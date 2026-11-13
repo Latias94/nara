@@ -1931,10 +1931,20 @@ struct RuntimeControlRecord {
     status: RuntimeControlStatus,
 }
 
+/// The work completed by the original successful managed App drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFrameKind {
+    /// A complete App frame under its running or paused execution policy.
+    FullFrame,
+    /// One exact fixed-tick transaction without the remaining App frame stages.
+    ExactFixedTick,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeDriveOutcome {
     state: RuntimeState,
     frame: Option<AppFrameOutcome>,
+    frame_kind: Option<RuntimeFrameKind>,
 }
 
 impl RuntimeDriveOutcome {
@@ -1946,6 +1956,14 @@ impl RuntimeDriveOutcome {
     #[must_use]
     pub const fn frame(self) -> Option<AppFrameOutcome> {
         self.frame
+    }
+
+    /// Returns the original execution kind of the successful [`Self::frame`].
+    ///
+    /// Returns `None` when this drive did not produce a frame outcome.
+    #[must_use]
+    pub const fn frame_kind(self) -> Option<RuntimeFrameKind> {
+        self.frame_kind
     }
 }
 
@@ -2561,6 +2579,7 @@ impl RuntimeInstance {
                         return Ok(RuntimeDriveOutcome {
                             state: self.state,
                             frame: Some(frame),
+                            frame_kind: Some(RuntimeFrameKind::FullFrame),
                         });
                     }
                     self.state = RuntimeState::Stepping;
@@ -2572,6 +2591,7 @@ impl RuntimeInstance {
                             Ok(RuntimeDriveOutcome {
                                 state: self.state,
                                 frame: Some(frame),
+                                frame_kind: Some(RuntimeFrameKind::ExactFixedTick),
                             })
                         }
                         Err(error) => {
@@ -2590,6 +2610,7 @@ impl RuntimeInstance {
                     return Ok(RuntimeDriveOutcome {
                         state: self.state,
                         frame: None,
+                        frame_kind: None,
                     });
                 }
                 RuntimeControl::RetryClose => {
@@ -2599,6 +2620,7 @@ impl RuntimeInstance {
                     return Ok(RuntimeDriveOutcome {
                         state: self.state,
                         frame: None,
+                        frame_kind: None,
                     });
                 }
             }
@@ -2610,6 +2632,7 @@ impl RuntimeInstance {
                 Ok(RuntimeDriveOutcome {
                     state: self.state,
                     frame: Some(frame),
+                    frame_kind: Some(RuntimeFrameKind::FullFrame),
                 })
             }
             RuntimeState::Paused => {
@@ -2617,6 +2640,7 @@ impl RuntimeInstance {
                 Ok(RuntimeDriveOutcome {
                     state: self.state,
                     frame: Some(frame),
+                    frame_kind: Some(RuntimeFrameKind::FullFrame),
                 })
             }
             RuntimeState::Faulted => Err(RuntimeDriveError::Faulted {
@@ -2638,11 +2662,13 @@ impl RuntimeInstance {
                 Ok(RuntimeDriveOutcome {
                     state: self.state,
                     frame: None,
+                    frame_kind: None,
                 })
             }
             RuntimeState::CloseIncomplete | RuntimeState::Stopped => Ok(RuntimeDriveOutcome {
                 state: self.state,
                 frame: None,
+                frame_kind: None,
             }),
             RuntimeState::Stepping => unreachable!("exact stepping completes inside one drive"),
         }
