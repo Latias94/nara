@@ -45,6 +45,68 @@ fn repaint(
 }
 
 #[test]
+fn pointer_movement_within_one_button_reuses_without_rebuilding_the_description() {
+    let (_project, application) = application(EditorDocumentKind::Scene, 4);
+    let model = application.current_frame().unwrap();
+    let mut owner = controller();
+    let initial = paint(&mut owner, &model);
+    let key = button(&initial, "Select entity-0001");
+    let rect = initial
+        .semantics()
+        .iter()
+        .find(|node| node.key() == &key)
+        .unwrap()
+        .rect();
+    let center = UiPoint::new(
+        rect.origin().x() + rect.size().width() * 0.5,
+        rect.origin().y() + rect.size().height() * 0.5,
+    );
+    let pointer = |position| {
+        UiInputEvent::Pointer(nara_ui_kernel::UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            position,
+        ))
+    };
+    let mut routing = RoutedInput::new(&initial);
+    assert!(
+        routing
+            .route(&mut owner, &initial, pointer(center))
+            .intents()
+            .is_empty()
+    );
+    let hovered = repaint(&mut owner, &model, &initial);
+    for offset in [0.25, 0.5, 0.0, -0.25] {
+        assert!(
+            routing
+                .route(
+                    &mut owner,
+                    &hovered,
+                    pointer(UiPoint::new(center.x() + offset, center.y())),
+                )
+                .intents()
+                .is_empty()
+        );
+        assert_reuses(&mut owner, &model, &hovered);
+    }
+    assert!(
+        routing
+            .route(&mut owner, &hovered, pointer(UiPoint::new(0.0, 0.0)))
+            .intents()
+            .is_empty()
+    );
+    let idle = repaint(&mut owner, &model, &hovered);
+    routing.focus(&mut owner, &idle, &key);
+    let focused = repaint(&mut owner, &model, &idle);
+    routing.focus(&mut owner, &focused, &key);
+    assert_reuses(&mut owner, &model, &focused);
+    assert_eq!(
+        application.current_frame().unwrap().workspace(),
+        model.workspace(),
+    );
+}
+
+#[test]
 fn source_parent_and_order_scroll_repaint_without_source_or_filter_refreshes() {
     let (_project, mut application) = application(EditorDocumentKind::Scene, 128);
     select(&mut application, entity(57));

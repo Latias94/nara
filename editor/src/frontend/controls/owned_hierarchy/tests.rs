@@ -334,11 +334,34 @@ impl RoutedInput {
         {
             *receipt
         } else {
+            let invalidated = self
+                .presented
+                .as_ref()
+                .filter(|(previous, _)| controller.retains_frame(previous))
+                .map(|(previous, _)| controller.invalidated_controls(previous, frame).unwrap())
+                .unwrap_or_default();
             self.epoch += 1;
             let receipt = self
                 .authority
                 .submit(&mut self.journal, Arc::clone(frame), self.epoch)
                 .unwrap();
+            if let Some(batch) = self
+                .session
+                .reconcile_latest_presentation(
+                    &self.journal,
+                    frame.environment().surface_id(),
+                    &invalidated,
+                )
+                .unwrap()
+            {
+                assert!(
+                    controller
+                        .dispatch(frame, &batch)
+                        .unwrap()
+                        .intents()
+                        .is_empty()
+                );
+            }
             self.presented = Some((Arc::clone(frame), receipt));
             receipt
         };

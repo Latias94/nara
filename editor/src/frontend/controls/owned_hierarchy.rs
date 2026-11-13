@@ -380,18 +380,22 @@ impl OwnedHierarchy {
                 button
             })
             .collect::<Vec<_>>();
-        self.paint_dirty = true;
         if live_input {
-            self.filter.reduce_focus(batch, &mut self.engine)?;
+            let previous = self.filter.input_token();
+            let result = self.filter.reduce_focus(batch, &mut self.engine);
+            self.paint_dirty |= self.filter.input_token() != previous;
+            result?;
         }
         let mut intents = UiIntentBatch::default();
         for button in buttons {
             if let Some(control) = self.controls.get_mut(&button.control)
                 && &control.key == button.button.key()
             {
+                let previous = control.state;
                 control
                     .state
                     .reduce_batch(&button.button, batch, &mut intents)?;
+                self.paint_dirty |= control.state != previous;
             }
         }
         Ok(intents)
