@@ -21,6 +21,8 @@ use std::{
     },
 };
 
+mod polling;
+
 // These sources test registry ordering, not native pump behavior. The separate Windows tests use
 // actual windows, the original EventLoop and actual Destroyed delivery.
 #[derive(Debug)]
@@ -383,6 +385,7 @@ fn maintenance_without_capture_arranges_wait_until_without_simulation() {
         WinitControlFlow::Wait,
         Duration::from_secs(1),
     );
+    state.frame_requested = false;
     let frame = state.runtime.world().resource::<RealTime>().frame;
     assert!(!state.maintain_presentation(now));
     assert_eq!(

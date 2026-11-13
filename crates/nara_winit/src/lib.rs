@@ -78,8 +78,10 @@ use std::{
 };
 
 use nara_app::{
-    AppExit, AppRunError, RuntimeControl, RuntimeControlRequestResult, RuntimeDriveError,
-    RuntimeDriverScope, RuntimeFault, RuntimeInstance, RuntimeScopeError, RuntimeState,
+    AppExit, AppRunError, RuntimeControl, RuntimeControlRejection, RuntimeControlRequestResult,
+    RuntimeControlStatus, RuntimeControlTicket, RuntimeDriveError, RuntimeDriverScope,
+    RuntimeFault, RuntimeFrameKind, RuntimeInstance, RuntimeScopeError, RuntimeScopeOutcome,
+    RuntimeState,
 };
 use nara_input::{
     ButtonDriverInput, ButtonInputDriverError, InputIngressError, InputPointerId, InputSeatId,
@@ -168,6 +170,7 @@ pub struct WinitEventLoop {
     event_loop: EventLoop<WinitUserEvent>,
     resumed: bool,
     needs_drain: bool,
+    handoff_deadline: Option<Instant>,
     #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
     next_wake_id: u64,
 }
@@ -192,6 +195,7 @@ impl WinitEventLoop {
             event_loop,
             resumed: false,
             needs_drain: false,
+            handoff_deadline: None,
             #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
             next_wake_id: 1,
         }
@@ -223,38 +227,37 @@ impl WinitEventLoop {
         target_os = "netbsd",
         target_os = "openbsd"
     ))]
-    fn prepare_handoff(&mut self, budget: Duration) -> Result<(), AppRunError> {
+    fn prepare_handoff(&mut self, budget: Duration) -> Result<bool, AppRunError> {
         if !self.needs_drain {
-            return Ok(());
+            return Ok(true);
         }
         let now = Instant::now();
-        let deadline = now.checked_add(budget).unwrap_or(now);
-        loop {
-            // This handler has no Runtime, native windows or driver authority. Winit's Windows
-            // reset preserves its event buffer; HWND identities can also be reused. Drain before
-            // creating any new window, including after an unused owner's admission failure.
-            let mut drain = WinitHandoffDrain {
-                resumed: &mut self.resumed,
-                received_event: false,
-            };
-            let status = self
-                .event_loop
-                .pump_app_events(Some(Duration::ZERO), &mut drain);
-            let received_event = drain.received_event;
-            if let PumpStatus::Exit(code) = status {
-                self.resumed = false;
-                return Err(AppRunError::runner(format!(
-                    "winit event pump exited during session handoff (code {code})"
-                )));
-            }
-            if !received_event {
-                self.needs_drain = false;
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(AppRunError::runner("winit session handoff budget expired"));
-            }
+        let deadline = *self
+            .handoff_deadline
+            .get_or_insert_with(|| now.checked_add(budget).unwrap_or(now));
+        let mut drain = WinitHandoffDrain {
+            resumed: &mut self.resumed,
+            received_event: false,
+        };
+        let status = self
+            .event_loop
+            .pump_app_events(Some(Duration::ZERO), &mut drain);
+        let received_event = drain.received_event;
+        if let PumpStatus::Exit(code) = status {
+            self.resumed = false;
+            return Err(AppRunError::runner(format!(
+                "winit event pump exited during session handoff (code {code})"
+            )));
         }
+        if !received_event {
+            self.needs_drain = false;
+            self.handoff_deadline = None;
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Err(AppRunError::runner("winit session handoff budget expired"));
+        }
+        Ok(false)
     }
 
     #[cfg(any(
@@ -315,12 +318,23 @@ impl ApplicationHandler<WinitUserEvent> for WinitHandoffDrain<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WinitRunner {
     pub control_flow: WinitControlFlow,
+    initial_visibility: bool,
 }
 
 impl WinitRunner {
     #[must_use]
     pub fn new(control_flow: WinitControlFlow) -> Self {
-        Self { control_flow }
+        Self {
+            control_flow,
+            initial_visibility: true,
+        }
+    }
+
+    /// Keeps native windows hidden and non-activating until [`WinitSession::reveal`].
+    #[must_use]
+    pub fn with_initial_visibility(mut self, visible: bool) -> Self {
+        self.initial_visibility = visible;
+        self
     }
 
     /// Runs an explicit platform-only session with no presentation owner.
@@ -355,12 +369,15 @@ impl WinitRunner {
             self.control_flow,
             DEFAULT_NATIVE_RETIREMENT_BUDGET,
         );
+        app.initial_visibility = self.initial_visibility;
         if expects_presentation {
             app.record_primary_failure(AppRunError::runner(
                 "platform-only Winit run cannot own an expected presentation backend",
             ));
         }
-        WinitSession::start(app, event_loop)
+        let mut session = WinitSession::start(app, event_loop);
+        session.execute();
+        session
     }
 
     #[doc(hidden)]
@@ -372,25 +389,46 @@ impl WinitRunner {
         native_retirement_budget: Duration,
         event_loop: Option<WinitEventLoop>,
     ) -> WinitSession {
-        WinitSession::start(
-            WinitApp::new(runtime, driver, self.control_flow, native_retirement_budget),
+        let mut session = self.__start_with_presentation_on(
+            runtime,
+            driver,
+            native_retirement_budget,
             event_loop,
-        )
+        );
+        session.execute();
+        session
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __start_with_presentation_on(
+        self,
+        runtime: RuntimeInstance,
+        driver: Box<dyn __WinitPresentationDriver>,
+        native_retirement_budget: Duration,
+        event_loop: Option<WinitEventLoop>,
+    ) -> WinitSession {
+        let mut app = WinitApp::new(runtime, driver, self.control_flow, native_retirement_budget);
+        app.initial_visibility = self.initial_visibility;
+        WinitSession::start(app, event_loop)
     }
 }
 
-/// The result of one finite retirement drive, or of the initial native run.
+/// Progress of the original native session, including retained incomplete cleanup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinitRunProgress {
+    Running,
+    Retiring,
     Retired,
     Incomplete,
 }
 
 /// A thread-bound native aggregate retaining the original event pump and target authority.
 ///
-/// `execute` runs the application initially. After an incomplete exit it only advances retirement;
-/// it never recreates a window or resumes simulation. Dropping an unfinished session makes one
-/// finite close attempt, then aborts if native or Runtime custody still cannot be released.
+/// [`Self::poll`] services one native pump without closing a live application. [`Self::execute`]
+/// blocks until retirement or incomplete cleanup, and explicitly retries an incomplete close.
+/// Dropping an unfinished session makes one finite close attempt, then aborts if native or Runtime
+/// custody still cannot be released.
 #[must_use = "an incomplete native session must retain and retire its owners"]
 pub struct WinitSession {
     app: Option<WinitApp>,
@@ -436,13 +474,11 @@ impl WinitSession {
         {
             app.record_primary_failure(error);
         }
-        let mut session = Self {
+        Self {
             app: Some(app),
             event_loop,
             executed: false,
-        };
-        session.execute();
-        session
+        }
     }
 
     #[must_use]
@@ -462,143 +498,265 @@ impl WinitSession {
             .is_none_or(|app| app.shutdown == WinitShutdownState::Complete)
     }
 
-    /// Starts the initial run, or retries retirement under the original native affinity.
+    /// Requests managed control while the original session is healthy and accepting input.
+    pub fn request_control(&mut self, control: RuntimeControl) -> RuntimeControlRequestResult {
+        let app = self.app.as_mut().expect("live session owns its Runtime");
+        if !app.is_healthy_live() {
+            return RuntimeControlRequestResult::Rejected(RuntimeControlRejection::InvalidState {
+                state: app.runtime.state(),
+                control,
+            });
+        }
+        let result = app.runtime.request_control(control);
+        if matches!(result, RuntimeControlRequestResult::Accepted(_)) {
+            app.request_frame();
+            if control == RuntimeControl::Stop {
+                app.exit = AppExit::Requested;
+                app.begin_shutdown_transition(Instant::now());
+            }
+        }
+        result
+    }
+
+    #[must_use]
+    pub fn control_status(&self, ticket: RuntimeControlTicket) -> Option<RuntimeControlStatus> {
+        self.runtime().control_status(ticket)
+    }
+
+    /// Fences new input and begins shutdown of the original Runtime and native owners.
+    ///
+    /// An incomplete cleanup budget is retained until an explicit [`Self::execute`] retry.
+    pub fn request_close(&mut self) {
+        if let Some(app) = self.app.as_mut()
+            && app.shutdown == WinitShutdownState::Running
+        {
+            app.exit = AppExit::Requested;
+            app.begin_shutdown_transition(Instant::now());
+        }
+    }
+
+    /// Reports a healthy full paused App frame after the most recent input or control.
+    ///
+    /// An exact fixed tick alone does not complete the later paused App stages.
+    #[must_use]
+    pub fn paused_frame_complete(&self) -> bool {
+        self.app.as_ref().is_some_and(|app| {
+            app.paused_frame_complete
+                && app.is_healthy_live()
+                && app.runtime.state() == RuntimeState::Paused
+        })
+    }
+
+    /// Invokes an original typed driver operation and retains its exact output and post-fault.
+    #[doc(hidden)]
+    pub fn __with_driver_scope<R>(
+        &mut self,
+        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> R,
+    ) -> Result<RuntimeScopeOutcome<R>, RuntimeScopeError> {
+        let app = self.app.as_mut().expect("live session owns its Runtime");
+        app.paused_frame_complete = false;
+        if app.shutdown.is_started() {
+            return Err(RuntimeScopeError::Unavailable {
+                state: app.runtime.state(),
+            });
+        }
+        app.request_frame();
+        app.runtime.with_driver_scope(operation)
+    }
+
+    /// Shows the original live native window after an initially hidden launch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before native creation, after close, or when the original target is no
+    /// longer live. This never creates a replacement window or handle registry.
+    pub fn reveal(&mut self) -> Result<(), AppRunError> {
+        let app = self.app.as_mut().expect("live session owns its Runtime");
+        if !app.is_healthy_live()
+            || app.platform_windows.is_empty()
+            || app.platform_windows.keys().any(|window_id| {
+                !app.owned_window_ids.contains(window_id)
+                    || !app
+                        .backend_windows
+                        .snapshot(*window_id)
+                        .is_ok_and(|snapshot| snapshot.phase == WindowTargetPhase::Active)
+            })
+        {
+            return Err(AppRunError::runner(
+                "original native window is unavailable for reveal",
+            ));
+        }
+        app.initial_visibility = true;
+        if let Some((window_id, fullscreen)) = app.deferred_fullscreen.take() {
+            app.platform_windows
+                .get(&window_id)
+                .expect("reveal validated the original window")
+                .set_fullscreen(Some(fullscreen));
+        }
+        for window in app.platform_windows.values() {
+            window.set_visible(true);
+        }
+        app.request_frame();
+        Ok(())
+    }
+
+    /// Services at most one native pump and its Runtime/presentation maintenance boundary.
+    ///
+    /// `max_wait` bounds native waiting, not time spent in callbacks, drivers or App execution.
+    /// Repeated polls preserve a live session and never renew an incomplete cleanup budget.
+    pub fn poll(&mut self, max_wait: Duration) -> WinitRunProgress {
+        self.poll_native(Some(max_wait))
+    }
+
+    /// Blocks on the original session, or explicitly retries its retained incomplete cleanup.
     pub fn execute(&mut self) -> WinitRunProgress {
+        if let Some(app) = self.app.as_mut()
+            && app.shutdown != WinitShutdownState::Complete
+            && (app.cleanup_incomplete || app.retirement_drive_incomplete(Instant::now()))
+        {
+            app.cleanup_incomplete = false;
+            app.prepare_retirement_retry(Instant::now());
+        }
+        loop {
+            match self.poll_native(None) {
+                WinitRunProgress::Running | WinitRunProgress::Retiring => {}
+                terminal => return terminal,
+            }
+        }
+    }
+
+    fn poll_native(&mut self, max_wait: Option<Duration>) -> WinitRunProgress {
+        self.poll_with(|app, event_loop, first_native_pump| {
+            Self::pump_native_once(app, event_loop, first_native_pump, max_wait)
+        })
+    }
+
+    fn poll_with(
+        &mut self,
+        pump: impl FnOnce(&mut WinitApp, Option<&mut WinitEventLoop>, bool) -> bool,
+    ) -> WinitRunProgress {
         let Some(app) = self.app.as_mut() else {
             return WinitRunProgress::Retired;
         };
         if app.shutdown == WinitShutdownState::Complete {
             return WinitRunProgress::Retired;
         }
-        if self.executed {
-            app.prepare_retirement_retry(Instant::now());
-        } else if app.primary_failure.is_some()
-            || !matches!(
-                app.runtime.state(),
-                RuntimeState::Running | RuntimeState::Paused
-            )
-        {
-            app.begin_shutdown_transition(Instant::now());
+        if app.cleanup_incomplete {
+            return WinitRunProgress::Incomplete;
         }
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        if !self.executed
-            && !app.shutdown.is_started()
-            && let Some(event_loop) = self.event_loop.as_mut()
-            && let Err(error) = event_loop.prepare_handoff(app.native_retirement_budget)
-        {
-            app.record_primary_failure(error);
-            app.begin_shutdown_transition(Instant::now());
-        }
-        let mut first_native_pump = !self.executed;
-        self.executed = true;
-
-        loop {
-            if app.shutdown == WinitShutdownState::Complete {
-                return WinitRunProgress::Retired;
+        if !app.shutdown.is_started() && !app.is_healthy_live() {
+            if let Some(fault) = app.runtime.fault() {
+                app.record_primary_failure(runtime_fault_error(fault));
             }
-            // Failed initial admission leaves a supplied physical loop unbound. Close only the
-            // original Runtime/driver; no platform callback is needed before any native target.
-            if let Some(event_loop) = self
-                .event_loop
-                .as_mut()
-                .filter(|_| app.event_proxy.is_some())
+            app.begin_shutdown_transition(Instant::now());
+        }
+        let first_native_pump = !std::mem::replace(&mut self.executed, true);
+        let pump_exited = pump(app, self.event_loop.as_mut(), first_native_pump);
+        if app.shutdown == WinitShutdownState::Complete {
+            WinitRunProgress::Retired
+        } else if pump_exited || app.retirement_drive_incomplete(Instant::now()) {
+            app.cleanup_incomplete = true;
+            WinitRunProgress::Incomplete
+        } else if app.shutdown.is_started() {
+            WinitRunProgress::Retiring
+        } else {
+            WinitRunProgress::Running
+        }
+    }
+
+    fn pump_native_once(
+        app: &mut WinitApp,
+        event_loop: Option<&mut WinitEventLoop>,
+        first_native_pump: bool,
+        max_wait: Option<Duration>,
+    ) -> bool {
+        if let Some(event_loop) = event_loop.filter(|_| app.event_proxy.is_some()) {
+            #[cfg(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "android",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            ))]
             {
-                #[cfg(any(
-                    target_os = "windows",
-                    target_os = "macos",
-                    target_os = "linux",
-                    target_os = "android",
-                    target_os = "freebsd",
-                    target_os = "dragonfly",
-                    target_os = "netbsd",
-                    target_os = "openbsd"
-                ))]
-                {
-                    app.boundary_serviced = false;
-                    // A running physical loop may wait before dispatching new_events. Give a
-                    // successor its first real callback before applying its configured Wait.
-                    let timeout = if std::mem::take(&mut first_native_pump) {
-                        Some(Duration::ZERO)
-                    } else {
-                        app.pump_timeout(Instant::now())
-                    };
-                    let status = event_loop.pump(timeout, app);
-                    if !app.boundary_serviced {
-                        if app.shutdown.is_started() {
-                            app.poll_native_shutdown_once(Instant::now());
-                        } else {
-                            match app.maintain_transition(Instant::now()) {
-                                EventLoopDirective::Poll => {
-                                    event_loop.event_loop.set_control_flow(ControlFlow::Poll)
-                                }
-                                EventLoopDirective::Wait => {
-                                    event_loop.event_loop.set_control_flow(ControlFlow::Wait)
-                                }
-                                EventLoopDirective::WaitUntil(wake) => event_loop
-                                    .event_loop
-                                    .set_control_flow(ControlFlow::WaitUntil(wake)),
-                                EventLoopDirective::None | EventLoopDirective::Exit => {}
-                            }
-                        }
-                    }
-                    if let PumpStatus::Exit(code) = status
-                        && app.shutdown != WinitShutdownState::Complete
-                    {
-                        app.record_primary_failure(AppRunError::runner(format!(
-                            "winit event pump exited before controlled retirement (code {code})"
-                        )));
+                if !app.shutdown.is_started() && event_loop.needs_drain {
+                    if let Err(error) = event_loop.prepare_handoff(app.native_retirement_budget) {
+                        app.record_primary_failure(error);
                         app.begin_shutdown_transition(Instant::now());
-                        return if app.shutdown == WinitShutdownState::Complete {
-                            WinitRunProgress::Retired
-                        } else {
-                            WinitRunProgress::Incomplete
-                        };
+                    }
+                    return false;
+                }
+                app.boundary_serviced = false;
+                let timeout = if first_native_pump {
+                    Some(Duration::ZERO)
+                } else {
+                    bounded_pump_timeout(app.pump_timeout(Instant::now()), max_wait)
+                };
+                let status = event_loop.pump(timeout, app);
+                if !app.boundary_serviced {
+                    let now = Instant::now();
+                    let directive = if app.shutdown.is_started() {
+                        app.poll_native_shutdown_once(now)
+                    } else {
+                        app.maintain_transition(now)
+                    };
+                    match directive {
+                        EventLoopDirective::Poll => {
+                            event_loop.event_loop.set_control_flow(ControlFlow::Poll)
+                        }
+                        EventLoopDirective::Wait => {
+                            event_loop.event_loop.set_control_flow(ControlFlow::Wait)
+                        }
+                        EventLoopDirective::WaitUntil(wake) => event_loop
+                            .event_loop
+                            .set_control_flow(ControlFlow::WaitUntil(wake)),
+                        EventLoopDirective::None | EventLoopDirective::Exit => {}
                     }
                 }
-                #[cfg(not(any(
-                    target_os = "windows",
-                    target_os = "macos",
-                    target_os = "linux",
-                    target_os = "android",
-                    target_os = "freebsd",
-                    target_os = "dragonfly",
-                    target_os = "netbsd",
-                    target_os = "openbsd"
-                )))]
+                if let PumpStatus::Exit(code) = status
+                    && app.shutdown != WinitShutdownState::Complete
                 {
-                    let _ = event_loop;
-                    app.record_primary_failure(AppRunError::runner(
-                        "retained Winit event pumping is unavailable on this platform",
-                    ));
+                    app.record_primary_failure(AppRunError::runner(format!(
+                        "winit event pump exited before controlled retirement (code {code})"
+                    )));
                     app.begin_shutdown_transition(Instant::now());
+                    return true;
                 }
-            } else {
+            }
+            #[cfg(not(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "android",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            )))]
+            {
+                let _ = (event_loop, first_native_pump, max_wait);
+                app.record_primary_failure(AppRunError::runner(
+                    "retained Winit event pumping is unavailable on this platform",
+                ));
                 app.begin_shutdown_transition(Instant::now());
-                app.poll_native_shutdown_once(Instant::now());
             }
-
-            if app.shutdown == WinitShutdownState::Complete {
-                return WinitRunProgress::Retired;
-            }
-            if app.retirement_drive_incomplete(Instant::now()) {
-                return WinitRunProgress::Incomplete;
-            }
-            if self.event_loop.is_none() || app.event_proxy.is_none() {
-                std::thread::sleep(
-                    app.pump_timeout(Instant::now())
-                        .unwrap_or(RUNTIME_CLOSE_POLL_INTERVAL),
-                );
+        } else {
+            app.begin_shutdown_transition(Instant::now());
+            app.poll_native_shutdown_once(Instant::now());
+            if app.shutdown != WinitShutdownState::Complete
+                && !app.retirement_drive_incomplete(Instant::now())
+            {
+                let timeout = bounded_pump_timeout(app.pump_timeout(Instant::now()), max_wait)
+                    .unwrap_or(RUNTIME_CLOSE_POLL_INTERVAL);
+                if !timeout.is_zero() {
+                    std::thread::sleep(timeout);
+                }
             }
         }
+        false
     }
 
     /// Extracts the final result without exposing an unfinished Runtime/native aggregate.
@@ -613,6 +771,7 @@ impl WinitSession {
         let mut event_loop = self.event_loop.take();
         if let Some(event_loop) = event_loop.as_mut() {
             event_loop.needs_drain = true;
+            event_loop.handoff_deadline = None;
         }
         Ok(WinitRetiredSession {
             runtime: app.runtime,
@@ -669,9 +828,7 @@ impl __WinitPresentationDriver for NoPresentationDriver {
 
 impl Default for WinitRunner {
     fn default() -> Self {
-        Self {
-            control_flow: WinitControlFlow::Poll,
-        }
+        Self::new(WinitControlFlow::Poll)
     }
 }
 
@@ -701,6 +858,9 @@ struct WinitApp {
     owned_window_ids: BTreeSet<WindowId>,
     last_frame: Instant,
     frame_requested: bool,
+    paused_frame_complete: bool,
+    initial_visibility: bool,
+    deferred_fullscreen: Option<(WindowId, winit::window::Fullscreen)>,
     exit: AppExit,
     primary_failure: Option<AppRunError>,
     presentation_failure: Option<AppRunError>,
@@ -711,6 +871,7 @@ struct WinitApp {
     control_flow: WinitControlFlow,
     native_retirement_budget: Duration,
     retirement_deadline: Option<Instant>,
+    cleanup_incomplete: bool,
     presentation_next_wake: Option<Instant>,
     presentation_retired: bool,
     providers_released: bool,
@@ -851,6 +1012,9 @@ impl WinitApp {
             owned_window_ids: BTreeSet::new(),
             last_frame: Instant::now(),
             frame_requested: true,
+            paused_frame_complete: false,
+            initial_visibility: true,
+            deferred_fullscreen: None,
             exit: AppExit::Success,
             primary_failure,
             presentation_failure: None,
@@ -861,6 +1025,7 @@ impl WinitApp {
             control_flow,
             native_retirement_budget,
             retirement_deadline: None,
+            cleanup_incomplete: false,
             presentation_next_wake: None,
             presentation_retired: false,
             providers_released: false,
@@ -883,7 +1048,30 @@ impl WinitApp {
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
     ) -> Result<R, AppRunError> {
+        self.paused_frame_complete = false;
+        self.frame_requested = true;
         with_runtime_driver_scope(&mut self.runtime, operation)
+    }
+
+    fn is_healthy_live(&self) -> bool {
+        self.shutdown == WinitShutdownState::Running
+            && self.primary_failure.is_none()
+            && self.presentation_failure.is_none()
+            && self.runtime_close_failure.is_none()
+            && self.native_retirement_failure.is_none()
+            && self.runtime.fault().is_none()
+            && matches!(
+                self.runtime.state(),
+                RuntimeState::Running | RuntimeState::Paused
+            )
+    }
+
+    fn request_frame(&mut self) {
+        self.paused_frame_complete = false;
+        self.frame_requested = true;
+        for window in self.platform_windows.values() {
+            window.request_redraw();
+        }
     }
 
     fn create_primary_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), AppRunError> {
@@ -898,6 +1086,12 @@ impl WinitApp {
                 "native window target is already registered",
             ));
         }
+        let fullscreen = window_mode::initial_fullscreen(&window, event_loop.primary_monitor())?;
+        let (initial_fullscreen, deferred_fullscreen) = if self.initial_visibility {
+            (fullscreen, None)
+        } else {
+            (None, fullscreen)
+        };
         let attributes = WinitWindow::default_attributes()
             .with_title(window.title.clone())
             .with_inner_size(PhysicalSize::new(
@@ -905,10 +1099,9 @@ impl WinitApp {
                 window.resolution.physical_height,
             ))
             .with_resizable(window.resizable)
-            .with_fullscreen(window_mode::initial_fullscreen(
-                &window,
-                event_loop.primary_monitor(),
-            )?);
+            .with_visible(self.initial_visibility)
+            .with_active(self.initial_visibility)
+            .with_fullscreen(initial_fullscreen);
         #[cfg(feature = "platform-accessibility")]
         let attributes = if self.accessibility_activation.is_enabled() {
             attributes.with_visible(false)
@@ -926,6 +1119,7 @@ impl WinitApp {
             .insert(platform_window.id(), window_id);
         self.platform_windows
             .insert(window_id, platform_window.clone());
+        self.deferred_fullscreen = deferred_fullscreen.map(|mode| (window_id, mode));
         self.backend_windows
             .insert(
                 window_id,
@@ -951,7 +1145,7 @@ impl WinitApp {
                 event_proxy,
             );
             self.accessibility_sessions.insert(window_id, session);
-            platform_window.set_visible(true);
+            platform_window.set_visible(self.initial_visibility);
         }
         self.connect_window_input(window_id)?;
         self.with_driver_scope(|scope| {
@@ -974,14 +1168,33 @@ impl WinitApp {
         })
     }
 
-    fn run_frame(&mut self, delta: Duration, event_loop: &ActiveEventLoop) {
-        let directive = self.run_frame_transition(delta);
-        apply_event_loop_directive(event_loop, directive);
+    fn service_boundary_transition(&mut self, now: Instant) -> EventLoopDirective {
+        if self.shutdown.is_started() {
+            return self.poll_native_shutdown_once(now);
+        }
+        if self.control_flow == WinitControlFlow::Wait && !self.frame_requested {
+            return self.maintain_transition(now);
+        }
+        let delta = now.saturating_duration_since(self.last_frame);
+        self.last_frame = now;
+        self.run_frame_transition(delta)
     }
 
     fn run_frame_transition(&mut self, delta: Duration) -> EventLoopDirective {
         self.frame_requested = false;
+        self.paused_frame_complete = false;
         let outcome = self.runtime.drive(delta);
+        if let Ok(outcome) = &outcome
+            && self.is_healthy_live()
+            && self.runtime.state() == RuntimeState::Paused
+            && outcome.frame().is_some_and(|frame| frame.exit.is_none())
+        {
+            match outcome.frame_kind() {
+                Some(RuntimeFrameKind::FullFrame) => self.paused_frame_complete = true,
+                Some(RuntimeFrameKind::ExactFixedTick) => self.request_frame(),
+                None => {}
+            }
+        }
         let now = Instant::now();
         // Return original presentation/UI facts before interpreting success, failure or exit.
         let presentation_shutdown = self.maintain_presentation(now);
@@ -1006,6 +1219,11 @@ impl WinitApp {
             outcome.state(),
             RuntimeState::Stopping | RuntimeState::CloseIncomplete | RuntimeState::Stopped
         ) {
+            return self.begin_shutdown_transition(now);
+        }
+
+        if let Some(fault) = self.runtime.fault() {
+            self.record_primary_failure(runtime_fault_error(fault));
             return self.begin_shutdown_transition(now);
         }
 
@@ -1064,6 +1282,9 @@ impl WinitApp {
     }
 
     fn running_directive(&self) -> EventLoopDirective {
+        if self.frame_requested {
+            return EventLoopDirective::Poll;
+        }
         match (self.control_flow, self.presentation_next_wake) {
             (WinitControlFlow::Poll, _) => EventLoopDirective::Poll,
             (WinitControlFlow::Wait, Some(wake)) => EventLoopDirective::WaitUntil(wake),
@@ -1157,7 +1378,7 @@ impl WinitApp {
             };
             self.handle_accessibility_wake(window_id)?;
         }
-        self.frame_requested = true;
+        self.request_frame();
         Ok(true)
     }
 
@@ -1167,6 +1388,9 @@ impl WinitApp {
         winit_window_id: WinitWindowId,
         event: WinitWindowEvent,
     ) -> Result<(), AppRunError> {
+        if self.nara_windows_by_winit.contains_key(&winit_window_id) {
+            self.paused_frame_complete = false;
+        }
         #[cfg(feature = "platform-accessibility")]
         self.process_accessibility_window_event(winit_window_id, &event);
         if matches!(&event, WinitWindowEvent::Destroyed) {
@@ -1180,7 +1404,8 @@ impl WinitApp {
         if !should_process_window_event_during_shutdown(self.shutdown, &event) {
             return Ok(());
         }
-        self.frame_requested |= window_event_requests_frame(&event);
+        self.frame_requested |=
+            window_event_requests_frame(&event) || self.runtime.state() == RuntimeState::Paused;
         self.input_window_id = window_id;
 
         match event {
@@ -1344,6 +1569,9 @@ impl WinitApp {
         event: RawKeyEvent,
         repeat: bool,
     ) -> Result<bool, AppRunError> {
+        if self.shutdown.is_started() {
+            return Ok(false);
+        }
         if !self.input_timeline_installed() {
             return Ok(false);
         }
@@ -1366,6 +1594,8 @@ impl WinitApp {
         window_id: WindowId,
         focused: bool,
     ) -> Result<(), AppRunError> {
+        self.paused_frame_complete = false;
+        self.frame_requested = true;
         if !self.input_timeline_installed() {
             if focused {
                 self.input_gate.gain_focus();
@@ -1491,6 +1721,7 @@ impl WinitApp {
     }
 
     fn record_primary_failure(&mut self, error: AppRunError) {
+        self.paused_frame_complete = false;
         self.primary_failure.get_or_insert(error);
     }
 
@@ -1525,6 +1756,10 @@ impl WinitApp {
     }
 
     fn begin_shutdown_transition(&mut self, now: Instant) -> EventLoopDirective {
+        self.paused_frame_complete = false;
+        if let Some(fault) = self.runtime.fault() {
+            self.record_primary_failure(runtime_fault_error(fault));
+        }
         match self.shutdown {
             WinitShutdownState::Complete => return EventLoopDirective::Exit,
             WinitShutdownState::Retiring => return self.poll_native_shutdown_transition(now),
@@ -1573,11 +1808,6 @@ impl WinitApp {
                 ),
             }
         }
-    }
-
-    fn poll_native_shutdown(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
-        let directive = self.poll_native_shutdown_once(now);
-        apply_event_loop_directive(event_loop, directive);
     }
 
     fn poll_native_shutdown_once(&mut self, now: Instant) -> EventLoopDirective {
@@ -1676,6 +1906,8 @@ impl WinitApp {
     fn pump_timeout(&self, now: Instant) -> Option<Duration> {
         if self.shutdown.is_started() {
             Some(self.retirement_wake(now).saturating_duration_since(now))
+        } else if self.frame_requested {
+            Some(Duration::ZERO)
         } else {
             match (self.control_flow, self.presentation_next_wake) {
                 (WinitControlFlow::Poll, _) => Some(Duration::ZERO),
@@ -1794,6 +2026,14 @@ fn apply_event_loop_directive(event_loop: &ActiveEventLoop, directive: EventLoop
     }
 }
 
+fn bounded_pump_timeout(timeout: Option<Duration>, max_wait: Option<Duration>) -> Option<Duration> {
+    match (timeout, max_wait) {
+        (Some(timeout), Some(max_wait)) => Some(timeout.min(max_wait)),
+        (timeout, None) => timeout,
+        (None, max_wait) => max_wait,
+    }
+}
+
 impl ApplicationHandler<WinitUserEvent> for WinitApp {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
         // A reused physical loop may already be resumed and will not emit another Resumed.
@@ -1808,6 +2048,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.native_resumed = true;
         if !self.shutdown.is_started() {
+            self.paused_frame_complete = false;
             self.frame_requested = true;
         }
         if let Err(error) = self.create_primary_window(event_loop) {
@@ -1817,6 +2058,8 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.native_resumed = false;
+        self.paused_frame_complete = false;
+        self.frame_requested = true;
     }
 
     fn window_event(
@@ -1846,19 +2089,8 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.shutdown.is_started() {
-            self.poll_native_shutdown(event_loop, Instant::now());
-            return;
-        }
-        let now = Instant::now();
-        if self.control_flow == WinitControlFlow::Wait && !self.frame_requested {
-            let directive = self.maintain_transition(now);
-            apply_event_loop_directive(event_loop, directive);
-            return;
-        }
-        let delta = now.saturating_duration_since(self.last_frame);
-        self.last_frame = now;
-        self.run_frame(delta, event_loop);
+        let directive = self.service_boundary_transition(Instant::now());
+        apply_event_loop_directive(event_loop, directive);
     }
 }
 
