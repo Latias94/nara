@@ -86,6 +86,7 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         packet.source_generation().runtime_generation() == Some(frame.runtime)
             && frame.snapshot.current_instance == Some(frame.instance.instance_id())
             && frame.timestep_nanos == expected.clock.timestep_nanos
+            && frame.runtime_time.to_continuation()? == expected.runtime_time.to_continuation()?
             && frame.instance.entity_ids().len() == 6
             && packet.target().extent() == WINDOW_EXTENT
             && packet.views().len() == 1,

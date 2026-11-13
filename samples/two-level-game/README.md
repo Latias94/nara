@@ -64,26 +64,34 @@ key or that a particular platform has passed the full interactive trajectory.
 ## Exact Game Reconstruction
 
 The separate `resume` format preserves the complete supported game semantics: progress across
-level instances, the live player transform, held movement intent, logical game time, counters and
-admitted configuration/Schema/content identities. The progress-save slot above retains its original
-anchor-based behavior and version-one migration.
+level instances, the live player transform, held movement intent, logical game time, fixed
+scheduling phase and actual time policy, counters and admitted configuration/Schema/content
+identities. Resume format version two requires an explicit time value; version one is refused
+rather than assumed to have zero phase. The finite continuity protocol also moves to version
+two, so an older child is refused at the version gate. The progress-save slot above retains its original
+anchor-based behavior and its separate version-one migration.
 
 Use `capture_resume(&session)` after the original `HeadlessSession` has completed a paused frame.
 Capture refuses pending commands, travel or authoritative tasks, scripted verification, unknown
-plugin services, an open save slot and unrepresented Runtime time policy. The shipped source/headless
+plugin services, an open save slot and a non-unit Runtime time scale. The shipped source/headless
 recipe is the first supported inventory. Extend that explicit inventory and compatibility policy
 when adding authoritative gameplay state or services.
 
 Start and pause a fresh candidate with the same ordinary product recipe, then call
-`request_resume(&mut candidate, &state)`. It admits one command through the existing gameplay
-queue. Drive complete paused maintenance frames, with an explicit deadline, until
+`request_resume(&mut candidate, &state)`. It first validates and initializes the phase through the
+original time owner, completes paused maintenance, then admits one command through the existing
+gameplay queue. Nonzero remainder and legal whole-tick debt survive the isolated exact tick and
+later maintenance. Drive complete paused maintenance frames, with an explicit deadline, until
 `GameSnapshot::restoring` clears or an error occurs. Compare `capture_resume(&candidate)` with
 the original state before allowing gameplay to continue. Rejected reconstruction remains
 ineligible even if an ordinary command later clears the displayed game error. Retain the original
 paused session and captured executable until the candidate passes state and continued-play checks.
 
 The fresh Runtime keeps its own clock, command authority and World identity. Logical game time
-is restored separately. Scene numbers are local to a World; compare scoped identities when
+is restored separately. The portable time value carries only policy and pending duration; the
+receiving Runtime validates its actual policy and derives interpolation while preserving its
+local history. Durations outside the game's `u64` nanosecond representation refuse capture.
+Scene numbers are local to a World; compare scoped identities when
 proving fresh construction. Current Scene and dynamic markers rebuild through their existing
 owners, with no old ECS entity, input connection or native handle in the format.
 

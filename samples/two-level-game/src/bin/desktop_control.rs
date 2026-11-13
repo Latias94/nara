@@ -36,7 +36,7 @@ use two_level_game::{
 use two_level_game::{
     resume::{
         GameClock, LevelContentStamp, PlayerState, ResumeCompatibility, ResumeState,
-        SessionCounters,
+        RuntimeTimeState, SessionCounters,
     },
     save::{Checkpoint, CheckpointLocation, CollectedPickup, MarkerId, MarkerRecord},
 };
@@ -202,6 +202,29 @@ impl Game {
         assert_eq!(self.run.progress(), DesktopRunProgress::NotStarted);
         self.settle()?;
         assert_eq!(self.run.state(), Some(RuntimeState::Paused));
+        let mut initial_time = RuntimeTimeState::from_continuation(
+            self.run
+                .capture_time_continuation()
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        initial_time.pending_nanos = 13_000_000;
+        self.run
+            .restore_time_continuation(
+                initial_time
+                    .to_continuation()
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        assert!(self.run.capture(|_| ()).is_err());
+        self.settle()?;
+        assert_eq!(
+            self.run
+                .capture_time_continuation()
+                .map_err(|error| error.to_string())?
+                .pending(),
+            Duration::from_millis(13)
+        );
         let initial = self.snapshot()?;
         assert_eq!(initial.player.to_array(), [-120.0, 0.0]);
         assert_eq!(initial.logical_tick, 0);
@@ -286,7 +309,14 @@ impl Game {
         assert_eq!(final_snapshot.player, after.player);
         assert_eq!(final_snapshot.held, [false; 4]);
         self.wait_presented(&final_snapshot)?;
-        let expected = visual_expectation(&final_snapshot, meadow_marker, meadow, cavern);
+        let runtime_time = RuntimeTimeState::from_continuation(
+            self.run
+                .capture_time_continuation()
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let expected =
+            visual_expectation(&final_snapshot, meadow_marker, meadow, cavern, runtime_time);
         self.presented
             .borrow()
             .frame
@@ -459,6 +489,7 @@ fn visual_expectation(
     meadow_marker: [f32; 2],
     meadow: nara::project_host::ProjectSceneContentStamp,
     cavern: nara::project_host::ProjectSceneContentStamp,
+    runtime_time: RuntimeTimeState,
 ) -> ResumeState {
     use nara::scene::SceneEntityId;
     let meadow_key = LevelKey::main(LevelId::Meadow);
@@ -506,6 +537,7 @@ fn visual_expectation(
             elapsed_nanos: snapshot.logical_tick * 20_000_000,
             timestep_nanos: 20_000_000,
         },
+        runtime_time,
         counters: SessionCounters {
             travel_count: 1,
             restarts: 0,

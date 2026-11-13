@@ -50,7 +50,7 @@ use nara::{
     advanced_prelude::{CurrentScene, SceneSourceView},
     app::{
         App, CoreStage, FixedTime, FrameExecutionStart, Plugin, PluginCategory, PluginDeclaration,
-        PluginError, PluginId, RuntimeGeneration,
+        PluginError, PluginId, RuntimeGeneration, RuntimeTimeContinuation, RuntimeTimeSettings,
     },
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     project_host::{DesktopPresentationObservation, ProjectSceneContentStamp},
@@ -62,7 +62,10 @@ use nara::{
     },
     scene::{SourceDocumentKey, SpawnedSceneInstance},
 };
-use two_level_game::{GamePhase, GameSnapshot, resume::ResumeState};
+use two_level_game::{
+    GamePhase, GameSnapshot,
+    resume::{ResumeState, RuntimeTimeState},
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -114,6 +117,7 @@ struct SealedGameFrame {
     runtime: RuntimeGeneration,
     app_frame: u64,
     timestep_nanos: u64,
+    runtime_time: RuntimeTimeState,
     snapshot: GameSnapshot,
     source: SourceDocumentKey,
     stamp: ProjectSceneContentStamp,
@@ -132,6 +136,7 @@ fn retain_stock_input(
     runtime: Res<RuntimeGeneration>,
     frame: Res<FrameExecutionStart>,
     time: Res<FixedTime>,
+    settings: Res<RuntimeTimeSettings>,
     current: CurrentScene,
     snapshot: Res<GameSnapshot>,
     cameras: Query<&Camera2d>,
@@ -161,6 +166,24 @@ fn retain_stock_input(
         state.failure = Some("original game fixed timestep cannot be represented".into());
         return;
     };
+    let runtime_time = time
+        .debt()
+        .checked_add(time.remainder())
+        .ok_or_else(|| "original pending time overflowed".to_owned())
+        .and_then(|pending| {
+            RuntimeTimeContinuation::new(&settings, &time, pending)
+                .map_err(|error| error.to_string())
+        })
+        .and_then(|value| {
+            RuntimeTimeState::from_continuation(value).map_err(|error| error.to_string())
+        });
+    let runtime_time = match runtime_time {
+        Ok(value) => value,
+        Err(error) => {
+            state.failure = Some(error);
+            return;
+        }
+    };
     let [view] = input.packet().views() else {
         state.failure = Some("the shipped game requires one original camera View".into());
         return;
@@ -188,6 +211,7 @@ fn retain_stock_input(
         runtime: *runtime,
         app_frame: frame.frame(),
         timestep_nanos,
+        runtime_time,
         snapshot: snapshot.clone(),
         source,
         stamp,

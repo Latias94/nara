@@ -3,10 +3,11 @@
 mod capture;
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use nara::{
     advanced_prelude::CurrentScene,
-    app::{FixedTime, RuntimeState, RuntimeTimeSettings},
+    app::{FixedTime, RuntimeState, RuntimeTimeContinuation, RuntimeTimeSettings},
     ecs::World,
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -197,6 +198,7 @@ pub fn request_resume(
     state: &ResumeState,
 ) -> Result<(), GameResumeError> {
     state.validate()?;
+    let bytes = encode_resume(state)?;
     session.capture(|world| {
         if world.resource::<FixedTime>().tick() != 0
             || world.resource::<Session>().clock.ticks != 0
@@ -208,7 +210,12 @@ pub fn request_resume(
         }
         capture::eligible(world)
     })??;
-    let bytes = encode_resume(state)?;
+    session.restore_time_continuation(state.runtime_time.to_continuation()?)?;
+    if session.frame(Duration::ZERO)?.is_some() {
+        return Err(GameResumeError::Ineligible(
+            "candidate exited during time continuation maintenance".into(),
+        ));
+    }
     let text = String::from_utf8(bytes).expect("resume encoding is UTF-8 JSON");
     let mut payload = GameplayCommandPayload::new();
     payload
@@ -257,6 +264,22 @@ pub(super) fn begin_from_command(
         return Err("resume command lacks its bounded state".into());
     };
     let state = decode_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+    let fixed = world.resource::<FixedTime>();
+    let pending = fixed
+        .debt()
+        .checked_add(fixed.remainder())
+        .ok_or("candidate scheduling phase overflowed")?;
+    let actual_time =
+        RuntimeTimeContinuation::new(world.resource::<RuntimeTimeSettings>(), fixed, pending)
+            .map_err(|error| error.to_string())?;
+    if state
+        .runtime_time
+        .to_continuation()
+        .map_err(|error| error.to_string())?
+        != actual_time
+    {
+        return Err("resume scheduling phase or policy is incompatible".into());
+    }
     let control = world.resource::<ResumeControl>();
     if !control.unsupported.is_empty() || control.configuration != state.compatibility.configuration
     {

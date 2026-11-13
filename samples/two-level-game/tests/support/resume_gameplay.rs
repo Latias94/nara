@@ -348,6 +348,19 @@ impl ProjectCopy {
         assert_eq!(fs::read_to_string(target).unwrap(), changed);
     }
 
+    pub fn preserve_fixed_debt(&self) {
+        let target = self.editable_file("nara.toml");
+        let manifest = fs::read_to_string(&target).unwrap();
+        assert_eq!(manifest.matches("[runtime]").count(), 1);
+        assert!(!manifest.contains("catch_up_policy"));
+        let changed = manifest.replace(
+            "[runtime]",
+            "[runtime]\ncatch_up_policy = \"preserve-debt\"",
+        );
+        fs::write(&target, changed.as_bytes()).unwrap();
+        assert_eq!(fs::read_to_string(target).unwrap(), changed);
+    }
+
     pub fn change_cavern_pickup(&self) {
         let target = self.editable_file("scenes/cavern.scene.json");
         let mut scene: serde_json::Value =

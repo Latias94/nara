@@ -1,4 +1,9 @@
-use nara::identity::SceneEntityId;
+use std::time::Duration;
+
+use nara::{
+    app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings},
+    identity::SceneEntityId,
+};
 use serde_json::{Value, json};
 
 use super::*;
@@ -15,7 +20,7 @@ fn canonical_resume_has_an_exact_round_trip() {
     let state = example();
     let bytes = encode_resume(&state).unwrap();
     let expected = concat!(
-        r#"{"kind":"two_level_resume","format_version":1,"game_compatibility":1,"payload":{"progress":{"#,
+        r#"{"kind":"two_level_resume","format_version":2,"game_compatibility":1,"payload":{"progress":{"#,
         r#""location":{"level":{"level":"cavern","instance":2},"anchor":"checkpoint"},"score":20,"#,
         r#""collected":[{"level":{"level":"meadow","instance":0},"entity":"gem-near"},"#,
         r#"{"level":{"level":"cavern","instance":2},"entity":"gem-away"}],"#,
@@ -23,6 +28,8 @@ fn canonical_resume_has_an_exact_round_trip() {
         r#"{"id":2,"level":{"level":"cavern","instance":2},"position":[40.0,12.5]}],"next_marker_id":3},"#,
         r#""player":{"translation":[17.25,-31.5],"rotation":0.5,"scale":[-1.5,2.0]},"#,
         r#""held":[true,false,false,true],"clock":{"ticks":12,"elapsed_nanos":300000000,"timestep_nanos":25000000},"#,
+        r#""runtime_time":{"timestep_nanos":25000000,"max_steps_per_frame":5,"max_debt_steps":120,"#,
+        r#""catch_up_policy":"discard_excess","time_scale":1.0,"max_delta_nanos":250000000,"pending_nanos":13000000},"#,
         r#""counters":{"travel_count":3,"restarts":2,"saves":4,"restores":1},"compatibility":{"schema":"#,
         "[9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9],",
         r#""configuration":"#,
@@ -207,6 +214,8 @@ fn finite_rotation_and_scale_keep_the_full_f32_capacity_including_signed_zero() 
 fn clock_timestep_is_nonzero_and_at_most_one_second() {
     let mut uninitialized = example();
     uninitialized.clock = GameClock::default();
+    uninitialized.runtime_time.timestep_nanos = 0;
+    uninitialized.runtime_time.pending_nanos = 0;
     assert!(matches!(
         uninitialized.validate(),
         Err(ResumeError::InvalidTimestep(0))
@@ -219,6 +228,8 @@ fn clock_timestep_is_nonzero_and_at_most_one_second() {
             elapsed_nanos: 0,
             timestep_nanos,
         };
+        state.runtime_time.timestep_nanos = timestep_nanos;
+        state.runtime_time.pending_nanos = 0;
         assert!(matches!(
             encode_resume(&state),
             Err(ResumeError::InvalidTimestep(actual)) if actual == timestep_nanos
@@ -235,6 +246,8 @@ fn clock_timestep_is_nonzero_and_at_most_one_second() {
             elapsed_nanos: 0,
             timestep_nanos,
         };
+        state.runtime_time.timestep_nanos = timestep_nanos;
+        state.runtime_time.pending_nanos = 0;
         assert_eq!(
             decode_resume(&encode_resume(&state).unwrap()).unwrap(),
             state
@@ -269,6 +282,8 @@ fn clock_rejects_inconsistency_overflow_and_exhaustion_without_truncating_large_
         elapsed_nanos: 0,
         timestep_nanos: 2,
     };
+    state.runtime_time.timestep_nanos = 2;
+    state.runtime_time.pending_nanos = 0;
     assert!(matches!(
         encode_resume(&state),
         Err(ResumeError::ClockOverflow)
@@ -282,6 +297,8 @@ fn clock_rejects_inconsistency_overflow_and_exhaustion_without_truncating_large_
         elapsed_nanos: u64::MAX,
         timestep_nanos: 1,
     };
+    state.runtime_time.timestep_nanos = 1;
+    state.runtime_time.pending_nanos = 0;
     assert!(matches!(
         encode_resume(&state),
         Err(ResumeError::ClockExhausted)
@@ -296,10 +313,285 @@ fn clock_rejects_inconsistency_overflow_and_exhaustion_without_truncating_large_
         elapsed_nanos: u64::MAX - 1,
         timestep_nanos: 1,
     };
+    state.runtime_time.timestep_nanos = 1;
+    state.runtime_time.pending_nanos = 0;
     assert_eq!(
         decode_resume(&encode_resume(&state).unwrap()).unwrap(),
         state
     );
+}
+
+#[test]
+fn runtime_time_preserves_phase_and_the_exact_debt_cap_with_a_remainder() {
+    for catch_up_policy in [
+        RuntimeCatchUpPolicy::DiscardExcess,
+        RuntimeCatchUpPolicy::PreserveDebt,
+    ] {
+        for pending_nanos in [0, 1, 13_000_000, 24_999_999, 50_000_000, 74_999_999] {
+            let mut state = example();
+            state.runtime_time.catch_up_policy = catch_up_policy;
+            state.runtime_time.max_debt_steps = 2;
+            state.runtime_time.pending_nanos = pending_nanos;
+            let bytes = encode_resume(&state).unwrap();
+            let restored = decode_resume(&bytes).unwrap();
+            assert_eq!(restored, state);
+            assert_eq!(restored.runtime_time.pending_nanos, pending_nanos);
+            assert_eq!(encode_resume(&restored).unwrap(), bytes);
+        }
+    }
+    let mut state = example();
+    state.runtime_time.catch_up_policy = RuntimeCatchUpPolicy::PreserveDebt;
+    let wire: Value = serde_json::from_slice(&encode_resume(&state).unwrap()).unwrap();
+    assert_eq!(
+        wire["payload"]["runtime_time"]["catch_up_policy"],
+        "preserve_debt"
+    );
+}
+
+#[test]
+fn runtime_time_continuation_round_trip_preserves_u64_max_nanoseconds() {
+    let maximum = Duration::from_nanos(u64::MAX);
+    let settings = RuntimeTimeSettings::new(true, 1.0, maximum).unwrap();
+    let fixed = FixedTime::new(Duration::from_nanos(MAX_TIMESTEP_NANOS))
+        .unwrap()
+        .with_catch_up_policy(FixedCatchUpPolicy::DiscardExcess);
+    let continuation = RuntimeTimeContinuation::new(&settings, &fixed, maximum).unwrap();
+    let state = RuntimeTimeState::from_continuation(continuation).unwrap();
+
+    assert_eq!(state.max_delta_nanos, u64::MAX);
+    assert_eq!(state.pending_nanos, u64::MAX);
+    assert_eq!(state.to_continuation().unwrap(), continuation);
+}
+
+#[test]
+fn runtime_time_continuation_refuses_durations_above_u64_nanoseconds() {
+    let maximum = Duration::from_nanos(u64::MAX);
+    let oversized = maximum.checked_add(Duration::from_nanos(1)).unwrap();
+    let fixed = FixedTime::new(Duration::from_nanos(MAX_TIMESTEP_NANOS))
+        .unwrap()
+        .with_catch_up_policy(FixedCatchUpPolicy::DiscardExcess);
+
+    for (field, max_delta, pending) in [
+        ("max_delta", oversized, maximum),
+        ("pending", maximum, oversized),
+    ] {
+        let settings = RuntimeTimeSettings::new(true, 1.0, max_delta).unwrap();
+        let continuation = RuntimeTimeContinuation::new(&settings, &fixed, pending).unwrap();
+        assert!(
+            matches!(
+                RuntimeTimeState::from_continuation(continuation),
+                Err(ResumeError::RuntimeDurationOutOfRange { field: actual }) if actual == field
+            ),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn runtime_time_continuation_round_trip_preserves_signed_zero_bits() {
+    for time_scale in [0.0_f32, -0.0_f32] {
+        let mut state = example().runtime_time;
+        state.time_scale = time_scale;
+        let continuation = state.to_continuation().unwrap();
+        assert_eq!(continuation.time_scale().to_bits(), time_scale.to_bits());
+
+        let restored = RuntimeTimeState::from_continuation(continuation).unwrap();
+        assert_eq!(restored.time_scale.to_bits(), time_scale.to_bits());
+        assert_eq!(restored, state);
+    }
+}
+
+#[test]
+fn preserve_debt_refuses_excess_completed_boundary_debt_without_a_frame_work_allowance() {
+    for pending_nanos in [75_000_000, 188_000_000, u64::MAX] {
+        let mut state = example();
+        state.runtime_time.catch_up_policy = RuntimeCatchUpPolicy::PreserveDebt;
+        state.runtime_time.max_debt_steps = 2;
+        state.runtime_time.pending_nanos = pending_nanos;
+        for result in [
+            state.validate(),
+            encode_resume(&state).map(|_| ()),
+            decode_resume(&wire_bytes(&state)).map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(ResumeError::ExcessPendingDebt {
+                    pending_steps,
+                    max_debt_steps: 2,
+                }) if pending_steps == pending_nanos / state.runtime_time.timestep_nanos
+            ));
+        }
+    }
+}
+
+#[test]
+fn discard_excess_retains_debt_after_a_paused_policy_and_cap_change() {
+    let mut state = example();
+    state.runtime_time.catch_up_policy = RuntimeCatchUpPolicy::PreserveDebt;
+    state.runtime_time.max_debt_steps = 2;
+    state.runtime_time.pending_nanos = 63_000_000;
+    let mut changed = decode_resume(&encode_resume(&state).unwrap()).unwrap();
+    changed.runtime_time.catch_up_policy = RuntimeCatchUpPolicy::DiscardExcess;
+    changed.runtime_time.max_debt_steps = 1;
+    assert_eq!(
+        decode_resume(&encode_resume(&changed).unwrap()).unwrap(),
+        changed
+    );
+    assert_eq!(
+        changed.runtime_time.pending_nanos,
+        state.runtime_time.pending_nanos
+    );
+}
+
+#[test]
+fn preserve_debt_supports_the_full_nonzero_u32_caps_without_multiplication_overflow() {
+    let mut state = example();
+    state.clock = GameClock {
+        ticks: 1,
+        elapsed_nanos: MAX_TIMESTEP_NANOS,
+        timestep_nanos: MAX_TIMESTEP_NANOS,
+    };
+    state.runtime_time = RuntimeTimeState {
+        timestep_nanos: MAX_TIMESTEP_NANOS,
+        max_steps_per_frame: u32::MAX,
+        max_debt_steps: u32::MAX,
+        catch_up_policy: RuntimeCatchUpPolicy::PreserveDebt,
+        time_scale: 1.0,
+        max_delta_nanos: u64::MAX,
+        pending_nanos: u64::from(u32::MAX) * MAX_TIMESTEP_NANOS + MAX_TIMESTEP_NANOS - 1,
+    };
+    assert_eq!(
+        decode_resume(&encode_resume(&state).unwrap()).unwrap(),
+        state
+    );
+    state.runtime_time.pending_nanos += 1;
+    assert!(matches!(
+        state.validate(),
+        Err(ResumeError::ExcessPendingDebt {
+            pending_steps,
+            max_debt_steps: u32::MAX,
+        }) if pending_steps == u64::from(u32::MAX) + 1
+    ));
+}
+
+#[test]
+fn runtime_timestep_is_bounded_and_must_match_logical_completed_time() {
+    for timestep_nanos in [0, MAX_TIMESTEP_NANOS + 1] {
+        let mut state = example();
+        state.runtime_time.timestep_nanos = timestep_nanos;
+        for result in [
+            state.validate(),
+            encode_resume(&state).map(|_| ()),
+            decode_resume(&wire_bytes(&state)).map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(ResumeError::InvalidTimestep(actual)) if actual == timestep_nanos
+            ));
+        }
+    }
+    let mut state = example();
+    state.runtime_time.timestep_nanos = 20_000_000;
+    for result in [
+        state.validate(),
+        encode_resume(&state).map(|_| ()),
+        decode_resume(&wire_bytes(&state)).map(|_| ()),
+    ] {
+        assert!(matches!(
+            result,
+            Err(ResumeError::RuntimeTimestepMismatch {
+                logical: 25_000_000,
+                runtime: 20_000_000,
+            })
+        ));
+    }
+}
+
+#[test]
+fn runtime_max_delta_is_nonzero_and_independent_of_the_timestep_limit() {
+    let mut state = example();
+    state.runtime_time.max_delta_nanos = 0;
+    for result in [
+        state.validate(),
+        encode_resume(&state).map(|_| ()),
+        decode_resume(&wire_bytes(&state)).map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(ResumeError::ZeroMaxDelta)));
+    }
+    for max_delta_nanos in [1, 250_000_000, 2_500_000_000, u64::MAX] {
+        state.runtime_time.max_delta_nanos = max_delta_nanos;
+        assert_eq!(
+            decode_resume(&encode_resume(&state).unwrap()).unwrap(),
+            state
+        );
+    }
+}
+
+#[test]
+fn runtime_work_and_debt_caps_must_both_be_nonzero() {
+    let mut state = example();
+    state.runtime_time.max_steps_per_frame = 0;
+    for result in [
+        state.validate(),
+        encode_resume(&state).map(|_| ()),
+        decode_resume(&wire_bytes(&state)).map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(ResumeError::ZeroMaxStepsPerFrame)));
+    }
+    state = example();
+    state.runtime_time.max_debt_steps = 0;
+    for result in [
+        state.validate(),
+        encode_resume(&state).map(|_| ()),
+        decode_resume(&wire_bytes(&state)).map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(ResumeError::ZeroMaxDebtSteps)));
+    }
+}
+
+#[test]
+fn runtime_scale_retains_the_full_nonnegative_f32_range_including_signed_zero() {
+    for value in [
+        0.0,
+        -0.0,
+        f32::from_bits(1),
+        f32::MIN_POSITIVE,
+        0.5,
+        2.0,
+        f32::MAX,
+    ] {
+        let mut state = example();
+        state.runtime_time.time_scale = value;
+        let bytes = encode_resume(&state).unwrap();
+        let restored = decode_resume(&bytes).unwrap();
+        assert_eq!(restored, state);
+        assert_eq!(restored.runtime_time.time_scale.to_bits(), value.to_bits());
+        assert_eq!(encode_resume(&restored).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn runtime_scale_refuses_negative_and_nonfinite_values_before_serialization() {
+    for value in [
+        -f32::from_bits(1),
+        -0.5,
+        -f32::MAX,
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ] {
+        let mut state = example();
+        state.runtime_time.time_scale = value;
+        for result in [state.validate(), encode_resume(&state).map(|_| ())] {
+            assert!(matches!(result, Err(ResumeError::InvalidTimeScale { .. })));
+        }
+        if value.is_finite() {
+            assert!(matches!(
+                decode_resume(&wire_bytes(&state)),
+                Err(ResumeError::InvalidTimeScale { .. })
+            ));
+        }
+    }
 }
 
 #[test]
@@ -474,6 +766,15 @@ fn maximum_progress_capacity_fits_with_full_content_stamps_and_identifier_length
         })
         .collect();
     state.progress.next_marker_id = MarkerId::new(MAX_MARKERS as u64 + 1).unwrap();
+    state.runtime_time = RuntimeTimeState {
+        timestep_nanos: state.clock.timestep_nanos,
+        max_steps_per_frame: u32::MAX,
+        max_debt_steps: u32::MAX,
+        catch_up_policy: RuntimeCatchUpPolicy::DiscardExcess,
+        time_scale: f32::MAX,
+        max_delta_nanos: u64::MAX,
+        pending_nanos: u64::MAX,
+    };
     let bytes = encode_resume(&state).unwrap();
     assert!(bytes.len() < MAX_RESUME_BYTES);
     assert_eq!(decode_resume(&bytes).unwrap(), state);
@@ -507,10 +808,10 @@ fn incompatible_headers_have_explicit_errors_before_payload_decoding() {
     wire["kind"] = json!("scene");
     assert!(matches!(decode_value(&wire), Err(ResumeError::WrongKind)));
     wire["kind"] = json!(KIND);
-    wire["format_version"] = json!(2);
+    wire["format_version"] = json!(3);
     assert!(matches!(
         decode_value(&wire),
-        Err(ResumeError::UnsupportedVersion(2))
+        Err(ResumeError::UnsupportedVersion(3))
     ));
     wire["format_version"] = json!(CURRENT_FORMAT_VERSION);
     wire["game_compatibility"] = json!(2);
@@ -518,6 +819,154 @@ fn incompatible_headers_have_explicit_errors_before_payload_decoding() {
         decode_value(&wire),
         Err(ResumeError::UnsupportedGameCompatibility(2))
     ));
+}
+
+#[test]
+fn version_one_is_refused_without_implicitly_assuming_zero_phase() {
+    let mut wire = example_wire();
+    wire["format_version"] = json!(1);
+    assert!(matches!(
+        decode_value(&wire),
+        Err(ResumeError::UnsupportedVersion(1))
+    ));
+    wire["payload"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runtime_time");
+    assert!(matches!(
+        decode_value(&wire),
+        Err(ResumeError::UnsupportedVersion(1))
+    ));
+    wire["format_version"] = json!(CURRENT_FORMAT_VERSION);
+    assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+}
+
+#[test]
+fn runtime_time_requires_every_field_and_refuses_independent_remainder_or_debt() {
+    for field in [
+        "timestep_nanos",
+        "max_steps_per_frame",
+        "max_debt_steps",
+        "catch_up_policy",
+        "time_scale",
+        "max_delta_nanos",
+        "pending_nanos",
+    ] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            matches!(decode_value(&wire), Err(ResumeError::Json(_))),
+            "{field}"
+        );
+    }
+    for field in ["remainder_nanos", "debt_nanos"] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"][field] = json!(0);
+        assert!(
+            matches!(decode_value(&wire), Err(ResumeError::Json(_))),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn runtime_time_requires_an_object_and_exact_snake_case_policy_strings() {
+    for value in [
+        Value::Null,
+        json!(false),
+        json!(0),
+        json!("runtime_time"),
+        json!([]),
+        json!([
+            25_000_000,
+            5,
+            120,
+            "discard_excess",
+            1.0,
+            250_000_000,
+            13_000_000
+        ]),
+    ] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"] = value;
+        assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+    }
+    for value in [
+        Value::Null,
+        json!(0),
+        json!(true),
+        json!("DiscardExcess"),
+        json!("PreserveDebt"),
+        json!("preserve"),
+        json!(["discard_excess"]),
+        json!({"discard_excess": null}),
+        json!({"preserve_debt": null}),
+    ] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"]["catch_up_policy"] = value;
+        assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+    }
+}
+
+#[test]
+fn runtime_time_numeric_fields_refuse_malformed_shapes_and_values_outside_their_widths() {
+    for field in [
+        "timestep_nanos",
+        "max_steps_per_frame",
+        "max_debt_steps",
+        "max_delta_nanos",
+        "pending_nanos",
+    ] {
+        for value in [
+            Value::Null,
+            json!(true),
+            json!(-1),
+            json!(1.5),
+            json!("1"),
+            json!([]),
+            json!({}),
+        ] {
+            let mut wire = example_wire();
+            wire["payload"]["runtime_time"][field] = value;
+            assert!(
+                matches!(decode_value(&wire), Err(ResumeError::Json(_))),
+                "{field}"
+            );
+        }
+    }
+    for field in ["max_steps_per_frame", "max_debt_steps"] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"][field] = json!(u64::from(u32::MAX) + 1);
+        assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+    }
+    for field in ["timestep_nanos", "max_delta_nanos", "pending_nanos"] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"][field] = json!("18446744073709551616");
+        let bytes = serde_json::to_string(&wire)
+            .unwrap()
+            .replace("\"18446744073709551616\"", "18446744073709551616");
+        assert!(matches!(
+            decode_resume(bytes.as_bytes()),
+            Err(ResumeError::Json(_))
+        ));
+    }
+    for value in [
+        Value::Null,
+        json!(false),
+        json!("1.0"),
+        json!([]),
+        json!({}),
+    ] {
+        let mut wire = example_wire();
+        wire["payload"]["runtime_time"]["time_scale"] = value;
+        assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+    }
+    let mut wire = example_wire();
+    wire["payload"]["runtime_time"]["time_scale"] = json!(1e100);
+    assert!(decode_value(&wire).is_err());
 }
 
 #[test]
@@ -534,6 +983,7 @@ fn unknown_fields_are_refused_at_every_record_boundary() {
         "/payload/progress/markers/0/level",
         "/payload/player",
         "/payload/clock",
+        "/payload/runtime_time",
         "/payload/counters",
         "/payload/compatibility",
         "/payload/compatibility/levels/0",
@@ -558,6 +1008,7 @@ fn complete_records_and_fixed_arrays_cannot_be_silently_defaulted_or_truncated()
         "player",
         "held",
         "clock",
+        "runtime_time",
         "counters",
         "compatibility",
     ] {
@@ -766,6 +1217,15 @@ fn example() -> ResumeState {
             ticks: 12,
             elapsed_nanos: 300_000_000,
             timestep_nanos: 25_000_000,
+        },
+        runtime_time: RuntimeTimeState {
+            timestep_nanos: 25_000_000,
+            max_steps_per_frame: 5,
+            max_debt_steps: 120,
+            catch_up_policy: RuntimeCatchUpPolicy::DiscardExcess,
+            time_scale: 1.0,
+            max_delta_nanos: 250_000_000,
+            pending_nanos: 13_000_000,
         },
         counters: SessionCounters {
             travel_count: 3,

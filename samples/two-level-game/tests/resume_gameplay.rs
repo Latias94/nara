@@ -10,10 +10,13 @@ use std::{
 };
 
 use nara::{
-    app::{FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeState},
+    app::{
+        FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeState,
+        RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
+    },
     gameplay::GameplayCommandDraft,
     prelude::{App, Plugin, PluginError},
-    project_host::HeadlessSessionError,
+    project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError},
 };
 use support::{
     DEADLINE, Game, INSTANCE, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, action, movement,
@@ -170,8 +173,11 @@ fn restore_candidate(original: &Game, candidate: &mut Game, state: &ResumeState)
         })
         .unwrap();
     assert_eq!(elapsed, timestep, "the Runtime clock must remain fresh");
-    assert_eq!(remainder, Duration::ZERO);
-    assert_eq!(debt, Duration::ZERO);
+    let pending = Duration::from_nanos(state.runtime_time.pending_nanos);
+    let expected_remainder =
+        Duration::from_nanos(state.runtime_time.pending_nanos % state.runtime_time.timestep_nanos);
+    assert_eq!(remainder, expected_remainder);
+    assert_eq!(debt, pending - expected_remainder);
     assert_ne!(candidate.frozen().domain, retained.domain);
     assert_ne!(
         (candidate.frozen().domain, reconstructed.current_instance),
@@ -501,8 +507,16 @@ fn incompatible_wire_schema_and_configuration_preserve_the_paused_original_byte_
         configured.compatibility.configuration,
         state.compatibility.configuration
     );
-    let reason = reject_candidate(&original, &mut configured_candidate, &state);
-    assert!(reason.contains("configuration"), "{reason}");
+    let fresh = configured_candidate.frozen();
+    assert!(matches!(
+        request_resume(&mut configured_candidate.session, &state),
+        Err(GameResumeError::Session(
+            HeadlessSessionError::TimeContinuation(RuntimeTimeContinuationError::Rejected(
+                RuntimeTimeContinuationRejection::PolicyMismatch
+            ))
+        ))
+    ));
+    assert_eq!(configured_candidate.frozen(), fresh);
     configured_candidate.close();
     assert_eq!(original.frozen(), retained);
 
@@ -624,6 +638,89 @@ impl Plugin for UnknownResumeService {
     }
 }
 
+#[derive(Default)]
+struct TimeInitializationGuard;
+
+impl Plugin for TimeInitializationGuard {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("two-level-game.test-time-initialization-fault"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.__install_runtime_authority_validator(
+            Self::declaration().id,
+            std::sync::Arc::new(|world, _| {
+                if world.resource::<FixedTime>().remainder() == Duration::from_millis(13) {
+                    Err(nara::app::RuntimeFault::engine(
+                        nara::app::RuntimeFaultKind::RuntimeAuthority,
+                        "two-level-game.test-time-initialization-fault",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }),
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn headless_time_initialization_preserves_applied_fault_and_closes_the_original_owner() {
+    let recipe = product_recipe()
+        .add_plugin::<TimeInitializationGuard>()
+        .unwrap();
+    let mut session = HeadlessSession::new(two_level_game::open_project_root().unwrap(), recipe);
+    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        session.start().unwrap();
+        session.pause().unwrap();
+        let mut state = two_level_game::resume::RuntimeTimeState::from_continuation(
+            session.capture_time_continuation().unwrap(),
+        )
+        .unwrap();
+        state.pending_nanos = 13_000_000;
+        let error = session
+            .restore_time_continuation(state.to_continuation().unwrap())
+            .unwrap_err();
+        let HeadlessSessionError::TimeContinuation(error) = error else {
+            panic!("original typed time error must be retained");
+        };
+        assert!(error.applied());
+        assert_eq!(
+            error.fault().unwrap().source(),
+            "two-level-game.test-time-initialization-fault"
+        );
+        assert_eq!(session.state(), Some(RuntimeState::Faulted));
+        assert!(session.capture(|_| ()).is_err());
+        assert!(session.capture_time_continuation().is_err());
+        assert!(
+            session
+                .restore_time_continuation(state.to_continuation().unwrap())
+                .is_err()
+        );
+        assert!(session.frame(Duration::ZERO).is_err());
+    }));
+    let deadline = Instant::now() + DEADLINE;
+    let terminal = loop {
+        match session.close() {
+            HeadlessSessionClose::Pending if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(1))
+            }
+            HeadlessSessionClose::Pending => {
+                std::mem::forget(session);
+                panic!("original faulted Host cleanup remains retained");
+            }
+            terminal => break terminal,
+        }
+    };
+    checked.unwrap();
+    assert_eq!(terminal, HeadlessSessionClose::Failed);
+    assert!(session.is_closed());
+}
+
 #[test]
 fn capture_refuses_running_sessions_and_additional_custom_plugins() {
     let mut game = Game::source();
@@ -664,12 +761,11 @@ fn capture_refuses_running_sessions_and_additional_custom_plugins() {
 }
 
 #[test]
-fn capture_refuses_fractional_runtime_time_without_discarding_it() {
+fn nonzero_runtime_phase_reconstructs_meaningful_game_and_matches_next_deltas() {
     let mut game = Game::source();
-    game.command(movement(1, true));
-    let state = game.capture();
+    let state = meaningful_game(&mut game);
     let tick = game.tick();
-    let fraction = Duration::from_nanos(1);
+    let fraction = Duration::from_millis(13);
     assert_eq!(game.session.resume().unwrap(), None);
     assert_eq!(game.session.frame(fraction).unwrap(), None);
     assert_eq!(game.session.pause().unwrap(), None);
@@ -683,10 +779,12 @@ fn capture_refuses_fractional_runtime_time_without_discarding_it() {
     assert_eq!(time.remainder(), fraction);
     assert_eq!(time.debt(), Duration::ZERO);
     let queue = game.queue();
-    assert!(matches!(
-        capture_resume(&game.session),
-        Err(GameResumeError::Ineligible(reason)) if reason.contains("remainder")
-    ));
+    let captured = game.capture();
+    assert_eq!(
+        captured.runtime_time.pending_nanos,
+        fraction.as_nanos() as u64
+    );
+    assert_eq!(captured.clock, state.clock);
     assert_eq!(game.queue(), queue);
     assert_eq!(
         game.session
@@ -695,19 +793,97 @@ fn capture_refuses_fractional_runtime_time_without_discarding_it() {
         time
     );
 
-    assert_eq!(game.session.resume().unwrap(), None);
-    assert_eq!(
-        game.session.frame(time.timestep() - fraction).unwrap(),
-        None
-    );
-    assert_eq!(game.session.pause().unwrap(), None);
-    game.settle();
+    let mut candidate = Game::source();
+    restore_candidate(&game, &mut candidate, &captured);
+    let offset = game.tick() as i128 - candidate.tick() as i128;
+    for millis in [3, 4, 5, 29, 60] {
+        for current in [&mut game, &mut candidate] {
+            assert_eq!(current.session.resume().unwrap(), None);
+            assert_eq!(
+                current
+                    .session
+                    .frame(Duration::from_millis(millis))
+                    .unwrap(),
+                None
+            );
+            assert_eq!(current.session.pause().unwrap(), None);
+            current.settle();
+        }
+        compare_games(&game, &candidate);
+        assert_eq!(game.tick() as i128 - candidate.tick() as i128, offset);
+    }
     let continued = game.capture();
-    assert_eq!(game.tick(), tick + 1);
-    assert_eq!(continued.clock.ticks, state.clock.ticks + 1);
+    assert_eq!(game.tick(), tick + 5);
+    assert_eq!(continued.clock.ticks, state.clock.ticks + 5);
+    assert_eq!(continued.runtime_time.pending_nanos, 14_000_000);
     assert_eq!(continued.held, state.held);
     assert!(continued.player.translation[0] > state.player.translation[0]);
+    candidate.close();
     game.close();
+}
+
+#[test]
+fn incompatible_time_policy_preserves_a_fresh_candidate_and_the_incumbent() {
+    let mut original = Game::source();
+    let state = meaningful_game(&mut original);
+    let retained = original.frozen();
+    let mut incompatible = state.clone();
+    incompatible.runtime_time.max_steps_per_frame += 1;
+    incompatible.validate().unwrap();
+    let mut candidate = Game::source();
+    let fresh = candidate.frozen();
+    assert!(matches!(
+        request_resume(&mut candidate.session, &incompatible),
+        Err(GameResumeError::Session(
+            HeadlessSessionError::TimeContinuation(RuntimeTimeContinuationError::Rejected(
+                RuntimeTimeContinuationRejection::PolicyMismatch
+            ))
+        ))
+    ));
+    assert_eq!(candidate.frozen(), fresh);
+    assert_eq!(original.frozen(), retained);
+    restore_candidate(&original, &mut candidate, &state);
+    compare_games(&original, &candidate);
+    candidate.close();
+    original.close();
+}
+
+#[test]
+fn preserved_whole_tick_debt_reconstructs_without_changing_the_fresh_runtime_history() {
+    let project = ProjectCopy::new();
+    project.preserve_fixed_debt();
+    let mut original = Game::from_project(project.root());
+    meaningful_game(&mut original);
+    original.session.resume().unwrap();
+    original.session.frame(Duration::from_millis(250)).unwrap();
+    original.session.pause().unwrap();
+    original.settle();
+    let captured = original.capture();
+    assert_eq!(
+        captured.runtime_time.catch_up_policy,
+        two_level_game::resume::RuntimeCatchUpPolicy::PreserveDebt
+    );
+    assert!(captured.runtime_time.pending_nanos >= captured.runtime_time.timestep_nanos);
+    assert_eq!(captured.runtime_time.pending_nanos, 150_000_000);
+    let mut candidate = Game::from_project(project.root());
+    restore_candidate(&original, &mut candidate, &captured);
+    let offset = original.tick() - candidate.tick();
+    for millis in [0, 7, 13, 40] {
+        for current in [&mut original, &mut candidate] {
+            current.session.resume().unwrap();
+            current
+                .session
+                .frame(Duration::from_millis(millis))
+                .unwrap();
+            current.session.pause().unwrap();
+            current.settle();
+        }
+        compare_games(&original, &candidate);
+        assert_eq!(original.tick() - candidate.tick(), offset);
+    }
+    assert_eq!(original.capture().runtime_time.pending_nanos, 10_000_000);
+    candidate.close();
+    original.close();
 }
 
 #[test]

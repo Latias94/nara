@@ -9,7 +9,7 @@
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;

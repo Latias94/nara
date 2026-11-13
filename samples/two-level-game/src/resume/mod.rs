@@ -6,6 +6,10 @@
 //! native handle is represented here. Use [`decode_resume`] to admit external bytes; derived Serde
 //! alone does not enforce the byte, shape, or semantic limits.
 
+mod runtime_time;
+
+pub use runtime_time::{RuntimeCatchUpPolicy, RuntimeTimeState};
+
 use nara::core::{
     ByteLimit, DepthLimit, ItemLimit, SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError,
     preflight_serde_shape,
@@ -19,7 +23,7 @@ use crate::{
 
 const KIND: &str = "two_level_resume";
 const MAX_TIMESTEP_NANOS: u64 = 1_000_000_000;
-pub const CURRENT_FORMAT_VERSION: u32 = 1;
+pub const CURRENT_FORMAT_VERSION: u32 = 2;
 pub const GAME_COMPATIBILITY: u32 = 1;
 pub const MAX_RESUME_BYTES: usize = 128 * 1024;
 
@@ -31,6 +35,8 @@ pub struct ResumeState {
     pub player: PlayerState,
     pub held: [bool; 4],
     pub clock: GameClock,
+    #[serde(deserialize_with = "runtime_time::deserialize_object")]
+    pub runtime_time: RuntimeTimeState,
     pub counters: SessionCounters,
     pub compatibility: ResumeCompatibility,
 }
@@ -44,7 +50,9 @@ pub struct PlayerState {
     pub scale: [f32; 2],
 }
 
-/// Logical game time; this never restores or rewinds the Runtime's own fixed clock.
+/// Logical completed game time, separate from the fresh Runtime's clock identities.
+///
+/// Its timestep must match [`RuntimeTimeState::timestep_nanos`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameClock {
@@ -132,6 +140,13 @@ impl ResumeState {
                 actual: self.clock.elapsed_nanos,
             });
         }
+        self.runtime_time.validate()?;
+        if self.clock.timestep_nanos != self.runtime_time.timestep_nanos {
+            return Err(ResumeError::RuntimeTimestepMismatch {
+                logical: self.clock.timestep_nanos,
+                runtime: self.runtime_time.timestep_nanos,
+            });
+        }
 
         let levels = &self.compatibility.levels;
         if levels.is_empty() || levels.len() > LevelId::ALL.len() {
@@ -215,6 +230,25 @@ pub enum ResumeError {
     ClockOverflow,
     #[error("resume elapsed time {actual} ns differs from its tick-derived {expected} ns")]
     ClockMismatch { expected: u64, actual: u64 },
+    #[error("resume logical timestep {logical} ns differs from its Runtime timestep {runtime} ns")]
+    RuntimeTimestepMismatch { logical: u64, runtime: u64 },
+    #[error("resume maximum fixed steps per frame must be non-zero")]
+    ZeroMaxStepsPerFrame,
+    #[error("resume maximum fixed debt steps must be non-zero")]
+    ZeroMaxDebtSteps,
+    #[error("resume time scale must be finite and non-negative, got {value}")]
+    InvalidTimeScale { value: f32 },
+    #[error("resume maximum real frame delta must be non-zero")]
+    ZeroMaxDelta,
+    #[error("resume pending debt of {pending_steps} ticks exceeds its limit of {max_debt_steps}")]
+    ExcessPendingDebt {
+        pending_steps: u64,
+        max_debt_steps: u32,
+    },
+    #[error("Runtime time duration {field} cannot be represented in u64 nanoseconds")]
+    RuntimeDurationOutOfRange { field: &'static str },
+    #[error("Runtime time continuation is invalid: {0}")]
+    InvalidRuntimeTime(String),
     #[error("resume content record count {0} is outside the nonempty finite level catalog")]
     InvalidContentRecordCount(usize),
     #[error("resume contains duplicate content records for {0:?}")]
@@ -225,7 +259,7 @@ pub enum ResumeError {
     MissingLevel(LevelId),
 }
 
-/// Produces canonical, bounded version-one bytes without file I/O or content admission.
+/// Produces canonical, bounded version-two bytes without file I/O or content admission.
 pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
     state.validate()?;
     let mut state = state.clone();
@@ -246,6 +280,7 @@ pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
 /// Successful decoding does not prove that recorded hashes match the fresh App and admitted
 /// content or that referenced objects exist. Hashes are full recorded values; no special byte
 /// pattern proves or disproves compatibility. This format has no checkpoint-save migration path.
+/// Version one is refused because it does not record Runtime scheduling phase.
 pub fn decode_resume(bytes: &[u8]) -> Result<ResumeState, ResumeError> {
     preflight(bytes)?;
     let header: Header = serde_json::from_slice(bytes).map_err(ResumeError::Json)?;

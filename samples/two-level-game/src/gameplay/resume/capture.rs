@@ -15,7 +15,7 @@ use crate::{
     gameplay::{
         ActiveLevel, GamePhase, Progress, Session, player, travel, verification::Verification,
     },
-    resume::{PlayerState, ResumeCompatibility, ResumeState, SessionCounters},
+    resume::{PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters},
 };
 
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
@@ -64,12 +64,9 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             "gameplay commands are pending, active or unacknowledged",
         ));
     }
-    if !time.remainder().is_zero()
-        || !time.debt().is_zero()
-        || world.resource::<RuntimeTimeSettings>().time_scale() != 1.0
-    {
+    if world.resource::<RuntimeTimeSettings>().time_scale() != 1.0 {
         return Err(reject(
-            "unrepresented Runtime time policy or remainder is active",
+            "this game does not support continuation at a non-unit time scale",
         ));
     }
     let tasks = world.resource::<TaskPools>().stats();
@@ -88,10 +85,14 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 /// sources, pending commands/travel/tasks, scripted verification and unrepresented time policy
 /// refuse capture. This value contains no World identity or native-service authority.
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
-    session.capture(capture_world)?
+    let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
+    session.capture(|world| capture_world(world, runtime_time))?
 }
 
-fn capture_world(world: &World) -> Result<ResumeState, GameResumeError> {
+fn capture_world(
+    world: &World,
+    runtime_time: RuntimeTimeState,
+) -> Result<ResumeState, GameResumeError> {
     eligible(world)?;
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let current = CurrentScene::get(world).ok_or_else(|| reject("current Scene is unavailable"))?;
@@ -137,6 +138,7 @@ fn capture_world(world: &World) -> Result<ResumeState, GameResumeError> {
         },
         held: session.held,
         clock: session.clock,
+        runtime_time,
         counters: SessionCounters {
             travel_count: session.travel_count,
             restarts: session.restarts,
