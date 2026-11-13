@@ -4697,6 +4697,23 @@ trajectory; the first RED run exposed and then explicitly classified the evidenc
 observer. This advances canonical desktop capture and retains native owners separately, but does
 not yet restore a rebuilt desktop candidate, confirm its first restored presentation, exchange the
 sole route or retire a predecessor.
+The following [desktop reconstruction and production-adoption successor](2026-11-13-rust-state-reconstruction-plan.md#desktop-reconstruction-and-production-adoption-qualification)
+at `4080306`/`65c0f75` connects the original game/Input/Scene/native/render owners through the explicit `SourceDesktop`
+development placement. Capture checks actual declared native holds; reconstruction compares the
+entire canonical encoding, including actual configuration and inactive-level state. A complete
+canonical digest is retained at the original stock Seal and joined to its exact presentation
+receipt before probe acceptance and fresh-adopter route exchange. The finite game-owned protocol
+is version three; supervised Editor Play keeps its existing protocol. Native activation and
+predecessor cleanup remain independent after route commit. Final affected CPU/public/native
+cohorts pass 346/346, 6/6 and 7/7. The new sequential native reconstruction/GPU consumer and actual
+desktop Rust body/private-structure edit/adoption trajectory each pass 1/1. Their linked record
+also retains ordinary game/CLI CPU 101/101, desktop-feature CPU 74/74, original headless
+actual-build/adoption 2/2 and actual JSON CLI 4/4. It
+separates hardware DX12 from sealed-child default backend selection, original receipt from replay
+pixels, compile/probe/source-drift refusals, input review corrections and remaining qualification.
+This is a concrete paused/Step-driven game development Host, not continuous Editor Play,
+arbitrary service migration, a measured iteration/performance budget or complete R12. UI and
+physical mixed-DPI work remain paused.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

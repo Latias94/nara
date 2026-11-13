@@ -439,6 +439,24 @@ Runtime services, while the qualification-only sealed-frame observer is named se
 unknown custom plugin still refuses capture. This is a capture prerequisite and a real desktop
 state comparison, not post-start candidate adoption or a second native owner.
 
+Desktop continuation additionally validates declared native Input membership against game held
+intent at the original full paused boundary. A completed paused App frame alone cannot authorize
+capture of deferred input. Controlled logical keyboard probes use Synthetic provenance through
+the original connected endpoint; they do not fabricate physical Platform events or bypass action
+resolution with a second gameplay queue. The incumbent's native ingress must remain isolated
+through final state revalidation and route exchange. Re-enabling it requires actual native focus
+and physical reconciliation, including when preparation fails after isolation.
+
+The concrete desktop restore adapter initializes time, admits the same game-owned reconstruction
+command and polls its original managed Step and Scene work. Original native/presentation owners
+stay live until physical close; no serialized pointer or cross-process numeric identity grants
+control. Confirm the restored canonical state against its original sealed/presented frame before
+adoption. Route commit, explicit native activation and predecessor retirement are separate results;
+a later focus or cleanup failure cannot relabel the route commit as unapplied.
+The concrete game-owned presentation observer is explicitly classified and fingerprinted. Its
+bounded state/Seal history and original presentation receipt are observations; they grant no
+native or cross-process authority and cannot be replaced by the callback's latest game state.
+
 ### Proposed Ownership Refinement
 
 The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial

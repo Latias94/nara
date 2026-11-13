@@ -1,8 +1,9 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Status: qualified for the shipped Windows source/headless workflow and the
-finite desktop control/presentation consumer; desktop reconstruction/adoption and complete R12
-remain open. Owner: the foundation rebaseline R12 runtime lane.
+Date: 2026-11-13. Updated: 2026-11-14. Status: qualified for the shipped Windows source/headless
+workflow and explicit source/desktop reconstruction/adoption through the finite development Host.
+Continuous Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline
+R12 runtime lane.
 Editor UI and physical mixed-DPI work remain paused.
 
 ## Complete Outcome
@@ -880,8 +881,9 @@ belongs to the shared inventory. Compilation features and actual placement remai
 feature, even for a selected headless profile. The explicit inventory now admits the known
 desktop-input declaration while unknown custom services still refuse capture. The qualification
 observer `two-level-game.test.desktop-capture` is separately named as evidence-only; it retains
-sealed WGPU inputs but owns no game state or native authority. The development Host still requires
-empty features, and this classification does not silently widen that source/headless Host.
+sealed WGPU inputs but owns no game state or native authority. At this capture-only milestone,
+the development Host still requires empty features; the explicit placement successor below owns
+its later desktop extension.
 
 The concrete game successor should share private eligibility, canonical World capture,
 fresh-candidate checks and restore-command construction between its two public placements.
@@ -889,10 +891,12 @@ The game now exposes a desktop capture adapter that uses the same canonical capt
 `DesktopRun`'s healthy paused boundary. It retains the actual configuration fingerprint, Schema,
 level stamps, time phase, counters and semantic state; native handles, WGPU resources and
 presentation receipts remain with `DesktopRun`. The real desktop control trajectory captures this
-value and compares every game-owned field against its visual oracle before replaying the captured
-state through the presentation evidence path. A first RED run correctly refused the evidence-only
-observer as an unknown service; the explicit classification fixed that without admitting an
-unrelated custom service.
+value and compares the visual oracle's represented semantic fields before replaying the captured
+state through the presentation evidence path. Its visual oracle does not independently check the
+configuration fingerprint or complete inactive-level state; canonical restoration and an actual
+ordinary-recipe incompatibility control belong to the successor below. A first RED run correctly
+refused the evidence-only observer as an unknown service; the explicit classification fixed that
+without admitting an unrelated custom service.
 
 Desktop restoration still submits through `DesktopRun`, polls the original Step ticket and
 completes paused maintenance through the existing game `begin_from_command`, travel and finish
@@ -902,3 +906,134 @@ explicit placement, restored-presentation confirmation and separate adoption/act
 retirement results. Preserve the current executable/source envelope, disposable probe, fresh
 adopter and final source/dual-state revalidation. These are required implementation changes;
 the current visual control consumer does not satisfy them.
+
+### Desktop Candidate Reconstruction Successor
+
+Status: qualified within the finite Windows workflow recorded below. Complete the concrete
+desktop reconstruction path before adding candidate adoption credit. Share private fresh-game
+checks and restore-command construction with the
+headless placement; the game-owned desktop adapter drives only original `DesktopRun` controls,
+time continuation, command submission and paused maintenance. Its finite cooperative deadline
+cannot interrupt native APIs, callbacks or graphics drivers. A failure after application retains
+the original partially changed candidate for physical close; it is not a game rollback.
+
+Desktop capture must compare the original native Input owner's declared movement holds against
+the game's held bits and refuse any pending or unsupported input. Known service IDs alone cannot
+make this capture complete. Restore only a healthy fresh paused isolated candidate, preflight
+configuration/Schema and empty native membership, initialize time, admit one restore command,
+wait for its exact Step and Scene reconstruction, restore fresh keyboard members, then compare
+the complete canonical encoded state. Keep the original Runtime clocks and native/GPU/Scene
+identities fresh. The source/headless capture adapter must refuse native presentation placement
+instead of bypassing the desktop input checks.
+
+The ordinary native consumer reconstructs meaningful multi-instance progress, non-anchor player
+state, nonzero time phase and held intent through these public APIs. It observes the restored
+stock input joined to the original presentation receipt at or after the capture's App frame and
+retains the finite GPU replay oracle after physical cleanup. Sequential native reconstruction
+does not prove an incumbent-preserving cross-process route exchange. That integration still
+requires explicit placement in the existing finite child protocol and development Host, a
+discarded probe, fresh adopter, final source/dual-state revalidation, restored-presentation
+confirmation, adopt-before-reveal, actual activation and independent predecessor retirement.
+
+The production desktop child additionally declares `two-level-game.development.presentation`.
+It rebuilds a bounded history of canonical state digests at the original stock Seal and joins
+only the matching original presentation receipt. The observer owns no native handle, GPU submit
+or game authority, and its configuration declaration remains part of compatibility. An actual
+plain recipe without the qualification observer must refuse that observer-bearing state without
+changing its fresh canonical state or command queue; a modified fingerprint alone is insufficient
+as the only control.
+
+Retain the previous gameplay, cleanup and refusal controls. Unknown services, open native save
+storage, stale configuration/content, pending work, incompatible time and native input mismatch
+must not become passing captures. No universal serializer, process framework, second native pump,
+render owner or input authority is added. UI and physical mixed-DPI work remain paused.
+
+### Desktop Reconstruction And Production Adoption Qualification
+
+Date: 2026-11-14. Qualified within the executed Windows scope. Implementation revisions:
+`4080306` for original Input/Host handoff controls and `65c0f75` for desktop reconstruction,
+production adoption, CLI and complete consumers. The implementation connects the concrete
+desktop adapter, original Input/Winit controls, finite child, process client, production
+development Host and ordinary JSON CLI. `SourceDesktop` is explicit; the default remains
+`SourceHeadless`. The game-owned protocol moves to version three and requires matching placement
+in READY and every response. Resume format two, progress saves and supervised Editor Play retain
+their independent formats and owners.
+
+Capture now checks complete declared native movement membership against game held intent, as
+well as the original healthy full paused frame. Headless capture refuses native presentation
+placement. Desktop restoration preflights freshness, configuration and Schema, restores time and
+the original game command, waits for its exact managed Step/Scene completion, restores fresh
+keyboard members and compares the entire canonical encoding. The ordinary-recipe control really
+omits the qualification observer; it proves a different actual configuration refuses restoration
+without changing fresh state, tick or queued commands. The earlier capture-only visual oracle
+did not independently establish this compatibility fact.
+
+Production probes use claimed Synthetic keyboard admission through the original Input owner,
+including original action resolution and terminal obligations. Prepare/adopt freezes incumbent
+native ingress before final capture; explicit activation is needed to resume native input after
+a refusal too. A complete canonical digest is retained at the original stock Seal and joined to
+the original Runtime/App/render/window/surface/backend/device receipt. Confirmation requests a
+new App frame and refuses state drift. Probe presentation and physical Close precede a different
+fresh adopter. The route exchange still has no synchronous predecessor Close; new active commands
+work while cleanup is Pending. Native reveal/focus/reconciliation is a separate outcome after
+commit. `Closing` retains the same child/native owner and request sequence for explicit retry.
+
+Independent input review identifies two P2 boundaries: Press-only controlled input could enter
+activation before its pending Input event was consumed, and native physical loss could report a
+Synthetic terminal trigger. Activation now refuses pending inventory before requesting native focus while
+keeping Isolated and original Step available. Physical loss reports Platform trigger with the
+original Synthetic member/press lineage and credits. Two bounded original-owner regressions
+accompany these fixes. Final static input, canonical/recipe, child/Seal/receipt and Host/process/CLI
+reviews find no remaining P1/P2; actual execution below remains the separate acceptance authority.
+
+| Scope | Actual result |
+| --- | --- |
+| Complete affected Input/Gameplay/Winit CPU and public targets | 346/346, 18 intentional native skips, run `2cfdcec3-cace-4f8f-b320-de9649ba5e9b`, 12.570 seconds. Includes both final P2 regressions and all prior keyboard/provenance/capacity/activation/retirement controls. |
+| Root public exact-input controls | 6/6, run `a0c1e3db-e2eb-4e59-aeb4-a30687aba5f4`, 0.336 seconds. Original Press lowering, staged release, cancellation and exact-tick ordering pass. |
+| Complete ordinary source/headless game and CLI CPU targets | 101/101, two actual-build cases kept separate, run `e36340da-e73f-47c7-a6f1-d819f340c244`, 11.478 seconds. Complete reconstruction/time/source fencing and abnormal-versus-physical CLI close controls pass after protocol migration. |
+| Desktop-feature game library and finite child/CLI CPU targets | 74/74, run `29ccc5c7-4b54-42ef-8b0a-4de9ac7df2ab`, 6.961 seconds. Includes the existing retained-Close and post-admission timeout cases; it is not native presentation evidence. |
+| Original actual source/headless A/B/C and production Host adoption | 2/2, two ordinary cases outside the ignored-only filter, run `015b394e-58d1-418e-adfa-5f5d1382acfa`, 174.219 seconds including nested Cargo. The independent A/B/C trajectory passes in 98.828 seconds and the production adoption trajectory in 75.391 seconds with version-three headless replies; all original failure/source/ticket/Pending-time/physical-cleanup checks remain. |
+| Original reusable native Winit trajectories | 7/7, 92 outside the ignored-only filter, run `b1b0f64a-521c-48a0-9640-1368b7a7a522`, 2.160 seconds. Hidden polling/fullscreen, original-loop reuse, real focus/physical key reconciliation and retirement pass; mixed-DPI is not selected. |
+| Original desktop gameplay/control and GPU replay | 1/1, run `b0d47c84-5d20-45df-9163-fec13cc4ec54`, 5.876 seconds. All prior gameplay/input/time/native cleanup and replay assertions remain; the added real game-held/native-inventory mismatch correctly refuses capture. |
+| Sequential native desktop reconstruction and independent GPU replay | 1/1, run `8e0cf920-58e5-4240-8c02-d23c1a92fe92`, 12.284 seconds after a 3m34s release build. Complete multi-instance state, 13 ms phase, fresh Runtime/Scene/render/native/GPU identities, ordinary-recipe incompatibility, held continuation/reconciliation and physical cleanup pass on hardware DX12. |
+| Production desktop actual body/private-structure edits and adoption | 1/1, run `0259249f-8372-4140-9bb2-447ec2dc8fc5`, 131.575 seconds including nested dev-profile Cargo. The incumbent survives compile/probe/stale-state/source-drift refusals; probes are discarded, B/C restore complete state and presentation, Pending-time commands run new logic, final native activation and all original clean retirement reports pass. |
+| Ordinary JSON development CLI with actual children/builds | 4/4: source/headless adoption, source/desktop adoption plus presentation/activation, desktop malformed-selector refusal with cleanup, and desktop EOF cleanup. Seven exact incumbent/candidate native handles are observed exited. All returned game/exit/containment/readers/output facts are clean; the deliberate input-refusal case exits unsuccessfully and the other three exit successfully. Desktop children report Vulkan. Work storage is removed only after the actual exits. The ordinary CLI executable is built in release; its explicit child selections use dev. |
+
+The first all-target check finds only a missing crate-root protocol import in the new desktop
+test; the corrected all-target check passes. The first actual-build run
+`dbb1afc6-ace3-46a0-b967-3d5e3819c946` fails its new backend assertion after 312.377 seconds,
+including an initial 5m06s nested dev build: exact product launch intentionally projects only the
+reviewed desktop-session environment, so the parent's DX12 hint does not reach the child, which
+selects hardware Vulkan. The fixture now reads the actual first hardware backend and requires
+the same supported native backend through incumbent/B/C presentations. Complete canonical,
+presentation, hardware-adapter and physical-cleanup checks remain. This does not add ambient
+variables to the shared process projection or claim that these children ran DX12.
+
+Correctness Clippy passes the affected Input/Gameplay/Winit all-target/all-feature graph, the
+root desktop library and every desktop sample target. The minimal root desktop library builds
+without default features, runtime-2d or serde. Root/sample format checks, affected TOML, added
+local document links/fragments and whitespace checks pass. Existing style/dead-code diagnostics
+remain outside the correctness gate; this is not a warning-free claim. All eight scoped
+implementation/review threads are closed. Owned Cargo sequences terminate, and native/game/CLI
+owners reach the actual cleanup observations recorded above. The root exact-input command first
+used the sample-only feature name `desktop`; correcting the command to the root's actual feature
+contract produces the 6/6 result without source changes. These cohorts overlap and are not a
+combined independent test count.
+
+Executed scope is Windows x64, Rust 1.95.0, locked/offline, jobs one and the shared root target.
+The outer tests use release; actual Cargo selections inside the A/B/C fixture use dev. The
+sequential native trajectory and contained child trajectories retain their distinct backend
+selection contracts. A presentation receipt proves original submission/present association,
+not GPU completion or scanout; independent replay pixels are not swapchain readback. Numeric
+latency, frame-time, CPU, memory and cross-platform budgets remain unqualified. Explicit child
+graphics selection is not yet a public Host option; the sealed default's actual adapter is
+reported instead. The finite development protocol remains paused/Step-driven rather than an
+Editor-integrated continuous Play session. Unsupported native services, open SaveSlot,
+arbitrary component/World serialization and complete R12 remain open. UI and physical mixed-DPI
+work remain paused.
+
+The next runtime workflow should connect ordinary continuous execution to the same explicit
+pause, input freeze, rebuild, correct-result confirmation and postcommit activation/retirement
+controls. Measure edit-to-correct-playable-result and retained/idle runtime costs separately from
+compiler time before broadening service migration. Supervised Editor Play requires reconciliation
+of its existing protocol owner; this game-owned command path does not silently extend it.

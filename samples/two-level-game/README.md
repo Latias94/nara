@@ -170,6 +170,9 @@ Rust/Cargo build inputs. The CLI emits one `ready` record, then one result for e
 | `{"operation":"adopt"}` | `committed:true`, new active generation and independent `retirement:"pending"`. Uses the CLI's retained ticket; generation observations grant no selection authority. |
 | `{"operation":"cancel"}` | Cancel the CLI's exact retained candidate. |
 | `{"operation":"retry_cleanup"}` | Retry retained physical cleanup without changing the active command route. |
+| `{"operation":"isolate_input"}` | Freeze the desktop active game's original native keyboard ingress without discarding held intent. |
+| `{"operation":"confirm_presentation"}` | Confirm a fresh desktop presentation joined to the complete current canonical state. |
+| `{"operation":"activate_input"}` | Reveal/focus the desktop active window and return its original activation state and any activation error. |
 | `{"operation":"close"}` | Fence commands and close the session. EOF also closes it. |
 
 Operation refusals produce `ok:false` while retaining the active game. Malformed input ends the
@@ -220,13 +223,73 @@ The ignored test launches that ordinary executable through the shared contained-
 and checks its actual exit, containment, readers and output. Executed results, the finite pixel
 oracle and platform limits belong to the
 [desktop development plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-development-and-original-native-session).
-This consumer does not yet reconstruct a desktop game or adopt a rebuilt executable. Its visual
-expectation is not an authoritative `ResumeState` capture; complete desktop service eligibility
-and canonical restoration remain required before extending the development Host to this placement.
+This consumer does not reconstruct a desktop game or adopt a rebuilt executable. Its visual
+expectation is not an authoritative `ResumeState` capture; the separate reconstruction and
+development-Host consumers below own those complete-state and route-exchange checks.
 The keyboard-continuation trajectory additionally starts isolated, restores the actual movement
 bindings without Started, and reconciles a key released before focus acquisition. One original
 exact Step must stop movement before native activation. This exercises the input prerequisite;
 it does not qualify a rebuilt desktop candidate.
+
+## Desktop Reconstruction And Explicit Development Placement
+
+With the `desktop` feature, `capture_desktop_resume(&run)` captures through a healthy completed
+paused `DesktopRun`. It also captures the original declared keyboard inventory and refuses if
+its holds differ from game movement intent or any original input work remains pending. The
+headless adapter refuses a native presentation placement. Typed gameplay Move alone is not a
+native keyboard member and cannot satisfy desktop capture.
+
+`restore_desktop_resume(&mut run, &state, deadline)` targets one fresh paused isolated game.
+It validates the complete bounded state, configuration, Schema and empty native membership,
+initializes original time, executes one original restore command/Step and waits for Scene
+reconstruction before restoring keyboard membership. Complete canonical bytes must match.
+It does not reveal, activate or replace a route. After any applied failure, retain the exact
+candidate and drive physical Close; no rollback is implied. The deadline is cooperative and
+cannot interrupt a graphics driver, native API or user callback.
+
+The ordinary `desktop_reconstruction` executable uses these APIs with the same recipe in two
+sequential native runs. It retains meaningful three-instance progress, a non-anchor player,
+held D and 13 ms scheduling phase, verifies incompatible preflight refusal, then reconstructs
+the complete state in fresh Runtime/Scene/render/native/GPU identities. Its presentation
+receipt must match a restored stock-input seal at or after the capture frame; separate GPU
+replay runs after original physical cleanup. Sequential reuse of one retired native pump does
+not demonstrate cross-process adoption.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test desktop_reconstruction --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+The development Host's explicit `SourceDesktop` placement uses the same existing source,
+executable, process and candidate owners. Its candidates start hidden and input-isolated. A
+presentation confirmation joins the exact sealed canonical state to the original native receipt;
+startup READY alone cannot qualify restoration. Prepare/adopt isolates incumbent native input
+before final capture. `activate_active()` is separate from route adoption, so denied focus or
+reveal failure retains an already adopted paused game with an actual activation result. Logical
+probe movement uses the original Input driver with Synthetic provenance; it does not pretend to
+observe OS input. The [owning plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-candidate-reconstruction-successor)
+records actual execution results and remaining integration limits.
+
+For the CLI, compile `develop` with `--features desktop` and pass `--placement desktop` after
+the Cargo argument separator. The CLI selects the `continuity` child's exact `desktop` feature;
+compiling the Host with that feature alone does not select native execution. `ready` reports
+the actual placement. Contained product launches retain the reviewed desktop-session environment
+projection; parent `WGPU_BACKEND` and `NARA_WGPU_FORCE_FALLBACK` hints are not inherited. The child
+uses the stock default selection and reports its actual adapter/backend in presentation results.
+Explicit graphics selection is not yet a development-Host option. The three desktop-only JSON operations above refuse source/headless
+placement. Prepare and adopt can leave the incumbent isolated even after refusal; explicitly
+activate the retained game when native input should resume. A committed adoption remains
+committed if subsequent activation fails. A `closing` child keeps its original native owner
+until an explicit retry reaches physical completion.
+
+Run the production desktop Host's actual body/private-structure edit qualification separately:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+This game-owned development protocol is version three and requires explicit placement in every
+reply. It refuses old children at the existing version gate. The resume format remains version
+two; progress saves and the supervised Editor Play protocol retain their separate formats.
 
 ## Ownership And Limits
 

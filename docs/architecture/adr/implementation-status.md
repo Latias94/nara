@@ -2588,12 +2588,29 @@ The follow-up [desktop capture boundary](../../plans/2026-11-13-rust-state-recon
 now routes the same game-owned canonical capture through a healthy paused `DesktopRun`. The
 explicit service inventory admits the known fresh-Runtime window/render/WGPU/image/sprite/input
 services and names the qualification-only sealed-frame observer separately; unknown custom
-services remain refused. The actual desktop/GPU consumer captures the full state, compares its
-semantic fields against the visual trajectory and uses the authoritative configuration fingerprint
-for the presentation oracle. Final run `20c77f33-efb2-499b-ba9e-1ebb4d2a815a` passes 1/1 after
+services remain refused. The actual desktop/GPU consumer captures the full state and compares the
+visual trajectory's represented semantic fields. The capture retains the authoritative configuration
+fingerprint; the visual oracle does not independently check it or complete inactive-level state.
+Final run `20c77f33-efb2-499b-ba9e-1ebb4d2a815a` passes 1/1 after
 the first RED run correctly exposed the unclassified evidence observer. This advances desktop
 canonical capture only; restored desktop candidate presentation, route adoption and predecessor
 retirement remain open.
+
+The following [desktop reconstruction/production-adoption unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-reconstruction-and-production-adoption-qualification)
+at `4080306`/`65c0f75` connects actual declared Input membership, complete canonical state, fresh desktop Scene/Runtime
+reconstruction and original sealed/presented state in the game-owned `SourceDesktop` development
+Host. Probe disposal, a fresh adopter, final source/dual-state/presentation checks and one route
+exchange preserve the original owners. Native activation and predecessor retirement have separate
+postcommit outcomes; `Closing` retains the original child for explicit retry. Complete affected
+Input/Gameplay/Winit CPU 346/346, root exact-input 6/6 and reusable native 7/7 pass. Sequential
+desktop reconstruction with independent GPU replay and actual Rust body/private-structure
+desktop adoption each pass 1/1. Ordinary game/CLI CPU 101/101, desktop-feature CPU 74/74, original
+headless actual-build/adoption 2/2 and actual JSON CLI 4/4 pass. The actual ordinary-recipe control closes the previous visual
+oracle's configuration coverage gap; the linked record keeps hardware/backend, receipt/replay,
+source refusal, lifecycle and cost limits explicit. The game protocol is version three; supervised
+Editor Play remains separate. Continuous Editor Play, unsupported service/state migration,
+cross-platform execution, numeric budgets and complete R12 remain open. UI and mixed-DPI remain
+paused.
 
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
