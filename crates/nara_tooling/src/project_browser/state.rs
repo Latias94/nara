@@ -130,6 +130,12 @@ impl EditorProjectBrowserView {
         self.snapshot.as_deref()
     }
 
+    /// Shares the original immutable index with independent Adapter-local query states.
+    #[must_use]
+    pub fn shared_snapshot(&self) -> Option<Arc<EditorProjectBrowserSnapshot>> {
+        self.snapshot.as_ref().map(Arc::clone)
+    }
+
     #[must_use]
     pub fn snapshot_generation(&self) -> Option<u64> {
         self.snapshot
