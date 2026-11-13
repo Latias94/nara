@@ -6,7 +6,7 @@ use std::{
 };
 
 use nara_app::{
-    App, CoreStage, FixedUpdateSet, Plugin, PluginError, RuntimeDriverScope,
+    App, CoreStage, FixedUpdateSet, Plugin, PluginError, RealTime, RuntimeDriverScope,
     RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
@@ -17,6 +17,7 @@ mod binding;
 mod definition;
 #[cfg(feature = "serde")]
 mod format;
+mod keyboard_continuation;
 #[cfg(feature = "serde")]
 mod runtime;
 mod schedule;
@@ -33,6 +34,10 @@ pub use definition::{
 };
 #[cfg(feature = "serde")]
 pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
+pub use keyboard_continuation::{
+    KeyboardActionBinding, KeyboardContinuationError, KeyboardHold, capture_keyboard_holds,
+    reconcile_keyboard_holds, restore_keyboard_holds,
+};
 #[cfg(feature = "serde")]
 pub use runtime::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 pub use schedule::InputSet;
@@ -255,6 +260,15 @@ impl<T: Copy + Ord> ButtonInput<T> {
             button,
             phase,
         });
+    }
+
+    fn restore_timeline_member(&mut self, button: T, sequence: u64) {
+        let index = self
+            .pressed
+            .binary_search(&(button, sequence))
+            .expect_err("a restored member has a fresh owner identity");
+        assert!(self.pressed.len() < self.pressed.capacity());
+        self.pressed.insert(index, (button, sequence));
     }
 }
 
@@ -842,6 +856,7 @@ impl Plugin for InputPlugin {
         if !app.world().contains_resource::<ActionStaging>() {
             app.insert_resource(ActionStaging::default())?;
         }
+        app.__register_driver_port::<ActionStaging>(keyboard_continuation::apply_registered)?;
         if !app.world().contains_resource::<PointerState>() {
             app.insert_resource(PointerState::default())?;
         }
@@ -855,6 +870,16 @@ impl Plugin for InputPlugin {
             )
                 .chain(),
         )?
+        .configure_sets(
+            CoreStage::FixedUpdate,
+            (
+                InputSet::ProjectTimeline,
+                InputSet::StageActions,
+                InputSet::ResolveActions,
+            )
+                .chain()
+                .in_set(FixedUpdateSet::Prepare),
+        )?
         .add_systems(
             CoreStage::First,
             project_timeline_input.in_set(InputSet::ProjectTimeline),
@@ -863,7 +888,19 @@ impl Plugin for InputPlugin {
             CoreStage::FixedUpdate,
             // Exact stepping can admit input without an intervening ordinary First stage.
             // The timeline's projection cursor makes this a no-op for already projected edges.
-            project_timeline_input.in_set(FixedUpdateSet::Prepare),
+            project_timeline_input.in_set(InputSet::ProjectTimeline),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            stage_fixed_actions
+                .in_set(InputSet::StageActions)
+                .run_if(fixed_actions_need_resolution),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            resolve_action_outcomes
+                .in_set(InputSet::ResolveActions)
+                .run_if(fixed_actions_need_resolution),
         )?
         .add_systems(
             CoreStage::First,
@@ -890,6 +927,14 @@ fn project_timeline_input(
 ) {
     for entry in timeline.projection_entries() {
         match entry.kind() {
+            InputEventKind::KeyRestored { key } => {
+                keyboard.restore_timeline_member(
+                    key,
+                    entry
+                        .press_sequence()
+                        .expect("logical admission has a member"),
+                );
+            }
             InputEventKind::Key { key, phase } => {
                 keyboard.apply_timeline_transition(entry, key, phase);
             }
@@ -936,12 +981,14 @@ fn finalize_timeline_routing(
 }
 
 fn resolve_action_outcomes(
+    time: Res<RealTime>,
     action_maps: Res<ActionMaps>,
     mut staging: ResMut<ActionStaging>,
     mut timeline: ResMut<InputTimeline>,
     mut outcomes: ResMut<ActionOutcomes>,
     mut semantic: ResMut<SemanticActions>,
 ) {
+    staging.resolved_frame = Some(time.frame);
     if !outcomes.is_empty() {
         outcomes.clear();
     }
@@ -954,6 +1001,19 @@ fn resolve_action_outcomes(
         }
         semantic.apply(&action_maps, &staging, &staged_revision, entry);
     }
+}
+
+fn fixed_actions_need_resolution(time: Res<RealTime>, staging: Res<ActionStaging>) -> bool {
+    staging.resolved_frame != Some(time.frame)
+}
+
+fn stage_fixed_actions(
+    maps: Res<ActionMaps>,
+    mut staging: ResMut<ActionStaging>,
+    mut timeline: ResMut<InputTimeline>,
+) {
+    staging.observe_maps(&maps);
+    timeline.stage_actions(&staging);
 }
 
 fn resolve_input_binding(

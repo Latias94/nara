@@ -109,10 +109,34 @@ Rules:
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
 
+### Fresh-Runtime Keyboard Continuation
+
+An explicitly isolated paused candidate may restore a finite declared set of keyboard Button
+contributions through the original Input owner. Validate the exact key/action/context binding,
+current mapping/context lifetime, original endpoint claim, empty pending consumer work and
+capacity for the complete batch and its terminal obligations before mutation. Allocate new local
+member identities. A restored logical admission is distinguishable from physical Press and
+creates held button and semantic projection without transient Press or Started outcomes.
+
+Capture checks each declared member and its actual semantic contribution, rejecting unsupported
+members and retained unconsumed or deferred events. An observed context or mapping cancellation
+cannot become a valid restored hold merely because configuration returns. Repeated or synthetic
+native Down cannot resurrect it. Future native Release, focus/context/mapping loss and retirement
+settle the original contribution once. Member admission provenance and the terminal trigger's
+origin remain separate observations; no old-process event sequence grants new authority.
+
+The original native owner separately controls isolation, visibility, focus acknowledgement and
+activation reconciliation. Showing a hidden window does not authorize gameplay input or prove
+physical held continuity. A route exchange precedes focus-changing reveal; unresolved activation
+retains a paused candidate and reports its actual result rather than claiming rollback.
+
 `InputSet` supplies supported ordering anchors for independent mapping configuration and UI
 adapters. ProjectTimeline, PublishObservations, RouteUi and StageActions run in First, in that
-order; ResolveActions runs in PreUpdate. Order a configuration change before its required First
-boundary rather than assuming a constraint crosses schedules. Set membership does not order
+order; ResolveActions runs in PreUpdate. Fixed Prepare reuses projection, staging and resolution
+for a frame not already resolved; later catch-up ticks leave late input for the next First mapping
+boundary. Unresolved UI decisions retain their original routing boundary. Order a configuration
+change before its required First boundary rather than assuming a constraint crosses schedules.
+Set membership does not order
 peer systems. Custom routers use the original timeline's synchronous `route_pending_ui_input`:
 the callback sees its current pending entry, returns an accepted consume/rejected-closed decision
 or leaves fallback open. The owner finalizes original member custody without accepting a bare

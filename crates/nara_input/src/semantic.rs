@@ -475,9 +475,16 @@ impl MapStaging {
 #[derive(Debug, Default, Resource)]
 pub(crate) struct ActionStaging {
     maps: BTreeMap<InputSeatId, MapStaging>,
+    pub(crate) resolved_frame: Option<u64>,
 }
 
 impl ActionStaging {
+    pub(crate) fn matches_current_map(&self, seat: InputSeatId, map: &ActionMap) -> bool {
+        self.maps
+            .get(&seat)
+            .and_then(|staging| staging.observed.as_ref())
+            .is_some_and(|observed| Arc::ptr_eq(observed, &map.revision))
+    }
     pub(crate) fn observe_maps(&mut self, maps: &ActionMaps) {
         self.maps.retain(|seat, _| maps.get(*seat).is_some());
         for (seat, map) in maps.iter() {
@@ -490,6 +497,113 @@ impl ActionStaging {
         seat: InputSeatId,
     ) -> Option<&Arc<StagedActionRevision>> {
         self.maps.get(&seat).map(|map| &map.current)
+    }
+}
+
+impl SemanticActions {
+    pub(crate) fn validate_keyboard_restore(
+        &self,
+        seat: InputSeatId,
+        count: usize,
+    ) -> Result<(), crate::KeyboardContinuationError> {
+        if self.held.keys().any(|key| key.seat == seat) {
+            return Err(crate::KeyboardContinuationError::MembersPresent);
+        }
+        if self
+            .contribution_count
+            .checked_add(count)
+            .is_none_or(|total| total > self.contribution_limit)
+        {
+            return Err(crate::KeyboardContinuationError::SemanticCapacity);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_keyboard_capture(
+        &self,
+        maps: &ActionMaps,
+        staging: &ActionStaging,
+        seat: InputSeatId,
+        bindings: &[crate::KeyboardActionBinding],
+        members: &[Option<u64>],
+    ) -> Result<(), crate::KeyboardContinuationError> {
+        let map = maps
+            .get(seat)
+            .ok_or(crate::KeyboardContinuationError::BindingMismatch)?;
+        let revision = staging
+            .revision_for_seat(seat)
+            .ok_or(crate::KeyboardContinuationError::ConfigurationPending)?;
+        let expected = members.iter().filter(|member| member.is_some()).count();
+        if self.held.keys().filter(|key| key.seat == seat).count() != expected {
+            return Err(crate::KeyboardContinuationError::ProjectionMismatch);
+        }
+        for (binding, sequence) in bindings.iter().zip(members) {
+            let held = self.held.get(&ActionKey {
+                seat,
+                action: binding.action.clone(),
+                context: binding.context.clone(),
+            });
+            match (sequence, held) {
+                (None, None) => {}
+                (Some(sequence), Some(held)) => {
+                    let slot = map
+                        .definition()
+                        .context_index(&binding.context)
+                        .ok_or(crate::KeyboardContinuationError::BindingMismatch)?;
+                    if !Arc::ptr_eq(&held.mapping, &revision.mapping)
+                        || !same_context_lifetime(
+                            held.context.as_ref(),
+                            revision.contexts[slot].as_ref(),
+                        )
+                        || held.value != ActionValue::Button(true)
+                        || held.contributions.len() != 1
+                        || held.contributions.get(sequence) != Some(&ActionValue::Button(true))
+                    {
+                        return Err(crate::KeyboardContinuationError::ProjectionMismatch);
+                    }
+                }
+                _ => return Err(crate::KeyboardContinuationError::ProjectionMismatch),
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_keyboard_members(
+        &mut self,
+        maps: &ActionMaps,
+        staging: &ActionStaging,
+        seat: InputSeatId,
+        holds: &[crate::KeyboardHold],
+        members: &[Option<u64>],
+    ) {
+        let map = maps.get(seat).expect("restore validates the exact map");
+        let revision = staging
+            .revision_for_seat(seat)
+            .expect("restore validates staging");
+        for (hold, sequence) in holds.iter().zip(members) {
+            let Some(sequence) = sequence else {
+                continue;
+            };
+            let slot = map
+                .definition()
+                .context_index(&hold.binding.context)
+                .expect("restore validates the exact context");
+            self.held.insert(
+                ActionKey {
+                    seat,
+                    action: hold.binding.action.clone(),
+                    context: hold.binding.context.clone(),
+                },
+                HeldAction {
+                    mapping: Arc::clone(&revision.mapping),
+                    context: revision.contexts[slot].clone(),
+                    contributions: BTreeMap::from([(*sequence, ActionValue::Button(true))]),
+                    value: ActionValue::Button(true),
+                    retention_owner: revision.retention_owner.clone(),
+                },
+            );
+            self.contribution_count += 1;
+        }
     }
 }
 

@@ -119,6 +119,33 @@ changes. An explicit restore may attach a newly connected incarnation with the s
 handoff clears predecessor interaction state. Late preparation or cleanup through the old Surface
 cannot adopt or terminate the replacement connection.
 
+## Paused Keyboard Continuation
+
+`KeyboardActionBinding` declares an exact keyboard key, Button action and context. A game captures
+a finite inventory with `capture_keyboard_holds`; each `KeyboardHold` includes the declaration and
+its actual held value. The original Input owner checks the current map/context lifetime, complete
+consumer quiescence and agreement between the button and semantic projections. Pending or deferred
+input, additional held members and unsupported routes refuse capture. The game separately checks
+its canonical held state, command watermarks and other services.
+
+`restore_keyboard_holds` uses the paused Runtime driver port and an exact newly connected endpoint
+claim. It preflights the whole batch and its terminal allowances, then installs fresh local members
+with `InputEventOrigin::Restored`. `KeyRestored` establishes held projections without physical Press,
+transient button transitions or Started commands. Old event sequences never become authority in
+the new Runtime. A later release, mapping/context cancellation or retirement settles the original
+contribution once; re-enabling a context does not resurrect it.
+
+`InputTimelineEntry::member_origin` and action provenance distinguish restored membership from the
+terminal trigger's origin. Native activation reconciliation uses `ActivationMismatch`, while an
+ordinary physical release retains its own trigger and the restored member identity. Exact fixed
+steps run the original input preparation and gameplay mapper before command admission. Ordinary
+frames and catch-up ticks consume semantic work once per App frame; late input waits for the next
+First mapping boundary instead of being staged prematurely.
+
+Native isolation, actual focus and physical reconciliation belong to the native session. Use the
+[desktop control operations](rust-product-recipes.md#caller-driven-desktop-control) for that
+workflow. Restored logical intent alone does not establish that a physical key remains held.
+
 ## Gamepad Connections And Axis Values
 
 Connect the endpoint first, then call `connect_gamepad_input(scope, window, seat, backend_label)`.

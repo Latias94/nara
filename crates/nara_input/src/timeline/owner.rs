@@ -19,6 +19,8 @@ use crate::{
 
 #[path = "gamepad.rs"]
 mod gamepad;
+#[path = "keyboard_continuation.rs"]
+mod keyboard_continuation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionRetention {
@@ -212,6 +214,7 @@ pub enum InputRouteCommit {
 struct InputDraft {
     route: InputRouteStamp,
     origin: InputEventOrigin,
+    member_origin: Option<InputEventOrigin>,
     logical_position: Option<Vec2>,
     kind: InputEventKind,
     invalidation: Option<InputInvalidationReason>,
@@ -773,6 +776,7 @@ impl InputTimeline {
         InputDraft {
             route: self.pointer_route(window, seat, pointer),
             origin,
+            member_origin: None,
             logical_position,
             kind,
             invalidation: None,
@@ -835,6 +839,10 @@ impl InputTimeline {
         );
         draft.route = route;
         draft.invalidation = reason;
+        draft.member_origin = Some(member.origin);
+        if member.origin == InputEventOrigin::Restored {
+            draft.origin = InputEventOrigin::Platform;
+        }
         draft.press_origin = Some((member.held.press_sequence, original));
         draft.action_delivery = member.held.action_delivery();
         draft
@@ -897,6 +905,7 @@ impl InputTimeline {
             let sequence =
                 first.expect("nonempty draft batch has a first sequence") + offset as u64;
             let press = draft.press_origin.or_else(|| match draft.kind {
+                InputEventKind::KeyRestored { .. } => Some((sequence, draft.route)),
                 InputEventKind::Key {
                     phase: ButtonTransitionPhase::Pressed,
                     ..
@@ -918,6 +927,7 @@ impl InputTimeline {
                 entry: InputTimelineEntry {
                     sequence,
                     origin: draft.origin,
+                    member_origin: draft.member_origin.or(press.map(|_| draft.origin)),
                     route: draft.route,
                     logical_position: draft.logical_position,
                     kind: draft.kind,
@@ -971,9 +981,9 @@ impl InputTimeline {
                 self.press(endpoint, None, None, InputBinding::Key(key), origin, None)
             }
             ButtonDriverInput::Release(key) => {
-                self.release(endpoint, None, None, InputBinding::Key(key))
+                self.release_trigger(endpoint, None, None, InputBinding::Key(key), Some(origin))
             }
-            ButtonDriverInput::ReleaseAll => self.release_all(endpoint, None, false),
+            ButtonDriverInput::ReleaseAll => self.release_all(endpoint, None, false, origin),
         }
     }
 
@@ -999,7 +1009,9 @@ impl InputTimeline {
             ButtonDriverInput::Release(button) => {
                 self.release(endpoint, Some(pointer), None, InputBinding::Mouse(button))
             }
-            ButtonDriverInput::ReleaseAll => self.release_all(endpoint, Some(pointer), true),
+            ButtonDriverInput::ReleaseAll => {
+                self.release_all(endpoint, Some(pointer), true, origin)
+            }
         }
     }
 
@@ -1096,6 +1108,17 @@ impl InputTimeline {
         gamepad: Option<GamepadId>,
         input: InputBinding,
     ) -> Result<__InputDriverOutput, InputIngressError> {
+        self.release_trigger(endpoint_index, pointer_index, gamepad, input, None)
+    }
+
+    fn release_trigger(
+        &mut self,
+        endpoint_index: usize,
+        pointer_index: Option<usize>,
+        gamepad: Option<GamepadId>,
+        input: InputBinding,
+        trigger: Option<InputEventOrigin>,
+    ) -> Result<__InputDriverOutput, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap().id);
         let Some(index) = self
@@ -1104,7 +1127,10 @@ impl InputTimeline {
         else {
             return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
         };
-        let draft = self.release_draft(self.topology.members[index].unwrap(), None);
+        let mut draft = self.release_draft(self.topology.members[index].unwrap(), None);
+        if let Some(trigger) = trigger {
+            draft.origin = trigger;
+        }
         let plan = self.terminal_plan(1, self.topology.obligations() - 1);
         let admission = self.publish(plan, &[draft]);
         let member = self.topology.members[index].as_mut().unwrap();
@@ -1121,6 +1147,7 @@ impl InputTimeline {
         endpoint_index: usize,
         pointer_index: Option<usize>,
         mouse: bool,
+        origin: InputEventOrigin,
     ) -> Result<__InputDriverOutput, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap().id;
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap().id);
@@ -1141,7 +1168,9 @@ impl InputTimeline {
                         )
                 })
             {
-                drafts.push(owner.release_draft(member, None));
+                let mut draft = owner.release_draft(member, None);
+                draft.origin = origin;
+                drafts.push(draft);
             }
             drafts.sort_by_key(|draft| draft.press_origin.unwrap().0);
             let plan =

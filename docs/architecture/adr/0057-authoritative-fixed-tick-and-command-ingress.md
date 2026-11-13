@@ -82,6 +82,14 @@ Seat-local semantic actions must not match another player's static mapping merel
 action name is equal. A game-owned dynamic adapter may construct analog payloads and stable
 player targets through the same reserved local command ingress.
 
+An exact managed tick prepares newly admitted Input through the original projection, semantic
+resolution and action-command mapper before closing that tick's command admission. Each domain
+consumes its frame work at most once per original App-frame identity; ordinary PreUpdate and
+multi-tick catch-up therefore do not duplicate action commands. This does not run arbitrary
+PreUpdate systems. Input with an unresolved UI decision remains pending until its original UI
+routing boundary. A restored hold has no Started outcome; its later Release maps the original
+stop command before that exact tick's gameplay consumption.
+
 ### Isolated semantic replay
 
 `GameplayCommandQueue::for_replay(settings, source_id)` constructs the original queue empty with

@@ -144,6 +144,7 @@ impl Error for InputConfigurationError {}
 pub enum InputEventOrigin {
     Platform,
     Synthetic,
+    Restored,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -430,6 +431,7 @@ pub struct InputRouteStamp {
 pub struct ActionInputProvenance {
     sequence: u64,
     origin: InputEventOrigin,
+    member_origin: Option<InputEventOrigin>,
     route: InputRouteStamp,
     press_sequence: Option<u64>,
     press_route: Option<InputRouteStamp>,
@@ -445,6 +447,12 @@ impl ActionInputProvenance {
     #[must_use]
     pub const fn origin(self) -> InputEventOrigin {
         self.origin
+    }
+
+    /// Admission source of the held member, separate from this event's trigger.
+    #[must_use]
+    pub const fn member_origin(self) -> Option<InputEventOrigin> {
+        self.member_origin
     }
 
     #[must_use]
@@ -546,6 +554,7 @@ impl InputRouteStamp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputInvalidationReason {
+    ActivationMismatch,
     PointerLeft,
     FocusLost,
     Resized,
@@ -557,6 +566,10 @@ pub enum InputInvalidationReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputEventKind {
+    /// Logical admission in a fresh local owner; no physical Press or Started edge.
+    KeyRestored {
+        key: KeyCode,
+    },
     PointerMoved,
     PointerButton {
         button: MouseButton,
@@ -608,6 +621,7 @@ pub enum InputEventKind {
 pub struct InputTimelineEntry {
     pub(super) sequence: u64,
     pub(super) origin: InputEventOrigin,
+    pub(super) member_origin: Option<InputEventOrigin>,
     pub(super) route: InputRouteStamp,
     pub(super) logical_position: Option<Vec2>,
     pub(super) kind: InputEventKind,
@@ -625,6 +639,11 @@ impl InputTimelineEntry {
     #[must_use]
     pub const fn origin(self) -> InputEventOrigin {
         self.origin
+    }
+
+    #[must_use]
+    pub const fn member_origin(self) -> Option<InputEventOrigin> {
+        self.member_origin
     }
 
     #[must_use]
@@ -657,6 +676,7 @@ impl InputTimelineEntry {
         ActionInputProvenance {
             sequence: self.sequence,
             origin: self.origin,
+            member_origin: self.member_origin,
             route: self.route,
             press_sequence: self.press_sequence,
             press_route: self.press_route,

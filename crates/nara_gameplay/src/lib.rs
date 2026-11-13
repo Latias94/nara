@@ -31,11 +31,13 @@ pub use queue::{
 pub use schedule::GameplayCommandSet;
 
 use nara_app::{
-    __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError,
+    __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError, RealTime,
     RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
     RuntimeWorldAccessError,
 };
-use nara_ecs::{Res, ResMut, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Res, ResMut, Resource, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs,
+};
 use nara_input::SemanticActions;
 
 use crate::schedule::GameplayCommandInternalSet;
@@ -80,6 +82,11 @@ pub struct GameplayCommandPlugin {
     settings: GameplayCommandQueueSettings,
 }
 
+#[derive(Debug, Default, Resource)]
+struct ActionCommandLoweringCursor {
+    frame: Option<u64>,
+}
+
 impl Default for GameplayCommandPlugin {
     fn default() -> Self {
         Self::new(GameplayCommandQueueSettings::default())
@@ -120,6 +127,7 @@ impl Plugin for GameplayCommandPlugin {
         if !app.world().contains_resource::<LocalGameplayCommands>() {
             app.insert_resource(LocalGameplayCommands::default())?;
         }
+        app.insert_resource(ActionCommandLoweringCursor::default())?;
         let admission_faults = app.world().resource::<RuntimeFaultReporter>().clone();
         let consumption_faults = admission_faults.clone();
         let acknowledgement_faults = admission_faults.clone();
@@ -152,6 +160,14 @@ impl Plugin for GameplayCommandPlugin {
             map_action_outcomes_to_commands
                 .after(nara_input::InputSet::ResolveActions)
                 .in_set(GameplayCommandInternalSet::MapLocalActions),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            map_action_outcomes_to_commands
+                .in_set(FixedUpdateSet::Prepare)
+                .in_set(GameplayCommandInternalSet::MapLocalActions)
+                .after(nara_input::InputSet::ResolveActions)
+                .before(GameplayCommandInternalSet::Admit),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
@@ -210,12 +226,17 @@ impl Plugin for GameplayCommandPlugin {
 }
 
 fn map_action_outcomes_to_commands(
+    time: Res<RealTime>,
+    mut cursor: ResMut<ActionCommandLoweringCursor>,
     command_map: Res<ActionCommandMap>,
     outcomes: Option<Res<SemanticActions>>,
     mut local_commands: ResMut<LocalGameplayCommands>,
     mut queue: ResMut<GameplayCommandQueue>,
     faults: Res<RuntimeFaultReporter>,
 ) {
+    if cursor.frame == Some(time.frame) {
+        return;
+    }
     if let Some(outcomes) = outcomes {
         for outcome in outcomes.as_slice() {
             for binding in command_map.matching_bindings(
@@ -231,6 +252,7 @@ fn map_action_outcomes_to_commands(
     for command in local_commands.drain() {
         submit_local_command(&mut queue, command, &faults);
     }
+    cursor.frame = Some(time.frame);
 }
 
 fn submit_local_command(
