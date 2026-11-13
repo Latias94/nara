@@ -70,11 +70,15 @@ impl CargoBuildTools {
         })
     }
 
-    pub(crate) fn cargo_path(&self) -> &Path {
+    /// Returns the resolved absolute Cargo executable selected in the original workspace.
+    #[must_use]
+    pub fn cargo_path(&self) -> &Path {
         &self.cargo
     }
 
-    pub(crate) fn rustc_path(&self) -> &Path {
+    /// Returns the resolved absolute compiler executable selected in the original workspace.
+    #[must_use]
+    pub fn rustc_path(&self) -> &Path {
         &self.rustc
     }
 }

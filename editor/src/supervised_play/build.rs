@@ -11,6 +11,7 @@ use std::{
 use nara::{
     fs::ContentDigest,
     project_host::MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES,
+    project_tooling::process::{ProcessLogRing, ProcessLogSequenceExhausted},
     project_workflow::cargo::{
         CargoArtifactFacts, CargoBuildDecoder, CargoBuildError, CargoBuildFacts,
         CargoBuildInvocation, CargoBuildSelectionError, CargoDiagnostics, CargoInvocationError,
@@ -20,14 +21,12 @@ use nara::{
 use thiserror::Error;
 
 use super::{
-    ProcessOutputStream,
-    log::{ProcessLogRing, ProcessLogSequenceExhausted},
+    ProcessOutputStream, SupervisedPlayWake,
     process::{
         SupervisedProcessCleanupReceipt, SupervisedProcessCommand, SupervisedProcessError,
         SupervisedProcessOwner, SupervisedProcessSpawnFailure, SupervisedProcessSpawnOwner,
         SupervisedProcessSpawnRetirement, SupervisedProcessSpawnTerminal, default_log_limits,
     },
-    wake::SupervisedPlayWake,
 };
 pub(super) use cargo_driver::*;
 pub(super) use source::*;

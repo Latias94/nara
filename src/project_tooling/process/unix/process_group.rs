@@ -8,7 +8,7 @@ unsafe extern "C" {
 ///
 /// Kernel tasks or namespace-hidden groups can have PGID zero. It is an observation, never a
 /// group this owner can signal. Only the retained child leader grants positive group authority.
-pub(crate) fn query(pid: c_int) -> io::Result<Option<NonZeroI32>> {
+pub(super) fn query(pid: c_int) -> io::Result<Option<NonZeroI32>> {
     if pid <= 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

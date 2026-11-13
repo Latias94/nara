@@ -7,15 +7,17 @@ use std::{
 
 use thiserror::Error;
 
+use nara::project_tooling::process::ProcessLogLimits;
+
 use super::{
     SupervisedProcessCommand, SupervisedProcessError, SupervisedProcessOwner,
     SupervisedProductProcessCommand,
 };
-use crate::supervised_play::{log::ProcessLogLimits, wake::SupervisedPlayWake};
+use crate::supervised_play::SupervisedPlayWake;
 
 struct SpawnWorkerOutcome {
     completed_at: Instant,
-    result: Result<SupervisedProcessOwner, SupervisedProcessError>,
+    result: Result<SupervisedProcessOwner, SupervisedProcessSpawnFailure>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,8 @@ pub(crate) enum SupervisedProcessSpawnFailure {
     WorkerDisconnected,
     #[error("the supervised process spawn worker panicked")]
     WorkerPanicked,
+    #[error("the exact executable generation could not be revalidated")]
+    Generation(#[source] crate::supervised_play::generation::GenerationStoreError),
     #[error("the supervised process could not be spawned")]
     Process(#[source] SupervisedProcessError),
     #[error("the late supervised process could not be cleaned up")]
@@ -79,6 +83,7 @@ impl SupervisedProcessSpawnOwner {
     ) -> Result<Self, SupervisedProcessSpawnFailure> {
         Self::dispatch(spawn_deadline, wake.clone(), move || {
             SupervisedProcessOwner::spawn_with_wake(&command, log_limits, wake)
+                .map_err(SupervisedProcessSpawnFailure::Process)
         })
     }
 
@@ -92,18 +97,19 @@ impl SupervisedProcessSpawnOwner {
         Self::dispatch(spawn_deadline, wake.clone(), move || {
             let authority = generation
                 .revalidate_for_launch()
-                .map_err(SupervisedProcessError::Generation)?
+                .map_err(SupervisedProcessSpawnFailure::Generation)?
                 .into_authority();
-            SupervisedProcessOwner::spawn_exact_generation_with_wake(
-                authority, &command, log_limits, wake,
-            )
+            SupervisedProcessOwner::spawn_exact_with_wake(authority, &command, log_limits, wake)
+                .map_err(SupervisedProcessSpawnFailure::Process)
         })
     }
 
     fn dispatch(
         spawn_deadline: Instant,
         wake: SupervisedPlayWake,
-        spawn: impl FnOnce() -> Result<SupervisedProcessOwner, SupervisedProcessError> + Send + 'static,
+        spawn: impl FnOnce() -> Result<SupervisedProcessOwner, SupervisedProcessSpawnFailure>
+        + Send
+        + 'static,
     ) -> Result<Self, SupervisedProcessSpawnFailure> {
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_wake = wake;
@@ -247,9 +253,7 @@ impl SupervisedProcessSpawnOwner {
                             SupervisedProcessSpawnRetirement::TimedOut,
                         )
                     }
-                    None => SupervisedProcessSpawnTerminal::Failed(
-                        SupervisedProcessSpawnFailure::Process(error),
-                    ),
+                    None => SupervisedProcessSpawnTerminal::Failed(error),
                 };
                 self.terminal = Some(terminal);
             }

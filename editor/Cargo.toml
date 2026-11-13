@@ -55,7 +55,7 @@ required-features = ["imgui-reference"]
 dear-imgui-rs = { workspace = true, optional = true, features = ["system-clipboard"] }
 dear-imgui-wgpu = { workspace = true, optional = true }
 dear-imgui-winit = { workspace = true, optional = true }
-nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow-cargo-facts", "render-wgpu", "runtime-ui", "tooling"] }
+nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-tooling", "render-wgpu", "runtime-ui", "tooling"] }
 nara_render_wgpu.workspace = true
 nara_text.workspace = true
 nara_ui_kernel.workspace = true

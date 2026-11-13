@@ -16,6 +16,7 @@ use nara::project_host::{
 use thiserror::Error;
 
 use super::{
+    SupervisedPlayWake,
     generation::ImmutableExecutableGeneration,
     handshake::{
         SupervisedDesktopHandshakeFailureKind, SupervisedDesktopHandshakeOwner,
@@ -28,7 +29,6 @@ use super::{
         SupervisedProcessSpawnRetirement, SupervisedProcessSpawnTerminal,
         SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand, default_log_limits,
     },
-    wake::SupervisedPlayWake,
 };
 
 const PROCESS_SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -160,7 +160,8 @@ impl SupervisedDesktopSessionSupervisor {
         let command = SupervisedProductProcessCommand::new(
             SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
             request.working_directory.clone(),
-        );
+        )
+        .with_bootstrap();
         let spawn_deadline = now
             .checked_add(PROCESS_SPAWN_TIMEOUT)
             .ok_or(SupervisedDesktopSupervisorStartError::SpawnDeadlineOverflow)?;

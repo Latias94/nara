@@ -5,8 +5,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use super::{PlatformOutput, SupervisedProcessStream};
-use crate::supervised_play::wake::SupervisedPlayWake;
+use super::{PlatformOutput, SupervisedProcessStream, SupervisedProcessWake};
 
 const PROTOCOL_STDOUT_CHUNK_BYTES: usize = 16 * 1024;
 
@@ -20,7 +19,7 @@ pub(super) struct PlatformOutputQueue {
     record_limit: usize,
     byte_limit: usize,
     state: Mutex<PlatformOutputQueueState>,
-    wake: SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 }
 
 impl PlatformOutputQueue {
@@ -34,7 +33,7 @@ impl PlatformOutputQueue {
             record_limit,
             byte_limit,
             protocol_stdout_limit,
-            SupervisedPlayWake::default(),
+            SupervisedProcessWake::default(),
         )
     }
 
@@ -42,7 +41,7 @@ impl PlatformOutputQueue {
         record_limit: usize,
         byte_limit: usize,
         protocol_stdout_limit: Option<NonZeroUsize>,
-        wake: SupervisedPlayWake,
+        wake: SupervisedProcessWake,
     ) -> Self {
         assert!(
             record_limit > 0,

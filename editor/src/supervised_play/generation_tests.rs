@@ -115,14 +115,22 @@ fn exact_launch_authority_survives_generation_path_replacement() {
         SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
         fixture.root.clone(),
     )
+    .with_bootstrap()
     .arguments([
         "--exact",
         "supervised_play::generation::store::tests::exact_generation_fd_helper",
         "--nocapture",
     ]);
     let mut owner =
-        SupervisedProcessOwner::spawn_exact_generation(authority, &command, default_log_limits())
-            .unwrap();
+        SupervisedProcessOwner::spawn_exact(authority, &command, default_log_limits()).unwrap();
+    #[cfg(windows)]
+    assert!(
+        fs::OpenOptions::new()
+            .write(true)
+            .open(generation.launch_manifest())
+            .is_err(),
+        "the consumed authority must retain its original manifest lease in the process owner"
+    );
     drop(owner.take_bootstrap());
     let deadline = Instant::now() + Duration::from_secs(10);
     while owner.state() != SupervisedProcessState::Complete {
@@ -150,6 +158,15 @@ fn exact_launch_authority_survives_generation_path_replacement() {
         assert!(output.contains("path-present=false"));
     }
     assert!(owner.cleanup_receipt().unwrap().exit().success());
+    drop(owner);
+    #[cfg(windows)]
+    assert!(
+        fs::OpenOptions::new()
+            .write(true)
+            .open(generation.launch_manifest())
+            .is_ok(),
+        "completed physical cleanup and owner release must retire the original manifest lease"
+    );
 }
 
 #[cfg(any(

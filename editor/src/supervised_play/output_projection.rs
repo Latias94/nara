@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, path::Path};
 
 use nara::{
+    project_tooling::process::{ProcessLogRing, ProcessLogStats},
     project_workflow::cargo::{CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics},
     tooling::{
         EditorExternalPlayCompilerLevel, EditorExternalPlayDiagnostics, EditorExternalPlayMessage,
@@ -8,11 +9,7 @@ use nara::{
     },
 };
 
-use super::{
-    ProcessOutputStream,
-    failure::HostFailureFacts,
-    log::{ProcessLogRing, ProcessLogStats},
-};
+use super::{ProcessOutputStream, failure::HostFailureFacts};
 
 const OUTPUT_MESSAGE_LIMIT: usize = 128;
 const OUTPUT_BYTE_LIMIT: usize = 128 * 1024;
@@ -617,7 +614,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::supervised_play::log::ProcessLogLimits;
+    use nara::project_tooling::process::ProcessLogLimits;
 
     #[test]
     fn host_failure_projects_only_bounded_labels_and_io_facts() {

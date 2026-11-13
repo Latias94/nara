@@ -17,7 +17,7 @@ use nara::fs::{
 use nara::project_host::{SupervisedDesktopProductIdentity, SupervisedDesktopWireError};
 use thiserror::Error;
 
-use crate::supervised_play::process::ExactGenerationLaunchAuthority;
+use crate::supervised_play::process::ExactExecutableLaunchAuthority;
 
 use super::format::{ExecutableGenerationId, GenerationManifestInput};
 #[cfg(test)]
@@ -108,15 +108,13 @@ impl ImmutableExecutableGeneration {
                 operation: "duplicate-generation-launch-manifest-handle",
                 source,
             })?;
-        let authority = ExactGenerationLaunchAuthority::from_verified_handles(
-            executable,
-            generation_directory,
-            launch_manifest,
-        )
-        .map_err(|source| GenerationStoreError::Io {
-            operation: "prepare-exact-generation-launch-authority",
-            source,
-        })?;
+        let authority =
+            ExactExecutableLaunchAuthority::from_verified_handles(executable, generation_directory)
+                .map_err(|source| GenerationStoreError::Io {
+                    operation: "prepare-exact-generation-launch-authority",
+                    source,
+                })?
+                .with_launch_record(launch_manifest);
 
         Ok(ExecutableGenerationLaunchReceipt {
             authority,
@@ -175,7 +173,7 @@ impl Debug for ImmutableExecutableGeneration {
 
 #[must_use = "a revalidated generation must be consumed by the immediate spawn attempt"]
 pub(crate) struct ExecutableGenerationLaunchReceipt {
-    authority: ExactGenerationLaunchAuthority,
+    authority: ExactExecutableLaunchAuthority,
     _directory: DirectoryCapability,
     _executable: FileCapability,
     _launch_manifest: FileCapability,
@@ -183,7 +181,7 @@ pub(crate) struct ExecutableGenerationLaunchReceipt {
 
 impl ExecutableGenerationLaunchReceipt {
     #[must_use]
-    pub(in crate::supervised_play) fn into_authority(self) -> ExactGenerationLaunchAuthority {
+    pub(in crate::supervised_play) fn into_authority(self) -> ExactExecutableLaunchAuthority {
         self.authority
     }
 }

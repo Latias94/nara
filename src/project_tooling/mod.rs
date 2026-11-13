@@ -21,6 +21,7 @@ pub mod cargo_build;
 mod export;
 pub mod host_fs;
 pub mod player_package;
+pub mod process;
 mod product_observation;
 mod protocol;
 mod schema;

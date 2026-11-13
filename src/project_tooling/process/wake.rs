@@ -5,31 +5,31 @@ use std::sync::{
 
 type WakeCallback = dyn Fn() -> bool + Send + Sync + 'static;
 
-/// Coalesced, authority-free notification that private supervised Play work changed.
+/// Coalesced, authority-free notification that supervised process work changed.
 ///
-/// The signal carries no attempt, process, or lifecycle value. The UI thread must drain the
-/// retained owner and apply its generation-stamped observations through the normal Host seam.
+/// The signal carries no process or lifecycle value. The consumer must drain the retained owner
+/// and interpret its observations through the consumer's own lifecycle contract.
 #[derive(Clone)]
-pub(crate) struct SupervisedPlayWake {
-    inner: Arc<SupervisedPlayWakeInner>,
+pub struct SupervisedProcessWake {
+    inner: Arc<SupervisedProcessWakeInner>,
 }
 
-struct SupervisedPlayWakeInner {
+struct SupervisedProcessWakeInner {
     pending: AtomicBool,
     callback: Box<WakeCallback>,
 }
 
-impl SupervisedPlayWake {
-    pub(crate) fn new(callback: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+impl SupervisedProcessWake {
+    pub fn new(callback: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         Self {
-            inner: Arc::new(SupervisedPlayWakeInner {
+            inner: Arc::new(SupervisedProcessWakeInner {
                 pending: AtomicBool::new(false),
                 callback: Box::new(callback),
             }),
         }
     }
 
-    pub(crate) fn notify(&self) {
+    pub fn notify(&self) {
         if self
             .inner
             .pending
@@ -43,26 +43,27 @@ impl SupervisedPlayWake {
         }
     }
 
-    pub(crate) fn acknowledge(&self) {
+    pub fn acknowledge(&self) {
         self.inner.pending.store(false, Ordering::Release);
     }
 
-    #[cfg(test)]
-    pub(crate) fn pending(&self) -> bool {
+    /// Observes a coalesced notification, not process progress or physical cleanup completion.
+    #[must_use]
+    pub fn pending(&self) -> bool {
         self.inner.pending.load(Ordering::Acquire)
     }
 }
 
-impl Default for SupervisedPlayWake {
+impl Default for SupervisedProcessWake {
     fn default() -> Self {
         Self::new(|| false)
     }
 }
 
-impl std::fmt::Debug for SupervisedPlayWake {
+impl std::fmt::Debug for SupervisedProcessWake {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("SupervisedPlayWake")
+            .debug_struct("SupervisedProcessWake")
             .field("pending", &self.inner.pending.load(Ordering::Acquire))
             .finish_non_exhaustive()
     }
@@ -78,7 +79,7 @@ mod tests {
     fn notifications_coalesce_until_the_ui_acknowledges_the_event() {
         let calls = Arc::new(AtomicUsize::new(0));
         let callback_calls = Arc::clone(&calls);
-        let wake = SupervisedPlayWake::new(move || {
+        let wake = SupervisedProcessWake::new(move || {
             callback_calls.fetch_add(1, Ordering::Relaxed);
             true
         });
@@ -97,7 +98,7 @@ mod tests {
     fn failed_delivery_rearms_the_signal() {
         let calls = Arc::new(AtomicUsize::new(0));
         let callback_calls = Arc::clone(&calls);
-        let wake = SupervisedPlayWake::new(move || {
+        let wake = SupervisedProcessWake::new(move || {
             callback_calls.fetch_add(1, Ordering::Relaxed);
             false
         });

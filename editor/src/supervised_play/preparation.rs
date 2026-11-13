@@ -12,13 +12,13 @@ use nara::fs::ContentDigest;
 use nara::tooling::EditorPlayFailure;
 
 use super::{
+    SupervisedPlayWake,
     build::{DesktopBuildSupersededReason, VerifiedDesktopBuildCandidate},
     failure::HostFailureFacts,
     generation::{
         ExecutableGenerationStore, GenerationManifestInput, ImmutableExecutableGeneration,
     },
     store_root::generation_store_base_root,
-    wake::SupervisedPlayWake,
 };
 
 pub(super) enum GenerationPreparationRequest {

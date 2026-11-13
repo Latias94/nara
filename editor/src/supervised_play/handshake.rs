@@ -17,10 +17,10 @@ use nara::{
 use thiserror::Error;
 
 use super::{
+    SupervisedPlayWake,
     process::{
         SupervisedBootstrapCancellation, SupervisedBootstrapChannel, SupervisedProcessError,
     },
-    wake::SupervisedPlayWake,
 };
 
 const READY_READ_CHUNK_BYTES: usize = 8 * 1024;

@@ -7,9 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nara::project_tooling::process::{ProcessLogLimits, ProcessLogStream};
+
 use super::{
     ProcessOutputStream,
-    log::{ProcessLogLimits, ProcessLogStream},
     process::{
         SupervisedProcessCleanupReceipt, SupervisedProcessCommand, SupervisedProcessOutput,
         SupervisedProcessOwner, SupervisedProcessState,

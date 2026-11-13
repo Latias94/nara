@@ -297,7 +297,14 @@ project-workflow = [
     "dep:toml",
 ]
 project-workflow-cargo-facts = ["project-workflow", "dep:serde_json"]
-project-tooling = ["project-workflow-cargo-facts"]
+project-tooling = [
+    "project-workflow-cargo-facts",
+    "windows-sys?/Win32_System_JobObjects",
+    "windows-sys?/Win32_Security_Cryptography",
+    "rustix?/event",
+    "rustix?/fs",
+    "rustix?/process",
+]
 project-workflow-cli = ["project-tooling"]
 
 [[bin]]

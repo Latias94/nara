@@ -19,6 +19,7 @@ use nara::{
 };
 
 use super::{
+    SupervisedPlayWake,
     build::{
         DesktopBuildAttempt, DesktopBuildInputRevision, DesktopBuildRequest, DesktopBuildStatus,
         DesktopBuildTools, VerifiedDesktopBuildCandidate,
@@ -39,7 +40,6 @@ use super::{
         SupervisedDesktopSupervisorFailure, SupervisedDesktopSupervisorStartError,
         SupervisedDesktopSupervisorStatus, SupervisedDesktopSupervisorTerminal,
     },
-    wake::SupervisedPlayWake,
 };
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -1713,8 +1713,8 @@ fn observe_supervisor_failure(
     output: &mut EditorExternalPlayOutputProjection,
     failure: &SupervisedDesktopSupervisorFailure,
 ) {
-    if let SupervisedDesktopSupervisorFailure::Spawn(SupervisedProcessSpawnFailure::Process(
-        SupervisedProcessError::Generation(error),
+    if let SupervisedDesktopSupervisorFailure::Spawn(SupervisedProcessSpawnFailure::Generation(
+        error,
     )) = failure
     {
         output.observe_host_failure_facts(HostFailureFacts::generation("spawn-generation", error));
@@ -1767,9 +1767,7 @@ fn spawn_failure_reason(failure: &SupervisedProcessSpawnFailure) -> &'static str
         SupervisedProcessSpawnFailure::Dispatch(_) => "worker-dispatch",
         SupervisedProcessSpawnFailure::WorkerDisconnected => "worker-disconnected",
         SupervisedProcessSpawnFailure::WorkerPanicked => "worker-panicked",
-        SupervisedProcessSpawnFailure::Process(SupervisedProcessError::Generation(_)) => {
-            "generation-revalidation"
-        }
+        SupervisedProcessSpawnFailure::Generation(_) => "generation-revalidation",
         SupervisedProcessSpawnFailure::Process(SupervisedProcessError::Spawn(_)) => "os-spawn",
         SupervisedProcessSpawnFailure::Process(_) => "process-setup",
         SupervisedProcessSpawnFailure::Cleanup(_) => "late-process-cleanup",

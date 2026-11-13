@@ -3,15 +3,17 @@ use std::io;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod process_group;
 
-use nara::fs::RestrictiveCapabilityHandleLease;
+use crate::fs::RestrictiveCapabilityHandleLease;
 
 use super::{
-    PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream,
-    SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
+    PlatformOutput, SupervisedProcessCommand, SupervisedProcessWake,
+    SupervisedProductProcessCommand,
 };
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use super::output::PlatformOutputQueue;
+use super::{
+    SupervisedProcessStream, SupervisedProductEnvironmentPolicy, output::PlatformOutputQueue,
+};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
@@ -75,33 +77,29 @@ unsafe extern "C" {
     fn syscall(number: c_long, ...) -> c_long;
 }
 
-pub(super) struct ExactGenerationLaunchAuthority {
+pub(super) struct ExactExecutableLaunchAuthority {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     executable: RestrictiveCapabilityHandleLease,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    _generation_directory: RestrictiveCapabilityHandleLease,
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    _launch_manifest: RestrictiveCapabilityHandleLease,
+    _directory: RestrictiveCapabilityHandleLease,
 }
 
-impl ExactGenerationLaunchAuthority {
+impl ExactExecutableLaunchAuthority {
     pub(super) fn new(
         executable: RestrictiveCapabilityHandleLease,
-        generation_directory: RestrictiveCapabilityHandleLease,
-        launch_manifest: RestrictiveCapabilityHandleLease,
+        directory: RestrictiveCapabilityHandleLease,
     ) -> io::Result<Self> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             return Ok(Self {
                 executable,
-                _generation_directory: generation_directory,
-                _launch_manifest: launch_manifest,
+                _directory: directory,
             });
         }
 
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = (executable, generation_directory, launch_manifest);
+            let _ = (executable, directory);
             Err(unsupported_platform())
         }
     }
@@ -171,7 +169,6 @@ impl BootstrapChannel {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
@@ -208,6 +205,7 @@ impl BootstrapChannel {
 }
 
 pub(super) struct PlatformProcess {
+    process_id: u32,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     child: Option<Child>,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -231,6 +229,10 @@ pub(super) struct PlatformProcess {
 }
 
 impl PlatformProcess {
+    pub(super) const fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
     #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
     pub(super) fn test_enqueue_stdout(&self, bytes: Vec<u8>) {
         self.output
@@ -502,7 +504,7 @@ impl PlatformProcess {
 
 pub(super) fn spawn(
     command: &SupervisedProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
@@ -516,14 +518,14 @@ pub(super) fn spawn(
     }
 }
 
-pub(super) fn spawn_exact_generation(
-    authority: ExactGenerationLaunchAuthority,
+pub(super) fn spawn_exact(
+    authority: ExactExecutableLaunchAuthority,
     command: &SupervisedProductProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        return spawn_exact_generation_supported(authority, command, wake);
+        return spawn_exact_supported(authority, command, wake);
     }
 
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -536,7 +538,7 @@ pub(super) fn spawn_exact_generation(
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn spawn_supported(
     command: &SupervisedProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     let mut native = Command::new(command.executable());
     native
@@ -558,33 +560,39 @@ fn spawn_supported(
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn spawn_exact_generation_supported(
-    authority: ExactGenerationLaunchAuthority,
+fn spawn_exact_supported(
+    authority: ExactExecutableLaunchAuthority,
     command: &SupervisedProductProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     let executable_fd = authority.executable.as_raw_fd();
     let payload = ExactExecPayload::new(command)?;
     let mut native = Command::new("/proc/self/exe");
     native.current_dir(command.working_directory()).env_clear();
 
-    let spawned = spawn_native(native, true, None, wake, move || {
-        close_non_stdio_on_exec()?;
-        // SAFETY: the executable descriptor and every C string/pointer array remain live through
-        // this call. `AT_EMPTY_PATH` instructs Linux to execute the already-opened object rather
-        // than resolving a mutable name. Success replaces the child image and never returns.
-        let _ = unsafe {
-            syscall(
-                SYS_EXECVEAT_X86_64,
-                executable_fd,
-                EMPTY_PATH.as_ptr(),
-                payload.argv_ptr(),
-                payload.environment_ptr(),
-                AT_EMPTY_PATH,
-            )
-        };
-        Err(io::Error::last_os_error())
-    });
+    let spawned = spawn_native(
+        native,
+        command.bootstrap_requested(),
+        None,
+        wake,
+        move || {
+            close_non_stdio_on_exec()?;
+            // SAFETY: the executable descriptor and every C string/pointer array remain live through
+            // this call. `AT_EMPTY_PATH` instructs Linux to execute the already-opened object rather
+            // than resolving a mutable name. Success replaces the child image and never returns.
+            let _ = unsafe {
+                syscall(
+                    SYS_EXECVEAT_X86_64,
+                    executable_fd,
+                    EMPTY_PATH.as_ptr(),
+                    payload.argv_ptr(),
+                    payload.environment_ptr(),
+                    AT_EMPTY_PATH,
+                )
+            };
+            Err(io::Error::last_os_error())
+        },
+    );
     drop(authority);
     spawned
 }
@@ -594,7 +602,7 @@ fn spawn_native(
     mut native: Command,
     bootstrap_requested: bool,
     protocol_stdout_limit: Option<NonZeroUsize>,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
     child_setup: impl FnMut() -> io::Result<()> + Send + Sync + 'static,
 ) -> io::Result<SpawnedProcess> {
     let (bootstrap, child_bootstrap) = if bootstrap_requested {
@@ -671,6 +679,7 @@ fn spawn_native(
 
     Ok(SpawnedProcess {
         process: PlatformProcess {
+            process_id: child.id(),
             child: Some(child),
             process_group,
             direct_child_exit: None,

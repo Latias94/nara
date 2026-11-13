@@ -18,8 +18,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use nara::fs::RestrictiveCapabilityHandleLease;
-use nara::project_host::process_image::{ExactProcessImage, encode_command_line};
+use crate::fs::RestrictiveCapabilityHandleLease;
+use crate::project_host::process_image::{ExactProcessImage, encode_command_line};
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
@@ -60,7 +60,7 @@ use windows_sys::Win32::{
 };
 
 use super::{
-    PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream,
+    PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream, SupervisedProcessWake,
     SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
     output::PlatformOutputQueue,
 };
@@ -86,26 +86,17 @@ pub(super) struct SpawnedProcess {
 /// `ReOpenFile` to an arbitrary foreign handle. The executable path is derived from the guarded
 /// file itself, and the created process remains suspended until Windows proves that its mapped
 /// image shares the guarded executable's underlying file stream.
-pub(super) struct ExactGenerationLaunchAuthority {
-    guards: ExactGenerationLaunchGuards,
-}
-
-struct ExactGenerationLaunchGuards {
+pub(super) struct ExactExecutableLaunchAuthority {
     image: ExactProcessImage,
-    _launch_manifest: RestrictiveCapabilityHandleLease,
 }
 
-impl ExactGenerationLaunchAuthority {
+impl ExactExecutableLaunchAuthority {
     pub(super) fn new(
         executable: RestrictiveCapabilityHandleLease,
-        generation_directory: RestrictiveCapabilityHandleLease,
-        launch_manifest: RestrictiveCapabilityHandleLease,
+        directory: RestrictiveCapabilityHandleLease,
     ) -> io::Result<Self> {
         Ok(Self {
-            guards: ExactGenerationLaunchGuards {
-                image: ExactProcessImage::from_verified_handles(executable, generation_directory)?,
-                _launch_manifest: launch_manifest,
-            },
+            image: ExactProcessImage::from_verified_handles(executable, directory)?,
         })
     }
 }
@@ -115,15 +106,20 @@ pub(super) struct PlatformProcess {
     // fail-safe even when an explicit cleanup receipt was not reached.
     job: OwnedHandle,
     process: Option<OwnedHandle>,
+    process_id: u32,
     exit_code: Option<u32>,
     output: Arc<PlatformOutputQueue>,
     output_poll_budget: usize,
     stdout_reader: OutputReaderOwner,
     stderr_reader: OutputReaderOwner,
-    _exact_generation: Option<ExactGenerationLaunchGuards>,
+    _exact_generation: Option<ExactExecutableLaunchAuthority>,
 }
 
 impl PlatformProcess {
+    pub(super) const fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
     #[cfg(test)]
     pub(super) fn test_enqueue_stdout(&self, bytes: Vec<u8>) {
         self.output
@@ -279,7 +275,6 @@ impl BootstrapChannel {
         cancellable_overlapped_write(&self.control, &self.event, &bytes[..length])
     }
 
-    #[cfg(test)]
     pub(super) fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
         while !bytes.is_empty() {
             let written = self.write_some(bytes)?;
@@ -328,7 +323,7 @@ impl BootstrapChannel {
 
 pub(super) fn spawn(
     command: &SupervisedProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     let environment = inherited_environment_block(command.environment_ref())?;
     spawn_windows(
@@ -343,22 +338,21 @@ pub(super) fn spawn(
     )
 }
 
-pub(super) fn spawn_exact_generation(
-    authority: ExactGenerationLaunchAuthority,
+pub(super) fn spawn_exact(
+    authority: ExactExecutableLaunchAuthority,
     command: &SupervisedProductProcessCommand,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     let environment = product_environment_block(command.environment_policy())?;
-    let ExactGenerationLaunchAuthority { guards } = authority;
-    let executable_path = guards.image.path().to_owned();
+    let executable_path = authority.image.path().to_owned();
     spawn_windows(
         &executable_path,
         command.working_directory(),
         command.arguments_ref(),
         environment,
-        true,
+        command.bootstrap_requested(),
         None,
-        Some(guards),
+        Some(authority),
         wake,
     )
 }
@@ -374,8 +368,8 @@ fn spawn_windows(
     environment: Vec<u16>,
     bootstrap_requested: bool,
     protocol_stdout_limit: Option<NonZeroUsize>,
-    exact_generation: Option<ExactGenerationLaunchGuards>,
-    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    exact_generation: Option<ExactExecutableLaunchAuthority>,
+    wake: SupervisedProcessWake,
 ) -> io::Result<SpawnedProcess> {
     let application = wide_path(executable, "executable")?;
     let current_directory = wide_path(working_directory, "working directory")?;
@@ -551,6 +545,7 @@ fn spawn_windows(
         process: PlatformProcess {
             job,
             process: Some(process),
+            process_id: process_information.dwProcessId,
             exit_code: None,
             output,
             output_poll_budget: OUTPUT_POLL_RECORD_BUDGET,
