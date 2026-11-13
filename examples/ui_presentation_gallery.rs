@@ -2,8 +2,8 @@ use std::{env, error::Error, sync::Arc, time::Duration};
 
 use nara::app::RuntimeInstance;
 use nara::input::{
-    ButtonTransitionPhase, InputPointerId, InputSeatId, InputWindowId,
-    apply_gamepad_driver_input_at,
+    ButtonTransitionPhase, InputPointerId, InputSeatId, InputWindowId, apply_gamepad_button_input,
+    connect_synthetic_gamepad_input, disconnect_gamepad_input,
 };
 use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::ui_render::advanced::{UiPreparedImages, UiPresentationPlanner};
@@ -171,14 +171,22 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     assert_eq!(button.actions(), std::slice::from_ref(&action));
     assert_eq!(
         runtime
-            .with_driver_scope(|scope| apply_gamepad_driver_input_at(
-                scope,
-                mapped_slot.endpoint().window(),
-                mapped_slot.endpoint().seat(),
-                0,
-                13,
-                ButtonTransitionPhase::Pressed,
-            ))?
+            .with_driver_scope(|scope| {
+                let gamepad = connect_synthetic_gamepad_input(
+                    scope,
+                    mapped_slot.endpoint().window(),
+                    mapped_slot.endpoint().seat(),
+                    0,
+                )?;
+                let press = apply_gamepad_button_input(
+                    scope,
+                    &gamepad,
+                    13,
+                    ButtonTransitionPhase::Pressed,
+                )?;
+                apply_gamepad_button_input(scope, &gamepad, 13, ButtonTransitionPhase::Released)?;
+                disconnect_gamepad_input(scope, &gamepad).map(|_| press)
+            })?
             .output?
             .admitted(),
         1

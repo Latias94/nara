@@ -7,8 +7,9 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_input::{
     ActionBinding, ActionContext, ActionContextDefinition, ActionId, ActionIdError, ActionMap,
     ActionMapBindings, ActionMapBuilder, ActionMapDefinition, ActionMapError, ActionMapLimitKind,
-    ActionMapLimits, InputBinding, KeyCode, MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS,
-    MAX_ACTION_IDENTIFIER_BYTES, MAX_BINDINGS_PER_INPUT, MouseButton,
+    ActionMapLimits, ActionTransform, ActionValueKind, AxisDeadZone, AxisDirection, InputBinding,
+    KeyCode, MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS, MAX_ACTION_IDENTIFIER_BYTES,
+    MAX_BINDINGS_PER_INPUT, MouseButton,
 };
 
 fn sample_definition(limits: ActionMapLimits) -> Result<ActionMapDefinition, ActionMapError> {
@@ -94,7 +95,7 @@ fn unknown_binding_context_is_rejected_without_becoming_a_declaration() {
 }
 
 #[test]
-fn only_complete_duplicate_bindings_are_rejected_and_lookup_keeps_declaration_order() {
+fn duplicate_binding_identities_are_rejected_and_lookup_keeps_declaration_order() {
     let gameplay = ActionContext::gameplay();
     let menu = ActionContext::new("menu").unwrap();
     let action = ActionId::new("confirm").unwrap();
@@ -110,8 +111,12 @@ fn only_complete_duplicate_bindings_are_rejected_and_lookup_keeps_declaration_or
     builder.declare_context(menu, false).unwrap();
     builder.bind(first.clone()).unwrap();
     assert_eq!(
-        builder.bind(first).unwrap_err(),
-        ActionMapError::DuplicateBinding
+        builder.bind(first.clone()).unwrap_err(),
+        ActionMapError::DuplicateBinding {
+            action: first.action,
+            context: first.context,
+            input: first.input,
+        }
     );
     for binding in &expected[1..] {
         builder.bind(binding.clone()).unwrap();
@@ -142,6 +147,164 @@ fn only_complete_duplicate_bindings_are_rejected_and_lookup_keeps_declaration_or
         assert_eq!(map.binding_at(index), Some(binding));
     }
     assert_eq!(map.binding_at(expected.len()), None);
+}
+
+#[test]
+fn mixed_value_kinds_are_rejected_before_definition_publication() {
+    let action = ActionId::new("move").unwrap();
+    let button = ActionBinding::key(action.clone(), KeyCode::Space);
+    let axis = ActionBinding::gamepad_axis(action.clone(), 0, AxisDeadZone::NONE, false);
+    for (first, conflicting) in [(button.clone(), axis.clone()), (axis, button)] {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder.bind(first.clone()).unwrap();
+        assert_eq!(
+            builder.bind(conflicting.clone()).unwrap_err(),
+            ActionMapError::InconsistentValueKind {
+                action: action.clone(),
+                context: ActionContext::gameplay(),
+                expected: first.value_kind(),
+                actual: conflicting.value_kind(),
+            }
+        );
+        let definition = builder.compile().unwrap();
+        assert_eq!(definition.bindings(), std::slice::from_ref(&first));
+        assert_eq!(
+            definition.value_kind(&action, &ActionContext::gameplay()),
+            Some(first.value_kind())
+        );
+    }
+}
+
+#[test]
+fn invalid_input_transforms_cannot_enter_the_compiled_definition() {
+    let valid = ActionBinding::key(ActionId::new("jump").unwrap(), KeyCode::Space);
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    builder.bind(valid.clone()).unwrap();
+    for (input, transform) in [
+        (
+            InputBinding::Key(KeyCode::ArrowUp),
+            ActionTransform::Axis {
+                dead_zone: AxisDeadZone::NONE,
+                inverted: false,
+            },
+        ),
+        (
+            InputBinding::Mouse(MouseButton::Left),
+            ActionTransform::Axis {
+                dead_zone: AxisDeadZone::NONE,
+                inverted: true,
+            },
+        ),
+        (
+            InputBinding::GamepadButton(0),
+            ActionTransform::Axis {
+                dead_zone: AxisDeadZone::NONE,
+                inverted: false,
+            },
+        ),
+        (InputBinding::GamepadAxis(0), ActionTransform::Button),
+        (
+            InputBinding::GamepadAxis(0),
+            ActionTransform::AxisButton {
+                direction: AxisDirection::Positive,
+            },
+        ),
+    ] {
+        let action = ActionId::new("move").unwrap();
+        assert_eq!(
+            builder
+                .bind(ActionBinding {
+                    action: action.clone(),
+                    input,
+                    context: ActionContext::gameplay(),
+                    transform,
+                })
+                .unwrap_err(),
+            ActionMapError::InvalidTransform {
+                action,
+                context: ActionContext::gameplay(),
+                input,
+                transform,
+            }
+        );
+    }
+    assert_eq!(builder.compile().unwrap().bindings(), [valid]);
+}
+
+#[test]
+fn changing_a_transform_cannot_duplicate_one_physical_binding_identity() {
+    let action = ActionId::new("move").unwrap();
+    for (first, conflicting) in [
+        (
+            ActionBinding::key_axis(action.clone(), KeyCode::ArrowUp, AxisDirection::Positive),
+            ActionBinding::key_axis(action.clone(), KeyCode::ArrowUp, AxisDirection::Negative),
+        ),
+        (
+            ActionBinding::key(action.clone(), KeyCode::ArrowUp),
+            ActionBinding::key_axis(action.clone(), KeyCode::ArrowUp, AxisDirection::Positive),
+        ),
+        (
+            ActionBinding::gamepad_axis(action.clone(), 0, AxisDeadZone::NONE, false),
+            ActionBinding::gamepad_axis(action.clone(), 0, AxisDeadZone::new(0.25).unwrap(), true),
+        ),
+    ] {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder.bind(first.clone()).unwrap();
+        assert_eq!(
+            builder.bind(conflicting).unwrap_err(),
+            ActionMapError::DuplicateBinding {
+                action: action.clone(),
+                context: ActionContext::gameplay(),
+                input: first.input,
+            }
+        );
+        assert_eq!(builder.compile().unwrap().bindings(), [first]);
+    }
+}
+
+#[test]
+fn value_kinds_are_shared_within_each_context_and_independent_across_contexts() {
+    let action = ActionId::new("move").unwrap();
+    let gameplay = ActionContext::gameplay();
+    let menu = ActionContext::new("menu").unwrap();
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder.declare_context(gameplay.clone(), true).unwrap();
+    builder.declare_context(menu.clone(), false).unwrap();
+    for binding in [
+        ActionBinding::key_axis(action.clone(), KeyCode::ArrowLeft, AxisDirection::Negative),
+        ActionBinding::key_axis(action.clone(), KeyCode::ArrowRight, AxisDirection::Positive),
+        ActionBinding::gamepad_axis(action.clone(), 0, AxisDeadZone::new(0.25).unwrap(), false),
+        ActionBinding::gamepad_button(action.clone(), 0).with_context(menu.clone()),
+    ] {
+        builder.bind(binding).unwrap();
+    }
+    let definition = builder.compile().unwrap();
+    assert_eq!(definition.bindings().len(), 4);
+    assert_eq!(
+        definition.value_kind(&action, &gameplay),
+        Some(ActionValueKind::Axis)
+    );
+    assert_eq!(
+        definition.value_kind(&action, &menu),
+        Some(ActionValueKind::Button)
+    );
+    assert_eq!(
+        definition.value_kind(&ActionId::new("absent").unwrap(), &gameplay),
+        None
+    );
+    assert_eq!(
+        definition.value_kind(&action, &ActionContext::new("absent").unwrap()),
+        None
+    );
 }
 
 #[test]

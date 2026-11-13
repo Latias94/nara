@@ -1,14 +1,15 @@
 #![cfg(feature = "serde")]
 
-use nara_asset::{AssetProductRef, ImportedProductId, StableAssetId};
+use nara_asset::{AssetProductRef, ImportedProductId, RuntimeAssetCodec, StableAssetId};
 use nara_core::{
     ByteLimit, DepthLimit, ItemLimit, PersistentFileContractError, SerdeShapeError,
     SerdeShapeLimits,
 };
 use nara_input::{
-    ActionBinding, ActionContext, ActionId, ActionIdError, ActionMapBuilder, ActionMapError,
-    ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits, ActionMapLimitKind,
-    ActionMapLimits, InputBinding, KeyCode, MouseButton,
+    ActionBinding, ActionContext, ActionId, ActionIdError, ActionMapAsset, ActionMapBuilder,
+    ActionMapError, ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits,
+    ActionMapLimitKind, ActionMapLimits, ActionMapRuntimeCodec, ActionTransform, ActionValueKind,
+    AxisDeadZone, AxisDirection, InputBinding, KeyCode, MAX_ACTION_BINDINGS, MouseButton,
 };
 use serde_json::{Value, json};
 
@@ -62,6 +63,68 @@ fn code_first_definition_writes_the_same_golden_and_moves_out_without_runtime_st
     assert!(payload.contains_key("product"));
     assert!(payload.contains_key("contexts"));
     assert!(payload.contains_key("bindings"));
+}
+
+#[test]
+fn typed_axis_definitions_round_trip_through_source_and_the_same_runtime_codec() {
+    let action = ActionId::new("move").unwrap();
+    let expected = [
+        ActionBinding::key_axis(action.clone(), KeyCode::ArrowLeft, AxisDirection::Negative),
+        ActionBinding::key_axis(
+            action.clone(),
+            KeyCode::Character('é'),
+            AxisDirection::Positive,
+        ),
+        ActionBinding::gamepad_axis(action, u16::MAX, AxisDeadZone::new(0.25).unwrap(), true),
+        ActionBinding::gamepad_button(ActionId::new("confirm").unwrap(), u16::MAX),
+        ActionBinding {
+            transform: ActionTransform::AxisButton {
+                direction: AxisDirection::Negative,
+            },
+            ..ActionBinding::mouse(ActionId::new("aim").unwrap(), MouseButton::Other(u16::MAX))
+        },
+    ];
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    for binding in &expected {
+        builder.bind(binding.clone()).unwrap();
+    }
+    let candidate = ActionMapFileCandidate::new(product(), builder.compile().unwrap()).unwrap();
+    let encoded = candidate.to_json_string().unwrap();
+    let wire: Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(wire["format_version"], json!(1));
+    assert_eq!(
+        wire["payload"]["bindings"][2]["input"],
+        json!({ "GamepadAxis": 65535 })
+    );
+    assert_eq!(
+        wire["payload"]["bindings"][2]["transform"],
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": true } })
+    );
+    let decoded = ActionMapFileCandidate::decode_json_bytes(encoded.as_bytes()).unwrap();
+    assert_eq!(decoded.product(), product());
+    assert_eq!(decoded.definition().bindings(), expected);
+    assert_eq!(decoded.definition().cost(), candidate.definition().cost());
+    assert_eq!(
+        decoded
+            .definition()
+            .value_kind(&ActionId::new("move").unwrap(), &ActionContext::gameplay()),
+        Some(ActionValueKind::Axis)
+    );
+    assert_eq!(decoded.to_json_string().unwrap(), encoded);
+
+    let (identity, definition) = decoded.into_parts();
+    let runtime = ActionMapAsset::new(identity, definition).unwrap();
+    let runtime_bytes = ActionMapRuntimeCodec::encode_runtime(&runtime).unwrap();
+    let runtime_decoded = ActionMapRuntimeCodec::decode_runtime(&runtime_bytes).unwrap();
+    assert_eq!(runtime_decoded.product(), identity);
+    assert_eq!(runtime_decoded.definition().bindings(), expected);
+    assert_eq!(
+        ActionMapRuntimeCodec::runtime_retained_bytes(&runtime).unwrap(),
+        ActionMapRuntimeCodec::runtime_retained_bytes(&runtime_decoded).unwrap()
+    );
 }
 
 #[test]
@@ -174,7 +237,7 @@ fn duplicate_members_are_rejected_by_structural_preflight() {
         ("/payload/bindings/0", "action"),
         ("/payload/bindings/0/input", "Key"),
     ] {
-        let encoded = duplicate_member(path, member);
+        let encoded = duplicate_member(&golden(), path, member);
         assert!(
             matches!(
                 ActionMapFileCandidate::decode_json_bytes(encoded.as_bytes()),
@@ -429,13 +492,16 @@ fn identifier_limits_use_decoded_utf8_bytes_and_survive_the_serde_boundary() {
 }
 
 #[test]
-fn only_the_current_key_and_mouse_grammar_is_accepted() {
+fn physical_input_grammar_rejects_unknown_variants_and_out_of_range_members() {
     for input in [
         json!({ "Gamepad": "South" }),
         json!({ "Key": "UnmappedKey" }),
         json!({ "Mouse": { "Other": 65536 } }),
         json!({ "Key": { "Character": "ab" } }),
         json!({ "Key": "Space", "Mouse": "Left" }),
+        json!({ "GamepadButton": 65536 }),
+        json!({ "GamepadAxis": -1 }),
+        json!({ "GamepadAxis": 0.5 }),
     ] {
         let mut value = golden();
         value["payload"]["bindings"][0]["input"] = input;
@@ -444,6 +510,156 @@ fn only_the_current_key_and_mouse_grammar_is_accepted() {
             Err(ActionMapFileError::JsonParse(_))
         ));
     }
+}
+
+#[test]
+fn malformed_transforms_and_invalid_dead_zones_are_rejected_during_decode() {
+    for transform in [
+        Value::Null,
+        json!(true),
+        json!("Unknown"),
+        json!({ "Axis": {} }),
+        json!({ "Axis": { "dead_zone": 0.25 } }),
+        json!({ "Axis": { "inverted": false } }),
+        json!({ "Axis": { "dead_zone": -0.01, "inverted": false } }),
+        json!({ "Axis": { "dead_zone": 1.0, "inverted": false } }),
+        json!({ "Axis": { "dead_zone": "NaN", "inverted": false } }),
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": 0 } }),
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": false, "unknown": true } }),
+        json!({ "Axis": [0.25, false] }),
+        json!({ "AxisButton": {} }),
+        json!({ "AxisButton": { "direction": "Sideways" } }),
+        json!({ "AxisButton": { "direction": "Positive", "unknown": true } }),
+        json!({ "AxisButton": ["Positive"] }),
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": false }, "Button": null }),
+    ] {
+        let mut value = golden();
+        value["payload"]["bindings"][0]["input"] = json!({ "GamepadAxis": 0 });
+        value["payload"]["bindings"][0]["transform"] = transform.clone();
+        assert!(
+            matches!(decode_value(&value), Err(ActionMapFileError::JsonParse(_))),
+            "malformed transform {transform}"
+        );
+    }
+}
+
+#[test]
+fn transform_records_reject_duplicate_members_before_definition_construction() {
+    let mut value = golden();
+    value["payload"]["bindings"][0]["input"] = json!({ "GamepadAxis": 0 });
+    value["payload"]["bindings"][0]["transform"] =
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": false } });
+    for (path, member) in [
+        ("/payload/bindings/0", "transform"),
+        ("/payload/bindings/0/transform", "Axis"),
+        ("/payload/bindings/0/transform/Axis", "dead_zone"),
+        ("/payload/bindings/0/transform/Axis", "inverted"),
+    ] {
+        let encoded = duplicate_member(&value, path, member);
+        assert!(matches!(
+            ActionMapFileCandidate::decode_json_bytes(encoded.as_bytes()),
+            Err(ActionMapFileError::Shape(SerdeShapeError::DuplicateMapKey))
+        ));
+    }
+    value["payload"]["bindings"][0]["input"] = json!({ "Key": "Space" });
+    value["payload"]["bindings"][0]["transform"] =
+        json!({ "AxisButton": { "direction": "Negative" } });
+    let encoded = duplicate_member(
+        &value,
+        "/payload/bindings/0/transform/AxisButton",
+        "direction",
+    );
+    assert!(matches!(
+        ActionMapFileCandidate::decode_json_bytes(encoded.as_bytes()),
+        Err(ActionMapFileError::Shape(SerdeShapeError::DuplicateMapKey))
+    ));
+}
+
+#[test]
+fn typed_source_bindings_use_the_same_compiler_validation_as_code_first_bindings() {
+    for transform in [
+        None,
+        Some(json!("Button")),
+        Some(json!({ "AxisButton": { "direction": "Positive" } })),
+    ] {
+        let mut value = golden();
+        value["payload"]["bindings"][0]["input"] = json!({ "GamepadAxis": 0 });
+        if let Some(transform) = transform {
+            value["payload"]["bindings"][0]["transform"] = transform;
+        }
+        assert!(matches!(
+            decode_value(&value),
+            Err(ActionMapFileError::Definition(
+                ActionMapError::InvalidTransform {
+                    input: InputBinding::GamepadAxis(0),
+                    ..
+                }
+            ))
+        ));
+    }
+    let mut mixed = golden();
+    mixed["payload"]["bindings"][1]["action"] = json!("jump");
+    mixed["payload"]["bindings"][1]["input"] = json!({ "GamepadAxis": 0 });
+    mixed["payload"]["bindings"][1]["transform"] =
+        json!({ "Axis": { "dead_zone": 0.25, "inverted": false } });
+    assert!(matches!(
+        decode_value(&mixed),
+        Err(ActionMapFileError::Definition(
+            ActionMapError::InconsistentValueKind {
+                expected: ActionValueKind::Button,
+                actual: ActionValueKind::Axis,
+                ..
+            }
+        ))
+    ));
+    let mut duplicate = golden();
+    duplicate["payload"]["bindings"][1] = duplicate["payload"]["bindings"][0].clone();
+    duplicate["payload"]["bindings"][1]["transform"] =
+        json!({ "AxisButton": { "direction": "Positive" } });
+    assert!(matches!(
+        decode_value(&duplicate),
+        Err(ActionMapFileError::Definition(
+            ActionMapError::DuplicateBinding {
+                input: InputBinding::Key(KeyCode::Space),
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn transform_metadata_stays_within_the_original_finite_shape_budget() {
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    for axis in 0..MAX_ACTION_BINDINGS {
+        builder
+            .bind(ActionBinding::gamepad_axis(
+                ActionId::new("x").unwrap(),
+                u16::try_from(axis).unwrap(),
+                AxisDeadZone::NONE,
+                false,
+            ))
+            .unwrap();
+    }
+    let definition = builder.compile().unwrap();
+    let candidate = ActionMapFileCandidate::new(product(), definition).unwrap();
+    let maximum = ActionMapFileLimits::default().shape().nodes().get();
+    assert!(matches!(
+        candidate.to_json_string(),
+        Err(ActionMapFileError::Shape(SerdeShapeError::NodeLimitExceeded { maximum: observed }))
+            if observed == maximum
+    ));
+    let (identity, definition) = candidate.into_parts();
+    let runtime = ActionMapAsset::new(identity, definition).unwrap();
+    let cost_error = ActionMapRuntimeCodec::runtime_retained_bytes(&runtime).unwrap_err();
+    let encode_error = ActionMapRuntimeCodec::encode_runtime(&runtime).unwrap_err();
+    assert_eq!(
+        cost_error.diagnostic().code().as_str(),
+        "input.runtime-budget"
+    );
+    assert_eq!(cost_error.diagnostic(), encode_error.diagnostic());
 }
 
 #[test]
@@ -469,7 +685,7 @@ fn compiler_owns_unknown_context_duplicate_and_fanout_rejections() {
     assert!(matches!(
         decode_value(&duplicate_binding),
         Err(ActionMapFileError::Definition(
-            ActionMapError::DuplicateBinding
+            ActionMapError::DuplicateBinding { .. }
         ))
     ));
     let mut fanout = golden();
@@ -621,7 +837,17 @@ fn golden() -> Value {
 }
 
 fn canonical_golden() -> String {
-    GOLDEN.replace("\r\n", "\n").trim_end().to_owned()
+    GOLDEN
+        .replace("\r\n", "\n")
+        .trim_end()
+        .replace(
+            "\"context\": \"gameplay\"\n",
+            "\"context\": \"gameplay\",\n        \"transform\": \"Button\"\n",
+        )
+        .replace(
+            "\"context\": \"menu\"\n",
+            "\"context\": \"menu\",\n        \"transform\": \"Button\"\n",
+        )
 }
 
 fn decode_value(value: &Value) -> Result<ActionMapFileCandidate, ActionMapFileError> {
@@ -638,13 +864,12 @@ fn decode_value_with_limits(
     )
 }
 
-fn duplicate_member(path: &str, member: &str) -> String {
-    let value = golden();
+fn duplicate_member(value: &Value, path: &str, member: &str) -> String {
     let object = value.pointer(path).unwrap();
     let original = serde_json::to_string(object).unwrap();
     let member_value = serde_json::to_string(&object[member]).unwrap();
     let repeated = format!("{{\"{member}\":{member_value},{}", &original[1..]);
-    serde_json::to_string(&value)
+    serde_json::to_string(value)
         .unwrap()
         .replacen(&original, &repeated, 1)
 }

@@ -9,13 +9,16 @@ use nara_ecs::Resource;
 
 use super::{
     capacity::{InputCapacity, InputCapacityError, InputCapacityPlan},
-    topology::{EndpointId, InputTopology, Member},
+    topology::{EndpointId, Gamepad, GamepadId, InputTopology, Member},
     *,
 };
 use crate::{
-    ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
-    PointerDriverInput, StagedActionRevision,
+    AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
+    PointerDriverInput, StagedActionRevision, semantic::ActionStaging,
 };
+
+#[path = "gamepad.rs"]
+mod gamepad;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionRetention {
@@ -152,6 +155,52 @@ impl InputEndpointClaim {
     }
 }
 
+/// Authority for one exact gamepad connection and its original endpoint and Input owner.
+///
+/// Cloning retains the same authority. Raw labels and generation metadata cannot recreate it.
+/// A disconnected connection does not pin a mutable slot or authorize a same-label replacement.
+#[derive(Debug, Clone)]
+pub struct GamepadConnection {
+    owner: Arc<()>,
+    endpoint: EndpointId,
+    gamepad: GamepadId,
+    raw_label: u16,
+    window: InputWindowId,
+    seat: InputSeatId,
+}
+
+impl PartialEq for GamepadConnection {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.owner, &other.owner)
+            && self.endpoint == other.endpoint
+            && self.gamepad == other.gamepad
+    }
+}
+
+impl Eq for GamepadConnection {}
+
+impl GamepadConnection {
+    #[must_use]
+    pub const fn window(&self) -> InputWindowId {
+        self.window
+    }
+
+    #[must_use]
+    pub const fn seat(&self) -> InputSeatId {
+        self.seat
+    }
+
+    #[must_use]
+    pub const fn raw_label(&self) -> u16 {
+        self.raw_label
+    }
+
+    #[must_use]
+    pub const fn connection_generation(&self) -> InputGamepadGeneration {
+        self.gamepad.0
+    }
+}
+
 /// Backend completion cannot reinstate authority revoked after preparation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputRouteCommit {
@@ -272,6 +321,39 @@ impl InputTimeline {
             .iter()
             .filter(|record| record.ui_pending)
             .map(|record| &record.entry)
+    }
+
+    /// Routes pending input synchronously through one custom UI adapter.
+    ///
+    /// Call from [`crate::InputSet::RouteUi`] after the adapter resolves the entry's captured
+    /// route against its own current UI state. Entries arrive in original admission order.
+    /// Return `Some` only after the UI decision is accepted or explicitly rejected closed;
+    /// the original Input owner records that decision and preserves held-member ownership
+    /// through later samples and release. Return `None` to leave an entry for another adapter
+    /// or the ordinary gameplay fallback at [`crate::InputSet::StageActions`].
+    ///
+    /// Returns the number completed by this call. No sequence-only completion or deferred
+    /// authority escapes the synchronous borrow. This operation neither presents pixels nor
+    /// creates a UI receipt. A callback panic leaves earlier decisions completed; it does not
+    /// roll back the adapter's effects or make the batch transactional.
+    pub fn route_pending_ui_input(
+        &mut self,
+        mut router: impl FnMut(InputTimelineEntry) -> Option<InputUiDisposition>,
+    ) -> usize {
+        let mut completed = 0;
+        for index in 0..self.retained.len() {
+            let record = &self.retained[index];
+            if !record.ui_pending {
+                continue;
+            }
+            let entry = record.entry;
+            if let Some(disposition) = router(entry) {
+                self.finalize_ui_record(index, disposition)
+                    .expect("the synchronous router retains the same pending entry");
+                completed += 1;
+            }
+        }
+        completed
     }
 
     #[must_use]
@@ -700,6 +782,15 @@ impl InputTimeline {
     }
 
     fn release_draft(&self, member: Member, reason: Option<InputInvalidationReason>) -> InputDraft {
+        self.member_draft(member, AxisValue::ZERO, reason)
+    }
+
+    fn member_draft(
+        &self,
+        member: Member,
+        axis_value: AxisValue,
+        reason: Option<InputInvalidationReason>,
+    ) -> InputDraft {
         let original = member.held.route;
         let current = self.pointer_route(original.window(), original.seat(), original.pointer());
         let route = if member.held.routes_through(current) {
@@ -716,6 +807,24 @@ impl InputTimeline {
                 button,
                 phase: ButtonTransitionPhase::Released,
             },
+            InputBinding::GamepadButton(button) => {
+                let gamepad = self.member_gamepad(member);
+                InputEventKind::GamepadButton {
+                    gamepad: gamepad.raw_label,
+                    connection_generation: gamepad.id.0,
+                    button,
+                    phase: ButtonTransitionPhase::Released,
+                }
+            }
+            InputBinding::GamepadAxis(axis) => {
+                let gamepad = self.member_gamepad(member);
+                InputEventKind::GamepadAxis {
+                    gamepad: gamepad.raw_label,
+                    connection_generation: gamepad.id.0,
+                    axis,
+                    value: axis_value,
+                }
+            }
         };
         let mut draft = self.ordinary_draft(
             route.window(),
@@ -729,6 +838,16 @@ impl InputTimeline {
         draft.press_origin = Some((member.held.press_sequence, original));
         draft.action_delivery = member.held.action_delivery();
         draft
+    }
+
+    fn member_gamepad(&self, member: Member) -> Gamepad {
+        self.topology
+            .gamepads
+            .iter()
+            .flatten()
+            .copied()
+            .find(|gamepad| Some(gamepad.id) == member.gamepad)
+            .expect("a gamepad member retains its original connection")
     }
 
     fn plan(
@@ -777,7 +896,7 @@ impl InputTimeline {
         for (offset, draft) in drafts.iter().copied().enumerate() {
             let sequence =
                 first.expect("nonempty draft batch has a first sequence") + offset as u64;
-            let press = match draft.kind {
+            let press = draft.press_origin.or_else(|| match draft.kind {
                 InputEventKind::Key {
                     phase: ButtonTransitionPhase::Pressed,
                     ..
@@ -785,9 +904,16 @@ impl InputTimeline {
                 | InputEventKind::PointerButton {
                     phase: ButtonTransitionPhase::Pressed,
                     ..
+                }
+                | InputEventKind::GamepadButton {
+                    phase: ButtonTransitionPhase::Pressed,
+                    ..
                 } => Some((sequence, draft.route)),
-                _ => draft.press_origin,
-            };
+                InputEventKind::GamepadAxis { value, .. } if value != AxisValue::ZERO => {
+                    Some((sequence, draft.route))
+                }
+                _ => None,
+            });
             self.retained.push_back(RetainedInput {
                 entry: InputTimelineEntry {
                     sequence,
@@ -842,9 +968,11 @@ impl InputTimeline {
         let endpoint = self.topology.connected_endpoint(window, seat)?;
         match input {
             ButtonDriverInput::Press(key) => {
-                self.press(endpoint, None, InputBinding::Key(key), origin)
+                self.press(endpoint, None, None, InputBinding::Key(key), origin, None)
             }
-            ButtonDriverInput::Release(key) => self.release(endpoint, None, InputBinding::Key(key)),
+            ButtonDriverInput::Release(key) => {
+                self.release(endpoint, None, None, InputBinding::Key(key))
+            }
             ButtonDriverInput::ReleaseAll => self.release_all(endpoint, None, false),
         }
     }
@@ -860,11 +988,16 @@ impl InputTimeline {
         let endpoint = self.topology.connected_endpoint(window, seat)?;
         let pointer = self.topology.connected_pointer(endpoint, pointer)?;
         match input {
-            ButtonDriverInput::Press(button) => {
-                self.press(endpoint, Some(pointer), InputBinding::Mouse(button), origin)
-            }
+            ButtonDriverInput::Press(button) => self.press(
+                endpoint,
+                Some(pointer),
+                None,
+                InputBinding::Mouse(button),
+                origin,
+                None,
+            ),
             ButtonDriverInput::Release(button) => {
-                self.release(endpoint, Some(pointer), InputBinding::Mouse(button))
+                self.release(endpoint, Some(pointer), None, InputBinding::Mouse(button))
             }
             ButtonDriverInput::ReleaseAll => self.release_all(endpoint, Some(pointer), true),
         }
@@ -874,14 +1007,21 @@ impl InputTimeline {
         &mut self,
         endpoint_index: usize,
         pointer_index: Option<usize>,
+        gamepad: Option<Gamepad>,
         input: InputBinding,
         origin: InputEventOrigin,
+        axis_value: Option<AxisValue>,
     ) -> Result<__InputDriverOutput, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap());
         if self
             .topology
-            .member_index(endpoint.id, pointer.map(|record| record.id), input)
+            .member_index(
+                endpoint.id,
+                pointer.map(|record| record.id),
+                gamepad.map(|record| record.id),
+                input,
+            )
             .is_some()
         {
             return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
@@ -901,6 +1041,24 @@ impl InputTimeline {
                 button,
                 phase: ButtonTransitionPhase::Pressed,
             },
+            InputBinding::GamepadButton(button) => {
+                let gamepad = gamepad.expect("gamepad input requires its original connection");
+                InputEventKind::GamepadButton {
+                    gamepad: gamepad.raw_label,
+                    connection_generation: gamepad.id.0,
+                    button,
+                    phase: ButtonTransitionPhase::Pressed,
+                }
+            }
+            InputBinding::GamepadAxis(axis) => {
+                let gamepad = gamepad.expect("gamepad input requires its original connection");
+                InputEventKind::GamepadAxis {
+                    gamepad: gamepad.raw_label,
+                    connection_generation: gamepad.id.0,
+                    axis,
+                    value: axis_value.expect("an axis member begins with an accepted sample"),
+                }
+            }
         };
         let draft = self.ordinary_draft(
             endpoint.window,
@@ -920,8 +1078,10 @@ impl InputTimeline {
         self.topology.members[member_slot] = Some(Member {
             endpoint: endpoint.id,
             pointer: pointer.map(|record| record.id),
+            gamepad: gamepad.map(|record| record.id),
             input,
             pressed: true,
+            axis_value,
             held: HeldInput::new(admission.first_sequence().unwrap(), draft.route),
             origin,
         });
@@ -933,17 +1093,25 @@ impl InputTimeline {
         &mut self,
         endpoint_index: usize,
         pointer_index: Option<usize>,
+        gamepad: Option<GamepadId>,
         input: InputBinding,
     ) -> Result<__InputDriverOutput, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap().id);
-        let Some(index) = self.topology.member_index(endpoint.id, pointer, input) else {
+        let Some(index) = self
+            .topology
+            .member_index(endpoint.id, pointer, gamepad, input)
+        else {
             return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
         };
         let draft = self.release_draft(self.topology.members[index].unwrap(), None);
         let plan = self.terminal_plan(1, self.topology.obligations() - 1);
         let admission = self.publish(plan, &[draft]);
-        self.topology.members[index].as_mut().unwrap().pressed = false;
+        let member = self.topology.members[index].as_mut().unwrap();
+        member.pressed = false;
+        if let Some(value) = &mut member.axis_value {
+            *value = AxisValue::ZERO;
+        }
         self.assert_accounting();
         Ok(__InputDriverOutput::new(admission))
     }
@@ -1024,6 +1192,7 @@ impl InputTimeline {
                     _ => None,
                 })
                 .collect(),
+            gamepad_connection: None,
         }
     }
 
@@ -1168,46 +1337,6 @@ impl InputTimeline {
             Some(pointer),
             InputEventKind::Wheel { delta },
             InputEventOrigin::Platform,
-        )
-    }
-
-    pub fn admit_gamepad_button(
-        &mut self,
-        window: InputWindowId,
-        seat: InputSeatId,
-        gamepad: u16,
-        button: u16,
-        phase: ButtonTransitionPhase,
-    ) -> Result<InputAdmission, InputIngressError> {
-        self.gamepad(
-            window,
-            seat,
-            gamepad,
-            button,
-            phase,
-            InputEventOrigin::Platform,
-        )
-    }
-
-    fn gamepad(
-        &mut self,
-        window: InputWindowId,
-        seat: InputSeatId,
-        gamepad: u16,
-        button: u16,
-        phase: ButtonTransitionPhase,
-        origin: InputEventOrigin,
-    ) -> Result<InputAdmission, InputIngressError> {
-        let endpoint = self.topology.connected_endpoint(window, seat)?;
-        self.admit_ordinary(
-            endpoint,
-            None,
-            InputEventKind::GamepadButton {
-                gamepad,
-                button,
-                phase,
-            },
-            origin,
         )
     }
 
@@ -1406,6 +1535,37 @@ impl InputTimeline {
                 draft.invalidation = Some(reason);
                 drafts.push(draft);
             }
+            let disconnects_start = drafts.len();
+            if retiring {
+                for gamepad in owner
+                    .topology
+                    .gamepads
+                    .iter()
+                    .flatten()
+                    .filter(|gamepad| gamepad.endpoint == endpoint.id && !gamepad.retiring)
+                {
+                    let mut draft = owner.ordinary_draft(
+                        endpoint.window,
+                        endpoint.seat,
+                        None,
+                        InputEventKind::GamepadDisconnected {
+                            gamepad: gamepad.raw_label,
+                            connection_generation: gamepad.id.0,
+                        },
+                        gamepad.origin,
+                    );
+                    draft.invalidation = Some(reason);
+                    drafts.push(draft);
+                }
+                drafts[disconnects_start..].sort_by_key(|draft| match draft.kind {
+                    InputEventKind::GamepadDisconnected {
+                        connection_generation,
+                        ..
+                    } => connection_generation,
+                    _ => unreachable!("connection retirement emits only disconnect records"),
+                });
+            }
+            let disconnects = drafts.len() - disconnects_start;
             if control {
                 let mut draft = owner.ordinary_draft(
                     endpoint.window,
@@ -1422,7 +1582,11 @@ impl InputTimeline {
             } else {
                 endpoint.obligations() - usize::from(control) - usize::from(endpoint.geometry)
             };
-            let after = owner.topology.obligations() - releases - leaves - endpoint.obligations()
+            let after = owner.topology.obligations()
+                - releases
+                - leaves
+                - disconnects
+                - endpoint.obligations()
                 + controls_after;
             let plan = owner.terminal_plan(drafts.len(), after);
             let admission = owner.publish(plan, drafts);
@@ -1435,6 +1599,20 @@ impl InputTimeline {
                 .filter(|member| member.endpoint == endpoint.id)
             {
                 member.pressed = false;
+                if let Some(value) = &mut member.axis_value {
+                    *value = AxisValue::ZERO;
+                }
+            }
+            if retiring {
+                for gamepad in owner
+                    .topology
+                    .gamepads
+                    .iter_mut()
+                    .flatten()
+                    .filter(|gamepad| gamepad.endpoint == endpoint.id)
+                {
+                    gamepad.retiring = true;
+                }
             }
             for pointer in owner
                 .topology
@@ -1495,13 +1673,23 @@ impl InputTimeline {
         sequence: u64,
         disposition: InputUiDisposition,
     ) -> Result<(), InputUiCursorError> {
-        let Some(record) = self
+        let Some(index) = self
             .retained
-            .iter_mut()
-            .find(|record| record.entry.sequence() == sequence)
+            .iter()
+            .position(|record| record.entry.sequence() == sequence)
         else {
             return Err(InputUiCursorError::UnknownSequence { sequence });
         };
+        self.finalize_ui_record(index, disposition)
+    }
+
+    fn finalize_ui_record(
+        &mut self,
+        index: usize,
+        disposition: InputUiDisposition,
+    ) -> Result<(), InputUiCursorError> {
+        let record = &mut self.retained[index];
+        let sequence = record.entry.sequence();
         if !record.ui_pending {
             return Err(InputUiCursorError::AlreadyFinalized { sequence });
         }
@@ -1516,16 +1704,7 @@ impl InputTimeline {
     }
 
     fn resolve_held_press(&mut self, entry: InputTimelineEntry, consumed: bool) {
-        if !matches!(
-            entry.kind(),
-            InputEventKind::Key {
-                phase: ButtonTransitionPhase::Pressed,
-                ..
-            } | InputEventKind::PointerButton {
-                phase: ButtonTransitionPhase::Pressed,
-                ..
-            }
-        ) {
+        if entry.press_sequence() != Some(entry.sequence()) || entry.action_input().is_none() {
             return;
         }
         let sequence = entry.sequence();
@@ -1605,21 +1784,21 @@ impl InputTimeline {
         }
     }
 
-    pub(crate) fn stage_actions(&mut self, revision: &Arc<StagedActionRevision>) {
+    pub(crate) fn stage_actions(&mut self, staging: &ActionStaging) {
         for record in &mut self.retained {
             if record.action != ActionRetention::Unscanned {
                 continue;
             }
-            // Every button edge participates, including a release after its mapping/context ended.
-            // Semantic reconciliation must finish before its admitted member can be recycled.
-            record.action = if record.entry.action_transition().is_some() {
+            record.action_revision = record.entry.action_input().and_then(|_| {
+                staging
+                    .revision_for_seat(record.entry.route().seat())
+                    .map(Arc::clone)
+            });
+            record.action = if record.action_revision.is_some() {
                 ActionRetention::Deferred
             } else {
                 ActionRetention::Done
             };
-            if record.action == ActionRetention::Deferred {
-                record.action_revision = Some(Arc::clone(revision));
-            }
             self.action_scanned_cursor = record.entry.sequence();
         }
     }
@@ -1637,10 +1816,18 @@ impl InputTimeline {
                 ActionDelivery::Gameplay => true,
                 ActionDelivery::Ui => false,
                 ActionDelivery::FollowPress(sequence) => {
-                    self.topology.members.iter().flatten().any(|member| {
-                        member.held.press_sequence == sequence
-                            && member.held.disposition == HeldInputDisposition::Gameplay
-                    })
+                    match self
+                        .topology
+                        .members
+                        .iter()
+                        .flatten()
+                        .find(|member| member.held.press_sequence == sequence)
+                        .map(|member| member.held.disposition)
+                    {
+                        Some(HeldInputDisposition::Gameplay) => true,
+                        Some(HeldInputDisposition::Ui) => false,
+                        Some(HeldInputDisposition::Pending) | None => continue,
+                    }
                 }
             };
             record.action = ActionRetention::Done;
@@ -1680,6 +1867,25 @@ impl InputTimeline {
             }) {
                 *slot = None;
             }
+        }
+        for slot in &mut self.topology.gamepads {
+            let Some(gamepad) = *slot else {
+                continue;
+            };
+            if !gamepad.retiring
+                || self
+                    .topology
+                    .members
+                    .iter()
+                    .flatten()
+                    .any(|member| member.gamepad == Some(gamepad.id))
+                || self.retained.iter().any(|record| {
+                    record.entry.gamepad_connection_generation() == Some(gamepad.id.0)
+                })
+            {
+                continue;
+            }
+            *slot = None;
         }
         for slot in &mut self.topology.pointers {
             let Some(pointer) = *slot else {
@@ -1731,6 +1937,12 @@ impl InputTimeline {
                     .iter()
                     .flatten()
                     .any(|pointer| pointer.endpoint == endpoint.id)
+                || self
+                    .topology
+                    .gamepads
+                    .iter()
+                    .flatten()
+                    .any(|gamepad| gamepad.endpoint == endpoint.id)
                 || self.retained.iter().any(|record| {
                     record.entry.route().window() == endpoint.window
                         && record.entry.route().seat() == endpoint.seat
@@ -1754,6 +1966,35 @@ impl InputTimeline {
                 self.connect_endpoint(window, seat)?;
                 Ok(__InputDriverOutput::new(InputAdmission::IGNORED))
             }
+            __InputDriverEvent::ConnectGamepad {
+                window,
+                seat,
+                gamepad,
+            } => {
+                let (connection, admission) =
+                    self.connect_gamepad_origin(window, seat, gamepad, InputEventOrigin::Platform)?;
+                let mut output = __InputDriverOutput::new(admission);
+                output.gamepad_connection = Some(connection);
+                Ok(output)
+            }
+            __InputDriverEvent::ConnectSyntheticGamepad {
+                window,
+                seat,
+                gamepad,
+            } => {
+                let (connection, admission) = self.connect_gamepad_origin(
+                    window,
+                    seat,
+                    gamepad,
+                    InputEventOrigin::Synthetic,
+                )?;
+                let mut output = __InputDriverOutput::new(admission);
+                output.gamepad_connection = Some(connection);
+                Ok(output)
+            }
+            __InputDriverEvent::DisconnectGamepad { connection } => self
+                .disconnect_gamepad(&connection)
+                .map(__InputDriverOutput::new),
             __InputDriverEvent::ConnectPointer {
                 window,
                 seat,
@@ -1798,21 +2039,19 @@ impl InputTimeline {
                 InputEventOrigin::Platform,
                 false,
             ),
-            __InputDriverEvent::Gamepad {
-                window,
-                seat,
-                gamepad,
+            __InputDriverEvent::GamepadButton {
+                connection,
                 button,
                 phase,
             } => self
-                .gamepad(
-                    window,
-                    seat,
-                    gamepad,
-                    button,
-                    phase,
-                    InputEventOrigin::Platform,
-                )
+                .admit_gamepad_button(&connection, button, phase)
+                .map(__InputDriverOutput::new),
+            __InputDriverEvent::GamepadAxis {
+                connection,
+                axis,
+                value,
+            } => self
+                .admit_gamepad_axis(&connection, axis, value)
                 .map(__InputDriverOutput::new),
             __InputDriverEvent::Window {
                 window,
@@ -1840,20 +2079,6 @@ impl InputTimeline {
                 InputEventOrigin::Synthetic,
                 false,
             ),
-            __InputDriverEvent::SyntheticGamepad {
-                gamepad,
-                button,
-                phase,
-            } => self
-                .gamepad(
-                    synthetic_window,
-                    synthetic_seat,
-                    gamepad,
-                    button,
-                    phase,
-                    InputEventOrigin::Synthetic,
-                )
-                .map(__InputDriverOutput::new),
         }
     }
 }

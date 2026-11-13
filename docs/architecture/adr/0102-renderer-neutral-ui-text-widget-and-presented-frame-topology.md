@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-11-05
+**Last Revised**: 2026-11-13
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption; 2026-11-05 by explicit neutral value consumption and runtime installation
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -345,10 +345,20 @@ flowchart LR
   it as disabled. Hiding or removing the key, retiring its surface, invalidating its modal scope, or
   cancelling its seat still clears or restores focus through the ordinary session rules. This
   preserves pending-control continuity without making disabled controls interactive.
-- Public scheduling exposes semantic registration for local command producers and only the immutable
-  current-tick consume and post-consume capture anchors required by independent products. Input
-  projection, UI route finalization, local-action mapping, command admission, acknowledgement, and
-  other technical phases remain private or doc-hidden engine-integration details.
+- Public scheduling exposes semantic registration for local command producers, immutable
+  current-tick consume/post-consume capture, and Input's documented ordering anchors required by
+  independent seat configuration and custom UI adapters. `InputSet` exposes the existing First
+  projection/observation/routing/staging order and separate PreUpdate action resolution; it does
+  not expose their execution functions or add a scheduler. Ordering applies within one schedule
+  and membership alone does not order peers in a set.
+- A custom UI adapter may use `InputTimeline::route_pending_ui_input` synchronously in RouteUi.
+  The original Input owner supplies pending entries in order and records accepted consume or
+  rejected-closed decisions; returning no decision leaves ordinary fallback intact. Raw sequence
+  completion stays private/doc-hidden: no delayed or foreign completion authority escapes the
+  synchronous borrow. A panic preserves the completed prefix, not batch rollback. This is a
+  routing-policy interface, not presentation evidence, a UI receipt issuer or a substitute for
+  the actual UI adapter's captured route validation and transaction. Projection/state algorithms,
+  local-action mapping, command admission and acknowledgement remain engine-owned implementation.
 - Shared UI interfaces are proven before product integration by three thin neutral conformance
   executables plus one independent public consumer: a kernel layout/frame gallery, an ECS/Scene
   runtime interaction lab, a root-facade presentation gallery, and [`ui-module-consumer`](../../../tests/fixtures/ui-module-consumer/). The kernel

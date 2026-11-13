@@ -28,7 +28,7 @@ use nara_engine::{
     identity::{EntityLookup, SpawnedSceneInstance},
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
-        ActionMapDefinition, ActionMapFileCandidate, ActionMapLimits, ActionOutcome,
+        ActionMapDefinition, ActionMapFileCandidate, ActionMapLimits, ActionMaps, ActionOutcome,
         ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput, InputBinding,
         InputEventOrigin, InputPointerId, InputSeatId, InputTimeline, InputWindowId, KeyCode,
         MouseButton, SemanticActionCause, SemanticActionOutcome, SemanticActions,
@@ -56,7 +56,8 @@ const FIRE_START: &str = "consumer.source-input.fire-start";
 const FIRE_STOP: &str = "consumer.source-input.fire-stop";
 const RESTART_REQUIRED: &str = "project.content.global-input-source-changed";
 const WINDOW: InputWindowId = InputWindowId::new(7);
-const SEAT: InputSeatId = InputSeatId::new(2);
+const SEAT: InputSeatId = InputSeatId::PRIMARY;
+const OTHER_SEAT: InputSeatId = InputSeatId::new(2);
 const POINTER: InputPointerId = InputPointerId::new(3);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +69,7 @@ enum Case {
     Restart,
     CodeFirst,
     CompetingEmpty,
+    OtherSeat,
 }
 
 impl Case {
@@ -143,8 +145,7 @@ impl Plugin for ConsumerPlugin {
     }
 }
 
-// Only the two explicit code-configuration controls install a physical map in a plugin.
-struct CodeInputPlugin(bool);
+struct CodeInputPlugin(Case);
 
 impl Plugin for CodeInputPlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -157,16 +158,26 @@ impl Plugin for CodeInputPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let map = if self.0 {
+        let map = if self.0 == Case::CompetingEmpty {
             ActionMap::default()
         } else {
+            let key = if self.0 == Case::OtherSeat {
+                KeyCode::Space
+            } else {
+                KeyCode::Character('w')
+            };
             ActionMap::new(
-                definition(KeyCode::Character('w')).into_bindings(),
+                definition(key).into_bindings(),
                 ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
             )
             .unwrap()
         };
-        app.insert_resource(map)?;
+        if self.0 == Case::OtherSeat {
+            let mut maps = app.world_mut()?.resource_mut::<ActionMaps>();
+            assert!(maps.insert(OTHER_SEAT, map).unwrap().is_none());
+        } else {
+            app.insert_resource(ActionMaps::new(map))?;
+        }
         Ok(())
     }
 }
@@ -313,10 +324,13 @@ impl Fixture {
                 ConsumerPlugin(configuration.clone())
             })
             .unwrap();
-        if matches!(case, Case::CodeFirst | Case::CompetingEmpty) {
+        if matches!(
+            case,
+            Case::CodeFirst | Case::CompetingEmpty | Case::OtherSeat
+        ) {
             recipe = recipe
                 .add_configured_plugin::<CodeInputPlugin, _, _>(configuration, |configuration| {
-                    CodeInputPlugin(configuration.case == Case::CompetingEmpty)
+                    CodeInputPlugin(configuration.case)
                 })
                 .unwrap();
         }
@@ -404,11 +418,17 @@ fn inspect_first_startup(world: &mut World) {
         timeline.connect_pointer(WINDOW, SEAT, POINTER).unwrap();
     }
     let key = world.resource::<Configuration>().case.key();
-    let map = world.resource::<ActionMap>();
+    let maps = world.resource::<ActionMaps>();
+    let map = maps.get(InputSeatId::PRIMARY).unwrap();
     assert_eq!(map.bindings(), definition(key).bindings());
     assert!(map.is_context_enabled(&ActionContext::gameplay()));
     assert!(!map.is_context_enabled(&menu()));
     let bindings = map.bindings_handle();
+    if world.resource::<Configuration>().case == Case::OtherSeat {
+        let other = maps.get(OTHER_SEAT).unwrap();
+        assert_eq!(other.bindings(), definition(KeyCode::Space).bindings());
+        assert!(!other.bindings_handle().shares_owner_with(&bindings));
+    }
     let mut outcome = world.resource_mut::<Outcome>();
     assert!(outcome.startup_bindings.is_none());
     outcome.startup_bindings = Some(bindings);
@@ -462,7 +482,11 @@ fn held(world: &World, expected: bool) {
     let semantic = world.resource::<SemanticActions>();
     for action in [MOVE, FIRE] {
         assert_eq!(
-            semantic.pressed(&ActionId::new(action).unwrap(), &ActionContext::gameplay()),
+            semantic.pressed(
+                SEAT,
+                &ActionId::new(action).unwrap(),
+                &ActionContext::gameplay(),
+            ),
             expected
         );
     }
@@ -502,7 +526,10 @@ fn inject(world: &mut World, pressed: bool) {
 
 fn assert_travel_input(world: &World) {
     let outcome = world.resource::<Outcome>();
-    let map = world.resource::<ActionMap>();
+    let map = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
     assert!(
         map.bindings_handle()
             .shares_owner_with(outcome.startup_bindings.as_ref().unwrap())
@@ -561,19 +588,19 @@ fn advance(world: &mut World) {
         Phase::Pressed => {
             held(world, true);
             assert!(world.resource::<Outcome>().distance > 0);
-            assert!(
-                world
-                    .resource_mut::<ActionMap>()
-                    .disable_context(&ActionContext::gameplay())
-                    .unwrap()
-            );
+            {
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
+                assert!(map.disable_context(&ActionContext::gameplay()).unwrap());
+            }
             world.resource_mut::<Outcome>().phase = Phase::Cancelled;
         }
         Phase::Cancelled => {
             held(world, false);
             assert_eq!(world.resource::<Outcome>().semantic.len(), 4);
             {
-                let mut map = world.resource_mut::<ActionMap>();
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
                 assert!(!map.disable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&menu()).unwrap());
@@ -625,7 +652,7 @@ fn advance(world: &mut World) {
         }
         Phase::Fresh => {
             assert_travel_input(world);
-            if matches!(case, Case::Restart | Case::CodeFirst) {
+            if matches!(case, Case::Restart | Case::CodeFirst | Case::OtherSeat) {
                 world.resource_mut::<Outcome>().phase = Phase::Done;
             } else {
                 if case == Case::ChangedBeforeTravel {
@@ -863,6 +890,7 @@ fn assert_physical_outcomes(outcome: &Outcome, key: KeyCode) {
             "each context cancellation is terminal exactly once"
         );
         for edge in &edges {
+            assert_eq!(edge.seat, SEAT);
             assert_eq!(edge.context, ActionContext::gameplay());
         }
         assert_eq!(edges[0].phase, ActionPhase::Started);
@@ -968,6 +996,13 @@ fn ready_commit_uses_captured_input_then_the_next_request_requires_restart() {
 fn no_file_selection_preserves_explicit_code_input() {
     let fixture = Fixture::new(false);
     let outcome = completed(fixture.run(Case::CodeFirst), Case::CodeFirst.key(), false);
+    assert_eq!((outcome.commits, outcome.rejections), (0, 0));
+}
+
+#[test]
+fn another_seats_explicit_map_preserves_source_primary_selection() {
+    let fixture = Fixture::new(true);
+    let outcome = completed(fixture.run(Case::OtherSeat), Case::OtherSeat.key(), true);
     assert_eq!((outcome.commits, outcome.rejections), (0, 0));
 }
 

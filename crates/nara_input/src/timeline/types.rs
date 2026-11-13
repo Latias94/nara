@@ -7,7 +7,7 @@ use nara_core::Vec2;
 use nara_ecs::Resource;
 
 use crate::{
-    ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
+    AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
     PointerDriverInput,
 };
 
@@ -24,6 +24,7 @@ pub struct InputLimits {
     endpoints: usize,
     pointers: usize,
     members: usize,
+    gamepads: usize,
 }
 
 impl Default for InputLimits {
@@ -33,6 +34,7 @@ impl Default for InputLimits {
             endpoints: 64,
             pointers: 256,
             members: 1_024,
+            gamepads: 64,
         }
     }
 }
@@ -57,6 +59,7 @@ impl InputLimits {
             .checked_add(endpoints)
             .and_then(|count| count.checked_add(pointers))
             .and_then(|count| count.checked_add(members))
+            .and_then(|count| count.checked_add(64))
             .and_then(|count| count.checked_mul(crate::MAX_BINDINGS_PER_INPUT))
             .ok_or(InputConfigurationError::CapacityOverflow)?;
         Ok(Self {
@@ -64,7 +67,22 @@ impl InputLimits {
             endpoints,
             pointers,
             members,
+            gamepads: 64,
         })
+    }
+
+    /// Sets the finite connection allowance, including disconnected connections still retained.
+    /// Zero disables gamepad admission without changing keyboard or pointer capacity.
+    pub fn with_gamepads(mut self, gamepads: usize) -> Result<Self, InputConfigurationError> {
+        self.events
+            .checked_add(self.endpoints)
+            .and_then(|count| count.checked_add(self.pointers))
+            .and_then(|count| count.checked_add(self.members))
+            .and_then(|count| count.checked_add(gamepads))
+            .and_then(|count| count.checked_mul(crate::MAX_BINDINGS_PER_INPUT))
+            .ok_or(InputConfigurationError::CapacityOverflow)?;
+        self.gamepads = gamepads;
+        Ok(self)
     }
 
     #[must_use]
@@ -82,6 +100,10 @@ impl InputLimits {
     #[must_use]
     pub const fn members(self) -> usize {
         self.members
+    }
+    #[must_use]
+    pub const fn gamepads(self) -> usize {
+        self.gamepads
     }
 }
 
@@ -261,6 +283,36 @@ impl InputGeometryGeneration {
     }
 }
 
+/// Non-reused metadata identifying one connection within its original Input owner.
+///
+/// The generation is observational data; only a [`super::GamepadConnection`] grants ingress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct InputGamepadGeneration(pub(super) u64);
+
+impl InputGamepadGeneration {
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for InputGamepadGeneration {
+    fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+    where
+        Deserializer: serde::Deserializer<'de>,
+    {
+        let raw = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+        if raw == 0 {
+            return Err(serde::de::Error::custom(
+                "gamepad generation must be non-zero",
+            ));
+        }
+        Ok(Self(raw))
+    }
+}
+
 #[cfg(feature = "serde")]
 macro_rules! nonzero_input_generation_deserialize {
     ($($generation:ty),* $(,)?) => {
@@ -381,6 +433,7 @@ pub struct ActionInputProvenance {
     route: InputRouteStamp,
     press_sequence: Option<u64>,
     press_route: Option<InputRouteStamp>,
+    gamepad_connection_generation: Option<InputGamepadGeneration>,
 }
 
 impl ActionInputProvenance {
@@ -407,6 +460,11 @@ impl ActionInputProvenance {
     #[must_use]
     pub const fn press_route(self) -> Option<InputRouteStamp> {
         self.press_route
+    }
+
+    #[must_use]
+    pub const fn gamepad_connection_generation(self) -> Option<InputGamepadGeneration> {
+        self.gamepad_connection_generation
     }
 }
 
@@ -494,6 +552,7 @@ pub enum InputInvalidationReason {
     ScaleFactorChanged,
     CloseRequested,
     SurfaceRetired,
+    GamepadDisconnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -511,10 +570,25 @@ pub enum InputEventKind {
         key: KeyCode,
         phase: ButtonTransitionPhase,
     },
+    GamepadConnected {
+        gamepad: u16,
+        connection_generation: InputGamepadGeneration,
+    },
+    GamepadDisconnected {
+        gamepad: u16,
+        connection_generation: InputGamepadGeneration,
+    },
     GamepadButton {
         gamepad: u16,
+        connection_generation: InputGamepadGeneration,
         button: u16,
         phase: ButtonTransitionPhase,
+    },
+    GamepadAxis {
+        gamepad: u16,
+        connection_generation: InputGamepadGeneration,
+        axis: u16,
+        value: AxisValue,
     },
     FocusChanged {
         focused: bool,
@@ -586,14 +660,63 @@ impl InputTimelineEntry {
             route: self.route,
             press_sequence: self.press_sequence,
             press_route: self.press_route,
+            gamepad_connection_generation: self.gamepad_connection_generation(),
         }
     }
 
-    pub(crate) fn action_transition(self) -> Option<(InputBinding, ButtonTransitionPhase)> {
+    #[must_use]
+    pub const fn gamepad_connection_generation(self) -> Option<InputGamepadGeneration> {
+        match self.kind {
+            InputEventKind::GamepadConnected {
+                connection_generation,
+                ..
+            }
+            | InputEventKind::GamepadDisconnected {
+                connection_generation,
+                ..
+            }
+            | InputEventKind::GamepadButton {
+                connection_generation,
+                ..
+            }
+            | InputEventKind::GamepadAxis {
+                connection_generation,
+                ..
+            } => Some(connection_generation),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn action_input(self) -> Option<InputBinding> {
+        match self.kind {
+            InputEventKind::Key { key, .. } => Some(InputBinding::Key(key)),
+            InputEventKind::PointerButton { button, .. } => Some(InputBinding::Mouse(button)),
+            InputEventKind::GamepadButton { button, .. } => {
+                Some(InputBinding::GamepadButton(button))
+            }
+            InputEventKind::GamepadAxis { axis, .. } => Some(InputBinding::GamepadAxis(axis)),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn axis_value(self) -> Option<AxisValue> {
+        match self.kind {
+            InputEventKind::GamepadAxis { value, .. } => Some(value),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn action_transition(self) -> Option<(InputBinding, ButtonTransitionPhase)> {
         match self.kind {
             InputEventKind::Key { key, phase } => Some((InputBinding::Key(key), phase)),
             InputEventKind::PointerButton { button, phase } => {
                 Some((InputBinding::Mouse(button), phase))
+            }
+            InputEventKind::GamepadButton { button, phase, .. } => {
+                Some((InputBinding::GamepadButton(button), phase))
             }
             _ => None,
         }
@@ -678,6 +801,13 @@ impl InputEndpointRetirement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputIngressError {
+    ForeignGamepadConnection,
+    GamepadConnectionExpired {
+        connection_generation: InputGamepadGeneration,
+    },
+    GamepadCapacityExceeded {
+        limit: usize,
+    },
     ForeignEndpointClaim,
     EndpointClaimExpired {
         window: InputWindowId,
@@ -749,6 +879,22 @@ pub enum InputIngressError {
 impl Display for InputIngressError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ForeignGamepadConnection => {
+                formatter.write_str("gamepad connection belongs to a different Input owner")
+            }
+            Self::GamepadConnectionExpired {
+                connection_generation,
+            } => write!(
+                formatter,
+                "gamepad connection {} has disconnected or its endpoint has retired",
+                connection_generation.get(),
+            ),
+            Self::GamepadCapacityExceeded { limit } => {
+                write!(
+                    formatter,
+                    "input gamepad connection capacity {limit} was exceeded"
+                )
+            }
             Self::ForeignEndpointClaim => {
                 formatter.write_str("input endpoint claim belongs to a different Input owner")
             }
@@ -991,10 +1137,18 @@ pub enum __InputDriverEvent {
     SyntheticPointer {
         input: PointerDriverInput,
     },
-    SyntheticGamepad {
+    ConnectGamepad {
+        window: InputWindowId,
+        seat: InputSeatId,
         gamepad: u16,
-        button: u16,
-        phase: ButtonTransitionPhase,
+    },
+    ConnectSyntheticGamepad {
+        window: InputWindowId,
+        seat: InputSeatId,
+        gamepad: u16,
+    },
+    DisconnectGamepad {
+        connection: super::GamepadConnection,
     },
     Keyboard {
         window: InputWindowId,
@@ -1013,12 +1167,15 @@ pub enum __InputDriverEvent {
         pointer: InputPointerId,
         input: PointerDriverInput,
     },
-    Gamepad {
-        window: InputWindowId,
-        seat: InputSeatId,
-        gamepad: u16,
+    GamepadButton {
+        connection: super::GamepadConnection,
         button: u16,
         phase: ButtonTransitionPhase,
+    },
+    GamepadAxis {
+        connection: super::GamepadConnection,
+        axis: u16,
+        value: AxisValue,
     },
     Window {
         window: InputWindowId,
@@ -1033,6 +1190,7 @@ pub struct __InputDriverOutput {
     pub admission: InputAdmission,
     pub released_keys: Vec<KeyCode>,
     pub released_mouse_buttons: Vec<MouseButton>,
+    pub gamepad_connection: Option<super::GamepadConnection>,
 }
 
 impl __InputDriverOutput {
@@ -1041,6 +1199,7 @@ impl __InputDriverOutput {
             admission,
             released_keys: Vec::new(),
             released_mouse_buttons: Vec::new(),
+            gamepad_connection: None,
         }
     }
 }

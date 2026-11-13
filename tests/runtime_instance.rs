@@ -40,8 +40,8 @@ use nara::{
     },
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-        ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput, InputPlugin,
-        KeyCode, MouseButton, apply_keyboard_driver_input, apply_mouse_driver_input,
+        ActionMaps, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput,
+        InputPlugin, KeyCode, MouseButton, apply_keyboard_driver_input, apply_mouse_driver_input,
     },
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
@@ -3396,13 +3396,13 @@ fn paused_input_edges_are_retained_until_the_next_resolving_frame() {
             MouseButton::Left,
         ))
         .unwrap();
-    app.insert_resource(
+    app.insert_resource(ActionMaps::new(
         ActionMap::new(
             builder.compile().unwrap().into_bindings(),
             ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
         )
         .unwrap(),
-    )
+    ))
     .unwrap();
     let mut runtime = start_runtime(app);
 

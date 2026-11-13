@@ -1,18 +1,21 @@
-//! Fixed live storage for connected Input lifetimes and accepted button members.
+//! Fixed live storage for connected Input lifetimes and accepted button and axis members.
 
 use nara_core::Vec2;
 
 use super::{
-    HeldInput, InputConfigurationError, InputEventOrigin, InputIngressError, InputLimits,
-    InputPointerId, InputSeatId, InputWindowId,
+    HeldInput, InputConfigurationError, InputEventOrigin, InputGamepadGeneration,
+    InputIngressError, InputLimits, InputPointerId, InputSeatId, InputWindowId,
 };
-use crate::InputBinding;
+use crate::{AxisValue, InputBinding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct EndpointId(pub(super) u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PointerId(pub(super) u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GamepadId(pub(super) InputGamepadGeneration);
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Endpoint {
@@ -61,16 +64,28 @@ pub(super) struct Pointer {
 pub(super) struct Member {
     pub(super) endpoint: EndpointId,
     pub(super) pointer: Option<PointerId>,
+    pub(super) gamepad: Option<GamepadId>,
     pub(super) input: InputBinding,
     pub(super) pressed: bool,
+    pub(super) axis_value: Option<AxisValue>,
     pub(super) held: HeldInput,
     pub(super) origin: InputEventOrigin,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Gamepad {
+    pub(super) id: GamepadId,
+    pub(super) endpoint: EndpointId,
+    pub(super) raw_label: u16,
+    pub(super) origin: InputEventOrigin,
+    pub(super) retiring: bool,
 }
 
 #[derive(Debug)]
 pub(super) struct InputTopology {
     pub(super) endpoints: Box<[Option<Endpoint>]>,
     pub(super) pointers: Box<[Option<Pointer>]>,
+    pub(super) gamepads: Box<[Option<Gamepad>]>,
     pub(super) members: Box<[Option<Member>]>,
     next_identity: u64,
 }
@@ -80,6 +95,7 @@ impl InputTopology {
         Ok(Self {
             endpoints: slots(limits.endpoints())?,
             pointers: slots(limits.pointers())?,
+            gamepads: slots(limits.gamepads())?,
             members: slots(limits.members())?,
             next_identity: 0,
         })
@@ -162,10 +178,19 @@ impl InputTopology {
         )
     }
 
+    pub(super) fn free_gamepad(&self) -> Result<usize, InputIngressError> {
+        self.gamepads.iter().position(Option::is_none).ok_or(
+            InputIngressError::GamepadCapacityExceeded {
+                limit: self.gamepads.len(),
+            },
+        )
+    }
+
     pub(super) fn member_index(
         &self,
         endpoint: EndpointId,
         pointer: Option<PointerId>,
+        gamepad: Option<GamepadId>,
         input: InputBinding,
     ) -> Option<usize> {
         self.members.iter().position(|slot| {
@@ -173,6 +198,7 @@ impl InputTopology {
                 record.pressed
                     && record.endpoint == endpoint
                     && record.pointer == pointer
+                    && record.gamepad == gamepad
                     && record.input == input
             })
         })
@@ -226,6 +252,27 @@ impl InputTopology {
         });
     }
 
+    pub(super) fn install_gamepad(
+        &mut self,
+        slot: usize,
+        identity: u64,
+        endpoint: EndpointId,
+        raw_label: u16,
+        origin: InputEventOrigin,
+    ) -> GamepadId {
+        debug_assert!(self.gamepads[slot].is_none());
+        self.next_identity = identity;
+        let id = GamepadId(InputGamepadGeneration(identity));
+        self.gamepads[slot] = Some(Gamepad {
+            id,
+            endpoint,
+            raw_label,
+            origin,
+            retiring: false,
+        });
+        id
+    }
+
     pub(super) fn obligations(&self) -> usize {
         self.endpoints
             .iter()
@@ -237,6 +284,12 @@ impl InputTopology {
                 .iter()
                 .flatten()
                 .filter(|record| record.leave)
+                .count()
+            + self
+                .gamepads
+                .iter()
+                .flatten()
+                .filter(|record| !record.retiring)
                 .count()
             + self
                 .members

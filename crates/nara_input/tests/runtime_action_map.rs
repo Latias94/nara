@@ -11,14 +11,16 @@ use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapAsset, ActionMapBindings, ActionMapBuilder,
     ActionMapDefinition, ActionMapDomain, ActionMapFileCandidate, ActionMapFileError,
-    ActionMapFileLimits, ActionMapLimits, ActionMapRuntimeCodec, InputBinding, KeyCode,
-    MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS, MAX_BINDINGS_PER_INPUT, MouseButton,
+    ActionMapFileLimits, ActionMapLimits, ActionMapRuntimeCodec, ActionTransform, AxisDeadZone,
+    AxisDirection, InputBinding, KeyCode, MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS,
+    MAX_BINDINGS_PER_INPUT, MouseButton,
 };
 use serde_json::{Value, json};
 
 const GOLDEN: &str = include_str!("fixtures/formats/v1/runtime-action-map.json");
 const SOURCE_GOLDEN: &str = include_str!("fixtures/formats/v1/action-map.json");
 const SOURCE: &str = "919617ea-c89c-4f83-9cce-b084de435a83";
+const DENSE_BINDING_COUNT: usize = 900;
 
 #[test]
 fn nonempty_processed_golden_preserves_identity_order_and_canonical_bytes() {
@@ -78,6 +80,70 @@ fn source_preparation_and_code_first_cooking_consume_definitions_and_are_determi
         bindings.definition().bindings(),
         code_first.definition().bindings()
     );
+}
+
+#[test]
+fn processed_typed_gamepad_and_axis_bindings_preserve_explicit_transforms() {
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    let steer = ActionId::new("steer").unwrap();
+    for binding in [
+        ActionBinding::key_axis(steer.clone(), KeyCode::ArrowLeft, AxisDirection::Negative),
+        ActionBinding::gamepad_axis(steer, u16::MAX, AxisDeadZone::new(0.25).unwrap(), true),
+        ActionBinding::gamepad_button(ActionId::new("confirm").unwrap(), 7),
+    ] {
+        builder.bind(binding).unwrap();
+    }
+    let asset = ActionMapAsset::new(primary(SOURCE), builder.compile().unwrap()).unwrap();
+    let encoded = encode(&asset);
+    let decoded = ActionMapRuntimeCodec::decode_runtime(&encoded).unwrap();
+    assert_eq!(
+        decoded.definition().bindings(),
+        asset.definition().bindings()
+    );
+    assert_eq!(encode(&decoded), encoded);
+    let bindings = decoded.definition().bindings();
+    assert_eq!(
+        bindings[0].transform,
+        ActionTransform::AxisButton {
+            direction: AxisDirection::Negative
+        }
+    );
+    assert_eq!(bindings[1].input, InputBinding::GamepadAxis(u16::MAX));
+    assert_eq!(
+        bindings[1].transform,
+        ActionTransform::Axis {
+            dead_zone: AxisDeadZone::new(0.25).unwrap(),
+            inverted: true
+        }
+    );
+    assert_eq!(bindings[2].input, InputBinding::GamepadButton(7));
+    assert_eq!(bindings[2].transform, ActionTransform::Button);
+    let wire: Value = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(wire["payload"]["bindings"][2]["transform"], json!("Button"));
+}
+
+#[test]
+fn processed_transform_validation_rejects_invalid_values_kinds_and_duplicate_sources() {
+    for threshold in [json!(-0.1), json!(1.0), json!("NaN")] {
+        let mut value = golden();
+        value["payload"]["bindings"][0]["input"] = json!({"GamepadAxis": 0});
+        value["payload"]["bindings"][0]["transform"] =
+            json!({"Axis": {"dead_zone": threshold, "inverted": false}});
+        assert_rejected(&value, "input.runtime-metadata");
+    }
+    let mut mixed = golden();
+    mixed["payload"]["bindings"][1]["action"] = mixed["payload"]["bindings"][0]["action"].clone();
+    mixed["payload"]["bindings"][1]["transform"] = json!({"AxisButton": {"direction": "Negative"}});
+    assert_rejected(&mixed, "input.runtime-definition");
+    let mut duplicate = mixed;
+    duplicate["payload"]["bindings"][1]["input"] =
+        duplicate["payload"]["bindings"][0]["input"].clone();
+    duplicate["payload"]["bindings"][0]["transform"] =
+        json!({"AxisButton": {"direction": "Positive"}});
+    assert_rejected(&duplicate, "input.runtime-definition");
 }
 
 #[test]
@@ -532,7 +598,7 @@ fn syntax_duplicate_keys_and_semantic_errors_keep_static_non_budget_diagnostics(
 fn code_first_cost_query_rejects_default_wire_caps_before_encoding() {
     let strings = dense_asset(&"x".repeat(124), 0);
     let baseline_wire: Value = serde_json::from_slice(&encode(&dense_asset("x", 0))).unwrap();
-    let required = string_bytes(&baseline_wire) + MAX_ACTION_BINDINGS * 123;
+    let required = string_bytes(&baseline_wire) + DENSE_BINDING_COUNT * 123;
     let maximum = ActionMapFileLimits::default()
         .shape()
         .total_string_bytes()
@@ -573,26 +639,32 @@ fn code_first_cost_query_rejects_default_wire_caps_before_encoding() {
 
 #[test]
 fn canonical_total_string_budget_is_exact_for_borrowed_cost_and_decode() {
-    let baseline = dense_asset(&"x".repeat(87), 0);
+    let baseline = dense_asset(&"x".repeat(90), 0);
     let baseline_wire: Value = serde_json::from_slice(&encode(&baseline)).unwrap();
     let maximum = ActionMapFileLimits::default()
         .shape()
         .total_string_bytes()
         .get();
     let extra = maximum - string_bytes(&baseline_wire);
-    assert!(extra < MAX_ACTION_BINDINGS);
-    let exact = dense_asset(&"x".repeat(87), extra);
+    assert!(extra < DENSE_BINDING_COUNT);
+    let exact = dense_asset(&"x".repeat(90), extra);
     let encoded = encode(&exact);
     assert_eq!(
         string_bytes(&serde_json::from_slice(&encoded).unwrap()),
         maximum
+    );
+    assert!(
+        encoded.len()
+            <= ActionMapRuntimeCodec::runtime_limits()
+                .encoded_bytes()
+                .get()
     );
     let decoded = ActionMapRuntimeCodec::decode_runtime(&encoded).unwrap();
     assert_eq!(
         ActionMapRuntimeCodec::runtime_retained_bytes(&exact).unwrap(),
         ActionMapRuntimeCodec::runtime_retained_bytes(&decoded).unwrap(),
     );
-    let excess = dense_asset(&"x".repeat(87), extra + 1);
+    let excess = dense_asset(&"x".repeat(90), extra + 1);
     assert_budget(
         &ActionMapRuntimeCodec::runtime_retained_bytes(&excess).unwrap_err(),
         "shape-total-string-bytes",
@@ -658,7 +730,7 @@ fn dense_asset(padding: &str, extra: usize) -> ActionMapAsset {
     builder
         .declare_context(ActionContext::gameplay(), true)
         .unwrap();
-    for index in 0..MAX_ACTION_BINDINGS {
+    for index in 0..DENSE_BINDING_COUNT {
         let suffix = if index < extra { "x" } else { "" };
         builder
             .bind(ActionBinding::mouse(
@@ -675,7 +747,17 @@ fn golden() -> Value {
 }
 
 fn canonical_golden() -> String {
-    GOLDEN.replace("\r\n", "\n").trim_end().to_owned()
+    GOLDEN
+        .replace("\r\n", "\n")
+        .trim_end()
+        .replace(
+            "\"context\": \"gameplay\"\n",
+            "\"context\": \"gameplay\",\n        \"transform\": \"Button\"\n",
+        )
+        .replace(
+            "\"context\": \"menu\"\n",
+            "\"context\": \"menu\",\n        \"transform\": \"Button\"\n",
+        )
 }
 
 fn encode(asset: &ActionMapAsset) -> Box<[u8]> {

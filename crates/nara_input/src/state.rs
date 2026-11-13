@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    collections::BTreeMap,
     sync::{Arc, OnceLock},
 };
 
@@ -9,13 +10,13 @@ use nara_ecs::{Resource, World};
 
 use crate::{
     ActionBinding, ActionContext, ActionMapBindings, ActionMapBuilder, ActionMapDefinition,
-    ActionMapError, ActionMapLimitKind, ActionMapLimits, InputBinding, MAX_ACTION_CONTEXTS,
-    MAX_INPUT_TIMELINE_ENTRIES, definition::check_limit, semantic::ActionMapRevision,
+    ActionMapError, ActionMapLimitKind, ActionMapLimits, InputBinding, InputSeatId,
+    MAX_ACTION_CONTEXTS, MAX_INPUT_TIMELINE_ENTRIES, definition::check_limit,
+    semantic::ActionMapRevision,
 };
 
-/// Independently mutable World-local context and mapping state. It is deliberately not cloneable
+/// Independently mutable context and mapping state for one seat. It is deliberately not cloneable
 /// or serializable; immutable bindings share their actual data owner instead.
-#[derive(Resource)]
 pub struct ActionMap {
     bindings: ActionMapBindings,
     enabled: Box<[bool]>,
@@ -23,6 +24,104 @@ pub struct ActionMap {
     explicit: bool,
     _state_owner: Option<Arc<dyn Any + Send + Sync>>,
 }
+
+/// Maximum independently configured action seats in one World.
+pub const MAX_SEAT_ACTION_MAPS: usize = 64;
+
+/// The World's finite owner of independently mutable seat action maps.
+///
+/// An unconfigured seat has no gameplay mapping. Raw button observations and UI routing remain
+/// independent of this policy. The default map occupies [`InputSeatId::PRIMARY`].
+#[derive(Debug, Resource)]
+pub struct ActionMaps {
+    maps: BTreeMap<InputSeatId, ActionMap>,
+}
+
+impl Default for ActionMaps {
+    fn default() -> Self {
+        Self::new(ActionMap::default())
+    }
+}
+
+impl ActionMaps {
+    pub(crate) fn pristine() -> Self {
+        Self::new(ActionMap::pristine())
+    }
+
+    /// Installs an owned map for the default seat.
+    #[must_use]
+    pub fn new(primary: ActionMap) -> Self {
+        Self {
+            maps: BTreeMap::from([(InputSeatId::PRIMARY, primary)]),
+        }
+    }
+
+    #[must_use]
+    pub fn get(&self, seat: InputSeatId) -> Option<&ActionMap> {
+        self.maps.get(&seat)
+    }
+
+    #[must_use]
+    pub fn get_mut(&mut self, seat: InputSeatId) -> Option<&mut ActionMap> {
+        self.maps.get_mut(&seat)
+    }
+
+    /// Transfers one map into this owner, returning the previous map when replacing a seat.
+    ///
+    /// Capacity refusal returns the supplied map without changing either installed state or its
+    /// retention ticket. Replacing an existing seat requires no additional map slot.
+    pub fn insert(
+        &mut self,
+        seat: InputSeatId,
+        map: ActionMap,
+    ) -> Result<Option<ActionMap>, ActionMapInstallError> {
+        if self.maps.len() == MAX_SEAT_ACTION_MAPS && !self.maps.contains_key(&seat) {
+            return Err(ActionMapInstallError { seat, map });
+        }
+        Ok(self.maps.insert(seat, map))
+    }
+
+    /// Returns the original owned state; later staging observes that this seat has no mapping.
+    pub fn remove(&mut self, seat: InputSeatId) -> Option<ActionMap> {
+        self.maps.remove(&seat)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (InputSeatId, &ActionMap)> {
+        self.maps.iter().map(|(seat, map)| (*seat, map))
+    }
+}
+
+/// A refused seat installation retaining the original supplied map.
+#[derive(Debug)]
+pub struct ActionMapInstallError {
+    seat: InputSeatId,
+    map: ActionMap,
+}
+
+impl ActionMapInstallError {
+    #[must_use]
+    pub const fn seat(&self) -> InputSeatId {
+        self.seat
+    }
+
+    #[must_use]
+    pub fn into_map(self) -> ActionMap {
+        self.map
+    }
+}
+
+impl std::fmt::Display for ActionMapInstallError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "action maps cannot install seat {} beyond the {}-map limit",
+            self.seat.get(),
+            MAX_SEAT_ACTION_MAPS,
+        )
+    }
+}
+
+impl std::error::Error for ActionMapInstallError {}
 
 impl std::fmt::Debug for ActionMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -204,9 +303,12 @@ pub(crate) struct InputInstallation {
 }
 
 impl InputInstallation {
-    pub(crate) fn new(map: &ActionMap) -> Self {
+    pub(crate) fn new(maps: &ActionMaps) -> Self {
         Self {
-            pristine: (!map.explicit).then(|| Arc::clone(&map.revision)),
+            pristine: maps
+                .get(InputSeatId::PRIMARY)
+                .filter(|map| !map.explicit)
+                .map(|map| Arc::clone(&map.revision)),
             finalized: false,
         }
     }
@@ -227,7 +329,7 @@ impl std::fmt::Display for InputSelectionError {
 }
 impl std::error::Error for InputSelectionError {}
 
-/// Finalizes the Host's global selection once in the unpublished candidate admission phase.
+/// Finalizes the Host's PRIMARY selection once in the unpublished candidate admission phase.
 /// `None` preserves code-first configuration. The scope type prevents post-Startup installation.
 pub fn finalize_input_selection(
     scope: &mut RuntimeCandidateScope<'_>,
@@ -257,20 +359,27 @@ fn receive_selection(
     if installation.finalized {
         return Err(InputSelectionError::AlreadyFinalized);
     }
-    let current = world
-        .get_resource::<ActionMap>()
+    let maps = world
+        .get_resource::<ActionMaps>()
         .ok_or(InputSelectionError::MissingActionMap)?;
-    if selection.is_some()
-        && (current.explicit
+    if selection.is_some() {
+        let current = maps
+            .get(InputSeatId::PRIMARY)
+            .ok_or(InputSelectionError::MissingActionMap)?;
+        if current.explicit
             || !installation
                 .pristine
                 .as_ref()
-                .is_some_and(|pristine| Arc::ptr_eq(pristine, &current.revision)))
-    {
-        return Err(InputSelectionError::CompetingConfiguration);
+                .is_some_and(|pristine| Arc::ptr_eq(pristine, &current.revision))
+        {
+            return Err(InputSelectionError::CompetingConfiguration);
+        }
     }
     if let Some(map) = selection {
-        world.insert_resource(map);
+        world
+            .resource_mut::<ActionMaps>()
+            .insert(InputSeatId::PRIMARY, map)
+            .expect("the pristine PRIMARY slot is already installed");
     }
     let mut installation = world.resource_mut::<InputInstallation>();
     installation.finalized = true;

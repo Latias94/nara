@@ -9,13 +9,15 @@ use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, World};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
-    ActionMapLimits, InputPlugin, InputSelectionError, KeyCode, finalize_input_selection,
+    ActionMapLimits, ActionMaps, InputPlugin, InputSeatId, InputSelectionError, KeyCode,
+    MAX_SEAT_ACTION_MAPS, finalize_input_selection,
 };
 
 #[derive(Debug, Default, Resource)]
 struct StartupObservations(Vec<(ActionMapBindings, bool)>);
 
-fn observe_startup(map: Res<ActionMap>, mut observed: ResMut<StartupObservations>) {
+fn observe_startup(maps: Res<ActionMaps>, mut observed: ResMut<StartupObservations>) {
+    let map = maps.get(InputSeatId::PRIMARY).unwrap();
     observed.0.push((
         map.bindings_handle(),
         map.is_context_enabled(&ActionContext::gameplay()),
@@ -43,6 +45,9 @@ impl Plugin for StartupObserverPlugin {
 
 #[derive(Resource)]
 struct SavedActionMap(ActionMap);
+
+#[derive(Resource)]
+struct SavedActionMaps(ActionMaps);
 
 fn candidate(with_input: bool) -> RuntimeCandidate {
     let observer = PluginDefinition::for_default::<StartupObserverPlugin>();
@@ -127,9 +132,188 @@ fn selected_map_is_visible_in_the_first_startup_stage() {
     assert!(
         candidate
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&expected)
+    );
+    assert_startup_selection(candidate, &expected, true);
+}
+
+#[test]
+fn an_explicit_default_collection_before_input_plugin_refuses_file_selection() {
+    let mut app = App::new();
+    app.insert_resource(ActionMaps::default()).unwrap();
+    app.add_plugin(InputPlugin).unwrap();
+    let mut candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    let result = with_scope(&mut candidate, |scope| {
+        finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space)))
+    });
+    retire(candidate);
+    assert_eq!(result, Err(InputSelectionError::CompetingConfiguration));
+}
+
+#[test]
+fn another_explicit_seat_does_not_compete_with_primary_selection() {
+    let mut candidate = candidate(true);
+    let other_seat = InputSeatId::new(1);
+    let mut secondary = action_map("code.confirm", KeyCode::Enter);
+    secondary
+        .disable_context(&ActionContext::gameplay())
+        .unwrap();
+    let secondary_bindings = secondary.bindings_handle();
+    let selected = action_map("file.jump", KeyCode::Space);
+    let expected = selected.bindings_handle();
+    with_scope(&mut candidate, |scope| {
+        scope.apply_command(move |world: &mut World| {
+            assert!(
+                world
+                    .resource_mut::<ActionMaps>()
+                    .insert(other_seat, secondary)
+                    .unwrap()
+                    .is_none()
+            );
+        });
+        finalize_input_selection(scope, Some(selected)).unwrap();
+    });
+    let secondary = candidate
+        .world()
+        .resource::<ActionMaps>()
+        .get(other_seat)
+        .unwrap();
+    assert!(
+        secondary
+            .bindings_handle()
+            .shares_owner_with(&secondary_bindings)
+    );
+    assert!(!secondary.is_context_enabled(&ActionContext::gameplay()));
+    assert_startup_selection(candidate, &expected, true);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn source_and_processed_primary_selection_share_bindings_with_an_independent_second_seat() {
+    use std::sync::Arc;
+
+    use nara_asset::RuntimeAssetCodec;
+    use nara_input::{ActionMapFileCandidate, ActionMapRuntimeCodec};
+
+    let (_, definition) = ActionMapFileCandidate::decode_json_bytes(include_bytes!(
+        "fixtures/formats/v1/action-map.json"
+    ))
+    .unwrap()
+    .into_parts();
+    let source_owner = Arc::new(definition);
+    let source_retained = Arc::downgrade(&source_owner);
+    let owner = Arc::new(
+        ActionMapRuntimeCodec::decode_runtime(include_bytes!(
+            "fixtures/formats/v1/runtime-action-map.json"
+        ))
+        .unwrap(),
+    );
+    let retained = Arc::downgrade(&owner);
+    for bindings in [
+        ActionMapBindings::from_owner(source_owner),
+        ActionMapBindings::from_owner(owner),
+    ] {
+        let mut candidate = candidate(true);
+        let selected = ActionMap::new(
+            bindings.clone(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
+        let mut secondary = ActionMap::new(
+            bindings.clone(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
+        secondary
+            .disable_context(&ActionContext::gameplay())
+            .unwrap();
+        let other_seat = InputSeatId::new(1);
+        with_scope(&mut candidate, |scope| {
+            scope.apply_command(move |world: &mut World| {
+                assert!(
+                    world
+                        .resource_mut::<ActionMaps>()
+                        .insert(other_seat, secondary)
+                        .unwrap()
+                        .is_none()
+                );
+            });
+            finalize_input_selection(scope, Some(selected)).unwrap();
+        });
+        let maps = candidate.world().resource::<ActionMaps>();
+        let primary = maps.get(InputSeatId::PRIMARY).unwrap();
+        let secondary = maps.get(other_seat).unwrap();
+        assert!(primary.bindings_handle().shares_owner_with(&bindings));
+        assert!(secondary.bindings_handle().shares_owner_with(&bindings));
+        assert!(primary.is_context_enabled(&ActionContext::gameplay()));
+        assert!(!secondary.is_context_enabled(&ActionContext::gameplay()));
+        assert_startup_selection(candidate, &bindings, true);
+    }
+    assert!(source_retained.upgrade().is_none());
+    assert!(retained.upgrade().is_none());
+}
+
+#[test]
+fn a_full_seat_collection_returns_the_supplied_map_and_still_selects_primary() {
+    let mut candidate = candidate(true);
+    with_scope(&mut candidate, |scope| {
+        scope.apply_command(|world: &mut World| {
+            let mut maps = world.resource_mut::<ActionMaps>();
+            for index in 1..MAX_SEAT_ACTION_MAPS {
+                assert!(
+                    maps.insert(
+                        InputSeatId::new(u32::try_from(index).unwrap()),
+                        ActionMap::default()
+                    )
+                    .unwrap()
+                    .is_none()
+                );
+            }
+        });
+    });
+    let supplied = action_map("refused.confirm", KeyCode::Enter);
+    let expected_supplied = supplied.bindings_handle();
+    let refused_seat = InputSeatId::new(999);
+    with_scope(&mut candidate, |scope| {
+        scope.apply_command(move |world: &mut World| {
+            let mut maps = world.resource_mut::<ActionMaps>();
+            let refusal = maps.insert(refused_seat, supplied).unwrap_err();
+            assert_eq!(refusal.seat(), refused_seat);
+            assert!(maps.get(refused_seat).is_none());
+            let recovered = refusal.into_map();
+            assert!(
+                recovered
+                    .bindings_handle()
+                    .shares_owner_with(&expected_supplied)
+            );
+            assert!(recovered.is_context_enabled(&ActionContext::gameplay()));
+            let freed_seat = InputSeatId::new(1);
+            assert!(maps.remove(freed_seat).is_some());
+            assert!(maps.insert(refused_seat, recovered).unwrap().is_none());
+        });
+    });
+    let selected = action_map("file.jump", KeyCode::Space);
+    let expected = selected.bindings_handle();
+    with_scope(&mut candidate, |scope| {
+        finalize_input_selection(scope, Some(selected)).unwrap();
+    });
+    assert!(
+        candidate
+            .world()
+            .resource::<ActionMaps>()
+            .get(refused_seat)
+            .is_some()
     );
     assert_startup_selection(candidate, &expected, true);
 }
@@ -146,7 +330,7 @@ fn explicit_code_maps_including_empty_maps_refuse_file_selection() {
         let expected = code_map.bindings_handle();
         with_scope(&mut candidate, |scope| {
             scope.apply_command(move |world: &mut World| {
-                world.insert_resource(code_map);
+                world.insert_resource(ActionMaps::new(code_map));
             });
         });
 
@@ -156,7 +340,11 @@ fn explicit_code_maps_including_empty_maps_refuse_file_selection() {
             }),
             Err(InputSelectionError::CompetingConfiguration)
         );
-        let current = candidate.world().resource::<ActionMap>();
+        let current = candidate
+            .world()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap();
         assert!(current.bindings_handle().shares_owner_with(&expected));
         assert_eq!(
             current.is_context_enabled(&ActionContext::gameplay()),
@@ -173,7 +361,12 @@ fn replacing_the_default_with_another_owners_pristine_map_refuses_selection() {
     with_scope(&mut donor, |scope| {
         scope.apply_command(move |world: &mut World| {
             sender
-                .send(world.remove_resource::<ActionMap>().unwrap())
+                .send(
+                    world
+                        .resource_mut::<ActionMaps>()
+                        .remove(InputSeatId::PRIMARY)
+                        .unwrap(),
+                )
                 .unwrap();
         });
     });
@@ -184,7 +377,7 @@ fn replacing_the_default_with_another_owners_pristine_map_refuses_selection() {
     let mut candidate = candidate(true);
     with_scope(&mut candidate, |scope| {
         scope.apply_command(move |world: &mut World| {
-            world.insert_resource(foreign_map);
+            world.insert_resource(ActionMaps::new(foreign_map));
         });
     });
     assert_eq!(
@@ -196,7 +389,9 @@ fn replacing_the_default_with_another_owners_pristine_map_refuses_selection() {
     assert!(
         candidate
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&foreign_bindings)
     );
@@ -210,7 +405,7 @@ fn selection_requires_the_input_plugin_owner_even_when_a_map_is_present() {
     let expected = map.bindings_handle();
     with_scope(&mut candidate, |scope| {
         scope.apply_command(move |world: &mut World| {
-            world.insert_resource(map);
+            world.insert_resource(ActionMaps::new(map));
         });
         assert_eq!(
             finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space))),
@@ -224,7 +419,9 @@ fn selection_requires_the_input_plugin_owner_even_when_a_map_is_present() {
     assert!(
         candidate
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&expected)
     );
@@ -232,13 +429,18 @@ fn selection_requires_the_input_plugin_owner_even_when_a_map_is_present() {
 }
 
 #[test]
-fn a_missing_map_refuses_selection_without_consuming_the_installation_slot() {
+fn a_missing_collection_refuses_selection_without_consuming_the_installation_slot() {
     let mut candidate = candidate(true);
-    let original = candidate.world().resource::<ActionMap>().bindings_handle();
+    let original = candidate
+        .world()
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap()
+        .bindings_handle();
     with_scope(&mut candidate, |scope| {
         scope.apply_command(|world: &mut World| {
-            let map = world.remove_resource::<ActionMap>().unwrap();
-            world.insert_resource(SavedActionMap(map));
+            let maps = world.remove_resource::<ActionMaps>().unwrap();
+            world.insert_resource(SavedActionMaps(maps));
         });
         assert_eq!(
             finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space))),
@@ -249,12 +451,14 @@ fn a_missing_map_refuses_selection_without_consuming_the_installation_slot() {
             Err(InputSelectionError::MissingActionMap)
         );
     });
-    assert!(!candidate.world().contains_resource::<ActionMap>());
+    assert!(!candidate.world().contains_resource::<ActionMaps>());
     assert!(
         candidate
             .world()
-            .resource::<SavedActionMap>()
+            .resource::<SavedActionMaps>()
             .0
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );
@@ -263,8 +467,49 @@ fn a_missing_map_refuses_selection_without_consuming_the_installation_slot() {
     let expected = selected.bindings_handle();
     with_scope(&mut candidate, |scope| {
         scope.apply_command(|world: &mut World| {
-            let saved = world.remove_resource::<SavedActionMap>().unwrap();
+            let saved = world.remove_resource::<SavedActionMaps>().unwrap();
             world.insert_resource(saved.0);
+        });
+        finalize_input_selection(scope, Some(selected)).unwrap();
+    });
+    assert_startup_selection(candidate, &expected, true);
+}
+
+#[test]
+fn a_missing_primary_slot_refuses_selection_until_its_original_map_returns() {
+    let mut candidate = candidate(true);
+    with_scope(&mut candidate, |scope| {
+        scope.apply_command(|world: &mut World| {
+            let original = world
+                .resource_mut::<ActionMaps>()
+                .remove(InputSeatId::PRIMARY)
+                .unwrap();
+            world.insert_resource(SavedActionMap(original));
+        });
+        assert_eq!(
+            finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space))),
+            Err(InputSelectionError::MissingActionMap)
+        );
+    });
+    assert!(
+        candidate
+            .world()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .is_none()
+    );
+    let selected = action_map("file.jump", KeyCode::Space);
+    let expected = selected.bindings_handle();
+    with_scope(&mut candidate, |scope| {
+        scope.apply_command(|world: &mut World| {
+            let original = world.remove_resource::<SavedActionMap>().unwrap().0;
+            assert!(
+                world
+                    .resource_mut::<ActionMaps>()
+                    .insert(InputSeatId::PRIMARY, original)
+                    .unwrap()
+                    .is_none()
+            );
         });
         finalize_input_selection(scope, Some(selected)).unwrap();
     });
@@ -309,7 +554,7 @@ fn no_selection_preserves_explicit_code_state_and_finalizes_once() {
         let expected = code_map.bindings_handle();
         with_scope(&mut candidate, |scope| {
             scope.apply_command(move |world: &mut World| {
-                world.insert_resource(code_map);
+                world.insert_resource(ActionMaps::new(code_map));
             });
             finalize_input_selection(scope, None).unwrap();
             assert_eq!(
@@ -333,22 +578,33 @@ fn failed_selection_preserves_configuration_and_can_retry_in_the_same_scope() {
         .disable_context(&ActionContext::gameplay())
         .unwrap();
     let code_bindings = code_map.bindings_handle();
-    let original_bindings = candidate.world().resource::<ActionMap>().bindings_handle();
+    let original_bindings = candidate
+        .world()
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap()
+        .bindings_handle();
     let selected = action_map("file.jump", KeyCode::Space);
     let expected = selected.bindings_handle();
 
     with_scope(&mut candidate, |scope| {
         scope.apply_command(move |world: &mut World| {
-            let original = world.remove_resource::<ActionMap>().unwrap();
+            let original = world
+                .resource_mut::<ActionMaps>()
+                .insert(InputSeatId::PRIMARY, code_map)
+                .unwrap()
+                .unwrap();
             world.insert_resource(SavedActionMap(original));
-            world.insert_resource(code_map);
         });
         assert_eq!(
             finalize_input_selection(scope, Some(action_map("rejected.jump", KeyCode::Space))),
             Err(InputSelectionError::CompetingConfiguration)
         );
         scope.apply_command(move |world: &mut World| {
-            let current = world.resource::<ActionMap>();
+            let current = world
+                .resource::<ActionMaps>()
+                .get(InputSeatId::PRIMARY)
+                .unwrap();
             assert!(current.bindings_handle().shares_owner_with(&code_bindings));
             assert!(!current.is_context_enabled(&ActionContext::gameplay()));
             assert!(world.resource::<StartupObservations>().0.is_empty());
@@ -359,7 +615,10 @@ fn failed_selection_preserves_configuration_and_can_retry_in_the_same_scope() {
                     .bindings_handle()
                     .shares_owner_with(&original_bindings)
             );
-            world.insert_resource(saved.0);
+            world
+                .resource_mut::<ActionMaps>()
+                .insert(InputSeatId::PRIMARY, saved.0)
+                .unwrap();
         });
         finalize_input_selection(scope, Some(selected)).unwrap();
     });

@@ -7,7 +7,8 @@ use thiserror::Error;
 
 use crate::{
     GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandKey, GameplayCommandSource,
-    GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
+    GameplayCommandSourceId, GameplayCommandSourceSequence, GameplayCommandSubmission,
+    GameplayCommandTick,
 };
 
 pub const MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS: usize = 65_536;
@@ -160,6 +161,8 @@ pub enum GameplayCommandSettingsError {
 pub enum GameplayCommandRejection {
     #[error("gameplay command queue lifecycle has failed")]
     LifecycleFaulted,
+    #[error("gameplay command source is excluded by the queue ingress policy")]
+    UnexpectedSource { actual: GameplayCommandSource },
     #[error("gameplay command logical size overflowed")]
     LogicalSizeOverflow,
     #[error("gameplay command payload exceeds its item limit")]
@@ -392,11 +395,18 @@ struct GameplayCommandCounters {
     lifecycle_faults: u64,
 }
 
+#[derive(Debug)]
+enum GameplayCommandIngressPolicy {
+    Live,
+    Replay(GameplayCommandSourceId),
+}
+
 /// Bounded authoritative gameplay intent waiting for fixed-tick admission.
 ///
 /// Producers submit local semantic actions in `PreUpdate` or explicit replay/AI/external commands
 /// before the engine-owned admission stage. The queue retains accepted intent across zero-tick
 /// frames.
+/// [`Self::for_replay`] restricts a fresh queue to one replay stream for its entire lifetime.
 /// `Admit` moves one tick into `GameplayCommandBatch`; `Acknowledge` retires it after successful
 /// consumption and replay capture. Managed execution failure quarantines the unacknowledged batch.
 /// A lifecycle fault terminally poisons ingress, hides the public batch, and moves any admitted
@@ -406,6 +416,7 @@ struct GameplayCommandCounters {
 #[derive(Debug, Resource)]
 pub struct GameplayCommandQueue {
     settings: GameplayCommandQueueSettings,
+    ingress_policy: GameplayCommandIngressPolicy,
     pending: BTreeMap<GameplayCommandTick, BTreeMap<SourceSequenceKey, QueuedCommand>>,
     quarantined: Vec<GameplayCommandEnvelope>,
     quarantined_bytes: usize,
@@ -431,8 +442,28 @@ impl Default for GameplayCommandQueue {
 impl GameplayCommandQueue {
     #[must_use]
     pub fn new(settings: GameplayCommandQueueSettings) -> Self {
+        Self::with_ingress_policy(settings, GameplayCommandIngressPolicy::Live)
+    }
+
+    /// Creates an empty queue that accepts only the selected replay stream.
+    ///
+    /// The ingress policy is fixed for this queue's lifetime. Other replay IDs, local actions,
+    /// test drivers, AI and external producers are rejected before retaining any intent.
+    #[must_use]
+    pub fn for_replay(
+        settings: GameplayCommandQueueSettings,
+        source: GameplayCommandSourceId,
+    ) -> Self {
+        Self::with_ingress_policy(settings, GameplayCommandIngressPolicy::Replay(source))
+    }
+
+    fn with_ingress_policy(
+        settings: GameplayCommandQueueSettings,
+        ingress_policy: GameplayCommandIngressPolicy,
+    ) -> Self {
         Self {
             settings,
+            ingress_policy,
             pending: BTreeMap::new(),
             quarantined: Vec::new(),
             quarantined_bytes: 0,
@@ -455,6 +486,15 @@ impl GameplayCommandQueue {
         self.settings
     }
 
+    /// Returns the only permitted replay source, or `None` for ordinary live ingress.
+    #[must_use]
+    pub const fn replay_source(&self) -> Option<&GameplayCommandSourceId> {
+        match &self.ingress_policy {
+            GameplayCommandIngressPolicy::Live => None,
+            GameplayCommandIngressPolicy::Replay(source) => Some(source),
+        }
+    }
+
     pub fn submit(
         &mut self,
         submission: GameplayCommandSubmission,
@@ -468,9 +508,7 @@ impl GameplayCommandQueue {
         key: GameplayCommandKey,
         command: GameplayCommandDraft,
     ) -> Result<GameplayCommandKey, GameplayCommandRejection> {
-        if self.last_lifecycle_error.is_some() {
-            return self.reject(GameplayCommandRejection::LifecycleFaulted);
-        }
+        self.validate_ingress(key.source())?;
         let payload_items = command.payload().len();
         if payload_items > self.settings.payload_items.get() {
             return self.reject(GameplayCommandRejection::PayloadItemLimit {
@@ -636,9 +674,7 @@ impl GameplayCommandQueue {
         &mut self,
         command: GameplayCommandDraft,
     ) -> Result<GameplayCommandKey, GameplayCommandRejection> {
-        if self.last_lifecycle_error.is_some() {
-            return self.reject(GameplayCommandRejection::LifecycleFaulted);
-        }
+        self.validate_ingress(&GameplayCommandSource::LocalAction)?;
         let Some(tick) = self
             .closed_through_tick
             .checked_add(1)
@@ -804,6 +840,23 @@ impl GameplayCommandQueue {
             self.invalidate_batch(batch, GameplayCommandLifecycleError::BatchExecutionFailed);
     }
 
+    fn validate_ingress(
+        &mut self,
+        source: &GameplayCommandSource,
+    ) -> Result<(), GameplayCommandRejection> {
+        if self.last_lifecycle_error.is_some() {
+            return self.reject(GameplayCommandRejection::LifecycleFaulted);
+        }
+        if let GameplayCommandIngressPolicy::Replay(expected) = &self.ingress_policy
+            && !matches!(source, GameplayCommandSource::Replay { stream } if stream == expected)
+        {
+            return self.reject(GameplayCommandRejection::UnexpectedSource {
+                actual: source.clone(),
+            });
+        }
+        Ok(())
+    }
+
     fn reject<T>(
         &mut self,
         rejection: GameplayCommandRejection,
@@ -814,7 +867,8 @@ impl GameplayCommandQueue {
                 self.counters.rejected_lifecycle =
                     self.counters.rejected_lifecycle.saturating_add(1);
             }
-            GameplayCommandRejection::LogicalSizeOverflow
+            GameplayCommandRejection::UnexpectedSource { .. }
+            | GameplayCommandRejection::LogicalSizeOverflow
             | GameplayCommandRejection::PayloadItemLimit { .. }
             | GameplayCommandRejection::PayloadByteLimit { .. }
             | GameplayCommandRejection::CommandByteLimit { .. } => {

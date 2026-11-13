@@ -12,6 +12,8 @@ use nara_app::{
 use nara_core::Vec2;
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 
+mod axis;
+mod binding;
 mod definition;
 #[cfg(feature = "serde")]
 mod format;
@@ -22,6 +24,8 @@ mod semantic;
 mod state;
 mod timeline;
 
+pub use axis::{AxisDeadZone, AxisValue, AxisValueError};
+pub use binding::{ActionBinding, ActionTransform, ActionValueKind, AxisDirection};
 pub use definition::{
     ActionContextDefinition, ActionMapBindings, ActionMapBuilder, ActionMapCompileCost,
     ActionMapDefinition, ActionMapError, ActionMapLimitKind, ActionMapLimits, MAX_ACTION_BINDINGS,
@@ -31,21 +35,24 @@ pub use definition::{
 pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
 #[cfg(feature = "serde")]
 pub use runtime::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
-use schedule::InputSet;
+pub use schedule::InputSet;
 use semantic::{ActionStaging, StagedActionRevision};
 pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
-pub use state::{ActionMap, InputSelectionError, finalize_input_selection};
+pub use state::{
+    ActionMap, ActionMapInstallError, ActionMaps, InputSelectionError, MAX_SEAT_ACTION_MAPS,
+    finalize_input_selection,
+};
 
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
-    ActionInputProvenance, InputAdmission, InputConfigurationError, InputConsumerCursors,
-    InputEndpointRetirement, InputEventKind, InputEventOrigin, InputFrameObservations,
-    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputLimits,
-    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
-    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
-    InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId,
-    MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
+    ActionInputProvenance, GamepadConnection, InputAdmission, InputConfigurationError,
+    InputConsumerCursors, InputEndpointRetirement, InputEventKind, InputEventOrigin,
+    InputFrameObservations, InputGamepadGeneration, InputGeometryGeneration, InputIngressError,
+    InputInvalidationReason, InputLimits, InputPointerId, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputRouteStamp, InputSeatId, InputSlotGeneration,
+    InputSurfaceId, InputTimeline, InputTimelineEntry, InputUiCursorError, InputUiDisposition,
+    InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -72,7 +79,6 @@ pub enum MouseButton {
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::schedule::InputSet;
     pub use crate::timeline::{
         InputEndpointClaim, InputRouteCommit, PreparedInputRoutePublication, abort_presented_route,
         claim_input_endpoint, commit_presented_route, owns_prepared_route, prepare_claimed_route,
@@ -451,15 +457,67 @@ pub fn apply_pointer_driver_input_at(
     Ok((output.admission, output.released_mouse_buttons))
 }
 
-pub fn apply_gamepad_driver_input(
+/// Connects one platform controller stream to an already connected endpoint.
+pub fn connect_gamepad_input(
     scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
     gamepad: u16,
+) -> Result<GamepadConnection, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectGamepad {
+            window,
+            seat,
+            gamepad,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output
+        .gamepad_connection
+        .expect("an accepted connect operation returns its original connection"))
+}
+
+/// Connects a synthetic controller through the same finite membership and terminal owner.
+pub fn connect_synthetic_gamepad_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    gamepad: u16,
+) -> Result<GamepadConnection, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectSyntheticGamepad {
+            window,
+            seat,
+            gamepad,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output
+        .gamepad_connection
+        .expect("an accepted connect operation returns its original connection"))
+}
+
+/// Releases and neutralizes the original connection before retiring its device slot.
+pub fn disconnect_gamepad_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    connection: &GamepadConnection,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::DisconnectGamepad {
+            connection: connection.clone(),
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.admission)
+}
+
+/// Admits a button through the origin, endpoint and generation captured by its connection.
+pub fn apply_gamepad_button_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    connection: &GamepadConnection,
     button: u16,
     phase: ButtonTransitionPhase,
 ) -> Result<InputAdmission, ButtonInputDriverError> {
     let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::SyntheticGamepad {
-            gamepad,
+        .__apply_port::<InputTimeline>(__InputDriverEvent::GamepadButton {
+            connection: connection.clone(),
             button,
             phase,
         })
@@ -467,21 +525,18 @@ pub fn apply_gamepad_driver_input(
     Ok(output.admission)
 }
 
-pub fn apply_gamepad_driver_input_at(
+/// Admits an already validated normalized scalar through the original connection.
+pub fn apply_gamepad_axis_input(
     scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    gamepad: u16,
-    button: u16,
-    phase: ButtonTransitionPhase,
+    connection: &GamepadConnection,
+    axis: u16,
+    value: AxisValue,
 ) -> Result<InputAdmission, ButtonInputDriverError> {
     let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Gamepad {
-            window,
-            seat,
-            gamepad,
-            button,
-            phase,
+        .__apply_port::<InputTimeline>(__InputDriverEvent::GamepadAxis {
+            connection: connection.clone(),
+            axis,
+            value,
         })
         .map_err(ButtonInputDriverError::WorldAccess)??;
     Ok(output.admission)
@@ -633,64 +688,56 @@ impl<'de> serde::Deserialize<'de> for ActionContext {
 pub enum InputBinding {
     Key(KeyCode),
     Mouse(MouseButton),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ActionBinding {
-    pub action: ActionId,
-    pub input: InputBinding,
-    pub context: ActionContext,
-}
-
-impl ActionBinding {
-    #[must_use]
-    pub fn key(action: ActionId, key: KeyCode) -> Self {
-        Self {
-            action,
-            input: InputBinding::Key(key),
-            context: ActionContext::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn mouse(action: ActionId, button: MouseButton) -> Self {
-        Self {
-            action,
-            input: InputBinding::Mouse(button),
-            context: ActionContext::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, context: ActionContext) -> Self {
-        self.context = context;
-        self
-    }
+    GamepadButton(u16),
+    GamepadAxis(u16),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ActionPhase {
     Started,
+    Changed,
     Released,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ActionValue {
-    pub digital: bool,
+pub enum ActionValue {
+    Button(bool),
+    Axis(AxisValue),
+}
+
+impl Default for ActionValue {
+    fn default() -> Self {
+        Self::released()
+    }
 }
 
 impl ActionValue {
     #[must_use]
     pub const fn pressed() -> Self {
-        Self { digital: true }
+        Self::Button(true)
     }
 
     #[must_use]
     pub const fn released() -> Self {
-        Self { digital: false }
+        Self::Button(false)
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> ActionValueKind {
+        match self {
+            Self::Button(_) => ActionValueKind::Button,
+            Self::Axis(_) => ActionValueKind::Axis,
+        }
+    }
+
+    #[must_use]
+    pub fn is_active(self) -> bool {
+        match self {
+            Self::Button(pressed) => pressed,
+            Self::Axis(value) => value != AxisValue::ZERO,
+        }
     }
 }
 
@@ -784,11 +831,11 @@ impl Plugin for InputPlugin {
         app.insert_resource(
             ButtonInput::<MouseButton>::with_limits(limits).map_err(projection_error)?,
         )?;
-        if !app.world().contains_resource::<ActionMap>() {
-            app.insert_resource(ActionMap::pristine())?;
+        if !app.world().contains_resource::<ActionMaps>() {
+            app.insert_resource(ActionMaps::pristine())?;
         }
         app.insert_resource(state::InputInstallation::new(
-            app.world().resource::<ActionMap>(),
+            app.world().resource::<ActionMaps>(),
         ))?;
         app.insert_resource(outcomes)?;
         app.insert_resource(semantic)?;
@@ -856,7 +903,10 @@ fn project_timeline_input(
             }
             InputEventKind::PointerLeft => pointer.clear_position(),
             InputEventKind::Wheel { .. }
+            | InputEventKind::GamepadConnected { .. }
+            | InputEventKind::GamepadDisconnected { .. }
             | InputEventKind::GamepadButton { .. }
+            | InputEventKind::GamepadAxis { .. }
             | InputEventKind::FocusChanged { .. }
             | InputEventKind::Resized { .. }
             | InputEventKind::ScaleFactorChanged { .. }
@@ -875,18 +925,18 @@ fn publish_timeline_observations(
 }
 
 fn finalize_timeline_routing(
-    action_map: Res<ActionMap>,
+    action_maps: Res<ActionMaps>,
     mut staging: ResMut<ActionStaging>,
     mut timeline: ResMut<InputTimeline>,
 ) {
-    let revision = staging.observe(&action_map);
+    staging.observe_maps(&action_maps);
     timeline.finalize_ui_routing();
-    timeline.stage_actions(&revision);
+    timeline.stage_actions(&staging);
     timeline.reclaim_completed();
 }
 
 fn resolve_action_outcomes(
-    action_map: Res<ActionMap>,
+    action_maps: Res<ActionMaps>,
     mut staging: ResMut<ActionStaging>,
     mut timeline: ResMut<InputTimeline>,
     mut outcomes: ResMut<ActionOutcomes>,
@@ -896,46 +946,53 @@ fn resolve_action_outcomes(
         outcomes.clear();
     }
     semantic.clear_outcomes();
-    let revision = staging.observe(&action_map);
-    semantic.reconcile(&action_map, &revision);
+    staging.observe_maps(&action_maps);
+    semantic.reconcile(&action_maps, &staging);
     for (entry, staged_revision) in timeline.take_deferred_action_inputs() {
-        let Some((input, transition_phase)) = entry.action_transition() else {
-            continue;
-        };
-        resolve_input_binding(
-            &action_map,
-            input,
-            transition_phase,
-            entry.action_provenance(),
-            &mut outcomes,
-        );
-        semantic.apply(&action_map, &revision, &staged_revision, entry);
+        if let Some(map) = action_maps.get(entry.route().seat()) {
+            resolve_input_binding(map, entry, &mut outcomes);
+        }
+        semantic.apply(&action_maps, &staging, &staged_revision, entry);
     }
 }
 
 fn resolve_input_binding(
     action_map: &ActionMap,
-    input: InputBinding,
-    transition_phase: ButtonTransitionPhase,
-    provenance: ActionInputProvenance,
+    entry: InputTimelineEntry,
     outcomes: &mut ActionOutcomes,
 ) {
-    let (phase, value) = match transition_phase {
-        ButtonTransitionPhase::Pressed => (ActionPhase::Started, ActionValue::pressed()),
-        ButtonTransitionPhase::Released => (ActionPhase::Released, ActionValue::released()),
+    let Some(input) = entry.action_input() else {
+        return;
+    };
+    let axis = entry.axis_value();
+    let transition = entry.action_transition().map(|(_, phase)| phase);
+    let phase = match (axis, transition) {
+        (Some(AxisValue::ZERO), _) | (_, Some(ButtonTransitionPhase::Released)) => {
+            ActionPhase::Released
+        }
+        (Some(_), _) if entry.press_sequence() != Some(entry.sequence()) => ActionPhase::Changed,
+        (Some(_), _) | (_, Some(ButtonTransitionPhase::Pressed)) => ActionPhase::Started,
+        _ => return,
     };
     for binding_index in action_map.binding_indices_for_input(input) {
         let Some(binding) = action_map.binding_at(binding_index) else {
             continue;
         };
         if action_map.is_context_enabled(&binding.context) {
+            let value = match axis {
+                Some(value) => binding.value_for_axis(value),
+                None => transition.and_then(|phase| binding.value_for_button(phase)),
+            };
+            let Some(value) = value else {
+                continue;
+            };
             outcomes.push_projected(ActionOutcome {
                 action: binding.action.clone(),
                 context: binding.context.clone(),
                 binding: input,
                 phase,
                 value,
-                provenance,
+                provenance: entry.action_provenance(),
             });
         }
     }
@@ -1064,6 +1121,9 @@ mod tests {
                 InputBinding::Mouse(button) => {
                     apply_mouse_driver_input(scope, ButtonDriverInput::Press(button)).unwrap();
                 }
+                InputBinding::GamepadButton(_) | InputBinding::GamepadAxis(_) => {
+                    unreachable!("this change-detection fixture supplies keyboard and mouse inputs")
+                }
             })
             .map(|outcome| {
                 assert!(outcome.post_operation_fault.is_none());
@@ -1106,7 +1166,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Space));
 
@@ -1186,7 +1248,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Space));
 
@@ -1198,7 +1262,7 @@ mod tests {
         assert_eq!(observed[0].action.as_str(), "jump");
         assert_eq!(observed[0].binding, InputBinding::Key(KeyCode::Space));
         assert_eq!(observed[0].phase, ActionPhase::Started);
-        assert!(observed[0].value.digital);
+        assert_eq!(observed[0].value, ActionValue::pressed());
         assert!(runtime.world().resource::<ActionOutcomes>().is_empty());
         runtime.finish().unwrap();
     }
@@ -1223,7 +1287,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime
@@ -1253,7 +1319,7 @@ mod tests {
         let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].phase, ActionPhase::Released);
-        assert!(!observed[0].value.digital);
+        assert_eq!(observed[0].value, ActionValue::released());
         runtime.finish().unwrap();
     }
 
@@ -1277,7 +1343,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_mouse(&mut app, ButtonDriverInput::Press(MouseButton::Left));
 
@@ -1289,7 +1357,7 @@ mod tests {
         assert_eq!(observed[0].action.as_str(), "select");
         assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
         assert_eq!(observed[0].phase, ActionPhase::Started);
-        assert!(observed[0].value.digital);
+        assert_eq!(observed[0].value, ActionValue::pressed());
         assert!(runtime.world().resource::<ActionOutcomes>().is_empty());
         runtime.finish().unwrap();
     }
@@ -1314,7 +1382,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime
@@ -1345,7 +1415,7 @@ mod tests {
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
         assert_eq!(observed[0].phase, ActionPhase::Released);
-        assert!(!observed[0].value.digital);
+        assert_eq!(observed[0].value, ActionValue::released());
         runtime.finish().unwrap();
     }
 
@@ -1368,11 +1438,15 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .disable_context(&menu)
             .unwrap();
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Enter));
@@ -1405,7 +1479,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::ArrowUp));
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Character('w')));
@@ -1449,7 +1525,9 @@ mod tests {
         }
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Space));
 
@@ -1489,7 +1567,9 @@ mod tests {
             .unwrap();
         app.world_mut()
             .unwrap()
-            .resource_mut::<ActionMap>()
+            .resource_mut::<ActionMaps>()
+            .get_mut(InputSeatId::PRIMARY)
+            .unwrap()
             .replace_bindings(builder.compile().unwrap().into_bindings());
         admit_key(&mut app, ButtonDriverInput::Press(KeyCode::Enter));
         admit_key(&mut app, ButtonDriverInput::Release(KeyCode::Enter));
@@ -1554,7 +1634,7 @@ mod tests {
             .unwrap();
         let bindings = action_map.bindings_handle();
         let revision = Arc::clone(&action_map.revision);
-        let mut staging = ActionStaging::default();
+        let mut staging = semantic::MapStaging::default();
         let staged = staging.observe(&action_map);
         let unknown = ActionContext::new("undeclared").unwrap();
 

@@ -7,12 +7,12 @@ use nara_app::{
 };
 use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_input::__private::InputSet;
+use nara_input::InputSet;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput, InputEventKind,
-    InputEventOrigin, InputFrameObservations, InputGeometryGeneration, InputLimits, InputPointerId,
-    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
+    ActionMaps, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput,
+    InputEventKind, InputEventOrigin, InputFrameObservations, InputGeometryGeneration, InputLimits,
+    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
     InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
     MouseButton, apply_keyboard_driver_input, apply_keyboard_driver_input_at,
     apply_mouse_driver_input_at, apply_window_input_driver_event, connect_input_endpoint,
@@ -150,11 +150,15 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
         .unwrap()
         .add_systems(CoreStage::Update, capture_action_outcomes)
         .unwrap();
-    app.insert_resource(gameplay_action_map(ActionBinding::key(
-        ActionId::new("move").unwrap(),
-        key,
-    )))
+    let primary = gameplay_action_map(ActionBinding::key(ActionId::new("move").unwrap(), key));
+    let secondary = ActionMap::new(
+        primary.bindings_handle(),
+        ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+    )
     .unwrap();
+    let mut maps = ActionMaps::new(primary);
+    assert!(maps.insert(second_seat, secondary).unwrap().is_none());
+    app.insert_resource(maps).unwrap();
     for (window, seat, surface) in [
         (first_window, first_seat, InputSurfaceId::new(9)),
         (second_window, second_seat, InputSurfaceId::new(10)),
@@ -339,10 +343,10 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
         .unwrap()
         .add_systems(CoreStage::Update, capture_action_outcomes)
         .unwrap();
-    app.insert_resource(gameplay_action_map(ActionBinding::mouse(
+    app.insert_resource(ActionMaps::new(gameplay_action_map(ActionBinding::mouse(
         ActionId::new("select").unwrap(),
         button,
-    )))
+    ))))
     .unwrap();
     let mut runtime = start_runtime(app);
     runtime
@@ -561,10 +565,10 @@ fn exact_step_projects_admitted_key_and_focus_release_before_fixed_simulation() 
         .unwrap()
         .add_systems(CoreStage::Update, capture_actions)
         .unwrap();
-    app.insert_resource(gameplay_action_map(ActionBinding::key(
+    app.insert_resource(ActionMaps::new(gameplay_action_map(ActionBinding::key(
         ActionId::new("move").unwrap(),
         KeyCode::Character('d'),
-    )))
+    ))))
     .unwrap();
     app.world_mut()
         .unwrap()
@@ -771,10 +775,10 @@ fn paused_ui_consumption_is_observed_once_and_skipped_by_gameplay_on_resume() {
         .unwrap()
         .add_systems(CoreStage::Update, capture_actions)
         .unwrap();
-    app.insert_resource(gameplay_action_map(ActionBinding::key(
+    app.insert_resource(ActionMaps::new(gameplay_action_map(ActionBinding::key(
         ActionId::new("confirm").unwrap(),
         KeyCode::Enter,
-    )))
+    ))))
     .unwrap();
     app.world_mut()
         .unwrap()

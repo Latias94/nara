@@ -22,8 +22,8 @@ use nara_fs::ContentDigest;
 use nara_identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapAsset, ActionMapBuilder,
-    ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, InputBinding, InputPlugin, KeyCode,
-    SemanticActions,
+    ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps, InputBinding, InputPlugin,
+    InputSeatId, KeyCode, SemanticActions,
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
@@ -370,18 +370,18 @@ struct InputControls(Arc<Mutex<InputChanges>>);
 
 fn change_input(
     controls: Res<InputControls>,
-    mut map: ResMut<ActionMap>,
+    mut maps: ResMut<ActionMaps>,
     mut timeline: ResMut<nara_input::InputTimeline>,
 ) {
     let mut changes = controls.0.lock().unwrap();
     if std::mem::take(&mut changes.replace) {
-        *map = ActionMap::default();
+        *maps = ActionMaps::new(ActionMap::default());
     }
     if std::mem::take(&mut changes.press) {
         timeline
             .admit_keyboard(
                 nara_input::InputWindowId::UNSPECIFIED,
-                nara_input::InputSeatId::PRIMARY,
+                InputSeatId::PRIMARY,
                 nara_input::ButtonDriverInput::Press(KeyCode::Space),
             )
             .unwrap();
@@ -398,12 +398,12 @@ fn paused_queued_input_retains_only_its_state_charge_after_the_original_map_is_r
     let controls = InputControls::default();
     let mut app = App::new();
     app.add_plugin(InputPlugin).unwrap();
-    app.insert_resource(content.prepare_state().unwrap())
+    app.insert_resource(ActionMaps::new(content.prepare_state().unwrap()))
         .unwrap();
     app.insert_resource(controls.clone()).unwrap();
     app.add_systems(
         CoreStage::First,
-        change_input.before(nara_input::__private::InputSet::StageActions),
+        change_input.before(nara_input::InputSet::StageActions),
     )
     .unwrap();
     drop(content);
@@ -427,12 +427,11 @@ fn paused_queued_input_retains_only_its_state_charge_after_the_original_map_is_r
         RuntimeControlRequestResult::Accepted(_)
     ));
     runtime.drive(Duration::ZERO).unwrap();
-    assert!(
-        !runtime
-            .world()
-            .resource::<SemanticActions>()
-            .pressed(&ActionId::new("jump").unwrap(), &ActionContext::gameplay(),)
-    );
+    assert!(!runtime.world().resource::<SemanticActions>().pressed(
+        InputSeatId::PRIMARY,
+        &ActionId::new("jump").unwrap(),
+        &ActionContext::gameplay(),
+    ));
     assert_refunded(&base, baseline);
     runtime.finish().unwrap();
 }

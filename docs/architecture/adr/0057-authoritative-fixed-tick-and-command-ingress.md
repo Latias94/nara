@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-11-13
 **Refines**: ADR 0023: Event, Message, and Command Model; ADR 0024: Determinism,
 Fixed Update, and Replay Policy; ADR 0036: Event, Message, and Resource Queue Lifetime;
 ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056: Headless Runtime
@@ -75,6 +75,36 @@ explicit rank followed by the validated UTF-8 source ID: local action, test driv
 AI driver, then external producer. `LocalAction` is one reserved stream; its source sequence
 preserves the already deterministic action/binding iteration order. Adding or reordering source
 kinds requires an ADR update rather than relying on Rust enum declaration order.
+
+Static action-command bindings include the originating Input seat as well as action, context and
+phase. Their constructors select PRIMARY unless the game explicitly supplies another seat.
+Seat-local semantic actions must not match another player's static mapping merely because the
+action name is equal. A game-owned dynamic adapter may construct analog payloads and stable
+player targets through the same reserved local command ingress.
+
+### Isolated semantic replay
+
+`GameplayCommandQueue::for_replay(settings, source_id)` constructs the original queue empty with
+an immutable ingress policy accepting only that exact Replay stream. It does not adopt pending
+live intent or switch an active queue's mode. Another Replay ID, local action mapping, Test,
+AI and External submissions reject with `UnexpectedSource` before command retention or local
+source-sequence mutation. Lifecycle-fault precedence, admission, canonical ordering and Capture/
+acknowledgement remain unchanged. Local mapping rejection follows the existing managed
+`LocalIntentLoss` fault contract; expected external refusal remains a typed producer rejection.
+
+The recipe must disable producers whose accepted effects were recorded. This policy isolates
+the command ingress; it does not sandbox arbitrary trusted Rust effects. A finite recording
+consumer may import the complete original canonical command order into that Replay stream using
+monotonically assigned recording ordinals, retaining original provenance as recording data.
+Simply relabeling LocalAction/AI/External source kinds does not preserve their relative order.
+Combining that import with arbitrary live producers is outside this selected mode.
+
+Physical replay also requires original control/configuration operation order and drive
+boundaries, including Pause, exact Step and Resume. A semantic artifact instead pins its bounded
+game vocabulary, version and value kinds before its first gameplay effect; it may survive a
+physical rebind. The [seat/input/replay unit](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md)
+owns the complete fresh-runtime consumer and qualification. No universal recording format,
+rollback, network trust model or whole-World determinism claim follows from queue isolation.
 
 Serde validation is the semantic inner boundary, not an allocation firewall. A file, replay,
 network, package, or other untrusted adapter must enforce the encoded byte, nesting-depth, and

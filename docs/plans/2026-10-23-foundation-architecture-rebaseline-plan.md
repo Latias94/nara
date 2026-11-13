@@ -1156,12 +1156,30 @@ The [Headless exact-entry successor](2026-11-03-joint-motion-execution-plan.md#h
 follows the initial-pause contract through source and processed product Hosts, with explicit
 one-time paused maintenance, readiness publication and exit before any exact transaction.
 
+The [seat/gamepad/replay replacement](2026-11-13-seat-gamepad-and-input-replay-plan.md)
+continues this runtime priority. It replaces global mutable mapping state with bounded seat-local
+maps and typed button/axis semantics, extends the existing finite Input owner with original
+connection authority, and uses the original gameplay queue for isolated semantic replay.
+Qualification requires two actual game-owned players, serialized fresh-runtime raw replay with
+Pause/Step/Resume/configuration boundaries, and canonical mixed-source semantic replay after
+physical rebind. Numeric helpers or a Replay label alone do not complete this unit or R10.
+The selected normalized-input/replay unit now passes its supported ordinary consumer15 and
+affected Input/Gameplay/UI/winit426, alongside Source/Processed Runtime, source-free process and
+existing game controls. It preserves original runtime/command/input owners and records complete
+per-tick and continued-state evidence in that plan. Physical controller backends, universal
+recording/rollback and broader repeatability requirements remain open.
+The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
+installed compiler's relevant changes and a passing Input/Gameplay production-library check.
+The complete unit retains its Rust 1.95 runtime qualification baseline; the bounded 1.100 probe
+does not qualify the whole workspace, native execution or packaging on that compiler.
+
 **Design:** D09. **State:** the [joint motion/execution unit](2026-11-03-joint-motion-execution-plan.md)
 has bounded independent, captured-discontinuity Windows/DX12 and same-World prediction/offline-PCM
 qualification. The [authored collision unit](2026-11-04-authored-collision-derivation-plan.md)
 adds a concrete public Schema/Scene-to-Rapier workflow; its selected scope and qualification stay
 separate from broader repeatability/effects and affine authoring. The bounded keyboard/mouse
-Input endpoint successor is qualified.
+Input endpoint successor is qualified; the November 13 successor separately qualifies normalized
+seat maps, gamepad/axis lifetimes and the finite ordinary raw/semantic replay consumer.
 **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver

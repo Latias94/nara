@@ -16,8 +16,8 @@ use crate::{
     ActionIdError, ActionMapDefinition, ActionMapError, ActionMapFileError, ActionMapFileLimits,
     ActionMapLimitKind,
     format::{
-        action_map_string_bytes, decode_action_map, encode_action_map, encoded_action_map_bytes,
-        require_primary,
+        action_map_nodes, action_map_string_bytes, decode_action_map, encode_action_map,
+        encoded_action_map_bytes, require_primary,
     },
 };
 
@@ -205,9 +205,14 @@ impl RuntimeAssetCodec<ActionMapAsset> for ActionMapRuntimeCodec {
                 ));
             }
         }
-        // With the compiler's fixed caps, canonical depth <= 7, each record <= 5 members and
-        // nodes <= 27 + 5*64 + 11*1024. Only total string and encoded budgets can be tighter.
-        // Immutable identifier and compiled-index invariants already belong to the compiler.
+        let nodes = action_map_nodes(definition);
+        if nodes > limits.shape().nodes().get() {
+            return Err(budget_error(
+                "shape-nodes",
+                Some(nodes),
+                limits.shape().nodes().get(),
+            ));
+        }
         let strings = action_map_string_bytes(definition, Self::RUNTIME_KIND);
         if strings > limits.shape().total_string_bytes().get() {
             return Err(budget_error(

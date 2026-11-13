@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use nara_app::{__RuntimeDriverPort, RuntimeState};
 use nara_core::Vec2;
 
 use super::*;
 use crate::{
-    ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
-    PointerDriverInput,
+    ActionMaps, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
+    PointerDriverInput, semantic::ActionStaging,
 };
 
 fn slot_generation(value: u64) -> InputSlotGeneration {
@@ -43,13 +41,18 @@ fn drain_unmapped(timeline: &mut InputTimeline) {
     let mut observations = InputFrameObservations::default();
     timeline.publish_observations(&mut observations);
     timeline.finalize_ui_routing();
-    timeline.stage_actions(&Arc::default());
-    // Unmapped button edges still finish their action consumer before member reclamation.
+    timeline.stage_actions(&ActionStaging::default());
     drop(timeline.take_deferred_action_inputs());
     observations.clear();
     timeline.finish_frame_observations();
     timeline.reclaim_completed();
     assert_eq!(timeline.retained_len(), 0);
+}
+
+fn primary_staging() -> ActionStaging {
+    let mut staging = ActionStaging::default();
+    staging.observe_maps(&ActionMaps::default());
+    staging
 }
 
 fn published_timeline() -> InputTimeline {
@@ -875,12 +878,75 @@ fn presented_endpoint_retirement_balances_edges_and_waits_for_consumers_before_r
 }
 
 #[test]
+fn synchronous_ui_router_preserves_completed_prefix_and_original_release_ownership_on_unwind() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut timeline = published_timeline();
+    let window = InputWindowId::new(1);
+    let seat = InputSeatId::PRIMARY;
+    let first = timeline
+        .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+        .unwrap()
+        .first_sequence()
+        .unwrap();
+    let second = timeline
+        .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Space))
+        .unwrap()
+        .first_sequence()
+        .unwrap();
+    let mut routed = Vec::new();
+    let unwind = catch_unwind(AssertUnwindSafe(|| {
+        timeline.route_pending_ui_input(|entry| {
+            routed.push(entry.sequence());
+            if entry.sequence() == second {
+                panic!("the custom UI router failed after completing its first decision");
+            }
+            Some(InputUiDisposition::Consumed)
+        });
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(routed, [first, second]);
+    assert_eq!(
+        timeline
+            .pending_ui_entries()
+            .map(|entry| entry.sequence())
+            .collect::<Vec<_>>(),
+        [second],
+    );
+    assert_eq!(timeline.route_pending_ui_input(|_| None), 0);
+    timeline.finalize_ui_routing();
+    timeline.stage_actions(&primary_staging());
+    let gameplay = timeline.take_deferred_action_inputs();
+    assert_eq!(gameplay.len(), 1);
+    assert_eq!(gameplay[0].0.sequence(), second);
+
+    for key in [KeyCode::Enter, KeyCode::Space] {
+        timeline
+            .admit_keyboard(window, seat, ButtonDriverInput::Release(key))
+            .unwrap();
+    }
+    timeline.finalize_ui_routing();
+    timeline.stage_actions(&primary_staging());
+    let releases = timeline.take_deferred_action_inputs();
+    assert_eq!(releases.len(), 1);
+    assert_eq!(releases[0].0.press_sequence(), Some(second));
+    assert!(matches!(
+        releases[0].0.kind(),
+        InputEventKind::Key {
+            key: KeyCode::Space,
+            phase: ButtonTransitionPhase::Released
+        }
+    ));
+}
+
+#[test]
 fn retirement_releases_follow_the_consumer_that_received_each_press() {
     let window = InputWindowId::new(1);
     let seat = InputSeatId::PRIMARY;
     let pointer = InputPointerId::PRIMARY;
     for consumed in [false, true] {
         let mut timeline = published_timeline();
+        let staging = primary_staging();
         let key = timeline
             .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
             .unwrap();
@@ -904,7 +970,7 @@ fn retirement_releases_follow_the_consumer_that_received_each_press() {
             }
         }
         timeline.finalize_ui_routing();
-        timeline.stage_actions(&Arc::default());
+        timeline.stage_actions(&staging);
         assert_eq!(
             timeline.take_deferred_action_inputs().len(),
             if consumed { 0 } else { 2 }
@@ -913,7 +979,7 @@ fn retirement_releases_follow_the_consumer_that_received_each_press() {
             .retire_presented_endpoint(window, seat, Some(presented))
             .unwrap();
         timeline.finalize_ui_routing();
-        timeline.stage_actions(&Arc::default());
+        timeline.stage_actions(&staging);
         let releases = timeline.take_deferred_action_inputs();
         assert_eq!(releases.len(), if consumed { 0 } else { 2 });
         if !consumed {
@@ -1182,7 +1248,7 @@ fn independent_cursors_and_ui_consumption_preserve_paused_action_edges() {
         )
         .unwrap();
     timeline.finalize_ui_routing();
-    timeline.stage_actions(&Arc::default());
+    timeline.stage_actions(&primary_staging());
     let cursors = timeline.cursors();
     assert_eq!(cursors.ui(), 3);
     assert_eq!(cursors.action_scanned(), 3);
@@ -1225,8 +1291,7 @@ fn ordinary_saturation_preserves_reserved_observed_and_coordinated_retirement() 
             let retained = timeline.entries().copied().collect::<Vec<_>>();
             let cursors = timeline.cursors();
             let sequence = timeline.capacity.next_sequence();
-            match timeline.admit_gamepad_button(window, seat, 0, 0, ButtonTransitionPhase::Pressed)
-            {
+            match timeline.admit_wheel(window, seat, pointer, Vec2::ZERO) {
                 Ok(_) => {}
                 Err(error) => {
                     assert!(matches!(error, InputIngressError::CapacityExceeded { .. }));

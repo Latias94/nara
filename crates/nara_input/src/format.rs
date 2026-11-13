@@ -25,8 +25,9 @@ use serde::{
 
 use crate::{
     ActionBinding, ActionContext, ActionContextDefinition, ActionId, ActionIdError,
-    ActionMapBuilder, ActionMapDefinition, ActionMapError, ActionMapLimits, InputBinding,
-    MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS, MAX_ACTION_IDENTIFIER_BYTES,
+    ActionMapBuilder, ActionMapDefinition, ActionMapError, ActionMapLimits, ActionTransform,
+    AxisDirection, InputBinding, MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS,
+    MAX_ACTION_IDENTIFIER_BYTES,
 };
 
 pub const ACTION_MAP_FORMAT_KIND: &str = "action_map";
@@ -325,6 +326,7 @@ pub(super) fn action_map_string_bytes(
         bytes += "action".len()
             + "input".len()
             + "context".len()
+            + "transform".len()
             + binding.action.as_str().len()
             + binding.context.as_str().len();
         bytes += match binding.input {
@@ -350,9 +352,46 @@ pub(super) fn action_map_string_bytes(
                         MouseButton::Other(_) => "Other".len(),
                     }
             }
+            InputBinding::GamepadButton(_) => "GamepadButton".len(),
+            InputBinding::GamepadAxis(_) => "GamepadAxis".len(),
+        };
+        bytes += match binding.transform {
+            ActionTransform::Button => "Button".len(),
+            ActionTransform::AxisButton { direction } => {
+                "AxisButton".len()
+                    + "direction".len()
+                    + match direction {
+                        AxisDirection::Negative => "Negative".len(),
+                        AxisDirection::Positive => "Positive".len(),
+                    }
+            }
+            ActionTransform::Axis { .. } => "Axis".len() + "dead_zone".len() + "inverted".len(),
         };
     }
     bytes
+}
+
+/// Counts canonical JSON nodes, including object keys, without allocating wire data.
+pub(super) fn action_map_nodes(definition: &ActionMapDefinition) -> usize {
+    use crate::{KeyCode, MouseButton};
+
+    let mut nodes = 27 + 5 * definition.contexts().len();
+    for binding in definition.bindings() {
+        nodes += match binding.input {
+            InputBinding::Key(KeyCode::Character(_))
+            | InputBinding::Mouse(MouseButton::Other(_)) => 11,
+            InputBinding::Key(_)
+            | InputBinding::Mouse(_)
+            | InputBinding::GamepadButton(_)
+            | InputBinding::GamepadAxis(_) => 9,
+        };
+        nodes += match binding.transform {
+            ActionTransform::Button => 2,
+            ActionTransform::AxisButton { .. } => 6,
+            ActionTransform::Axis { .. } => 8,
+        };
+    }
+    nodes
 }
 
 /// Concrete failures survive the serde visitor boundary; only JSON grammar errors use serde's
@@ -968,6 +1007,44 @@ struct BindingSeed<'a> {
     state: &'a mut DecodeState,
 }
 
+struct TransformRecord(ActionTransform);
+
+impl<'de> Deserialize<'de> for TransformRecord {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct AxisButton {
+            direction: AxisDirection,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Axis {
+            dead_zone: crate::AxisDeadZone,
+            inverted: bool,
+        }
+
+        #[derive(Deserialize)]
+        enum Record {
+            Button,
+            AxisButton(ObjectOnly<AxisButton>),
+            Axis(ObjectOnly<Axis>),
+        }
+
+        let transform = match Record::deserialize(deserializer)? {
+            Record::Button => ActionTransform::Button,
+            Record::AxisButton(ObjectOnly(axis)) => ActionTransform::AxisButton {
+                direction: axis.direction,
+            },
+            Record::Axis(ObjectOnly(axis)) => ActionTransform::Axis {
+                dead_zone: axis.dead_zone,
+                inverted: axis.inverted,
+            },
+        };
+        Ok(Self(transform))
+    }
+}
+
 impl<'de> DeserializeSeed<'de> for BindingSeed<'_> {
     type Value = ActionBinding;
 
@@ -983,7 +1060,9 @@ impl<'de> Visitor<'de> for BindingSeed<'_> {
     type Value = ActionBinding;
 
     fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a binding object with action, input and context members")
+        formatter.write_str(
+            "a binding object with action, input, context and optional transform members",
+        )
     }
 
     fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
@@ -993,11 +1072,13 @@ impl<'de> Visitor<'de> for BindingSeed<'_> {
             Action,
             Input,
             Context,
+            Transform,
         }
 
         let mut action = None;
         let mut input = None;
         let mut context = None;
+        let mut transform = None;
         while let Some(field) = map.next_key()? {
             match field {
                 Field::Action => {
@@ -1026,12 +1107,19 @@ impl<'de> Visitor<'de> for BindingSeed<'_> {
                             .fail::<M::Error>(ActionMapFileError::Identifier(error))
                     })?);
                 }
+                Field::Transform => {
+                    if transform.is_some() {
+                        return Err(de::Error::duplicate_field("transform"));
+                    }
+                    transform = Some(map.next_value::<TransformRecord>()?.0);
+                }
             }
         }
         Ok(ActionBinding {
             action: action.ok_or_else(|| de::Error::missing_field("action"))?,
             input: input.ok_or_else(|| de::Error::missing_field("input"))?,
             context: context.ok_or_else(|| de::Error::missing_field("context"))?,
+            transform: transform.unwrap_or_default(),
         })
     }
 }
@@ -1071,5 +1159,114 @@ impl<'de> Visitor<'de> for IdentifierSeed<'_> {
                 }));
         }
         Ok(value.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AxisDeadZone, KeyCode, MouseButton};
+
+    #[test]
+    fn canonical_costs_count_all_typed_metadata_from_the_actual_wire_value() {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .declare_context(ActionContext::new("menu").unwrap(), false)
+            .unwrap();
+        let inputs = [
+            InputBinding::Key(KeyCode::Escape),
+            InputBinding::Key(KeyCode::Space),
+            InputBinding::Key(KeyCode::Enter),
+            InputBinding::Key(KeyCode::ArrowUp),
+            InputBinding::Key(KeyCode::ArrowDown),
+            InputBinding::Key(KeyCode::ArrowLeft),
+            InputBinding::Key(KeyCode::ArrowRight),
+            InputBinding::Key(KeyCode::Character('é')),
+            InputBinding::Mouse(MouseButton::Left),
+            InputBinding::Mouse(MouseButton::Right),
+            InputBinding::Mouse(MouseButton::Middle),
+            InputBinding::Mouse(MouseButton::Other(u16::MAX)),
+            InputBinding::GamepadButton(u16::MAX),
+        ];
+        for (index, input) in inputs.into_iter().enumerate() {
+            for (variant, transform) in [
+                ActionTransform::Button,
+                ActionTransform::AxisButton {
+                    direction: AxisDirection::Negative,
+                },
+                ActionTransform::AxisButton {
+                    direction: AxisDirection::Positive,
+                },
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                builder
+                    .bind(ActionBinding {
+                        action: ActionId::new(format!("action-{index}-{variant}")).unwrap(),
+                        input,
+                        context: ActionContext::gameplay(),
+                        transform,
+                    })
+                    .unwrap();
+            }
+        }
+        for (axis, dead_zone, inverted) in [
+            (0, AxisDeadZone::NONE, false),
+            (u16::MAX, AxisDeadZone::new(0.25).unwrap(), true),
+        ] {
+            builder
+                .bind(ActionBinding::gamepad_axis(
+                    ActionId::new(format!("axis-{axis}")).unwrap(),
+                    axis,
+                    dead_zone,
+                    inverted,
+                ))
+                .unwrap();
+        }
+        let product = AssetProductRef::new(
+            nara_asset::StableAssetId::parse_str("919617ea-c89c-4f83-9cce-b084de435a83").unwrap(),
+            ImportedProductId::PRIMARY,
+        )
+        .unwrap();
+        for definition in [
+            ActionMapBuilder::new(ActionMapLimits::default())
+                .compile()
+                .unwrap(),
+            builder.compile().unwrap(),
+        ] {
+            for kind in [ACTION_MAP_FORMAT_KIND, "runtime_action_map"] {
+                let value = serde_json::to_value(envelope_ref(product, &definition, kind)).unwrap();
+                let (nodes, strings) = wire_cost(&value);
+                assert_eq!(action_map_nodes(&definition), nodes);
+                assert_eq!(action_map_string_bytes(&definition, kind), strings);
+            }
+        }
+    }
+
+    fn wire_cost(value: &serde_json::Value) -> (usize, usize) {
+        use serde_json::Value;
+
+        match value {
+            Value::String(text) => (1, text.len()),
+            Value::Array(values) => values.iter().map(wire_cost).fold(
+                (1, 0),
+                |(nodes, strings), (child_nodes, child_strings)| {
+                    (nodes + child_nodes, strings + child_strings)
+                },
+            ),
+            Value::Object(values) => {
+                values
+                    .iter()
+                    .fold((1, 0), |(nodes, strings), (key, value)| {
+                        let (child_nodes, child_strings) = wire_cost(value);
+                        (nodes + 1 + child_nodes, strings + key.len() + child_strings)
+                    })
+            }
+            _ => (1, 0),
+        }
     }
 }

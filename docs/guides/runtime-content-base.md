@@ -230,12 +230,14 @@ The selected configuration must include the actual Input plugin. Catalog admissi
 selection does not grant Scene or addressable-root permissions. Source projection retains its
 path obligation separately; it does not silently convert an authored path into this Product.
 
-The first-party runs acquire and install global Input once before Scene materialization and
+The first-party runs acquire and install PRIMARY Input once before Scene materialization and
 Startup. `RuntimeContentBase::acquire_startup_input()` exposes the optional retained CPU owner for
 inspection. Its bindings preserve the actual `RuntimeContentAsset<ActionMapAsset>`, original
 base and decoded-output reservation. Mutable context and mapping state receives a separate
-reservation from that base. Explicit code configuration, including an empty map, competes with
-the selected Product and refuses before Startup.
+reservation from that base. Explicit PRIMARY code configuration, including an empty map,
+competes with the selected Product and refuses before Startup. An independently configured
+different seat may coexist through `ActionMaps`; it cannot replace PRIMARY selection. Public
+`ActionMaps::default()` is explicit configuration, including when installed before `InputPlugin`.
 
 Scene travel preserves the global owner and mutable state. An explicit Scene Required reference
 may independently acquire the same Product as typed CPU data and pay its own decode/output

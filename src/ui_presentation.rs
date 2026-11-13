@@ -92,7 +92,7 @@ impl Plugin for UiPresentationBridgePlugin {
             CoreStage::First,
             surfaces::synchronize_runtime_ui_surface_metrics
                 .after(nara_window::WindowSet::ApplyEvents)
-                .before(nara_input::__private::InputSet::RouteUi),
+                .before(nara_input::InputSet::RouteUi),
         )?;
         app.add_systems(CoreStage::Queue, compile_runtime_ui_packets)?;
         // CPU backends may return during the managed frame. Native WGPU results return later

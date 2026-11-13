@@ -5,9 +5,9 @@ use nara::{
     app::RuntimeInstance,
     input::{
         ButtonDriverInput, ButtonTransitionPhase, InputPointerId, InputSeatId, InputWindowEvent,
-        InputWindowId, KeyCode, MouseButton, PointerDriverInput, apply_gamepad_driver_input_at,
+        InputWindowId, KeyCode, MouseButton, PointerDriverInput, apply_gamepad_button_input,
         apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-        apply_window_input_driver_event,
+        apply_window_input_driver_event, connect_synthetic_gamepad_input, disconnect_gamepad_input,
     },
     prelude::{FixedTime, Vec2},
     ui::{
@@ -90,14 +90,15 @@ pub(super) fn clear_focus(runtime: &mut RuntimeInstance) {
 pub(super) fn activate_gamepad(runtime: &mut RuntimeInstance) {
     runtime
         .with_driver_scope(|scope| {
-            apply_gamepad_driver_input_at(
+            let gamepad = connect_synthetic_gamepad_input(
                 scope,
                 InputWindowId::new(1),
                 InputSeatId::PRIMARY,
                 0,
-                0,
-                ButtonTransitionPhase::Pressed,
-            )
+            )?;
+            apply_gamepad_button_input(scope, &gamepad, 0, ButtonTransitionPhase::Pressed)?;
+            apply_gamepad_button_input(scope, &gamepad, 0, ButtonTransitionPhase::Released)?;
+            disconnect_gamepad_input(scope, &gamepad)
         })
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());

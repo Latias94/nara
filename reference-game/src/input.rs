@@ -3,7 +3,7 @@ use nara::{
     gameplay::{ActionCommandBinding, ActionCommandMap},
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapError,
-        ActionMapLimits, ActionPhase, KeyCode,
+        ActionMapLimits, ActionMaps, ActionPhase, KeyCode,
     },
     prelude::{App, PluginError},
 };
@@ -64,7 +64,7 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
             .expect("action-map state allowance is nonzero"),
     )
     .map_err(action_map_error)?;
-    app.insert_resource(action_map)?;
+    app.insert_resource(ActionMaps::new(action_map))?;
 
     {
         let world = app.world_mut()?;

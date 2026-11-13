@@ -18,7 +18,7 @@ use engine::{
     identity::{EntityLookup, SpawnedSceneInstance},
     image::{ImageAsset, ImageDomain, ImageExtent},
     input::{
-        ActionContext, ActionId, ActionMap, ActionMapBindings, ActionOutcomes, ActionPhase,
+        ActionContext, ActionId, ActionMapBindings, ActionMaps, ActionOutcomes, ActionPhase,
         ButtonDriverInput, ButtonInput, InputBinding, InputEventOrigin, InputPointerId,
         InputSeatId, InputTimeline, InputWindowId, KeyCode, MouseButton, SemanticActionCause,
         SemanticActions,
@@ -37,7 +37,7 @@ pub const FIRE: &str = "consumer.cooked-player.fire";
 pub const KEY: KeyCode = KeyCode::ArrowUp;
 pub const MOUSE: MouseButton = MouseButton::Right;
 const WINDOW: InputWindowId = InputWindowId::new(7);
-const SEAT: InputSeatId = InputSeatId::new(2);
+const SEAT: InputSeatId = InputSeatId::PRIMARY;
 const POINTER: InputPointerId = InputPointerId::new(3);
 
 pub fn menu() -> ActionContext {
@@ -152,7 +152,10 @@ fn startup(world: &mut World) {
         timeline.connect_endpoint(WINDOW, SEAT).unwrap();
         timeline.connect_pointer(WINDOW, SEAT, POINTER).unwrap();
     }
-    let map = world.resource::<ActionMap>();
+    let map = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
     assert_eq!(map.bindings().len(), 2);
     assert!(map.is_context_enabled(&ActionContext::gameplay()));
     assert!(!map.is_context_enabled(&menu()));
@@ -277,7 +280,11 @@ fn held(world: &World, expected: bool) {
         assert_eq!(
             world
                 .resource::<SemanticActions>()
-                .pressed(&ActionId::new(action).unwrap(), &ActionContext::gameplay()),
+                .pressed(
+                    SEAT,
+                    &ActionId::new(action).unwrap(),
+                    &ActionContext::gameplay(),
+                ),
             expected
         );
     }
@@ -323,7 +330,10 @@ fn inject(world: &mut World, pressed: bool) {
 fn travel_input(world: &World) {
     held(world, true);
     let outcome = world.resource::<Outcome>();
-    let map = world.resource::<ActionMap>();
+    let map = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
     assert!(
         map.bindings_handle()
             .shares_owner_with(outcome.bindings.as_ref().unwrap())
@@ -381,6 +391,7 @@ fn advance(world: &mut World) {
     }
     for (offset, edge) in semantic.iter().enumerate() {
         let index = semantic_start + offset;
+        assert_eq!(edge.seat, SEAT);
         assert_eq!(edge.context, ActionContext::gameplay());
         assert_eq!(
             edge.cause,
@@ -407,18 +418,18 @@ fn advance(world: &mut World) {
         Phase::Pressed => {
             held(world, true);
             assert!(world.resource::<Outcome>().distance > 0);
-            assert!(
-                world
-                    .resource_mut::<ActionMap>()
-                    .disable_context(&ActionContext::gameplay())
-                    .unwrap()
-            );
+            {
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
+                assert!(map.disable_context(&ActionContext::gameplay()).unwrap());
+            }
             world.resource_mut::<Outcome>().phase = Phase::Cancelled;
         }
         Phase::Cancelled => {
             held(world, false);
             {
-                let mut map = world.resource_mut::<ActionMap>();
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
                 assert!(!map.disable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&menu()).unwrap());

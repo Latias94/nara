@@ -18,12 +18,13 @@ use nara_engine::{
     },
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
-        ActionMapLimits, ActionPhase, ButtonDriverInput, ButtonInput, ButtonInputDriverError,
-        InputEventOrigin, InputIngressError, InputLimits, InputPlugin, InputPointerId, InputSeatId,
-        InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
-        SemanticActionCause, SemanticActions, apply_keyboard_driver_input,
-        apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-        apply_window_input_driver_event, connect_input_endpoint, connect_input_pointer,
+        ActionMapLimits, ActionMaps, ActionPhase, ButtonDriverInput, ButtonInput,
+        ButtonInputDriverError, InputEventOrigin, InputIngressError, InputLimits, InputPlugin,
+        InputPointerId, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
+        MouseButton, PointerDriverInput, SemanticActionCause, SemanticActions,
+        apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_mouse_driver_input_at,
+        apply_pointer_driver_input_at, apply_window_input_driver_event, connect_input_endpoint,
+        connect_input_pointer,
     },
 };
 
@@ -79,7 +80,8 @@ struct Configuration {
     alternate: ActionMapBindings,
 }
 
-fn apply_configuration(configuration: Res<Configuration>, mut map: ResMut<ActionMap>) {
+fn apply_configuration(configuration: Res<Configuration>, mut maps: ResMut<ActionMaps>) {
+    let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
     match configuration.pending.lock().unwrap().take() {
         Some(ConfigurationChange::DisableGameplay) => {
             assert!(map.disable_context(&ActionContext::gameplay()).unwrap());
@@ -154,6 +156,7 @@ fn observe_actions(actions: Res<SemanticActions>, mut evidence: ResMut<ActionEvi
         .iter()
         .filter(|edge| edge.action.as_str() == MOVE)
     {
+        assert_eq!(edge.seat, SEAT);
         match edge.cause {
             SemanticActionCause::PhysicalInput => {
                 let provenance = edge.provenance.expect("admitted input retains its origin");
@@ -171,6 +174,9 @@ fn observe_actions(actions: Res<SemanticActions>, mut evidence: ResMut<ActionEvi
                     }
                     (ActionPhase::Released, InputEventOrigin::Synthetic) => {
                         evidence.synthetic_stops += 1
+                    }
+                    (ActionPhase::Changed, _) => {
+                        panic!("digital bindings cannot emit changed values")
                     }
                 }
             }
@@ -201,14 +207,12 @@ fn start(
     app.insert_resource(InputTimeline::with_limits(limits).unwrap())
         .unwrap();
     app.add_plugin(InputPlugin).unwrap();
-    app.insert_resource(
-        ActionMap::new(
-            original.clone(),
-            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
-        )
-        .unwrap(),
+    let map = ActionMap::new(
+        original.clone(),
+        ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
     )
     .unwrap();
+    app.insert_resource(ActionMaps::new(map)).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
     app.insert_resource(Configuration {
         pending: Arc::clone(&pending),
@@ -272,10 +276,11 @@ fn effects(runtime: &RuntimeInstance) -> Effects {
 }
 
 fn movement_is_held(runtime: &RuntimeInstance) -> bool {
-    runtime
-        .world()
-        .resource::<SemanticActions>()
-        .pressed(&ActionId::new(MOVE).unwrap(), &ActionContext::gameplay())
+    runtime.world().resource::<SemanticActions>().pressed(
+        SEAT,
+        &ActionId::new(MOVE).unwrap(),
+        &ActionContext::gameplay(),
+    )
 }
 
 fn control(runtime: &mut RuntimeInstance, command: RuntimeControl) {
@@ -558,7 +563,9 @@ fn bounded_input_aggregates_rejects_and_reuses_retired_capacity() {
     assert!(
         runtime
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );
@@ -616,12 +623,11 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
     );
     control(&mut runtime, RuntimeControl::Resume);
     assert!(!movement_is_held(&runtime));
-    assert!(
-        runtime
-            .world()
-            .resource::<SemanticActions>()
-            .pressed(&ActionId::new(MENU).unwrap(), &menu())
-    );
+    assert!(runtime.world().resource::<SemanticActions>().pressed(
+        SEAT,
+        &ActionId::new(MENU).unwrap(),
+        &menu()
+    ));
     assert_eq!(
         runtime
             .world()
@@ -696,7 +702,9 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
     assert!(
         !runtime
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );
@@ -704,7 +712,9 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
     assert!(
         runtime
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );
@@ -813,7 +823,9 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
     assert!(
         runtime
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );
@@ -894,7 +906,9 @@ fn bounded_input_reuses_keyboard_and_pointer_capacity_across_historical_identiti
     assert!(
         runtime
             .world()
-            .resource::<ActionMap>()
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
             .bindings_handle()
             .shares_owner_with(&original)
     );

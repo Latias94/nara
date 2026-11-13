@@ -4,7 +4,9 @@ use std::{any::Any, error::Error, fmt, mem::size_of, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
 
-use crate::{ActionBinding, ActionContext, InputBinding};
+use crate::{
+    ActionBinding, ActionContext, ActionId, ActionTransform, ActionValueKind, InputBinding,
+};
 
 pub const MAX_ACTION_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_ACTION_CONTEXTS: usize = 64;
@@ -139,7 +141,23 @@ pub enum ActionMapError {
     },
     DuplicateContext(ActionContext),
     UnknownContext(ActionContext),
-    DuplicateBinding,
+    DuplicateBinding {
+        action: ActionId,
+        context: ActionContext,
+        input: InputBinding,
+    },
+    InvalidTransform {
+        action: ActionId,
+        context: ActionContext,
+        input: InputBinding,
+        transform: ActionTransform,
+    },
+    InconsistentValueKind {
+        action: ActionId,
+        context: ActionContext,
+        expected: ActionValueKind,
+        actual: ActionValueKind,
+    },
     CostOverflow,
 }
 
@@ -153,7 +171,32 @@ impl fmt::Display for ActionMapError {
             } => write!(f, "action map {kind:?} requires {required}, limit {limit}"),
             Self::DuplicateContext(context) => write!(f, "duplicate action context {context}"),
             Self::UnknownContext(context) => write!(f, "undeclared action context {context}"),
-            Self::DuplicateBinding => f.write_str("duplicate complete action binding"),
+            Self::DuplicateBinding {
+                action,
+                context,
+                input,
+            } => write!(
+                f,
+                "duplicate binding for action {action} in context {context}: {input:?}"
+            ),
+            Self::InvalidTransform {
+                action,
+                context,
+                input,
+                transform,
+            } => write!(
+                f,
+                "invalid transform {transform:?} for action {action} in context {context}: {input:?}"
+            ),
+            Self::InconsistentValueKind {
+                action,
+                context,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "action {action} in context {context} requires {expected:?}, binding produces {actual:?}"
+            ),
             Self::CostOverflow => f.write_str("action map cost overflow"),
         }
     }
@@ -195,6 +238,19 @@ impl ActionMapDefinition {
     #[must_use]
     pub fn bindings(&self) -> &[ActionBinding] {
         &self.data.bindings
+    }
+    /// Returns the compiled value domain for an action in a declared context.
+    #[must_use]
+    pub fn value_kind(
+        &self,
+        action: &ActionId,
+        context: &ActionContext,
+    ) -> Option<ActionValueKind> {
+        self.data
+            .bindings
+            .iter()
+            .find(|binding| &binding.action == action && &binding.context == context)
+            .map(ActionBinding::value_kind)
     }
     #[must_use]
     pub fn cost(&self) -> ActionMapCompileCost {
@@ -352,8 +408,40 @@ impl ActionMapBuilder {
         {
             return Err(ActionMapError::UnknownContext(binding.context));
         }
-        if self.bindings.contains(&binding) {
-            return Err(ActionMapError::DuplicateBinding);
+        if !binding.is_transform_valid() {
+            return Err(ActionMapError::InvalidTransform {
+                action: binding.action,
+                context: binding.context,
+                input: binding.input,
+                transform: binding.transform,
+            });
+        }
+        if self.bindings.iter().any(|entry| {
+            entry.action == binding.action
+                && entry.context == binding.context
+                && entry.input == binding.input
+        }) {
+            return Err(ActionMapError::DuplicateBinding {
+                action: binding.action,
+                context: binding.context,
+                input: binding.input,
+            });
+        }
+        if let Some(existing) = self
+            .bindings
+            .iter()
+            .find(|entry| entry.action == binding.action && entry.context == binding.context)
+        {
+            let expected = existing.value_kind();
+            let actual = binding.value_kind();
+            if expected != actual {
+                return Err(ActionMapError::InconsistentValueKind {
+                    action: binding.action,
+                    context: binding.context,
+                    expected,
+                    actual,
+                });
+            }
         }
         let fanout = self
             .bindings

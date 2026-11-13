@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-04
+**Last Revised**: 2026-11-13
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -59,11 +59,14 @@ Rules:
 - Action maps should be able to produce semantic gameplay commands or action outcomes that can be
   consumed by replay, AI drivers, and future server-authoritative worlds without exposing raw
   device events.
-- `ActionOutcomes` exposes ordered low-level edges for each enabled physical binding.
-  `SemanticActions` separately owns aggregate held state for each action/context and exposes one
-  `Started` edge when its first physical contribution begins and one `Released` edge when its final
-  contribution ends. Gameplay command mapping consumes this semantic projection; releasing one
-  of several held bindings or endpoints cannot stop the action.
+- `ActionOutcomes` exposes ordered low-level outcomes for each enabled physical binding.
+  `SemanticActions` separately owns aggregate values for each seat/action/context. Buttons combine
+  with OR; scalar axis contributions sum in admitted-member order with a wide accumulator and
+  clamp once to [-1, 1]. Zero is inactive. Inactive-to-active emits Started, a changed active value
+  emits Changed, and active-to-zero emits Released. Opposing held axis contributions can remain
+  admitted while their sum is zero; removing one can start the value again. A definition rejects
+  mixed value kinds and duplicate `(action, context, input)` sources. Gameplay command mapping
+  consumes this semantic projection, preserving another seat's or device's contributions.
 - Disabling a context terminates its delivered semantic actions once. Re-enabling it while an
   input remains physically held leaves that action inactive until release and a fresh press.
   A mapping change ends the previous mapping lifetime with the same fresh-press requirement.
@@ -106,6 +109,17 @@ Rules:
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
 
+`InputSet` supplies supported ordering anchors for independent mapping configuration and UI
+adapters. ProjectTimeline, PublishObservations, RouteUi and StageActions run in First, in that
+order; ResolveActions runs in PreUpdate. Order a configuration change before its required First
+boundary rather than assuming a constraint crosses schedules. Set membership does not order
+peer systems. Custom routers use the original timeline's synchronous `route_pending_ui_input`:
+the callback sees its current pending entry, returns an accepted consume/rejected-closed decision
+or leaves fallback open. The owner finalizes original member custody without accepting a bare
+sequence from the caller. This neither grants presentation authority nor permits delayed
+completion. The actual UI adapter still validates captured routes and commits its own reducer/
+journal transaction; lower-level stage functions and raw finalization remain private/doc-hidden.
+
 ### Editor Text And Keyboard Handoff
 
 The native Editor adapter distinguishes the focused keyboard control from the focused text
@@ -125,7 +139,7 @@ Editor policies, not a shared gameplay action-map or platform accessibility capa
 
 ### Bounded Ingress And Terminal Retirement
 
-One Input owner admits connected window/seat records, pointer children, accepted physical/synthetic
+One Input owner admits connected window/seat records, pointer and gamepad children, accepted physical/synthetic
 members and their ordered event log. Configuration bounds persistent pools, indexes, prepared and
 retiring records, projections and retained/transient outputs. Queued, held and terminal-pending
 members stay admitted until every relevant internal consumer finishes. Read-only `ButtonInput`
@@ -139,13 +153,30 @@ projection must reacquire the next frame's pin when it is actually copied. Only 
 those copies clear releases that pin; physical loss or another cursor cannot reclaim their space
 and admit another full frame of copies in the same frame.
 
-Raw adapter labels remain the public delivery identity for this bounded workflow. Explicit
+Keyboard/mouse endpoint labels remain the public delivery identity for their bounded workflow. Explicit
 connection/retirement and private non-reused record/member identity protect internal lifetimes.
 Retirement prevents label reuse while old internal consumers still pin the record. The adapter
 drains or discards externally queued operations before reusing labels. A current-generation lookup
 or a newly allocated public handle cannot recover an old event's missing origin. A future adapter
 with asynchronous native recreation must establish its own origin/nonreuse proof before support;
 the current source review does not qualify that broader behavior.
+
+Gamepad delivery instead requires the opaque `GamepadConnection` issued by that original Input
+owner. It retains endpoint incarnation, non-reused connection generation and origin. The backend
+integer label is metadata, including when concurrent connections use equal labels. Reconnect,
+another World or endpoint recreation cannot adopt an old token. Every button and axis sample
+validates this authority before mutation; retain it at the adapter's original event boundary
+rather than looking up a current connection for an originless delayed sample.
+
+Finite normalized scalar admission rejects nonfinite/out-of-range values. A raw nonzero axis
+starts one member; later samples update that same original press sequence, and zero terminates
+it. Explicit binding transforms select scalar dead zone/inversion without hidden product defaults.
+Disconnect, focus loss and endpoint retirement neutralize accepted axes and release buttons
+before connection reuse, through the existing ordered terminal credits. UI and action/frame
+copies keep original members charged until their consumers finish. No second gamepad ledger,
+unowned callback writer or independent terminal queue is introduced. An axis member staged under
+an absent/expired mapping may not be newly adopted by later nonzero samples; neutralization and
+a fresh member are required. These contracts do not establish a physical controller backend.
 
 Coordinated owners capture an Input-issued private endpoint-incarnation claim when associating
 with a connected endpoint. The claim retains original owner/identity, independently of the active
@@ -196,11 +227,20 @@ origin recovery, seat-scoped maps, gamepad/axis holds, replay or complete text/I
 
 ### Immutable Definitions And Global Runtime Selection
 
+The November 13 [seat/gamepad/replay successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md)
+refines the earlier single-global-map implementation below. Historical qualification retains
+its original global/digital scope. The successor records separate owning, public and independently
+compiled normalized-input/replay evidence; that does not establish native controller support.
+
 `nara_input` owns one finite compiler for code-first and file-backed action definitions. An
 `ActionMapDefinition` contains declared contexts, their initial enable state, ordered physical
 bindings and compiled lookup data. It contains no mutable World state or execution authority.
-The World-local `ActionMap` is move-only and owns context enable state and mapping lifetimes;
-it is not a persistent authoring record. Unknown context operations fail without growing state.
+The World-local `ActionMaps` owns a finite set of seat mappings. Each `ActionMap` is a move-only
+value owning one seat's context enable state and mapping lifetimes; it is not a persistent
+authoring record or a second World resource. Install refusal returns the supplied original
+value. Definitions can share immutable bindings while mutable state stays independent. A seat
+without a mapping produces no gameplay actions instead of borrowing another seat's policy.
+Unknown context operations fail without growing state.
 Live `ButtonInput` and `SemanticActions` are likewise move-only: copying observations or outcomes
 does not implicitly duplicate their private edge queues, held ownership or revision custody.
 Replacing bindings consumes an already compiled definition and always begins a new mapping
@@ -214,7 +254,7 @@ cannot change installed bindings. Compiled storage sharing remains private behin
 definition wrapper, with no public borrowed-definition cloning operation.
 Source ownership retains the compiled output and its original charge; processed ownership retains
 the actual typed acquisition. Borrowing a definition cannot detach a clone of its allocation and
-substitute an unrelated retention token. A second independently mutable World state has its own
+substitute an unrelated retention token. A second independently mutable seat or World map has its own
 finite context/revision allowance. These costs do not by themselves establish a bound for all
 physical endpoints, semantic contributions or transient output in the ingress pipeline.
 
@@ -222,20 +262,22 @@ The canonical native source file is an `action_map` version-one JSON envelope wi
 complete primary Product, explicitly declared contexts and ordered bindings. It does not require
 a second identity sidecar. An observed sidecar/catalogue identity must agree with the intrinsic
 source UUID and actual canonical location; conflicting UUIDs or locations refuse admission.
-The first source workflow supports current key/mouse bindings. Chords, analog bindings and an
-action-map editor require their own complete consumer before implementation.
+The original source workflow supports key/mouse bindings. The successor adds typed gamepad and
+axis transforms through the same version-one source/runtime compiler, with omitted transforms
+defaulting to Button for existing digital files. Chords and an action-map editor remain separate.
 
-A manifest-selected global map is installed once through `RuntimeCandidateScope`, before Scene
-materialization and Startup. The actual Input owner verifies its pristine resource identity and
-rejects a competing explicit code configuration, including an explicit empty map. Missing Input
+A manifest-selected default map is installed for PRIMARY once through `RuntimeCandidateScope`,
+before Scene materialization and Startup. The actual Input owner verifies that seat's pristine
+resource identity and rejects a competing explicit PRIMARY configuration, including an explicit
+empty map. Independent code configuration of another seat does not replace PRIMARY. Missing Input
 ownership, resource replacement and repeated selection refuse installation. No installation API
 accepts an arbitrary World or a post-Startup runtime scope. With no file selection, code-first
 configuration remains valid. Startup selection and later explicit runtime rebinding are separate
 operations.
 
-The global source owner survives Scene collection replacement and travel with the same World
+The default source owner survives Scene collection replacement and travel with the same World
 state. Target preparation verifies the original file receipt and reuses that owner; changed or
-missing source refuses the target. Using a changed global definition requires an explicit restart;
+missing source refuses the target. Using a changed default definition requires an explicit restart;
 restoring the original admitted source permits a preparation retry. Ready publication consumes
 captured facts rather than discovering or installing another map at commit. The definition/state and source workflow
 are selected contracts; their implementation and actual qualification belong in the
@@ -253,11 +295,11 @@ An optional Product in admitted Runtime configuration is a startup root independ
 and addressable roots. The catalogue verifies its membership and format; composition requires
 the actual Input plugin and selected typed decoder. Startup acquires through the original base,
 retains the actual typed acquisition, separately admits mutable state and finalizes selection
-through the existing candidate scope. Global startup Input is acquired and installed once for
+through the existing candidate scope. Default PRIMARY startup Input is acquired and installed once for
 the receiving World. Scene collection replacement cannot own its only custody or recreate that
 World-local state. Explicit Scene Required references may independently acquire ActionMap products
 as typed CPU data, retaining their own acquisition charges from the original base. These reads
-grant no authority to reinstall or reconfigure global Input. When no Product is selected, explicit
+grant no authority to reinstall or reconfigure seat Input. When no Product is selected, explicit
 code-first Input remains valid. An explicitly installed code map, including empty, competes with
 a selected processed map.
 Actual implementation and source-free physical process evidence follow the

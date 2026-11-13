@@ -6,7 +6,8 @@ use nara_fs::ContentDigest;
 use nara_identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapAsset, ActionMapBindings,
-    ActionMapBuilder, ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, InputBinding,
+    ActionMapBuilder, ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps,
+    InputBinding, InputSeatId,
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
@@ -28,6 +29,7 @@ use crate::{
 
 const INPUT_FILE: &str = "input.runtime.json";
 const SCENE_FILE: &str = "startup.runtime.json";
+const OTHER_SEAT: InputSeatId = InputSeatId::new(2);
 static NEXT_INPUT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 fn product(source: &str) -> AssetProductRef {
@@ -257,7 +259,8 @@ impl Plugin for StartupInputProbePlugin {
         app.init_resource::<StartupInputProbe>()?;
         app.add_systems(
             StartupStage::Core,
-            |map: Res<ActionMap>, mut probe: nara_ecs::ResMut<StartupInputProbe>| {
+            |maps: Res<ActionMaps>, mut probe: nara_ecs::ResMut<StartupInputProbe>| {
+                let map = maps.get(InputSeatId::PRIMARY).unwrap();
                 probe.calls += 1;
                 probe.bindings = Some(map.bindings_handle());
                 probe.gameplay_enabled = map.is_context_enabled(&ActionContext::gameplay());
@@ -282,7 +285,31 @@ impl Plugin for ExplicitEmptyInputPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(ActionMap::default())?;
+        app.insert_resource(ActionMaps::new(ActionMap::default()))?;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct OtherSeatInputPlugin;
+
+impl Plugin for OtherSeatInputPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.processed-input.other-seat"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[nara_input::INPUT_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let mut maps = app.world_mut()?.resource_mut::<ActionMaps>();
+        assert!(
+            maps.insert(OTHER_SEAT, ActionMap::default())
+                .unwrap()
+                .is_none()
+        );
         Ok(())
     }
 }
@@ -325,7 +352,9 @@ fn processed_selection_is_visible_in_first_startup_from_the_captured_base_withou
     host.with_running_world(|world| {
         assert!(
             world
-                .resource::<ActionMap>()
+                .resource::<ActionMaps>()
+                .get(InputSeatId::PRIMARY)
+                .unwrap()
                 .bindings_handle()
                 .shares_owner_with(&expected)
         );
@@ -360,8 +389,48 @@ fn an_explicit_empty_code_map_refuses_processed_selection_before_startup() {
         panic!("the rejected candidate must stay in existing Host cleanup custody")
     };
     let world = owner.world().unwrap();
-    assert!(world.resource::<ActionMap>().bindings().is_empty());
+    assert!(
+        world
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
+            .bindings()
+            .is_empty()
+    );
     assert_eq!(world.resource::<StartupInputProbe>().calls, 0);
+    finish_retirement(&mut host, &base, baseline);
+    drop(attempt);
+}
+
+#[test]
+fn another_seats_explicit_map_preserves_processed_primary_selection() {
+    let fixture = InputFixture::new(recipe().add_plugin::<OtherSeatInputPlugin>().unwrap());
+    let base = fixture.open();
+    let baseline = retained_charge(&base);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let expected = selected_input(&attempt).bindings();
+    let prepared = host.prepare_start(&mut attempt).unwrap();
+    let world = prepared.runtime.runtime().unwrap().world();
+    let probe = world.resource::<StartupInputProbe>();
+    assert_eq!(probe.calls, 1);
+    assert!(
+        probe
+            .bindings
+            .as_ref()
+            .unwrap()
+            .shares_owner_with(&expected)
+    );
+    let maps = world.resource::<ActionMaps>();
+    let primary = maps.get(InputSeatId::PRIMARY).unwrap();
+    assert!(primary.bindings_handle().shares_owner_with(&expected));
+    assert_eq!(primary.bindings()[0].action.as_str(), "file.jump");
+    let other = maps.get(OTHER_SEAT).unwrap();
+    assert!(other.bindings().is_empty());
+    assert!(!other.bindings_handle().shares_owner_with(&expected));
+    assert!(!host.commit_prepared_start(prepared).has_errors());
+    drop(expected);
+    host.retire_running();
     finish_retirement(&mut host, &base, baseline);
     drop(attempt);
 }
@@ -419,7 +488,13 @@ fn failed_startup_retains_global_input_until_host_retirement_then_refunds_all_ch
     let world = owner.world().unwrap();
     assert_eq!(world.resource::<StartupInputProbe>().calls, 1);
     assert_eq!(
-        world.resource::<ActionMap>().bindings()[0].action.as_str(),
+        world
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
+            .bindings()[0]
+            .action
+            .as_str(),
         "file.jump",
     );
     assert!(retained_charge(&base) >= baseline + ActionMap::required_state_bytes());
@@ -544,7 +619,14 @@ fn processed_input_state_budget_keeps_exact_host_numbers_and_cleanup_custody() {
     };
     let world = owner.world().unwrap();
     assert_eq!(world.resource::<StartupInputProbe>().calls, 0);
-    assert!(world.resource::<ActionMap>().bindings().is_empty());
+    assert!(
+        world
+            .resource::<ActionMaps>()
+            .get(InputSeatId::PRIMARY)
+            .unwrap()
+            .bindings()
+            .is_empty()
+    );
     drop(pressure);
     finish_retirement(&mut host, &base, baseline);
     drop(attempt);

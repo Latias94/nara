@@ -3,7 +3,7 @@ use super::*;
 use nara_app::{
     __RuntimeDriverPort, RuntimeDriveError, RuntimeDriveOutcome, RuntimeWorldAccessError,
 };
-use nara_input::{InputAdmission, InputIngressError, InputRouteStamp};
+use nara_input::{GamepadConnection, InputAdmission, InputIngressError, InputRouteStamp};
 
 use crate::runtime::{
     UiDeferredPresentationAuthority, UiDeferredPresentationRetry, UiPreparedPresentationAuthority,
@@ -250,8 +250,10 @@ ui_test_commands! {
         -> Result<InputAdmission, InputIngressError> |world| { world.resource_mut::<InputTimeline>().admit_window_event(window, seat, event) };
     AdmitWheel => fn admit_wheel(window: InputWindowId, seat: InputSeatId, pointer: InputPointerId, delta: Vec2)
         -> Result<InputAdmission, InputIngressError> |world| { world.resource_mut::<InputTimeline>().admit_wheel(window, seat, pointer, delta) };
-    AdmitGamepad => fn admit_gamepad_button(window: InputWindowId, seat: InputSeatId, gamepad: u16, button: u16, phase: ButtonTransitionPhase)
-        -> Result<InputAdmission, InputIngressError> |world| { world.resource_mut::<InputTimeline>().admit_gamepad_button(window, seat, gamepad, button, phase) };
+    ConnectGamepad => fn connect_gamepad(window: InputWindowId, seat: InputSeatId, raw_label: u16)
+        -> Result<GamepadConnection, InputIngressError> |world| { world.resource_mut::<InputTimeline>().connect_gamepad(window, seat, raw_label) };
+    AdmitGamepadButton => fn admit_gamepad_button(connection: GamepadConnection, button: u16, phase: ButtonTransitionPhase)
+        -> Result<InputAdmission, InputIngressError> |world| { world.resource_mut::<InputTimeline>().admit_gamepad_button(&connection, button, phase) };
 }
 
 pub(super) struct UiTestTimeline<'a>(&'a mut UiTestApp);

@@ -7,12 +7,11 @@ use nara_ecs::{Res, ResMut, Resource};
 use super::*;
 use crate::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionPhase, ButtonDriverInput, ButtonInput, ButtonInputDriverError, InputPlugin, KeyCode,
-    MouseButton, PointerDriverInput, SemanticActions, StagedActionRevision,
-    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_window_input_driver_event,
-    connect_input_endpoint, connect_input_pointer, retire_input_pointer,
+    ActionMaps, ActionPhase, ButtonDriverInput, ButtonInput, ButtonInputDriverError, InputPlugin,
+    KeyCode, MouseButton, PointerDriverInput, SemanticActions, apply_keyboard_driver_input_at,
+    apply_mouse_driver_input_at, apply_window_input_driver_event, connect_input_endpoint,
+    connect_input_pointer, retire_input_pointer, semantic::ActionStaging,
 };
-use std::sync::Arc;
 
 const WINDOW: InputWindowId = InputWindowId::new(1);
 const BUTTON: MouseButton = MouseButton::Left;
@@ -27,6 +26,7 @@ fn observe_edges(actions: Res<SemanticActions>, mut delivered: ResMut<DeliveredE
     for edge in actions.as_slice() {
         match edge.phase {
             ActionPhase::Started => delivered.starts += 1,
+            ActionPhase::Changed => {}
             ActionPhase::Released => delivered.releases += 1,
         }
     }
@@ -55,7 +55,7 @@ fn runtime_with_timeline(mut timeline: InputTimeline) -> RuntimeInstance {
     let mut app = App::new();
     app.insert_resource(timeline).unwrap();
     app.add_plugin(InputPlugin).unwrap();
-    app.insert_resource(map).unwrap();
+    app.insert_resource(ActionMaps::new(map)).unwrap();
     app.init_resource::<DeliveredEdges>().unwrap();
     app.add_systems(CoreStage::Update, observe_edges).unwrap();
     RuntimeInstance::start(app).unwrap()
@@ -248,10 +248,11 @@ fn platform_focus_loss_finishes_all_accepted_holds_after_cross_frame_growth() {
         .world()
         .resource::<ButtonInput<MouseButton>>()
         .pressed(BUTTON);
-    let semantic = runtime
-        .world()
-        .resource::<SemanticActions>()
-        .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay());
+    let semantic = runtime.world().resource::<SemanticActions>().pressed(
+        InputSeatId::PRIMARY,
+        &ActionId::new("hold").unwrap(),
+        &ActionContext::gameplay(),
+    );
     let delivered = runtime.world().resource::<DeliveredEdges>();
     let delivered = (delivered.starts, delivered.releases);
     runtime.finish().unwrap();
@@ -287,10 +288,11 @@ fn physical_loss_does_not_allocate_a_new_route_binding_generation() {
         .world()
         .resource::<ButtonInput<MouseButton>>()
         .pressed(BUTTON);
-    let semantic = runtime
-        .world()
-        .resource::<SemanticActions>()
-        .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay());
+    let semantic = runtime.world().resource::<SemanticActions>().pressed(
+        InputSeatId::PRIMARY,
+        &ActionId::new("hold").unwrap(),
+        &ActionContext::gameplay(),
+    );
     runtime.finish().unwrap();
     assert!(
         !physical && !semantic,
@@ -303,7 +305,7 @@ fn drain_unmapped_timeline(timeline: &mut InputTimeline) {
     timeline.finish_projection();
     timeline.publish_observations(&mut InputFrameObservations::default());
     timeline.finalize_ui_routing();
-    timeline.stage_actions(&Arc::<StagedActionRevision>::default());
+    timeline.stage_actions(&ActionStaging::default());
     timeline.take_deferred_action_inputs();
     timeline.finish_frame_observations();
     timeline.reclaim_completed();

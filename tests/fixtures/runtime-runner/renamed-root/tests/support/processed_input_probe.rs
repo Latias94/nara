@@ -25,10 +25,10 @@ use engine::{
     identity::{EntityLookup, SpawnedSceneInstance},
     input::{
         ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapDomain,
-        ActionMapRuntimeCodec, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput,
-        ButtonInput, InputBinding, InputEventOrigin, InputPointerId, InputSeatId, InputTimeline,
-        InputWindowId, KeyCode, MouseButton, SemanticActionCause, SemanticActionOutcome,
-        SemanticActions,
+        ActionMapRuntimeCodec, ActionMaps, ActionOutcome, ActionOutcomes, ActionPhase,
+        ButtonDriverInput, ButtonInput, InputBinding, InputEventOrigin, InputPointerId,
+        InputSeatId, InputTimeline, InputWindowId, KeyCode, MouseButton, SemanticActionCause,
+        SemanticActionOutcome, SemanticActions,
     },
     project_host::{
         ProjectSceneRequestError, ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
@@ -51,7 +51,7 @@ const MOVE_STOP: &str = "consumer.processed-input.move-stop";
 const FIRE_START: &str = "consumer.processed-input.fire-start";
 const FIRE_STOP: &str = "consumer.processed-input.fire-stop";
 const WINDOW: InputWindowId = InputWindowId::new(7);
-const SEAT: InputSeatId = InputSeatId::new(2);
+const SEAT: InputSeatId = InputSeatId::PRIMARY;
 const POINTER: InputPointerId = InputPointerId::new(3);
 static STARTUPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -202,7 +202,7 @@ impl Plugin for CompetingInputPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(ActionMap::default())?;
+        app.insert_resource(ActionMaps::new(ActionMap::default()))?;
         Ok(())
     }
 }
@@ -320,7 +320,7 @@ impl Outcome {
             assert!(
                 edges
                     .iter()
-                    .all(|edge| edge.context == ActionContext::gameplay())
+                    .all(|edge| edge.seat == SEAT && edge.context == ActionContext::gameplay())
             );
             assert_eq!(edges[0].phase, ActionPhase::Started);
             assert_eq!(edges[0].cause, SemanticActionCause::PhysicalInput);
@@ -360,7 +360,10 @@ fn inspect_first_startup(world: &mut World) {
         timeline.connect_endpoint(WINDOW, SEAT).unwrap();
         timeline.connect_pointer(WINDOW, SEAT, POINTER).unwrap();
     }
-    let map = world.resource::<ActionMap>();
+    let map = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
     assert_eq!(map.bindings().len(), 2);
     assert!(map.is_context_enabled(&ActionContext::gameplay()));
     assert!(!map.is_context_enabled(&menu()));
@@ -431,9 +434,11 @@ fn simulate(batch: Res<GameplayCommandBatch>, mut outcome: ResMut<Outcome>) {
 fn held(world: &World, expected: bool) {
     for action in [MOVE, FIRE] {
         assert_eq!(
-            world
-                .resource::<SemanticActions>()
-                .pressed(&ActionId::new(action).unwrap(), &ActionContext::gameplay(),),
+            world.resource::<SemanticActions>().pressed(
+                SEAT,
+                &ActionId::new(action).unwrap(),
+                &ActionContext::gameplay(),
+            ),
             expected,
         );
     }
@@ -471,7 +476,10 @@ fn inject(world: &mut World, pressed: bool) {
 
 fn assert_travel_input(world: &World) {
     let outcome = world.resource::<Outcome>();
-    let map = world.resource::<ActionMap>();
+    let map = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
     assert!(
         map.bindings_handle()
             .shares_owner_with(outcome.startup_bindings.as_ref().unwrap()),
@@ -519,19 +527,19 @@ fn advance(world: &mut World) {
         Phase::Pressed => {
             held(world, true);
             assert!(world.resource::<Outcome>().distance > 0);
-            assert!(
-                world
-                    .resource_mut::<ActionMap>()
-                    .disable_context(&ActionContext::gameplay())
-                    .unwrap(),
-            );
+            {
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
+                assert!(map.disable_context(&ActionContext::gameplay()).unwrap());
+            }
             world.resource_mut::<Outcome>().phase = Phase::Cancelled;
         }
         Phase::Cancelled => {
             held(world, false);
             assert_eq!(world.resource::<Outcome>().semantic.len(), 4);
             {
-                let mut map = world.resource_mut::<ActionMap>();
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(InputSeatId::PRIMARY).unwrap();
                 assert!(!map.disable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&menu()).unwrap());

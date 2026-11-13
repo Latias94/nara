@@ -223,10 +223,10 @@ pub mod prelude {
         PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
     };
     pub use nara_input::{
-        ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
-        ActionPhase, ActionValue, ButtonInput, ButtonTransition, ButtonTransitionPhase,
-        InputBinding, KeyCode, MouseButton, PointerState, SemanticActionCause,
-        SemanticActionOutcome, SemanticActions,
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMaps, ActionOutcome,
+        ActionOutcomes, ActionPhase, ActionValue, ButtonInput, ButtonTransition,
+        ButtonTransitionPhase, InputBinding, KeyCode, MouseButton, PointerState,
+        SemanticActionCause, SemanticActionOutcome, SemanticActions,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -574,7 +574,7 @@ mod tests {
             !app.world()
                 .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
         );
-        assert!(!app.world().contains_resource::<nara_input::ActionMap>());
+        assert!(!app.world().contains_resource::<nara_input::ActionMaps>());
         assert!(
             !app.world()
                 .contains_resource::<nara_input::ActionOutcomes>()
@@ -735,7 +735,7 @@ mod tests {
             !app.world()
                 .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
         );
-        assert!(!app.world().contains_resource::<nara_input::ActionMap>());
+        assert!(!app.world().contains_resource::<nara_input::ActionMaps>());
         assert!(
             !app.world()
                 .contains_resource::<nara_input::ActionOutcomes>()

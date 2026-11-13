@@ -62,7 +62,7 @@ fn runtime(limits: InputLimits) -> RuntimeInstance {
     let mut app = App::new();
     app.insert_resource(InputTimeline::with_limits(limits).unwrap())
         .unwrap();
-    app.insert_resource(map).unwrap();
+    app.insert_resource(ActionMaps::new(map)).unwrap();
     app.add_plugin(InputPlugin).unwrap();
     app.insert_resource(FrameSnapshot::default()).unwrap();
     app.add_systems(
@@ -89,6 +89,7 @@ fn key(runtime: &mut RuntimeInstance, edge: ButtonDriverInput<KeyCode>) -> Vec<K
 
 fn activate_is_held(runtime: &RuntimeInstance) -> bool {
     runtime.world().resource::<SemanticActions>().pressed(
+        InputSeatId::PRIMARY,
         &ActionId::new("activate").unwrap(),
         &ActionContext::gameplay(),
     )
@@ -183,7 +184,7 @@ fn release_all_projects_one_terminal_edge_per_accepted_key() {
 fn physical_and_synthetic_members_share_one_semantic_aggregate() {
     let mut runtime = runtime(InputLimits::new(32, 2, 1, 4).unwrap());
     let window = InputWindowId::new(81);
-    let seat = InputSeatId::new(2);
+    let seat = InputSeatId::PRIMARY;
     input(&mut runtime, |scope| {
         connect_input_endpoint(scope, window, seat)
     })
@@ -203,6 +204,8 @@ fn physical_and_synthetic_members_share_one_semantic_aggregate() {
     let snapshot = runtime.world().resource::<FrameSnapshot>();
     assert_eq!(snapshot.held_keys, [KeyCode::Space]);
     assert_eq!(snapshot.semantic.len(), 1);
+    assert_eq!(snapshot.semantic[0].seat, InputSeatId::PRIMARY);
+    assert_eq!(snapshot.semantic[0].value, ActionValue::pressed());
     assert_eq!(snapshot.actions.len(), 2);
     assert_eq!(
         snapshot.actions[0].provenance.origin(),
@@ -240,6 +243,79 @@ fn physical_and_synthetic_members_share_one_semantic_aggregate() {
     assert_eq!(released.press_sequence(), Some(platform_member));
     assert_eq!(released.route().window(), window);
     assert_eq!(released.route().seat(), seat);
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn unconfigured_seat_keeps_raw_input_without_borrowing_the_primary_mapping() {
+    let mut runtime = runtime(InputLimits::new(32, 2, 1, 4).unwrap());
+    let window = InputWindowId::new(82);
+    let seat = InputSeatId::new(2);
+    input(&mut runtime, |scope| {
+        connect_input_endpoint(scope, window, seat)
+    })
+    .unwrap();
+    input(&mut runtime, |scope| {
+        apply_keyboard_driver_input_at(
+            scope,
+            window,
+            seat,
+            ButtonDriverInput::Press(KeyCode::Space),
+        )
+    })
+    .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.held_keys, [KeyCode::Space]);
+    assert_eq!(snapshot.keys.len(), 1);
+    assert_eq!(snapshot.keys[0].provenance().route().seat(), seat);
+    assert_eq!(
+        snapshot.keys[0].provenance().origin(),
+        InputEventOrigin::Platform
+    );
+    assert!(snapshot.actions.is_empty());
+    assert!(snapshot.semantic.is_empty());
+    assert!(!activate_is_held(&runtime));
+    assert_eq!(
+        runtime.world().resource::<SemanticActions>().value(
+            seat,
+            &ActionId::new("activate").unwrap(),
+            &ActionContext::gameplay(),
+        ),
+        None
+    );
+
+    key(&mut runtime, ButtonDriverInput::Press(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.semantic.len(), 1);
+    assert_eq!(snapshot.semantic[0].seat, InputSeatId::PRIMARY);
+    assert!(activate_is_held(&runtime));
+    input(&mut runtime, |scope| {
+        apply_keyboard_driver_input_at(
+            scope,
+            window,
+            seat,
+            ButtonDriverInput::Release(KeyCode::Space),
+        )
+    })
+    .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.held_keys, [KeyCode::Space]);
+    assert!(snapshot.actions.is_empty());
+    assert!(snapshot.semantic.is_empty());
+    assert!(activate_is_held(&runtime));
+
+    key(&mut runtime, ButtonDriverInput::Release(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert!(snapshot.held_keys.is_empty());
+    assert_eq!(snapshot.semantic.len(), 1);
+    assert_eq!(snapshot.semantic[0].seat, InputSeatId::PRIMARY);
+    assert_eq!(snapshot.semantic[0].phase, ActionPhase::Released);
+    assert_eq!(snapshot.semantic[0].value, ActionValue::released());
+    assert!(!activate_is_held(&runtime));
     runtime.finish().unwrap();
 }
 

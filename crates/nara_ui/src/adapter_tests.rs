@@ -13,7 +13,7 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+    ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, ActionMaps,
     ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonTransitionPhase, InputEventKind,
     InputGeometryGeneration, InputPointerId, InputPresentationEpoch, InputPresentedRoute,
     InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
@@ -145,7 +145,9 @@ fn install_gameplay_capture(app: &mut UiTestApp, additional_bindings: &[ActionBi
         .expect("test gameplay definition should compile")
         .into_bindings();
     app.configuration_world()
-        .resource_mut::<ActionMap>()
+        .resource_mut::<ActionMaps>()
+        .get_mut(InputSeatId::PRIMARY)
+        .expect("InputPlugin should install the primary action map")
         .replace_bindings(bindings);
     app.configuration_world()
         .insert_resource(CapturedGameplayPhases::default());
@@ -4285,17 +4287,22 @@ fn ordinary_input_saturation_preserves_surface_retirement_and_other_endpoint_cre
     let other_semantics =
         ui_semantic_snapshot(app.world(), second_receipt, UiSeatId::PRIMARY).unwrap();
 
+    let gamepad = app.timeline().connect_gamepad(window, seat, 0).unwrap();
+    assert_eq!(
+        app.timeline()
+            .admit_gamepad_button(gamepad.clone(), u16::MAX, ButtonTransitionPhase::Pressed,)
+            .unwrap()
+            .admitted(),
+        1
+    );
     let refusal = loop {
         assert!(
             app.world().resource::<InputTimeline>().retained_len() < MAX_INPUT_TIMELINE_ENTRIES
         );
-        match app.timeline().admit_gamepad_button(
-            window,
-            seat,
-            0,
-            u16::MAX,
-            ButtonTransitionPhase::Pressed,
-        ) {
+        match app
+            .timeline()
+            .admit_wheel(window, seat, pointer, Vec2::new(0.0, 1.0))
+        {
             Ok(admission) => assert_eq!(admission.admitted(), 1),
             Err(error @ InputIngressError::CapacityExceeded { .. }) => break error,
             Err(error) => {
@@ -4319,13 +4326,8 @@ fn ordinary_input_saturation_preserves_surface_retirement_and_other_endpoint_cre
         "terminal obligations must remain charged"
     );
     assert_eq!(
-        app.timeline().admit_gamepad_button(
-            window,
-            seat,
-            0,
-            u16::MAX,
-            ButtonTransitionPhase::Pressed
-        ),
+        app.timeline()
+            .admit_wheel(window, seat, pointer, Vec2::new(0.0, 1.0),),
         Err(refusal),
     );
     assert_eq!(
@@ -4381,7 +4383,17 @@ fn ordinary_input_saturation_preserves_surface_retirement_and_other_endpoint_cre
                 key: KeyCode::Enter,
                 phase: ButtonTransitionPhase::Released
             },
+            InputEventKind::GamepadButton {
+                gamepad: gamepad.raw_label(),
+                connection_generation: gamepad.connection_generation(),
+                button: u16::MAX,
+                phase: ButtonTransitionPhase::Released,
+            },
             InputEventKind::PointerLeft,
+            InputEventKind::GamepadDisconnected {
+                gamepad: gamepad.raw_label(),
+                connection_generation: gamepad.connection_generation(),
+            },
             InputEventKind::SurfaceRetired,
         ]
     );

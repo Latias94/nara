@@ -8,9 +8,9 @@ use nara_gameplay::{
 };
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionPhase, ButtonInput, InputEventKind, InputEventOrigin, InputGeometryGeneration,
-    InputInvalidationReason, InputPlugin, InputPresentationEpoch, InputPresentedRoute,
-    InputRouteGeneration, InputSlotGeneration, InputSurfaceId, PointerState,
+    ActionMaps, ActionPhase, ButtonInput, InputEventKind, InputEventOrigin,
+    InputGeometryGeneration, InputInvalidationReason, InputPlugin, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, PointerState,
 };
 use nara_window::{WindowEvents, WindowPlugin};
 
@@ -181,13 +181,13 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
     bindings
         .bind(ActionBinding::key(action.clone(), KeyCode::Character('w')))
         .unwrap();
-    app.insert_resource(
+    app.insert_resource(ActionMaps::new(
         ActionMap::new(
             bindings.compile().unwrap().into_bindings(),
             nara_core::ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
         )
         .unwrap(),
-    )
+    ))
     .unwrap();
     for (phase, command) in [
         (ActionPhase::Started, "test.move.started"),

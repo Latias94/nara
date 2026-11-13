@@ -23,7 +23,10 @@ use nara::{
     core::ItemLimit,
     ecs::schedule::IntoScheduleConfigs,
     gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
-    input::{ActionContext, ActionMap, ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
+    input::{
+        ActionContext, ActionMaps, ButtonDriverInput, InputSeatId, KeyCode,
+        apply_keyboard_driver_input,
+    },
     prelude::{FixedTime, ResMut, Transform2d},
     project_host::{
         ProjectContentLoader,
@@ -56,14 +59,15 @@ impl Plugin for InputContextProbe {
         let enabled = Arc::clone(&self.0);
         app.add_systems(
             CoreStage::First,
-            (move |mut actions: ResMut<ActionMap>| {
+            (move |mut maps: ResMut<ActionMaps>| {
+                let actions = maps.get_mut(InputSeatId::PRIMARY).unwrap();
                 if enabled.load(Ordering::Relaxed) {
                     actions.enable_context(&ActionContext::gameplay()).unwrap();
                 } else {
                     actions.disable_context(&ActionContext::gameplay()).unwrap();
                 }
             })
-            .before(nara::input::__private::InputSet::StageActions),
+            .before(nara::input::InputSet::StageActions),
         )?;
         Ok(())
     }

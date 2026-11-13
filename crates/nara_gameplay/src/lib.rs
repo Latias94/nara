@@ -127,7 +127,7 @@ impl Plugin for GameplayCommandPlugin {
             CoreStage::PreUpdate,
             (
                 GameplayCommandInternalSet::CollectLocalCommands
-                    .after(nara_input::__private::InputSet::ResolveActions),
+                    .after(nara_input::InputSet::ResolveActions),
                 GameplayCommandInternalSet::MapLocalActions,
             )
                 .chain(),
@@ -150,7 +150,7 @@ impl Plugin for GameplayCommandPlugin {
         .add_systems(
             CoreStage::PreUpdate,
             map_action_outcomes_to_commands
-                .after(nara_input::__private::InputSet::ResolveActions)
+                .after(nara_input::InputSet::ResolveActions)
                 .in_set(GameplayCommandInternalSet::MapLocalActions),
         )?
         .add_systems(
@@ -218,9 +218,12 @@ fn map_action_outcomes_to_commands(
 ) {
     if let Some(outcomes) = outcomes {
         for outcome in outcomes.as_slice() {
-            for binding in
-                command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
-            {
+            for binding in command_map.matching_bindings(
+                outcome.seat,
+                &outcome.action,
+                &outcome.context,
+                outcome.phase,
+            ) {
                 submit_local_command(&mut queue, binding.command().clone(), &faults);
             }
         }
@@ -366,7 +369,7 @@ mod tests {
     };
     use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-        ActionPhase, InputPlugin, KeyCode,
+        ActionMaps, ActionPhase, InputPlugin, KeyCode,
     };
 
     #[derive(Debug, Default, Resource)]
@@ -419,17 +422,19 @@ mod tests {
         GameplayCommandDraft::new(GameplayCommandTypeId::new(command_type).unwrap())
     }
 
-    fn action_map(binding: ActionBinding) -> ActionMap {
+    fn action_map(binding: ActionBinding) -> ActionMaps {
         let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
         builder
             .declare_context(binding.context.clone(), true)
             .unwrap();
         builder.bind(binding).unwrap();
-        ActionMap::new(
-            builder.compile().unwrap().into_bindings(),
-            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        ActionMaps::new(
+            ActionMap::new(
+                builder.compile().unwrap().into_bindings(),
+                ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+            )
+            .unwrap(),
         )
-        .unwrap()
     }
 
     fn tick(value: u64) -> GameplayCommandTick {
@@ -593,6 +598,125 @@ mod tests {
             None
         );
         runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn static_action_commands_select_the_seat_before_fixed_tick_admission() {
+        use nara_input::{
+            ButtonDriverInput, InputSeatId, InputWindowId, apply_keyboard_driver_input,
+            apply_keyboard_driver_input_at, connect_input_endpoint,
+        };
+
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default()).unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+        )
+        .unwrap();
+        let action = ActionId::new("confirm").unwrap();
+        let binding = ActionBinding::key(action.clone(), KeyCode::Enter);
+        let other_seat = InputSeatId::new(1);
+        let other_window = InputWindowId::new(10);
+        let mut maps = action_map(binding.clone());
+        let other = action_map(binding).remove(InputSeatId::PRIMARY).unwrap();
+        maps.insert(other_seat, other).unwrap();
+        app.insert_resource(maps).unwrap();
+        {
+            let mut commands = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
+            for (seat, prefix) in [
+                (InputSeatId::PRIMARY, "player.primary"),
+                (other_seat, "player.secondary"),
+            ] {
+                for (phase, suffix) in [
+                    (ActionPhase::Started, "started"),
+                    (ActionPhase::Released, "released"),
+                ] {
+                    commands
+                        .bind(
+                            ActionCommandBinding::new(
+                                action.clone(),
+                                phase,
+                                GameplayCommandTypeId::new(format!("{prefix}.{suffix}")).unwrap(),
+                            )
+                            .with_seat(seat),
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                connect_input_endpoint(scope, other_window, other_seat)?;
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter))?;
+                apply_keyboard_driver_input_at(
+                    scope,
+                    other_window,
+                    other_seat,
+                    ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KeyCode::Enter))
+            })
+            .unwrap()
+            .output
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input_at(
+                    scope,
+                    other_window,
+                    other_seat,
+                    ButtonDriverInput::Release(KeyCode::Enter),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let actual = runtime
+            .world()
+            .resource::<CommandsByTick>()
+            .0
+            .iter()
+            .map(|(tick, commands)| {
+                (
+                    *tick,
+                    commands
+                        .iter()
+                        .map(|command| command.command_type().as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        runtime.finish().unwrap();
+        assert_eq!(
+            actual,
+            [
+                (
+                    1,
+                    vec![
+                        "player.primary.started".to_owned(),
+                        "player.secondary.started".to_owned()
+                    ]
+                ),
+                (2, vec!["player.primary.released".to_owned()]),
+                (3, vec!["player.secondary.released".to_owned()]),
+            ]
+        );
     }
 
     #[test]
@@ -929,6 +1053,279 @@ mod tests {
             );
             assert!(command_map.bindings().is_empty());
         }
+    }
+
+    #[test]
+    fn replay_queue_starts_fresh_without_adopting_live_pending_intent() {
+        let mut live = GameplayCommandQueue::default();
+        live.submit_local_for_next_tick(command("local.pending"))
+            .unwrap();
+        live.submit(submission(
+            2,
+            GameplayCommandIngressSource::ai("agent").unwrap(),
+            1,
+            "ai.pending",
+        ))
+        .unwrap();
+        let before = live.stats();
+        let source = GameplayCommandSourceId::new("recording").unwrap();
+
+        let replay = GameplayCommandQueue::for_replay(live.settings(), source.clone());
+
+        assert_eq!(replay.replay_source(), Some(&source));
+        assert_eq!(replay.settings(), live.settings());
+        assert_eq!(replay.stats(), GameplayCommandQueueStats::default());
+        assert!(replay.is_idle());
+        assert!(replay.quarantined_commands().is_empty());
+        assert_eq!(live.replay_source(), None);
+        assert_eq!(live.stats(), before);
+        assert_eq!(before.pending_commands, 2);
+    }
+
+    #[test]
+    fn replay_queue_rejects_other_sources_without_mutating_owned_commands() {
+        let selected = GameplayCommandSourceId::new("recording").unwrap();
+        let mut queue = GameplayCommandQueue::for_replay(
+            settings(2, 8_192, 2_048, 8, 1_024, 2),
+            selected.clone(),
+        );
+        for target in 1..=2 {
+            queue
+                .submit(submission(
+                    target,
+                    GameplayCommandIngressSource::Replay {
+                        stream: selected.clone(),
+                    },
+                    target,
+                    "recorded",
+                ))
+                .unwrap();
+        }
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        let active = batch.commands().to_vec();
+        assert_eq!(queue.stats().active_commands, 1);
+        assert_eq!(queue.stats().pending_commands, 1);
+
+        for source in [
+            GameplayCommandIngressSource::replay("other-recording").unwrap(),
+            GameplayCommandIngressSource::ai("recording").unwrap(),
+            GameplayCommandIngressSource::external("recording").unwrap(),
+            GameplayCommandIngressSource::test("recording").unwrap(),
+        ] {
+            let before = queue.stats();
+            let actual = source.clone().into_admitted();
+            assert_eq!(
+                queue.submit(submission(1, source, 1, "unexpected")),
+                Err(GameplayCommandRejection::UnexpectedSource { actual })
+            );
+            assert_eq!(
+                queue.stats(),
+                GameplayCommandQueueStats {
+                    rejected: before.rejected + 1,
+                    rejected_invalid: before.rejected_invalid + 1,
+                    ..before
+                }
+            );
+            assert_eq!(batch.commands(), active.as_slice());
+        }
+
+        let before = queue.stats();
+        assert_eq!(
+            queue.submit_local_for_next_tick(command("local.unexpected")),
+            Err(GameplayCommandRejection::UnexpectedSource {
+                actual: GameplayCommandSource::LocalAction,
+            })
+        );
+        assert_eq!(
+            queue.stats(),
+            GameplayCommandQueueStats {
+                rejected: before.rejected + 1,
+                rejected_invalid: before.rejected_invalid + 1,
+                ..before
+            }
+        );
+        assert_eq!(batch.commands(), active.as_slice());
+        assert_eq!(queue.last_lifecycle_error(), None);
+
+        queue.fail_batch_execution(&mut batch);
+        assert_eq!(queue.quarantined_commands(), active.as_slice());
+        let before = queue.stats();
+        assert_eq!(
+            queue.submit(submission(
+                2,
+                GameplayCommandIngressSource::external("recording").unwrap(),
+                1,
+                "after-fault",
+            )),
+            Err(GameplayCommandRejection::LifecycleFaulted)
+        );
+        assert_eq!(
+            queue.submit_local_for_next_tick(command("local.after-fault")),
+            Err(GameplayCommandRejection::LifecycleFaulted)
+        );
+        assert_eq!(
+            queue.stats(),
+            GameplayCommandQueueStats {
+                rejected: before.rejected + 2,
+                rejected_lifecycle: before.rejected_lifecycle + 2,
+                ..before
+            }
+        );
+        assert_eq!(queue.replay_source(), Some(&selected));
+    }
+
+    #[test]
+    fn replay_queue_preserves_recording_sequence_and_tick_order() {
+        let source = GameplayCommandIngressSource::replay("recording").unwrap();
+        let mut queue = GameplayCommandQueue::for_replay(
+            GameplayCommandQueueSettings::default(),
+            source.id().clone(),
+        );
+        for (target, ordinal, name) in [
+            (2, 4, "next-tick"),
+            (1, 3, "third"),
+            (1, 1, "first"),
+            (1, 2, "second"),
+        ] {
+            queue
+                .submit(submission(target, source.clone(), ordinal, name))
+                .unwrap();
+        }
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+
+        assert_eq!(
+            batch
+                .iter()
+                .map(|envelope| (
+                    envelope.source_sequence().get(),
+                    envelope.command_type().as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            [(1, "first"), (2, "second"), (3, "third")]
+        );
+        let expected_source = GameplayCommandSource::replay("recording").unwrap();
+        assert!(
+            batch
+                .iter()
+                .all(|envelope| envelope.source() == &expected_source)
+        );
+        queue.acknowledge_tick(tick(1), &mut batch).unwrap();
+        assert_eq!(queue.stats().retained_commands, 1);
+        assert_eq!(queue.stats().acknowledged, 3);
+
+        queue.admit_tick(tick(2), &mut batch).unwrap();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch.commands()[0].source_sequence(), sequence(4));
+        assert_eq!(batch.commands()[0].command_type().as_str(), "next-tick");
+        queue.acknowledge_tick(tick(2), &mut batch).unwrap();
+        assert_eq!(queue.stats().acknowledged, 4);
+        assert_eq!(queue.stats().retained_bytes, 0);
+        assert!(queue.is_idle());
+    }
+
+    #[test]
+    fn plugin_preserves_preconfigured_replay_queue_and_capture_acknowledgement() {
+        let selected = GameplayCommandSourceId::new("recording").unwrap();
+        let limits = settings(4, 8_192, 2_048, 8, 1_024, 4);
+        let mut queue = GameplayCommandQueue::for_replay(limits, selected.clone());
+        queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::replay("recording").unwrap(),
+                1,
+                "recorded",
+            ))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(queue).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.init_resource::<CommandsByTick>().unwrap();
+        app.init_resource::<BatchLifecycle>().unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+                record_capture.in_set(GameplayCommandSet::Capture),
+            ),
+        )
+        .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let outcome = runtime
+            .with_driver_scope(|scope| {
+                submit_gameplay_driver_command(
+                    scope,
+                    submission(
+                        1,
+                        GameplayCommandIngressSource::external("recording").unwrap(),
+                        2,
+                        "unexpected",
+                    ),
+                )
+            })
+            .unwrap();
+        assert!(outcome.post_operation_fault.is_none());
+        assert_eq!(
+            outcome.output.unwrap(),
+            Err(GameplayCommandRejection::UnexpectedSource {
+                actual: GameplayCommandSource::external("recording").unwrap(),
+            })
+        );
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        let queue = runtime.world().resource::<GameplayCommandQueue>();
+        assert_eq!(queue.replay_source(), Some(&selected));
+        assert_eq!(queue.settings(), limits);
+        assert_eq!(queue.stats().accepted, 1);
+        assert_eq!(queue.stats().rejected_invalid, 1);
+        assert_eq!(queue.stats().acknowledged, 1);
+        assert_eq!(queue.stats().acknowledged_through_tick, 1);
+        assert!(queue.is_idle());
+        let observed = &runtime.world().resource::<CommandsByTick>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].1[0].command_type().as_str(), "recorded");
+        assert_eq!(
+            runtime.world().resource::<BatchLifecycle>().0,
+            [("capture".to_owned(), Some(1), 1)]
+        );
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn local_callback_commands_cannot_bypass_replay_queue_ingress() {
+        let mut app = App::new();
+        app.insert_resource(GameplayCommandQueue::for_replay(
+            GameplayCommandQueueSettings::default(),
+            GameplayCommandSourceId::new("recording").unwrap(),
+        ))
+        .unwrap();
+        let mut local_commands = LocalGameplayCommands::default();
+        local_commands.push(command("before-start")).unwrap();
+        app.insert_resource(local_commands).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        add_local_gameplay_command_systems(&mut app, collect_semantic_command).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+
+        let error = runtime.drive(Duration::ZERO).unwrap_err();
+
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::LocalIntentLoss);
+        assert_eq!(error.fault().source(), "nara.gameplay.local-action");
+        assert_eq!(
+            runtime.world().resource::<GameplayCommandQueue>().stats(),
+            GameplayCommandQueueStats {
+                rejected: 2,
+                rejected_invalid: 2,
+                ..GameplayCommandQueueStats::default()
+            }
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<LocalGameplayCommands>()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
     }
 
     #[test]

@@ -6,9 +6,8 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ActionBinding, ActionContext, ActionId as InputActionId, ActionMap, ActionMapBuilder,
-    ActionMapLimits, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId,
-    KeyCode,
+    ActionBinding, ActionContext, ActionId as InputActionId, ActionMapBuilder, ActionMapLimits,
+    ActionMaps, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId, KeyCode,
 };
 use nara_reflect::{ComponentRegistryPlugin, component_registry};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
@@ -64,7 +63,9 @@ pub(super) fn build_lab() -> Result<App, Box<dyn Error>> {
     builder.bind(ActionBinding::key(gameplay_action.clone(), KeyCode::Escape))?;
     let bindings = builder.compile()?.into_bindings();
     app.world_mut()?
-        .resource_mut::<ActionMap>()
+        .resource_mut::<ActionMaps>()
+        .get_mut(InputSeatId::PRIMARY)
+        .expect("InputPlugin should install the primary action map")
         .replace_bindings(bindings);
     app.insert_resource(GameplayProbe::new(gameplay_action))?;
     app.add_systems(CoreStage::Update, capture_gameplay_outcome)?;

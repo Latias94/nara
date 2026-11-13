@@ -1739,9 +1739,9 @@ mod input_batch_tests {
     use nara_ecs::{Res, ResMut};
     use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-        ActionPhase, ButtonInput, ButtonTransition, ButtonTransitionPhase, InputEventKind,
-        InputIngressError, InputLimits, InputPlugin, PointerState, SemanticActionOutcome,
-        SemanticActions, connect_input_endpoint, connect_input_pointer,
+        ActionMaps, ActionPhase, ButtonInput, ButtonTransition, ButtonTransitionPhase,
+        InputEventKind, InputIngressError, InputLimits, InputPlugin, PointerState,
+        SemanticActionOutcome, SemanticActions, connect_input_endpoint, connect_input_pointer,
     };
     use std::time::Duration;
 
@@ -1780,13 +1780,13 @@ mod input_batch_tests {
                 KeyCode::Enter,
             ))
             .unwrap();
-        app.insert_resource(
+        app.insert_resource(ActionMaps::new(
             ActionMap::new(
                 bindings.compile().unwrap().into_bindings(),
                 ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
             )
             .unwrap(),
-        )
+        ))
         .unwrap();
         app.init_resource::<ObservedInput>().unwrap();
         app.add_systems(CoreStage::Update, observe_input).unwrap();
@@ -1830,12 +1830,11 @@ mod input_batch_tests {
                 .resource::<ButtonInput<KeyCode>>()
                 .pressed(KeyCode::Enter)
         );
-        assert!(
-            runtime
-                .world()
-                .resource::<SemanticActions>()
-                .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay())
-        );
+        assert!(runtime.world().resource::<SemanticActions>().pressed(
+            InputSeatId::PRIMARY,
+            &ActionId::new("hold").unwrap(),
+            &ActionContext::gameplay()
+        ));
         (runtime, window)
     }
 
@@ -1877,11 +1876,11 @@ mod input_batch_tests {
                 .pressed(MouseButton::Left)
         );
         assert_eq!(world.resource::<PointerState>().position(), None);
-        assert!(
-            !world
-                .resource::<SemanticActions>()
-                .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay())
-        );
+        assert!(!world.resource::<SemanticActions>().pressed(
+            InputSeatId::PRIMARY,
+            &ActionId::new("hold").unwrap(),
+            &ActionContext::gameplay()
+        ));
         let observed = world.resource::<ObservedInput>();
         assert_eq!(
             observed

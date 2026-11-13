@@ -175,18 +175,18 @@ pub(crate) fn project_timeline_entry(
             };
             input
         }
-        InputEventKind::GamepadButton {
-            gamepad: _,
-            button,
-            phase,
-        } => {
+        InputEventKind::GamepadButton { button, phase, .. } => {
             let Some(input) = project_gamepad(seat, button, phase) else {
                 return unhandled_projection(blocks_unhandled_input);
             };
             input
         }
         InputEventKind::FocusChanged { focused: false } => UiInputEvent::SeatCancelled { seat },
-        InputEventKind::FocusChanged { focused: true } | InputEventKind::Wheel { .. } => {
+        InputEventKind::FocusChanged { focused: true }
+        | InputEventKind::Wheel { .. }
+        | InputEventKind::GamepadConnected { .. }
+        | InputEventKind::GamepadDisconnected { .. }
+        | InputEventKind::GamepadAxis { .. } => {
             return unhandled_projection(blocks_unhandled_input);
         }
         InputEventKind::Resized { .. } | InputEventKind::ScaleFactorChanged { .. } => {

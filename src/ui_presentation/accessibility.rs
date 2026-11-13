@@ -17,13 +17,13 @@ pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
         CoreStage::First,
         synchronize_platform_surface_lifetimes
             .after(super::surfaces::synchronize_runtime_ui_surface_metrics)
-            .before(nara_input::__private::InputSet::RouteUi),
+            .before(nara_input::InputSet::RouteUi),
     )?;
     app.add_systems(
         CoreStage::First,
         dispatch_platform_accessibility_inputs
             .after(synchronize_platform_surface_lifetimes)
-            .before(nara_input::__private::InputSet::RouteUi),
+            .before(nara_input::InputSet::RouteUi),
     )?;
     app.add_systems(
         CoreStage::Cleanup,

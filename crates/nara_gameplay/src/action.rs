@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use nara_ecs::Resource;
-use nara_input::{ActionContext, ActionId, ActionPhase};
+use nara_input::{ActionContext, ActionId, ActionPhase, InputSeatId};
 use thiserror::Error;
 
 use crate::{
@@ -22,6 +22,8 @@ pub enum ActionCommandMapError {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ActionCommandBinding {
+    #[cfg_attr(feature = "serde", serde(default = "primary_seat"))]
+    seat: InputSeatId,
     action: ActionId,
     #[cfg_attr(feature = "serde", serde(default))]
     context: ActionContext,
@@ -33,11 +35,23 @@ impl ActionCommandBinding {
     #[must_use]
     pub fn new(action: ActionId, phase: ActionPhase, command_type: GameplayCommandTypeId) -> Self {
         Self {
+            seat: InputSeatId::PRIMARY,
             action,
             context: ActionContext::gameplay(),
             phase,
             command: GameplayCommandDraft::new(command_type),
         }
+    }
+
+    #[must_use]
+    pub fn with_seat(mut self, seat: InputSeatId) -> Self {
+        self.seat = seat;
+        self
+    }
+
+    #[must_use]
+    pub const fn seat(&self) -> InputSeatId {
+        self.seat
     }
 
     #[must_use]
@@ -87,14 +101,21 @@ impl ActionCommandBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ActionCommandKey {
+    seat: InputSeatId,
     action: ActionId,
     context: ActionContext,
     phase: ActionPhase,
 }
 
 impl ActionCommandKey {
-    fn new(action: ActionId, context: ActionContext, phase: ActionPhase) -> Self {
+    fn new(
+        seat: InputSeatId,
+        action: ActionId,
+        context: ActionContext,
+        phase: ActionPhase,
+    ) -> Self {
         Self {
+            seat,
             action,
             context,
             phase,
@@ -103,6 +124,7 @@ impl ActionCommandKey {
 
     fn from_binding(binding: &ActionCommandBinding) -> Self {
         Self::new(
+            binding.seat,
             binding.action.clone(),
             binding.context.clone(),
             binding.phase,
@@ -253,14 +275,20 @@ impl ActionCommandMap {
 
     pub fn matching_bindings(
         &self,
+        seat: InputSeatId,
         action: &ActionId,
         context: &ActionContext,
         phase: ActionPhase,
     ) -> impl Iterator<Item = &ActionCommandBinding> {
-        let key = ActionCommandKey::new(action.clone(), context.clone(), phase);
+        let key = ActionCommandKey::new(seat, action.clone(), context.clone(), phase);
         self.bindings_by_action
             .get(&key)
             .into_iter()
             .flat_map(|indices| indices.iter().filter_map(|index| self.bindings.get(*index)))
     }
+}
+
+#[cfg(feature = "serde")]
+fn primary_seat() -> InputSeatId {
+    InputSeatId::PRIMARY
 }
