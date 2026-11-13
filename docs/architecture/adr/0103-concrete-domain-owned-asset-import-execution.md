@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-31
+**Last Revised**: 2026-11-13
 **Owner**: `nara_asset`, concrete asset domains, host-authorized source reads, and runtime asset publication
 **Refines**: [ADR 0007](0007-asset-identity-and-import-pipeline.md),
 [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -287,6 +287,14 @@ seed; actual scoped raw/presence and verified processed-member observations clos
 Build observations do not replace the codec's actual Immediate/Deferred Runtime references.
 A stored seed association is a verified historical hint. The execution owner must replay current
 inputs and revalidate its request before returning a current hit or publishing a successor.
+
+A failed tracked read has no admitted presence/content snapshot and cannot become an omitted
+input of a successful recipe. The executing Host retains its first read failure and refuses
+publication even if trusted domain code ignores that result and returns a product. Preserve the
+original typed Host failure; do not encode authority, allocation or I/O refusal as optional
+absence. A later corrected request must execute normally rather than reuse output admitted from
+the failed read. The dependent-refresh successor also needs attempted canonical paths for
+separate retry observation; they are not successful build dependencies or last-good authority.
 
 Local publication verifies every selected member and serializes cooperating owners through an
 original retained lock. It publishes content blobs, then the complete manifest, then one index

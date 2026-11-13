@@ -399,8 +399,9 @@ impl SourceInputs<'_> {
 /// Executes one explicitly selected source/build/codec family or reuses verified current output.
 ///
 /// Metadata identity and normalized settings are admitted before lookup. Every returned input
-/// byte is captured under the actual directory/scope. The control callback can revoke the request
-/// at publication boundaries; it must not re-enter this store while its commit lock is held.
+/// byte is captured under the actual directory/scope. A failed tracked read rejects the build
+/// even if the domain ignores its result. The control callback can revoke the request at
+/// publication boundaries; it must not re-enter this store while its commit lock is held.
 pub fn build_source<D>(
     store: &ArtifactBuildStore,
     request: &ArtifactSourceRequest,
@@ -486,9 +487,25 @@ where
     } else {
         ArtifactBuildReason::NoPriorSuccess
     };
-    let mut reader = |path: &AssetPath, limit| inputs.read(path, limit, true);
-    let mut source = AssetBuildSource::new(&actual, primary, &mut reader);
-    let value = D::build(&mut source).map_err(import_error)?;
+    let mut read_failure = None;
+    let built = {
+        let mut reader = |path: &AssetPath, limit| {
+            inputs.read(path, limit, true).map_err(|error| {
+                read_failure.get_or_insert(error);
+            })
+        };
+        let mut source = AssetBuildSource::new(&actual, primary, &mut reader);
+        D::build(&mut source)
+    };
+    if let Some(error) = read_failure {
+        return Err(error);
+    }
+    let value = built.map_err(|error| match error {
+        AssetImportError::Source(()) => {
+            ArtifactBuildError::InvalidCandidate("source dependency read failed")
+        }
+        AssetImportError::Domain(diagnostic) => ArtifactBuildError::Domain(diagnostic),
+    })?;
     let codec_limits = D::Codec::runtime_limits();
     let codec_work = codec_limits
         .work_bytes()
@@ -588,13 +605,6 @@ where
         inputs.revalidate()
     })?;
     Ok(ArtifactBuildResult::built(committed, reason))
-}
-
-fn import_error(error: AssetImportError<ArtifactBuildError>) -> ArtifactBuildError {
-    match error {
-        AssetImportError::Source(error) => error,
-        AssetImportError::Domain(diagnostic) => ArtifactBuildError::Domain(diagnostic),
-    }
 }
 
 fn is_missing(error: &FsError) -> bool {

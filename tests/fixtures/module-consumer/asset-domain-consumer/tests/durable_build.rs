@@ -265,6 +265,95 @@ impl SourceAssetBuild for CountedBundle {
     }
 }
 
+struct IgnoredReadFailureBundle;
+
+impl AssetDomain for IgnoredReadFailureBundle {
+    type Product = TextBundle;
+
+    fn contains_product(product: &TextBundle, id: ImportedProductId) -> bool {
+        TextBundleDomain::contains_product(product, id)
+    }
+}
+
+impl SourceAssetImporter for IgnoredReadFailureBundle {
+    type Settings = TextBundleSettings;
+    const SOURCE_KIND: &'static str = TextBundleDomain::SOURCE_KIND;
+
+    fn limits() -> AssetImportLimits {
+        TextBundleDomain::limits()
+    }
+
+    fn prepare<E>(
+        source: &mut AssetImportSource<'_, E>,
+    ) -> Result<TextBundle, AssetImportError<E>> {
+        TextBundleDomain::prepare(source)
+    }
+}
+
+impl SourceAssetBuild for IgnoredReadFailureBundle {
+    type Codec = TextBundleDomain;
+    const BUILD_ID: &'static str = "consumer.text-bundle.ignored-read-failure";
+    const BUILD_REVISION: u32 = 1;
+
+    fn normalize_settings(settings: Self::Settings) -> Result<Self::Settings, Diagnostic> {
+        TextBundleDomain::normalize_settings(settings)
+    }
+
+    fn build<E>(source: &mut AssetBuildSource<'_, E>) -> Result<TextBundle, AssetImportError<E>> {
+        let _ = source.read_optional_dependency(
+            &AssetPath::new("probe.txt").unwrap(),
+            ByteLimit::new(1).unwrap(),
+        );
+        TextBundleDomain::build(source)
+    }
+
+    fn visit_products<E>(
+        product: &TextBundle,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        TextBundleDomain::visit_products(product, visitor)
+    }
+}
+
+#[test]
+fn an_ignored_tracked_read_failure_cannot_publish_a_successful_closed_recipe() {
+    let fixture = Fixture::new();
+    fixture.write_source("probe.txt", b"ab");
+    let request = ArtifactSourceRequest::new(
+        directory(&fixture.root.join("source"), CapabilityRights::ReadOnly),
+        AssetPathScope::under(AssetSourcePath::new("assets").unwrap()),
+        AssetPath::new("bundle.json").unwrap(),
+        ArtifactBuildDefinition {
+            id: IgnoredReadFailureBundle::BUILD_ID.to_owned(),
+            revision: FormatVersion::new(IgnoredReadFailureBundle::BUILD_REVISION).unwrap(),
+            implementation: ArtifactContentDigest::of_bytes(b"ignored-read-failure-v1"),
+        },
+    );
+    let store = fixture.store("cache-a");
+    let mut publication_calls = 0;
+    let refused = build_source::<IgnoredReadFailureBundle>(&store, &request, |_| {
+        publication_calls += 1;
+        Ok(())
+    });
+    assert!(matches!(
+        refused,
+        Err(ArtifactBuildError::Budget {
+            kind: "source-bytes",
+            required: 2,
+            limit: 1
+        }),
+    ));
+    assert_eq!(publication_calls, 0);
+    fixture.write_source("probe.txt", b"a");
+    let accepted = build_source::<IgnoredReadFailureBundle>(&store, &request, |_| Ok(())).unwrap();
+    assert_eq!(accepted.status(), ArtifactBuildStatus::Built);
+    assert_eq!(
+        raw_observation(accepted.group(), "probe.txt"),
+        Some(ArtifactContentDigest::of_bytes(b"a")),
+    );
+    assert_text(accepted.group(), "Hello world", "Goodbye world");
+}
+
 struct DefaultBundle;
 
 impl AssetDomain for DefaultBundle {

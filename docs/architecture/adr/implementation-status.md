@@ -2042,6 +2042,14 @@ owner20, minimal features and workspace/strict-consumer Clippy pass within the r
 ADRs0007/0103 own this accepted finite contract; the remainder of Proposed0087, general scheduling,
 target executable selection and packaged delivery remain separate.
 
+The November 13 [dependent-refresh prerequisite](../../plans/2026-10-31-local-artifact-build-plan.md#ignored-tracked-read-failure-qualification)
+retains the first failed tracked read in the original finite build executor. A domain that
+ignores that failure cannot publish a closed recipe with the failed input omitted; real optional
+absence keeps its existing meaning. The independent TextBundle regression exercises exact
+budget refusal, no publication callback and corrected-input recovery; its final durable-build
+suite passes 20/20 on Windows x64 / Rust 1.95.0. Automatic typed refresh, current-generation
+subscription adoption and separate failed-attempt retry observations remain unimplemented.
+
 The [explicit Cargo unit](../../plans/2026-10-31-explicit-cargo-build-selection-plan.md) is
 qualified under ADRs0110/0116. Shared pure explicit selection replaces fixed decoders; native
 execution captures exact executable/input facts, Export stages captured bytes, and the Editor
