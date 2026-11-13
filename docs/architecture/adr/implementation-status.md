@@ -2520,6 +2520,17 @@ review corrections, actual run IDs and Windows source/headless limits. Supervise
 unsupported native services, general replay and measured latency/memory remain open; Editor UI
 and physical mixed-DPI work stay paused. Complete R12 and the foundation rebaseline remain active.
 
+The [shared native-process prerequisite](../../plans/2026-11-13-rust-state-reconstruction-plan.md#shared-native-process-custody-successor)
+moves the Editor's existing platform/output/log/wake implementation into concrete
+`project_tooling::process` execution. Supervised Play retains generation/READY/lifecycle ownership;
+the game retains its state format and finite protocol. Both now use the original contained native
+process and physical cleanup owner. Windows qualification passes 31 root process cases, 3
+independently locked public-consumer cases, 77 original Editor supervised cases and the real A/B/C
+game rebuild/reconstruction trajectory. The linked record separates helper counts, exact runs,
+review corrections and platform scope. This replaces direct-child supervision in the game Host;
+it does not extend desktop v1's post-start protocol, adopt a Runtime candidate, resume paused UI,
+qualify Linux execution or complete R12.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

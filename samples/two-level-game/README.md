@@ -93,6 +93,11 @@ private temporary directory outside project source. Its arguments are `--project
 accepts finite Observe/Step/Frame/Capture/Restore/Close operations. Session, generation and request
 IDs are validated before effects; stdout/stderr carry diagnostics. The test Host owns child
 creation, deadlines, immutable executable installations and physical retirement.
+Its native child execution uses the same `project_tooling::process` owner as supervised Editor
+Play. Each game launch consumes restrictive executable/directory capabilities; only a matching
+game Close reply and the original native cleanup receipt prove normal retirement. Diagnostic
+output remains a bounded in-memory tail, independent of the file-based game protocol. Candidate
+failure cleanup retains its original owner until containment and output readers have completed.
 
 From the engine root, the actual Rust-edit qualification uses the existing shared target and
 installed Rust 1.95 baseline:

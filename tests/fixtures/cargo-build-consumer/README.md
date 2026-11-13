@@ -96,6 +96,30 @@ test corrupt the third Scene's pack extent: a new Player still starts, completes
 travels, and rejects the final Deferred acquisition while preserving the current Scene/resources.
 The catalog and extent table are not modified to manufacture that failure.
 
+## Shared Native Process Consumer
+
+`contained_process` is an ordinary independently locked consumer of
+`engine::project_tooling::process`, without Editor or UI dependencies. It uses the same concrete
+native implementation as supervised Play and the Two-Level Game reconstruction Host.
+
+The tool case delays caller polling while its real child writes 512 KiB of binary stdout and
+1 MiB of stderr. It compares the complete admitted protocol bytes and separately checks bounded
+diagnostic-tail retention and explicit loss. The product case launches the actual test executable
+through restrictive executable and immediate-directory capabilities, with sealed environment and
+closed stdin. It checks the child's observed PID/output and the original owner's successful exit,
+empty containment and stopped output readers. Helper modes are finite; no Cargo child is spawned
+by these tests. The native process receipt does not attest game source or reconstruction semantics.
+
+Run from the repository root with one build job and the shared absolute target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --offline --release --test contained_process --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Windows and Linux x86-64 are the selected native implementations; local Windows execution and
+configured CI coverage remain separate evidence. This command does not run the ignored nested
+build/cooked-delivery workflows below.
+
 ## Run Serial Qualification
 
 Use the already installed `1.95.0` toolchain and `wasm32-wasip1` standard library. Tool selection

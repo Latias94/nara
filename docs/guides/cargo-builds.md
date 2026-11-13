@@ -61,6 +61,8 @@ installing a toolchain. Absolute `CARGO` and `RUSTC` overrides take precedence o
 entries. `CargoBuildTools::new` accepts explicit absolute tool paths and resolves any rustup proxy
 in the current directory. The adapter subsequently observes and revalidates the actual tool files;
 an MSRV, channel label or project profile is not a compiler identity.
+The read-only `cargo_path()` and `rustc_path()` accessors expose those resolved absolute choices
+for another explicit native tool operation; they grant no source, build or execution attestation.
 
 Every build uses `--locked`. Preparing or updating a lockfile is a separate authoring action.
 The inventory must include the workspace manifest, lockfile, selected package manifest and
@@ -126,3 +128,45 @@ for qualification scope.
 For complete cooked content plus a Player whose expectation is compiled as an exact declared
 input, use the separate [cooked Player workflow](cooked-player-delivery.md). Content preparation,
 code/content binding, package publication and Runtime/native qualification remain distinct.
+
+## Run A Product With Native Process Custody
+
+The `project_tooling::process` module contains the concrete native process implementation shared
+by supervised Editor Play and the game's [Rust reconstruction Host](../../samples/two-level-game/README.md#exact-game-reconstruction).
+It owns a process and its containment/output resources. The caller owns installation of captured
+bytes, source compatibility, game state and selection of an adopted executable generation.
+
+For a product launch, open the immutable installation through filesystem capabilities and mint
+`ExactExecutableLaunchAuthority::from_verified_handles` from fresh restrictive executable and
+immediate-directory leases. Use the executable-specific handle duplication method, not an ordinary
+read lease. The authority is move-only and consumed by `SupervisedProcessOwner::spawn_exact`.
+Editor generation admission separately validates its launch manifest and retains that file's
+lease with `with_launch_record`; the process module does not interpret the record or its source
+meaning. A pathname or process ID is not an alternative exact-launch authority.
+
+`SupervisedProductProcessCommand` selects an absolute working directory, bounded arguments and
+either a sealed environment or the reviewed desktop-session projection. It starts with closed
+stdin; `with_bootstrap` explicitly selects the inherited duplex child endpoint used by Editor
+Play. `SupervisedProcessCommand` is the separate tool path with its existing inherited environment
+and explicit overrides. Its `bounded_stdout` gives machine-protocol output a cumulative allowance
+independent of truncated diagnostic tails. Parse that exact output rather than a lossy log ring.
+Both spawn calls are synchronous; the Editor continues to use its original background spawn
+worker. `SupervisedProcessWake` is a coalesced notification, not a control or completion receipt.
+
+Retain the owner and call `advance` or `advance_with_output` until its actual cleanup receipt
+exists. The receipt requires the direct child's exit, empty containment, stopped/joined output
+readers and drained output. An application-level Close reply alone cannot prove these facts.
+Conversely, killing the process cannot prove that the game completed its own Runtime Close.
+`request_terminate` is fallback/Stop execution; on Windows its first request can terminate the Job,
+so a false `force_killed` escalation flag does not establish a graceful shutdown. Failed cleanup
+keeps the same owner for `retry_cleanup`. Drop is a fail-safe and publishes no clean-close proof.
+A transferred bootstrap channel and its consumer worker retain their separate completion owner.
+
+The Windows implementation installs the non-breakaway kill-on-close Job and inherited-handle
+allowlist at creation, then verifies the suspended mapped image before resuming its primary
+thread. The Linux x86-64 implementation uses descriptor-bound execution and a process group;
+it does not provide the same hard-kill containment guarantee. Other unsupported native targets
+refuse execution. Qualification and platform execution evidence belong to the
+[current process successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#shared-native-process-custody-successor).
+This module does not extend the desktop one-shot READY contract or make native services
+checkpointable.

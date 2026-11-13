@@ -4637,6 +4637,14 @@ continued gameplay preserve the incumbent across compile/startup/compatibility f
 messages. The linked plan records actual run IDs, review corrections and Windows scope. This
 does not complete supervised desktop adoption, unsupported service migration, measured costs or
 the full R12 outcome; supervised desktop integration keeps its existing protocol owner.
+The [shared native-process successor](2026-11-13-rust-state-reconstruction-plan.md#shared-native-process-custody-successor)
+moves the existing concrete process implementation out of the Editor so the real reconstruction
+Host and supervised Play use one native containment/output/physical-cleanup mechanism. Both retain
+their own semantic and lifecycle decisions. The Windows cohort passes 31 root process cases, 3
+independent public-consumer cases, 77 original supervised Editor cases and the complete actual
+A/B/C game rebuild/reconstruction trajectory through that shared owner. The linked plan retains
+review corrections and exact source/platform limits. Post-start adoption remains the next
+separate contract; this does not resume paused UI or physical mixed-DPI work.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

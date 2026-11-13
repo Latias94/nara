@@ -4,6 +4,7 @@
 **Date**: 2026-08-21
 **Amended**: 2026-10-31 by separate bounded build-protocol capture and diagnostic-tail retention
 **Amended**: 2026-11-01 by CP1 operation-bound physical retirement and Play owner replacement
+**Amended**: 2026-11-13 by shared concrete native-process custody for Editor and game iteration
 **Owner**: private `nara-editor`, the project Host, executable product Hosts, UI-neutral tooling,
 and platform process adapters
 **Refines**: [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md),
@@ -131,11 +132,22 @@ receipts match, Restart launches the exact same generation under a fresh nonce a
 cleanup. A new successful Play build publishes a successor generation and cannot mutate an active
 one. Build completion alone does not make a generation last-good.
 
-The root project Host owns the narrow Windows image evidence shared with other concrete Host
-consumers: restrictive executable/directory leases, bounded native path association and mapped
-image stream comparison. Play retains its generation/manifest custody, suspended startup,
-primary-thread resume, containment, bootstrap and physical retirement. Sharing that evidence
-does not create a process supervisor Interface or attest transitive managed/native dependencies.
+The UI-independent root tooling module owns the concrete native-process execution shared with
+the game reconstruction Host: restrictive executable/directory leases, exact mapped-image
+association, suspended startup and primary-thread resume, containment, bounded output and physical
+retirement. The original platform implementation moves to this module; the Editor does not keep
+a parallel native implementation. Play retains build orchestration, generation/manifest custody,
+asynchronous spawn ownership, source/READY admission and lifecycle adoption. Game consumers retain
+their own semantic protocol and reconstruction policy. A shared process cleanup receipt cannot
+attest either consumer's source compatibility or successful state restoration, and exact image
+evidence does not attest transitive managed/native dependencies.
+
+The [shared process prerequisite](../../plans/2026-11-13-rust-state-reconstruction-plan.md#shared-native-process-custody-successor)
+qualifies the two concrete consumers and their actual physical cleanup. It adds no process-provider
+trait, general runtime-session protocol or second lifecycle authority. Each process owns its exact
+native resources; only the application decides which game may execute or become last-good. The
+existing desktop v1 placement continues to own one active child and one-shot READY. Simultaneous
+incumbent/candidate execution and post-start reconstruction require their own selected contract.
 
 After the child publishes its strict Runtime, it arms one value-only activation observer. The
 observer emits exactly one bounded READY attestation only after the primary window and surface

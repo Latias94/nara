@@ -255,3 +255,104 @@ memory distributions remain unqualified. Editor UI and physical mixed-DPI work s
 Existing R6 automatic source refresh and R10 input/replay evidence remain under their owning
 plans. The complete R12 and foundation Goal remain active; this source/headless rebuild/restore
 evidence does not substitute for those broader production and platform outcomes.
+
+## Shared Native Process Custody Successor
+
+Status: implemented and qualified on Windows x64 as the supervised reconstruction prerequisite;
+post-start desktop adoption and Linux execution qualification remain open.
+
+Source inspection at `98c68e9` finds two real consumers with different physical guarantees. The
+Editor already owns bounded native process execution, Windows Job containment, exact executable
+leases, diagnostic/protocol output and completion-gated reader retirement. The game reconstruction
+Host directly owns `std::process::Child`; its previous acceptance proves Runtime Close and direct
+child reap, without the Editor's process-tree guarantee. Move the existing native implementation
+to a UI-independent `project_tooling::process` module and use it from both consumers. Do not copy
+the platform implementation or introduce a process-provider trait, scheduler or second supervisor.
+
+The shared module owns only a concrete native process and its physical resources: bounded
+command/environment selection, exact executable-handle launch, an explicitly requested inherited
+bootstrap endpoint, bounded output, termination and polled cleanup. A cleanup receipt requires
+the original direct child, containment and output readers to finish. Drop remains a fail-safe.
+Wake callbacks carry no lifecycle authority. Editor-specific build/generation preparation and
+the asynchronous spawn worker remain with the existing Editor owner; game capture, compatibility,
+request identity and reconstruction remain with the game. The Editor's manifest lease retains
+its original platform guarantees for the child lifetime; Windows write denial is separate from
+Linux descriptor custody and cooperative immutable-store policy.
+
+Implement and qualify the complete prerequisite through both existing consumers:
+
+1. Move the existing platform/output/log/wake code behind the shared concrete Interface. Preserve
+   original Windows suspended exact-image/Job/handle-list admission and Linux descriptor/process-
+   group behavior, with unsupported-platform refusal. Keep build stdout's cumulative protocol
+   allowance separate from diagnostic-tail truncation. Remove the replaced Editor implementation.
+2. Migrate the actual game A/B/C Host to that owner, retaining the original semantic and executable
+   assertions. Bind launch to its existing immutable executable installation, carry explicit
+   bounded arguments and environment, and expose process IDs only as observations. Normal Close
+   requires both the game reply and the shared physical cleanup receipt; fallback termination
+   remains separately observed. A rejected or timed-out candidate cannot retire the incumbent.
+3. Exercise an independent public consumer without Editor/UI dependencies, and the existing
+   Editor process/build/generation/handshake/retirement controls. Include descendant containment,
+   inherited-handle isolation, noisy diagnostics versus exact protocol stdout, wake failure,
+   late spawn/cancellation and retained cleanup retries where affected. Run the real game edit/
+   build/restore trajectory through the shared owner, not a substitute helper-only trajectory.
+4. Update the owning ADR and current guide with actual guarantees, results and platform scope.
+   Keep physical native tests separate from UI tests; mixed-DPI and Editor UI remain paused.
+
+This extraction does not extend `desktop-supervised-play/v1`. Its bootstrap still closes after
+one exact first-present READY, Restart still revalidates the current saved source before retiring
+the incumbent, and runtime Pause/Step remain unavailable for that placement. A later explicit
+post-start contract must own capture/restore/result correlation, simultaneous incumbent/candidate
+custody, qualification side effects, one adopted execution target and exact predecessor retirement.
+The shared process consumer does not prove those later adoption semantics or make desktop native
+services checkpointable. Complete R12 and the foundation Goal remain active.
+
+### Shared Process Qualification
+
+Implementation revisions: shared native execution and Editor adapters `de16b01`, followed by
+the real game Host, independent public consumer and CI selection `e40d3a9`.
+
+The native implementation, bounded output queue, log ring and wake move from the Editor rather
+than remaining as duplicated backends. Editor adapters retain generation revalidation in the
+original background spawn worker, preserve its typed generation failure, explicitly request the
+one-shot bootstrap, and transfer the original restrictive manifest lease into the shared owner.
+The game retains all A/B/C semantic/build assertions while replacing its direct child and compiler
+probe supervision. Its normal Close now checks the game reply and the original native cleanup
+receipt, including output drain; diagnostics use a separate bounded memory tail.
+
+Independent Editor adapter and native/consumer reviews are closed. The latter found one P2 in
+the new independent test guard: an unresolved native cleanup could be followed by work-directory
+deletion. One guard now owns both resources, retries the same process and releases the directory
+only after a real receipt. If the final finite retry cannot complete, the isolated failing test
+retains the owner/directory until process exit. The bounded rereview closes that finding; no
+remaining P1/P2 is reported in the selected scope.
+
+| Scope | Actual result |
+| --- | --- |
+| Root process/output/log/wake | 31/31, run `bb9c7c9e-9e15-41e9-86a5-3081168c73fd`; 850 unrelated tests filtered. Windows x64, Rust 1.95.0, release/locked/offline, shared root `target`, one build job. |
+| Independently locked renamed process consumer | 3/3, run `b0966bba-75a8-4c47-94f5-b84cf37e4f8d`; two substantive public workflows plus their ordinary no-op helper. Complete 512 KiB binary stdout survives delayed polling and 1 MiB diagnostic overflow; exact capability launch observes sealed environment, EOF stdin, original PID and actual exit/containment/readers/output cleanup. |
+| Original Editor supervised consumers | 77/77, run `6076c58f-fb4d-4596-8deb-b5ba7e518a2c`; 148 unrelated tests filtered. Includes build/generation/handshake, stale and cancelled work, exact source/image custody, actual descendant cleanup, inherited-handle isolation and physical retirement retry. The exact native generation test also observes Windows manifest write denial after launch and release after completed cleanup plus owner drop. |
+| Actual game rebuild/reconstruction through the shared owner | 1/1, run `32c14786-90dc-420f-8e66-d521f48d071b`. The original A/B/C Rust edits, complete state comparison, failure/stale-message controls, incumbent continuation and game Close assertions remain; every native product now consumes exact executable/directory handles and completes the shared physical cleanup. |
+
+Root `project-tooling` and the no-default-feature Editor production-library checks pass. A whole-
+Editor source scan finds the default frontend's native lifecycle tests also observe wake pending
+state. The shared wake now exposes that same read-only query in production, explicitly without
+completion authority; default-frontend test compilation is checked separately from UI execution.
+The shared-owner game run takes 105.111 seconds after its outer test program is compiled. It
+includes inner Cargo work and multiple actual process trajectories; differing cached compilation
+inputs prevent comparing it with the earlier direct-child run as a process or edit-latency
+regression. No P50/P95, memory or runtime performance budget is established.
+
+Final default-frontend Editor test-target compilation passes, including the native lifecycle
+callers of `wake.pending()`; no native UI test is executed. Root `project-tooling` library,
+no-default-feature Editor library and the game's actual-build Host pass Clippy with
+`-D clippy::correctness`. The independent process test target separately passes strict
+`-D warnings`. Root/sample/independent formatting, affected TOML/CI YAML, document links/headings
+and whitespace checks pass. Existing advisory warnings remain outside the selected correctness
+gate. The independent normal dependency tree excludes `nara-editor`, `winit`, `wgpu` and
+`dear-imgui*` packages; no Editor/UI runtime is required by this consumer.
+
+The existing Windows/Linux module-consumer CI job now selects this ordinary public process
+target without enabling the ignored nested-build/cooked-delivery matrix. Configured CI is not
+remote execution evidence. Linux and other native execution remain outside this local Windows
+result. The full foundation Goal stays active, with post-start candidate adoption, desktop
+service classification and iteration-cost measurement still under their original owners.
