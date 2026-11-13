@@ -9,7 +9,7 @@
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
@@ -45,6 +45,23 @@ pub enum InputActivation {
     Unavailable,
 }
 
+/// The original managed execution state, independent of the game's travel phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionState {
+    Running,
+    Paused,
+}
+
+/// Read-only current facts, without a paused capture or presentation guarantee.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionStatus {
+    pub state: ExecutionState,
+    pub input_activation: InputActivation,
+    pub observation: Observation,
+}
+
 /// Original presentation joined to the exact sealed canonical game state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +92,9 @@ pub struct Request {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Observe,
+    ExecutionStatus,
+    Pause,
+    Resume,
     Step { commands: Vec<SemanticCommand> },
     Frame,
     Capture,
@@ -109,6 +129,9 @@ pub struct Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
+    Execution {
+        status: ExecutionStatus,
+    },
     Observed {
         observation: Observation,
     },

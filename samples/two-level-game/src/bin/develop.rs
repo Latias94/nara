@@ -6,6 +6,9 @@
 //! stdout contains one ready record followed by newline-delimited JSON command results.
 //! At most 128 commands are accepted. Lifetime checks run between commands and after stdin reads;
 //! they cannot interrupt blocked stdin or the existing synchronous trusted Cargo adapter.
+//! Desktop execution_status, pause and resume commands use the original child's execution owner.
+//! The child pumps independently while stdin is blocked. Commands never implicitly pause or resume;
+//! a successful execution result can carry a separate capture_error when paused capture is unavailable.
 
 #[path = "develop/input.rs"]
 mod input;
@@ -246,6 +249,24 @@ fn execute(
 ) -> Result<Value, Value> {
     match command {
         Command::Observe {} => Ok(json!({ "capture": capture(host)? })),
+        Command::ExecutionStatus {} => {
+            let status = host
+                .execution_status()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(with_capture(host, json!({ "execution_status": status })))
+        }
+        Command::Pause {} => {
+            let status = host
+                .pause_active()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(with_capture(host, json!({ "execution_status": status })))
+        }
+        Command::Resume {} => {
+            let status = host
+                .resume_active()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(with_capture(host, json!({ "execution_status": status })))
+        }
         Command::Step { commands } => {
             let observed = host
                 .step(commands)

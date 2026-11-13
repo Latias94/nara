@@ -33,9 +33,9 @@ use nara::{
 use crate::resume::ResumeState;
 
 use super::protocol::{
-    Command, DesktopPresentation, DevelopmentPlacement, InputActivation, MAX_IDENTITY_BYTES,
-    MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE,
-    Reply, Request, Response, SemanticCommand,
+    Command, DesktopPresentation, DevelopmentPlacement, ExecutionState, ExecutionStatus,
+    InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation,
+    PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response, SemanticCommand,
 };
 
 const STORE_PREFIX: &str = "nara-two-level-development-";
@@ -621,6 +621,44 @@ impl Process {
         self.observed(Command::Observe, Instant::now() + REQUEST_TIMEOUT)
     }
 
+    pub(super) fn execution_status(&mut self) -> Result<ExecutionStatus, String> {
+        self.execution(Command::ExecutionStatus, None)
+    }
+
+    pub(super) fn pause(&mut self) -> Result<ExecutionStatus, String> {
+        self.execution(Command::Pause, Some(ExecutionState::Paused))
+    }
+
+    pub(super) fn resume(&mut self) -> Result<ExecutionStatus, String> {
+        self.execution(Command::Resume, Some(ExecutionState::Running))
+    }
+
+    fn execution(
+        &mut self,
+        command: Command,
+        expected_state: Option<ExecutionState>,
+    ) -> Result<ExecutionStatus, String> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(
+                "continuous execution controls require the explicit desktop placement".into(),
+            );
+        }
+        match self.request(command, Instant::now() + REQUEST_TIMEOUT)? {
+            Reply::Execution { status } => {
+                if expected_state.is_some_and(|expected| status.state != expected) {
+                    return Err(self.protocol_fault(format!(
+                        "execution control returned {:?}, expected {expected_state:?}",
+                        status.state
+                    )));
+                }
+                Ok(status)
+            }
+            reply => Err(self.protocol_fault(format!(
+                "execution control returned an unexpected reply: {reply:?}"
+            ))),
+        }
+    }
+
     pub(super) fn capture(&mut self) -> Result<ResumeState, String> {
         match self.request(Command::Capture, Instant::now() + REQUEST_TIMEOUT)? {
             Reply::Captured { state } => {
@@ -800,6 +838,9 @@ impl Process {
                 | Command::Frame
                 | Command::Restore { .. }
                 | Command::IsolateInput => matches!(reply, Reply::Observed { .. }),
+                Command::ExecutionStatus | Command::Pause | Command::Resume => {
+                    matches!(reply, Reply::Execution { .. })
+                }
                 Command::Capture => matches!(reply, Reply::Captured { .. }),
                 Command::ConfirmPresentation => matches!(reply, Reply::Presented { .. }),
                 Command::ActivateInput => matches!(reply, Reply::Activated { .. }),

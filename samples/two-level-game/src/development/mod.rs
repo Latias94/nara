@@ -28,7 +28,9 @@ use nara::{
 
 use crate::resume::{ResumeState, encode_resume};
 use process::{Executable, Process, Store};
-pub use protocol::{DesktopPresentation, DevelopmentPlacement, InputActivation};
+pub use protocol::{
+    DesktopPresentation, DevelopmentPlacement, ExecutionState, ExecutionStatus, InputActivation,
+};
 use protocol::{MAX_STEP_COMMANDS, Observation, SemanticCommand};
 use source::SourceFence;
 
@@ -276,6 +278,50 @@ impl DevelopmentHost {
     #[must_use]
     pub const fn placement(&self) -> DevelopmentPlacement {
         self.placement
+    }
+
+    /// Observes the adopted desktop child's actual execution state without requiring a capture.
+    pub fn execution_status(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "continuous execution controls require the explicit desktop placement",
+            ));
+        }
+        self.active_mut()?
+            .process
+            .execution_status()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+    }
+
+    /// Pauses the adopted desktop child through its original managed Runtime.
+    /// A predecessor awaiting retirement does not prevent controlling the current active child.
+    pub fn pause_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "continuous execution controls require the explicit desktop placement",
+            ));
+        }
+        self.active_mut()?
+            .process
+            .pause()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+    }
+
+    /// Resumes the adopted desktop child after its original native activation.
+    /// Admission refusal preserves the adopted route and all retained cleanup owners.
+    pub fn resume_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "continuous execution controls require the explicit desktop placement",
+            ));
+        }
+        self.active_mut()?
+            .process
+            .resume()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
     }
 
     /// Freezes native ingress through the active child's original owner before handoff capture.

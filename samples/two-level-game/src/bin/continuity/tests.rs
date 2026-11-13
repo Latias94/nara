@@ -28,6 +28,37 @@ fn game() -> Game {
 }
 
 #[test]
+fn desktop_execution_controls_refuse_headless_without_consuming_commands_or_closing() {
+    let mut game = game();
+    let original =
+        two_level_game::resume::encode_resume(&capture_resume(&game.session).unwrap()).unwrap();
+    for command in [Command::ExecutionStatus, Command::Pause, Command::Resume] {
+        assert!(
+            game.execute(command, Instant::now() + OPERATION_TIMEOUT)
+                .unwrap_err()
+                .contains("desktop placement")
+        );
+        assert!(!game.execution_failed);
+        assert_eq!(game.session.state(), Some(RuntimeState::Paused));
+        assert_eq!(
+            two_level_game::resume::encode_resume(&capture_resume(&game.session).unwrap(),)
+                .unwrap(),
+            original
+        );
+    }
+    game.execute(
+        Command::Step {
+            commands: Vec::new(),
+        },
+        Instant::now() + OPERATION_TIMEOUT,
+    )
+    .unwrap();
+    assert_eq!(game.snapshot().unwrap().tick, 1);
+    assert!(!game.close(Instant::now() + OPERATION_TIMEOUT).unwrap());
+    assert!(game.session.is_closed());
+}
+
+#[test]
 fn expired_step_after_admission_cannot_be_consumed_by_a_successor_request() {
     let mut game = game();
     let before = game.snapshot().unwrap();

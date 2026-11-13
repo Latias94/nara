@@ -97,6 +97,15 @@ fn production_host_adopts_real_body_and_structure_edits_without_probe_state_leak
         let generation_a = host.active().unwrap();
         assert_eq!(generation_a.executable, executable_a);
         assert_eq!(generation_a.provenance, provenance_a);
+        let initial = host.capture().unwrap();
+        for refusal in [
+            host.execution_status().unwrap_err(),
+            host.pause_active().unwrap_err(),
+            host.resume_active().unwrap_err(),
+        ] {
+            assert_eq!(refusal.stage, DevelopmentStage::State);
+        }
+        assert_preserved(&mut host, &generation_a, &initial);
         let foreign_ready = foreign.start(a).unwrap();
         let foreign_generation = foreign.active().unwrap();
         let foreign_state = foreign.capture().unwrap();

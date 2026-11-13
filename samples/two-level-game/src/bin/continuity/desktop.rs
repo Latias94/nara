@@ -34,8 +34,11 @@ use two_level_game::{
     resume::{ResumeState, encode_resume},
 };
 
-use super::protocol::{Command, DesktopPresentation, InputActivation, Reply, SemanticCommand};
-use super::{POLL_INTERVAL, check_deadline, command_draft, observed_snapshot};
+use super::protocol::{
+    Command, DesktopPresentation, ExecutionState, ExecutionStatus, InputActivation, Reply,
+    SemanticCommand,
+};
+use super::{POLL_INTERVAL, check_deadline, command_draft, observation, observed_snapshot};
 
 const MAX_PRESENTATIONS: usize = 8;
 
@@ -141,15 +144,111 @@ impl DesktopGame {
         ))
     }
 
-    fn poll_live(&mut self, deadline: Instant) -> Result<(), String> {
+    fn poll_runtime(&mut self, deadline: Instant) -> Result<(), String> {
         check_deadline(deadline)?;
         let wait = POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now()));
         let progress = self.run.poll(wait);
-        if progress != DesktopRunProgress::Running || self.run.state() != Some(RuntimeState::Paused)
+        if progress != DesktopRunProgress::Running
+            || !matches!(
+                self.run.state(),
+                Some(RuntimeState::Running | RuntimeState::Paused)
+            )
         {
-            return Err(format!("original paused desktop stopped: {progress:?}"));
+            return Err(format!("original desktop execution stopped: {progress:?}"));
         }
         check_deadline(deadline)
+    }
+
+    fn poll_live(&mut self, deadline: Instant) -> Result<(), String> {
+        self.poll_runtime(deadline)?;
+        self.require_paused()
+    }
+
+    fn require_paused(&self) -> Result<(), String> {
+        if self.run.state() != Some(RuntimeState::Paused) {
+            return Err("this operation requires the original paused desktop Runtime".into());
+        }
+        Ok(())
+    }
+
+    fn execution_status(&self) -> Result<ExecutionStatus, String> {
+        let state = match self.run.state() {
+            Some(RuntimeState::Running) => ExecutionState::Running,
+            Some(RuntimeState::Paused) => ExecutionState::Paused,
+            state => {
+                return Err(format!(
+                    "desktop execution status is unavailable: {state:?}"
+                ));
+            }
+        };
+        let runtime = self
+            .run
+            .runtime_generation()
+            .ok_or("the original desktop Runtime generation is unavailable")?;
+        let snapshot = self
+            .run
+            .observe(|world| world.resource::<GameSnapshot>().clone())
+            .map_err(|error| format!("desktop execution observation was refused: {error}"))?;
+        Ok(ExecutionStatus {
+            state,
+            input_activation: activation(self.run.input_activation()),
+            observation: observation(runtime.get(), snapshot),
+        })
+    }
+
+    fn control_execution(
+        &mut self,
+        control: RuntimeControl,
+        deadline: Instant,
+    ) -> Result<ExecutionStatus, String> {
+        check_deadline(deadline)?;
+        let expected = match control {
+            RuntimeControl::Pause => RuntimeState::Paused,
+            RuntimeControl::Resume => RuntimeState::Running,
+            _ => return Err("continuous execution supports only original Pause/Resume".into()),
+        };
+        if self.run.state() == Some(expected) {
+            if expected == RuntimeState::Paused {
+                self.maintenance(deadline)?;
+            }
+            return self.execution_status();
+        }
+        if control == RuntimeControl::Resume {
+            self.wait_quiescent(deadline)?;
+            if self.run.input_activation() != Some(WinitInputActivation::Active) {
+                return Err("Resume requires explicit original native input activation".into());
+            }
+        }
+        let ticket = self
+            .run
+            .request_control(control)
+            .map_err(|error| format!("original desktop execution control was refused: {error}"))?;
+        let applied = (|| {
+            loop {
+                self.poll_runtime(deadline)?;
+                match self.run.control_status(ticket) {
+                    Some(RuntimeControlStatus::Applied) => break,
+                    Some(RuntimeControlStatus::Pending) => {}
+                    status => {
+                        return Err(format!(
+                            "original desktop execution control did not apply: {status:?}"
+                        ));
+                    }
+                }
+            }
+            if self.run.state() != Some(expected) {
+                return Err("original applied control disagrees with Runtime state".into());
+            }
+            if expected == RuntimeState::Paused {
+                self.wait_quiescent(deadline)?;
+            }
+            check_deadline(deadline)?;
+            self.execution_status()
+        })();
+        if applied.is_err() {
+            self.execution_failed = true;
+        }
+        applied
     }
 
     fn snapshot(&self) -> Result<GameSnapshot, String> {
@@ -210,6 +309,26 @@ impl DesktopGame {
         if (self.execution_failed || self.closing) && !matches!(&command, Command::Close) {
             return Err("the original desktop child retains only physical cleanup".into());
         }
+        match &command {
+            Command::ExecutionStatus => {
+                check_deadline(deadline)?;
+                return self
+                    .execution_status()
+                    .map(|status| Reply::Execution { status });
+            }
+            Command::Pause | Command::Resume => {
+                let control = if matches!(&command, Command::Pause) {
+                    RuntimeControl::Pause
+                } else {
+                    RuntimeControl::Resume
+                };
+                return self
+                    .control_execution(control, deadline)
+                    .map(|status| Reply::Execution { status });
+            }
+            Command::Close => {}
+            _ => self.require_paused()?,
+        }
         if matches!(&command, Command::ActivateInput) {
             let error = self.activate_input(deadline).err();
             if self.run.progress() != DesktopRunProgress::Running {
@@ -241,6 +360,9 @@ impl DesktopGame {
 
     fn execute_inner(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
         match command {
+            Command::ExecutionStatus | Command::Pause | Command::Resume => {
+                Err("execution controls must retain their managed result".into())
+            }
             Command::Observe => {
                 self.wait_quiescent(deadline)?;
                 self.observed()

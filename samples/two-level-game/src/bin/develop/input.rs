@@ -224,6 +224,9 @@ fn linked(metadata: &fs::Metadata) -> bool {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Command {
     Observe {},
+    ExecutionStatus {},
+    Pause {},
+    Resume {},
     Step {
         commands: Vec<SemanticCommand>,
     },
@@ -244,6 +247,9 @@ impl Command {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::Observe {} => "observe",
+            Self::ExecutionStatus {} => "execution_status",
+            Self::Pause {} => "pause",
+            Self::Resume {} => "resume",
             Self::Step { .. } => "step",
             Self::Prepare { .. } => "prepare",
             Self::Adopt {} => "adopt",
@@ -359,6 +365,29 @@ mod tests {
             );
             for selection in [r#""generation":999999"#, r#""candidate":"foreign""#] {
                 let invalid = format!(r#"{{"operation":"{operation}",{selection}}}"#);
+                assert!(read_command(&mut invalid.as_bytes()).is_err(), "{invalid}");
+            }
+        }
+    }
+
+    #[test]
+    fn execution_commands_refuse_caller_supplied_execution_facts() {
+        for operation in ["execution_status", "pause", "resume"] {
+            let valid = format!(r#"{{"operation":"{operation}"}}"#);
+            assert_eq!(
+                read_command(&mut valid.as_bytes())
+                    .unwrap()
+                    .unwrap()
+                    .operation(),
+                operation,
+            );
+            for fact in [
+                r#""state":"paused""#,
+                r#""input_activation":"active""#,
+                r#""observation":{}"#,
+                r#""generation":999999"#,
+            ] {
+                let invalid = format!(r#"{{"operation":"{operation}",{fact}}}"#);
                 assert!(read_command(&mut invalid.as_bytes()).is_err(), "{invalid}");
             }
         }

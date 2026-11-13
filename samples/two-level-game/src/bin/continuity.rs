@@ -357,6 +357,9 @@ impl Game {
 
     fn execute_inner(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
         let result = match command {
+            Command::ExecutionStatus | Command::Pause | Command::Resume => {
+                Err("continuous execution controls require the explicit desktop placement".into())
+            }
             Command::Observe => self.observed(),
             Command::Frame => {
                 self.frame()?;
@@ -496,26 +499,30 @@ impl Game {
 
 fn observed_snapshot(runtime_generation: u64, snapshot: GameSnapshot) -> Reply {
     Reply::Observed {
-        observation: Observation {
-            runtime_generation,
-            engine_tick: snapshot.tick,
-            logical_tick: snapshot.logical_tick,
-            logical_elapsed_nanos: snapshot.logical_elapsed_nanos,
-            player: snapshot.player.to_array(),
-            held: snapshot.held,
-            score: snapshot.score,
-            collected: snapshot.collected,
-            markers: snapshot.markers.iter().map(|marker| marker.get()).collect(),
-            phase: match snapshot.phase {
-                GamePhase::Running => "running",
-                GamePhase::Preparing => "preparing",
-                GamePhase::Reconstructing => "reconstructing",
-                GamePhase::Degraded => "degraded",
-            }
-            .into(),
-            restoring: snapshot.restoring,
-            error: snapshot.error,
-        },
+        observation: observation(runtime_generation, snapshot),
+    }
+}
+
+fn observation(runtime_generation: u64, snapshot: GameSnapshot) -> Observation {
+    Observation {
+        runtime_generation,
+        engine_tick: snapshot.tick,
+        logical_tick: snapshot.logical_tick,
+        logical_elapsed_nanos: snapshot.logical_elapsed_nanos,
+        player: snapshot.player.to_array(),
+        held: snapshot.held,
+        score: snapshot.score,
+        collected: snapshot.collected,
+        markers: snapshot.markers.iter().map(|marker| marker.get()).collect(),
+        phase: match snapshot.phase {
+            GamePhase::Running => "running",
+            GamePhase::Preparing => "preparing",
+            GamePhase::Reconstructing => "reconstructing",
+            GamePhase::Degraded => "degraded",
+        }
+        .into(),
+        restoring: snapshot.restoring,
+        error: snapshot.error,
     }
 }
 
