@@ -4643,8 +4643,18 @@ Host and supervised Play use one native containment/output/physical-cleanup mech
 their own semantic and lifecycle decisions. The Windows cohort passes 31 root process cases, 3
 independent public-consumer cases, 77 original supervised Editor cases and the complete actual
 A/B/C game rebuild/reconstruction trajectory through that shared owner. The linked plan retains
-review corrections and exact source/platform limits. Post-start adoption remains the next
-separate contract; this does not resume paused UI or physical mixed-DPI work.
+review corrections and exact source/platform limits. The desktop post-start contract remains
+separate; this does not resume paused UI or physical mixed-DPI work.
+The [game-owned development Host](2026-11-13-rust-state-reconstruction-plan.md#development-host-qualification)
+now implements that source/headless adoption route through the same Cargo/native owners. It
+compares complete probe states, physically discards the probe, restores a fresh adopter and
+revalidates both original states and the prospective source before switching the sole command
+route. Predecessor cleanup stays independent and Pending-time commands target the new active
+game. The final ordinary sample passes 78/78, the production actual-edit/adoption test and original
+A/B/C regression each pass 1/1, and three actual JSON CLI trajectories pass with exact native
+exit and clean game/containment/readers/output evidence. Desktop post-start integration and
+service classification remain separate; these results do not resume UI, qualify other platforms,
+measure an iteration budget or complete R12.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

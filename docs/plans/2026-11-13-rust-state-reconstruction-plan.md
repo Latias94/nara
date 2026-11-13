@@ -356,3 +356,126 @@ target without enabling the ignored nested-build/cooked-delivery matrix. Configu
 remote execution evidence. Linux and other native execution remain outside this local Windows
 result. The full foundation Goal stays active, with post-start candidate adoption, desktop
 service classification and iteration-cost measurement still under their original owners.
+
+## Game-Owned Development Host And Adoption
+
+Status: implemented; Windows source/headless acceptance is recorded below. This successor delivers
+a concrete development Host and command-line consumer; desktop Play retains its separate lifecycle
+and one-shot READY contract.
+
+The existing actual-build test manually retains A/B/C processes and compares their game states.
+It does not implement a production command route, candidate ticket or adoption operation. Move
+the game's finite process client and packet definition into its ordinary library, using the same
+shared native-process owner. Add one concrete `DevelopmentHost` and a finite `develop` CLI. Keep
+the original low-level A/B/C oracle as a separate regression; new tests must call the production
+Host and demonstrate the actual command target changing. No universal Runtime serializer,
+process-provider interface, scheduler or Editor UI feature is selected.
+
+The caller supplies an explicit source project, trusted temporary parent, captured initial
+executable and later explicit Cargo requests. Only this game's native headless continuity binary
+and supported service inventory qualify. The Host does not edit source. It captures its incumbent
+at a stable paused frame, compares canonical complete state with the caller's expected initial
+probe basis, builds the actual changed source and restores an isolated probe. Each finite supplied
+command step must match the complete expected canonical state, including logical time, held
+intent, progress, counters and compatibility. Observation fields alone are insufficient, and
+floating-point equality cannot substitute for canonical encoding's signed-zero fidelity.
+
+A passing probe is closed through both the game and native owner before another child starts.
+The Host then launches a fresh adopter from the same immutable captured bytes and restores the
+original capture. This prevents probe movement, pickup, marker or travel state from leaking into
+the adoption point; it does not roll back external native-code or build-script effects. Capture
+continues to refuse open save storage and unclassified authoritative services.
+
+Preparation returns a nominal, privately constructed ticket for the exact retained candidate.
+The Host remains the sole ordinary command router to the incumbent; a foreign, consumed or
+cancelled ticket cannot select or retire another candidate. If the incumbent changes after
+preparation, adoption refuses and leaves the candidate available for explicit cancellation.
+Before the route exchange, revalidate both complete states and the candidate's source envelope.
+After the exchange, all ordinary commands target the new active process. Predecessor cleanup is
+a separate retained outcome: pending cleanup cannot be relabelled as a failed adoption or cause
+rollback. The new active game may continue, while another rebuild waits for original cleanup.
+
+The source envelope is concrete to this game: the manifest/lock/project files and finite complete
+`src`, `assets`, `scenes`, `prefabs` and `schema` trees, plus every declared Cargo input. Capture
+the prospective edited source before building, then revalidate after building, before the fresh
+adopter and immediately before adoption. Verify the original project directory object and the
+complete inventory, including Cavern before it is visited. This is trusted-local per-file
+revalidation, not an atomic filesystem snapshot, arbitrary Rust dependency discovery or protection
+against hostile concurrent writers. Old executable provenance remains distinct from prospective
+build inputs; an intentional Rust edit must not be rejected merely because the old code differs.
+
+The finite Host bounds rebuild attempts, probe steps, captured executable bytes, source work,
+protocol messages and native cleanup drives. Preserve the current synchronous Cargo adapter's
+explicit contract: cancellation is cooperative between phases and cannot interrupt a blocked
+compiler/build-script call. Do not claim a hard compilation deadline or latency distribution from
+these bounds. Broader asynchronous supervision and desktop process adoption need their own
+integration under the existing owners, rather than a detached timeout thread in the game.
+
+Qualify the complete public backend with actual Rust body and private-state edits, wrong/stale
+probe basis, compile/restore/probe failure, source drift, cancellation, foreign/consumed tickets,
+probe-state disposal, sole-route adoption and exact predecessor retirement. Exercise the ordinary
+CLI with real children and structured results. Retain physical cleanup custody on startup,
+protocol, deadline or Close failure. Run focused serial nextest, owning builds/Clippy, format and
+document checks; record actual local platform/toolchain evidence and remaining limits below.
+
+### Development Host Qualification
+
+Implementation revisions: production Host, source/process custody and actual adoption tests
+`09dc48b`; ordinary JSON CLI, portable source inventory and guide `0b8c7d7`.
+
+The game library now owns one `DevelopmentHost`, exact nominal `PreparedRebuild` tickets, a finite
+process client and a concrete source envelope over the existing native/Cargo owners. The protocol
+moves out of the continuity binary into the game library; the original A/B/C test consumes that
+same protocol without losing its independent process-level assertions. The only root API addition
+is `CargoBuildRequest::workspace()`, returning its existing canonical admitted workspace.
+
+The ordinary [`develop` consumer](../../samples/two-level-game/src/bin/develop.rs) uses that Host,
+retains its exact candidate ticket and emits bounded newline JSON. It never creates process
+authority from a supplied generation or PID. Its
+[guide](../../samples/two-level-game/README.md#sourceheadless-development-host) describes explicit
+paths, source trust, operations and independent adoption/retirement results. Responses expose
+original generation, game Close, fallback termination and actual native exit/containment/readers/
+output facts; physical cleanup completion is separate from graceful game Close.
+
+Three independent final reviews cover Host orchestration, process/protocol custody and source/CLI
+correctness. Concrete findings are corrected: each retained child receives a fresh cleanup budget
+instead of inheriting a deadline spent on earlier owners; initial capture mismatch uses the
+Capture stage; already-reaped probe/adopter PIDs need not differ; and no-argument CLI commands use
+Serde struct variants so unknown generation/candidate fields are actually refused. All findings
+close on bounded rereview. The production adoption test retains the exact complete-state oracle,
+including signed zero, and explicitly uses the new active game while predecessor retirement is
+still Pending. Its final Close retains and retires both the predecessor and active game.
+
+| Scope | Actual result |
+| --- | --- |
+| Final ordinary sample | 78/78, two actual-build tests intentionally skipped, run `0bb03432-e31e-487c-bb46-aae999ec3572`. Includes nine Windows source-envelope tests, Host construction/lifecycle controls, actual CLI parsing rejection of unknown selectors and the real nested continuity source inventory. Test execution is 10.799 seconds; the first ordinary release build separately took 4m22s. |
+| Production Host with actual Rust edits and adoption | 1/1, run `c88cf9e6-c348-440d-9862-7927ba92d782`, 75.911 seconds including nested Cargo work. Actual body and private-structure edits, meaningful two-level state, typed compilation diagnostics, wrong probe, cancellation, source drift, foreign/consumed tickets, probe-state disposal, sole-route adoption, Pending-time continued execution/rebuild refusal and original physical cleanup all pass. |
+| Original actual A/B/C process regression after protocol migration | 1/1, run `e59d7959-77e1-40ab-9232-26eab07382c8`, 52.552 seconds. Original code/state/executable/failure/stale-message assertions remain. |
+| Actual ordinary CLI | 3/3 finite subprocess trajectories using the release `develop` binary and actual inner native Cargo builds: prepare/adopt/Pending-time Step/rebuild refusal/retry/Close; a prepared candidate followed by an unknown generation selector; and Observe followed by EOF. The malformed request exits unsuccessfully without adopting; all three complete clean game/native retirement. Five handles opened while their exact native children are live are observed signaled after cleanup, independently of PID reuse. Passing temporary storage is removed only afterward. |
+
+The first production acceptance run `bafb83e2-0760-49d0-bc49-68177cfbb814` stops on a stale test
+expectation for the initial mismatch stage after review correction. Updating that assertion to
+Capture resolves it; neither canonical comparison nor incumbent-preservation assertions are
+removed. The succeeding full production trajectory above includes every original assertion.
+
+The first actual CLI smoke refuses startup at source inventory before admitting a child: Windows
+`Path::join` produced native backslashes for the logical `RelativePath` parser. The CLI now carries
+validated portable relative spellings through its finite inventory and resolves them only at the
+native filesystem boundary; it does not replace separators inside arbitrary filenames. The
+ordinary nested-product regression and all three actual CLI trajectories above pass after that
+correction. Cleanup JSON now exposes the original reports rather than equating physical completion
+with graceful game Close.
+
+The final sample production binary build and all-target release Clippy with
+`-D clippy::correctness` pass. Root/sample formatting, affected TOML, added local document
+links/fragments and whitespace checks pass. Existing advisory warnings remain outside that
+correctness gate. The native process backend itself is unchanged in this unit; its previous root,
+independent and Editor cohorts retain the shared-process record above rather than being rerun as
+unrelated UI/native matrices. All seven scoped implementation/review agents are closed. UI and
+native mixed-DPI execution remain paused.
+
+This remains Windows x64, Rust 1.95.0, release/locked/offline, one Cargo job and the shared root
+`target`. These elapsed runs are fixture observations, not P50/P95 edit latency or performance
+budgets. Linux execution, desktop post-start exchange/service classification, hard compiler
+interruption, native-effect rollback, open save storage and full R12 remain open. Editor UI and
+physical mixed-DPI work stay paused.

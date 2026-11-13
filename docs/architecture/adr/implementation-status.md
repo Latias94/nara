@@ -2531,6 +2531,20 @@ review corrections and platform scope. This replaces direct-child supervision in
 it does not extend desktop v1's post-start protocol, adopt a Runtime candidate, resume paused UI,
 qualify Linux execution or complete R12.
 
+The [game-owned development Host successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#development-host-qualification)
+implements source/headless candidate preparation, complete canonical probes, fresh-adopter state
+restoration and a nominal-ticket route exchange. Final adoption revalidates source and both full
+states; predecessor cleanup remains independent after commit, with the new active game usable
+while another rebuild refuses. Final ordinary sample qualification passes 78/78; actual Rust body
+and private-structure adoption and the original A/B/C regression each pass 1/1. The ordinary JSON
+CLI passes three actual process trajectories, including malformed selection with a retained
+candidate and EOF cleanup, with exact native handles observed exited and original clean game/
+containment/readers/output reports. Independent reviews close the per-child cleanup budget,
+capture-stage, reaped-PID and unknown-field corrections; actual CLI execution also corrects a
+Windows logical/native inventory-path mismatch. The linked plan records runs, final checks and
+Windows Rust 1.95 scope. Desktop adoption, unsupported services, hard compiler interruption,
+performance budgets, Linux execution and the complete R12/foundation outcome remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
