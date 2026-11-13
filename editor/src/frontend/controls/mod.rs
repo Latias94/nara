@@ -1,5 +1,6 @@
 //! Private Nara controls shared by the Editor frontends.
 
+mod appearance;
 pub(in crate::frontend) mod authoring;
 pub(in crate::frontend) mod field_drafts;
 mod hierarchy;

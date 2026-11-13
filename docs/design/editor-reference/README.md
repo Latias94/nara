@@ -67,6 +67,15 @@ either or reclassify the original files as production code.
 
 ## Reconcile Before Implementation
 
+The November 13 source-workspace frontend adopts the graphite surface, text, teal accent,
+selection/focus and status colors through its private `frontend/drawn/theme.rs` appearance.
+The existing `UiColor::from_srgb8` owns decoding; the reference JSON is not loaded as a runtime
+theme schema. Its single current border role uses the reference control border. The error
+color serves both destructive emphasis and error feedback, with the dark on-accent text on
+enabled destructive emphasis. The inherited metrics and page arrangement remain unchanged by
+this palette step. The GPUI product component/theme route and broader visual acceptance remain
+under the [current quality sequence](../../plans/2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development).
+
 The proposed body is **13/20**, with 12/18 small/numeric text and 600-weight headings. The current
 [implemented recipes](../../guides/editable-text.md#scoped-appearance-and-measured-controls)
 use **14/20**, 12/18 and 16/24 roles, an explicitly admitted Regular face and configured fallback.

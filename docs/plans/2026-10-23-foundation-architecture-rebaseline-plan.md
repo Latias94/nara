@@ -4509,6 +4509,12 @@ covered by a later 37/37 owner/adapter run. Build, correctness Clippy, formattin
 checks pass. This qualifies the selected same-frame Hierarchy unit. Running Game publishes new
 models, so cross-frame dependency reuse, full R11a budgets and R11b-f remain open.
 
+The [November 13 follow-up](2026-11-05-styled-source-workspace-plan.md#november-13-editor-palette-and-input-work-follow-up)
+closes an admitted-input gap in this selected reuse path: movement within an unchanged button
+no longer dirties the description, while hover/press/focus transitions retain redraw. Its
+hosted-journal regression and actual native source workflow qualify that bounded correction;
+root repaint scheduling and the broader cost matrix remain open.
+
 ### R11f: Editor extension edit/build/reconstruct
 
 **Dependencies:** R11b attachment/state scopes, R11d matching presentation observations and

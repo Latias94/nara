@@ -13,6 +13,9 @@ pub(crate) mod input;
 mod inspector;
 mod shell;
 mod text_controls;
+mod theme;
+
+pub(crate) use theme::editor_appearance;
 
 pub(crate) struct DrawnPanel(PanelControls);
 

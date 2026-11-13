@@ -5,7 +5,7 @@ use std::{
 };
 
 use nara_ui_kernel::{
-    UiActionId, UiAuthoringSnapshotBuilder, UiCaptureContinuity, UiEdges, UiInteraction, UiLayer,
+    UiActionId, UiAuthoringSnapshotBuilder, UiCaptureContinuity, UiInteraction, UiLayer,
     UiLocalKey, UiNode, UiOverflow, UiRoot, UiRootStatus, UiStyle, UiTextOverflow, UiVisual,
 };
 use nara_ui_widgets::{UiAppearanceError, UiAppearancePalette, UiButtonVariant, UiControlSize};
@@ -141,17 +141,12 @@ impl OwnedUiHierarchy {
                 field
                     .input
                     .reconfigure(&mut self.engine, appearance.typography(UiTextRole::Body)?)?;
-                let mut field_appearance = appearance.field(
-                    field.input.input_token().is_some(),
-                    field.input.enabled(),
+                let field_appearance = super::super::appearance::field_appearance(
+                    appearance,
+                    &field.input,
+                    width,
                     self.input_error.is_some(),
                 )?;
-                let padding = field_appearance.padding;
-                if width <= padding.left() + padding.right() {
-                    let inline = (width - 1.0) * 0.5;
-                    field_appearance.padding =
-                        UiEdges::new(inline, inline, padding.top(), padding.bottom())?;
-                }
                 field.input.set_appearance(field_appearance);
             }
         }

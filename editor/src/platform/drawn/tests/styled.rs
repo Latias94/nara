@@ -46,6 +46,7 @@ impl Workflow<'_> {
 
     pub(super) fn inspector_edit_and_restore(&mut self) -> TestResult {
         let original_source = self.project.read(fixture::SCENE)?;
+        let appearance = self.native.appearance;
         let before_component = self.state()?;
         self.click(INSPECTOR, "Add Component")?;
         self.click(INSPECTOR, "Add nara.scene.Name")?;
@@ -91,7 +92,7 @@ impl Workflow<'_> {
             (nara_ui_widgets::UiDensity::Normal, 2.0),
             (nara_ui_widgets::UiDensity::Normal, 1.0),
         ] {
-            self.native.appearance = nara_ui_widgets::UiAppearance::default()
+            self.native.appearance = appearance
                 .with_density(density)
                 .with_text_scale(scale)
                 .map_err(|error| error.to_string())?;

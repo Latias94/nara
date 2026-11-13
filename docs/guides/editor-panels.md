@@ -42,6 +42,11 @@ Shell, Hierarchy and Inspector use the shared typography/appearance recipes docu
 [editable text](editable-text.md#scoped-appearance-and-measured-controls), with a regular primary
 face, measured control groups and an anchored Document actions menu. Current source-built
 composition inputs support density/text scale; this does not add a persisted user-preference UI.
+The source workspace applies an Editor-local graphite/teal palette from
+[Design Kit v0.4](../design/editor-reference/README.md). Encoded sRGB colors pass through the
+existing linear-color conversion; generic widget defaults retain their separate appearance.
+This palette adoption does not complete the design's compact workspace arrangement, typography,
+icons, property catalogue or docking behavior.
 The complete future component catalogue, Scene/Game and other panel breadth, docking, native
 multi-window behavior and default switch retain their separate plans.
 

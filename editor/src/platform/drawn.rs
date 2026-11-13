@@ -114,6 +114,7 @@ impl DrawnNative {
 
     fn new(window: Arc<Window>, options: EditorLaunchOptions) -> Result<Self, String> {
         let fonts = font_policy()?;
+        let appearance = crate::frontend::drawn::editor_appearance()?;
         let mut application = EditorApplication::new(options);
         let mut panels = EditorPanelHost::new();
         let shell_fonts = fonts.clone();
@@ -189,7 +190,7 @@ impl DrawnNative {
             next_surface: 1,
             display_frame: 0,
             fonts,
-            appearance: UiAppearance::default(),
+            appearance,
             presented: BTreeMap::new(),
             started: Instant::now(),
             closing: false,

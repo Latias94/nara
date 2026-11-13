@@ -535,6 +535,18 @@ forced-position loop was found. A real title-bar move/DPI trace must distinguish
 that fails to cross from a moved window whose content stops presenting. Injected normalized
 events and programmatic placement cannot validate the native title-bar correction branch.
 
+Upstream evidence checked November 13 strengthens this lead without reproducing Nara's
+failure: [Winit #4600](https://github.com/rust-windowing/winit/issues/4600) reports mixed-DPI
+drag growth and retention on the old monitor on 0.30.13. The merged mainline
+[Windows 11 DPI correction](https://github.com/rust-windowing/winit/commit/488c036a)
+restricts the old workaround to older Windows. The proposed 0.30.x
+[drag backport #4694](https://github.com/rust-windowing/winit/pull/4694) is still open at this
+observation. Compare a released correction or narrowly pinned backport through the real move
+loop before selecting a dependency change. Also retain the reported
+[size-writer regression #4721](https://github.com/rust-windowing/winit/issues/4721) in that
+comparison; do not fix dragging by silently dropping caller-requested DPI sizes. Current Nara
+manifests and lockfiles are unchanged by this investigation.
+
 ### Component Responsibilities
 
 Continue the existing layers rather than starting another general UI framework:
@@ -576,8 +588,9 @@ does not by itself establish incremental layout or cheap whole-Editor refresh.
    Views between windows and does not require a new docking owner.
 2. Attribute the current performance complaint before claiming a release improvement. The
    source audit confirms that every converted event, including ordinary pointer movement,
-   requests redraw. Ordinary Hierarchy also marks paint dirty unconditionally, and Inspector
-   builds its description before immutable snapshot reuse. Panel images already reuse an
+   requests redraw. The initial audit also found unconditional ordinary-Hierarchy paint
+   invalidation, corrected by the bounded follow-up below; Inspector still builds its
+   description before immutable snapshot reuse. Panel images already reuse an
    unchanged original frame. Refine visible-state invalidation through original reducers;
    `consumed` alone is not a redraw decision. Preserve exposure, geometry, business updates,
    pending presentation and deadlines. Measure quiet idle, movement within a control and
@@ -597,8 +610,17 @@ does not by itself establish incremental layout or cheap whole-Editor refresh.
    transitions. Docking, foreign-platform execution, physical IME and numeric performance
    budgets retain their own unexecuted scope. Do not qualify the page through static mockups.
 
-The November 13 visual review inspected the two reference PNGs and implementation source, not
-the live application's pixels. The performance review was also source-only: the prior debug
-process had already exited, so no current CPU/FPS sample exists. The release Editor build is a
-comparison prerequisite, not evidence of a speedup. Full Editor visual acceptance and R11e
-cost acceptance remain open.
+The initial November 13 visual review inspected the two reference PNGs and implementation
+source. The performance review was source-only: the prior debug process had already exited,
+so no current CPU/FPS sample exists. The release Editor build is a comparison prerequisite,
+not evidence of a speedup. Full Editor visual acceptance and R11e cost acceptance remain open.
+
+### Qualified Palette And Hierarchy Invalidation Follow-Up
+
+The [bounded implementation and qualification](2026-11-05-styled-source-workspace-plan.md#november-13-editor-palette-and-input-work-follow-up)
+adds the Editor-local graphite/teal palette, readable invalid-field recipes and actual-state
+Hierarchy invalidation. Final affected controls pass 134/134 and the complete no-reference
+Windows/DX12 source workflow passes 1/1 with its original history, persistence and recovery
+assertions. The record retains a failed capture-enabled native run, actual panel-texel visual
+inspection and its limits. These changes do not qualify physical title-bar movement, a complete
+GPUI Editor component catalogue, swapchain/OS screenshots or measured performance budgets.

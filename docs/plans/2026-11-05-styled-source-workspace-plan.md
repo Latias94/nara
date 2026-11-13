@@ -339,3 +339,63 @@ catalogues, Editor information design, persistent preferences, font-family/style
 platform accessibility, docking/multiple windows, remaining Editor tools, extension code
 reconstruction and R11a/e end-to-end budgets open under their existing owners. The full foundation
 Goal remains active.
+
+## November 13 Editor Palette And Input Work Follow-Up
+
+The user's visible-workspace feedback requires native usability, visual composition and
+component quality work before further catalogue expansion. The
+[current responsibility and quality sequence](2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development)
+distinguishes the earlier drawn frontend from the maintained GPUI product route. This bounded
+follow-up improves the existing consumer without selecting another toolkit or closing R11b/e.
+
+The drawn composition now resolves its private Editor appearance from Design Kit v0.4's
+graphite surfaces, text, teal accent/selection/focus and status colors. Encoded bytes use the
+existing `UiColor::from_srgb8`; generic widget defaults stay unchanged. The existing metric,
+font, text-capacity, layout and input owners remain. Density/text-scale native cases retain the
+Editor's palette instead of silently reverting to the shared default.
+
+Independent review finds that mixing the bright error color into invalid-field backgrounds
+with the inherited recipe would lower normal text contrast to about 4.42:1. One private Editor
+field recipe now preserves the neutral input background and original foreground, focus/error
+border, radius and exact-width padding. Inspector scalar/structured fields and both Hierarchy
+field consumers use it. The actual-theme regression requires at least 4.5:1 in focused and
+unfocused enabled invalid fields. A separate error plus focus ring, independent border roles,
+variant-specific hover colors and the complete reference typography remain open.
+
+The Source Hierarchy reducer no longer marks paint dirty on every admitted batch. It preserves
+prior dirty work and records actual filter input-lifetime and button-state changes, including
+focus revocation before a fallible composition cancellation. A regression routes actual
+pointer input through the hosted journal: entering/leaving the row and focus changes repaint,
+while movement inside the unchanged button reuses before description construction. The
+fixture now performs the same successor-presentation reconciliation as the native adapter.
+The reconciled original source fails this regression (`468a231a-1f02-49f3-8691-f46e0fd51f6a`);
+the owner/drawn cohort passes **90/90** (`19107730-311a-444e-96a9-aa0b30820db9`). The final
+affected controls/Inspector/Hierarchy/drawn cohort passes **134/134**
+(`85d380e0-5b38-4130-9629-c0bed84c5abe`), including the actual-theme contrast case.
+
+An initial complete Windows/DX12 run with five panel readbacks times out at **181.696s** in
+the later dirty-close/recovery portion (`178ec9d5-e269-4276-811b-b04ec6117645`). It remains a
+failed run. Its successful earlier readbacks show actual panel texels with original geometry;
+they are CPU-composited using nearest sampling and are not swapchain or OS screenshots.
+Inspection confirms the palette direction and continuing oversized command area, dense
+technical identity feedback and incomplete product composition.
+
+The complete final-behavior trajectory without readback capture then passes **1/1** in
+**73.696s** (`f7706f6d-63a1-4e82-8cfc-09e0329faa00`), with 254 unselected cases. Temporary
+stage timing observes actual replacement images after graphics recovery; all original source,
+history, persistence, input, dirty-close and physical-retirement assertions remain. No timeout
+or assertion was weakened; the temporary diagnostics are removed. Different capture/source
+and uncontrolled workload conditions do not identify the first timeout's cause or establish
+a before/after runtime improvement.
+
+Independent correctness and visual reviews close the concrete reconciliation and invalid-text
+contrast findings. Ordinary desktop node dragging, the reported cross-monitor title-bar move,
+physical IME, full product layout/components and numeric end-to-end performance budgets remain
+open. Reducing description work does not remove the current unconditional root event redraw,
+Inspector description-before-reuse or window-compositing costs.
+
+Final correctness Clippy passes for the Editor library and binaries with all features; root
+formatting, changed-document file/heading links and whitespace checks pass. The production
+`nara-editor-drawn` binary builds with locked dependencies, `--release --no-default-features`
+and Rust 1.95.0. This optimized build enables subsequent comparison; no release runtime or
+debug/release speedup is established by compilation.

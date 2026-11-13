@@ -29,11 +29,11 @@ use nara_ui_widgets::UiButtonVisualState;
 use nara_ui_widgets::{
     UiAppearance, UiAppearanceError, UiAppearancePalette, UiButton, UiButtonState, UiButtonVariant,
     UiControlGrid, UiControlSize, UiIconLabel, UiIntentBatch, UiIntentBatchError, UiPropertyRow,
-    UiTextField, UiTextFieldAppearance, UiTextFieldError, UiTextInputToken, UiTextRole,
-    UiWidgetError,
+    UiTextField, UiTextFieldError, UiTextInputToken, UiTextRole, UiWidgetError,
 };
 use thiserror::Error;
 
+use super::appearance::field_appearance as inspector_field_appearance;
 use super::authoring;
 use super::field_drafts::structure::{self, DraftAction, DraftInput};
 use super::field_drafts::{
@@ -2212,21 +2212,6 @@ impl OwnedInspector {
         );
         Ok(node)
     }
-}
-
-fn inspector_field_appearance(
-    appearance: UiAppearance,
-    text: &UiTextField,
-    width: f32,
-    invalid: bool,
-) -> Result<UiTextFieldAppearance, UiAppearanceError> {
-    let mut field = appearance.field(text.input_token().is_some(), text.enabled(), invalid)?;
-    let padding = field.padding;
-    if width <= padding.left() + padding.right() {
-        let inline = (width - 1.0) * 0.5;
-        field.padding = UiEdges::new(inline, inline, padding.top(), padding.bottom())?;
-    }
-    Ok(field)
 }
 
 fn property_label_layout(gap: f32) -> Result<UiIconLabel, UiLayoutError> {

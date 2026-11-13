@@ -6,8 +6,8 @@ use std::{
 
 use nara::tooling::SceneInspectorEntityRow;
 use nara_ui_kernel::{
-    UiActionId, UiAuthoringSnapshotBuilder, UiDimension, UiEdges, UiLayer, UiLocalKey, UiNode,
-    UiOverflow, UiRoot, UiRootStatus, UiStyle, UiTextOverflow, UiVisual,
+    UiActionId, UiAuthoringSnapshotBuilder, UiDimension, UiLayer, UiLocalKey, UiNode, UiOverflow,
+    UiRoot, UiRootStatus, UiStyle, UiTextOverflow, UiVisual,
 };
 use nara_ui_widgets::{UiAppearanceError, UiAppearancePalette, UiButtonVariant, UiControlSize};
 
@@ -167,17 +167,13 @@ impl OwnedHierarchy {
         let mut buttons = HashMap::new();
         self.filter
             .reconfigure(&mut self.engine, appearance.typography(UiTextRole::Body)?)?;
-        let mut field_appearance = appearance.field(
-            self.filter.input_token().is_some(),
-            self.filter.enabled(),
+        let field_appearance = super::super::appearance::field_appearance(
+            appearance,
+            &self.filter,
+            width,
             self.input_error.is_some(),
         )?;
         let padding = field_appearance.padding;
-        if width <= padding.left() + padding.right() {
-            let inline = (width - 1.0) * 0.5;
-            field_appearance.padding =
-                UiEdges::new(inline, inline, padding.top(), padding.bottom())?;
-        }
         let field_height = metrics
             .field
             .max(line_box(self.filter.editor().layout()) + padding.top() + padding.bottom());
