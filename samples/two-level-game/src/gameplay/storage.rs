@@ -23,6 +23,10 @@ pub(super) const OBLIGATION: PluginShutdownObligationId =
 #[derive(Resource, Clone)]
 pub(super) struct Storage(Arc<Mutex<Option<SaveSlot>>>);
 impl Storage {
+    pub(super) fn permits_resume(&self) -> bool {
+        self.0.try_lock().is_ok_and(|slot| slot.is_none())
+    }
+
     pub fn save(&self, checkpoint: &Checkpoint) -> Result<(), String> {
         self.0
             .lock()

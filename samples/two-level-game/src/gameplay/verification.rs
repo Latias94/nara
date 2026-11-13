@@ -38,6 +38,10 @@ pub(super) struct Verification {
 }
 
 impl Verification {
+    pub(super) fn is_interactive(&self) -> bool {
+        self.steps.is_empty()
+    }
+
     pub fn new(scenario: Scenario) -> Self {
         use LevelId::{Cavern, Meadow};
         let level =

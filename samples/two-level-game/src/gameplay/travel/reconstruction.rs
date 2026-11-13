@@ -19,12 +19,15 @@ pub(in crate::gameplay) struct DynamicMarker {
     pub id: MarkerId,
 }
 
-pub(in crate::gameplay) fn observe_markers(world: &mut World) -> Result<Vec<MarkerId>, String> {
-    let mut query = world.query::<(nara::ecs::Entity, &DynamicMarker)>();
-    let mut actual = query
-        .iter(world)
+pub(in crate::gameplay) fn observe_markers(world: &World) -> Result<Vec<MarkerId>, String> {
+    let mut actual = world
+        .iter_entities()
+        .filter_map(|entity| {
+            entity
+                .get::<DynamicMarker>()
+                .map(|marker| (entity.id(), marker.id))
+        })
         .take(MAX_MARKERS + 1)
-        .map(|(entity, marker)| (entity, marker.id))
         .collect::<Vec<_>>();
     actual.sort_by_key(|(_, id)| *id);
     let tokens = &world.resource::<Session>().markers;

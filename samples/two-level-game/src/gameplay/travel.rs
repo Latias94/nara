@@ -31,6 +31,11 @@ use crate::{
 pub(super) struct Travel {
     pending: Option<Pending>,
 }
+impl Travel {
+    pub(super) fn is_idle(&self) -> bool {
+        self.pending.is_none()
+    }
+}
 struct Pending {
     checkpoint: Checkpoint,
     target: LevelKey,
@@ -82,6 +87,13 @@ pub(super) fn consume(world: &mut World) {
             continue;
         }
         let result = match kind.as_str() {
+            super::resume::RESTORE_STATE => {
+                let result = super::resume::begin_from_command(world, &payload);
+                if result.is_err() {
+                    super::resume::reject(world);
+                }
+                result
+            }
             TRAVEL | INSTANCE => {
                 let key = world.resource::<ActiveLevel>().key();
                 let target = if kind == INSTANCE {
@@ -106,7 +118,8 @@ pub(super) fn consume(world: &mut World) {
                 let checkpoint = world.resource::<Progress>().checkpoint().clone();
                 let result = world.resource::<Storage>().save(&checkpoint);
                 if result.is_ok() {
-                    world.resource_mut::<Session>().saves += 1;
+                    let mut session = world.resource_mut::<Session>();
+                    session.saves = session.saves.saturating_add(1);
                     println!(
                         "two_level_game: checkpoint file published and verified at {:?} score={}",
                         checkpoint.location.level, checkpoint.score
@@ -163,7 +176,7 @@ fn retry_current(world: &mut World) -> Result<(), String> {
         let mut session = world.resource_mut::<Session>();
         session.markers.clear();
         session.held = [false; 4];
-        session.restarts += 1;
+        session.restarts = session.restarts.saturating_add(1);
         session.phase = GamePhase::Reconstructing;
     }
     match reconstruct(world) {
@@ -173,7 +186,11 @@ fn retry_current(world: &mut World) -> Result<(), String> {
     Ok(())
 }
 
-fn begin(world: &mut World, checkpoint: Checkpoint, restore: bool) -> Result<(), String> {
+pub(super) fn begin(
+    world: &mut World,
+    checkpoint: Checkpoint,
+    restore: bool,
+) -> Result<(), String> {
     checkpoint.validate().map_err(|error| error.to_string())?;
     if world.resource::<Travel>().pending.is_some() {
         return Err("level preparation is already pending".into());
@@ -186,6 +203,7 @@ fn begin(world: &mut World, checkpoint: Checkpoint, restore: bool) -> Result<(),
             .map(|pickup| pickup.level.level()),
     );
     validate.extend(checkpoint.markers.iter().map(|marker| marker.level.level()));
+    validate.extend(super::resume::required_levels(world));
     // Validate other sources first; keep the final target's prepared generation for commit.
     validate.remove(&checkpoint.location.level.level());
     world.resource_mut::<Travel>().pending = Some(Pending {
@@ -225,9 +243,9 @@ pub(super) fn advance(world: &mut World) {
     }
     let request = pending.request.unwrap();
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
-        Some(ProjectSceneRequestState::Ready) => scenes
-            .prepared(request)
-            .map(|view| Content::read(view.scene())),
+        Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
+            Content::read(view.scene()).map(|content| (content, view.source_content_stamp()))
+        }),
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         state => Some(Err(format!(
             "level preparation rejected: {state:?}; {:?}",
@@ -238,7 +256,7 @@ pub(super) fn advance(world: &mut World) {
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
     };
-    let content = match prepared {
+    let (content, stamp) = match prepared {
         Ok(content) => content,
         Err(error) => {
             cancel_ack(world, request);
@@ -246,6 +264,11 @@ pub(super) fn advance(world: &mut World) {
             return;
         }
     };
+    if let Err(error) = super::resume::validate_content(world, level, stamp) {
+        cancel_ack(world, request);
+        reject(world, error);
+        return;
+    }
     if !pending.restore && level == pending.target.level() {
         pending.checkpoint.location.anchor = content.checkpoint.clone();
     }
@@ -293,8 +316,8 @@ pub(super) fn advance(world: &mut World) {
         let mut session = world.resource_mut::<Session>();
         session.markers.clear();
         session.phase = GamePhase::Reconstructing;
-        session.travel_count += 1;
-        session.restores += u32::from(pending.restore);
+        session.travel_count = session.travel_count.saturating_add(1);
+        session.restores = session.restores.saturating_add(u32::from(pending.restore));
     }
     match reconstruct(world) {
         Ok(()) => {
@@ -309,6 +332,7 @@ pub(super) fn advance(world: &mut World) {
 }
 
 fn reject(world: &mut World, error: String) {
+    super::resume::reject_pending(world);
     eprintln!("two_level_game: level preparation/commit rejected; current game retained: {error}");
     let mut session = world.resource_mut::<Session>();
     session.phase = GamePhase::Running;

@@ -2,6 +2,7 @@ mod commands;
 mod content;
 #[cfg(feature = "desktop")]
 mod input;
+pub(crate) mod resume;
 mod storage;
 mod travel;
 mod verification;
@@ -101,6 +102,10 @@ pub struct GameSnapshot {
     pub error: Option<String>,
     pub current_instance: Option<nara::identity::SceneInstanceId>,
     pub scene_members: usize,
+    pub logical_tick: u64,
+    pub logical_elapsed_nanos: u64,
+    pub held: [bool; 4],
+    pub restoring: bool,
 }
 
 /// Stable owner identity with a bounded write counter; ordinary mutations never allocate it.
@@ -247,6 +252,7 @@ pub(super) struct Session {
     restores: u32,
     initialized: bool,
     error: Option<String>,
+    clock: crate::resume::GameClock,
 }
 
 struct ExplorationPlugin {
@@ -269,12 +275,13 @@ impl Plugin for ExplorationPlugin {
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
         .insert_resource(verification::Verification::new(self.options.scenario))?;
+        resume::install(app)?;
         storage::install(app, self.options.save_path.as_deref())?;
         add_startup_scene_activation_systems(app, initialize)?;
         add_local_gameplay_command_systems(app, verification::drive)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (travel::consume, travel::advance, simulate, capture)
+            (travel::consume, simulate, capture)
                 .chain()
                 .in_set(GameplayCommandSet::Consume)
                 .before(GameplayCommandSet::Capture)
@@ -284,7 +291,16 @@ impl Plugin for ExplorationPlugin {
             CoreStage::FixedUpdate,
             verification::observe_progress.after(GameplayCommandSet::Capture),
         )?;
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            (travel::advance, resume::finish).chain(),
+        )?;
+        app.add_systems(CoreStage::Last, capture)?;
         Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        resume::record_configuration(app)
     }
 }
 
@@ -326,6 +342,20 @@ fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegi
 }
 
 fn initialize(world: &mut World) {
+    let Ok(timestep) = u64::try_from(
+        world
+            .resource::<nara::app::FixedTime>()
+            .timestep()
+            .as_nanos(),
+    ) else {
+        fail(
+            world,
+            "the game timestep cannot be represented by its logical clock".into(),
+        );
+        return;
+    };
+    world.resource_mut::<Session>().clock.timestep_nanos = timestep;
+    resume::remember_current(world);
     let content = CurrentScene::get(world)
         .ok_or_else(|| "current Scene is unavailable".to_owned())
         .and_then(|current| Content::read(current.source()));
@@ -349,6 +379,7 @@ fn initialize(world: &mut World) {
 }
 
 fn fail(world: &mut World, error: String) {
+    resume::reject_pending(world);
     eprintln!("two_level_game: reconstruction degraded: {error}");
     let mut session = world.resource_mut::<Session>();
     session.phase = GamePhase::Degraded;
@@ -367,6 +398,10 @@ fn player(world: &World) -> Option<nara::ecs::Entity> {
 
 fn simulate(world: &mut World) {
     if world.resource::<Session>().phase != GamePhase::Running {
+        return;
+    }
+    if let Err(error) = resume::advance_clock(world) {
+        fail(world, error);
         return;
     }
     let Some(player) = player(world) else {
@@ -474,6 +509,10 @@ fn capture(world: &mut World) {
         scene_members: receipt
             .as_ref()
             .map_or(0, |receipt| receipt.entity_ids().len()),
+        logical_tick: session.clock.ticks,
+        logical_elapsed_nanos: session.clock.elapsed_nanos,
+        held: session.held,
+        restoring: resume::is_pending(world),
     };
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }
