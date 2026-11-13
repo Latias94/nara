@@ -10,12 +10,11 @@ use std::{
 
 use nara_app::{App, CoreStage};
 use nara_asset::{
-    AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetPathScope, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
-    AssetReloadRequestKind, AssetServer, AssetSourceChangeKind, AssetSourceChanges,
-    AssetSourceKind, AssetSourcePath, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets,
-    Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion, LoadState,
-    SourceHash, StableAssetId,
+    AssetEventKind, AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetPathScope,
+    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetServer, AssetSourceChangeKind,
+    AssetSourceChanges, AssetSourceKind, AssetSourcePath, AssetStates, AssetTaskUpdateSet,
+    AssetVersion, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId,
+    ImporterVersion, LoadState, SourceHash, StableAssetId,
 };
 #[cfg(feature = "serde")]
 use nara_asset::{AssetMeta, AssetMetaIdentity};
@@ -4562,26 +4561,8 @@ fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
     started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     track_image_task(&mut app, first_request, first);
 
-    let generation = app
-        .world_mut()
-        .unwrap()
-        .resource_mut::<AssetLoadGenerations>()
-        .begin_request(handle.id());
-    let expected_version = app
-        .world_mut()
-        .unwrap()
-        .resource_mut::<AssetStates>()
-        .set_loading(handle.id());
-    let second_request = AssetReloadRequest::new(
-        AssetReloadRequestId::from_raw(1),
-        handle.id(),
-        record.clone(),
-        AssetReloadRequestKind::LoadOrReload,
-        AssetSourceChangeKind::Modified,
-        expected_version,
-        generation,
-        Vec::new(),
-    );
+    let (second_handle, second_request) = reserve_loading_request(&mut app, &record);
+    assert_eq!(second_handle, handle);
     let second_imported = imported_image_for_request(
         app.world(),
         &importer,
@@ -4628,6 +4609,187 @@ fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
         "the desired generation must publish before obsolete physical work retires"
     );
     assert_eq!(published_after_release, Some(second_hash));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn generation_owner_replacement_rejects_old_image_success_failure_and_removal() {
+    for outcome in ["success", "failure", "removal"] {
+        let root = unique_temp_root();
+        let source_path = root.join("textures/player.png");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(&root, record.clone());
+        let importer = app.world().resource::<ImageImporter>().clone();
+        let (server, handle, images, states, events) =
+            loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+        let version = states.version(handle.id()).unwrap();
+        let slot = images.slot_revision(handle);
+        let before = Arc::new(Mutex::new(None));
+        let capture = Arc::clone(&before);
+        let mut replace_owner = true;
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            (move |mut generations: ResMut<AssetLoadGenerations>,
+                   requests: nara_ecs::Res<nara_asset::AssetReloadRequests>,
+                   states: nara_ecs::Res<AssetStates>| {
+                if std::mem::take(&mut replace_owner) {
+                    let request = requests.iter().next().unwrap().clone();
+                    assert!(generations.is_current_request(&request));
+                    let state = states.state(handle.id()).unwrap().clone();
+                    let revision = states.state_revision(handle.id());
+                    let mut replacement = AssetLoadGenerations::default();
+                    for _ in 0..request.generation().raw() {
+                        replacement.begin_request(handle.id());
+                    }
+                    assert!(replacement.is_current(handle.id(), request.generation()));
+                    assert!(!replacement.is_current_request(&request));
+                    *generations = replacement;
+                    *capture.lock().unwrap() = Some((request, state, revision));
+                }
+            })
+            .after(AssetTaskUpdateSet::ResolveSourceChanges)
+            .before(AssetTaskUpdateSet::SpawnJobs),
+        )
+        .unwrap();
+        let world = app.world_mut().unwrap();
+        world.insert_resource(server);
+        world.insert_resource(images);
+        world.insert_resource(states);
+        world.insert_resource(events);
+        if outcome == "failure" {
+            fs::write(&source_path, b"invalid PNG").unwrap();
+        }
+        if outcome == "removal" {
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .removed(record.path().clone())
+                .unwrap();
+        } else {
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .modified(record.path().clone())
+                .unwrap();
+        }
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        drive_image_jobs(&mut runtime);
+        let (request, state, revision) = before.lock().unwrap().take().unwrap();
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .pixels(),
+            &[255, 0, 0, 255],
+            "{outcome}"
+        );
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<Assets<ImageAsset>>()
+                .slot_revision(handle),
+            slot,
+            "{outcome}"
+        );
+        assert_eq!(
+            runtime.world().resource::<AssetStates>().state(handle.id()),
+            Some(&state),
+            "{outcome}"
+        );
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<AssetStates>()
+                .state_revision(handle.id()),
+            revision,
+            "{outcome}"
+        );
+        assert!(
+            !runtime
+                .world()
+                .resource::<AssetLoadGenerations>()
+                .is_current_request(&request)
+        );
+        assert!(
+            runtime.world().resource::<AssetEvents>().is_empty(),
+            "{outcome}"
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<AssetReloadDiagnostics>()
+                .is_empty(),
+            "{outcome}"
+        );
+        assert!(!crate::reload::recovery_facts_for_tests(runtime.world(), handle).0);
+        let stats = runtime.world().resource::<ImageReloadStats>();
+        assert_eq!(stats.applied, 0, "{outcome}");
+        assert_eq!(stats.failed, 0, "{outcome}");
+        assert_eq!(stats.removed, 0, "{outcome}");
+        assert_eq!(stats.stale, 1, "{outcome}");
+        assert_eq!(stats.pending, 0, "{outcome}");
+
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                record.stable_id(),
+                root_alias(&record),
+                AssetSourceKind::Image,
+            ),
+            ImageImportSettings::default(),
+        );
+        fs::write(
+            source_path.with_extension("png.meta"),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::write(&source_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+        edit_image_pipeline(
+            &mut runtime,
+            ImagePipelineEdit::SourceChange {
+                path: record.path().clone(),
+                kind: AssetSourceChangeKind::MetaModified,
+            },
+        );
+        drive_image_jobs(&mut runtime);
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .pixels(),
+            &[0, 255, 0, 255],
+            "{outcome}"
+        );
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            &LoadState::Loaded,
+            "{outcome}"
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<AssetStates>()
+                .version(handle.id())
+                .unwrap()
+                > version,
+            "{outcome}"
+        );
+        assert_eq!(
+            runtime.world().resource::<ImageReloadStats>().applied,
+            1,
+            "{outcome}"
+        );
+        runtime.finish().unwrap();
+        remove_temp_root(&root);
+    }
 }
 
 #[test]
@@ -4693,7 +4855,9 @@ fn superseded_image_bookkeeping_and_budget_stay_bounded_until_physical_close() {
     let (server, handle, images, states, _) =
         loaded_image_store(&importer, &record, &[255, 255, 255, 255]);
     let expected_version = states.version(handle.id()).unwrap();
-    let first_request = reload_request(&record, handle, expected_version);
+    let mut generations = AssetLoadGenerations::default();
+    let first_request =
+        reload_request(&record, handle, expected_version, &server, &mut generations);
     let bytes = rgba_png(1, 1, &[255, 0, 0, 255]);
     let first_imported = importer
         .import_image(
@@ -4736,18 +4900,8 @@ fn superseded_image_bookkeeping_and_budget_stay_bounded_until_physical_close() {
             first,
         )
         .unwrap();
-    let mut generations = AssetLoadGenerations::default();
     for request_id in 1..=32 {
-        let request = AssetReloadRequest::new(
-            AssetReloadRequestId::from_raw(request_id),
-            handle.id(),
-            record.clone(),
-            AssetReloadRequestKind::LoadOrReload,
-            AssetSourceChangeKind::Modified,
-            expected_version,
-            generations.begin_request(handle.id()),
-            Vec::new(),
-        );
+        let request = reload_request(&record, handle, expected_version, &server, &mut generations);
         let failed = accepted_image_handle(pools.spawn(
             TaskPoolKind::Io,
             TaskSpawnRequest::new(request_id, IMAGE_RELOAD_TASK_DOMAIN),
@@ -4783,16 +4937,7 @@ fn superseded_image_bookkeeping_and_budget_stay_bounded_until_physical_close() {
         .recv_timeout(Duration::from_secs(2))
         .unwrap();
     for request_id in 34..=97 {
-        let request = AssetReloadRequest::new(
-            AssetReloadRequestId::from_raw(request_id),
-            handle.id(),
-            record.clone(),
-            AssetReloadRequestKind::LoadOrReload,
-            AssetSourceChangeKind::Modified,
-            expected_version,
-            generations.begin_request(handle.id()),
-            Vec::new(),
-        );
+        let request = reload_request(&record, handle, expected_version, &server, &mut generations);
         let imported = importer
             .import_image(
                 bytes_request(&record, &bytes),
@@ -4992,8 +5137,21 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
     let first_handle = server.reserve_record::<ImageAsset>(&first_record).unwrap();
     let first_asset = first_handle.id();
     let second_asset = second_handle.id();
-    let first_request = reload_request(&first_record, first_handle, AssetVersion::ZERO);
-    let second_request = reload_request(&second_record, second_handle, AssetVersion::ZERO);
+    let mut generations = AssetLoadGenerations::default();
+    let first_request = reload_request(
+        &first_record,
+        first_handle,
+        AssetVersion::ZERO,
+        &server,
+        &mut generations,
+    );
+    let second_request = reload_request(
+        &second_record,
+        second_handle,
+        AssetVersion::ZERO,
+        &server,
+        &mut generations,
+    );
     let pools = TaskPools::try_new(bounded_task_config(4, 8)).unwrap();
     let (first_started_tx, first_started_rx) = mpsc::channel();
     let (first_release_tx, first_release_rx) = mpsc::channel();
@@ -5120,6 +5278,7 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
     let second_handle = server.reserve_record::<ImageAsset>(&second_record).unwrap();
     let first_asset = first_handle.id();
     let second_asset = second_handle.id();
+    let mut generations = AssetLoadGenerations::default();
     let own_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
     let foreign_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
     let own_task = accepted_image_handle(own_pools.spawn(
@@ -5140,7 +5299,13 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
         .or_default()
         .push(
             detached_attempt(
-                reload_request(&first_record, first_handle, AssetVersion::ZERO),
+                reload_request(
+                    &first_record,
+                    first_handle,
+                    AssetVersion::ZERO,
+                    &server,
+                    &mut generations,
+                ),
                 first_handle,
             ),
             own_task,
@@ -5152,7 +5317,13 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
         .or_default()
         .push(
             detached_attempt(
-                reload_request(&second_record, second_handle, AssetVersion::ZERO),
+                reload_request(
+                    &second_record,
+                    second_handle,
+                    AssetVersion::ZERO,
+                    &server,
+                    &mut generations,
+                ),
                 second_handle,
             ),
             foreign_task,
@@ -5621,7 +5792,13 @@ fn publication_failure_releases_candidate_charge_for_the_failure_recorder() {
             .active_publication_overlap_bytes(),
         0
     );
-    let request = reload_request(&record, handle, AssetVersion::ZERO);
+    let request = reload_request(
+        &record,
+        handle,
+        AssetVersion::ZERO,
+        &server,
+        &mut AssetLoadGenerations::default(),
+    );
     let attempt = ImageReloadAttempt::capture(request, handle, &images, &states).unwrap();
     let mut stats = ImageReloadStats::default();
     let unknown_server = AssetServer::new();
@@ -5679,7 +5856,13 @@ fn stale_first_load_failure_cannot_overwrite_newer_state() {
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
     let expected_version = states.set_loading(handle.id());
-    let request = reload_request(&record, handle, expected_version);
+    let request = reload_request(
+        &record,
+        handle,
+        expected_version,
+        &server,
+        &mut AssetLoadGenerations::default(),
+    );
     let attempt = ImageReloadAttempt::capture(request, handle, &images, &states).unwrap();
     images
         .remove_with_state(handle, &mut states, &mut events)
@@ -5717,7 +5900,13 @@ fn same_version_state_aba_retires_an_old_failure_as_stale() {
     let mut events = AssetEvents::default();
     let expected_version = states.set_loading(handle.id());
     let attempt = ImageReloadAttempt::capture(
-        reload_request(&record, handle, expected_version),
+        reload_request(
+            &record,
+            handle,
+            expected_version,
+            &server,
+            &mut AssetLoadGenerations::default(),
+        ),
         handle,
         &images,
         &states,
@@ -5760,7 +5949,13 @@ fn slot_replacement_retires_an_old_failure_as_stale() {
         loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
     let expected_version = states.set_loading(handle.id());
     let attempt = ImageReloadAttempt::capture(
-        reload_request(&record, handle, expected_version),
+        reload_request(
+            &record,
+            handle,
+            expected_version,
+            &server,
+            &mut AssetLoadGenerations::default(),
+        ),
         handle,
         &images,
         &states,
@@ -6410,7 +6605,10 @@ fn reserve_loading_request(
         .unwrap()
         .resource_mut::<AssetStates>()
         .set_loading(handle.id());
-    (handle, reload_request(record, handle, expected_version))
+    (
+        handle,
+        app_reload_request(app, record, handle, expected_version),
+    )
 }
 
 fn reserve_loaded_image_request(
@@ -6462,7 +6660,7 @@ fn reserve_loaded_image_request(
     app.world_mut().unwrap().insert_resource(events);
     (
         handle,
-        reload_request(record, handle, expected_version),
+        app_reload_request(app, record, handle, expected_version),
         last_good_hash,
     )
 }
@@ -6710,16 +6908,85 @@ fn reload_request(
     record: &AssetRecord,
     handle: Handle<ImageAsset>,
     expected_version: AssetVersion,
+    server: &AssetServer,
+    generations: &mut AssetLoadGenerations,
 ) -> AssetReloadRequest {
-    AssetReloadRequest::new(
-        AssetReloadRequestId::from_raw(0),
-        handle.id(),
-        record.clone(),
-        AssetReloadRequestKind::LoadOrReload,
-        AssetSourceChangeKind::Modified,
-        expected_version,
-        AssetLoadGeneration::ZERO,
-        Vec::new(),
+    let mut app = App::new();
+    app.add_plugins((nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin))
+        .unwrap();
+    let consumer = nara_asset::register_image_reload_consumer::<ImageAsset>(&mut app).unwrap();
+    let captured = Arc::new(Mutex::new(None));
+    let output = Arc::clone(&captured);
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut requests: ResMut<nara_asset::AssetReloadRequests>,
+               mut generations: ResMut<AssetLoadGenerations>| {
+            let mut requests = requests.drain_images(&consumer).unwrap();
+            if !requests.is_empty() {
+                assert_eq!(requests.len(), 1);
+                *output.lock().unwrap() =
+                    Some((requests.remove(0), std::mem::take(&mut *generations)));
+            }
+        })
+        .in_set(AssetTaskUpdateSet::SpawnJobs),
+    )
+    .unwrap();
+    let world = app.world_mut().unwrap();
+    world.insert_resource(server.clone());
+    world.insert_resource(std::mem::take(generations));
+    if expected_version != AssetVersion::ZERO {
+        let mut values = Assets::<ImageAsset>::default();
+        world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
+            let mut events = world.resource_mut::<AssetEvents>();
+            for _ in 0..expected_version.raw() {
+                let value = ImageAsset::new(
+                    ImageExtent::new(1, 1),
+                    ImageFormat::Rgba8,
+                    ImageColorSpace::Srgb,
+                    vec![0, 0, 0, 255],
+                )
+                .unwrap();
+                values
+                    .commit_loaded(handle, value, &mut states, &mut events, None, None)
+                    .unwrap();
+            }
+        });
+    }
+    world
+        .resource_mut::<nara_asset::ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    world
+        .resource_mut::<AssetSourceChanges>()
+        .modified(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let (request, original_generations) = captured.lock().unwrap().take().unwrap();
+    *generations = original_generations;
+    assert_eq!(request.asset_id(), handle.id());
+    assert_eq!(request.expected_version(), expected_version);
+    assert!(generations.is_current_request(&request));
+    runtime.finish().unwrap();
+    request
+}
+
+fn app_reload_request(
+    app: &mut App,
+    record: &AssetRecord,
+    handle: Handle<ImageAsset>,
+    expected_version: AssetVersion,
+) -> AssetReloadRequest {
+    app.world_mut().unwrap().resource_scope(
+        |world, mut generations: nara_ecs::Mut<AssetLoadGenerations>| {
+            reload_request(
+                record,
+                handle,
+                expected_version,
+                world.resource::<AssetServer>(),
+                &mut generations,
+            )
+        },
     )
 }
 

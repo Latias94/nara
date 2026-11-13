@@ -869,6 +869,8 @@ pub struct AssetDependencyGraph {
     source_to_recipes: BTreeMap<StableAssetId, BTreeSet<ImportRecipeDigest>>,
     recipe_to_sources: BTreeMap<ImportRecipeDigest, BTreeSet<StableAssetId>>,
     source_to_dependents: BTreeMap<StableAssetId, BTreeSet<StableAssetId>>,
+    #[cfg(feature = "runtime")]
+    pub(crate) source_subscriptions: crate::source_subscriptions::SourceSubscriptions,
 }
 
 impl AssetDependencyGraph {
@@ -879,6 +881,8 @@ impl AssetDependencyGraph {
 
     /// Records one source-to-recipe association without asserting successful output publication.
     pub fn record_recipe(&mut self, source: StableAssetId, recipe: ImportRecipeDigest) {
+        #[cfg(feature = "runtime")]
+        self.source_subscriptions.advance_revision();
         self.source_to_recipes
             .entry(source)
             .or_default()
@@ -890,6 +894,8 @@ impl AssetDependencyGraph {
     }
 
     pub fn remove_recipe(&mut self, source: StableAssetId, recipe: ImportRecipeDigest) {
+        #[cfg(feature = "runtime")]
+        self.source_subscriptions.advance_revision();
         if let Some(recipes) = self.source_to_recipes.get_mut(&source) {
             recipes.remove(&recipe);
             if recipes.is_empty() {
@@ -930,6 +936,8 @@ impl AssetDependencyGraph {
     }
 
     pub fn add_source_dependency(&mut self, source: StableAssetId, dependent: StableAssetId) {
+        #[cfg(feature = "runtime")]
+        self.source_subscriptions.advance_revision();
         self.source_to_dependents
             .entry(source)
             .or_default()
@@ -937,6 +945,8 @@ impl AssetDependencyGraph {
     }
 
     pub fn remove_source_dependency(&mut self, source: StableAssetId, dependent: StableAssetId) {
+        #[cfg(feature = "runtime")]
+        self.source_subscriptions.advance_revision();
         if let Some(dependents) = self.source_to_dependents.get_mut(&source) {
             dependents.remove(&dependent);
             if dependents.is_empty() {

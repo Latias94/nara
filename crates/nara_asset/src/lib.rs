@@ -22,6 +22,8 @@ mod runtime_codec;
 mod server;
 mod source_changes;
 mod source_root;
+#[cfg(feature = "runtime")]
+mod source_subscriptions;
 mod state;
 mod storage;
 
@@ -62,8 +64,9 @@ pub use reload::{
     AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
     AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequestLimitKind,
     AssetReloadRequestLimits, AssetReloadRequests, AssetSourcePlugin, AssetTaskUpdateSet,
-    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
-    register_image_reload_consumer,
+    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError, SourceReloadConsumer,
+    SourceReloadDrainError, SourceReloadRegistrationError, register_image_reload_consumer,
+    register_source_reload_consumer,
 };
 pub use runtime_codec::{AssetDomain, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
 pub use server::{AssetError, AssetServer};
@@ -72,6 +75,12 @@ pub use source_changes::{
     AssetSourceChangeLimitKind, AssetSourceChangeLimits, AssetSourceChanges,
 };
 pub use source_root::AssetSourceRoot;
+#[cfg(feature = "runtime")]
+pub use source_subscriptions::{
+    PreparedSourceSubscriptions, SourceSubscriptionCommitError, SourceSubscriptionError,
+    SourceSubscriptionKind, SourceSubscriptionLimitKind, SourceSubscriptionLimits,
+    SourceSubscriptionUsage,
+};
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
     AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,

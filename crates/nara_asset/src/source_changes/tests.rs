@@ -98,73 +98,121 @@ fn source_changes_metadata_does_not_resurrect_a_removed_source() {
 }
 
 #[test]
-fn source_changes_preserve_metadata_removal_order_across_batches_and_roundtrips() {
+fn source_change_constructors_preserve_semantics_and_distinguish_raw_origins() {
     let path = AssetSourcePath::new("textures/player.png").unwrap();
-    let kinds = [
-        AssetSourceChangeKind::Modified,
-        AssetSourceChangeKind::MetaModified,
-        AssetSourceChangeKind::Removed,
+    for (change, kind, dirty, raw_source, raw_metadata) in [
+        (
+            AssetSourceChange::new(path.clone(), AssetSourceChangeKind::Modified),
+            AssetSourceChangeKind::Modified,
+            false,
+            true,
+            false,
+        ),
+        (
+            AssetSourceChange::new(path.clone(), AssetSourceChangeKind::Removed),
+            AssetSourceChangeKind::Removed,
+            false,
+            true,
+            false,
+        ),
+        (
+            AssetSourceChange::new(path.clone(), AssetSourceChangeKind::MetaModified),
+            AssetSourceChangeKind::MetaModified,
+            true,
+            false,
+            true,
+        ),
+        (
+            AssetSourceChange::metadata_removed(path.clone()),
+            AssetSourceChangeKind::Removed,
+            false,
+            false,
+            true,
+        ),
+    ] {
+        assert_eq!(change.path(), &path);
+        assert_eq!(change.kind(), kind);
+        assert_eq!(change.metadata_dirty(), dirty);
+        assert_eq!(change.raw_source_changed(), raw_source);
+        assert_eq!(change.raw_metadata_changed(), raw_metadata);
+        assert_eq!(change.metadata_after_removal(), dirty);
+    }
+}
+
+#[test]
+fn source_changes_preserve_raw_origins_and_removal_order_associatively_across_batches() {
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
+    let observations = [
+        AssetSourceChange::new(path.clone(), AssetSourceChangeKind::Modified),
+        AssetSourceChange::new(path.clone(), AssetSourceChangeKind::MetaModified),
+        AssetSourceChange::new(path.clone(), AssetSourceChangeKind::Removed),
+        AssetSourceChange::metadata_removed(path.clone()),
     ];
-    for first in kinds {
-        for second in kinds {
-            for third in kinds {
-                let sequence = [first, second, third];
+    for first in &observations {
+        for second in &observations {
+            for third in &observations {
+                let sequence = [first.clone(), second.clone(), third.clone()];
                 let last_source = sequence
                     .iter()
-                    .rfind(|kind| **kind != AssetSourceChangeKind::MetaModified);
-                let metadata = sequence.contains(&AssetSourceChangeKind::MetaModified);
+                    .map(AssetSourceChange::kind)
+                    .rfind(|kind| *kind != AssetSourceChangeKind::MetaModified);
+                let metadata = sequence.iter().any(AssetSourceChange::metadata_dirty);
                 let last_invalidation = sequence
                     .iter()
-                    .rfind(|kind| **kind != AssetSourceChangeKind::Modified);
+                    .map(AssetSourceChange::kind)
+                    .rfind(|kind| *kind != AssetSourceChangeKind::Modified);
                 let expected_kind = match last_source {
                     Some(AssetSourceChangeKind::Removed) => AssetSourceChangeKind::Removed,
                     _ if metadata => AssetSourceChangeKind::MetaModified,
                     _ => AssetSourceChangeKind::Modified,
                 };
                 let mut direct = AssetSourceChanges::new();
-                for kind in sequence {
-                    direct
-                        .push(AssetSourceChange::new(path.clone(), kind))
-                        .unwrap();
+                for change in &sequence {
+                    direct.push(change.clone()).unwrap();
                 }
                 let expected = direct.drain_coalesced();
                 assert_eq!(expected[0].kind(), expected_kind, "{sequence:?}");
                 assert_eq!(expected[0].metadata_dirty(), metadata, "{sequence:?}");
                 assert_eq!(
+                    expected[0].raw_source_changed(),
+                    sequence.iter().any(AssetSourceChange::raw_source_changed),
+                    "{sequence:?}"
+                );
+                assert_eq!(
+                    expected[0].raw_metadata_changed(),
+                    sequence.iter().any(AssetSourceChange::raw_metadata_changed),
+                    "{sequence:?}"
+                );
+                assert_eq!(
                     expected[0].metadata_after_removal(),
-                    last_invalidation == Some(&AssetSourceChangeKind::MetaModified),
+                    last_invalidation == Some(AssetSourceChangeKind::MetaModified),
                     "{sequence:?}"
                 );
                 let mut batch = AssetSourceChanges::new();
-                batch
-                    .try_extend(sequence.map(|kind| AssetSourceChange::new(path.clone(), kind)))
-                    .unwrap();
+                batch.try_extend(sequence.iter().cloned()).unwrap();
                 assert_eq!(batch.drain_coalesced(), expected, "one batch: {sequence:?}");
                 for split in 1..3 {
                     for use_batch in [false, true] {
                         let mut prefix = AssetSourceChanges::new();
                         prefix
-                            .try_extend(
-                                sequence[..split]
-                                    .iter()
-                                    .map(|kind| AssetSourceChange::new(path.clone(), *kind)),
-                            )
+                            .try_extend(sequence[..split].iter().cloned())
+                            .unwrap();
+                        let mut suffix = AssetSourceChanges::new();
+                        suffix
+                            .try_extend(sequence[split..].iter().cloned())
                             .unwrap();
                         let mut roundtrip = AssetSourceChanges::new();
-                        for change in prefix.drain_coalesced() {
+                        for change in prefix
+                            .drain_coalesced()
+                            .into_iter()
+                            .chain(suffix.drain_coalesced())
+                        {
                             if use_batch {
                                 roundtrip.try_extend([change]).unwrap();
                             } else {
                                 roundtrip.push(change).unwrap();
                             }
                         }
-                        roundtrip
-                            .try_extend(
-                                sequence[split..]
-                                    .iter()
-                                    .map(|kind| AssetSourceChange::new(path.clone(), *kind)),
-                            )
-                            .unwrap();
                         assert_eq!(
                             roundtrip.drain_coalesced(),
                             expected,

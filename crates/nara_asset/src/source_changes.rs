@@ -33,6 +33,19 @@ impl AssetSourceChange {
         }
     }
 
+    /// Records a metadata sidecar removal with the principal's semantic removal behavior.
+    #[must_use]
+    pub const fn metadata_removed(path: AssetSourcePath) -> Self {
+        Self {
+            path,
+            observation: PendingSourceChange {
+                raw_source_changed: false,
+                raw_metadata_changed: true,
+                ..PendingSourceChange::new(AssetSourceChangeKind::Removed)
+            },
+        }
+    }
+
     #[must_use]
     pub const fn path(&self) -> &AssetSourcePath {
         &self.path
@@ -47,6 +60,18 @@ impl AssetSourceChange {
     #[must_use]
     pub const fn metadata_dirty(&self) -> bool {
         self.observation.metadata_dirty
+    }
+
+    /// Whether any coalesced observation changed the raw principal input.
+    #[must_use]
+    pub const fn raw_source_changed(&self) -> bool {
+        self.observation.raw_source_changed
+    }
+
+    /// Whether any coalesced observation changed the raw metadata sidecar input.
+    #[must_use]
+    pub const fn raw_metadata_changed(&self) -> bool {
+        self.observation.raw_metadata_changed
     }
 
     #[cfg(any(feature = "runtime", test))]
@@ -192,6 +217,8 @@ enum SourceInvalidation {
 struct PendingSourceChange {
     removed: Option<bool>,
     metadata_dirty: bool,
+    raw_source_changed: bool,
+    raw_metadata_changed: bool,
     // The rightmost relevant observation survives source-only edits and regrouped batches.
     last_invalidation: Option<SourceInvalidation>,
 }
@@ -205,6 +232,8 @@ impl PendingSourceChange {
                 AssetSourceChangeKind::MetaModified => None,
             },
             metadata_dirty: matches!(kind, AssetSourceChangeKind::MetaModified),
+            raw_source_changed: !matches!(kind, AssetSourceChangeKind::MetaModified),
+            raw_metadata_changed: matches!(kind, AssetSourceChangeKind::MetaModified),
             last_invalidation: match kind {
                 AssetSourceChangeKind::MetaModified => Some(SourceInvalidation::Metadata),
                 AssetSourceChangeKind::Removed => Some(SourceInvalidation::Removal),
@@ -218,6 +247,8 @@ impl PendingSourceChange {
             self.removed = incoming.removed;
         }
         self.metadata_dirty |= incoming.metadata_dirty;
+        self.raw_source_changed |= incoming.raw_source_changed;
+        self.raw_metadata_changed |= incoming.raw_metadata_changed;
         if incoming.last_invalidation.is_some() {
             self.last_invalidation = incoming.last_invalidation;
         }

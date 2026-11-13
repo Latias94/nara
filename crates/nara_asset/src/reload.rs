@@ -12,13 +12,14 @@ mod resolution;
 #[cfg(test)]
 use crate::AssetSourceRoot;
 #[cfg(test)]
-use requests::ImageReloadRegistration;
+use requests::SourceReloadRegistrations;
 pub use requests::{
     AssetLoadGeneration, AssetLoadGenerations, AssetReloadRequest,
     AssetReloadRequestAdmissionError, AssetReloadRequestId, AssetReloadRequestKind,
     AssetReloadRequestLimitKind, AssetReloadRequestLimits, AssetReloadRequests,
-    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
-    register_image_reload_consumer,
+    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError, SourceReloadConsumer,
+    SourceReloadDrainError, SourceReloadRegistrationError, register_image_reload_consumer,
+    register_source_reload_consumer,
 };
 use resolution::{reject_unclaimed_asset_reload_requests, resolve_asset_source_changes};
 

@@ -17,7 +17,7 @@ use super::diagnostics::{
 };
 use super::requests::{
     AssetLoadGenerations, AssetReloadRequestAdmissionError, AssetReloadRequestKind,
-    AssetReloadRequestLimitKind, AssetReloadRequests, ImageReloadRegistration,
+    AssetReloadRequestLimitKind, AssetReloadRequests, SourceReloadRegistrations,
 };
 use super::{AssetReloadDiagnostics, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges};
 
@@ -141,7 +141,7 @@ struct AssetReloadResolutionContext<'a> {
     states: &'a mut AssetStates,
     generations: &'a mut AssetLoadGenerations,
     requests: &'a mut AssetReloadRequests,
-    image_registration: Option<&'a ImageReloadRegistration>,
+    registrations: Option<&'a SourceReloadRegistrations>,
     events: &'a mut AssetEvents,
     diagnostics: &'a mut AssetReloadDiagnostics,
 }
@@ -149,30 +149,74 @@ struct AssetReloadResolutionContext<'a> {
 impl AssetReloadResolutionContext<'_> {
     fn resolve_changes(&mut self, changes: Vec<AssetSourceChange>) {
         let mut dependency_roots = BTreeMap::new();
+        let mut raw_roots = BTreeMap::new();
+        let mut resolved_roots = BTreeSet::new();
 
         for change in changes {
+            let mut has_raw_subscribers = false;
+            let metadata = change.raw_metadata_changed().then(|| {
+                AssetSourcePath::new(format!("{}.meta", change.path().as_str()))
+                    .expect("a metadata suffix preserves a canonical source path")
+            });
+            for path in [
+                change.raw_source_changed().then_some(change.path()),
+                metadata.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                for dependent in self.dependencies.raw_dependents_for_path(path) {
+                    has_raw_subscribers = true;
+                    raw_roots.entry(dependent).or_insert_with(|| path.clone());
+                }
+            }
             let Some(record) = self.database.record_for_path(change.path()).cloned() else {
                 let asset_id = self.asset_server.id_for_path(change.path());
                 if let Some(source_stable_id) =
                     asset_id.and_then(|asset_id| self.asset_server.stable_id(asset_id))
                 {
                     dependency_roots.insert(source_stable_id, change.path().clone());
+                    resolved_roots.insert(source_stable_id);
                 }
-                let error = AssetReloadResolutionError::RecordMissing {
-                    path: change.path().clone(),
-                    change_kind: change.kind(),
-                };
-                self.reject_known_record_gap(asset_id, error);
+                if !has_raw_subscribers || asset_id.is_some() {
+                    let error = AssetReloadResolutionError::RecordMissing {
+                        path: change.path().clone(),
+                        change_kind: change.kind(),
+                    };
+                    self.reject_known_record_gap(asset_id, error);
+                }
                 continue;
             };
 
             dependency_roots.insert(record.stable_id(), record.path().clone());
-            self.resolve_record_observed(
-                record,
-                change.kind(),
-                change.metadata_dirty(),
-                change.metadata_after_removal(),
-            );
+            if resolved_roots.insert(record.stable_id()) {
+                self.resolve_record_observed(
+                    record,
+                    change.kind(),
+                    change.metadata_dirty(),
+                    change.metadata_after_removal(),
+                );
+            }
+        }
+
+        for (dependent, path) in raw_roots {
+            dependency_roots
+                .entry(dependent)
+                .or_insert_with(|| path.clone());
+            if !resolved_roots.insert(dependent) {
+                continue;
+            }
+            match self.database.record_for_stable_id(dependent).cloned() {
+                Some(record) => self.resolve_record(record, AssetSourceChangeKind::Modified),
+                None => {
+                    let error = AssetReloadResolutionError::DependentRecordMissing {
+                        path,
+                        change_kind: AssetSourceChangeKind::Modified,
+                    };
+                    let asset_id = self.asset_server.id_for_stable_id(dependent);
+                    self.reject_known_record_gap(asset_id, error);
+                }
+            }
         }
 
         for (dependent, source) in
@@ -186,7 +230,9 @@ impl AssetReloadResolutionContext<'_> {
                     let error = AssetReloadResolutionError::DependentRecordMissing {
                         path: dependency_roots
                             .get(&source)
-                            .expect("dependent origin comes from a direct source")
+                            .expect(
+                                "dependent origin comes from a changed source or raw subscriber",
+                            )
                             .clone(),
                         change_kind: AssetSourceChangeKind::Modified,
                     };
@@ -227,9 +273,11 @@ impl AssetReloadResolutionContext<'_> {
             self.asset_server.id_for_path(record.path()),
             self.asset_server.id_for_stable_id(record.stable_id()),
         ];
-        if let Some(registration) = self.image_registration
-            && record.source_kind() == &AssetSourceKind::Image
-        {
+        let registration = self
+            .registrations
+            .and_then(|registrations| registrations.for_kind(record.source_kind()));
+        let image_recovery = registration.is_some_and(|registration| registration.image_recovery);
+        if let Some(registration) = registration {
             for id in known_ids.into_iter().flatten() {
                 if let Err(source) = (registration.validate_asset_type)(self.asset_server, id) {
                     return Err(AssetReloadResolutionError::Asset {
@@ -240,6 +288,33 @@ impl AssetReloadResolutionContext<'_> {
                 }
             }
         }
+        let affected_recipes = if registration.is_some() && !image_recovery {
+            let affected_recipes = self.dependencies.affected_recipes(record.stable_id());
+            if let Err(source) = self
+                .requests
+                .check_capacity_for(&record, affected_recipes.capacity())
+            {
+                for id in known_ids.into_iter().flatten().collect::<BTreeSet<_>>() {
+                    self.observe_request(
+                        id,
+                        change_kind,
+                        metadata_dirty,
+                        metadata_after_removal,
+                        false,
+                    );
+                    self.reject_asset(id, source.kind().diagnostic_code());
+                }
+                return Err(AssetReloadResolutionError::RequestAdmission {
+                    path: record.path().clone(),
+                    source_kind: record.source_kind().clone(),
+                    change_kind,
+                    source,
+                });
+            }
+            Some(affected_recipes)
+        } else {
+            None
+        };
         let asset_id = match self.asset_server.reserve_record_id(&record) {
             Ok(asset_id) => asset_id,
             Err(source) => {
@@ -255,9 +330,7 @@ impl AssetReloadResolutionContext<'_> {
                 return Err(error);
             }
         };
-        if let Some(registration) = self.image_registration
-            && record.source_kind() == &AssetSourceKind::Image
-        {
+        if let Some(registration) = registration {
             (registration.claim_asset_type)(self.asset_server, asset_id).map_err(|source| {
                 AssetReloadResolutionError::Asset {
                     path: record.path().clone(),
@@ -265,37 +338,34 @@ impl AssetReloadResolutionContext<'_> {
                     source,
                 }
             })?;
-            self.states
-                .bind_image_reload_authority(&registration.authority);
+            if image_recovery {
+                self.states
+                    .bind_image_reload_authority(&registration.authority);
+            }
         }
+        let source_authority = registration.map(|registration| Arc::clone(&registration.authority));
         let previous_state = (
             self.states.state_revision(asset_id),
             self.states
                 .state(asset_id)
                 .and_then(|state| state.usable_version()),
         );
-        let metadata_dirty = metadata_dirty || change_kind == AssetSourceChangeKind::MetaModified;
-        let removed = change_kind == AssetSourceChangeKind::Removed;
-        if removed && metadata_after_removal {
-            self.observe_source_removal(asset_id, record.source_kind());
-        }
-        if metadata_dirty {
-            self.states.observe_metadata_change(asset_id);
-        }
-        let generation = self.generations.begin_request(asset_id);
-        if removed && !metadata_after_removal {
-            // Source removal revokes derivation authority before optional cleanup is admitted.
-            self.observe_source_removal(asset_id, record.source_kind());
-        }
-        let image_authority = match (record.source_kind(), self.image_registration) {
-            (AssetSourceKind::Image, Some(registration)) => Arc::clone(&registration.authority),
-            _ => {
+        let generation = self.observe_request(
+            asset_id,
+            change_kind,
+            metadata_dirty,
+            metadata_after_removal,
+            image_recovery,
+        );
+        let source_authority = match source_authority {
+            Some(authority) => authority,
+            None => {
                 let error = AssetReloadResolutionError::SourceConsumerMissing {
                     path: record.path().clone(),
                     source_kind: record.source_kind().clone(),
                     change_kind,
                 };
-                return Err(self.reject_request(asset_id, error));
+                return Err(self.reject_request(asset_id, error, image_recovery));
             }
         };
 
@@ -311,11 +381,12 @@ impl AssetReloadResolutionContext<'_> {
                 change_kind,
                 source,
             };
-            return Err(self.reject_request(asset_id, error));
+            return Err(self.reject_request(asset_id, error, image_recovery));
         }
 
         let expected_version = self.states.version(asset_id).unwrap_or(AssetVersion::ZERO);
-        let affected_recipes = self.dependencies.affected_recipes(record.stable_id());
+        let affected_recipes = affected_recipes
+            .unwrap_or_else(|| self.dependencies.affected_recipes(record.stable_id()));
         let request_path = record.path().clone();
         let request_source_kind = record.source_kind().clone();
 
@@ -326,8 +397,9 @@ impl AssetReloadResolutionContext<'_> {
             change_kind,
             expected_version,
             generation,
+            Arc::clone(self.generations.store_identity()),
             affected_recipes,
-            image_authority,
+            source_authority,
             Some(previous_state),
         ) {
             Ok(request) => request,
@@ -338,17 +410,43 @@ impl AssetReloadResolutionContext<'_> {
                     change_kind,
                     source,
                 };
-                return Err(self.reject_request(asset_id, error));
+                return Err(self.reject_request(asset_id, error, image_recovery));
             }
         };
-        let loading_version = self.states.set_loading_for_image_reload(asset_id);
+        let loading_version = if image_recovery {
+            self.states.set_loading_for_image_reload(asset_id)
+        } else {
+            self.states.set_loading(asset_id)
+        };
         request.set_resolved_state_revision(self.states.state_revision(asset_id));
         debug_assert_eq!(loading_version, expected_version);
         Ok(())
     }
 
-    fn observe_source_removal(&mut self, id: AssetId, kind: &AssetSourceKind) {
-        if kind == &AssetSourceKind::Image && self.image_registration.is_some() {
+    fn observe_request(
+        &mut self,
+        id: AssetId,
+        change_kind: AssetSourceChangeKind,
+        metadata_dirty: bool,
+        metadata_after_removal: bool,
+        image_recovery: bool,
+    ) -> super::AssetLoadGeneration {
+        let removed = change_kind == AssetSourceChangeKind::Removed;
+        if removed && metadata_after_removal {
+            self.observe_source_removal(id, image_recovery);
+        }
+        if metadata_dirty || change_kind == AssetSourceChangeKind::MetaModified {
+            self.states.observe_metadata_change(id);
+        }
+        let generation = self.generations.begin_request(id);
+        if removed && !metadata_after_removal {
+            self.observe_source_removal(id, image_recovery);
+        }
+        generation
+    }
+
+    fn observe_source_removal(&mut self, id: AssetId, image_recovery: bool) {
+        if image_recovery {
             self.states.observe_image_source_removal(id);
         } else {
             self.states.observe_source_removal(id);
@@ -377,8 +475,9 @@ impl AssetReloadResolutionContext<'_> {
         &mut self,
         asset_id: AssetId,
         error: AssetReloadResolutionError,
+        image_recovery: bool,
     ) -> AssetReloadResolutionError {
-        if matches!(&error, AssetReloadResolutionError::RequestAdmission { .. }) {
+        if image_recovery && matches!(&error, AssetReloadResolutionError::RequestAdmission { .. }) {
             let version = self
                 .states
                 .reject_image_reload_capacity(asset_id, error.diagnostic_code());
@@ -453,7 +552,7 @@ pub(super) fn resolve_asset_source_changes(
     mut states: ResMut<AssetStates>,
     mut generations: ResMut<AssetLoadGenerations>,
     mut requests: ResMut<AssetReloadRequests>,
-    image_registration: Option<Res<ImageReloadRegistration>>,
+    registrations: Option<Res<SourceReloadRegistrations>>,
     mut events: ResMut<AssetEvents>,
     mut diagnostics: ResMut<AssetReloadDiagnostics>,
 ) {
@@ -466,7 +565,7 @@ pub(super) fn resolve_asset_source_changes(
         states: &mut states,
         generations: &mut generations,
         requests: &mut requests,
-        image_registration: image_registration.as_deref(),
+        registrations: registrations.as_deref(),
         events: &mut events,
         diagnostics: &mut diagnostics,
     };
@@ -484,7 +583,7 @@ pub(super) fn reject_unclaimed_asset_reload_requests(
         return;
     }
     for request in requests.drain_unclaimed() {
-        if !generations.is_current(request.asset_id(), request.generation())
+        if !generations.is_current_request(&request)
             || states.version(request.asset_id()) != Some(request.expected_version())
         {
             continue;
@@ -502,3 +601,7 @@ pub(super) fn reject_unclaimed_asset_reload_requests(
 #[cfg(test)]
 #[path = "tests_recovery_continuity.rs"]
 mod recovery_continuity_tests;
+
+#[cfg(test)]
+#[path = "tests_source_routing.rs"]
+mod source_routing_tests;

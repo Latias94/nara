@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{any::TypeId, collections::BTreeMap, fmt, sync::Arc};
 
 use nara_app::{App, PluginError};
 use nara_core::{ByteLimit, ItemLimit};
@@ -129,13 +129,192 @@ impl fmt::Display for AssetReloadRequestAdmissionError {
 
 impl std::error::Error for AssetReloadRequestAdmissionError {}
 
+/// Non-cloneable authority for one concrete source kind and Rust asset type in an App.
+///
+/// Registration routes source reload intent only; the consumer owns import execution and
+/// publication. Publicly constructed requests carry no registration authority.
+#[derive(Debug)]
+pub struct SourceReloadConsumer {
+    source_kind: AssetSourceKind,
+    authority: Arc<()>,
+}
+
+impl SourceReloadConsumer {
+    #[must_use]
+    pub const fn source_kind(&self) -> &AssetSourceKind {
+        &self.source_kind
+    }
+
+    #[must_use]
+    pub fn owns_request(&self, request: &AssetReloadRequest) -> bool {
+        request.source_kind() == &self.source_kind
+            && request
+                .source_authority
+                .as_ref()
+                .is_some_and(|authority| Arc::ptr_eq(authority, &self.authority))
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct SourceReloadRegistration {
+    pub(super) source_kind: AssetSourceKind,
+    asset_type: TypeId,
+    asset_type_name: &'static str,
+    pub(super) authority: Arc<()>,
+    pub(super) validate_asset_type: fn(&AssetServer, AssetId) -> Result<(), AssetError>,
+    pub(super) claim_asset_type: fn(&mut AssetServer, AssetId) -> Result<(), AssetError>,
+    pub(super) image_recovery: bool,
+}
+
+#[derive(Debug, Default, Resource)]
+pub(super) struct SourceReloadRegistrations {
+    registrations: Vec<SourceReloadRegistration>,
+}
+
+impl SourceReloadRegistrations {
+    pub(super) fn for_kind(
+        &self,
+        source_kind: &AssetSourceKind,
+    ) -> Option<&SourceReloadRegistration> {
+        self.registrations
+            .iter()
+            .find(|registration| &registration.source_kind == source_kind)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceReloadDrainError {
+    AuthorityMismatch,
+}
+
+impl fmt::Display for SourceReloadDrainError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AuthorityMismatch => formatter
+                .write_str("source reload requests were admitted for a different App registration"),
+        }
+    }
+}
+
+impl std::error::Error for SourceReloadDrainError {}
+
+#[derive(Debug)]
+pub enum SourceReloadRegistrationError {
+    AssetSourcePluginMissing,
+    AlreadyRegistered {
+        source_kind: AssetSourceKind,
+        asset_type: &'static str,
+    },
+    SourceKindConflict {
+        source_kind: AssetSourceKind,
+        existing_type: &'static str,
+        requested_type: &'static str,
+    },
+    AppMutation(PluginError),
+}
+
+impl fmt::Display for SourceReloadRegistrationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AssetSourcePluginMissing => {
+                formatter.write_str("source reload consumer requires AssetSourcePlugin")
+            }
+            Self::AlreadyRegistered {
+                source_kind,
+                asset_type,
+            } => write!(
+                formatter,
+                "source reload consumer for {source_kind} and {asset_type} is already registered"
+            ),
+            Self::SourceKindConflict {
+                source_kind,
+                existing_type,
+                requested_type,
+            } => write!(
+                formatter,
+                "source reload kind {source_kind} is registered for {existing_type}, not {requested_type}"
+            ),
+            Self::AppMutation(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for SourceReloadRegistrationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::AppMutation(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Registers routing authority without installing an importer or an execution system.
+///
+/// Each source kind has one consumer and concrete Rust asset type in an App. Distinct source
+/// kinds may share the same Rust asset type.
+pub fn register_source_reload_consumer<T: 'static>(
+    app: &mut App,
+    source_kind: AssetSourceKind,
+) -> Result<SourceReloadConsumer, SourceReloadRegistrationError> {
+    register_reload_consumer::<T>(app, source_kind, false)
+}
+
+fn register_reload_consumer<T: 'static>(
+    app: &mut App,
+    source_kind: AssetSourceKind,
+    image_recovery: bool,
+) -> Result<SourceReloadConsumer, SourceReloadRegistrationError> {
+    if !app.world().contains_resource::<AssetReloadRequests>() {
+        return Err(SourceReloadRegistrationError::AssetSourcePluginMissing);
+    }
+    let asset_type = TypeId::of::<T>();
+    let asset_type_name = std::any::type_name::<T>();
+    if let Some(registrations) = app.world().get_resource::<SourceReloadRegistrations>() {
+        if let Some(existing) = registrations.for_kind(&source_kind) {
+            return Err(if existing.asset_type == asset_type {
+                SourceReloadRegistrationError::AlreadyRegistered {
+                    source_kind,
+                    asset_type: asset_type_name,
+                }
+            } else {
+                SourceReloadRegistrationError::SourceKindConflict {
+                    source_kind,
+                    existing_type: existing.asset_type_name,
+                    requested_type: asset_type_name,
+                }
+            });
+        }
+    }
+
+    let authority = Arc::new(());
+    let world = app
+        .world_mut()
+        .map_err(SourceReloadRegistrationError::AppMutation)?;
+    world
+        .get_resource_or_insert_with(SourceReloadRegistrations::default)
+        .registrations
+        .push(SourceReloadRegistration {
+            source_kind: source_kind.clone(),
+            asset_type,
+            asset_type_name,
+            authority: Arc::clone(&authority),
+            validate_asset_type: AssetServer::validate_type_claim::<T>,
+            claim_asset_type: |server, id| server.claim::<T>(id).map(|_| ()),
+            image_recovery,
+        });
+    Ok(SourceReloadConsumer {
+        source_kind,
+        authority,
+    })
+}
+
 /// Non-cloneable authority for the concrete first-party image reload integration.
 ///
 /// The token is returned directly to `ImageSourcePlugin` and never stored as a public ECS resource.
 /// Requests admitted for another App generation cannot be drained with this token.
 #[derive(Debug)]
 pub struct ImageReloadConsumer {
-    authority: Arc<()>,
+    consumer: SourceReloadConsumer,
 }
 
 impl ImageReloadConsumer {
@@ -146,15 +325,8 @@ impl ImageReloadConsumer {
         states: &AssetStates,
         id: AssetId,
     ) -> ImageRecoveryContinuity {
-        states.image_recovery_continuity(id, Arc::clone(&self.authority))
+        states.image_recovery_continuity(id, Arc::clone(&self.consumer.authority))
     }
-}
-
-#[derive(Debug, Resource)]
-pub(super) struct ImageReloadRegistration {
-    pub(super) authority: Arc<()>,
-    pub(super) validate_asset_type: fn(&AssetServer, AssetId) -> Result<(), AssetError>,
-    pub(super) claim_asset_type: fn(&mut AssetServer, AssetId) -> Result<(), AssetError>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,21 +379,17 @@ impl std::error::Error for ImageReloadRegistrationError {
 pub fn register_image_reload_consumer<T: 'static>(
     app: &mut App,
 ) -> Result<ImageReloadConsumer, ImageReloadRegistrationError> {
-    if !app.world().contains_resource::<AssetReloadRequests>() {
-        return Err(ImageReloadRegistrationError::AssetSourcePluginMissing);
-    }
-    if app.world().contains_resource::<ImageReloadRegistration>() {
-        return Err(ImageReloadRegistrationError::AlreadyRegistered);
-    }
-
-    let authority = Arc::new(());
-    app.insert_resource(ImageReloadRegistration {
-        authority: Arc::clone(&authority),
-        validate_asset_type: AssetServer::validate_type_claim::<T>,
-        claim_asset_type: |server, id| server.claim::<T>(id).map(|_| ()),
-    })
-    .map_err(ImageReloadRegistrationError::AppMutation)?;
-    Ok(ImageReloadConsumer { authority })
+    register_reload_consumer::<T>(app, AssetSourceKind::Image, true)
+        .map(|consumer| ImageReloadConsumer { consumer })
+        .map_err(|error| match error {
+            SourceReloadRegistrationError::AssetSourcePluginMissing => {
+                ImageReloadRegistrationError::AssetSourcePluginMissing
+            }
+            SourceReloadRegistrationError::AppMutation(error) => {
+                ImageReloadRegistrationError::AppMutation(error)
+            }
+            _ => ImageReloadRegistrationError::AlreadyRegistered,
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -239,9 +407,14 @@ impl AssetLoadGeneration {
 #[derive(Debug, Default, Resource)]
 pub struct AssetLoadGenerations {
     generations: BTreeMap<AssetId, AssetLoadGeneration>,
+    store_identity: Arc<()>,
 }
 
 impl AssetLoadGenerations {
+    pub(crate) fn store_identity(&self) -> &Arc<()> {
+        &self.store_identity
+    }
+
     #[must_use]
     pub fn current(&self, id: AssetId) -> AssetLoadGeneration {
         self.generations
@@ -259,6 +432,17 @@ impl AssetLoadGenerations {
     #[must_use]
     pub fn is_current(&self, id: AssetId, generation: AssetLoadGeneration) -> bool {
         self.current(id) == generation
+    }
+
+    /// Checks the original issuing store and the current generation of an admitted request.
+    /// Publicly constructed requests have no issuer and cannot be current.
+    #[must_use]
+    pub fn is_current_request(&self, request: &AssetReloadRequest) -> bool {
+        request
+            .generation_issuer
+            .as_ref()
+            .is_some_and(|issuer| Arc::ptr_eq(issuer, &self.store_identity))
+            && self.is_current(request.asset_id(), request.generation())
     }
 }
 
@@ -283,7 +467,7 @@ pub enum AssetReloadRequestKind {
     Remove,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AssetReloadRequest {
     id: AssetReloadRequestId,
     asset_id: AssetId,
@@ -294,11 +478,40 @@ pub struct AssetReloadRequest {
     previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     resolved_state_revision: Option<AssetStateRevision>,
     generation: AssetLoadGeneration,
+    generation_issuer: Option<Arc<()>>,
     affected_recipes: Vec<ImportRecipeDigest>,
-    image_authority: Option<Arc<()>>,
+    source_authority: Option<Arc<()>>,
 }
 
+impl PartialEq for AssetReloadRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.asset_id == other.asset_id
+            && self.record == other.record
+            && self.request_kind == other.request_kind
+            && self.source_change_kind == other.source_change_kind
+            && self.expected_version == other.expected_version
+            && self.previous_state == other.previous_state
+            && self.resolved_state_revision == other.resolved_state_revision
+            && self.generation == other.generation
+            && self.affected_recipes == other.affected_recipes
+            && match (&self.generation_issuer, &other.generation_issuer) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+            && match (&self.source_authority, &other.source_authority) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for AssetReloadRequest {}
+
 impl AssetReloadRequest {
+    /// Constructs request data without source registration or generation-store authority.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -321,13 +534,14 @@ impl AssetReloadRequest {
             previous_state: None,
             resolved_state_revision: None,
             generation,
+            generation_issuer: None,
             affected_recipes,
-            image_authority: None,
+            source_authority: None,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn new_admitted_image(
+    fn new_admitted_source(
         id: AssetReloadRequestId,
         asset_id: AssetId,
         record: AssetRecord,
@@ -335,8 +549,9 @@ impl AssetReloadRequest {
         source_change_kind: AssetSourceChangeKind,
         expected_version: AssetVersion,
         generation: AssetLoadGeneration,
+        generation_issuer: Arc<()>,
         affected_recipes: Vec<ImportRecipeDigest>,
-        image_authority: Arc<()>,
+        source_authority: Arc<()>,
         previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     ) -> Self {
         let mut request = Self::new(
@@ -349,7 +564,8 @@ impl AssetReloadRequest {
             generation,
             affected_recipes,
         );
-        request.image_authority = Some(image_authority);
+        request.generation_issuer = Some(generation_issuer);
+        request.source_authority = Some(source_authority);
         request.previous_state = previous_state;
         request
     }
@@ -433,7 +649,13 @@ impl AssetReloadRequest {
         self.record.clone()
     }
 
-    pub(super) fn retained_payload_bytes(&self) -> Option<usize> {
+    /// Returns the dynamic payload bytes retained by this request without allocating.
+    ///
+    /// Counts the owned record's string capacities and the affected-recipe vector's full
+    /// capacity, including unused storage. The inline request value and shared registration
+    /// authority are excluded. `None` indicates that the byte total cannot fit in `usize`.
+    #[must_use]
+    pub fn retained_payload_bytes(&self) -> Option<usize> {
         self.record.retained_bytes()?.checked_add(
             self.affected_recipes
                 .capacity()
@@ -444,8 +666,8 @@ impl AssetReloadRequest {
 
 /// Bounded task-update queue from source resolution to typed asset consumers.
 ///
-/// `ResolveSourceChanges` is the sole producer. The concrete image domain drains through its
-/// `ImageReloadConsumer` no later than `ApplyResults`; the engine then rejects every unclaimed
+/// `ResolveSourceChanges` is the sole producer. Concrete domains drain through their registered
+/// consumer no later than `ApplyResults`; the engine then rejects every unclaimed
 /// current-generation request, publishes diagnostics/events, and releases all queue charges in
 /// the same task update. The queue is runtime request intent and is not replay-recordable.
 #[derive(Debug, Resource)]
@@ -479,7 +701,7 @@ impl AssetReloadRequests {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn try_push_resolved(
+    pub(super) fn try_push_resolved(
         &mut self,
         asset_id: AssetId,
         record: AssetRecord,
@@ -487,13 +709,14 @@ impl AssetReloadRequests {
         source_change_kind: AssetSourceChangeKind,
         expected_version: AssetVersion,
         generation: AssetLoadGeneration,
+        generation_issuer: Arc<()>,
         affected_recipes: Vec<ImportRecipeDigest>,
-        image_authority: Arc<()>,
+        source_authority: Arc<()>,
         previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     ) -> Result<&mut AssetReloadRequest, AssetReloadRequestAdmissionError> {
-        self.check_item_capacity()?;
+        let attempted_bytes = self.check_capacity_for(&record, affected_recipes.capacity())?;
         let id = AssetReloadRequestId(self.next_id);
-        let request = AssetReloadRequest::new_admitted_image(
+        let request = AssetReloadRequest::new_admitted_source(
             id,
             asset_id,
             record,
@@ -501,13 +724,34 @@ impl AssetReloadRequests {
             source_change_kind,
             expected_version,
             generation,
+            generation_issuer,
             affected_recipes,
-            image_authority,
+            source_authority,
             previous_state,
         );
-        let request_bytes = request.retained_payload_bytes();
-        let attempted_bytes =
-            request_bytes.and_then(|bytes| self.retained_payload_bytes.checked_add(bytes));
+
+        self.next_id = self.next_id.saturating_add(1);
+        self.retained_payload_bytes = attempted_bytes;
+        let request_index = self.requests.len();
+        self.requests.push(request);
+        Ok(&mut self.requests[request_index])
+    }
+
+    pub(super) fn check_capacity_for(
+        &self,
+        record: &AssetRecord,
+        affected_recipe_capacity: usize,
+    ) -> Result<usize, AssetReloadRequestAdmissionError> {
+        self.check_item_capacity()?;
+        let attempted_bytes = record
+            .retained_bytes()
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    affected_recipe_capacity
+                        .checked_mul(std::mem::size_of::<ImportRecipeDigest>())?,
+                )
+            })
+            .and_then(|bytes| self.retained_payload_bytes.checked_add(bytes));
         let Some(attempted_bytes) = attempted_bytes else {
             return Err(AssetReloadRequestAdmissionError::new(
                 AssetReloadRequestLimitKind::RetainedBytes,
@@ -523,11 +767,7 @@ impl AssetReloadRequests {
             ));
         }
 
-        self.next_id = self.next_id.saturating_add(1);
-        self.retained_payload_bytes = attempted_bytes;
-        let request_index = self.requests.len();
-        self.requests.push(request);
-        Ok(&mut self.requests[request_index])
+        Ok(attempted_bytes)
     }
 
     pub(super) fn check_item_capacity(&self) -> Result<(), AssetReloadRequestAdmissionError> {
@@ -570,20 +810,25 @@ impl AssetReloadRequests {
         &mut self,
         consumer: &ImageReloadConsumer,
     ) -> Result<Vec<AssetReloadRequest>, ImageReloadDrainError> {
+        self.drain_source(&consumer.consumer)
+            .map_err(|_| ImageReloadDrainError::AuthorityMismatch)
+    }
+
+    /// Drains only this consumer's source kind, rejecting foreign authority without mutation.
+    pub fn drain_source(
+        &mut self,
+        consumer: &SourceReloadConsumer,
+    ) -> Result<Vec<AssetReloadRequest>, SourceReloadDrainError> {
         if self.requests.iter().any(|request| {
-            request.source_kind() == &AssetSourceKind::Image
-                && request
-                    .image_authority
-                    .as_ref()
-                    .is_none_or(|authority| !Arc::ptr_eq(authority, &consumer.authority))
+            request.source_kind() == consumer.source_kind() && !consumer.owns_request(request)
         }) {
-            return Err(ImageReloadDrainError::AuthorityMismatch);
+            return Err(SourceReloadDrainError::AuthorityMismatch);
         }
         let retained_payload_bytes = &mut self.retained_payload_bytes;
         Ok(self
             .requests
             .extract_if(.., |request| {
-                if request.source_kind() != &AssetSourceKind::Image {
+                if request.source_kind() != consumer.source_kind() {
                     return false;
                 }
                 *retained_payload_bytes = retained_payload_bytes

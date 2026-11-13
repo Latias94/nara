@@ -227,24 +227,24 @@ impl AssetWatchTranslator {
         source_kind: AssetSourceChangeKind,
     ) -> Result<AssetSourceChange, AssetWatchError> {
         let local = local_path(root.root(), path)?;
-        let local = if let Some(source) = local.as_str().strip_suffix(".meta") {
-            AssetPath::new(source).map_err(AssetWatchError::InvalidLogicalPath)?
+        let (local, is_metadata) = if let Some(source) = local.as_str().strip_suffix(".meta") {
+            (
+                AssetPath::new(source).map_err(AssetWatchError::InvalidLogicalPath)?,
+                true,
+            )
         } else {
-            local
+            (local, false)
         };
-        let kind = if path
-            .file_name()
-            .and_then(|file_name| file_name.to_str())
-            .is_some_and(|file_name| file_name.ends_with(".meta"))
-        {
-            match source_kind {
-                AssetSourceChangeKind::Removed => AssetSourceChangeKind::Removed,
-                _ => AssetSourceChangeKind::MetaModified,
-            }
+        let path = root.scope().resolve(&local);
+        if is_metadata && source_kind == AssetSourceChangeKind::Removed {
+            return Ok(AssetSourceChange::metadata_removed(path));
+        }
+        let kind = if is_metadata {
+            AssetSourceChangeKind::MetaModified
         } else {
             source_kind
         };
-        Ok(AssetSourceChange::new(root.scope().resolve(&local), kind))
+        Ok(AssetSourceChange::new(path, kind))
     }
 }
 

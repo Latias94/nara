@@ -16,7 +16,7 @@ struct RecoveryFixture {
     states: AssetStates,
     generations: AssetLoadGenerations,
     requests: AssetReloadRequests,
-    registration: ImageReloadRegistration,
+    registration: SourceReloadRegistrations,
     consumer: ImageReloadConsumer,
     events: AssetEvents,
     diagnostics: AssetReloadDiagnostics,
@@ -30,7 +30,7 @@ impl RecoveryFixture {
         let registration = app
             .world_mut()
             .unwrap()
-            .remove_resource::<ImageReloadRegistration>()
+            .remove_resource::<SourceReloadRegistrations>()
             .unwrap();
         let record = AssetRecord::new(
             StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
@@ -62,7 +62,12 @@ impl RecoveryFixture {
             Some("deleted pixels")
         );
         events.drain();
-        states.bind_image_reload_authority(&registration.authority);
+        states.bind_image_reload_authority(
+            &registration
+                .for_kind(&AssetSourceKind::Image)
+                .unwrap()
+                .authority,
+        );
         Self {
             record,
             handle,
@@ -99,7 +104,7 @@ impl RecoveryFixture {
             states: &mut self.states,
             generations: &mut self.generations,
             requests: &mut self.requests,
-            image_registration: Some(&self.registration),
+            registrations: Some(&self.registration),
             events: &mut self.events,
             diagnostics: &mut self.diagnostics,
         }
@@ -698,7 +703,7 @@ fn metadata_and_missing_consumer_are_not_capacity_continuations() {
     let token = fixture.continuity();
     let record = fixture.record.clone();
     let mut resolver = fixture.resolver();
-    resolver.image_registration = None;
+    resolver.registrations = None;
     resolver.resolve_record(record, AssetSourceChangeKind::Modified);
     assert!(!token.is_current(&fixture.states, fixture.handle.id()));
     assert_eq!(

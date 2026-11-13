@@ -54,10 +54,7 @@ fn real_file_changes_keep_same_name_roots_independent_in_nested_scopes() {
             translator
                 .translate_event(&bound, &AssetWatchEvent::removed(&sidecar))
                 .unwrap(),
-            [AssetSourceChange::new(
-                canonical,
-                AssetSourceChangeKind::Removed
-            )]
+            [AssetSourceChange::metadata_removed(canonical)]
         );
     }
     remove_temp_root(&root);
@@ -83,7 +80,11 @@ fn real_file_and_sidecar_renames_map_both_ends_without_losing_atomic_save_order(
         assert_eq!(
             translated,
             [
-                AssetSourceChange::new(old_path.clone(), AssetSourceChangeKind::Removed),
+                if suffix.ends_with(".meta") {
+                    AssetSourceChange::metadata_removed(old_path.clone())
+                } else {
+                    AssetSourceChange::new(old_path.clone(), AssetSourceChangeKind::Removed)
+                },
                 AssetSourceChange::new(
                     new_path.clone(),
                     if suffix.ends_with(".meta") {

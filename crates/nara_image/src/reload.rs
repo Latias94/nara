@@ -990,7 +990,7 @@ fn apply_image_reload_results(
     removals.sort_by_key(|attempt| attempt.request.id());
     for attempt in removals {
         let request = &attempt.request;
-        if !generations.is_current(request.asset_id(), request.generation())
+        if !generations.is_current_request(request)
             || !attempt.is_current(&asset_server, &images, &states)
         {
             stats.stale = stats.stale.saturating_add(1);
@@ -1059,12 +1059,12 @@ fn apply_image_reload_results(
             stats.cancelled = stats.cancelled.saturating_add(1);
         }
         if coalesced {
-            if !generations.is_current(request.asset_id(), request.generation()) {
+            if !generations.is_current_request(request) {
                 stats.stale = stats.stale.saturating_add(1);
             }
             continue;
         }
-        if !generations.is_current(request.asset_id(), request.generation()) {
+        if !generations.is_current_request(request) {
             stats.stale = stats.stale.saturating_add(1);
             continue;
         }

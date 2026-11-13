@@ -20,6 +20,9 @@ use std::{
 #[path = "tests/source_scopes.rs"]
 mod source_scopes;
 
+#[path = "tests/raw_sidecars.rs"]
+mod raw_sidecars;
+
 fn temp_root() -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -499,9 +502,8 @@ fn meta_remove_maps_to_source_remove_change() {
 
     assert_eq!(
         changes,
-        vec![AssetSourceChange::new(
-            AssetSourcePath::new("textures/player.png").unwrap(),
-            AssetSourceChangeKind::Removed
+        vec![AssetSourceChange::metadata_removed(
+            AssetSourcePath::new("textures/player.png").unwrap()
         )]
     );
     remove_temp_root(&root);

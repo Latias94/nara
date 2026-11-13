@@ -679,7 +679,13 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
     let mut app = App::new();
     app.insert_resource(AssetReloadRequests::new()).unwrap();
     let consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
-    let authority = Arc::clone(&app.world().resource::<ImageReloadRegistration>().authority);
+    let authority = Arc::clone(
+        &app.world()
+            .resource::<SourceReloadRegistrations>()
+            .for_kind(&AssetSourceKind::Image)
+            .unwrap()
+            .authority,
+    );
     let mut path = String::with_capacity(4_096);
     path.push_str("textures/capacity.png");
     let record = AssetRecord::new(
@@ -712,6 +718,7 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
             AssetSourceChangeKind::Modified,
             AssetVersion::ZERO,
             AssetLoadGeneration::ZERO,
+            Arc::clone(AssetLoadGenerations::default().store_identity()),
             recipes,
             authority,
             None,
@@ -735,7 +742,9 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
     let owner_authority = Arc::clone(
         &owner_app
             .world()
-            .resource::<ImageReloadRegistration>()
+            .resource::<SourceReloadRegistrations>()
+            .for_kind(&AssetSourceKind::Image)
+            .unwrap()
             .authority,
     );
 
@@ -757,6 +766,7 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
             AssetSourceChangeKind::Modified,
             AssetVersion::ZERO,
             AssetLoadGeneration::ZERO,
+            Arc::clone(AssetLoadGenerations::default().store_identity()),
             Vec::new(),
             owner_authority,
             None,
@@ -784,6 +794,54 @@ fn image_reload_consumer_rejects_duplicate_owners() {
         register_image_reload_consumer::<String>(&mut app),
         Err(ImageReloadRegistrationError::AlreadyRegistered)
     ));
+}
+
+#[test]
+fn reload_request_equality_compares_issuer_and_registration_by_identity() {
+    let generations = AssetLoadGenerations::default();
+    let other_generations = AssetLoadGenerations::default();
+    let authority = Arc::new(());
+    let make_request = |issuer: Arc<()>, source_authority: Arc<()>| {
+        let mut requests = AssetReloadRequests::default();
+        requests
+            .try_push_resolved(
+                AssetId::from_raw(1),
+                image_record("textures/identity.png", stable_id()),
+                AssetReloadRequestKind::LoadOrReload,
+                AssetSourceChangeKind::Modified,
+                AssetVersion::ZERO,
+                AssetLoadGeneration::ZERO,
+                issuer,
+                Vec::new(),
+                source_authority,
+                None,
+            )
+            .unwrap()
+            .clone()
+    };
+    let request = make_request(
+        Arc::clone(generations.store_identity()),
+        Arc::clone(&authority),
+    );
+    assert_eq!(request, request.clone());
+    assert_eq!(
+        request,
+        make_request(
+            Arc::clone(generations.store_identity()),
+            Arc::clone(&authority),
+        )
+    );
+    assert_ne!(
+        request,
+        make_request(
+            Arc::clone(other_generations.store_identity()),
+            Arc::clone(&authority),
+        )
+    );
+    assert_ne!(
+        request,
+        make_request(Arc::clone(generations.store_identity()), Arc::new(()))
+    );
 }
 
 #[test]
