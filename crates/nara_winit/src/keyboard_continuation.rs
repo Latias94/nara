@@ -79,6 +79,95 @@ impl WinitSession {
         app.capture_keyboard_inventory(bindings)
     }
 
+    /// Requests a full paused App frame through this session's original frame owner.
+    ///
+    /// This invalidates the previous paused boundary without advancing fixed simulation,
+    /// changing time continuation, or manufacturing a control ticket. The caller continues
+    /// driving the existing session to observe completion.
+    pub fn request_paused_maintenance(&mut self) -> Result<(), WinitKeyboardContinuationError> {
+        let app = self
+            .app
+            .as_mut()
+            .ok_or(WinitKeyboardContinuationError::Unavailable)?;
+        app.check_keyboard_live_paused()?;
+        app.request_frame();
+        Ok(())
+    }
+
+    /// Freezes ordinary native ingress without cancelling the declared keyboard intent.
+    ///
+    /// Capture validates the original endpoint, mapping, consumers, and complete held inventory
+    /// before the gate changes. Original focus remains observationally unchanged. The caller must
+    /// complete paused maintenance before capturing again and later use native focus/physical-key
+    /// reconciliation to reactivate the same session.
+    pub fn isolate_keyboard_input(
+        &mut self,
+        bindings: &[KeyboardActionBinding],
+    ) -> Result<Vec<KeyboardHold>, WinitKeyboardContinuationError> {
+        let app = self
+            .app
+            .as_mut()
+            .ok_or(WinitKeyboardContinuationError::Unavailable)?;
+        app.check_keyboard_boundary()?;
+        let holds = app.capture_keyboard_inventory(bindings)?;
+        app.keyboard_continuation.bindings = bindings.to_vec();
+        app.keyboard_continuation.isolated = true;
+        app.keyboard_continuation.activation = WinitInputActivation::Isolated;
+        app.keyboard_continuation.error = None;
+        app.keyboard_continuation.admission = None;
+        app.keyboard_continuation.needs_step = false;
+        app.keyboard_continuation.step = None;
+        app.request_frame();
+        Ok(holds)
+    }
+
+    /// Admits one controlled synthetic edge while the original native endpoint stays isolated.
+    ///
+    /// Multiple bounded edges may be admitted before maintenance. Capture remains unavailable
+    /// until the original action-to-command tick and paused maintenance settle every edge.
+    pub fn admit_isolated_keyboard_input(
+        &mut self,
+        input: ButtonDriverInput<KeyCode>,
+    ) -> Result<InputAdmission, WinitKeyboardContinuationError> {
+        let app = self
+            .app
+            .as_mut()
+            .ok_or(WinitKeyboardContinuationError::Unavailable)?;
+        app.check_keyboard_live_paused()?;
+        if !app.keyboard_continuation.isolated
+            || app.keyboard_continuation.activation != WinitInputActivation::Isolated
+        {
+            return Err(WinitKeyboardContinuationError::NotIsolated);
+        }
+        if app.keyboard_continuation.bindings.is_empty()
+            || match input {
+                ButtonDriverInput::Press(key) | ButtonDriverInput::Release(key) => !app
+                    .keyboard_continuation
+                    .bindings
+                    .iter()
+                    .any(|binding| binding.key == key),
+                ButtonDriverInput::ReleaseAll => false,
+            }
+        {
+            return Err(WinitKeyboardContinuationError::Input(
+                KeyboardContinuationError::BindingMismatch,
+            ));
+        }
+        let claim = app
+            .keyboard_continuation
+            .claim
+            .clone()
+            .ok_or(WinitKeyboardContinuationError::Unavailable)?;
+        app.apply_keyboard_operation(|scope| {
+            nara_input::apply_claimed_keyboard_driver_input(scope, claim, input).map_err(|error| {
+                match error {
+                    ButtonInputDriverError::WorldAccess(error) => error.into(),
+                    ButtonInputDriverError::Timeline(error) => error.into(),
+                }
+            })
+        })
+    }
+
     /// Restores logical keyboard members while native ingress remains isolated.
     pub fn restore_keyboard_holds(
         &mut self,
@@ -148,6 +237,11 @@ impl WinitSession {
         }
         if app.keyboard_continuation.activation == WinitInputActivation::Active {
             return Ok(WinitInputActivation::Active);
+        }
+        if app.keyboard_continuation.activation == WinitInputActivation::Isolated
+            && !app.keyboard_continuation.bindings.is_empty()
+        {
+            app.capture_keyboard_inventory(&app.keyboard_continuation.bindings)?;
         }
         let window = app
             .original_keyboard_window()
@@ -223,7 +317,7 @@ impl WinitApp {
         self.keyboard_continuation.activation == WinitInputActivation::Active
     }
 
-    fn check_keyboard_boundary(&self) -> Result<(), WinitKeyboardContinuationError> {
+    fn check_keyboard_live_paused(&self) -> Result<(), WinitKeyboardContinuationError> {
         if let Some(fault) = self
             .runtime
             .fault()
@@ -242,6 +336,11 @@ impl WinitApp {
         if self.runtime.state() != RuntimeState::Paused {
             return Err(WinitKeyboardContinuationError::NotPaused);
         }
+        Ok(())
+    }
+
+    fn check_keyboard_boundary(&self) -> Result<(), WinitKeyboardContinuationError> {
+        self.check_keyboard_live_paused()?;
         if !self.paused_frame_complete {
             return Err(WinitKeyboardContinuationError::IncompletePausedFrame);
         }

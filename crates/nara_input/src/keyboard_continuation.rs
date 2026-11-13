@@ -140,7 +140,7 @@ pub fn restore_keyboard_holds(
     ))?
 }
 
-/// Cancels only restored members absent from the native owner's current physical observation.
+/// Cancels declared gameplay members absent from the native owner's current physical observation.
 ///
 /// This admits terminal records with ActivationMismatch through original reserved credits.
 /// The game must consume the resulting semantic Release before activation is complete.

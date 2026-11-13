@@ -1536,7 +1536,9 @@ impl InputTimeline {
                 .copied()
                 .filter(|member| member.endpoint == endpoint.id && member.pressed)
             {
-                drafts.push(owner.release_draft(member, Some(reason)));
+                let mut draft = owner.release_draft(member, Some(reason));
+                draft.origin = InputEventOrigin::Platform;
+                drafts.push(draft);
             }
             drafts.sort_by_key(|draft| draft.press_origin.unwrap().0);
             let releases = drafts.len();
@@ -2049,6 +2051,15 @@ impl InputTimeline {
                 seat,
                 input,
             } => self.apply_keyboard(window, seat, input, InputEventOrigin::Platform),
+            __InputDriverEvent::ClaimedKeyboard { claim, input } => {
+                if !self.owns_claim(&claim)? {
+                    return Err(InputIngressError::EndpointClaimExpired {
+                        window: claim.window,
+                        seat: claim.seat,
+                    });
+                }
+                self.apply_keyboard(claim.window, claim.seat, input, InputEventOrigin::Synthetic)
+            }
             __InputDriverEvent::Mouse {
                 window,
                 seat,

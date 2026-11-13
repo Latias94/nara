@@ -398,6 +398,22 @@ pub fn apply_keyboard_driver_input(
     Ok(output.released_keys)
 }
 
+/// Admits synthetic keyboard input at the exact endpoint retained by its original claim.
+///
+/// Foreign, retired, and recycled claims refuse before even an empty ReleaseAll can be ignored.
+/// The original timeline owns membership, ordering, and reserved terminal records. A Release of
+/// a restored or physical member preserves that member's origin independently of this trigger.
+pub fn apply_claimed_keyboard_driver_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    claim: timeline::InputEndpointClaim,
+    input: ButtonDriverInput<KeyCode>,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::ClaimedKeyboard { claim, input })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.admission)
+}
+
 /// Sends platform input from an explicitly connected endpoint.
 pub fn apply_keyboard_driver_input_at(
     scope: &mut RuntimeDriverScope<'_>,

@@ -152,6 +152,15 @@ impl DesktopRun {
             .map_err(Into::into)
     }
 
+    /// Requests one original full paused App frame without advancing a fixed simulation tick.
+    /// Poll until capture is eligible; a request alone is not maintenance or presentation proof.
+    pub fn request_paused_maintenance(&mut self) -> Result<(), DesktopControlError> {
+        self.live_native_mut()?
+            .session
+            .request_paused_maintenance()
+            .map_err(Into::into)
+    }
+
     /// Captures declared keyboard Button contributions through the original Input owner.
     /// Game capture must additionally validate its canonical held state and pending commands.
     pub fn capture_keyboard_holds(
@@ -175,6 +184,32 @@ impl DesktopRun {
         self.live_native_mut()?
             .session
             .restore_keyboard_holds(holds)
+            .map_err(Into::into)
+    }
+
+    /// Freezes ordinary native ingress after validating the exact paused keyboard inventory.
+    /// Complete original paused maintenance before final handoff capture. Re-enabling input
+    /// requires the same native focus and physical reconciliation as initial activation.
+    pub fn isolate_keyboard_input(
+        &mut self,
+        bindings: &[nara_input::KeyboardActionBinding],
+    ) -> Result<Vec<nara_input::KeyboardHold>, DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native_mut()?
+            .session
+            .isolate_keyboard_input(bindings)
+            .map_err(Into::into)
+    }
+
+    /// Admits controlled Synthetic keyboard input through the original isolated endpoint.
+    /// This is a logical driver admission, not an observation of a physical platform key.
+    pub fn admit_isolated_keyboard_input(
+        &mut self,
+        input: nara_input::ButtonDriverInput<nara_input::KeyCode>,
+    ) -> Result<nara_input::InputAdmission, DesktopControlError> {
+        self.live_native_mut()?
+            .session
+            .admit_isolated_keyboard_input(input)
             .map_err(Into::into)
     }
 

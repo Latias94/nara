@@ -1151,6 +1151,10 @@ pub enum __InputDriverEvent {
     SyntheticKeyboard {
         input: ButtonDriverInput<KeyCode>,
     },
+    ClaimedKeyboard {
+        claim: super::InputEndpointClaim,
+        input: ButtonDriverInput<KeyCode>,
+    },
     SyntheticMouse {
         input: ButtonDriverInput<MouseButton>,
     },

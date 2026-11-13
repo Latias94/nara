@@ -27,9 +27,7 @@ impl InputTimeline {
                 .member_index(claim.endpoint, None, None, InputBinding::Key(key))
                 .ok_or(KeyboardContinuationError::ProjectionMismatch)?;
             let member = self.topology.members[index].unwrap();
-            if member.origin != InputEventOrigin::Restored
-                || member.held.disposition != HeldInputDisposition::Gameplay
-            {
+            if member.held.disposition != HeldInputDisposition::Gameplay {
                 return Err(KeyboardContinuationError::UnsupportedMembers);
             }
             slots.push(index);
@@ -37,10 +35,12 @@ impl InputTimeline {
         let drafts = slots
             .iter()
             .map(|index| {
-                self.release_draft(
+                let mut draft = self.release_draft(
                     self.topology.members[*index].unwrap(),
                     Some(InputInvalidationReason::ActivationMismatch),
-                )
+                );
+                draft.origin = InputEventOrigin::Platform;
+                draft
             })
             .collect::<Vec<_>>();
         let plan = self.terminal_plan(drafts.len(), self.topology.obligations() - drafts.len());
