@@ -322,6 +322,19 @@ The following constraints are fixed now:
 - ADR 0024's deterministic-friendly scope remains: no cross-platform bit-exact replay guarantee is
   implied.
 
+Caller-driven Headless products retain the existing project Host through `HeadlessSession`.
+Source admission and processed Runtime-base custody, control tickets, fixed stepping, command
+admission and physical retirement keep their existing owners. Paused capture requires an actual
+completed managed frame; Startup with paused time alone is insufficient. The read-only capture
+closure owns game-specific eligibility and semantic state validation. A queue rejection preserves
+the incumbent, and a fault detected after command admission retains the actual admission output.
+An exact fixed transaction is followed by a full paused maintenance frame before capture is
+admitted. Expected control refusal remains retryable, and AppExit revokes further execution and
+input admission while retaining the original close owner.
+Close remains explicitly polled to physical completion. This facility grants no serialization
+rights for World authority or native services; complete rebuild/restore follows the
+[concrete game plan](../../plans/2026-11-13-rust-state-reconstruction-plan.md).
+
 Every participating service selects one recovery class. Missing classification fails closed:
 
 | Recovery class | Contract |

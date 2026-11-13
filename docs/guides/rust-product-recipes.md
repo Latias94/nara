@@ -491,6 +491,34 @@ cleanup participants must return promptly and keep unfinished work in their exis
 The lower-level `HeadlessRun` and `DesktopRun` APIs retain the owner when an execution report is
 `CleanupIncomplete`; keep the same run value and call its execute method again to advance cleanup.
 Dropping a run with live cleanup responsibilities abandons the caller's custody of that owner.
+
+Use `project_host::HeadlessSession` when a caller must retain the same Headless product between
+operations. `new(project_root, recipe)` selects source content;
+`from_runtime_content(base)` retains the admitted immutable base and its original executable plan.
+Call `start` once, `frame(real_delta)` for a complete App frame, or `pause` followed by `step` for
+one exact fixed tick at a time. Each step also runs a complete paused maintenance frame, including
+TaskUpdate and Last, before capture becomes available again. `resume` applies the existing Runtime
+control before ordinary frame driving continues. `ControlRejected` preserves the incumbent; for
+example, a later maintenance frame can restore simulation readiness after a refused step.
+A closed or failed session cannot restart itself. A returned `AppExit` is retained by `exit()`
+and refuses subsequent driving and command admission; read-only final observation and Close remain
+available.
+
+`observe` reads the original published World under its Schema checks. `capture` invokes its
+read-only closure only after a healthy paused frame has completed. The game must also validate
+command acknowledgement, pending/future commands, authoritative services and its complete semantic
+state; the closure can return its own validation result. Initial paused Startup does not by itself
+enable capture. `submit` uses the existing gameplay queue; `CommandRejected` leaves the incumbent
+usable, while `CommandFault` retains the actual admission result together with a subsequent managed
+fault. Reconcile that output before handling the fault.
+
+Poll `close` until `HeadlessSessionClose::Complete` or `Failed`. `Pending` retains the same physical
+owner for the next call; `is_closed` becomes true only at physical completion. `Failed` reports
+completed retirement with startup, execution or cleanup errors available through `diagnostics`.
+Use the Host's own deadline and retention policy while close is pending. Dropping a session is not
+a successful-close receipt. The [runtime reconstruction plan](../plans/2026-11-13-rust-state-reconstruction-plan.md)
+tracks the separate game-state format and actual Rust rebuild/restore workflow.
+
 Ordinary generic Editor opening reads the declared authoring bundle and does not accept or load the
 game's native recipe. A user-selected local workspace uses
 cooperative `ReadWrite + TrustedLocal` filesystem authority for cross-platform Save, independently

@@ -2496,6 +2496,19 @@ custody and shutdown observations after removing input files. Both retain Window
 the linked plan distinguishes the RED evidence, independent review and remaining scope. This
 adds no scheduler, public phase interface, gameplay-state machine or native qualification.
 
+The November 13 [retained Headless prerequisite](../../plans/2026-11-13-rust-state-reconstruction-plan.md#current-evidence-and-limits)
+adds a public `HeadlessSession` over the original private product Host. Source and processed
+products retain their original content, Runtime generation, command queue and physical retirement
+between caller drives. Paused capture requires a completed full frame; each exact tick is followed
+by paused TaskUpdate/Last maintenance. Ordinary control/command refusal preserves the incumbent,
+post-admission fault retains its output, and AppExit prevents further execution and input.
+The affected Host/public boot cohort passes 111/111 and an independently locked renamed consumer
+passes 12/12 on Windows CPU, including failed-candidate isolation, execution fault and
+pending/completed-error close.
+The linked plan records initial review defects and fixes, exact verification revisions and limits.
+Game-owned resume state, actual Rust body/structural rebuild, finite process exchange and candidate
+adoption remain open; this prerequisite does not complete R12 or the foundation rebaseline.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

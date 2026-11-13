@@ -238,6 +238,7 @@ pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{
     HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
+    HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
 };
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) use runtime::{

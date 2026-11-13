@@ -329,6 +329,83 @@ fn retire(host: &mut ProjectHost) {
 }
 
 #[test]
+fn headless_session_retains_the_original_processed_base_across_pause_step_and_close() {
+    use crate::project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError};
+
+    let fixture = Fixture::new(recipe());
+    let base = fixture.open(RuntimeContentLimits::default());
+    for path in [
+        STARTUP_FILE,
+        LATER_FILE,
+        IMAGE_FILE,
+        RUNTIME_CONTENT_CATALOG_FILE,
+    ] {
+        fs::remove_file(fixture.root.join(path)).unwrap();
+    }
+    let mut session = HeadlessSession::from_runtime_content(base.clone());
+    session.start().unwrap();
+    let generation = session.runtime_generation().unwrap();
+    assert!(session.startup_content_closure().is_none());
+    assert!(matches!(
+        session.capture(|_| ()),
+        Err(HeadlessSessionError::NotPaused)
+    ));
+    assert!(session.pause().unwrap().is_none());
+    let tick = session
+        .capture(|world| {
+            assert!(
+                world
+                    .resource::<CurrentSceneOwner>()
+                    .hosted_runtime_base()
+                    .unwrap()
+                    .same_base(&base)
+            );
+            assert!(
+                world
+                    .resource::<Assets<ImageAsset>>()
+                    .iter()
+                    .next()
+                    .is_some()
+            );
+            world.resource::<nara_app::FixedTime>().tick()
+        })
+        .unwrap();
+    assert!(session.step().unwrap().is_none());
+    assert_eq!(
+        session
+            .capture(|world| world.resource::<nara_app::FixedTime>().tick())
+            .unwrap(),
+        tick + 1
+    );
+    assert_eq!(session.runtime_generation(), Some(generation));
+    assert!(session.resume().unwrap().is_none());
+    assert!(session.frame(Duration::from_millis(20)).unwrap().is_none());
+    assert!(
+        session
+            .observe(|world| world.resource::<nara_app::FixedTime>().tick())
+            .unwrap()
+            > tick + 1
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match session.close() {
+            HeadlessSessionClose::Complete => break,
+            HeadlessSessionClose::Failed => panic!("{:?}", session.diagnostics()),
+            HeadlessSessionClose::Pending => {
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+        }
+    }
+    assert!(session.is_closed());
+    assert_eq!(session.close(), HeadlessSessionClose::Complete);
+    assert!(matches!(
+        session.start(),
+        Err(HeadlessSessionError::Unavailable)
+    ));
+}
+
+#[test]
 fn processed_start_installs_native_values_and_original_request_context_without_files() {
     let fixture = Fixture::new(recipe().add_plugin::<RequestProbePlugin>().unwrap());
     let base = fixture.open(RuntimeContentLimits::default());

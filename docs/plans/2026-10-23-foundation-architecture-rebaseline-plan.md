@@ -4627,6 +4627,10 @@ extension or agent server part of this refactor's current delivery.
 
 Name the Rust capture/rebuild/restore successor explicitly. The game owns checkpoint data and
 compatibility; supervised Play owns build, immutable executable generation and process lifecycle.
+The [November 13 runtime reconstruction plan](2026-11-13-rust-state-reconstruction-plan.md)
+selects Two-Level Game and a retained public Headless Host as the first complete consumer path.
+Its lifecycle prerequisite does not complete the game-state, real Rust rebuild or candidate
+adoption requirements below; supervised desktop integration keeps its existing protocol owner.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

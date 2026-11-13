@@ -19,10 +19,11 @@ use nara_app::RuntimeCloseCause;
 use nara_app::{
     AppExit, PluginFailureReport, PluginPlanError, RuntimeAdmissionReservation,
     RuntimeCandidateFailure, RuntimeCandidateRetirementState, RuntimeCloseEvidence,
-    RuntimeClosePolicy, RuntimeConstructionFailure, RuntimeControl, RuntimeControlRequestResult,
-    RuntimeControlStatus, RuntimeControlTicket, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger,
-    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+    RuntimeClosePolicy, RuntimeConstructionFailure, RuntimeControl, RuntimeControlRejection,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
+    RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance,
+    RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
+    RuntimeState,
 };
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
@@ -105,6 +106,7 @@ pub(super) use action::DesktopRunInputs;
 pub use action::DesktopRunIntent;
 pub use action::{
     HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
+    HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
 };
 #[cfg(all(feature = "tooling", feature = "presentation-ui"))]
 pub use editor::EditorUiPreviewCandidate;
@@ -756,10 +758,11 @@ impl ProjectHost {
         })?;
         match runtime.request_control(control) {
             RuntimeControlRequestResult::Accepted(ticket) => Ok(ticket),
-            RuntimeControlRequestResult::Rejected(_) => Err(HostFault::new(single_error(
+            RuntimeControlRequestResult::Rejected(rejection) => Err(HostFault::control_rejected(
+                rejection,
                 "project.run.control-rejected",
                 "Project runtime rejected the control request",
-            ))),
+            )),
         }
     }
 
@@ -1337,13 +1340,15 @@ impl ProjectHost {
             return Err(HostFault::new(runtime_scope_failure_report(fault)));
         }
         let pause = if runtime.state() == RuntimeState::Running {
-            let RuntimeControlRequestResult::Accepted(pause) =
-                runtime.request_control(RuntimeControl::Pause)
-            else {
-                return Err(HostFault::new(single_error(
-                    "project.run.pause-rejected",
-                    "Project runtime rejected exact-step preparation",
-                )));
+            let pause = match runtime.request_control(RuntimeControl::Pause) {
+                RuntimeControlRequestResult::Accepted(pause) => pause,
+                RuntimeControlRequestResult::Rejected(rejection) => {
+                    return Err(HostFault::control_rejected(
+                        rejection,
+                        "project.run.pause-rejected",
+                        "Project runtime rejected exact-step preparation",
+                    ));
+                }
             };
             Some(pause)
         } else if runtime.state() == RuntimeState::Paused {
@@ -1400,13 +1405,15 @@ impl ProjectHost {
             )));
         }
 
-        let RuntimeControlRequestResult::Accepted(step) =
-            runtime.request_control(RuntimeControl::StepFixedTick)
-        else {
-            return Err(HostFault::new(single_error(
-                "project.run.exact-step-rejected",
-                "Project runtime rejected an exact fixed step",
-            )));
+        let step = match runtime.request_control(RuntimeControl::StepFixedTick) {
+            RuntimeControlRequestResult::Accepted(step) => step,
+            RuntimeControlRequestResult::Rejected(rejection) => {
+                return Err(HostFault::control_rejected(
+                    rejection,
+                    "project.run.exact-step-rejected",
+                    "Project runtime rejected an exact fixed step",
+                ));
+            }
         };
         let outcome = runtime.drive(Duration::ZERO).map_err(|error| {
             self.delivered_runtime_fault = Some(generation);
@@ -1983,11 +1990,26 @@ fn verify_published_runtime_registry(
 #[derive(Debug)]
 struct HostFault {
     diagnostics: DiagnosticReport,
+    control_rejection: Option<RuntimeControlRejection>,
 }
 
 impl HostFault {
     const fn new(diagnostics: DiagnosticReport) -> Self {
-        Self { diagnostics }
+        Self {
+            diagnostics,
+            control_rejection: None,
+        }
+    }
+
+    fn control_rejected(
+        rejection: RuntimeControlRejection,
+        code: &'static str,
+        summary: &'static str,
+    ) -> Self {
+        Self {
+            diagnostics: single_error(code, summary),
+            control_rejection: Some(rejection),
+        }
     }
 }
 

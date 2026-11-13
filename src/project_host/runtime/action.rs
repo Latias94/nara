@@ -31,6 +31,9 @@ use crate::ProductRecipe;
 
 type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
 
+mod session;
+pub use session::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError};
+
 #[derive(Debug, Clone, Copy)]
 enum HeadlessDrive {
     ExactTicks(NonZeroU32),
