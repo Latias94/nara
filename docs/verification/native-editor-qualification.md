@@ -290,6 +290,15 @@ observed cross-monitor regression or new passing qualification. The test windows
 no owned Cargo or probe process remains. No Rust or display-configuration change is made;
 another physical crossing run requires a second active display at a different DPI.
 
+A further user-requested retry at 02:52 +08:00 has the same unmet prerequisite. Run
+`270ce938-53d3-498f-bc6f-ec59413cf067` reports 0/2 passing in 0.826 seconds after a
+2.34-second release build, with 81 cases outside the selection. Both probes again see only
+DISPLAY2 at 3840x2160, DPI 144 (150%). Independent `EnumDisplayDevicesW` observation confirms
+that DISPLAY2 is attached and primary, while DISPLAY1 is not attached to the desktop; this
+is not a Remote Desktop session. Both probes retire their original windows before reporting
+the prerequisite failure, and no owned probe remains. No native source or display settings
+change is made. This repeat supplies no new cross-monitor movement qualification.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work
