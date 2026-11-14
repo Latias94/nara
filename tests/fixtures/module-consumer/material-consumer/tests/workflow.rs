@@ -6,6 +6,71 @@ use nara_material::{AlphaMode2d, MaterialParameterValue, MaterialUpdateError};
 use nara_material_module_consumer::{palette_sprite, startup_materials};
 
 #[test]
+fn native_carrier_has_one_default_or_custom_owner_and_supports_explicit_disable() {
+    use nara::{
+        MinimalPlugins, ProductRecipe, Runtime2dPlugins, SchemaContribution,
+        app::{App, PluginGroup, PluginPlan, PluginPlanError},
+        asset::Assets,
+        material::{
+            MATERIAL_PLUGIN_ID, MATERIAL_SCHEMA_OWNER_ID, MATERIAL_SCHEMA_PROVIDER,
+            Material2dAsset, Material2dPlugin,
+        },
+        reflect::{ComponentTypeId, component_registry},
+    };
+
+    let recipe = || {
+        ProductRecipe::new()
+            .add_contribution(
+                SchemaContribution::<Material2dPlugin>::for_default([MATERIAL_SCHEMA_PROVIDER])
+                    .unwrap(),
+            )
+            .unwrap()
+    };
+    let mut defaults = App::new();
+    defaults.add_plugins(Runtime2dPlugins).unwrap();
+    let mut custom = App::new();
+    custom
+        .add_plugins(recipe().with_defaults(MinimalPlugins))
+        .unwrap();
+    let mut disabled = App::new();
+    disabled
+        .add_plugins(Runtime2dPlugins.edit().disable::<Material2dPlugin>())
+        .unwrap();
+    for (app, selected) in [(defaults, true), (custom, true), (disabled, false)] {
+        assert_eq!(
+            app.installed_plugins()
+                .filter(|plugin| plugin.id == MATERIAL_PLUGIN_ID)
+                .count(),
+            usize::from(selected),
+        );
+        let sealed = app.seal().unwrap();
+        let world = sealed.world();
+        let registry = component_registry(world).unwrap();
+        assert_eq!(
+            registry
+                .schema(&ComponentTypeId::new("nara.material2d"))
+                .is_some(),
+            selected,
+        );
+        assert_eq!(
+            registry
+                .contribution_receipts()
+                .filter(|receipt| receipt.owner().owner() == MATERIAL_SCHEMA_OWNER_ID)
+                .count(),
+            usize::from(selected),
+        );
+        assert_eq!(
+            world.contains_resource::<Assets<Material2dAsset>>(),
+            selected
+        );
+    }
+    assert!(matches!(
+        PluginPlan::resolve(recipe().with_defaults(Runtime2dPlugins)),
+        Err(PluginPlanError::DuplicatePlugin { plugin }) if plugin == MATERIAL_PLUGIN_ID,
+    ));
+}
+
+#[test]
 fn public_palette_retains_original_values_after_shader_update_and_library_retirement() {
     let mut library = startup_materials().unwrap();
     let indices = allocate_anonymous_handle::<ImageAsset>().unwrap();

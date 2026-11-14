@@ -2,6 +2,7 @@ use nara::{
     app::PluginGroupId,
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::IMAGE_PLUGIN_ID,
+    material::MATERIAL_SCHEMA_PROVIDER_ID,
     project::ProductCapability,
     project_host::resolve_product_recipe,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
@@ -167,6 +168,7 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
     assert!(providers.contains(&SPRITE_SCHEMA_PROVIDER_ID));
     assert!(providers.contains(&REFERENCE_GAME_SCHEMA_PROVIDER_ID));
     assert!(providers.contains(&TILEMAP_SCHEMA_PROVIDER_ID));
+    assert!(providers.contains(&MATERIAL_SCHEMA_PROVIDER_ID));
 
     let first_app = first.plugin_plan().instantiate().unwrap();
     let second_app = first.plugin_plan().instantiate().unwrap();

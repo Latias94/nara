@@ -111,6 +111,28 @@ test corrupt the third Scene's pack extent: a new Player still starts, completes
 travels, and rejects the final Deferred acquisition while preserving the current Scene/resources.
 The catalog and extent table are not modified to manufacture that failure.
 
+## Persistent Material Delivery
+
+`material_source_export` and `material_cooked_delivery` extend the real build/publication path
+with a durable Palette Material and a PNG referenced only through its defaults. They use the
+default first-party carrier and explicit source/runtime codecs, not private test registration.
+The source Export control observes headless and desktop products, relocates the distribution,
+deletes the project and runs its published headless executable. The cooked control builds a
+real cooker and Player, publishes only the executable/pack/manifest, then relocates and runs
+after deleting all original sources/cache. Its live Scene checks include complete Product
+identity, semantic values, uniform bytes and decoded palette pixels without a source importer.
+
+Run both serially through the independent lockfile and absolute shared target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --offline --release --test material_source_export --test material_cooked_delivery --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Source Export requires an interactive Windows desktop for its original product observation.
+The relocated run and cooked Player are headless; their pixel assertions do not establish native
+rendered material readback. Actual results and remaining scope are recorded in the
+[R9b plan](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#persistent-product-successor).
+
 ## Shared Native Process Consumer
 
 `contained_process` is an ordinary independently locked consumer of
