@@ -5,6 +5,21 @@ This independent workspace imports Nara as `engine`, with default features disab
 `engine::project_tooling::cargo_build::build_executable`. Root-workspace tests do not run this
 consumer, and ordinary fixture tests do not start nested Cargo.
 
+The ordinary `declarations` target separately exercises the public declaration-only invocation
+constructor and actual incremental decoder with synthetic records. It distinguishes unavailable
+workspace features from a full metadata observation of an empty set, keeps actual artifact
+features separate from requested features, and rejects required-feature/profile/output mismatch.
+It proves public API and decoder behavior, not a real build or Runtime. Run it with the same
+independent lockfile and shared target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --offline --release --test declarations --test-threads=1 --no-fail-fast
+```
+
+The existing ignored native Cargo tests now consume declaration-only metadata through the
+finite adapter. Their independent full-metadata control still observes the deliberately widened
+workspace feature set; the selected compiler artifact retains its narrower actual features.
+
 Generate this workspace's independent `Cargo.lock` with Cargo after integrating the parent
 implementation and before locked qualification. Do not copy the root lockfile or hand-author
 dependency facts.

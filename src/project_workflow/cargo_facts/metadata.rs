@@ -53,18 +53,23 @@ impl CargoPackageGraphFact {
 /// bounded declarations and observations. Operational paths and IDs remain transient facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoMetadataFacts {
+    pub(super) declaration: CargoTargetDeclaration,
+    package_graph: Box<[CargoPackageGraphFact]>,
+    pub(super) metadata_features: Box<[String]>,
+    package_source: Option<String>,
+    project_tool_protocol: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CargoTargetDeclaration {
     pub(super) selection: CargoBuildSelection,
     pub(super) package_id: String,
     pub(super) package: CargoPackageGraphFact,
-    package_graph: Box<[CargoPackageGraphFact]>,
     pub(super) manifest_path: PathBuf,
     pub(super) workspace_root: PathBuf,
     pub(super) target_directory: PathBuf,
     pub(super) source_path: PathBuf,
     pub(super) required_features: Box<[String]>,
-    pub(super) metadata_features: Box<[String]>,
-    package_source: Option<String>,
-    project_tool_protocol: Option<u64>,
 }
 
 impl CargoMetadataFacts {
@@ -75,15 +80,11 @@ impl CargoMetadataFacts {
     ) -> Result<Self, CargoMetadataFactsError> {
         let value = metadata_document(metadata, expected_package_manifest)?;
         let selected = manifest_owner(&value, expected_package_manifest)?;
-        if selection.package() != selected.package.name() {
-            return Err(CargoMetadataFactsError::SelectedPackageMismatch);
-        }
+        let declaration = selected.target_declaration(selection)?;
         // resolve.root may identify a different workspace package or be null. The selected
         // package's node is a workspace observation, not an expected single-build feature set.
         let metadata_features =
             selected_metadata_features(value.get("resolve"), selected.package_id)?;
-        let (source_path, required_features) =
-            select_binary(selected.metadata, selection.target())?;
         let project_tool_protocol = selected
             .metadata
             .get("metadata")
@@ -91,15 +92,8 @@ impl CargoMetadataFacts {
             .and_then(|nara| nara.get("project-tool-protocol"))
             .and_then(Value::as_u64);
         Ok(Self {
-            selection: selection.clone(),
-            package_id: selected.package_id.to_owned(),
-            package: selected.package,
+            declaration,
             package_graph: selected.package_graph,
-            manifest_path: selected.manifest_path,
-            workspace_root: selected.workspace_root,
-            target_directory: selected.target_directory,
-            source_path,
-            required_features,
             metadata_features,
             package_source: selected.source.map(str::to_owned),
             project_tool_protocol,
@@ -120,20 +114,20 @@ impl CargoMetadataFacts {
     }
 
     pub fn package(&self) -> &CargoPackageGraphFact {
-        &self.package
+        &self.declaration.package
     }
 
     /// Returns Cargo's transient, potentially path-bearing package ID.
     pub fn package_id(&self) -> &str {
-        &self.package_id
+        &self.declaration.package_id
     }
 
     pub fn package_name(&self) -> &str {
-        self.package.name()
+        self.declaration.package.name()
     }
 
     pub fn package_version(&self) -> &str {
-        self.package.version()
+        self.declaration.package.version()
     }
 
     pub fn package_graph(&self) -> &[CargoPackageGraphFact] {
@@ -141,19 +135,19 @@ impl CargoMetadataFacts {
     }
 
     pub fn manifest_path(&self) -> &Path {
-        &self.manifest_path
+        &self.declaration.manifest_path
     }
 
     pub fn workspace_root(&self) -> &Path {
-        &self.workspace_root
+        &self.declaration.workspace_root
     }
 
     pub fn target_directory(&self) -> &Path {
-        &self.target_directory
+        &self.declaration.target_directory
     }
 
     pub fn source_path(&self) -> &Path {
-        &self.source_path
+        &self.declaration.source_path
     }
 
     /// Returns a transient source URL, separate from the path-safe package graph.
@@ -251,6 +245,40 @@ struct ManifestOwner<'a> {
     target_directory: PathBuf,
     metadata: &'a Map<String, Value>,
     source: Option<&'a str>,
+}
+
+impl ManifestOwner<'_> {
+    fn target_declaration(
+        &self,
+        selection: &CargoBuildSelection,
+    ) -> Result<CargoTargetDeclaration, CargoMetadataFactsError> {
+        if selection.package() != self.package.name() {
+            return Err(CargoMetadataFactsError::SelectedPackageMismatch);
+        }
+        let (source_path, required_features) = select_binary(self.metadata, selection.target())?;
+        Ok(CargoTargetDeclaration {
+            selection: selection.clone(),
+            package_id: self.package_id.to_owned(),
+            package: self.package.clone(),
+            manifest_path: self.manifest_path.clone(),
+            workspace_root: self.workspace_root.clone(),
+            target_directory: self.target_directory.clone(),
+            source_path,
+            required_features,
+        })
+    }
+}
+
+pub(super) fn parse_target_declaration(
+    metadata: &[u8],
+    expected_package_manifest: &Path,
+    selection: &CargoBuildSelection,
+) -> Result<CargoTargetDeclaration, CargoMetadataFactsError> {
+    let value = metadata_document(metadata, expected_package_manifest)?;
+    if !matches!(value.get("resolve"), Some(Value::Null)) {
+        return Err(CargoMetadataFactsError::InvalidField { field: "resolve" });
+    }
+    manifest_owner(&value, expected_package_manifest)?.target_declaration(selection)
 }
 
 fn manifest_owner<'a>(

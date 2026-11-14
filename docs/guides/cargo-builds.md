@@ -83,6 +83,21 @@ observations, declared input digests and metadata digest. Metadata's workspace f
 can include features absent from the selected compiler unit. Only the selected compiler artifact
 supplies the built feature set. Dependency-qualified `required-features` are left to Cargo.
 
+The finite native adapter obtains declarations with `cargo metadata --no-deps --format-version 1`.
+It binds the selected workspace package/bin, required features, source and output directory,
+then validates the actual selected compiler artifact through the same decoder. It does not
+request a full dependency graph or cache metadata. `metadata_digest()` hashes the exact
+declaration-only response; it is not a resolved-graph observation.
+
+Pure callers can use `CargoBuildInvocation::from_metadata_declarations(bytes, manifest, selection)`
+for this explicit mode. Its input requires an explicit null `resolve` field. Full
+`CargoMetadataFacts::parse` retains its strict selected resolve-node requirement and graph
+observations. `CargoBuildInvocation::metadata_features()` now returns `Option<&[String]>`:
+`None` means declarations only, while `Some(&[])` means a resolved empty set. Callers using full
+metadata should handle that observation explicitly; the selected artifact's `features()` remains
+the authority for compiled features in either mode. The Editor's supervised build continues to
+consume full metadata independently of the finite synchronous adapter.
+
 `CargoBuildFailure::Compilation` preserves the actual process exit status, bounded structured
 compiler diagnostics and any protocol rejection. Diagnostics include explicit dropped/truncated
 counts; raw JSON stdout is not retained in the error. A failed compile therefore remains

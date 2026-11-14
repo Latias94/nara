@@ -9,7 +9,10 @@ use super::messages::{
     CargoCompilerArtifactFacts, CargoDiagnostics, CargoDiagnosticsBuilder, CargoJsonMessage,
     CargoJsonMessageError,
 };
-use super::metadata::{CargoMetadataFacts, CargoPackageGraphFact};
+use super::metadata::{
+    CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoTargetDeclaration,
+    parse_target_declaration,
+};
 use super::selection::CargoBuildSelection;
 use super::{
     DEV_PROFILE, DEV_PROFILE_DIRECTORY, MAX_JSON_RECORD_BYTES, MAX_JSON_RECORDS,
@@ -32,7 +35,7 @@ pub struct CargoBuildInvocation {
     target_directory: PathBuf,
     pub(super) source_path: PathBuf,
     pub(super) required_features: Box<[String]>,
-    metadata_features: Box<[String]>,
+    metadata_features: Option<Box<[String]>>,
     selection: CargoBuildSelection,
     pub(super) executable_directory: PathBuf,
 }
@@ -41,6 +44,34 @@ impl CargoBuildInvocation {
     pub(super) fn new(
         metadata: &CargoMetadataFacts,
         selection: CargoBuildSelection,
+    ) -> Result<Self, CargoInvocationError> {
+        Self::from_declaration(
+            &metadata.declaration,
+            selection,
+            Some(metadata.metadata_features.clone()),
+        )
+    }
+
+    /// Binds one selected target from `cargo metadata --no-deps --format-version 1`.
+    ///
+    /// The caller must use the same feature, target and output-directory arguments for the
+    /// later build. This constructor requires an explicit null `resolve` field and does not
+    /// observe a resolved workspace graph or infer target eligibility. The actual compiler
+    /// artifact supplies compiled features and must still pass the original build decoder.
+    pub fn from_metadata_declarations(
+        metadata: &[u8],
+        expected_package_manifest: &Path,
+        selection: CargoBuildSelection,
+    ) -> Result<Self, CargoTargetDeclarationError> {
+        let declaration =
+            parse_target_declaration(metadata, expected_package_manifest, &selection)?;
+        Ok(Self::from_declaration(&declaration, selection, None)?)
+    }
+
+    fn from_declaration(
+        metadata: &CargoTargetDeclaration,
+        selection: CargoBuildSelection,
+        metadata_features: Option<Box<[String]>>,
     ) -> Result<Self, CargoInvocationError> {
         if selection.package() != metadata.package.name() {
             return Err(CargoInvocationError::PackageMismatch);
@@ -68,7 +99,7 @@ impl CargoBuildInvocation {
             target_directory: metadata.target_directory.clone(),
             source_path: metadata.source_path.clone(),
             required_features: metadata.required_features.clone(),
-            metadata_features: metadata.metadata_features.clone(),
+            metadata_features,
             selection,
             executable_directory,
         })
@@ -115,11 +146,12 @@ impl CargoBuildInvocation {
         self.selection.features()
     }
 
-    /// Returns the selected package's features observed by workspace metadata.
+    /// Returns the selected package's features observed by full workspace metadata, if present.
     ///
-    /// These can differ from the actual features reported by the selected compiler artifact.
-    pub fn metadata_features(&self) -> &[String] {
-        &self.metadata_features
+    /// `None` denotes declaration-only preparation; `Some(&[])` is an observed empty set.
+    /// Workspace observations can differ from the selected compiler artifact's actual features.
+    pub fn metadata_features(&self) -> Option<&[String]> {
+        self.metadata_features.as_deref()
     }
 
     pub const fn default_features(&self) -> bool {
@@ -129,6 +161,15 @@ impl CargoBuildInvocation {
     pub fn target_triple(&self) -> &str {
         self.selection.target_triple()
     }
+}
+
+/// Declaration parsing or output-directory binding failed before any build was executed.
+#[derive(Debug, Error)]
+pub enum CargoTargetDeclarationError {
+    #[error(transparent)]
+    Metadata(#[from] CargoMetadataFactsError),
+    #[error(transparent)]
+    Invocation(#[from] CargoInvocationError),
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

@@ -13,6 +13,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-31 by finite cooked-content assembly and captured Player package binding
 **Amended**: 2026-11-01 by explicit physical event-loop custody across sequential desktop actions
 **Amended**: 2026-11-01 by project-wide source readiness and bounded authored-upgrade recovery
+**Amended**: 2026-11-14 by declaration-only finite build preparation and explicit metadata-feature absence
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -69,13 +70,22 @@ flowchart LR
 
 The compiled native build Host selects package, binary, Cargo profile, target triple,
 default-feature policy, requested features and actual Cargo/rustc tools explicitly. Cargo
-metadata owns the selected manifest/package/target and its workspace-level feature observation.
-The selected `compiler-artifact` supplies actual compiled features, which can differ from that
-observation. Cargo decides target eligibility, including dependency-qualified `required-features`;
+metadata owns the selected manifest/package/target. Full metadata separately supplies a resolved
+workspace-level feature observation. A finite build may instead bind declarations from
+`cargo metadata --no-deps`; the absence of a resolved observation is distinct from an observed
+empty set. Both preparation paths share exact target binding and the same artifact decoder.
+The selected `compiler-artifact` supplies actual compiled features, which can differ from a
+workspace observation. Cargo decides target eligibility, including dependency-qualified `required-features`;
 Nara does not implement feature closure or infer code enablement from product profile labels. Build-only
 target artifacts are separate from native product qualification, Host activation and Runtime
 Ready. A foreign-target build can finish without an available runner and must not execute
 its output on the build Host.
+
+The synchronous finite build adapter uses declaration-only preparation rather than repeatedly
+requesting a dependency graph it does not consume. Full graph/feature consumers keep strict
+resolved metadata. This changes no source/tool/lease checks, compilation diagnostics, target
+eligibility, captured-byte authority or native cleanup. No metadata cache or dependency resolver
+is introduced in Nara.
 
 The pure selection/invocation/incremental decoder belongs to `project_workflow::cargo`. Native
 finite execution belongs to `project_tooling::cargo_build`; the Editor keeps its supervised

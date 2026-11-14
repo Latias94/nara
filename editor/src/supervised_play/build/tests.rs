@@ -108,7 +108,7 @@ fn desktop_preset_uses_matching_metadata_and_build_selection_with_explicit_tools
     assert!(!invocation.default_features());
     assert_eq!(invocation.features(), &["desktop"]);
     assert_eq!(
-        invocation.metadata_features(),
+        invocation.metadata_features().unwrap(),
         &["desktop", "renderer", "workspace-only"]
     );
 
@@ -216,7 +216,7 @@ fn desktop_candidate_retains_compiler_unit_features_separately_from_metadata() {
     assert_eq!(candidate.artifact().features(), &["desktop", "renderer"]);
     assert_ne!(
         candidate.artifact().features(),
-        candidate.invocation().metadata_features()
+        candidate.invocation().metadata_features().unwrap()
     );
     assert_eq!(candidate.artifact().target_triple(), FIXTURE_HOST);
     assert_eq!(candidate.artifact_path(), executable.as_path());
@@ -305,6 +305,26 @@ fn invocation_digest_binds_requested_selection_and_metadata_feature_observation(
     let changed = invocation(&changed, select("dev", FIXTURE_HOST, &["desktop"], false));
     assert_eq!(changed.features(), baseline.features());
     assert_ne!(digest_build_invocation(&changed), digest);
+
+    let mut declarations = fixture_metadata(&request);
+    declarations["resolve"]["nodes"][0]["features"] = json!([]);
+    let observed_empty = invocation(
+        &declarations,
+        select("dev", FIXTURE_HOST, &["desktop"], false),
+    );
+    declarations["resolve"] = Value::Null;
+    let unobserved = CargoBuildInvocation::from_metadata_declarations(
+        &serde_json::to_vec(&declarations).unwrap(),
+        &request.manifest_path,
+        select("dev", FIXTURE_HOST, &["desktop"], false),
+    )
+    .unwrap();
+    assert_eq!(unobserved.metadata_features(), None);
+    assert!(observed_empty.metadata_features().unwrap().is_empty());
+    assert_ne!(
+        digest_build_invocation(&unobserved),
+        digest_build_invocation(&observed_empty)
+    );
 }
 
 fn fixture_request() -> DesktopBuildRequest {

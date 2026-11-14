@@ -16,8 +16,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::project_workflow::cargo::{
-    CargoBuildDecoder, CargoBuildError, CargoBuildSelection, CargoDiagnostics,
-    CargoInvocationError, CargoMetadataFacts, CargoMetadataFactsError,
+    CargoBuildDecoder, CargoBuildError, CargoBuildInvocation, CargoBuildSelection,
+    CargoDiagnostics, CargoInvocationError, CargoMetadataFactsError, CargoTargetDeclarationError,
 };
 
 use super::host_fs::{self, HostDirectoryError, HostFileError};
@@ -229,6 +229,7 @@ impl CargoBuildProvenance {
     pub fn declared_inputs(&self) -> &[CargoDeclaredInput] {
         &self.inputs
     }
+    /// Digest of the exact declaration-only metadata returned for this build preparation.
     #[must_use]
     pub const fn metadata_digest(&self) -> ContentDigest {
         self.metadata
@@ -517,7 +518,7 @@ fn build_executable_inner(
     let mut metadata_command = command(request, request.tools.cargo_path());
     metadata_command.env("CARGO_TARGET_DIR", &lease.path);
     metadata_command
-        .args(["metadata", "--locked", "--format-version", "1"])
+        .args(["metadata", "--locked", "--no-deps", "--format-version", "1"])
         .arg("--manifest-path")
         .arg(&manifest)
         .arg("--filter-platform")
@@ -546,8 +547,15 @@ fn build_executable_inner(
         "metadata interpretation work",
     )?;
     let metadata_digest = ContentDigest::of_bytes(&metadata);
-    let facts = CargoMetadataFacts::parse(&metadata, &manifest, &request.selection)?;
-    let invocation = facts.build_invocation(request.selection.clone())?;
+    let invocation = CargoBuildInvocation::from_metadata_declarations(
+        &metadata,
+        &manifest,
+        request.selection.clone(),
+    )
+    .map_err(|error| match error {
+        CargoTargetDeclarationError::Metadata(error) => CargoBuildFailure::Metadata(error),
+        CargoTargetDeclarationError::Invocation(error) => CargoBuildFailure::Invocation(error),
+    })?;
     if !same_path(invocation.workspace_root(), &request.workspace) {
         return Err(CargoBuildFailure::Stale);
     }
@@ -569,7 +577,6 @@ fn build_executable_inner(
             )
         })
         .ok_or(CargoBuildFailure::Limit("build work"))?;
-    drop(facts);
     drop(metadata);
     control(CargoBuildPoint::BeforeBuild)?;
     revalidate_inputs(&root, request, &inputs)?;
@@ -1087,7 +1094,7 @@ fn invocation_allocation(
     bytes
         .checked_add(feature_allocation(invocation.features())?)
         .and_then(|bytes| {
-            feature_allocation(invocation.metadata_features())
+            feature_allocation(invocation.metadata_features().unwrap_or_default())
                 .ok()
                 .and_then(|features| bytes.checked_add(features))
         })

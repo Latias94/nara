@@ -311,8 +311,12 @@ pub(crate) fn digest_build_invocation(invocation: &CargoBuildInvocation) -> Cont
     for feature in invocation.features() {
         feed_digest_field(&mut bytes, "requested-feature", feature);
     }
-    for feature in invocation.metadata_features() {
-        feed_digest_field(&mut bytes, "metadata-feature", feature);
+    if let Some(features) = invocation.metadata_features() {
+        for feature in features {
+            feed_digest_field(&mut bytes, "metadata-feature", feature);
+        }
+    } else {
+        feed_digest_field(&mut bytes, "metadata-feature-observation", "unresolved");
     }
     ContentDigest::of_bytes(&bytes)
 }

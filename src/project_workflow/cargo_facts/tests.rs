@@ -4,6 +4,9 @@ use serde_json::{Value, json};
 
 use super::*;
 
+#[path = "declarations_tests.rs"]
+mod declarations;
+
 const PACKAGE_ID: &str = "path+file:///project#sample-game@0.1.0";
 const DEPENDENCY_ID: &str = "registry+https://example.invalid/index#dependency@1.2.3";
 
@@ -153,7 +156,7 @@ fn metadata_selects_the_manifest_owner_binary_and_path_safe_graph() {
     assert_eq!(invocation.profile(), "dev");
     assert_eq!(invocation.features(), ["play"]);
     assert_eq!(
-        invocation.metadata_features(),
+        invocation.metadata_features().unwrap(),
         ["default", "play", "render"]
     );
     assert!(invocation.default_features());
@@ -303,7 +306,7 @@ fn workspace_metadata_can_include_features_not_compiled_for_the_selected_binary(
     assert_eq!(invocation.features(), ["play"]);
     assert!(!invocation.default_features());
     assert_eq!(
-        invocation.metadata_features(),
+        invocation.metadata_features().unwrap(),
         ["default", "play", "render"]
     );
 
@@ -361,7 +364,7 @@ fn required_features_preserve_declarations_and_leave_eligibility_to_cargo() {
     metadata["resolve"]["nodes"][0]["features"] = json!(["play"]);
     let facts = parse_metadata(&metadata, &root.join("Cargo.toml"), &selection).unwrap();
     assert_eq!(facts.metadata_features(), ["play"]);
-    assert_eq!(facts.required_features.as_ref(), ["render"]);
+    assert_eq!(facts.declaration.required_features.as_ref(), ["render"]);
     let invocation = facts.build_invocation(selection).unwrap();
     assert_eq!(invocation.features(), ["play"]);
     assert_eq!(invocation.required_features.as_ref(), ["render"]);
@@ -1140,7 +1143,7 @@ fn artifact_message(invocation: &CargoBuildInvocation, fresh: bool) -> Value {
             "kind": ["bin"], "crate_types": ["bin"], "name": invocation.target_name(),
             "src_path": invocation.source_path(), "required-features": invocation.required_features
         },
-        "profile": {"test": false}, "features": invocation.metadata_features(),
+        "profile": {"test": false}, "features": invocation.metadata_features().unwrap_or_default(),
         "executable": expected_executable(invocation), "fresh": fresh
     })
 }

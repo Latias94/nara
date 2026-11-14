@@ -17,7 +17,7 @@ mod selection;
 
 pub use build::{
     CargoArtifactFacts, CargoArtifactMismatchField, CargoBuildDecoder, CargoBuildError,
-    CargoBuildFacts, CargoBuildInvocation, CargoInvocationError,
+    CargoBuildFacts, CargoBuildInvocation, CargoInvocationError, CargoTargetDeclarationError,
 };
 pub use messages::{
     CargoCompilerArtifactFacts, CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics,
