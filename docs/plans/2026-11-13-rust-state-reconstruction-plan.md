@@ -1554,3 +1554,11 @@ the eleven native runs pass, and the bounded independent review finds no P1/P2. 
 viewer query are retained under the existing benchmark data owner. This qualifies the concrete
 decision-local Host capture, not a public tracing framework, a profiler UI, per-pass GPU timing,
 foreign execution, a representative game performance budget or full R12.
+
+The final original import-lifecycle/settings-transition selection passes 10/10
+(`8b309ff4-a07b-40b8-8202-9e06873b5973`), with 1359 other tests outside its filter. The required
+root feature combination includes `runtime-2d,serde` as well as `tooling,editor-work-observation`;
+the preceding narrower invocation selected zero tests and proves compilation only. Feature-off
+root checking, feature-on root and selected independent-consumer correctness Clippy, root and
+independent formatting, new document targets, JSON and canonical raw-record digests pass.
+This closes the capture unit's verification record without repeating unchanged product work.

@@ -834,8 +834,12 @@ whitelist and gives crossing operation lifetimes separate bounded viewer tracks.
 Selected public/collector regressions pass 34/34, run
 `66ecadf1-8e06-412a-be06-8e9099e768d3`, with one unrelated ignored test. All eleven native runs
 complete with identical original product facts and actual physical cleanup. The additional
-bounded concurrency review finds no P1/P2. The remaining static and import-lifecycle
-qualification is recorded in the owning reconstruction plan after its actual completion.
+bounded concurrency review finds no P1/P2. The affected import-lifecycle and settings-transition
+cohort passes 10/10 (`8b309ff4-a07b-40b8-8202-9e06873b5973`), with 1359 other cases outside the
+filter. Its actual root feature selection is `runtime-2d,serde,tooling,editor-work-observation`;
+the first narrower command selected no tests and is not accepted as test evidence. Feature-off
+root checking, feature-on root and independent-consumer correctness Clippy, affected formatting,
+new local targets, JSON and raw-record hashes pass. Existing warnings remain.
 This unit does not establish foreign native execution, game-scale performance budgets,
 per-pass GPU timings, Editor frontend integration or completion of full R12. Editor/UI,
 Dialogue UI and physical mixed-DPI work remain paused.
