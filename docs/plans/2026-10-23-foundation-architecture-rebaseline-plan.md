@@ -4833,6 +4833,25 @@ correlation observational under ADRs 0048/0068; reconcile any extension to the e
 policy. This adds no global subscriber, budget manager or profiler UI and does not gate the current
 compiled unit. App-frame-to-completion observations are not per-pass GPU execution timings.
 
+This concrete successor is now qualified in the independent module consumer. Eleven serial
+Windows/DX12 release runs preserve the actual delayed source import, valid edit, stale-basis
+rejection, complete authoring history, twelve original desktop presentations, completion
+associations, telemetry seal, native destruction and event-loop recovery across disabled,
+enabled, overflow, collection-failure and export-refusal modes. The normal enabled traces retain
+111–121 events with no dropped spans, rejected fields, faults or active lifetimes; the fixed
+payload reservation is 1,698,304 bytes and high-water payload is 45,304–49,384 bytes. Perfetto
+v59.1 parses the retained trace with 115 intervals/tracks, one held import, one stale-revision
+refusal, twelve matched presentation/completion pairs, no missing parents and no parser errors.
+The three retained elapsed pairs vary from -32.158 to +82.930 ms, so the 1.09% enabled mean
+difference is only a finite shared-process observation. A four-thread regression corrected a
+real one-span loss caused by the original `try_lock`; field visitation and parent lookup now
+happen outside the bounded-state mutex. The private collector still makes no lock-free or hard
+real-time claim. Evidence, raw records and scope limits are recorded in the
+[runtime-cost report](../benchmarks/2026-11-14-development-runtime-costs.md#host-composed-execution-capture)
+and the reconstruction plan. This closes the concrete capture successor while full R12, public
+diagnostic infrastructure, per-pass GPU timing, foreign execution and paused product work remain
+open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

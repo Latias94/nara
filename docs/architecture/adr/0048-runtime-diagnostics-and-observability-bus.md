@@ -72,6 +72,25 @@ Rules:
   `RuntimePressureSnapshots` resource in headless applications. It does not install a tracing
   subscriber or take ownership of the process-global panic hook.
 
+### Host-Composed Execution Capture
+
+A concrete Host may explicitly compose a scoped tracing subscriber and a finite viewer exporter
+for existing owner operations. This is an observational execution capture, separate from the
+diagnostic bus and its entry/cursor logging sink. Diagnostic field values remain excluded from
+that sink. Execution spans may carry source-defined static operation/outcome names and numeric
+task, document, revision, Runtime, App-frame, render-transaction, window, backend and device-epoch
+correlations under ADR 0068. These observations grant no operation, publication or cleanup authority.
+
+The Host owns the capture's clock, retained metadata/events, limits, drop accounting and export.
+It may propagate its scoped Dispatch and explicit parent Span to an already-owned worker;
+thread-local subscription is not implicitly inherited. A pending operation's observation follows
+its original actual return/retirement, not logical cancellation. Dropping an incomplete observer
+must remain distinguishable from successful physical completion. Export failure, a full buffer
+or disabled collection cannot change the original typed result, waits, presentation or cleanup.
+No runtime plugin installs a global subscriber, alternate task lifecycle, global profiler, or
+reusable offline evidence/admission service. Complete-frame-to-completion spans are not per-pass
+GPU execution or scanout measurements.
+
 ## Resolved Questions
 
 - **Ownership:** The bus lives in `nara_diagnostic`, not `nara_app`. `nara_app` supplies lifecycle,

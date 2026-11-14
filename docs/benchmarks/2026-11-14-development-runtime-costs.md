@@ -722,3 +722,120 @@ all owned Cargo and native executions are terminal. No remote publication or bra
 occurs. The next startup investigation should locate the original Adapter request's internal
 cost and compare any proposed policy or reuse against exact target, failure, device and complete
 rebuild/continued-gameplay behavior before selecting a production change.
+
+### Adapter Request Source Follow-up
+
+At Nara `8e646f2`, read-only inspection of the locked WGPU
+`cddb2f5d80dc0009b2ef6767635140cacf90a007` finds no justified additional Nara optimization.
+The native `wgpu/src/backend/wgpu_core.rs` request performs core adapter selection before
+returning a ready future. Core `instance.rs` enumerates/exposes the backend candidates before
+applying power-preference sorting. Moving only future polling or changing preference therefore
+does not remove that earlier work.
+
+The DX12 HAL's `instance.rs` ignores the Surface hint while enumerating. Its DXGI factory
+enumerates candidates and `adapter.rs::expose` creates a native D3D12 device for each surviving
+candidate, queries driver/PCI information and probes capabilities. The PCI helper separately
+enumerates Windows display-device information. Later `Adapter::open` reuses that native device
+and prepares queue/fence resources. Consequently, the separately measured WGPU Device request
+is not a measurement of all native device initialization. These are source-proven operation
+boundaries, not individually measured contributors to the 524–740 ms Adapter request.
+
+Nara's healthy Ready path performs no repeated selection; ordinary window and image entry
+points share the original device owner. The pinned public request/backend options offer no
+equivalent early candidate filter or switch that simply omits PCI/capability work.
+`WGPU_ADAPTER_NAME` belongs to a separate WGPU utility helper, is not selected by Nara's current
+request path and itself starts with full enumeration. This investigation does not change
+fallback, Surface compatibility, validation flags, device selection or native ownership, and
+does not select a global/cross-process cache. Further internal cost attribution needs its own
+evidence; unrelated runtime delivery should continue without a speculative adapter rewrite.
+
+## Host-Composed Execution Capture
+
+The independent [Editor panel consumer](../../tests/fixtures/module-consumer/README.md#scoped-execution-capture)
+now composes an opt-in scoped tracing Layer around actual authoring work and the original
+Two-Level Game desktop product. No Editor frontend opens. The ordinary source-import worker,
+prepared-edit owner, `DesktopRun`, telemetry seal and native cleanup remain authoritative.
+The [complete raw record](data/2026-11-14-development-runtime/host-capture-results.json)
+contains eleven serial Windows/Rust 1.95.0 release runs: excluded disabled/enabled warmups,
+three alternating disabled/enabled pairs, then overflow, collection failure and export refusal.
+All runs use the same actual discrete DX12 adapter, vendor 4318/device 9860 and 960 by 540 target.
+
+Each run imports a real text asset with a controlled 10 ms hold inside the original Io worker,
+preserves source and metadata identity, commits a valid property value of 23, and rejects the
+original stale basis without changing complete authoring state or Undo/Redo history. Actual
+Undo/Redo and the original Session/OpenHost Close complete. The hold deliberately creates a
+visible wait; it does not identify an ordinary production importer bottleneck. The desktop
+half captures the full canonical paused game DTO, retains twelve exact original presentations
+and completion samples, seals original telemetry and completes target destruction and physical
+loop recovery. The authoring and game projects are separate consumers composed by this Host;
+this does not implement Editor Play or an integrated profiler UI.
+
+The [enabled trace](data/2026-11-14-development-runtime/host-capture-enabled.json), retained
+from run 4, imports successfully into official Perfetto `trace_processor_shell` v59.1-1e9c61e98.
+The [actual query record](data/2026-11-14-development-runtime/host-capture-viewer.json) retains
+the tool hash, exact SQL and parser output: 115 intervals on 115 capture-local observation
+tracks, one held import, one `stale_revision` refusal, twelve presented/completed frame pairs,
+zero missing parent correlations and zero parser errors. The import lifetime is 17.8764 ms,
+including its 11.7597 ms validation child and actual worker/publication retirement. App-start
+to GPU-complete spans range from 2.8352 to 679.5499 ms. They retain distinct Runtime, App-frame,
+render-frame, window, Surface generation, backend and device-epoch fields. These intervals
+include CPU work, submission and waits; they are neither GPU execution nor scanout. A track
+identifies a retained operation, not an invented OS thread. Explicit parent arguments preserve
+the asynchronous relationships without forcing crossing lifetimes onto one synchronous stack.
+
+### Capture Cost And Failure Controls
+
+| Retained pair | Disabled elapsed | Enabled elapsed | Enabled minus disabled |
+| --- | ---: | ---: | ---: |
+| Runs 3 / 4 | 1025.061 ms | 992.902 ms | -32.158 ms |
+| Runs 6 / 5 | 1010.910 ms | 1093.840 ms | +82.930 ms |
+| Runs 7 / 8 | 1039.458 ms | 1022.333 ms | -17.125 ms |
+
+Disabled and enabled means are 1025.143 and 1036.359 ms respectively, a difference of
+11.216 ms (1.09%). This is a finite sequential whole-workflow comparison with shared process,
+code/driver caches and recovered native loop, not isolated collector cost, a stable overhead
+estimate, a speedup, a cold-start distribution or a latency-tail budget. Product comparisons
+exclude these times and require identical complete state, authoring outcomes, adapter and extent.
+
+The enabled collector reserves 1,698,304 bytes in two preallocated Vec payloads for at most
+4096 retained events and 64 active spans. Observed occupied high-water payload is 45,304–49,384
+bytes across normal enabled/export-refusal runs. Registry, Arc, allocator metadata and process
+RSS are excluded. Normal enabled runs retain 111–121 events with zero drops, active spans,
+rejected fields or faults after cleanup. Disabled capture reserves zero payload bytes and
+retains zero events. The
+[overflow control](data/2026-11-14-development-runtime/host-capture-overflow.json) reserves
+832 bytes, retains one event, and reports 24 dropped events plus 90 dropped spans. The
+[collection-failure control](data/2026-11-14-development-runtime/host-capture-failed.json)
+reports one fault and an incomplete capture. Export refusal preserves the original existing
+file, returns `AlreadyExists` only after product cleanup, and then marks capture incomplete.
+All three controls preserve the same original product state, results and physical cleanup.
+
+### Capture Corrections And Scope
+
+The first consumer compile corrected private-API and observer-borrow mistakes. An initial
+collector test assumed full Registry ID reuse within a fixed number of spans; its oracle now
+checks our actual contract: unique capture IDs and correct retained parent lifetimes. The
+native-loop handoff can return before a new paused full frame exists. The consumer now waits
+for a successful original paused capture before requesting maintenance, preserving the native
+handoff and public maintenance rules. No native-owner workaround is introduced.
+
+An actual enabled run then reported one missing span despite ample capacity and valid fields;
+its [incomplete trace](data/2026-11-14-development-runtime/host-capture-contention-before.json)
+is retained. A focused four-thread regression reproduces that loss and the resulting failed
+close bookkeeping with the original global `try_lock`. The private collector now serializes
+only bounded primitive bookkeeping with a short mutex; visitation and parent lookup happen
+outside it, and no product callback or I/O runs under it. The same 256 span lifetimes and 512
+records now retain every update and parent with zero loss. Buffer exhaustion and capture faults
+still produce explicit incomplete observations. Mutex wait has no hard bound: no lock-free,
+nonblocking or real-time guarantee is claimed. Export remains synchronous after original
+physical cleanup. Source review also corrects prefix-based metadata acceptance to an exact
+whitelist and gives crossing operation lifetimes separate bounded viewer tracks.
+
+Selected public/collector regressions pass 34/34, run
+`66ecadf1-8e06-412a-be06-8e9099e768d3`, with one unrelated ignored test. All eleven native runs
+complete with identical original product facts and actual physical cleanup. The additional
+bounded concurrency review finds no P1/P2. The remaining static and import-lifecycle
+qualification is recorded in the owning reconstruction plan after its actual completion.
+This unit does not establish foreign native execution, game-scale performance budgets,
+per-pass GPU timings, Editor frontend integration or completion of full R12. Editor/UI,
+Dialogue UI and physical mixed-DPI work remain paused.

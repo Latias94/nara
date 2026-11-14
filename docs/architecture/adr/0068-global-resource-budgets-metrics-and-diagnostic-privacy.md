@@ -143,6 +143,15 @@ or hooks merely to obtain diagnostic facts.
 
 ### Decision-Local Offline Product Measurements
 
+Host-composed execution capture may export numeric owner correlations and durations with
+source-defined static operation, stage and outcome names. This separate tracing projection does
+not authorize exporting the diagnostic bus's fields. A concrete collector selects and bounds its
+accepted fields; it must ignore free-form message/Debug/Display text, raw errors, host paths,
+environment/settings values and sensitive fingerprints. No blanket classified-field-to-trace
+conversion is admitted. Missing correlation remains explicit instead of inventing an owner ID.
+The capture reports its own retained-storage scope and dropped/incomplete observations, distinct
+from producer overload and from allocator/RSS or GPU execution measurements.
+
 Offline raw samples, percentile aggregation, and Continue/Redirect/Stop decisions are product
 evidence, not `RuntimePressureSnapshots`. They do not add histograms, exporters, or decision policy
 to the foundation runtime. A collector may read a runtime gauge or counter, but it lowers that fact

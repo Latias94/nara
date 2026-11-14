@@ -1492,3 +1492,65 @@ sample all-target/all-feature correctness Clippy, formatting and document/data c
 Independent source reviews find no P1/P2; four scoped agents close. Sequential timings do not
 establish a dominant-latency improvement, cold-start or tail budget. Further work should locate
 the original Adapter request cost before changing policy, scheduling or device reuse.
+
+## Host-Composed Execution Capture
+
+Status: active runtime successor under foundation R12. The bounded Adapter source follow-up
+finds no justified change to current selection or ownership. Continue the complete diagnostic
+workflow without turning that source inspection into a performance claim or speculative cache.
+
+Use the existing independent editor-panel consumer as one concrete Host: delayed source import,
+stale-basis edit refusal, original game desktop frames/completion and complete Close. Keep Editor
+UI, Dialogue and physical mixed-DPI work paused. Compose a thread-local standard tracing Layer
+in the consumer; add no public collector, sink trait, global subscriber, clock or budget manager.
+The already-selected `editor-work-observation` feature owns the new static lifecycle spans.
+Import retains an explicit operation Span through actual worker return and publication retirement,
+propagates the scoped Dispatch/parent to the existing worker, and distinguishes incomplete Drop.
+Prepared editing records its original basis and typed prepare/commit outcome without refreshing
+stale data or changing error/diagnostic publication.
+
+The consumer's fixed capture accepts only static metadata/outcomes and whitelisted numeric
+correlations. Bound event and active-span storage, report reserved payload bytes, overflow/faults
+and incomplete capture, and export standard Chrome Trace Event JSON only after product cleanup.
+Do not derive event order/lifetimes from aggregate timing snapshots. Original frame starts and
+completion sample durations preserve distinct Runtime, App-frame, render-transaction, window,
+backend and epoch identities; sample reception is not its completion timestamp or GPU duration.
+
+Qualify actual delayed import and stale edit without a native Editor frontend, then the original
+desktop/GPU path. Compare finite identical workloads with capture disabled/enabled, forcing
+overflow and collection/export failure separately; product outcomes, state and physical cleanup
+must agree. Measure enabled/disabled elapsed overhead, fixed retained storage and dropped counts
+without claiming controlled cold starts or reliable tails. Inspect the exported file with a
+standard viewer/parser and retain decision-local raw facts. ADRs 0048/0068 now explicitly separate
+safe execution correlations from diagnostic-field logging; their original privacy and ownership
+contracts remain. Full R12, representative budgets and paused product work remain open.
+
+The implementation and qualification now complete this bounded successor. The independent
+module consumer's actual Host performs a delayed asset import with a controlled 10 ms worker
+hold, a valid property edit to 23, a stale-basis rejection that preserves the complete document
+and history, actual Undo/Redo, and complete Session/OpenHost cleanup. Its original Two-Level Game
+desktop path retains the complete canonical paused state, twelve original presentations and
+completion samples, telemetry seal, target destruction and physical event-loop recovery. Eleven
+serial Windows/DX12 release runs compare excluded disabled/enabled warmups, three retained
+disabled/enabled pairs, overflow, collection failure and export refusal. All product state,
+authoring results, adapter/extent facts and physical cleanup agree across modes.
+
+The enabled run retains 111–121 events with zero drops, active spans, rejected fields or faults;
+the fixed payload reservation is 1,698,304 bytes and observed high-water payload is 45,304–49,384
+bytes. Disabled capture retains zero bytes/events. Overflow and collection-failure controls report
+their explicit incomplete/drop/fault facts, and export refusal preserves `AlreadyExists` after
+product cleanup. Perfetto v59.1 parses the retained enabled trace: 115 intervals on 115
+capture-local tracks, one held import, one stale-revision refusal, twelve matched presentation /
+completion pairs, no missing parents and no parser errors. The three retained elapsed pairs vary
+from -32.158 to +82.930 ms; the enabled mean is 1.09% above disabled in this shared-process,
+shared-cache sequence. This is an overhead observation, not a stable budget or tail claim.
+
+The first collector attempt exposed a real concurrent producer loss: one span disappeared with
+the original `try_lock`. A focused four-thread regression now retains all 256 span lifetimes and
+512 records. The private collector visits fields and resolves parents outside its mutex, then
+uses the mutex only for bounded primitive state; it makes no lock-free or hard real-time claim.
+The final selected consumer/collector cohort passes 34/34 (`66ecadf1-8e06-412a-be06-8e9099e768d3`),
+the eleven native runs pass, and the bounded independent review finds no P1/P2. Raw JSON and the
+viewer query are retained under the existing benchmark data owner. This qualifies the concrete
+decision-local Host capture, not a public tracing framework, a profiler UI, per-pass GPU timing,
+foreign execution, a representative game performance budget or full R12.
