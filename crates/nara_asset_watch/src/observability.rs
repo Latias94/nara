@@ -8,7 +8,7 @@ use nara_diagnostic::{
 use nara_ecs::{Res, ResMut, Resource};
 
 use crate::{
-    AssetWatchTranslator,
+    AssetWatchRuntime, AssetWatchTranslator,
     backend::AssetWatcher,
     queue::{
         AssetWatchEventQueue, AssetWatchFailureKind, AssetWatchQueueObservation,
@@ -54,7 +54,17 @@ pub(crate) fn drain_asset_watch_events(
     mut observer: ResMut<AssetWatchQueueObserver>,
     mut status: ResMut<AssetWatchRuntimeStatus>,
     mut watcher: Option<ResMut<AssetWatcher>>,
+    runtime: Option<Res<AssetWatchRuntime>>,
 ) {
+    if runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.poll_retired().is_err())
+        && !status.requires_rescan()
+    {
+        if let Some(queue) = queue.as_ref() {
+            queue.sender().record_backend_failure();
+        }
+    }
     if watcher
         .as_ref()
         .is_some_and(|watcher| watcher.is_running() && watcher.source_root() != &*root)

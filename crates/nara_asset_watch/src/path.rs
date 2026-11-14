@@ -1,8 +1,53 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    io::ErrorKind,
+    path::{Component, Path, PathBuf},
+};
 
 use nara_asset::AssetPath;
 
-use crate::AssetWatchError;
+use crate::{AssetWatchError, AssetWatchPath};
+
+pub(crate) fn native_watch_paths(
+    root: &Path,
+    paths: &[AssetWatchPath],
+) -> Result<Vec<AssetWatchPath>, AssetWatchError> {
+    if paths.is_empty() {
+        return Err(AssetWatchError::NoWatchPaths);
+    }
+    let root = absolute_lexical(root)?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| AssetWatchError::Filesystem(error.to_string()))?;
+    paths
+        .iter()
+        .map(|selected| {
+            let path = if selected.path().is_absolute() {
+                normalize_lexical(selected.path())
+            } else {
+                normalize_lexical(root.join(selected.path()))
+            };
+            let outside = || AssetWatchError::SourceOutsideRoot {
+                path: path.clone(),
+                root: root.clone(),
+            };
+            if !path.starts_with(&root) {
+                return Err(outside());
+            }
+            let mut existing = path.as_path();
+            loop {
+                match existing.canonicalize() {
+                    Ok(canonical) if canonical.starts_with(&canonical_root) => break,
+                    Ok(_) => return Err(outside()),
+                    Err(error) if error.kind() == ErrorKind::NotFound => {
+                        existing = existing.parent().ok_or_else(outside)?;
+                    }
+                    Err(error) => return Err(AssetWatchError::Filesystem(error.to_string())),
+                }
+            }
+            Ok(AssetWatchPath::new(path, selected.recursive()))
+        })
+        .collect()
+}
 
 pub(crate) fn local_path(root: &Path, path: &Path) -> Result<AssetPath, AssetWatchError> {
     let root = absolute_lexical(root)?;

@@ -183,6 +183,7 @@ fn plugin_rejects_a_different_scope_for_the_same_native_directory() {
     remove_temp_root(&root);
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn rescan_receipt_refuses_a_rebound_scope_and_retires_its_native_callback() {
     let root = temp_root();
@@ -222,6 +223,7 @@ fn rescan_receipt_refuses_a_rebound_scope_and_retires_its_native_callback() {
     remove_temp_root(&root);
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn running_watcher_refuses_to_reinterpret_queued_events_after_scope_rebinding() {
     let root = temp_root();
@@ -298,6 +300,7 @@ fn canonical_prefix_bytes_remain_subject_to_downstream_change_admission() {
     remove_temp_root(&root);
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn native_file_observation_maps_the_selected_scope_or_requires_complete_reconciliation() {
     let root = temp_root();

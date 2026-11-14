@@ -15,11 +15,16 @@ use nara_asset::{
 use nara_ecs::schedule::IntoScheduleConfigs;
 
 mod backend;
+mod lifecycle;
 mod observability;
 mod path;
 mod queue;
 
 pub use backend::AssetWatcher;
+pub use lifecycle::{
+    ASSET_WATCH_NATIVE_INSTANCE_LIMIT, AssetWatchLifecycleStats, AssetWatchPath, AssetWatchRuntime,
+    AssetWatchRuntimeObserver, AssetWatchStartFailure,
+};
 pub use observability::{AssetWatchRuntimeState, AssetWatchRuntimeStatus};
 pub use queue::{
     AssetWatchEventQueue, AssetWatchEventSender, AssetWatchQueueDrain, AssetWatchQueueLimits,
@@ -125,6 +130,13 @@ pub enum AssetWatchError {
     MissingRenameTarget(PathBuf),
     Filesystem(String),
     Notify(String),
+    NativeCapacityExceeded { limit: usize },
+    RuntimeClosing,
+    ManagedRuntimeMissing,
+    NoWatchPaths,
+    ManagedPlatformUnsupported,
+    NativeClose { joined: bool, message: String },
+    StartFailure(AssetWatchStartFailure),
     RescanRequired,
 }
 
@@ -152,6 +164,22 @@ impl Display for AssetWatchError {
             ),
             Self::Filesystem(error) => write!(formatter, "asset watch filesystem error: {error}"),
             Self::Notify(error) => write!(formatter, "asset watch error: {error}"),
+            Self::NativeCapacityExceeded { limit } => write!(
+                formatter,
+                "asset watch native instance limit {limit} is occupied by active or retiring sessions"
+            ),
+            Self::RuntimeClosing => formatter.write_str("asset watch runtime is closing"),
+            Self::ManagedRuntimeMissing => {
+                formatter.write_str("asset watch rescan requires a registered lifecycle owner")
+            }
+            Self::NoWatchPaths => formatter.write_str("asset watch needs at least one native path"),
+            Self::ManagedPlatformUnsupported => formatter
+                .write_str("managed native watcher join is supported only on Windows and Linux"),
+            Self::NativeClose { joined, message } => write!(
+                formatter,
+                "asset watch native close failed (original worker joined: {joined}): {message}"
+            ),
+            Self::StartFailure(failure) => Display::fmt(failure, formatter),
             Self::RescanRequired => {
                 formatter.write_str("asset watch scope requires a complete source rescan")
             }
@@ -292,6 +320,10 @@ fn retire_watch_rescan(session: &Mutex<Option<PendingWatchRescan>>) {
 }
 
 impl AssetWatchRescan {
+    /// Starts a replacement under the World's registered [`AssetWatchRuntime`].
+    ///
+    /// A standalone World must install a registered owner before beginning managed rescans;
+    /// a missing owner is reported without acquiring a native watcher.
     pub fn begin(
         world: &mut nara_ecs::World,
         limits: AssetWatchQueueLimits,
@@ -315,7 +347,10 @@ impl AssetWatchRescan {
             .ok_or(AssetWatchError::RescanRequired)?
             .clone();
         let queue = AssetWatchEventQueue::with_limits(limits);
-        let watcher = AssetWatcher::watch_recursive(&root, queue.sender())?;
+        let runtime = world
+            .get_resource::<AssetWatchRuntime>()
+            .ok_or(AssetWatchError::ManagedRuntimeMissing)?;
+        let watcher = runtime.watch_recursive(&root, queue.sender())?;
         let session = Arc::new(Mutex::new(Some(PendingWatchRescan { queue, watcher })));
         world.insert_resource(ActiveWatchRescan(Arc::clone(&session)));
         Ok(Self {
@@ -350,7 +385,7 @@ impl AssetWatchRescan {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let replacement = pending.as_ref().ok_or(AssetWatchError::RescanRequired)?;
-            if replacement.queue.stats().rescan_required() {
+            if replacement.queue.stats().rescan_required() || !replacement.watcher.is_running() {
                 return Err(AssetWatchError::RescanRequired);
             }
             pending.take().ok_or(AssetWatchError::RescanRequired)?
@@ -389,6 +424,8 @@ pub struct AssetWatchPlugin {
 pub const ASSET_WATCH_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.asset-watch");
 pub const ASSET_WATCH_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
     nara_app::PluginShutdownObligationId::new("nara.asset-watch.watcher");
+pub const ASSET_WATCH_CLOSE_PARTICIPANT: nara_app::RuntimeCloseParticipantId =
+    nara_app::RuntimeCloseParticipantId::new("nara.asset-watch.native");
 const ASSET_WATCH_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("asset-watch")];
 pub const ASSET_WATCH_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -451,15 +488,21 @@ impl Plugin for AssetWatchPlugin {
             root
         };
 
+        let runtime = AssetWatchRuntime::register(
+            app,
+            ASSET_WATCH_SHUTDOWN_OBLIGATION,
+            ASSET_WATCH_CLOSE_PARTICIPANT,
+        )?;
+        app.insert_resource(runtime.clone())?;
         let queue = AssetWatchEventQueue::with_limits(self.queue_limits);
         let observer = queue.observer();
         let sender = queue.sender();
-        let watcher = AssetWatcher::watch_recursive(&watch_root, sender).map_err(|error| {
-            PluginError::SetupFailed {
+        let watcher = runtime
+            .watch_recursive(&watch_root, sender)
+            .map_err(|error| PluginError::SetupFailed {
                 plugin: ASSET_WATCH_PLUGIN_ID,
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         app.insert_resource(observer)?;
         app.insert_resource(AssetWatchRuntimeStatus::default())?;
         app.insert_resource(queue)?;
@@ -468,7 +511,6 @@ impl Plugin for AssetWatchPlugin {
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(AssetTaskUpdateSet::Poll),
         )?;
-        app.register_plugin_shutdown_obligation(ASSET_WATCH_SHUTDOWN_OBLIGATION)?;
         Ok(())
     }
 

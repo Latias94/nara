@@ -17,6 +17,7 @@ exclude = [
     "samples/collect-game",
     "samples/two-level-game",
     "vendor/winit",
+    "vendor/notify",
 ]
 members = [
     "crates/nara_app",
@@ -117,7 +118,7 @@ getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 icu_segmenter = { version = "2.2", default-features = false, features = ["compiled_data"] }
-notify = "8.2.0"
+notify = { version = "=8.2.0", path = "vendor/notify" }
 naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007", features = ["wgsl-in"] }
 parley = { version = "=0.11.0", default-features = false, features = ["std", "complex-scripts"] }
 taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
@@ -146,6 +147,7 @@ rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [patch.crates-io]
+notify = { path = "vendor/notify" }
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 winit = { path = "vendor/winit" }
 

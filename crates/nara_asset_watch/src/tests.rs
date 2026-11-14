@@ -23,6 +23,10 @@ mod source_scopes;
 #[path = "tests/raw_sidecars.rs"]
 mod raw_sidecars;
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
+
 fn temp_root() -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -129,6 +133,23 @@ fn assert_callback_retired(lifetime: std::sync::Weak<()>) {
         0,
         "the exact native callback must be released"
     );
+}
+
+fn assert_retirements_joined(runtime: &AssetWatchRuntime) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        runtime.poll_retired().unwrap();
+        let stats = runtime.stats();
+        if stats.retiring() == 0 {
+            assert_eq!(stats.started(), stats.joined() + stats.active() as u64);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "native worker join did not complete"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[test]
@@ -250,33 +271,37 @@ fn bounded_overflow_does_not_clear_when_accepted_prefix_is_drained() {
     assert!(queue.drain().rescan_required());
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
     let root = temp_root();
     fs::create_dir_all(&root).unwrap();
-    let mut world = nara_ecs::World::new();
-    world.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT));
-    let queue = AssetWatchEventQueue::new();
-    queue.sender().record_backend_failure();
-    world.insert_resource(queue.observer());
-    world.insert_resource(queue);
-    world.insert_resource(AssetSourceChanges::default());
-    world.insert_resource(AssetWatchRuntimeStatus::default());
-    world.insert_resource(RuntimeDiagnostics::default());
-    world.insert_resource(RuntimePressureSnapshots::default());
+    let mut app = App::new();
+    install_asset_prerequisites(&mut app);
+    app.add_plugin(AssetWatchPlugin::new(&root, AssetPathScope::ROOT))
+        .unwrap();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
+    let retirement = lifecycle.observer();
+    let world = app.world_mut().unwrap();
+    world
+        .resource::<AssetWatchEventQueue>()
+        .sender()
+        .record_backend_failure();
     let mut schedule = nara_ecs::schedule::Schedule::default();
     schedule.add_systems(drain_asset_watch_events);
-    schedule.run(&mut world);
-    let abandoned = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    schedule.run(world);
+    let abandoned = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
     drop(abandoned);
+    assert_retirements_joined(&lifecycle);
     assert!(
         world
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
-    let superseded = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
-    let completed = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
-    assert!(superseded.complete(&mut world).is_err());
+    let superseded = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
+    let completed = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
+    assert!(superseded.complete(world).is_err());
+    assert_retirements_joined(&lifecycle);
     assert!(
         world
             .resource::<AssetWatchRuntimeStatus>()
@@ -285,12 +310,12 @@ fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
     let mut foreign = nara_ecs::World::new();
     foreign.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT));
     // A receipt cannot complete a different runtime, even if its source path is equal.
-    let foreign_receipt =
-        AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    let foreign_receipt = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
     assert!(foreign_receipt.complete(&mut foreign).is_err());
-    assert!(completed.complete(&mut world).is_err());
+    assert!(completed.complete(world).is_err());
+    assert_retirements_joined(&lifecycle);
     let overflowed = AssetWatchRescan::begin(
-        &mut world,
+        world,
         AssetWatchQueueLimits::new(ItemLimit::ONE, ByteLimit::new(4096).unwrap()),
     )
     .unwrap();
@@ -303,17 +328,18 @@ fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
             .try_send(AssetWatchEvent::modified("textures/b.png"))
             .is_err()
     );
-    assert!(overflowed.complete(&mut world).is_err());
+    assert!(overflowed.complete(world).is_err());
+    assert_retirements_joined(&lifecycle);
     assert!(
         world
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
-    let completed = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    let completed = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
     rescan_sender(&world)
         .try_send(AssetWatchEvent::modified("textures/during-scan.png"))
         .unwrap();
-    completed.complete(&mut world).unwrap();
+    completed.complete(world).unwrap();
     assert!(
         !world
             .resource::<AssetWatchRuntimeStatus>()
@@ -328,9 +354,18 @@ fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
         [AssetWatchEvent::modified("textures/during-scan.png")]
     );
     world.remove_resource::<AssetWatcher>();
+    assert_retirements_joined(&lifecycle);
+    assert_eq!(lifecycle.stats().active(), 0);
+    assert_eq!(lifecycle.stats().started(), lifecycle.stats().joined());
+    nara_app::RuntimeInstance::start(app)
+        .unwrap()
+        .finish()
+        .unwrap();
+    assert_eq!(retirement.stats().started(), retirement.stats().joined());
     remove_temp_root(&root);
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
     let root = temp_root();
@@ -339,6 +374,7 @@ fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
     install_asset_prerequisites(&mut app);
     app.add_plugin(AssetWatchPlugin::new(&root, AssetPathScope::ROOT))
         .unwrap();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
     let world = app.world_mut().unwrap();
     world
         .resource::<AssetWatchEventQueue>()
@@ -356,6 +392,8 @@ fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
     let replacement_callback = rescan_callback_lifetime(world);
     let replacement_sender = rescan_sender(world);
     assert_callback_retired(old_callback);
+    assert_retirements_joined(&lifecycle);
+    assert_eq!(lifecycle.stats().active(), 1);
     assert_eq!(
         old_sender.try_send(AssetWatchEvent::modified("old.png")),
         Err(AssetWatchQueueSendError::Disconnected)
@@ -373,6 +411,9 @@ fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
 
     drop(abandoned);
     assert_callback_retired(replacement_callback);
+    assert_retirements_joined(&lifecycle);
+    assert_eq!(lifecycle.stats().active(), 0);
+    assert_eq!(lifecycle.stats().started(), lifecycle.stats().joined());
     assert_eq!(
         replacement_sender.try_send(AssetWatchEvent::modified("abandoned.png")),
         Err(AssetWatchQueueSendError::Disconnected)
@@ -421,9 +462,11 @@ fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
         .finish()
         .unwrap();
     assert_callback_retired(completed_callback);
+    assert_eq!(lifecycle.stats().started(), lifecycle.stats().joined());
     remove_temp_root(&root);
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
 fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
     let root = temp_root();
@@ -432,6 +475,8 @@ fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
     install_asset_prerequisites(&mut app);
     app.add_plugin(AssetWatchPlugin::new(&root, AssetPathScope::ROOT))
         .unwrap();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
+    let retirement = lifecycle.observer();
     app.world()
         .resource::<AssetWatchEventQueue>()
         .sender()
@@ -470,6 +515,16 @@ fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+    let stats = lifecycle.stats();
+    assert_eq!(stats.active(), 0);
+    assert_eq!(stats.retiring(), 0);
+    assert_eq!(stats.started(), stats.joined());
+    assert_eq!(retirement.stats(), stats);
+    assert_eq!(
+        callback.strong_count(),
+        0,
+        "Stopped must follow actual native join"
+    );
     assert!(
         host_receipt.lock().unwrap().is_some(),
         "the Host still holds its receipt while the stopped World remains alive"
@@ -483,6 +538,7 @@ fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
     );
     drop(host_receipt.lock().unwrap().take());
     runtime.finish().unwrap();
+    assert_eq!(retirement.stats(), stats);
     remove_temp_root(&root);
 }
 
