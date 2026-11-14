@@ -150,6 +150,37 @@ maps after the Host's actual original prefix completes. Import/re-export checks 
 original producer, source generation and frame. It neither takes a native submission reservation
 nor submits command buffers directly.
 
+## Graph-Shared Material Inputs
+
+`tests/material_inputs.rs` uses an ordinary captured Material Sprite with two declared Image
+inputs. A separately authored Feature generates a 2x2 premultiplied palette, and an explicit
+semantic binding routes that exact version into the original stock Material world operation.
+An independent Grade operation branches from the same palette. The source extent differs from
+the 32x24 world target, and both nearest/linear sampling and linear/sRGB source formats have
+predetermined pixel oracles. The Shader explicitly unpremultiplies the source and returns the
+existing straight-alpha Material output. The original default Image path has a separate control.
+
+CPU cases use the public `validate_input` graph check, including exact generation/uniform-byte/
+complete-Image-map matching, signed zero, duplicate/unmatched bindings, missing writers, foreign
+graph versions and source shape/format refusals. Tight limits require refusal followed by a
+corrected operation on the same builder, with restored resource bytes, metadata and draw facts.
+Native cases retain old outputs, import a prior palette, replay an old capture through another
+producer, reject foreign-Host imports, and retire through the original actual submission prefix.
+The separate source-release trajectory drops all external source/capture/frame leases before
+polling the importing prefix and records whether that original callback was still pending.
+Source shutdown invalidates old outputs, but the foreign-Host control does not independently
+qualify same-Host device reconstruction or physical device loss.
+
+The final source/stock/material cohort passes 21/21 with no skips on Windows 11 / Vulkan,
+Rust 1.95.0, run `9dc4cc7d-0e17-404f-b5ce-af704c1f6230` (10.879 seconds). The four Material
+native trajectories separately pass DX12 in `069b1603-8d48-478c-8283-bd09ae3e5108`
+(6.213 seconds). The final owning graph/policy/Runtime/material/public-sidecar selection passes
+324/324 in `96cd0d92-dfb1-4dcf-b8f6-112f088a35b2`, including a targeted weak-storage observation of the
+actual pending import submission and release on its real callback. Counts from these selections
+overlap other evidence and are not additive. The
+[owning plan](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#graph-input-qualification)
+records failed fixtures, review corrections and remaining engine/platform/cost scope.
+
 ## Serial verification commands
 
 Run from the repository root after the parent has aligned this workspace's lock. Reuse the normal
@@ -160,6 +191,7 @@ $env:CARGO_BUILD_JOBS = '1'
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
 cargo +1.95.0 check --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --tests --examples --all-features
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --test source --test-threads=1
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test material_inputs --test-threads=1 --no-tests fail
 ```
 
 Run the ignored GPU cases explicitly on an actual adapter. Missing adapter/desktop prerequisites,
@@ -169,6 +201,7 @@ timeouts, an empty selection and unavailable evidence are failures, not passing 
 $env:WGPU_BACKEND = 'dx12'
 $env:NARA_WGPU_FORCE_FALLBACK = '0'
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --test composition --test effects --test translucent_scene --test ui_binding --run-ignored only --test-threads=1
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test material_inputs --run-ignored only --test-threads=1 --no-tests fail
 ```
 
 The Runtime test launches a prebuilt example so the real EventLoop stays on the child process's
