@@ -1197,8 +1197,23 @@ composition passes 4/4, both existing sample Check entries succeed, and final wo
 correctness/independent strict Clippy, format and document checks pass. Their
 implementation and review corrections belong to the
 [same R9b plan](2026-11-14-durable-material-and-shader-plan.md#persistent-product-successor).
-Automatic Material/Shader hydration in the Editor Scene preview, graph-shared resources,
-numerical costs and complete R9b remain open.
+Automatic Material/Shader hydration in the Editor Scene preview, numerical costs and complete
+R9b remain open.
+
+The [graph-shared Material successor](2026-11-14-durable-material-and-shader-plan.md#graph-shared-material-texture-successor)
+at `13a0927`, with independent consumers at `e9d8755`, routes exact typed program textures into
+captured stock material slots through semantic IDs, without fake Image handles or another
+renderer. It retains original generation/uniform-byte/
+Image-map matching, sampled-read dependencies, local builder retry and native submission custody.
+The final owning/affected/public-sidecar selection passes 324/324 in
+`96cd0d92-dfb1-4dcf-b8f6-112f088a35b2`;
+the independently locked source/stock/material cohort passes 21/21 in
+`9dc4cc7d-0e17-404f-b5ce-af704c1f6230`, including actual Vulkan pixel/readback and retirement.
+Four Material native trajectories also pass DX12 in `069b1603-8d48-478c-8283-bd09ae3e5108`.
+Pure CPU consumers take the original sealed batch through the public entry also used by Editor
+Game View; native presentation remains separate. The same plan records failed fixtures, review
+corrections, exact storage lifetime, passing feature/workspace/Clippy/format/document closure
+and remaining source-update/Editor/cost qualification.
 
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata

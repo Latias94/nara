@@ -6,8 +6,9 @@ starting from `4bd02b9`. Editor/component and Dialogue UI development remain pau
 qualification shares the original serial Cargo owner with Runtime work.
 The declaration/Shader/native prerequisite is implemented at `899d64b`. The selected persistent
 source/processed Material product workflow is implemented and qualified below. Live Editor
-Material/Shader hydration, graph-shared texture inputs and representative production costs
-remain active successors; complete R9b and the foundation Goal are not finished.
+Material/Shader hydration and representative production costs remain active successors. The
+graph-shared texture workflow is implemented and qualified below; complete R9b and the
+foundation Goal are not finished.
 The persistent implementation/migration is `2535b46`; independent/public and real executable
 delivery consumers are `d091151`. Both are local commits on the original foundation branch.
 
@@ -24,6 +25,174 @@ This unit replaces the startup-only static-text, one-vec4/one-texture extension.
 serde to `Material2dInstance` or keeping an old pipeline cache entry does not complete it.
 No visual Shader Graph, new renderer, universal publication manager or parallel asset registry
 is selected. R9a View/history, R9c measured geometry locality and broader 3D retain their scopes.
+
+## Graph-Shared Material Texture Successor
+
+Status: implemented at `13a0927`, with independent consumers at `e9d8755` and scoped
+qualification below. Both follow persistent delivery `a67134f` on the original local branch.
+In the ordinary public workload, a Feature generates a palette texture and the original stock
+Material shader samples that exact program version. A second operation may branch from the
+same texture; dependency order, complete group refusal, retained old outputs and original native
+cleanup must remain observable. Preserve
+all ordinary asset-Image material inputs and immutable exact generations.
+
+The selected seam is the stock policy's world operation: an explicit binding associates one
+captured `Material2dBinding` and declared semantic texture ID with a typed program texture. The
+mapping belongs to that immutable operation, not a mutable material/current registry. Matching
+uses the original generation, exact uniform bytes and complete original Image-handle map.
+Reject duplicate, unmatched, foreign-candidate or invalid source bindings; do not allocate fake
+Image handles or reconstruct the capture from the current World. Automatically declare the exact
+sampled reads on the stock writer, and resolve those same reads when preparing the native bind
+group. Missing writers, feedback and cycles keep the existing graph compiler's refusal.
+
+Graph textures remain owned by the program and original submission. The adapter may borrow/clone
+their admitted views while building the existing stock bind group, but may not put them into
+the Image upload/residency cache. Only unreplaced Image inputs contribute upload demand. Native
+allocation/custody accounting must include actual bind groups, uniforms and view storage without
+charging graph textures twice. Every operation's capture/access preflight completes before native
+work. Late native failure retains the existing original prefix; no second Queue, renderer or
+submission owner is introduced.
+
+Scope remains the existing whole single-sample, single-mip 2D baseline float/filterable texture
+contract. Extent may differ from the world/output. Transfer follows the declared native format;
+alpha interpretation remains explicit and is never silently converted. The material Shader owns
+its sampling math and straight-alpha output, and the existing stock sampler remains selected by
+the Sprite capture. No automatic framebuffer fetch, implicit mip generation or aliasing is
+selected. Imported native outputs retain their original Host/epoch checks.
+
+Pinned comparison: Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_sprite_render/src/mesh2d/material.rs`,
+`crates/bevy_render/macros/src/as_bind_group.rs`, and
+`examples/shader/compute_shader_game_of_life.rs` separate texture binding from explicit producer
+ordering. That revision's RenderGraph is an ECS schedule label, not its historical texture-slot
+API. Godot `7a37606a433c0e7735525037cdf774f043146a21`,
+`servers/rendering/renderer_rd/renderer_canvas_render_rd.cpp` and
+`servers/rendering/renderer_viewport.cpp` separately own backbuffer snapshot timing and viewport
+draw order. These are source constraints, not evidence that Nara already implements the selected
+version/access or lifetime contract.
+
+Acceptance requires independent public CPU refusal controls plus actual WGPU readback for a
+generated palette, a changed successor and retained original output. Include an imported prior
+output, nondefault source extent, sampler/color interpretation, missing writer, incompatible
+format, duplicated/unmatched mapping, graph/Host mismatch and original physical cleanup. Run
+affected stock/material native controls serially. Runtime source dependency updating remains the
+next owning comparison; live Editor hydration and full R9b stay open.
+
+Public CPU admission uses `WgpuRenderHost::validate_input` through the same original policy
+builder. It checks the graph, final target and Feature ownership without acquiring a device,
+reserving a candidate or publishing bindings/history. The original policy callbacks execute and
+may reserve CPU installation/history tables; arbitrary callback effects are not rolled back.
+Native import validity, Adapter capabilities and native Feature preflight remain separate
+preparation/submission checks. Validation does not return a reusable prepared value. Error
+atomicity belongs to the stock world builder: both ordinary and graph-texture world calls restore
+only their own appended unwritten resources, modeled bytes, capture metadata and draw facts on
+refusal. Verify both unmatched-selection and later operation-admission refusal followed by a
+corrected retry on the same builder/key at the exact sufficient resource/metadata limits.
+
+The independent source fixture must consume each original sealed CPU batch through
+`take_captured_policy_batch` in the selected Publish system before driving its successor.
+Promote that existing finite batch entry from hidden exports to the ordinary public interface,
+migrate the first-party Editor Game View import and retain its original body/authority. A pure
+CPU collector does not install native-window presentation or publish into its separate Runtime
+exchange. Observing the same unconsumed input repeatedly is not evidence of successive source
+frames. Taking a batch carries no GPU success facts; retained replayable inputs execute later
+through the original image Host.
+
+### Graph Input Qualification
+
+Windows 11 / Rust 1.95.0 qualification reuses the original target directory, one Cargo job and
+explicit native selection. The final owning/material/graph/policy/Runtime selection passes
+275/275, with 338 outside the selection, run `5bc40439-8964-4a7f-9e42-ed7ea681464b`
+(37.143 seconds after an 80-second release build). This includes exact sampled-access native
+preflight, ordinary asset defaults, prior cache/failure controls, the new history-GC control and
+the imported Material source's original storage lifetime. The production Host identifies the
+NVIDIA RTX 4090 / Vulkan adapter. The targeted lifetime control observes
+`complete_before_drop=false`, `pending_after_drop=true`, `source_alive_after_drop=true`; its
+weak original storage releases after the real callback. This proves source custody in that
+submitted trajectory, not GPU hardware occupancy, scanout or a numerical latency budget.
+
+Independent review first finds inaccessible unwritten resources after a rejected mapping, then
+default-feature compilation and expired history-table accumulation, incomplete mapping metadata,
+weak color sensitivity and masked aggregate-budget lifetime assertions. The owner corrections
+are local error rollback, original Host maintenance and pre-admitted fixed-capacity vector
+indexing with exact-identity collision checks and source-read deduplication. The final bounded
+reviews find no remaining P1/P2 in those contracts. A separate exact source-storage observation
+replaces the aggregate-byte assertion as lifetime evidence.
+
+The independent fixture's first metadata check finds an oversized plugin tuple. Its initial
+behavioral run `7e1eff0b-f111-4984-b90c-cc152a4f0d57` passes only the oracle sensitivity control
+and fails eight fixtures because the unconsumed original pending frame is observed repeatedly.
+Assertions before Runtime close trigger the existing fail-stop Drop path. The corrected fixture
+retires before inspecting its snapshots. The first correction incorrectly targets the separate
+desktop Runtime exchange, which the pure CPU fixture has not installed; run
+`62249869-a1be-4cdd-b22f-231051ed8e83` passes eight original controls plus oracle sensitivity
+and rejects twelve new fixtures before GPU work. The final correction takes the original sealed
+batch in Publish; neither source frame indices nor native success are manufactured. The corrected CPU cohort
+passes 9/9, four ignored native cases outside that selection, run
+`6e107baf-5f85-4ef4-b8ec-e25711d96e1c` (1.019 seconds).
+
+The final independent source/stock/material selection passes 21/21 with no skips, run
+`9dc4cc7d-0e17-404f-b5ce-af704c1f6230` (10.879 seconds). Actual Vulkan readback covers
+linear/sRGB source formats, nearest/linear sampling, generated A/B, Grade branching, imported
+prior output, delayed old replay, original Image defaults and physical retirement. The source
+release case observes an unfinished original callback after external leases are dropped.
+RGB-channel loss, wrong sampler and encoded-sRGB-as-linear models differ beyond the fixed
+three-byte tolerance before GPU execution. An intermediate 20/21 run
+`6c28d1b6-f4bf-4e23-a263-f614eee2d905` identifies a fixture's incorrect expectation that a
+rejected foreign import has no retirement prefix. The correction waits for the original failed
+attempt's prefix while preserving zero publication/native-work assertions. DX12 independently
+passes the four Material native trajectories in `069b1603-8d48-478c-8283-bd09ae3e5108`
+(6.213 seconds, nine CPU cases outside the ignored-only selection).
+
+The final owning selection includes the migrated public CPU batch entry, original frame/plugin
+controls and all seven public UI sidecar integration cases: 324/324 pass, 296 outside this
+selection, run `96cd0d92-dfb1-4dcf-b8f6-112f088a35b2` (42.327 seconds after a 111-second
+release build). It repeats the exact source-storage pending/callback observation successfully.
+The workspace check first detects four remaining hidden-path test calls; they are migrated to
+the public batch entry without aliases or changed assertions. The original desktop Runtime
+exchange stays unchanged.
+
+Release library checks pass with no stock features, stock-sprite only and stock-ui only. The
+final workspace release all-target check passes after the hidden test-call migration. The
+owning all-target/all-feature correctness Clippy passes with existing warnings, and independent
+workspace all-target/all-feature Clippy passes with `-D warnings`. Root and independent format
+checks, affected whitespace, manifest parsing and added document-link/heading checks pass.
+Ordinary CI already discovers the new CPU consumer cases through its existing workspace loop;
+the native cases remain explicitly selected local qualification, not a remote CI result.
+All three scoped review/regression agents from this continuation are closed, all owned Cargo
+sequences are terminal, and paused GPUI/Dialogue changes are excluded from the local commits.
+
+These results do not qualify automatic source updates, live Editor Material hydration, same-Host
+device reconstruction, physical loss, foreign-native execution, a numeric performance budget or
+the full R9b/Foundation Goal. No remote publication is part of this unit.
+
+### Runtime Source Update Ownership Findings
+
+At `a67134f`, actual source-backed runtime reload already has an explicit complete path:
+request the same declared Scene through `ProjectScenes`, inspect its prepared candidate and
+commit through `commit_prepared_project_scene` or managed native travel. Invalid Material WGSL
+rejects preparation while the incumbent Scene/products remain usable. This replaces the selected
+Scene instance and uses the caller's original overlay for preserved gameplay data; it is not
+an in-place asset-only or automatic event-driven update.
+
+The missing automatic bridge has three concrete obligations. `project_content/domains.rs`
+records raw dependency reads in content receipts but does not retain failed-attempt recovery
+paths or live source subscriptions. Those must join the original `AssetDependencyGraph`
+Published/Retry sets: changing `a.wgsl` to missing `b.wgsl`, then creating `b.wgsl`, must recover.
+Second, source intent must be accepted by the original Scene/residency owner. Registering a
+parallel Material reloader would advance `AssetStates` independently and invalidate its exact
+slot/state baseline. `SourceAssetBuildPlugin` publishes `BuiltSourceAsset<Product>` and does not
+update the actual Scene-owned `Assets<Material2dAsset>` or `ProjectDomainAssets`. Third, events
+during Preparing/Ready need bounded successor intent and original cancellation/physical-return
+handling. A frozen Ready candidate must not be silently reinterpreted from newer disk contents.
+
+Qualify that later bridge with actual semantic source-change notifications, compatible/invalid/
+repaired WGSL, missing-file recovery, default Image content/selection edits, removed dependency
+events, events during preparation, explicit terminal acknowledgement and Stop. Preserve the
+original two-distinct-generation budget, last-good capture, managed native retirement and
+processed-base isolation. A test manually requesting Scene reload after every edit only proves
+the explicit workflow; it cannot qualify automatic dependency-directed updates. No watcher,
+second current map or additional scheduler follows from this source study alone.
 
 ## Baseline Source Findings
 

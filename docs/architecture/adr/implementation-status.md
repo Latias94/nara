@@ -2201,8 +2201,24 @@ owner records preserved. The affected native material/cache cohort passes 15/15 
 `f8cf8622-7eb0-41bc-b11d-105f7febbe8e`, and the production Host DX12 cohort passes 5/5 in
 `9badbda0-1909-45bd-9e01-0bb765ed2d5a`. Reference composition passes 4/4, both sample Check
 entries succeed, and final workspace/correctness/strict consumer Clippy/format/document checks
-pass in the same linked plan. Automatic live Material/Shader preview, graph-shared inputs,
-numerical budgets and full R9b remain open.
+pass in the same linked plan. Automatic live Material/Shader preview, numerical budgets and full
+R9b remain open.
+
+The graph-shared input successor at `13a0927`, with independent consumers at `e9d8755`, adds
+explicit exact material/semantic-slot bindings to program textures, complete sampled-access
+preflight, original native realization and local builder refusal/retry. Selected graph textures
+bypass Image upload/cache accounting and retain
+their original program/submission storage. The final affected owning/public-sidecar selection
+passes 324/324 in `96cd0d92-dfb1-4dcf-b8f6-112f088a35b2`; the independent source/stock/material
+cohort passes 21/21 in `9dc4cc7d-0e17-404f-b5ce-af704c1f6230` on Vulkan, and its four Material
+native trajectories pass DX12 in `069b1603-8d48-478c-8283-bd09ae3e5108`. A targeted original storage
+observation survives actual pending submission after all external source leases release, then
+expires on its real callback. CPU consumers use the original public sealed-batch take, also
+adopted by Editor Game View, without selecting native-window presentation. Same-Host device
+reconstruction, automatic source dependency updates, live Editor hydration, foreign execution
+and numerical budgets remain outside this qualification. Feature-matrix/workspace build,
+correctness/strict independent Clippy, format and document checks pass in the linked plan.
+The full R9b/Foundation Goal stays open.
 
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
