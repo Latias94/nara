@@ -414,6 +414,11 @@ window/device/frame work; it is not pure GPU initialization. The six runs share 
 driver/code caches and recovered physical event loop, so these observations are not independent
 cold-process startups.
 
+The separate `first_presentation` record retains the first actual receipt's exact Runtime,
+App/render frame, window, surface, backend and device identities, adapter and App-start-to-post-Host
+wall span. It does not consume the running warmup or 120 measured frames, and includes original
+driver waits rather than measuring GPU execution or scanout.
+
 The opt-in `cost-measurement` feature enables read-only Windows current-process counters through
 the already locked SDK dependency. It does not enter normal desktop or reconstructed-child
 features. Whole-process CPU/working-set/private observations are separate from frame wall

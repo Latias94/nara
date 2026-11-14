@@ -20,7 +20,7 @@ use super::{
     process_cost::{self, ProcessCost},
 };
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Serialize)]
 struct Frame {
     runtime: u64,
     app_frame: u64,
@@ -42,6 +42,7 @@ pub(super) struct Collector {
     wanted: usize,
     accepted: usize,
     last_presented: Option<(u64, u64, u64)>,
+    first_presentation: Option<Value>,
     pub(super) baseline: Option<GameSnapshot>,
     pub(super) collect_running: bool,
     frames: Vec<Frame>,
@@ -66,6 +67,7 @@ impl Collector {
             wanted,
             accepted: 0,
             last_presented: None,
+            first_presentation: None,
             baseline: None,
             collect_running: false,
             frames: Vec::with_capacity(wanted),
@@ -174,7 +176,8 @@ impl Collector {
         if let Some(baseline) = &self.baseline {
             validate_workload(snapshot, baseline)?;
         }
-        if !self.collect_running || self.frames.len() == self.wanted {
+        let measuring = self.collect_running && self.frames.len() < self.wanted;
+        if !measuring && self.first_presentation.is_some() {
             return Ok(());
         }
         let Some(receipt) = observation.presented_frame() else {
@@ -223,6 +226,31 @@ impl Collector {
         let adapter = json!({ "name": adapter.name(), "vendor": adapter.vendor(), "device": adapter.device(),
             "device_type": adapter.device_type(), "backend": adapter.backend(), "driver": adapter.driver(),
             "driver_info": adapter.driver_info(), "surface_extent": [extent.width, extent.height] });
+        let frame = Frame {
+            runtime: key.0,
+            app_frame: key.1,
+            render_frame: key.2,
+            window: receipt.window_id().get(),
+            surface_generation: receipt.surface_generation(),
+            backend_instance: receipt.backend_instance_id(),
+            device_epoch: receipt.device_epoch(),
+            simulation_tick: world.resource::<FixedTime>().tick(),
+            logical_tick: snapshot.logical_tick,
+            frame_wall_ns: ns(observation
+                .now()
+                .checked_duration_since(start.started_at())
+                .ok_or("frame timestamp regressed")?)?,
+        };
+        if self.first_presentation.is_none() {
+            self.first_presentation = Some(json!({
+                "frame": frame,
+                "adapter": adapter,
+                "scope": "first original actual presentation; exact App/render/window/device transaction, App frame start through post-Host observation including waits; not GPU execution or scanout; separate from running warmup and measured frames",
+            }));
+        }
+        if !measuring {
+            return Ok(());
+        }
         if self
             .adapter
             .as_ref()
@@ -251,24 +279,9 @@ impl Collector {
         if self.frames.len() + 1 == self.wanted {
             self.process_end = Some((Instant::now(), process_cost::capture()?));
         }
-        let tick = world.resource::<FixedTime>().tick();
         self.first_start.get_or_insert(start.started_at());
         self.last_end = Some(observation.now());
-        self.frames.push(Frame {
-            runtime: key.0,
-            app_frame: key.1,
-            render_frame: key.2,
-            window: receipt.window_id().get(),
-            surface_generation: receipt.surface_generation(),
-            backend_instance: receipt.backend_instance_id(),
-            device_epoch: receipt.device_epoch(),
-            simulation_tick: tick,
-            logical_tick: snapshot.logical_tick,
-            frame_wall_ns: ns(observation
-                .now()
-                .checked_duration_since(start.started_at())
-                .ok_or("frame timestamp regressed")?)?,
-        });
+        self.frames.push(frame);
         Ok(())
     }
 
@@ -284,6 +297,10 @@ impl Collector {
             .frames
             .last()
             .ok_or("no final measured successful presentation")?;
+        let first_presentation = self
+            .first_presentation
+            .as_ref()
+            .ok_or("no original first presentation")?;
         if self.frames.len() != self.wanted {
             return Err("finite continuous presentation workload did not complete".into());
         }
@@ -311,6 +328,7 @@ impl Collector {
         Ok(
             json!({ "recipe": if self.witness { "witness" } else { "plain" },
                 "adapter": self.adapter, "warmup_accepted_frames": self.warmup,
+                "first_presentation": first_presentation,
                 "sample_accepted_frames": self.frames.len(), "frames": self.frames,
                 "canonical_witnessed_frames": self.witnessed_frames,
                 "process_cost": {
