@@ -1437,6 +1437,7 @@ mod tests {
                     &material_layouts,
                     &mut texture_cache,
                     frame_index,
+                    None,
                 )
                 .unwrap();
                 {

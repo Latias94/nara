@@ -235,7 +235,12 @@ impl WgpuSpriteTextureCache {
                 .material_extension
                 .as_ref()
                 .into_iter()
-                .flat_map(|material| material.textures.iter().map(|(_, snapshot)| snapshot));
+                .flat_map(|material| {
+                    material
+                        .textures
+                        .iter()
+                        .filter_map(|(_, texture)| texture.image())
+                });
             for snapshot in primary.into_iter().chain(extension) {
                 let versions = images.entry(snapshot.identity().key()).or_default();
                 if !versions
@@ -319,7 +324,12 @@ impl WgpuSpriteTextureCache {
                 .material_extension
                 .as_ref()
                 .into_iter()
-                .flat_map(|material| material.textures.iter().map(|(_, snapshot)| snapshot));
+                .flat_map(|material| {
+                    material
+                        .textures
+                        .iter()
+                        .filter_map(|(_, texture)| texture.image())
+                });
             for snapshot in primary.into_iter().chain(material) {
                 if self.has_exact_image(snapshot) {
                     continue;

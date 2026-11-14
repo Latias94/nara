@@ -246,6 +246,54 @@ impl Fixture {
 }
 
 #[test]
+fn cpu_validation_reclaims_temporary_history_lineages_without_native_work_or_publication() {
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let mut retained_history_bytes = None;
+
+    for _ in 0..=crate::history::MAX_HISTORY_LINEAGES {
+        let fixture = Fixture::new();
+        let capture = Arc::downgrade(&fixture.capture);
+        let lineage = Arc::downgrade(&fixture.capture.lineage.0);
+        let input = fixture.input(1);
+        for _ in 0..2 {
+            host.validate_input(&producer, &input, wgpu::TextureFormat::Rgba8Unorm)
+                .expect("CPU validation must reclaim expired lineages and permit capture replay");
+        }
+
+        let owner = &host.views[&producer.id()];
+        assert_eq!(owner.histories.len(), 1);
+        assert!(owner.histories[0].leases.is_empty());
+        assert!(owner.admission.source_generation.is_none());
+        assert!(owner.admission.last_frame_index.is_none());
+        assert!(owner.target.is_none());
+        assert!(owner.submitted_prefix.is_none());
+        let bytes = host.history_budget.retained();
+        assert!(bytes > 0);
+        assert_eq!(bytes, *retained_history_bytes.get_or_insert(bytes));
+        let observations = fixture.capture.observations.lock().unwrap();
+        assert_eq!(observations.len(), 2 * fixture.capture.effects.len());
+        assert!(observations.iter().all(|(frame, reason)| {
+            frame.is_none() && *reason == Some(WgpuEmptyHistoryReason::Uninitialized)
+        }));
+        drop(observations);
+
+        assert_eq!(host.device_epoch(), 0);
+        assert!(host.host_frame_index.is_none());
+        assert_eq!(host.frame_transaction_stats(), Default::default());
+        assert_eq!(host.retained_resource_bytes(), 0);
+        assert_eq!(host.retained_candidate_metadata_bytes(), 0);
+        drop((input, fixture));
+        assert!(capture.upgrade().is_none());
+        assert!(lineage.upgrade().is_none());
+    }
+
+    assert!(host.retire_producer(&producer).is_none());
+    assert_eq!(host.history_budget.retained(), 0);
+    assert_eq!(host.cleanup_fault_count(), 0);
+}
+
+#[test]
 #[ignore = "requires an explicitly selected native GPU; unavailable hardware fails the prerequisite"]
 fn native_history_publication_is_coherent_and_failed_attempt_retries_the_same_candidate() {
     let fixture = Fixture::new();

@@ -5,15 +5,15 @@ use std::ops::Range;
 use std::{mem::size_of, sync::Arc};
 
 use crate::{
-    GraphError, LimitKind, WgpuRenderError, WgpuRenderProgramError,
+    GraphError, LimitKind, WgpuOperationResources, WgpuRenderError, WgpuRenderProgramError,
     budget::{InstanceBudget, InstanceReservation},
     output::OutputReservation,
     preparation::WgpuFeatureAllocation,
     quad::{
-        WgpuMaterial2dLayouts, WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipeline,
-        WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
-        create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
-        create_quad_texture_bind_group_layout, quad_batch_draw_stats,
+        WgpuMaterial2dLayouts, WgpuMaterialTextureView, WgpuQuadBatch, WgpuQuadBatchBuffer,
+        WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey,
+        admit_quad_instance_buffers, create_material_bind_group_layout, create_quad_batch_buffers,
+        create_quad_pipeline, create_quad_texture_bind_group_layout, quad_batch_draw_stats,
     },
     submission::WgpuSubmissionReservation,
     texture::{
@@ -120,6 +120,7 @@ impl StockPreparationCost {
         let mut count = 0_usize;
         let mut extensions = 0_usize;
         let mut material_textures = 0_usize;
+        let mut material_images = 0_usize;
         let mut material_bytes = 0_usize;
         for batch in batches.filter(|batch| !batch.instances.is_empty()) {
             count = count.checked_add(1).ok_or_else(overflow)?;
@@ -128,27 +129,43 @@ impl StockPreparationCost {
                 material_textures = material_textures
                     .checked_add(material.textures.len())
                     .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
+                material_images = material_images
+                    .checked_add(
+                        material
+                            .textures
+                            .iter()
+                            .filter_map(|(_, texture)| texture.image())
+                            .count(),
+                    )
+                    .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
                 material_bytes = material_bytes
                     .checked_add(material.binding.uniform_bytes().len())
                     .ok_or_else(overflow)?;
             }
         }
-        Self::for_resources(count, extensions, material_textures, material_bytes)
+        Self::for_resources(
+            count,
+            extensions,
+            material_textures,
+            material_images,
+            material_bytes,
+        )
     }
 
     #[cfg(test)]
     fn for_counts(batches: usize, extensions: usize) -> Result<Self, WgpuRenderProgramError> {
-        Self::for_resources(batches, extensions, extensions, 0)
+        Self::for_resources(batches, extensions, extensions, extensions, 0)
     }
 
     fn for_resources(
         batches: usize,
         extensions: usize,
         material_textures: usize,
+        material_images: usize,
         material_bytes: usize,
     ) -> Result<Self, WgpuRenderProgramError> {
         let textures = batches
-            .checked_add(material_textures)
+            .checked_add(material_images)
             .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
         let buffers = batches
             .checked_add(extensions)
@@ -206,7 +223,7 @@ impl StockPreparationCost {
             (buffers, buffer_records),
             (
                 material_textures.checked_mul(4).ok_or_else(overflow)?,
-                size_of::<WgpuCachedImageView>()
+                size_of::<WgpuMaterialTextureView>()
                     + size_of::<wgpu::BindGroupEntry<'_>>()
                     + size_of::<wgpu::BindGroupLayoutEntry>(),
             ),
@@ -389,7 +406,11 @@ impl StockQuadResources {
                 continue;
             };
             crate::quad::validate_material_capture(material).map_err(WgpuRenderError::from)?;
-            for (_, snapshot) in &material.textures {
+            for snapshot in material
+                .textures
+                .iter()
+                .filter_map(|(_, texture)| texture.image())
+            {
                 crate::texture::validate_image_device_limits(snapshot, limits)?;
             }
             let declaration = material.binding.generation().declaration();
@@ -453,6 +474,7 @@ impl StockQuadResources {
             view_format,
             &batches,
             frame_index,
+            None,
         )?;
         Ok(PreparedSubmitterDraw {
             pipelines: prepared.pipelines,
@@ -474,6 +496,7 @@ impl StockQuadResources {
         view_format: wgpu::TextureFormat,
         batches: &[WgpuQuadBatch],
         frame_index: u64,
+        resources: Option<&WgpuOperationResources<'_>>,
     ) -> Result<StockQuadPrepared, WgpuRenderError> {
         let result = self.prepare_batches_inner(
             preparation,
@@ -481,6 +504,7 @@ impl StockQuadResources {
             view_format,
             batches,
             frame_index,
+            resources,
         );
         self.trim_pipeline_cache();
         result
@@ -493,6 +517,7 @@ impl StockQuadResources {
         view_format: wgpu::TextureFormat,
         batches: &[WgpuQuadBatch],
         frame_index: u64,
+        resources: Option<&WgpuOperationResources<'_>>,
     ) -> Result<StockQuadPrepared, WgpuRenderError> {
         let stats = quad_batch_draw_stats(batches);
         if batches.is_empty() {
@@ -500,6 +525,13 @@ impl StockQuadResources {
         }
         check_device()?;
         self.preflight_material_device_limits(batches.iter(), &preparation.device().limits())?;
+        for material in batches
+            .iter()
+            .filter(|batch| !batch.instances.is_empty())
+            .filter_map(|batch| batch.material_extension.as_ref())
+        {
+            crate::quad::validate_material_texture_resources(material, resources)?;
+        }
         preparation.preflight_allocation_bytes(self.pending_allocation_bytes(batches.iter())?)?;
         let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
             WgpuRenderError::ContentRejected {
@@ -526,6 +558,7 @@ impl StockQuadResources {
             &self.material_layouts,
             &mut self.textures,
             frame_index,
+            resources,
         )
         .map_err(WgpuRenderError::from)?;
         Ok(StockQuadPrepared {
@@ -782,7 +815,7 @@ mod tests {
                 [0.0; 4],
                 handle,
             ),
-            textures: vec![(1, image)],
+            textures: vec![(1, image.into())],
         });
         let extended = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
         assert_eq!(extended.custody_entries, 10);
@@ -889,6 +922,7 @@ mod tests {
                         format,
                         batches,
                         frame_index,
+                        None,
                     )?;
                     {
                         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -944,7 +978,7 @@ mod tests {
         custom.instances[0].color = [1.0; 4];
         custom.material_extension = Some(WgpuMaterial2d {
             binding: material_binding(&good_generation, [1.0; 4], handle),
-            textures: vec![(1, green)],
+            textures: vec![(1, green.into())],
         });
         let before = resources.texture_stats();
         assert!(matches!(
@@ -1007,7 +1041,7 @@ mod tests {
         }
         repeated[1].material_extension.as_mut().unwrap().binding =
             material_binding(&good_generation, [1.0, 0.0, 1.0, 1.0], handle);
-        repeated[2].material_extension.as_mut().unwrap().textures = vec![(1, red)];
+        repeated[2].material_extension.as_mut().unwrap().textures = vec![(1, red.into())];
         let reuse_failure = AllocationFailureGuard::at("nara_material_2d_bind_group_layout");
         for frame_index in 4..=5 {
             let (pixels, _) = render(&mut resources, &repeated, frame_index).unwrap();

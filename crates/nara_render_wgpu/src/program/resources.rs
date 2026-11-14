@@ -177,8 +177,15 @@ impl<S: 'static> WgpuProgramBuffer<S> {
 }
 
 /// One declared read of a candidate-local resource. Construct through a typed port.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WgpuProgramRead(pub(super) ResourceRead);
+
+impl WgpuProgramRead {
+    #[cfg(feature = "stock-sprite")]
+    pub(crate) fn version(&self) -> &ResourceVersion {
+        &self.0.version
+    }
+}
 
 /// One declared writer and its explicit initialization. Construct through a typed port.
 #[derive(Clone, Debug)]

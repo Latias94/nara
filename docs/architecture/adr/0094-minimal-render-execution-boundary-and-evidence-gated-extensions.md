@@ -374,6 +374,36 @@ itself over a newer current declaration. Cross-Feature inputs still require comp
 versions and declared reads. This bounded stock-material selection neither establishes arbitrary
 Shader Graph/frontends nor qualifies the still-active persistent, native and interleaving tests.
 
+### Graph-Shared Stock Material Inputs
+
+A finite stock world operation may explicitly replace a captured material's declared texture
+slot with a typed program texture. Selection names the original immutable material binding and
+semantic texture ID, not a current material name or a forged Image handle. Matching retains
+original generation identity, exact uniform bytes and complete captured Image-handle map.
+Every matching draw occurrence consumes the same explicit source; duplicate, unknown or unused
+selections reject instead of silently falling back.
+
+Refusing a stock world operation restores its own appended unwritten reservations, modeled
+resource/capture bytes and observation facts. Earlier graph declarations stay intact, and the
+caller can correct its selection or operation key on the same builder. This is local builder
+error recovery, not rollback of native work or arbitrary policy callback effects.
+
+The stock operation declares the selected source's exact sampled graph read. Whole-program
+preflight verifies the complete resource descriptor, semantic type and access declaration before
+native work. Native bind-group preparation resolves the same original read through its operation
+scope. Initialization, producer order, feedback, missing writers, imports and Host/device epochs
+remain under the existing program compiler and Host. The original material Shader and geometry
+path execute; no second renderer or submission owner follows from a texture binding.
+
+Program inputs do not enter the stock Image cache or upload demand. Their original program and
+submission retain the actual allocation and view; immutable Shader/native pipeline reuse cannot
+retarget them. The source may have a different extent from the destination, but must fit the
+existing single-mip, single-sample, filterable float 2D scope. Transfer follows native format and
+the original stock sampler remains selected by the draw. Alpha interpretation is explicit data
+for the Shader author, with no implicit premultiplication conversion. Broader texture views,
+mip generation, framebuffer-fetch and persistent graph bindings retain separate consumer gates.
+Actual qualification belongs to the R9b successor plan and is not inferred from this selection.
+
 ## Candidate Extensions, Not Accepted Decisions
 
 The following remain non-normative hypotheses in the render pressure matrix, render Interface

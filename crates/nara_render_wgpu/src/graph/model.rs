@@ -39,6 +39,20 @@ impl PartialEq for ResourceVersion {
 
 impl Eq for ResourceVersion {}
 
+impl PartialOrd for ResourceVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ResourceVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        Arc::as_ptr(&self.owner)
+            .cmp(&Arc::as_ptr(&other.owner))
+            .then_with(|| self.index.cmp(&other.index))
+    }
+}
+
 impl fmt::Debug for ResourceVersion {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -536,6 +550,20 @@ pub(crate) struct GraphBuilder {
 }
 
 impl GraphBuilder {
+    pub(crate) fn resource_checkpoint(&self) -> (usize, u64) {
+        (self.resources.len(), self.modeled_resource_bytes)
+    }
+
+    pub(crate) fn rollback_unwritten_resources(&mut self, checkpoint: (usize, u64)) {
+        debug_assert!(
+            self.resources[checkpoint.0..]
+                .iter()
+                .all(|resource| matches!(resource.origin, Origin::Local { producer: None }))
+        );
+        self.resources.truncate(checkpoint.0);
+        self.modeled_resource_bytes = checkpoint.1;
+    }
+
     pub(crate) fn new(limits: GraphLimits) -> Result<Self, GraphError> {
         let modeled_metadata_bytes = limits.modeled_metadata_bytes()?;
         Ok(Self {

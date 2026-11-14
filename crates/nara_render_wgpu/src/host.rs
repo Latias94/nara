@@ -1518,6 +1518,37 @@ impl WgpuRenderHost {
         self.submit_image_in_namespace(view_id, &namespace, input, None)
     }
 
+    /// Builds and checks the captured policy's CPU graph, final target and Feature ownership.
+    ///
+    /// This runs the original policy callbacks and may reserve their CPU installation/history
+    /// tables. It does not acquire a device, reserve a candidate, publish bindings/history or
+    /// advance a producer watermark. Callback effects outside the Host are not rolled back.
+    /// Device capabilities, imported native resources and native Feature preflight remain the
+    /// responsibility of preparation/submission. Success is not a retained preparation: a later
+    /// [`Self::prepare`] or [`Self::submit`] builds and validates its own original candidate.
+    pub fn validate_input(
+        &mut self,
+        producer: &WgpuRenderProducer,
+        input: &crate::WgpuRenderInput,
+        format: wgpu::TextureFormat,
+    ) -> Result<(), WgpuRenderHostError> {
+        self.maintain_producers()?;
+        let id = self.producer_id(producer)?;
+        let built = self.build_policy(id, input, format)?;
+        let result = (|| {
+            Self::validate_policy_target(
+                &built.output,
+                input.packet(),
+                format,
+                matches!(input.packet().target(), RenderFrameTarget::Image(_)),
+            )?;
+            self.validate_program_instances(id, &built.output.program)?;
+            self.validate_policy_history(id, &built)
+        })();
+        self.release_publication_value(built);
+        result
+    }
+
     /// Pins one image candidate's original instances and complete temporal predecessor basis.
     /// No surface or native submission reservation escapes this preparation.
     pub fn prepare(

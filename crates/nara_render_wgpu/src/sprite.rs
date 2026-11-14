@@ -1,11 +1,14 @@
-use std::{marker::PhantomData, ops::Range, sync::Arc};
+use std::{
+    collections::hash_map::RandomState, hash::BuildHasher, marker::PhantomData, ops::Range,
+    sync::Arc,
+};
 
 use crate::{
     WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
     WgpuProgramTexture, WgpuRenderFeature, WgpuRenderProgramError,
     quad::{
-        WGPU_QUAD_SHAPE_PLAIN, WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance,
-        WgpuQuadMaterialKey, WgpuQuadTexture,
+        WGPU_QUAD_SHAPE_PLAIN, WgpuMaterial2d, WgpuMaterialTexture, WgpuQuadBatch,
+        WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
     },
     stock_quad::StockQuadPrepared,
 };
@@ -42,7 +45,141 @@ pub(crate) const fn ordered_view_metadata_bytes() -> usize {
         + 2 * std::mem::size_of::<usize>()
 }
 
+pub(crate) fn material_texture_metadata_bytes(
+    slots: usize,
+    materials: usize,
+    selections: usize,
+) -> Result<usize, WgpuRenderProgramError> {
+    let metadata = materials
+        .checked_mul(std::mem::size_of::<Vec<(u32, WgpuMaterialTexture)>>())
+        .and_then(|bytes| {
+            slots
+                .checked_mul(std::mem::size_of::<(u32, WgpuMaterialTexture)>())
+                .and_then(|slots| bytes.checked_add(slots))
+        })
+        .ok_or(crate::GraphError::LimitExceeded(
+            crate::LimitKind::MetadataBytes,
+        ))?;
+    if selections == 0 {
+        return Ok(metadata);
+    }
+    let scratch_per_selection = std::mem::size_of::<(u64, usize)>()
+        + std::mem::size_of::<crate::WgpuProgramRead>()
+        + std::mem::size_of::<bool>();
+    selections
+        .checked_mul(scratch_per_selection)
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Vec<(u64, usize)>>()))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Vec<crate::WgpuProgramRead>>()))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Vec<bool>>()))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<RandomState>()))
+        .and_then(|bytes| bytes.checked_add(metadata))
+        .ok_or_else(|| crate::GraphError::LimitExceeded(crate::LimitKind::MetadataBytes).into())
+}
+
 impl<S: 'static> SpriteCapture<S> {
+    pub(crate) fn bind_material_textures(
+        &mut self,
+        bindings: &[crate::WgpuMaterialTextureBinding],
+    ) -> Result<Vec<crate::WgpuProgramRead>, WgpuRenderProgramError> {
+        if bindings.is_empty() {
+            return Ok(Vec::new());
+        }
+        let slots = self
+            .batches
+            .iter()
+            .try_fold(0_usize, |total, batch| {
+                total.checked_add(
+                    batch
+                        .material_extension
+                        .as_ref()
+                        .map_or(0, |material| material.textures.len()),
+                )
+            })
+            .ok_or(crate::GraphError::LimitExceeded(
+                crate::LimitKind::MetadataBytes,
+            ))?;
+        if bindings.len() > slots {
+            return Err(WgpuRenderProgramError::feature(
+                "material texture selections exceed the captured texture slots",
+            ));
+        }
+        let hasher = RandomState::new();
+        let mut selections = Vec::new();
+        selections
+            .try_reserve_exact(bindings.len())
+            .map_err(|_| WgpuRenderProgramError::ResourceCapacity)?;
+        for (index, binding) in bindings.iter().enumerate() {
+            selections.push((hasher.hash_one(binding.selection()), index));
+        }
+        selections.sort_unstable();
+        for (index, &(hash, selected)) in selections.iter().enumerate() {
+            let first = selections[..index].partition_point(|(other, _)| *other < hash);
+            if selections[first..index].iter().any(|&(_, other)| {
+                bindings[other].binding() == bindings[selected].binding()
+                    && bindings[other].selection() == bindings[selected].selection()
+            }) {
+                return Err(WgpuRenderProgramError::feature(
+                    "duplicate material program texture selection",
+                ));
+            }
+        }
+        let mut matched = Vec::new();
+        matched
+            .try_reserve_exact(bindings.len())
+            .map_err(|_| WgpuRenderProgramError::ResourceCapacity)?;
+        matched.resize(bindings.len(), false);
+        let batches = Arc::get_mut(&mut self.batches).ok_or_else(|| {
+            WgpuRenderProgramError::feature(
+                "material sources must be bound before sharing the lowered capture",
+            )
+        })?;
+        for batch in batches {
+            if batch.instances.is_empty() {
+                continue;
+            }
+            let Some(material) = &mut batch.material_extension else {
+                continue;
+            };
+            let selection = crate::material_textures::MaterialSelection(&material.binding);
+            let hash = hasher.hash_one(selection);
+            let first = selections.partition_point(|(other, _)| *other < hash);
+            let last = selections.partition_point(|(other, _)| *other <= hash);
+            for &(_, index) in &selections[first..last] {
+                let replacement = &bindings[index];
+                if replacement.selection()
+                    != crate::material_textures::MaterialSelection(&material.binding)
+                {
+                    continue;
+                }
+                let Some((_, texture)) = material
+                    .textures
+                    .iter_mut()
+                    .find(|(slot, _)| *slot == replacement.binding())
+                else {
+                    return Err(WgpuRenderProgramError::feature(
+                        "the captured material texture slot is unavailable",
+                    ));
+                };
+                let source = replacement.source();
+                *texture = WgpuMaterialTexture::Program(source);
+                matched[index] = true;
+            }
+        }
+        if matched.iter().any(|matched| !matched) {
+            return Err(WgpuRenderProgramError::feature(
+                "material program texture selection has no matching captured draw",
+            ));
+        }
+        let mut reads = Vec::new();
+        reads
+            .try_reserve_exact(bindings.len())
+            .map_err(|_| WgpuRenderProgramError::ResourceCapacity)?;
+        reads.extend(bindings.iter().map(|binding| binding.source().read()));
+        reads.sort_unstable_by(|left, right| left.version().cmp(right.version()));
+        reads.dedup_by(|left, right| left.version() == right.version());
+        Ok(reads)
+    }
+
     #[cfg(test)]
     pub(crate) fn new(
         batches: &SpriteBatches,
@@ -243,7 +380,11 @@ fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
             .as_ref()
             .map(|material| WgpuMaterial2d {
                 binding: material.binding.clone(),
-                textures: material.textures.clone(),
+                textures: material
+                    .textures
+                    .iter()
+                    .map(|(binding, image)| (*binding, image.clone().into()))
+                    .collect(),
             }),
     }
 }

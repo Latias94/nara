@@ -67,6 +67,43 @@ interpretation; the selected render target/output policy owns conversion and com
 material does not infer display transfer from byte texture format or bypass
 [the SDR color contract](../architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md).
 
+## Sample A Graph Texture
+
+A stock renderer policy can replace one extra Material texture with a typed texture produced in
+the same program, or an exact retained output imported through `stock.graph().import_texture`.
+The policy retains the original `Material2dBinding` from its captured draw and uses the texture's
+declared semantic ID:
+
+```rust,ignore
+let selection = WgpuMaterialTextureBinding::new(&material, "palette", &palette)?;
+let world = stock.world_with_material_textures(10, &[selection])?;
+```
+
+Here `stock` is the existing `WgpuStockStages::begin` builder and `palette` is a typed port from
+that builder. Declare its writer through the original program API; operation keys break ready
+ties, while the automatically declared sampled read determines dependency order. Continue the
+policy's Canvas/UI/effect composition and finish through the same stock builder.
+
+Matching requires the original generation, exact uniform bytes and complete original Image
+handle map. Every nonempty captured batch with that exact binding receives the selection.
+Duplicate, unknown and unused mappings refuse the whole world operation. The operation restores
+its own resource reservations, metadata and draw facts on error, so a caller may correct the
+selection and retry in the same builder. Missing writers, foreign graph ports and feedback retain
+the graph compiler's ordinary refusals. Imported outputs keep the original Host/device-epoch
+validation and lifetime.
+
+The source may have a different extent. It must be a whole single-mip, single-sample baseline
+filterable float D2 texture with `TEXTURE_BINDING`; its transfer must match the native format.
+The original Sprite's sampler still determines nearest/linear sampling. The descriptor's alpha
+interpretation is explicit and receives no implicit conversion. For example, a Shader sampling a
+premultiplied palette must unpremultiply it before returning the Material's straight-alpha output.
+Only unreplaced asset Images enter the Image upload cache; the program retains selected graph
+textures through its original native submission.
+
+The independent [stock composition consumer](../../tests/fixtures/stock-composition-consumer/README.md)
+contains a generated palette, an independent grading branch, explicit sampling/color oracles and
+retained original output use. Its recorded qualification limits remain separate from this API.
+
 ## Edit And Observe
 
 `current(id)` returns the actually published generation. `prepare_update` builds an effect-free

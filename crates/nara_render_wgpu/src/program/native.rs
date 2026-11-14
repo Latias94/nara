@@ -27,6 +27,10 @@ pub struct WgpuFeaturePreflightContext<'a> {
     known_cost: &'a mut NativePreparationCost,
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_images: &'a mut crate::stock_quad::StockImagePreflight,
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    graph: &'a CompiledGraph,
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    operation: &'a GraphOperation,
 }
 
 impl WgpuFeaturePreflightContext<'_> {
@@ -67,6 +71,18 @@ impl WgpuFeaturePreflightContext<'_> {
         &mut self,
         batches: &Arc<[crate::quad::WgpuQuadBatch]>,
     ) -> Result<(), WgpuRenderProgramError> {
+        for material in batches
+            .iter()
+            .filter(|batch| !batch.instances.is_empty())
+            .filter_map(|batch| batch.material_extension.as_ref())
+        {
+            for (_, texture) in &material.textures {
+                if let crate::quad::WgpuMaterialTexture::Program(source) = texture {
+                    source.validate()?;
+                    validate_material_texture_read(self.graph, self.operation, &source.read())?;
+                }
+            }
+        }
         self.stock_images.collect(batches)
     }
 }
@@ -99,6 +115,22 @@ pub struct WgpuOperationResources<'a> {
 }
 
 impl<'a> WgpuOperationResources<'a> {
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    pub(crate) fn material_texture(
+        &self,
+        read: &super::WgpuProgramRead,
+    ) -> Result<&'a wgpu::TextureView, WgpuRenderProgramError> {
+        validate_material_texture_read(self.graph, self.operation, read)?;
+        let storage = self.storage(&read.0.version)?;
+        if storage.descriptor != read.0.expected {
+            return Err(GraphError::IncompatibleRead(read.0.version.index()).into());
+        }
+        match &storage.native {
+            NativeResource::Texture { view, .. } => Ok(view),
+            NativeResource::Buffer(_) => Err(WgpuRenderProgramError::ResourceKind),
+        }
+    }
+
     /// Borrows the exact whole-texture view, including its semantic port interpretation.
     pub fn texture<S: 'static>(
         &self,
@@ -175,6 +207,24 @@ impl<'a> WgpuOperationResources<'a> {
     }
 }
 
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+fn validate_material_texture_read(
+    graph: &CompiledGraph,
+    operation: &GraphOperation,
+    read: &super::WgpuProgramRead,
+) -> Result<(), WgpuRenderProgramError> {
+    let logical = graph.resource(&read.0.version)?;
+    if logical.desc != read.0.expected {
+        return Err(GraphError::IncompatibleRead(read.0.version.index()).into());
+    }
+    if read.0.role != crate::graph::AccessRole::Sampled
+        || !operation.reads.iter().any(|declared| declared == &read.0)
+    {
+        return Err(WgpuRenderProgramError::UndeclaredResource);
+    }
+    Ok(())
+}
+
 /// Native preparation under the original Host's pre-upload resource custody.
 ///
 /// Queue uploads become visible before the submitted command buffer executes. Use them for
@@ -216,6 +266,7 @@ impl<'a> WgpuFeaturePrepareContext<'a> {
             format,
             batches,
             self.frame_index,
+            Some(&self.resources),
         )?;
         if let Some(reservation) = prepared.instance_reservation.take() {
             // One exact stock operation can reserve once. This Vec was admitted before uploads.
@@ -404,13 +455,6 @@ pub(crate) fn prepare_and_encode(
     let mut known_cost = finalization_cost;
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     let mut stock_images = crate::stock_quad::StockImagePreflight::new(compiled.operations.len())?;
-    let mut preflight = WgpuFeaturePreflightContext {
-        limits: &enabled_limits,
-        features: namespace.device.features(),
-        known_cost: &mut known_cost,
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        stock_images: &mut stock_images,
-    };
     for operation in graph.operations() {
         let original = compiled
             .operations
@@ -418,7 +462,17 @@ pub(crate) fn prepare_and_encode(
             .find(|entry| entry.key == operation.key)
             .ok_or(WgpuRenderProgramError::FeatureState)?;
         if let Some(capture) = &original.capture {
-            capture.preflight(&mut preflight)?;
+            capture.preflight(&mut WgpuFeaturePreflightContext {
+                limits: &enabled_limits,
+                features: namespace.device.features(),
+                known_cost: &mut known_cost,
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+                stock_images: &mut stock_images,
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+                graph,
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+                operation,
+            })?;
         }
     }
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]

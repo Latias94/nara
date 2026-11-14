@@ -4,7 +4,9 @@ use crate::texture::{
 use crate::{
     allocation::checked_allocation,
     budget::MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
+    material_textures::WgpuMaterialTextureSource,
     preparation::{NativePreparation, WgpuFeatureAllocation},
+    program::WgpuOperationResources,
 };
 use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
@@ -101,7 +103,44 @@ pub(crate) struct WgpuQuadBatch {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WgpuMaterial2d {
     pub(crate) binding: Material2dBinding,
-    pub(crate) textures: Vec<(u32, PreparedImageSnapshot)>,
+    pub(crate) textures: Vec<(u32, WgpuMaterialTexture)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WgpuMaterialTexture {
+    Image(PreparedImageSnapshot),
+    #[cfg_attr(not(feature = "stock-sprite"), allow(dead_code))]
+    Program(WgpuMaterialTextureSource),
+}
+
+impl From<PreparedImageSnapshot> for WgpuMaterialTexture {
+    fn from(snapshot: PreparedImageSnapshot) -> Self {
+        Self::Image(snapshot)
+    }
+}
+
+impl WgpuMaterialTexture {
+    pub(crate) fn image(&self) -> Option<&PreparedImageSnapshot> {
+        match self {
+            Self::Image(snapshot) => Some(snapshot),
+            Self::Program(_) => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum WgpuMaterialTextureView {
+    Image(WgpuCachedImageView),
+    Program(wgpu::TextureView),
+}
+
+impl WgpuMaterialTextureView {
+    fn view(&self) -> &wgpu::TextureView {
+        match self {
+            Self::Image(image) => &image.view,
+            Self::Program(view) => view,
+        }
+    }
 }
 
 /// Retains the admitted source while comparing only actual pipeline inputs.
@@ -174,7 +213,7 @@ pub(crate) struct WgpuQuadBatchBuffer {
     _instance_allocation: WgpuFeatureAllocation,
     bind_group: WgpuCachedTextureBinding,
     material_bind_group: Option<wgpu::BindGroup>,
-    _material_images: Vec<WgpuCachedImageView>,
+    _material_textures: Vec<WgpuMaterialTextureView>,
     _material_buffer: Option<wgpu::Buffer>,
     _material_allocation: Option<WgpuFeatureAllocation>,
     material: Option<WgpuMaterial2dPipelineKey>,
@@ -446,6 +485,7 @@ pub(crate) fn create_quad_batch_buffers(
     material_layouts: &WgpuMaterial2dLayouts,
     texture_cache: &mut WgpuSpriteTextureCache,
     frame_index: u64,
+    resources: Option<&WgpuOperationResources<'_>>,
 ) -> Result<Vec<WgpuQuadBatchBuffer>, WgpuTextureError> {
     let missing_material_layout = || WgpuTextureError::ResourceRejected {
         label: "nara_material_2d_bind_group",
@@ -462,6 +502,7 @@ pub(crate) fn create_quad_batch_buffers(
             return Err(missing_material_layout());
         }
         validate_material_capture(material)?;
+        validate_material_texture_resources(material, resources)?;
     }
     batches
         .iter()
@@ -474,7 +515,7 @@ pub(crate) fn create_quad_batch_buffers(
                 &batch.texture,
                 frame_index,
             )?;
-            let (material_bind_group, material_images, material_buffer, material_allocation) =
+            let (material_bind_group, material_textures, material_buffer, material_allocation) =
                 if let Some(material) = &batch.material_extension {
                     let declaration = material.binding.generation().declaration();
                     let material_layout = material_layouts
@@ -483,8 +524,14 @@ pub(crate) fn create_quad_batch_buffers(
                     let views = material
                         .textures
                         .iter()
-                        .map(|(_, snapshot)| {
-                            texture_cache.prepared_image_view(preparation, snapshot, frame_index)
+                        .map(|(_, texture)| match texture {
+                            WgpuMaterialTexture::Image(snapshot) => texture_cache
+                                .prepared_image_view(preparation, snapshot, frame_index)
+                                .map(WgpuMaterialTextureView::Image),
+                            WgpuMaterialTexture::Program(source) => {
+                                material_program_view(resources, source)
+                                    .map(|view| WgpuMaterialTextureView::Program(view.clone()))
+                            }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     let (parameters, allocation) = preparation.create_buffer_with_data(
@@ -499,7 +546,7 @@ pub(crate) fn create_quad_batch_buffers(
                     entries.extend(material.textures.iter().zip(&views).map(
                         |((binding, _), view)| wgpu::BindGroupEntry {
                             binding: *binding,
-                            resource: wgpu::BindingResource::TextureView(&view.view),
+                            resource: wgpu::BindingResource::TextureView(view.view()),
                         },
                     ));
                     let device = preparation.device();
@@ -529,7 +576,7 @@ pub(crate) fn create_quad_batch_buffers(
                 _instance_allocation: instance_allocation,
                 bind_group,
                 material_bind_group,
-                _material_images: material_images,
+                _material_textures: material_textures,
                 _material_buffer: material_buffer,
                 _material_allocation: material_allocation,
                 material: batch
@@ -557,12 +604,18 @@ pub(crate) fn validate_material_capture(material: &WgpuMaterial2d) -> Result<(),
             .windows(2)
             .all(|pair| pair[0].0 < pair[1].0)
         && declaration.textures().iter().all(|texture| {
-            let Some(handle) = material.binding.textures().get(texture.id()) else {
-                return false;
-            };
-            material.textures.iter().any(|(binding, snapshot)| {
+            material.textures.iter().any(|(binding, source)| {
                 *binding == texture.binding()
-                    && snapshot.identity().key() == nara_image::image_resource_key(*handle)
+                    && match source {
+                        WgpuMaterialTexture::Image(snapshot) => material
+                            .binding
+                            .textures()
+                            .get(texture.id())
+                            .is_some_and(|handle| {
+                                snapshot.identity().key() == nara_image::image_resource_key(*handle)
+                            }),
+                        WgpuMaterialTexture::Program(_) => true,
+                    }
             })
         });
     if !valid {
@@ -573,6 +626,34 @@ pub(crate) fn validate_material_capture(material: &WgpuMaterial2d) -> Result<(),
         });
     }
     Ok(())
+}
+
+pub(crate) fn validate_material_texture_resources(
+    material: &WgpuMaterial2d,
+    resources: Option<&WgpuOperationResources<'_>>,
+) -> Result<(), WgpuTextureError> {
+    for (_, texture) in &material.textures {
+        if let WgpuMaterialTexture::Program(source) = texture {
+            material_program_view(resources, source)?;
+        }
+    }
+    Ok(())
+}
+
+fn material_program_view<'a>(
+    resources: Option<&WgpuOperationResources<'a>>,
+    source: &WgpuMaterialTextureSource,
+) -> Result<&'a wgpu::TextureView, WgpuTextureError> {
+    let resources = resources.ok_or_else(|| WgpuTextureError::ResourceRejected {
+        label: "nara_material_2d_program_texture",
+        message: "program material textures require the original operation resources".to_owned(),
+    })?;
+    resources
+        .material_texture(&source.read())
+        .map_err(|error| WgpuTextureError::ResourceRejected {
+            label: "nara_material_2d_program_texture",
+            message: error.to_string(),
+        })
 }
 
 /// Compares actual stock pipeline requirements with the enabled device's upper bounds.
@@ -821,7 +902,7 @@ mod tests {
                         [1.0; 4],
                         handle,
                     ),
-                    textures: vec![(1, image)],
+                    textures: vec![(1, image.into())],
                 }),
             };
             let layouts =
@@ -842,6 +923,7 @@ mod tests {
                 &layouts,
                 &mut cache,
                 1,
+                None,
             )?;
             assert_eq!(buffers.len(), 1);
             assert_eq!(buffers[0].buffer.size(), quad_instance_byte_len(2));

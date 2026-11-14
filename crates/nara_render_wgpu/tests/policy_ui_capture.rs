@@ -250,8 +250,8 @@ fn consume_ui(world: &mut World) {
             probe.returned.take(),
         )
     };
-    let batch = nara_render_wgpu::__private::take_captured_policy_batch(world).unwrap();
-    assert!(nara_render_wgpu::__private::take_captured_policy_batch(world).is_none());
+    let batch = nara_render_wgpu::take_captured_policy_batch(world).unwrap();
+    assert!(nara_render_wgpu::take_captured_policy_batch(world).is_none());
     let (captured, ui) = batch.into_parts();
     match case {
         Case::NoViews => assert!(matches!(captured, Ok(None))),

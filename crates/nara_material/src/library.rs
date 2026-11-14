@@ -148,6 +148,12 @@ impl PartialEq for Material2dGeneration {
 
 impl Eq for Material2dGeneration {}
 
+impl std::hash::Hash for Material2dGeneration {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&Arc::as_ptr(&self.inner), state);
+    }
+}
+
 impl Material2dGeneration {
     /// Retains this exact generation, its previous owner and an additional opaque lifetime owner.
     ///

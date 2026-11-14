@@ -532,7 +532,6 @@ impl WgpuFramePacketSlot {
 }
 
 /// Move-only transport of an already sealed policy input and its original UI permissions.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct WgpuCapturedPolicyBatch {
     pub(crate) captured: Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>,
@@ -572,7 +571,11 @@ impl WgpuCapturedPolicyBatch {
 }
 
 /// Takes the original sealed batch once without selecting or capturing a policy again.
-#[doc(hidden)]
+///
+/// Call in the selected consumer's [`crate::WgpuPolicyCaptureSet::Publish`] system after sealing,
+/// or from its existing admitted Host scope. A second take returns `None`. This consumes CPU
+/// transport only; no native execution or presentation fact is issued. The consumer must handle
+/// the batch's original UI permissions when present instead of reconstructing them from packets.
 pub fn take_captured_policy_batch(world: &mut World) -> Option<WgpuCapturedPolicyBatch> {
     world
         .get_resource_mut::<WgpuFramePacketSlot>()?

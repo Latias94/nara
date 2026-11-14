@@ -50,6 +50,14 @@ Queue or presentation authority. Return `WgpuPolicyProgram` with its published f
 explicit observation counters. The Host checks the final texture's actual extent, format,
 transfer and alpha contract before execution.
 
+Use `host.validate_input(&producer, &input, format)` for CPU graph/target/Feature-ownership
+diagnostics before native acquisition. It runs the same policy callbacks and may reserve their
+CPU installation/history tables. It does not reserve a candidate, publish bindings/history or
+advance the producer watermark; callback effects outside the Host remain the caller's
+responsibility. It does not qualify Adapter capabilities, imported native resources or native
+Feature preflight. Later preparation rebuilds and revalidates its own candidate, so a passing
+check is not an execution permit or a retained preparation.
+
 For normal ECS capture, install `WgpuCapturePlugin`, select one exact installation with
 `install_wgpu_policy`, and run the domain collector in `WgpuPolicyCaptureSet::Capture`. The
 collector reads ordinary ECS parameters and calls `WgpuPolicyFrameWriter::capture` with an
@@ -71,6 +79,15 @@ to reinterpret them. Submitted work retains the original capture and CPU instanc
 completion. Producer close still refuses execution. A retained CPU input can build new instances
 on a replacement Host; it contains no old native state. Host caches are finite and reclaim entries
 after the installation, accepted inputs and submitted uses release their leases.
+
+A CPU/image consumer takes its original sealed batch with `take_captured_policy_batch` in its
+selected `WgpuPolicyCaptureSet::Publish` system after sealing, or from its existing admitted
+Host scope. `into_render_input` accepts a batch without UI presentation permissions; a UI-aware
+consumer instead uses `into_parts` and retains its original sidecar. A second take returns
+`None`. This consumes CPU transport, issues no native success facts and does not require
+`WgpuWindowPresentationPlugin`. Repeatedly observing the reader's input does not consume the
+sealed batch or prove a new frame. The first-party Editor Game View uses this same finite batch
+entry; desktop presentation retains its separate original move-only Runtime exchange.
 
 UI paint packets remain replayable data while backend presentation permissions stay move-only in
 their concrete sidecar. An external policy's collector can check `can_capture_with_ui`, take one

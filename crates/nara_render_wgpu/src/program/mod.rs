@@ -215,6 +215,31 @@ pub struct WgpuRenderProgramBuilder {
 }
 
 impl WgpuRenderProgramBuilder {
+    pub(crate) fn stock_world_checkpoint(&self) -> ((usize, u64), usize) {
+        (
+            self.graph.resource_checkpoint(),
+            self.modeled_metadata_bytes,
+        )
+    }
+
+    pub(crate) fn rollback_stock_world(&mut self, checkpoint: ((usize, u64), usize)) {
+        self.graph.rollback_unwritten_resources(checkpoint.0);
+        self.modeled_metadata_bytes = checkpoint.1;
+    }
+
+    #[cfg(feature = "stock-sprite")]
+    pub(crate) fn reserve_capture_metadata(
+        &mut self,
+        bytes: usize,
+    ) -> Result<(), WgpuRenderProgramError> {
+        self.modeled_metadata_bytes = self
+            .modeled_metadata_bytes
+            .checked_add(bytes)
+            .filter(|bytes| *bytes <= self.max_modeled_metadata_bytes)
+            .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
+        Ok(())
+    }
+
     pub fn new(
         source: RenderFrameSourceGeneration,
         frame_index: u64,

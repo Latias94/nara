@@ -12,6 +12,8 @@ mod frame;
 mod graph;
 mod history;
 mod host;
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+mod material_textures;
 mod observation;
 mod output;
 mod plugin;
@@ -66,7 +68,10 @@ pub use crate::candidate::WgpuUiCandidateSubmitFailure;
 pub use crate::candidate::{WgpuCandidateSubmitFailure, WgpuPublishedFrame, WgpuRenderCandidate};
 pub use crate::error::WgpuRenderError;
 pub use crate::frame::WgpuPolicyFrameReader;
-pub use crate::frame::{WgpuFrameCaptureError, WgpuFrameSet as WgpuPolicyCaptureSet};
+pub use crate::frame::{
+    WgpuCapturedPolicyBatch, WgpuFrameCaptureError, WgpuFrameSet as WgpuPolicyCaptureSet,
+    take_captured_policy_batch,
+};
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
 };
@@ -79,6 +84,8 @@ pub use crate::host::{
     WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId, WgpuWindowDeviceScope,
     WgpuWindowFrame, WgpuWindowFrameOutcome,
 };
+#[cfg(feature = "stock-sprite")]
+pub use crate::material_textures::WgpuMaterialTextureBinding;
 pub use crate::observation::WgpuRenderObservation;
 pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput};
 pub use crate::plugin::{
@@ -151,9 +158,6 @@ pub use crate::ui::{
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::frame::{
-        WgpuCapturedPolicyBatch, WgpuFrameCaptureError, take_captured_policy_batch,
-    };
     #[cfg(feature = "editor-imgui")]
     pub use crate::host::{
         WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,

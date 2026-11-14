@@ -79,7 +79,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                 [1.0; 4],
                 handle,
             ),
-            textures: vec![(1, snapshot)],
+            textures: vec![(1, snapshot.into())],
         }),
     };
     let labels = [

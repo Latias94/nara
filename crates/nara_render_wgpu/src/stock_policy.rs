@@ -339,6 +339,48 @@ impl WgpuStockProgramBuilder<'_> {
         &mut self,
         operation: u64,
     ) -> Result<WgpuProgramTexture<WgpuWorldColor>, WgpuRenderProgramError> {
+        self.world_inner(operation, &[])
+    }
+
+    /// Draws the original world capture with explicit program-local material texture sources.
+    ///
+    /// Every selection must match a nonempty captured draw. The original graph owns the exact
+    /// sampled dependencies, resource initialization, allocation and original submission custody.
+    /// Asset-backed inputs that are not selected retain their existing exact Image snapshots.
+    /// The source's transfer and alpha remain explicit; this method does not add conversion.
+    #[cfg(feature = "stock-sprite")]
+    pub fn world_with_material_textures(
+        &mut self,
+        operation: u64,
+        bindings: &[crate::WgpuMaterialTextureBinding],
+    ) -> Result<WgpuProgramTexture<WgpuWorldColor>, WgpuRenderProgramError> {
+        self.world_inner(operation, bindings)
+    }
+
+    fn world_inner(
+        &mut self,
+        operation: u64,
+        #[cfg(feature = "stock-sprite")] bindings: &[crate::WgpuMaterialTextureBinding],
+        #[cfg(not(feature = "stock-sprite"))] bindings: &[()],
+    ) -> Result<WgpuProgramTexture<WgpuWorldColor>, WgpuRenderProgramError> {
+        let checkpoint = self.graph.stock_world_checkpoint();
+        let facts = self.facts;
+        match self.lower_world(operation, bindings) {
+            Ok(port) => Ok(port),
+            Err(error) => {
+                self.graph.rollback_stock_world(checkpoint);
+                self.facts = facts;
+                Err(error)
+            }
+        }
+    }
+
+    fn lower_world(
+        &mut self,
+        operation: u64,
+        #[cfg(feature = "stock-sprite")] bindings: &[crate::WgpuMaterialTextureBinding],
+        #[cfg(not(feature = "stock-sprite"))] bindings: &[()],
+    ) -> Result<WgpuProgramTexture<WgpuWorldColor>, WgpuRenderProgramError> {
         let packet = self.context.packet();
         let mut world_descriptor = self.target_descriptor();
         if let Some(canvas) = packet.world_canvas() {
@@ -355,17 +397,39 @@ impl WgpuStockProgramBuilder<'_> {
         };
         #[cfg(feature = "stock-sprite")]
         if let Some(batches) = self.capture.sprite_batches.as_ref() {
-            let sprite_capture = crate::sprite::SpriteCapture::for_views(
+            let (source_slots, material_count) = batches
+                .as_slice()
+                .iter()
+                .try_fold((0_usize, 0_usize), |(slots, materials), batch| {
+                    let Some(material) = &batch.material_extension else {
+                        return Some((slots, materials));
+                    };
+                    Some((
+                        slots.checked_add(material.textures.len())?,
+                        materials.checked_add(1)?,
+                    ))
+                })
+                .ok_or(crate::GraphError::LimitExceeded(
+                    crate::LimitKind::MetadataBytes,
+                ))?;
+            let metadata = crate::sprite::material_texture_metadata_bytes(
+                source_slots,
+                material_count,
+                bindings.len(),
+            )?;
+            self.graph.reserve_capture_metadata(metadata)?;
+            let mut sprite_capture = crate::sprite::SpriteCapture::for_views(
                 Some(batches),
                 packet.views(),
                 scene.clone(),
             )?;
+            let reads = sprite_capture.bind_material_textures(bindings)?;
             add_draw_facts(&mut self.facts, &sprite_capture.batches)?;
             self.graph.operation(
                 operation,
                 &self.bindings.world,
                 Arc::new(sprite_capture),
-                &[],
+                &reads,
                 &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
             )?;
         }
@@ -374,6 +438,11 @@ impl WgpuStockProgramBuilder<'_> {
         #[cfg(not(feature = "stock-sprite"))]
         let initialize_only = true;
         if initialize_only {
+            if !bindings.is_empty() {
+                return Err(WgpuRenderProgramError::feature(
+                    "material program texture selections require a captured Sprite draw",
+                ));
+            }
             // With no world drawing, the last whole-attachment clear is the complete result.
             let clear = packet
                 .views()

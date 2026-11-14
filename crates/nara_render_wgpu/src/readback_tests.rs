@@ -154,7 +154,13 @@ pub(crate) fn material_batch(
             border_width: 0.0,
         }],
         counts_as_sprites: true,
-        material_extension: Some(crate::quad::WgpuMaterial2d { binding, textures }),
+        material_extension: Some(crate::quad::WgpuMaterial2d {
+            binding,
+            textures: textures
+                .into_iter()
+                .map(|(binding, snapshot)| (binding, snapshot.into()))
+                .collect(),
+        }),
     }
 }
 
@@ -291,6 +297,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
                 &layouts,
                 &mut cache,
                 1,
+                None,
             );
             if width == 8_192 {
                 assert_eq!(result.unwrap().len(), 1);
@@ -342,6 +349,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
             &layouts,
             &mut cache,
             1,
+            None,
         )
         .unwrap();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -412,7 +420,7 @@ fn image_extent_admission_batch(
                 [1.0; 4],
                 handle,
             ),
-            textures: vec![(1, snapshot)],
+            textures: vec![(1, snapshot.into())],
         }),
     }
 }
@@ -492,6 +500,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 &material_layouts,
                 &mut cache,
                 1,
+                None,
             )
             .unwrap();
             let first = cache.stats();
@@ -503,6 +512,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 &material_layouts,
                 &mut cache,
                 2,
+                None,
             )
             .unwrap();
             let repeated = cache.stats();
@@ -748,6 +758,7 @@ pub(crate) fn render_batches_to_rgba(
             &layouts,
             &mut texture_cache,
             1,
+            None,
         )
         .unwrap();
 

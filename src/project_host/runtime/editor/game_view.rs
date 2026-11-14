@@ -25,7 +25,7 @@ use nara_render::{RenderFramePacket, RenderFrameTarget};
 #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
 use nara_render_wgpu::WgpuUiSubmission;
 #[cfg(feature = "render-wgpu")]
-use nara_render_wgpu::{__private::take_captured_policy_batch, WgpuRenderInput};
+use nara_render_wgpu::{WgpuRenderInput, take_captured_policy_batch};
 use nara_scene::SceneAuthoringRevision;
 #[cfg(feature = "presentation-ui")]
 use nara_ui_render::__private::{UiCompletedBackendOutcome, commit_ui_backend_outcomes};

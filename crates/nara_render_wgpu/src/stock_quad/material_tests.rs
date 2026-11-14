@@ -135,6 +135,7 @@ fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases(
                         wgpu::TextureFormat::Rgba8Unorm,
                         &batches,
                         revision as u64,
+                        None,
                     )
                     .unwrap_err();
                 assert!(matches!(error, WgpuRenderError::ContentRejected { .. }));
@@ -203,6 +204,7 @@ fn native_rejected_shader_history_uses_the_same_bounded_cache_and_never_uploads(
                     wgpu::TextureFormat::Rgba8Unorm,
                     std::slice::from_ref(&batch),
                     revision as u64,
+                    None,
                 )
                 .unwrap_err();
             assert!(matches!(error, WgpuRenderError::ContentRejected { .. }));
@@ -245,6 +247,7 @@ fn native_rejected_shader_history_uses_the_same_bounded_cache_and_never_uploads(
                 wgpu::TextureFormat::Rgba8Unorm,
                 std::slice::from_ref(&first),
                 100,
+                None,
             )
             .unwrap_err();
         assert!(matches!(error, WgpuRenderError::ContentRejected { .. }));
@@ -563,8 +566,14 @@ fn shared_snapshot_preflight_deduplicates_textures_but_keeps_every_capture_occur
         .uniform_bytes()
         .len() as u64;
     let shared: Arc<[WgpuQuadBatch]> = Arc::from([batch.clone(), batch]);
-    let first = &shared[0].material_extension.as_ref().unwrap().textures[0].1;
-    let last = &shared[1].material_extension.as_ref().unwrap().textures[1].1;
+    let first = shared[0].material_extension.as_ref().unwrap().textures[0]
+        .1
+        .image()
+        .unwrap();
+    let last = shared[1].material_extension.as_ref().unwrap().textures[1]
+        .1
+        .image()
+        .unwrap();
     assert_eq!(first.identity(), last.identity());
     assert!(std::ptr::eq(
         first.resource().pixels(),
@@ -584,7 +593,7 @@ fn shared_snapshot_preflight_deduplicates_textures_but_keeps_every_capture_occur
         .as_mut()
         .unwrap()
         .textures[1]
-        .1 = green;
+        .1 = green.into();
     assert_eq!(
         StockPreparationCost::for_batches(shared.iter().chain(different_version.iter()),).unwrap(),
         cost
@@ -629,7 +638,7 @@ fn native_enabled_material_limits_reject_before_layout_and_upload() {
         let (result, prefix) = gpu.with_preparation::<()>(|preparation| {
             let error = resources.prepare_batches(
                 preparation, || Ok(()), wgpu::TextureFormat::Rgba8Unorm,
-                std::slice::from_ref(&batch), 1,
+                std::slice::from_ref(&batch), 1, None,
             ).unwrap_err();
             assert!(matches!(&error, WgpuRenderError::ContentRejected { message } if message.contains(name)), "{error}");
             assert_eq!(preparation.work_stats(), crate::WgpuNativeWorkStats::default());
@@ -665,6 +674,7 @@ fn native_variable_material_budget_refuses_before_partial_upload_and_original_pr
                 wgpu::TextureFormat::Rgba8Unorm,
                 std::slice::from_ref(&batch),
                 1,
+                None,
             )
             .unwrap_err();
         assert!(matches!(error, WgpuRenderError::UploadDeferred { .. }));
@@ -686,6 +696,7 @@ fn native_variable_material_budget_refuses_before_partial_upload_and_original_pr
             wgpu::TextureFormat::Rgba8Unorm,
             std::slice::from_ref(&batch),
             2,
+            None,
         )?;
         assert_eq!(draw.buffers.len(), 1);
         assert_eq!(preparation.work_stats().issued_texture_write_calls, 3);
@@ -710,4 +721,256 @@ fn native_variable_material_budget_refuses_before_partial_upload_and_original_pr
     );
     gpu.wait_for_prefix(&prefix);
     assert_eq!(gpu.budget.retained(), 0);
+}
+
+#[cfg(feature = "stock-sprite")]
+fn material_program_descriptor() -> crate::WgpuProgramTextureDescriptor {
+    crate::WgpuProgramTextureDescriptor {
+        native: wgpu::TextureDescriptor {
+            label: Some("test-material-program-texture"),
+            size: wgpu::Extent3d {
+                width: 3,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        },
+        transfer: crate::TextureTransfer::Linear,
+        alpha: crate::TextureAlpha::Opaque,
+    }
+}
+
+#[cfg(feature = "stock-sprite")]
+fn material_program_source(
+    material: &nara_material::Material2dBinding,
+    texture_id: &str,
+) -> crate::material_textures::WgpuMaterialTextureSource {
+    let mut builder = crate::WgpuRenderProgramBuilder::new(
+        nara_render::RenderFrameSourceGeneration::try_acquire().unwrap(),
+        1,
+        crate::GraphLimits::default(),
+    )
+    .unwrap();
+    let texture = builder
+        .texture::<()>(material_program_descriptor())
+        .unwrap();
+    crate::WgpuMaterialTextureBinding::new(material, texture_id, &texture)
+        .unwrap()
+        .source()
+}
+
+#[cfg(feature = "stock-sprite")]
+#[test]
+fn program_material_textures_replace_only_image_demand_and_preserve_capture_validation() {
+    let (left, [red, _]) = image_versions_with_handle(64, 1);
+    let (right, [_, green]) = image_versions_with_handle(32, 1);
+    let mut library = mixed_material_library("test.program-material-cost");
+    let generation = publish_material(
+        &mut library,
+        "test.program-material-cost",
+        MIXED_MATERIAL_FRAGMENT,
+    );
+    let binding = mixed_material_binding(
+        &generation,
+        &MixedMaterialParameters::default(),
+        left,
+        right,
+    );
+    let source = material_program_source(&binding, "left");
+    let mut batch = material_batch(binding.clone(), vec![(2, red), (7, green)]);
+    let resources = StockQuadResources::default();
+    let images = crate::texture::WgpuSpriteTextureCache::with_image_residency_limits(0, 0);
+    let limits = wgpu::Limits {
+        max_texture_dimension_2d: 8,
+        ..Default::default()
+    };
+    let original_bytes = resources
+        .pending_allocation_bytes(std::iter::once(&batch))
+        .unwrap();
+    let original_cost = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
+    assert!(
+        resources
+            .preflight_material_device_limits(std::iter::once(&batch), &limits)
+            .is_err()
+    );
+    assert!(
+        images
+            .preflight_image_residency(std::iter::once(&batch))
+            .is_err()
+    );
+    batch.material_extension.as_mut().unwrap().textures[0].1 =
+        crate::quad::WgpuMaterialTexture::Program(source.clone());
+    assert_eq!(
+        StockPreparationCost::for_batches(std::iter::once(&batch))
+            .unwrap()
+            .custody_entries,
+        original_cost.custody_entries - 3,
+    );
+    assert_eq!(
+        resources
+            .pending_allocation_bytes(std::iter::once(&batch))
+            .unwrap(),
+        original_bytes - 64 * 4,
+    );
+    assert!(
+        resources
+            .preflight_material_device_limits(std::iter::once(&batch), &limits)
+            .is_err()
+    );
+    batch.material_extension.as_mut().unwrap().textures[1].1 =
+        crate::quad::WgpuMaterialTexture::Program(source);
+    resources
+        .preflight_material_device_limits(std::iter::once(&batch), &limits)
+        .unwrap();
+    images
+        .preflight_image_residency(std::iter::once(&batch))
+        .unwrap();
+    let cost = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
+    assert_eq!(cost.custody_entries, 7);
+    assert!(cost.modeled_metadata_bytes < original_cost.modeled_metadata_bytes);
+    assert_eq!(
+        resources
+            .pending_allocation_bytes(std::iter::once(&batch))
+            .unwrap(),
+        original_bytes - (64 + 32) * 4,
+    );
+    let material = batch.material_extension.as_mut().unwrap();
+    assert_eq!(material.binding, binding);
+    assert!(
+        material
+            .textures
+            .iter()
+            .all(|(_, texture)| texture.image().is_none())
+    );
+    crate::quad::validate_material_capture(material).unwrap();
+    material.textures[0].0 = 3;
+    assert!(crate::quad::validate_material_capture(material).is_err());
+    material.textures[0].0 = 2;
+    let [foreign_image, _] = crate::readback_tests::two_image_versions();
+    material.textures[1].1 = foreign_image.into();
+    assert!(crate::quad::validate_material_capture(material).is_err());
+}
+
+#[cfg(feature = "stock-sprite")]
+#[test]
+fn program_material_without_original_operation_resources_rejects_before_native_work() {
+    let gpu = ReadbackGpu::new();
+    let mut batch = mixed_batch();
+    let material = batch.material_extension.as_mut().unwrap();
+    material.textures[0].1 = crate::quad::WgpuMaterialTexture::Program(material_program_source(
+        &material.binding,
+        "left",
+    ));
+    let mut resources = StockQuadResources::default();
+    let failure = AllocationFailureGuard::at("nara_wgpu_quad_texture_bind_group_layout");
+    let (result, prefix) = gpu.with_preparation::<()>(|preparation| {
+        let error = resources
+            .prepare_batches(
+                preparation,
+                || Ok(()),
+                wgpu::TextureFormat::Rgba8Unorm,
+                std::slice::from_ref(&batch),
+                1,
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&error, WgpuRenderError::ContentRejected { message }
+            if message.contains("original operation resources"))
+        );
+        assert_eq!(
+            preparation.work_stats(),
+            crate::WgpuNativeWorkStats::default()
+        );
+        Err(error)
+    });
+    assert!(result.is_err());
+    assert!(!failure.was_consumed());
+    assert_eq!(resources.pipeline_stats(), (0, 0, 0));
+    assert_eq!(
+        resources.texture_stats(),
+        crate::WgpuRenderTextureCacheStats::default()
+    );
+    assert_eq!(resources.instance_charges(), (0, 0));
+    assert_eq!(gpu.budget.retained(), 0);
+    gpu.wait_for_prefix(&prefix);
+}
+
+#[cfg(feature = "stock-sprite")]
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn program_material_requires_the_exact_sampled_read_before_any_program_allocation() {
+    use crate::sprite::{SpriteCapture, SpriteFeature};
+    use crate::{AccessRole, WgpuFeatureDefinition, WgpuRenderHost, WgpuRenderProgramBuilder};
+
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let definition = WgpuFeatureDefinition::new(SpriteFeature::<()>::new());
+    let feature = host
+        .create_feature_instance(&producer, &definition)
+        .unwrap();
+    let source = nara_render::RenderFrameSourceGeneration::try_acquire().unwrap();
+    for (index, role) in [None, Some(AccessRole::CopySource)].into_iter().enumerate() {
+        let frame = index as u64 + 1;
+        let mut builder =
+            WgpuRenderProgramBuilder::new(source, frame, crate::GraphLimits::default()).unwrap();
+        let palette = builder
+            .texture::<()>(material_program_descriptor())
+            .unwrap();
+        let target = builder
+            .texture::<()>(material_program_descriptor())
+            .unwrap();
+        builder
+            .initialize(
+                1,
+                &[palette.clear(wgpu::Color::GREEN, AccessRole::Attachment)],
+            )
+            .unwrap();
+        let mut batch = mixed_batch();
+        let material = batch.material_extension.as_mut().unwrap();
+        material.textures[0].1 = crate::quad::WgpuMaterialTexture::Program(
+            crate::WgpuMaterialTextureBinding::new(&material.binding, "left", &palette)
+                .unwrap()
+                .source(),
+        );
+        let reads = role
+            .map(|role| palette.read(role))
+            .into_iter()
+            .collect::<Vec<_>>();
+        builder
+            .operation(
+                2,
+                &feature,
+                Arc::new(SpriteCapture::from_lowered(
+                    target.clone(),
+                    nara_render::ViewportRect::new(0, 0, 3, 2).unwrap(),
+                    Arc::from([batch]),
+                )),
+                &reads,
+                &[target.clear(wgpu::Color::BLACK, AccessRole::Attachment)],
+            )
+            .unwrap();
+        let program = builder.finish(&[target.output()]).unwrap();
+        host.begin_frame(frame).unwrap();
+        let failure = AllocationFailureGuard::at("nara_program_texture");
+        assert!(matches!(
+            host.submit_program(&producer, &program),
+            Err(crate::WgpuRenderHostError::Program(
+                WgpuRenderProgramError::UndeclaredResource
+            )),
+        ));
+        assert!(!failure.was_consumed());
+        assert_eq!(
+            host.frame_transaction_stats().native_work(),
+            crate::WgpuNativeWorkStats::default()
+        );
+        assert_eq!(host.retained_resource_bytes(), 0);
+    }
 }

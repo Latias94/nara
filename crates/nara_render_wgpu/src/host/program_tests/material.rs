@@ -206,6 +206,126 @@ fn native_shader_cache_bounds_edit_history_without_capping_one_working_set_or_re
 
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_imported_material_source_storage_survives_until_original_submission_settlement() {
+    let mut host = WgpuRenderHost::offscreen();
+    let source_producer = host.create_producer().unwrap();
+    let frame_source = source();
+    let (source_program, source_target) = clear(frame_source, 1, wgpu::Color::GREEN);
+    host.begin_frame(1).unwrap();
+    let source_outputs = host
+        .submit_program(&source_producer, &source_program)
+        .unwrap();
+    let source_output = source_outputs.texture(&source_target).unwrap();
+    let weak_source = Arc::downgrade(&source_output.storage);
+    drain(source_outputs.submitted_prefix());
+    drain(&host.retire_producer(&source_producer).unwrap());
+
+    let importer = host.create_producer().unwrap();
+    let definition = WgpuFeatureDefinition::new(SpriteFeature::<Color>::new());
+    let feature = host
+        .create_feature_instance(&importer, &definition)
+        .unwrap();
+    let mut builder =
+        WgpuRenderProgramBuilder::new(frame_source, 2, GraphLimits::default()).unwrap();
+    let palette = builder.import_texture(&source_output).unwrap();
+    let target = builder.texture::<Color>(descriptor()).unwrap();
+    let (texture, [red, _]) = image_versions_with_handle(1, 1);
+    let mut library = material_library("test.host-material-import-custody", AlphaMode2d::Opaque);
+    let generation = publish_material(
+        &mut library,
+        "test.host-material-import-custody",
+        TEXTURE_MATERIAL_FRAGMENT,
+    );
+    let mut batch = material_batch(
+        material_binding(&generation, [1.0; 4], texture),
+        vec![(1, red)],
+    );
+    let material = batch.material_extension.as_mut().unwrap();
+    material.textures[0].1 = crate::quad::WgpuMaterialTexture::Program(
+        crate::WgpuMaterialTextureBinding::new(&material.binding, "texture", &palette)
+            .unwrap()
+            .source(),
+    );
+    let viewport =
+        nara_render::ViewportRect::from_extent(nara_render::Extent2d::new(4, 4).unwrap()).unwrap();
+    let capture = Arc::new(SpriteCapture::from_lowered(
+        target.clone(),
+        viewport,
+        vec![batch].into(),
+    ));
+    builder
+        .operation(
+            1,
+            &feature,
+            Arc::clone(&capture),
+            &[palette.read(AccessRole::Sampled)],
+            &[target.clear(wgpu::Color::BLACK, AccessRole::Attachment)],
+        )
+        .unwrap();
+    let program = builder.finish(&[target.output()]).unwrap();
+    host.begin_frame(2).unwrap();
+    let outputs = host.submit_program(&importer, &program).unwrap();
+    let destination = outputs.texture(&target).unwrap();
+    let prefix = outputs.submitted_prefix().clone();
+    let retirement = host.retire_producer(&importer).unwrap();
+    assert!(retirement.submission_index().is_some());
+    assert!(prefix.submission_index().is_some());
+    drop(retirement);
+    let complete_before_drop = prefix.is_complete();
+    drop((
+        source_outputs,
+        source_output,
+        source_program,
+        source_target,
+        source_producer,
+        outputs,
+        program,
+        capture,
+        palette,
+        target,
+        feature,
+        definition,
+        importer,
+        library,
+        generation,
+    ));
+    let source_alive_after_drop = weak_source.upgrade().is_some();
+    let pending_after_drop = !prefix.is_complete();
+    eprintln!(
+        "material import custody: complete_before_drop={complete_before_drop}, \
+         pending_after_drop={pending_after_drop}, source_alive_after_drop={source_alive_after_drop}"
+    );
+    if pending_after_drop {
+        assert!(
+            source_alive_after_drop,
+            "the original pending submission must retain the exact imported source storage"
+        );
+    }
+    drain(&prefix);
+    assert!(
+        weak_source.upgrade().is_none(),
+        "the exact imported source storage must release after its original callback"
+    );
+    assert_eq!(
+        pixels(&mut host, &destination),
+        vec![[0, 255, 0, 255]; 4 * 4]
+    );
+    drop((destination, prefix));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !host.poll_retirement().unwrap() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the original material Host did not retire"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(host.retained_resource_bytes(), 0);
+    assert_eq!(host.retained_candidate_metadata_bytes(), 0);
+    assert_eq!(host.cleanup_fault_count(), 0);
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_material_generations_keep_two_layouts_last_good_and_late_original_capture_in_one_host() {
     let mut host = WgpuRenderHost::offscreen();
     let current = host.create_producer().unwrap();
@@ -408,7 +528,7 @@ fn native_material_generations_keep_two_layouts_last_good_and_late_original_capt
         (2, 2, 2)
     );
     let mut textures = current_batch;
-    textures.material_extension.as_mut().unwrap().textures = vec![(1, green)];
+    textures.material_extension.as_mut().unwrap().textures = vec![(1, green.into())];
     let (textures_program, textures_target) = captured_program(
         &current_feature,
         source,

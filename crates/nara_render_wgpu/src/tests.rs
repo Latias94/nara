@@ -129,7 +129,7 @@ fn observe_uninstalled_sprite_contribution(world: &mut nara_ecs::World) {
     let source_instances = world
         .resource::<nara_sprite_render::__private::SpriteBatches>()
         .total_instances();
-    let batch = __private::take_captured_policy_batch(world).unwrap();
+    let batch = take_captured_policy_batch(world).unwrap();
     #[cfg(feature = "stock-ui")]
     let (captured, ui) = batch.into_parts();
     #[cfg(not(feature = "stock-ui"))]
@@ -249,7 +249,7 @@ fn retire_held_stock_ui_capture(world: &mut nara_ecs::World) {
         }
         Arc::clone(&held.capture)
     };
-    let batch = __private::take_captured_policy_batch(world).unwrap();
+    let batch = take_captured_policy_batch(world).unwrap();
     let (captured, ui) = batch.into_parts();
     let input = captured.unwrap().unwrap();
     assert!(std::ptr::eq(
