@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-11-01 (explicit physical event-loop handoff after native retirement)
+**Last Revised**: 2026-11-14 (reissuable Stop observation lifetime)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -409,6 +409,14 @@ operation result: Pending | Applied | Failed
 - Control requests apply only at declared safe points. Rejected requests make no partial change.
 - Stop is idempotent. A Stop requested during a system or fixed transaction waits for the current
   transaction boundary before close begins.
+- The original Stop operation result remains retained in that exact Runtime for its lifetime,
+  independently of bounded ordinary control history. Where reissuing Stop is admitted, it returns
+  the original ticket and operation status; it does not acquire the result of a later RetryClose
+  attempt. RetryClose has a separate ticket whose Pending/final result remains observable while active.
+  A successful retry preserves an earlier `Failed(CloseIncomplete)` Stop result and the original
+  close evidence. Completed ordinary controls may expire from the unchanged finite history;
+  `control_status` then returns `None`, as it does for another Runtime generation. These absent
+  observations grant no execution or cleanup authority.
 - Restart while a start attempt, `Stepping`, `Stopping`, or incomplete retirement owns authority is
   rejected. The Host may retain one pending restart intent and continue it after the current owner
   reaches an allowed terminal state.

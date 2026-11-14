@@ -2112,7 +2112,7 @@ pub struct RuntimeInstance {
     pending_control: Option<PendingRuntimeControl>,
     control_results: VecDeque<RuntimeControlRecord>,
     next_control_ticket: u64,
-    stop_ticket: Option<RuntimeControlTicket>,
+    stop_control: Option<RuntimeControlRecord>,
     active_close_ticket: Option<RuntimeControlTicket>,
     last_frame_kind: Option<RuntimeFrameKind>,
 }
@@ -2252,7 +2252,7 @@ impl RuntimeInstance {
             pending_control: None,
             control_results: VecDeque::new(),
             next_control_ticket: 1,
-            stop_ticket: None,
+            stop_control: None,
             active_close_ticket: None,
             last_frame_kind: None,
         }
@@ -2449,10 +2449,14 @@ impl RuntimeInstance {
         }
     }
 
+    /// Requests one safe-point control operation.
+    ///
+    /// An admitted repeated Stop returns the original operation ticket, independently of later
+    /// RetryClose attempts and bounded ordinary observation history.
     pub fn request_control(&mut self, control: RuntimeControl) -> RuntimeControlRequestResult {
         let state = self.state();
         if control == RuntimeControl::Stop
-            && let Some(ticket) = self.stop_ticket
+            && let Some(record) = self.stop_control
             && matches!(
                 state,
                 RuntimeState::Running
@@ -2461,7 +2465,7 @@ impl RuntimeInstance {
                     | RuntimeState::Stopping
             )
         {
-            return RuntimeControlRequestResult::Accepted(ticket);
+            return RuntimeControlRequestResult::Accepted(record.ticket);
         }
 
         if let Some(pending) = self.pending_control {
@@ -2506,17 +2510,31 @@ impl RuntimeInstance {
         };
         self.next_control_ticket = next;
         self.pending_control = Some(PendingRuntimeControl { ticket, control });
-        self.push_control_record(ticket, RuntimeControlStatus::Pending);
         if control == RuntimeControl::Stop {
-            self.stop_ticket = Some(ticket);
+            self.stop_control = Some(RuntimeControlRecord {
+                ticket,
+                status: RuntimeControlStatus::Pending,
+            });
+        } else {
+            self.push_control_record(ticket, RuntimeControlStatus::Pending);
         }
         RuntimeControlRequestResult::Accepted(ticket)
     }
 
+    /// Observes one exact control operation without granting execution or cleanup authority.
+    ///
+    /// The original Stop result remains for this Runtime's lifetime, including after later close
+    /// retries. Each RetryClose retains its own attempt status. Ordinary completed results have
+    /// bounded retention and may expire; `None` also rejects a foreign Runtime generation.
     #[must_use]
     pub fn control_status(&self, ticket: RuntimeControlTicket) -> Option<RuntimeControlStatus> {
         if ticket.generation != self.generation {
             return None;
+        }
+        if let Some(record) = self.stop_control
+            && record.ticket == ticket
+        {
+            return Some(record.status);
         }
         self.control_results
             .iter()
@@ -2834,6 +2852,12 @@ impl RuntimeInstance {
     }
 
     fn set_control_status(&mut self, ticket: RuntimeControlTicket, status: RuntimeControlStatus) {
+        if let Some(record) = self.stop_control.as_mut()
+            && record.ticket == ticket
+        {
+            record.status = status;
+            return;
+        }
         if let Some(record) = self
             .control_results
             .iter_mut()

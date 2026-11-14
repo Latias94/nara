@@ -9,9 +9,9 @@
 [ADR 0042](0042-runtime-service-and-backend-boundary.md),
 [ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md), and
 [ADR 0058](0058-stable-runtime-identity-and-entity-references.md)
-**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 jointly propose concrete Host-owned
-runtime/start-attempt authority; that owner split and its state names are not current authority while
-either ADR remains Proposed.
+**Runtime Ownership Refinement**: Accepted ADRs 0082 and 0084 own concrete Host/runtime/start-attempt
+authority for their bounded already-compiled, Host-trusted scope. Broader observation and code
+activation proposals retain their separately recorded status.
 
 ## Context
 
@@ -72,8 +72,8 @@ nara adopts a layered Play-runtime debugging contract. Complete fixed-tick contr
 observation, domain instruction cursors, historical recovery, and native code iteration are related
 user experiences but remain separate engine capabilities.
 
-The Host node in the following diagram is the proposed ADR 0082/0084 owner. The accepted debugging
-layers do not depend on that proposal being current authority.
+The Host node in the following diagram follows Accepted ADRs 0082/0084 for their bounded scope.
+The broader debugging layers do not enlarge that concrete Host authority.
 
 ```mermaid
 flowchart LR
@@ -139,12 +139,18 @@ The stable semantic operations are:
   declared app boundary exactly once, preserves the configured paused/time-scale state, and
   returns to paused.
 - **Stop** requests finite service shutdown and runtime disposal. A host reports clean completion
-  only after its bounded close contract succeeds. Under ADR 0084's proposed state vocabulary, a
+  only after its bounded close contract succeeds. Under ADR 0084's accepted state vocabulary, a
   timeout or participant failure that leaves a registered owner unfinished remains `Stopping` or
   `CloseIncomplete` rather than pretending that ownership reached `Stopped`. A once-only plugin
   shutdown hook that was attempted and failed is different: after every registered waitable owner
   completes, the runtime may reach `Stopped`, but the Stop result is `Failed(CloseFailed)` and the
   Host/runner still reports teardown failure.
+
+An accepted control ticket identifies one operation, not a latest-status lookup. ADR0084 retains
+the reissuable original Stop result for its Runtime's lifetime and keeps each RetryClose attempt
+distinct. Ordinary completed observations can expire from bounded history; a `None` status or a
+foreign-generation ticket cannot be interpreted as Pending, success or cleanup completion. Hosts
+observe their exact active ticket before continuing a lifecycle operation.
 
 Control commands take effect only at nara-owned main-thread safe points. The first product slice
 does not pause inside an executing Rust system and does not expose render-frame stepping as fixed

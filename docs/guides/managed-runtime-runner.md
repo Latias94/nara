@@ -61,6 +61,14 @@ Use `request_control` and `drive` for pause, resume, exact fixed-tick stepping, 
 close. A request is accepted separately from the later operation result; inspect its ticket with
 `control_status` after a drive. Stop is finite only when the runtime reaches `RuntimeState::Stopped`.
 
+Keep the ticket for the exact operation being observed. The original Stop result remains available
+for that Runtime's lifetime, independently of bounded ordinary control history. Reissuing Stop
+where admitted returns the same ticket. Each `RetryClose` has its own ticket: a later successful
+retry does not replace an earlier Stop's `Failed(CloseIncomplete)` result. Observe the retry and
+the original close evidence to distinguish that operation from eventual physical completion.
+Completed ordinary results may expire; `None` also rejects a ticket from another Runtime generation.
+An absent observation proves neither Pending nor success and grants no cleanup authority.
+
 Use `drive(delta)` when the Host supplies the next interval explicitly, including finite headless
 or controlled simulation. Native wall-clock runners use `drive_elapsed(delta)` for an interval
 that already elapsed under the previous state. If it entered paused and Resume applies, that
