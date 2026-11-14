@@ -7,8 +7,8 @@ use std::{
 
 use nara_engine::{
     app::{
-        App, CoreStage, FixedTime, RuntimeControl, RuntimeControlRequestResult, RuntimeDriverScope,
-        RuntimeInstance, RuntimeState,
+        App, CoreStage, FixedTime, FixedUpdateSet, RealTime, RuntimeControl,
+        RuntimeControlRequestResult, RuntimeDriverScope, RuntimeInstance, RuntimeState,
     },
     core::{ByteLimit, Vec2},
     ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs},
@@ -142,6 +142,7 @@ fn simulate(batch: Res<GameplayCommandBatch>, mut effects: ResMut<Effects>) {
 
 #[derive(Debug, Default, Resource)]
 struct ActionEvidence {
+    observed_frame: Option<u64>,
     platform_starts: u32,
     synthetic_starts: u32,
     platform_stops: u32,
@@ -150,7 +151,15 @@ struct ActionEvidence {
     mapping_cancellations: u32,
 }
 
-fn observe_actions(actions: Res<SemanticActions>, mut evidence: ResMut<ActionEvidence>) {
+fn observe_actions(
+    time: Res<RealTime>,
+    actions: Res<SemanticActions>,
+    mut evidence: ResMut<ActionEvidence>,
+) {
+    if evidence.observed_frame == Some(time.frame) {
+        return;
+    }
+    evidence.observed_frame = Some(time.frame);
     for edge in actions
         .as_slice()
         .iter()
@@ -174,6 +183,9 @@ fn observe_actions(actions: Res<SemanticActions>, mut evidence: ResMut<ActionEvi
                     }
                     (ActionPhase::Released, InputEventOrigin::Synthetic) => {
                         evidence.synthetic_stops += 1
+                    }
+                    (ActionPhase::Started | ActionPhase::Released, InputEventOrigin::Restored) => {
+                        panic!("this workflow never restores held input")
                     }
                     (ActionPhase::Changed, _) => {
                         panic!("digital bindings cannot emit changed values")
@@ -257,6 +269,11 @@ fn start(
     )
     .unwrap();
     app.add_systems(CoreStage::Update, observe_actions).unwrap();
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        observe_actions.in_set(FixedUpdateSet::Finalize),
+    )
+    .unwrap();
     app.add_systems(CoreStage::Last, apply_configuration)
         .unwrap();
     (RuntimeInstance::start(app).unwrap(), pending, original)
@@ -767,19 +784,24 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
             .resource::<ButtonInput<KeyCode>>()
             .pressed(KEY)
     );
-    assert!(
-        !movement_is_held(&runtime),
-        "exact stepping cannot resolve paused semantic input early"
-    );
+    assert!(movement_is_held(&runtime));
+    assert_eq!(runtime.state(), RuntimeState::Paused);
     assert_eq!(
         (
             effects(&runtime).starts,
             effects(&runtime).stops,
             effects(&runtime).distance
         ),
-        (before_step.starts, before_step.stops, before_step.distance)
+        (
+            before_step.starts + 1,
+            before_step.stops,
+            before_step.distance + 1
+        )
     );
+    assert_eq!(effects(&runtime).ticks, before_step.ticks + 1);
     control(&mut runtime, RuntimeControl::Resume);
+    assert_eq!(effects(&runtime).starts, before_step.starts + 1);
+    assert_eq!(effects(&runtime).distance, before_step.distance + 1);
     runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     input(&mut runtime, |scope| {
         apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KEY))
@@ -793,7 +815,7 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
             final_effects.stops,
             final_effects.distance
         ),
-        (3, 3, 6)
+        (3, 3, 7)
     );
     assert_eq!(
         (final_effects.menu_starts, final_effects.menu_stops),
