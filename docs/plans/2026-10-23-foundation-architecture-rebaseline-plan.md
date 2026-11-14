@@ -1178,6 +1178,28 @@ Complete persistent Schema/source/Runtime material delivery, graph-shared resour
 representative numerical budgets and full R9b/R12 remain open. The former static APIs are removed
 after consumer migration; this does not select a second renderer or publication owner.
 
+The qualified persistent successor at `2535b46`, with independent delivery consumers at
+`d091151`, wires `Material2dAsset`, the native authored carrier,
+typed source-product dependency closure, source/processed candidate validation and original
+Scene residency publication. Final owning CPU/combination qualification passes 241/241 in
+`75e72673-2dcf-45d7-8a22-e8bcdeb2c2f1`, including snapshot budget custody and managed extraction
+identity/slot checks. The final independent source/persistent/processed cohort passes 8/8 in
+`cdc577e3-638e-40bc-912a-5af6cce82272`, including actual prepared field editing, Undo/Redo,
+exact Save/Reopen/Check and source-free processed Runtime. The carrier uses complete typed
+parameter maps and the original first-party native authoring/default composition; no opaque
+value guard or duplicate-plugin rule is relaxed. Actual source Export passes 1/1 in
+`868062fd-b075-4f56-9f0a-ef5a48026fc0`; the separately compiled, relocated source-free cooked
+Player passes 1/1 in `aa341ef5-71a2-4d17-9b01-cfe0dd6346af`. Six current authoring bundles
+gain the real provider while every original owner record remains unchanged. The affected native
+material/cache cohort passes 15/15 in `f8cf8622-7eb0-41bc-b11d-105f7febbe8e`; its production
+Host cohort passes DX12 5/5 in `9badbda0-1909-45bd-9e01-0bb765ed2d5a`. The reference-game
+composition passes 4/4, both existing sample Check entries succeed, and final workspace build,
+correctness/independent strict Clippy, format and document checks pass. Their
+implementation and review corrections belong to the
+[same R9b plan](2026-11-14-durable-material-and-shader-plan.md#persistent-product-successor).
+Automatic Material/Shader hydration in the Editor Scene preview, graph-shared resources,
+numerical costs and complete R9b remain open.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

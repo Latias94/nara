@@ -2182,6 +2182,28 @@ failed fixtures, independent review corrections and remaining product scope. Com
 Schema/source/Runtime material delivery, graph-shared material resources, full R9b/R12 and the
 foundation Goal remain open. These scoped results do not admit the full Proposed0121.
 
+The persistent successor at `2535b46`, with independent consumers at `d091151`, has integrated
+product qualification: an imported material Product,
+one authored carrier, complete typed source
+dependency discovery, candidate-local validation and original Scene resource publication.
+Its final owning CPU/combination selection passes 241/241 in
+`75e72673-2dcf-45d7-8a22-e8bcdeb2c2f1`. Snapshot
+clones retain original source/Runtime charges; managed extraction checks actual Product and
+slot authority. The final independently locked cohort passes 8/8 in
+`cdc577e3-638e-40bc-912a-5af6cce82272`, executing prepared edits, Undo/Redo, exact
+Save/Reopen/Check, source material residency and source-free processed running. Complete typed
+parameter maps reuse the existing safe authoring shapes, and the first-party native carrier
+joins the original Editor/default composition without executing arbitrary recipe plugins.
+Actual source Export passes 1/1 in `868062fd-b075-4f56-9f0a-ef5a48026fc0` and the separately
+compiled cooked Player passes 1/1 in `aa341ef5-71a2-4d17-9b01-cfe0dd6346af` after relocation
+and source/cache deletion. Six current authoring bundles add the actual provider with all old
+owner records preserved. The affected native material/cache cohort passes 15/15 in
+`f8cf8622-7eb0-41bc-b11d-105f7febbe8e`, and the production Host DX12 cohort passes 5/5 in
+`9badbda0-1909-45bd-9e01-0bb765ed2d5a`. Reference composition passes 4/4, both sample Check
+entries succeed, and final workspace/correctness/strict consumer Clippy/format/document checks
+pass in the same linked plan. Automatic live Material/Shader preview, graph-shared inputs,
+numerical budgets and full R9b remain open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
