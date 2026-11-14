@@ -275,8 +275,19 @@ pub(crate) fn create_quad_pipeline(
     device: &wgpu::Device,
     key: WgpuQuadPipelineKey,
     texture_bind_group_layout: &wgpu::BindGroupLayout,
-    material_bind_group_layout: &wgpu::BindGroupLayout,
+    material_bind_group_layout: Option<&wgpu::BindGroupLayout>,
 ) -> Result<WgpuQuadPipeline, crate::WgpuRenderError> {
+    let material_bind_group_layout = key
+        .material
+        .map(|material| {
+            material_bind_group_layout.ok_or_else(|| crate::WgpuRenderError::ContentRejected {
+                message: format!(
+                    "2D material {:?} requires a material bind group layout",
+                    material.id
+                ),
+            })
+        })
+        .transpose()?;
     let fragment = key.material.map_or(
         "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return sampled * tint; }",
         |material| material.fragment_shader,
@@ -295,7 +306,7 @@ pub(crate) fn create_quad_pipeline(
     });
     finish_quad_pipeline_stage(allocation_scope, validation_scope, key)?;
     let mut layouts = vec![Some(texture_bind_group_layout)];
-    if key.material.is_some() {
+    if let Some(material_bind_group_layout) = material_bind_group_layout {
         layouts.push(Some(material_bind_group_layout));
     }
     let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
@@ -345,10 +356,21 @@ pub(crate) fn create_quad_batch_buffers(
     preparation: &mut NativePreparation<'_>,
     batches: &[WgpuQuadBatch],
     texture_layout: &wgpu::BindGroupLayout,
-    material_layout: &wgpu::BindGroupLayout,
+    material_layout: Option<&wgpu::BindGroupLayout>,
     texture_cache: &mut WgpuSpriteTextureCache,
     frame_index: u64,
 ) -> Result<Vec<WgpuQuadBatchBuffer>, WgpuTextureError> {
+    let missing_material_layout = || WgpuTextureError::ResourceRejected {
+        label: "nara_material_2d_bind_group",
+        message: "material bind group layout was not prepared".to_owned(),
+    };
+    if material_layout.is_none()
+        && batches
+            .iter()
+            .any(|batch| !batch.instances.is_empty() && batch.material_extension.is_some())
+    {
+        return Err(missing_material_layout());
+    }
     batches
         .iter()
         .filter(|batch| !batch.instances.is_empty())
@@ -362,6 +384,7 @@ pub(crate) fn create_quad_batch_buffers(
             )?;
             let (material_bind_group, material_image, material_buffer, material_allocation) =
                 if let Some(material) = &batch.material_extension {
+                    let material_layout = material_layout.ok_or_else(missing_material_layout)?;
                     let view = texture_cache.prepared_image_view(
                         preparation,
                         &material.texture,
@@ -624,7 +647,7 @@ mod tests {
                 &mut NativePreparation::new(device, queue, &budget, &mut reservation, &mut Default::default()),
                 &[batch],
                 &texture_layout,
-                &material_layout,
+                Some(&material_layout),
                 &mut cache,
                 1,
             )?;

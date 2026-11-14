@@ -323,12 +323,9 @@ pub(crate) fn configure_surface(
     }
     let surface = surface_state.surface(window_id)?;
     let capabilities = surface.get_capabilities(adapter);
-    let Some(mut config) = surface.get_default_config(adapter, size.width, size.height) else {
+    let Some(config) = surface_configuration(&capabilities, present_mode, size) else {
         return Err(WgpuRenderError::SurfaceUnsupported { window_id });
     };
-
-    config.present_mode = choose_present_mode(present_mode, &capabilities.present_modes);
-    config.view_formats = vec![config.format.add_srgb_suffix()];
     surface.configure(device, &config);
     surface_state.size = size;
     surface_state.config = Some(config);
@@ -337,9 +334,65 @@ pub(crate) fn configure_surface(
     Ok(())
 }
 
+fn surface_configuration(
+    capabilities: &wgpu::SurfaceCapabilities,
+    present_mode: PresentMode,
+    size: Extent2d,
+) -> Option<wgpu::SurfaceConfiguration> {
+    let format = *capabilities.formats.first()?;
+    capabilities.present_modes.first()?;
+    Some(wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        color_space: wgpu::SurfaceColorSpace::Auto,
+        width: size.width,
+        height: size.height,
+        desired_maximum_frame_latency: 2,
+        present_mode: choose_present_mode(present_mode, &capabilities.present_modes),
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        view_formats: vec![format.add_srgb_suffix()],
+    })
+}
+
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
+
+    #[test]
+    fn capability_snapshot_keeps_format_order_and_requested_mode_fallback() {
+        let capabilities = wgpu::SurfaceCapabilities {
+            formats: vec![
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            ],
+            present_modes: vec![wgpu::PresentMode::Fifo, wgpu::PresentMode::Immediate],
+            ..Default::default()
+        };
+        let size = Extent2d::new(320, 180).unwrap();
+        for (requested, selected) in [
+            (PresentMode::Immediate, wgpu::PresentMode::Immediate),
+            (PresentMode::Mailbox, wgpu::PresentMode::Fifo),
+        ] {
+            let config = surface_configuration(&capabilities, requested, size).unwrap();
+            assert_eq!(config.format, wgpu::TextureFormat::Rgba8Unorm);
+            assert_eq!(config.view_formats, [wgpu::TextureFormat::Rgba8UnormSrgb]);
+            assert_eq!(config.present_mode, selected);
+            assert_eq!(config.color_space, wgpu::SurfaceColorSpace::Auto);
+            assert_eq!(config.alpha_mode, wgpu::CompositeAlphaMode::Auto);
+        }
+    }
+
+    #[test]
+    fn incomplete_capability_snapshot_cannot_produce_a_surface_configuration() {
+        let size = Extent2d::new(320, 180).unwrap();
+        let mut capabilities = wgpu::SurfaceCapabilities::default();
+        capabilities.formats.push(wgpu::TextureFormat::Bgra8Unorm);
+        assert!(surface_configuration(&capabilities, PresentMode::Fifo, size).is_none());
+        capabilities.present_modes.push(wgpu::PresentMode::Fifo);
+        assert!(surface_configuration(&capabilities, PresentMode::Fifo, size).is_some());
+        capabilities.formats.clear();
+        assert!(surface_configuration(&capabilities, PresentMode::Fifo, size).is_none());
+    }
 
     #[test]
     fn surface_configuration_rejects_out_of_device_bounds_without_mutating_last_good() {

@@ -1422,8 +1422,12 @@ mod tests {
                 let pipelines = crate::required_quad_pipeline_keys(&batches, format)
                     .into_iter()
                     .map(|key| {
-                        let pipeline =
-                            create_quad_pipeline(device, key, &texture_layout, &material_layout)?;
+                        let pipeline = create_quad_pipeline(
+                            device,
+                            key,
+                            &texture_layout,
+                            Some(&material_layout),
+                        )?;
                         Ok(WgpuQuadPipelineDrawRef {
                             alpha_mode: key.alpha_mode,
                             material: key.material,
@@ -1435,7 +1439,7 @@ mod tests {
                     preparation,
                     &batches,
                     &texture_layout,
-                    &material_layout,
+                    Some(&material_layout),
                     &mut texture_cache,
                     frame_index,
                 )

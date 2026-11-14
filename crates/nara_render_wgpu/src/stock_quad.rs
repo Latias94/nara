@@ -354,7 +354,6 @@ impl StockQuadResources {
         let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
         let device = preparation.device();
         let texture_layout = self.ensure_texture_layout(device)?;
-        let material_layout = self.ensure_material_layout(device)?;
         for key in &pipeline_keys {
             self.ensure_pipeline(device, &check_device, *key)?;
         }
@@ -363,7 +362,7 @@ impl StockQuadResources {
             preparation,
             &batches,
             &texture_layout,
-            &material_layout,
+            self.material_layout.as_ref(),
             &mut self.textures,
             frame_index,
         )
@@ -420,12 +419,15 @@ impl StockQuadResources {
             };
         }
         let texture_layout = self.ensure_texture_layout(device)?;
-        let material_layout = self.ensure_material_layout(device)?;
+        let material_layout = key
+            .material
+            .map(|_| self.ensure_material_layout(device))
+            .transpose()?;
         #[cfg(test)]
         {
             self.pipeline_attempts += 1;
         }
-        let result = create_quad_pipeline(device, key, &texture_layout, &material_layout);
+        let result = create_quad_pipeline(device, key, &texture_layout, material_layout.as_ref());
         // Device loss is a namespace failure even if it also invalidated a shader handle.
         check_device()?;
         match result {
@@ -497,10 +499,10 @@ mod tests {
     use crate::device::WgpuDeviceOwner;
     use crate::quad::{
         WgpuMaterial2d, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey,
-        draw_quad_batch_buffers,
+        WgpuScissorRect, draw_quad_batch_buffers,
     };
     use crate::readback_tests::{
-        image_versions, readback_pixel, readback_viewport, render_to_rgba,
+        ReadbackGpu, image_versions, readback_pixel, readback_viewport, render_to_rgba,
     };
     use nara_material::{AlphaMode2d, Material2dDefinition, Material2dInput, SamplerDescriptor};
 
@@ -641,6 +643,8 @@ mod tests {
 
     #[test]
     fn permanent_pipeline_rejection_is_cached_per_device_and_valid_material_renders() {
+        use crate::allocation::AllocationFailureGuard;
+
         let bad_material = Material2dDefinition {
             id: "test.pipeline-rejection",
             fragment_shader: "this is not valid WGSL",
@@ -648,109 +652,171 @@ mod tests {
             alpha_mode: AlphaMode2d::Opaque,
         };
         let good_material = Material2dDefinition {
-            fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }",
+            fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * material_parameters * tint; }",
             ..bad_material
         };
-        let (pixels, (mut resources, mut owner, bad_key)) =
-            render_to_rgba(|device, queue, format, output_view, encoder, preparation| {
-                let mut owner = WgpuDeviceOwner::default();
-                owner.install_probe_device(device.clone(), queue.clone());
-                let mut resources = StockQuadResources::default();
-                let bad_key = WgpuQuadPipelineKey {
-                    format,
-                    alpha_mode: AlphaMode2d::Opaque,
-                    material: Some(bad_material),
-                };
-                for _ in 1..=4 {
-                    resources.reset_instance_budget();
-                    assert!(matches!(
-                        resources
-                            .ensure_pipeline(device, &|| owner.fail_if_device_lost(), bad_key,),
-                        Err(WgpuRenderError::ContentRejected { .. })
-                    ));
-                }
-                assert_eq!(resources.pipeline_attempts, 1);
-                assert_eq!(resources.pipelines.len(), 1);
-                let good_key = WgpuQuadPipelineKey {
-                    material: Some(good_material),
-                    ..bad_key
-                };
-                for _ in 5..=8 {
-                    resources.reset_instance_budget();
-                    resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), good_key)?;
-                }
-                assert_eq!(resources.pipeline_attempts, 2);
-                let [image, _] = image_versions(1, 1);
-                let prepared = resources.prepare(
-                    preparation,
-                    || owner.fail_if_device_lost(),
-                    format,
-                    WgpuLoweredFrameDraw {
-                        batches: vec![WgpuQuadBatch {
-                            material: WgpuQuadMaterialKey {
-                                texture: WgpuQuadTextureKey::Fallback,
-                                sampler: SamplerDescriptor::NEAREST_CLAMP,
-                                alpha_mode: AlphaMode2d::Opaque,
-                            },
-                            texture: WgpuQuadTexture::Fallback,
-                            scissor: None,
-                            instances: vec![WgpuQuadInstance {
-                                center: [0.0; 2],
-                                x_axis: [1.0, 0.0],
-                                y_axis: [0.0, 1.0],
-                                color: [1.0; 4],
-                                uv_min: [0.0; 2],
-                                uv_size: [1.0; 2],
-                                texture_mode: 0,
-                                shape_mode: 0,
-                                rect_size: [1.0; 2],
-                                corner_radius: 0.0,
-                                border_width: 0.0,
-                            }],
-                            counts_as_sprites: true,
-                            material_extension: Some(WgpuMaterial2d {
-                                definition: good_material,
-                                parameters: [0.0; 4],
-                                texture: image,
-                            }),
-                        }],
-                        #[cfg(feature = "stock-ui")]
-                        ui_packets: Vec::new(),
-                    },
-                    8,
-                )?;
-                assert_eq!(resources.pipeline_attempts, 2);
-                {
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("nara_pipeline_rejection_recovery"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: output_view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    draw_quad_batch_buffers(
-                        &mut pass,
-                        &prepared.pipelines,
-                        &prepared.buffers,
-                        readback_viewport(),
-                    );
-                }
-                Ok((resources, owner, bad_key))
-            })
-            .unwrap();
+        let gpu = ReadbackGpu::new();
+        let mut owner = WgpuDeviceOwner::default();
+        owner.install_probe_device(gpu.device.clone(), gpu.queue.clone());
+        let mut resources = StockQuadResources::default();
+        let render =
+            |resources: &mut StockQuadResources, batches: &[WgpuQuadBatch], frame_index| {
+                resources.begin_frame(frame_index);
+                resources.reset_instance_budget();
+                gpu.render_to_rgba(|_, _, format, output_view, encoder, preparation| {
+                    let prepared = resources.prepare_batches(
+                        preparation,
+                        || owner.fail_if_device_lost(),
+                        format,
+                        batches,
+                        frame_index,
+                    )?;
+                    {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("nara_pipeline_rejection_recovery"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: output_view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                            multiview_mask: None,
+                        });
+                        draw_quad_batch_buffers(
+                            &mut pass,
+                            &prepared.pipelines,
+                            &prepared.buffers,
+                            readback_viewport(),
+                        );
+                    }
+                    Ok(format)
+                })
+            };
+        let mut ordinary = cost_test_batch();
+        ordinary.instances[0] = WgpuQuadInstance {
+            center: [0.0; 2],
+            x_axis: [1.0, 0.0],
+            y_axis: [0.0, 1.0],
+            color: [0.0, 0.0, 1.0, 1.0],
+            uv_min: [0.0; 2],
+            uv_size: [1.0; 2],
+            texture_mode: 0,
+            shape_mode: 0,
+            rect_size: [1.0; 2],
+            corner_radius: 0.0,
+            border_width: 0.0,
+        };
+        let failure = AllocationFailureGuard::at("nara_material_2d_bind_group_layout");
+        let (pixels, format) = render(&mut resources, std::slice::from_ref(&ordinary), 1).unwrap();
+        assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 0, 255, 255]);
+        assert!(!failure.was_consumed());
+        assert!(resources.material_layout.is_none());
+        assert_eq!(resources.pipeline_attempts, 1);
+        assert_eq!(resources.pipelines.len(), 1);
+
+        let [red, green] = image_versions(1, 1);
+        let mut custom = ordinary.clone();
+        custom.instances[0].color = [1.0; 4];
+        custom.material_extension = Some(WgpuMaterial2d {
+            definition: good_material,
+            parameters: [1.0; 4],
+            texture: green,
+        });
+        let before = resources.texture_stats();
+        assert!(matches!(
+            render(&mut resources, std::slice::from_ref(&custom), 2),
+            Err(WgpuRenderError::UploadDeferred { message })
+                if message.contains("nara_material_2d_bind_group_layout")
+                    && message.contains("injected allocation failure")
+        ));
+        assert!(failure.was_consumed());
+        assert!(resources.material_layout.is_none());
+        assert_eq!(resources.pipeline_attempts, 1);
+        assert_eq!(resources.pipelines.len(), 1);
+        assert_eq!(resources.texture_stats(), before);
+        assert_eq!(resources.instance_charges(), (0, 0));
+        drop(failure);
+
+        let bad_key = WgpuQuadPipelineKey {
+            format,
+            alpha_mode: AlphaMode2d::Opaque,
+            material: Some(bad_material),
+        };
+        for _ in 1..=4 {
+            resources.reset_instance_budget();
+            assert!(matches!(
+                resources.ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), bad_key),
+                Err(WgpuRenderError::ContentRejected { .. })
+            ));
+        }
+        assert_eq!(resources.pipeline_attempts, 2);
+        assert_eq!(resources.pipelines.len(), 2);
+        let good_key = WgpuQuadPipelineKey {
+            material: Some(good_material),
+            ..bad_key
+        };
+        for _ in 5..=8 {
+            resources.reset_instance_budget();
+            resources
+                .ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), good_key)
+                .unwrap();
+        }
+        assert_eq!(resources.pipeline_attempts, 3);
+
+        let (pixels, _) = render(&mut resources, std::slice::from_ref(&custom), 3).unwrap();
         assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 255, 0, 255]);
+        assert!(resources.material_layout.is_some());
+        assert_eq!(resources.pipeline_attempts, 3);
+        assert_eq!(resources.pipelines.len(), 3);
+        let stats = resources.texture_stats();
+        assert_eq!(stats.uploaded_images + stats.reuploaded_images, 1);
+        assert_eq!(stats.image_textures, 1);
+
+        let mut repeated = [ordinary, custom.clone(), custom];
+        for (batch, (x, width)) in repeated.iter_mut().zip([(0, 21), (21, 21), (42, 22)]) {
+            batch.scissor = Some(WgpuScissorRect {
+                x,
+                y: 0,
+                width,
+                height: 64,
+            });
+        }
+        repeated[1].material_extension.as_mut().unwrap().parameters = [1.0, 0.0, 1.0, 1.0];
+        repeated[2].material_extension.as_mut().unwrap().texture = red;
+        let reuse_failure = AllocationFailureGuard::at("nara_material_2d_bind_group_layout");
+        for frame_index in 4..=5 {
+            let (pixels, _) = render(&mut resources, &repeated, frame_index).unwrap();
+            assert_eq!(readback_pixel(&pixels, 10, 32), &[0, 0, 255, 255]);
+            assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 0, 0, 255]);
+            assert_eq!(readback_pixel(&pixels, 53, 32), &[255, 0, 0, 255]);
+            assert!(!reuse_failure.was_consumed());
+            assert_eq!(resources.pipeline_attempts, 3);
+            assert_eq!(resources.pipelines.len(), 3);
+            let stats = resources.texture_stats();
+            assert_eq!(stats.image_textures, 2);
+            assert_eq!(stats.fallback_bindings, 1);
+            if frame_index == 5 {
+                assert_eq!(stats.uploaded_images + stats.reuploaded_images, 0);
+                assert_eq!(stats.reused_images, 2);
+            }
+        }
+
+        assert!(!reuse_failure.was_consumed());
+        drop(reuse_failure);
         resources.clear();
         owner.clear();
+        assert!(resources.texture_layout.is_none());
+        assert!(resources.material_layout.is_none());
         assert!(resources.pipelines.is_empty());
+        assert_eq!(resources.logical_texture_bytes(), 0);
+        assert_eq!(gpu.budget.retained(), 0);
+        drop(gpu);
         render_to_rgba(|device, queue, _, _, _, _| {
             owner.install_probe_device(device.clone(), queue.clone());
             for _ in 0..3 {
@@ -760,7 +826,7 @@ mod tests {
                 ));
             }
             assert_eq!(
-                resources.pipeline_attempts, 3,
+                resources.pipeline_attempts, 4,
                 "replacement device must revalidate once"
             );
             let mut replacement_owner = WgpuDeviceOwner::default();
