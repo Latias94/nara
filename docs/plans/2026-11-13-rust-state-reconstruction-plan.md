@@ -1448,3 +1448,47 @@ pass 28/28 in `a085eacd`; original default-disabled continuous desktop rebuild/a
 sample correctness Clippy, formatting and document/data checks pass. Independent source review
 closes its two P2 findings; all three unit agents close. Further attribution should distinguish
 original window/device/resource/first-frame operations before selecting any optimization.
+
+### Native First-Presentation Attribution And Demand Preparation
+
+Status: qualified within the finite Windows scope below, at `42b4eef`/`44725e0`.
+Locate the work inside the measured native polling span before
+choosing a device, resource or pipeline change. Inspect the original Winit and WGPU owners in
+parallel, and preserve their native, queue, source and cleanup contracts. Keep the existing
+complete ordinary runtime comparison as the actual measurement consumer. Retain its first
+original presentation's App/render/window/device identities and App-start-to-post-Host span,
+separately from the 30-frame warmup and 120-frame running cohort.
+
+Use a finite, explicitly temporary source-local timing experiment if existing observations
+cannot locate the cost. Record its exact patch and raw output outside the checkout, then remove
+only those owned instrumentation hunks. Do not introduce a permanent trace callback, registry,
+global device/cache owner or general profiling framework for this investigation. Distinguish
+actual elapsed measurements from source-proven call counts and from expected savings.
+
+Select a production change only when it removes unnecessary work or repairs the owning contract
+without weakening packet/format/material/target admission, original presentation or physical
+retirement. A candidate demand-driven preparation change must still support the first actual
+use of every affected stock path and reuse the existing device/format/resource owners. Qualify
+the changed public runtime, affected native renderer paths and real Rust rebuild/restore/
+continued-gameplay workflow. Keep UI/DPI work paused and full R12 open.
+
+The [first-presentation report](../benchmarks/2026-11-14-development-runtime-costs.md#first-presentation-and-original-gpu-calls)
+retains three distinct six-run datasets: original baseline, explicitly instrumented attribution
+and final production without probes. First actual App/render/window/device facts remain separate
+from the 30-frame running warmup and 120-frame sample cohort. Adapter request is the largest
+measured original call at 524–740 ms; Instance, Device and quad Pipeline spans are smaller and
+still include driver waits. The exact temporary probe/consumer delta is retained and all probe
+code removed. Correct handoff isolation, required Canvas/final presentation and the independent
+fresh adopter remain.
+
+Only two source-proven redundancies are changed: material layout is prepared for actual extension
+use, and Surface configuration consumes one capabilities snapshot while retaining pinned WGPU
+defaults and the original mode/color policy. Real default/custom failure/retry, texture/parameter
+pixels, cache reuse, cleanup and device replacement pass in renderer run `02ad471f`, 24/24.
+The final six-run consumer preserves every original witness, frame, neutral-state and cleanup
+oracle. Complete continuous/paused desktop body/structure rebuild/adoption passes 2/2 in
+`d593e489`, 227.734 seconds including actual nested Cargo. Minimal feature checking, renderer/
+sample all-target/all-feature correctness Clippy, formatting and document/data checks pass.
+Independent source reviews find no P1/P2; four scoped agents close. Sequential timings do not
+establish a dominant-latency improvement, cold-start or tail budget. Further work should locate
+the original Adapter request cost before changing policy, scheduling or device reuse.

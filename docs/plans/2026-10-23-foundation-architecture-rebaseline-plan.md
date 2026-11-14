@@ -4791,6 +4791,20 @@ desktop rebuild/adoption 1/1, minimal code-first checking, correctness Clippy, f
 document/data checks pass; source review closes all P1/P2. Further window/device/resource/
 first-frame attribution, representative budgets and full R12 remain open.
 
+The [first-presentation investigation](../benchmarks/2026-11-14-development-runtime-costs.md#first-presentation-and-original-gpu-calls)
+at `42b4eef`/`44725e0` retains the first actual App/render/window/device receipt independently of
+running warmup and samples. The source-local six-run attribution places Adapter request at 524–740 ms, Instance
+creation at 46–91 ms, Device request at 60–73 ms and stock quad Pipeline creation at 12–15 ms.
+These are returned calls with waits, not GPU execution. Temporary probes are removed and their
+exact owned source delta retained with the raw observations. Correct handoff isolation and the
+sample's actual Canvas/final-presentation passes remain. Owner-local corrections remove unused
+material layout preparation and a duplicate capabilities query without claiming to cure Adapter
+latency or selecting global device reuse. Affected native renderer paths pass 24/24, the final
+six-run production consumer passes and complete continuous/paused desktop adoption passes 2/2.
+Minimal feature checking, correctness Clippy, formatting and document/data checks pass; independent
+review finds no P1/P2. Complete Runtime, input, source, receipt and retirement contracts remain
+the qualification boundary. Further Adapter attribution and full R12 remain open.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

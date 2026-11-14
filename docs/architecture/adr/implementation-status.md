@@ -2685,6 +2685,19 @@ Root/public controls 28/28, original continuous desktop adoption 1/1, minimal fe
 correctness Clippy, formatting and document/data checks pass; source review closes all P1/P2.
 Further owning-operation attribution and full R12 remain open.
 
+The [first-presentation investigation](../../benchmarks/2026-11-14-development-runtime-costs.md#first-presentation-and-original-gpu-calls)
+at `42b4eef`/`44725e0` retains the actual first transaction separately from running warmup/samples.
+Six temporary source-local probe runs locate Adapter request as the largest measured call at 524–740 ms;
+the exact probe/consumer delta and all raw observations are retained after probes are removed.
+Stock pipelines were already keyed by actual use. Two bounded corrections defer material layout
+until a real extension and use one Surface capabilities snapshot, preserving original format/
+mode/color policy, caches and device/target ownership. Actual ordinary/custom allocation failure,
+retry, texture/parameter pixels, mixed reuse, clear and device replacement pass in the affected
+24/24 renderer cohort. Final ordinary six-run and complete continuous/paused desktop adoption
+2/2, minimal feature checking, correctness Clippy, formatting and document/data checks pass;
+independent review finds no P1/P2. No dominant-latency improvement, global cache or complete
+R12 is claimed.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

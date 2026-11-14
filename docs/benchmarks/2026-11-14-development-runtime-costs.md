@@ -608,3 +608,117 @@ Three scoped agents in this unit are closed, and all owned Cargo/native executio
 The selected Windows/Rust 1.95.0 evidence does not qualify foreign execution, independent cold
 starts, numerical CPU/GPU/tail budgets, cross-domain trace-viewer capture, complete R12 or the
 paused Editor/UI/mixed-DPI work.
+
+## First Presentation And Original GPU Calls
+
+Qualified consumer: `42b4eefb6050a304530d3fb0b3b2f312cf81e351`.
+Qualified renderer: `44725e0a4affe527788e1a89abd50baeaed3b27b`.
+Final native observations use these production sources; no production code changes after them.
+
+The ordinary runtime consumer additionally retains its first actual presentation as a separate
+record. The same original App/render/device transaction checks validate this receipt before it
+is saved once; the 30-frame running warmup and 120 measured running frames remain independent.
+Its frame-start-to-post-Host wall span includes App, Host, driver work and waits. It is neither
+GPU execution nor a timestamp of scanout. The first six-run
+[baseline](data/2026-11-14-development-runtime/first-presentation-baseline.json) completes all
+original canonical, frame, telemetry and cleanup checks. All first receipts name App/render
+frame 1, the original window and device epoch 1; original Runtime and backend identities differ
+between runs as expected. First-frame spans are 650.534–1430.304 ms while corresponding native
+poll totals are 657.198–1440.734 ms. These separate spans are not an exact additive partition.
+
+Source inspection confirms that a recovered Winit loop must drain old events before a new
+Session receives them. That first handoff poll can return without constructing the next window.
+Window construction has its original one-window guard, and reveal uses the same target.
+No evidence justifies deleting handoff isolation. A Windows pump can also reach multiple
+`about_to_wait` service boundaries, so one poll is not necessarily one managed frame.
+
+The WGPU stock resource constructor does not eagerly create all Pipelines: actual captured keys
+select cache misses. The sample needs its stock quad draw, 320 by 180 Canvas resolve and final
+960 by 540 Surface presentation. The latter two have different responsibilities. Skipping an
+actual required pass would not preserve the measured workload.
+
+An explicitly temporary source-local experiment measures four original calls in each of the
+same six serial runs: Instance creation, Adapter request, Device request and full stock quad
+Pipeline creation, including its shader/layout/error-scope work. There is one event of each
+kind per run. Output is associated through the original serial run boundaries, not a new
+Runtime, device or trace owner. The [instrumented raw record](data/2026-11-14-development-runtime/first-presentation-probes.json)
+retains all ordinary frame/cleanup checks and the 24 operation observations. The
+[exact source delta](data/2026-11-14-development-runtime/first-presentation-probe-source.json)
+retains its base, complete owned probe/consumer patch and patch SHA256. Unrelated paused WIP is
+preserved; this is not an isolated complete-checkout source snapshot.
+
+| Run | Recipe | Instance | Adapter request | Device request | Quad Pipeline | First actual App-frame span |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | Plain | 46.028 ms | 523.847 ms | 60.413 ms | 11.742 ms | 664.806 ms |
+| 2 | Witness | 68.183 ms | 588.197 ms | 73.275 ms | 13.969 ms | 774.540 ms |
+| 3 | Witness | 87.298 ms | 740.125 ms | 61.465 ms | 11.575 ms | 928.093 ms |
+| 4 | Plain | 67.493 ms | 669.933 ms | 71.168 ms | 13.849 ms | 854.609 ms |
+| 5 | Plain | 64.056 ms | 648.711 ms | 67.174 ms | 11.536 ms | 822.874 ms |
+| 6 | Witness | 90.505 ms | 658.959 ms | 68.522 ms | 14.807 ms | 862.533 ms |
+
+Adapter request is the largest measured original call. The operation spans include driver and
+thread waits; they do not identify a hardware-execution, DXGI, virtual-adapter or compiler
+subcomponent. Printing is outside each operation's bracket but inside the whole-frame span,
+so the instrumented run is not an uninstrumented CPU benchmark. Surface creation/configuration,
+Canvas/final presentation, uploads and other work are not individually attributed by these four
+probes. All probes are removed after this experiment, with no permanent environment flag,
+instrumentation clock or logging added to the production renderer.
+
+Two source-proven redundancies have bounded owner-local corrections: material layout preparation
+is required only for actual material-extension use; Surface configuration uses one capabilities
+snapshot instead of querying it again inside WGPU's `get_default_config`. The latter preserves
+the pinned WGPU defaults, current requested-mode fallback and sRGB view-format behavior. Neither
+operation's individual cost is measured here, and these corrections do not establish a cure
+for the dominant Adapter request. Original shader validation, allocation/error scopes, device/
+epoch caches, target admission and physical retirement remain required. No new global device,
+cross-process cache, renderer or ownership policy is selected from these measurements.
+
+The source findings are grounded in the existing
+[Winit Session/pump](../../crates/nara_winit/src/lib.rs),
+[Device owner](../../crates/nara_render_wgpu/src/device.rs),
+[stock resources](../../crates/nara_render_wgpu/src/stock_quad.rs),
+[quad realization](../../crates/nara_render_wgpu/src/quad.rs) and
+[Surface configuration](../../crates/nara_render_wgpu/src/surface.rs). WGPU's default-config
+comparison uses the locally locked `cddb2f5d80dc0009b2ef6767635140cacf90a007` implementation,
+not an assumption about current upstream defaults. Other source findings retain the experiment's
+base revision in its exact source-delta artifact.
+
+### First-Presentation Qualification
+
+| Scope | Actual result |
+| --- | --- |
+| Affected stock/quad/material/Surface/UI paths | 24/24, run `02ad471f-9223-45ea-bf12-1e2e8083c1d2`, 15.156 seconds; 443 cases outside the filter. Includes actual device-backed image/material/UI readbacks and the two new finite Surface-capability controls. |
+| Final uninstrumented ordinary consumer | Six complete release/DX12 runs with the original first receipt, 30 running warmup and 120 accepted running frames each, exact witness/neutral-state/telemetry and physical cleanup; normal exit. |
+| Original continuous and paused desktop rebuild/adoption | 2/2, run `d593e489-f515-4cf5-87d8-cb75b67cce7d`, 227.734 seconds including actual nested builds. Continuous native input/body/structure adoption passes in 119.711 seconds; exact paused restore/presentation/adoption passes in 108.023 seconds. Original incumbent failures, stale source/state refusal, Pending-time execution, activation and physical cleanup assertions remain. |
+| Feature closure and static checks | Locked/offline release renderer library check passes without stock features. Renderer and sample all-target/all-feature correctness Clippy and affected formatting pass; existing warnings remain. |
+
+The [final record](data/2026-11-14-development-runtime/first-presentation-final.json) observes
+first-frame spans of 701.214, 728.648, 801.142, 747.566, 720.508 and 656.714 ms. Corresponding
+native poll totals are 731.708, 736.971, 810.167, 756.519, 729.574 and 665.413 ms. Every first
+receipt retains the same Runtime/window/surface/backend/epoch as that run's later measured
+frames, and the actual adapter/extent agree. These sequential ranges overlap earlier runs and
+share driver/code caches; they do not establish a stable improvement from either small correction.
+
+The material trajectory strengthens the original permanent-pipeline-rejection oracle on one
+device/resource set. A real ordinary blue draw leaves the material-layout failure injection
+unconsumed. The first custom material attempts that allocation and truthfully returns the
+injected retryable failure, without losing the ordinary cache or retaining instance charges.
+After retry, exact green/red/black pixel checks exercise auxiliary texture and parameter effects;
+ordinary/custom mixed draws reuse the original layout and pipelines, and later frames avoid
+reuploading the exact retained image versions. Original permanent shader refusal, clear, budget
+release and replacement-device revalidation remain. Generic readback helpers still accept mixed
+materials; the private argument migration does not reduce their capability.
+
+Independent Surface/consumer and subsequent material-diff reviews find no P1/P2. Default Surface
+configuration semantics are checked against the actual locked WGPU source. No performance gain
+is inferred from the removed allocation/query counts. The platform evidence remains Windows,
+Rust 1.95.0 and the recorded hardware adapter; complete R12, representative larger games,
+stable cold/tail budgets, foreign native execution and paused Editor/UI/DPI work remain open.
+
+All fourteen raw-file SHA256 values and the temporary patch linkage are checked against canonical
+repository LF bytes, including staged blobs. Added local document targets/fragments and ordinary
+whitespace checks pass. All four scoped investigation/implementation/review agents are closed;
+all owned Cargo and native executions are terminal. No remote publication or branch/main movement
+occurs. The next startup investigation should locate the original Adapter request's internal
+cost and compare any proposed policy or reuse against exact target, failure, device and complete
+rebuild/continued-gameplay behavior before selecting a production change.

@@ -106,6 +106,31 @@
     "exploration_disposition": "An earlier four-phase six-run experiment and CPU run 22aed45a-1f11-4d37-90b5-9aa1355c0311 exposed initialization deferred beyond the first poll; it is not the final five-phase qualification or a before/after optimization comparison.",
     "decision": "no startup optimization selected; further attribution must distinguish original window/device/resource/first-frame operations; native elapsed calls are not GPU execution or scanout and cannot be subtracted from the separate dev/Vulkan child READY measurements"
   },
+  "native_first_presentation": {
+    "base_revision": "9c8f3be",
+    "qualified_consumer_revision": "42b4eefb6050a304530d3fb0b3b2f312cf81e351",
+    "qualified_renderer_revision": "44725e0a4affe527788e1a89abd50baeaed3b27b",
+    "affected_renderer_run": "02ad471f-9223-45ea-bf12-1e2e8083c1d2",
+    "native_game_regression_run": "d593e489-f515-4cf5-87d8-cb75b67cce7d",
+    "native_game_regression_command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test continuous_desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail",
+    "affected_renderer_command": "cargo +1.95.0 nextest run --locked --offline --release -p nara_render_wgpu --all-features --lib -E 'test(stock_quad::) | test(quad::tests::) | test(readback_tests::) | test(surface::configuration_tests::) | test(ui::tests::reconfigured_editor_snapshot_retains_clipped_gpu_pixels_and_old_font_packets)' --test-threads=1 --no-fail-fast --no-tests fail",
+    "source_state": "The first-presentation consumer and temporary probes were uncommitted during baseline/attribution; the exact owned source delta is retained separately, preserving unrelated paused WIP rather than claiming isolated complete-checkout provenance.",
+    "command": "cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --bin runtime_cost",
+    "baseline": "first-presentation-baseline.json",
+    "final": "first-presentation-final.json",
+    "final_scope": "temporary probes absent; six complete original workloads with first-frame/runtime/window/surface/backend/device identity agreement, same actual adapter/extent and all original cleanup; sequential variation prevents a speedup claim",
+    "probe_observations": "first-presentation-probes.json",
+    "probe_source": "first-presentation-probe-source.json",
+    "probe_patch_sha256": "3d433f1eb21f216d84e0004124c28117bd1a32c0b2a1f9b954d53924b95d54d8",
+    "probe_environment": "NARA_TEMP_STARTUP_ATTRIBUTION=1 was consumed only by the recorded temporary source patch; all production probe code is subsequently removed.",
+    "environment": {
+      "WGPU_BACKEND": "dx12",
+      "NARA_WGPU_FORCE_FALLBACK": "0"
+    },
+    "scope": "six complete serial runs per variant, original first App/render/window/device transaction plus unchanged 30 warmup and 120 accepted running frames; same process and recovered physical loop, hardware DX12 at 960x540, not independent cold starts",
+    "probe_scope": "Instance creation, Adapter request, Device request and full quad Pipeline creation including shader/layout/error scopes; 24 returned elapsed observations, not GPU execution; printing lies outside each call bracket and inside the complete frame span",
+    "decision": "Adapter request is the largest measured call. Do not delete correct handoff isolation or required Canvas/final presentation passes. Remove proven unused material-layout work and duplicate capabilities lookup through existing owners, without claiming these unmeasured small operations cure Adapter latency or selecting a global/cross-process GPU cache."
+  },
   "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
   "data_sha256": {
     "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
@@ -117,6 +142,10 @@
     "metadata-command-exploration.json": "2f03a22df6d5503bcebc88a91a63ff329384d572da041fb0ce007f00a3ce6f7a",
     "workflow-declarations.json": "a263747574d09391c3f13fb7fc73e7f95c8fdcde65651d5869301ac652052f15",
     "startup-attribution.json": "05172b58376ff1cad27319da023b915475bc5fef29356711dbe1f5aeffb37f80",
-    "runtime-startup-operations.json": "a939b83e0987769b26183427047923a56e84bd7b0d2348afb36da334f4a23826"
+    "runtime-startup-operations.json": "a939b83e0987769b26183427047923a56e84bd7b0d2348afb36da334f4a23826",
+    "first-presentation-baseline.json": "34abc7a46eef4e78507b969b6e426527ef832a55fb903bb2c9e346b5757067cc",
+    "first-presentation-probes.json": "db997aeb25175db8e41d86f18bcf41990a17313728f7f5430f687955bf198947",
+    "first-presentation-probe-source.json": "c97fcde0bb4a77ddb7f3f0c1cdf46ac09795001447b881b026c2e203d6b196fd",
+    "first-presentation-final.json": "49bbafc3d50c5322a8f62dc117ad5be6cae362385ad322270155087e8da41ba4"
   }
 }
