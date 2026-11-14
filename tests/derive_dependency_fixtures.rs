@@ -70,7 +70,7 @@ fn reference_game_runtime_uses_the_public_root_package() {
 }
 
 #[test]
-fn standalone_editor_has_no_project_crate_dependency() {
+fn standalone_editor_declares_only_reviewed_local_dependencies() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repository.join("editor").join("Cargo.toml");
     let output = Command::new(cargo_executable())
@@ -108,7 +108,23 @@ fn standalone_editor_has_no_project_crate_dependency() {
         .filter(|dependency| dependency["kind"].is_null())
         .filter(|dependency| dependency["path"].is_string())
         .collect::<Vec<_>>();
-    assert_eq!(local_dependencies.len(), 2, "{local_dependencies:#?}");
+    let local_dependency_names = local_dependencies
+        .iter()
+        .filter_map(|dependency| dependency["name"].as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        local_dependency_names,
+        [
+            "nara",
+            "nara_render_wgpu",
+            "nara_text",
+            "nara_ui_kernel",
+            "nara_ui_render",
+            "nara_ui_widgets",
+        ]
+        .into_iter()
+        .collect()
+    );
     for dependency in local_dependencies {
         assert!(dependency["rename"].is_null(), "{dependency:#?}");
         assert!(dependency["target"].is_null(), "{dependency:#?}");
@@ -119,9 +135,16 @@ fn standalone_editor_has_no_project_crate_dependency() {
                 repository.to_owned()
             }
             Some("nara_render_wgpu") => {
-                assert_eq!(dependency["features"], serde_json::json!(["editor-imgui"]));
+                assert_eq!(dependency["features"], serde_json::json!([]));
                 repository.join("crates/nara_render_wgpu")
             }
+            Some("nara_text") => repository.join("crates/nara_text"),
+            Some("nara_ui_kernel") => repository.join("crates/nara_ui_kernel"),
+            Some("nara_ui_render") => {
+                assert_eq!(dependency["features"], serde_json::json!(["runtime"]));
+                repository.join("crates/nara_ui_render")
+            }
+            Some("nara_ui_widgets") => repository.join("crates/nara_ui_widgets"),
             _ => {
                 panic!("the standalone editor has an unreviewed local dependency: {dependency:#?}")
             }
@@ -131,7 +154,7 @@ fn standalone_editor_has_no_project_crate_dependency() {
                 .canonicalize()
                 .unwrap(),
             expected_path.canonicalize().unwrap(),
-            "the standalone editor must use the exact root or private renderer adapter path"
+            "the standalone editor must use the exact reviewed engine module path"
         );
     }
 }
