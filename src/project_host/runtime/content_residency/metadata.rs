@@ -186,8 +186,8 @@ fn metadata_bytes(
     // their own capacity model. No catalog, path or source hash is manufactured for Runtime data.
     let mut bytes = size_of::<ProjectSceneResidency>()
         + size_of::<PreparedResidency>()
-        + size_of::<PreparedProjectSceneReplacement>();
-    // SceneAssetBindings owns an original baseline and a staged catalogue. Residency also
+        + size_of::<StagedProjectSceneReplacement>();
+    // SceneAssetReservations owns an original baseline and a staged catalogue. Residency also
     // retains a staged clone across native waits. Include every existing binding, including
     // unrelated Products, path aliases and anonymous claims, before any of those clones.
     let catalogue_bytes = match world.get_resource::<AssetServer>() {

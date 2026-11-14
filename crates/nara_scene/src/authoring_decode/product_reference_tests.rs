@@ -12,8 +12,8 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    InMemoryPrefabSourceResolver, PrefabProjectionStep, ResolvedPrefabSource,
-    SceneAuthoringSession, SceneComponentBindings, SceneExportOptions, SceneOccurrenceKey,
+    InMemoryPrefabSourceResolver, LiveSceneExportOptions, PrefabProjectionStep,
+    ResolvedPrefabSource, SceneAuthoringSession, SceneComponentBindings, SceneOccurrenceKey,
     SourceDocumentKey, SourceDocumentKind,
 };
 
@@ -218,9 +218,9 @@ fn scene_product_source_check_and_both_export_policies_preserve_complete_selecti
         nara_asset::AssetRefExportPolicy::StableIdWhenKnown,
     ] {
         // Neither product selection needs a source-spelling conversion, even under Path.
-        let exported = bindings.export_scene_with_options(
+        let exported = bindings.export_live_scene_with_options(
             &world,
-            SceneExportOptions {
+            LiveSceneExportOptions {
                 asset_ref_export_policy: policy,
                 ..Default::default()
             },

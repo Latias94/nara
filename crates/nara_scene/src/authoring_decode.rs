@@ -2445,8 +2445,10 @@ fn classify_complete_record(
             &effective,
             if has_assets {
                 nara_reflect::EntityReferenceTraversalLimits::new(
-                    reference_limits.nodes(),
-                    reference_limits.bytes(),
+                    nara_core::ItemLimit::new(reference_limits.nodes())
+                        .expect("source reference node limits are nonzero"),
+                    nara_core::ByteLimit::new(reference_limits.bytes())
+                        .expect("source reference byte limits are nonzero"),
                     reference_limits.depth(),
                 )
             } else {

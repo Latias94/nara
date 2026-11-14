@@ -79,7 +79,7 @@ pub(super) fn prepare_claims(
                 .or(field.default_value())
         {
             let cost = default
-                .cost_up_to(limits.nodes().get(), limits.bytes().get())
+                .cost_up_to(limits.nodes(), limits.bytes())
                 .ok_or(SceneCompilationFailureKind::WorkLimit)?;
             nodes = nodes.saturating_add(cost.nodes());
             bytes = bytes.saturating_add(cost.logical_bytes());
@@ -327,8 +327,8 @@ fn effective_value<'value>(
             schema,
             value,
             contextual_defaults,
-            limits.nodes().get(),
-            limits.bytes().get(),
+            limits.nodes(),
+            limits.bytes(),
             limits.depth(),
         )
         .map_err(codec_failure)?;
@@ -394,7 +394,7 @@ fn claim_cost(
     claims: &[PrefabPropertyClaim],
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(usize, usize), SceneCompilationFailureKind> {
-    if claims.len() > limits.nodes().get() {
+    if claims.len() > limits.nodes() {
         return Err(SceneCompilationFailureKind::WorkLimit);
     }
     let mut nodes = 0usize;
@@ -404,13 +404,13 @@ fn claim_cost(
             return Err(SceneCompilationFailureKind::WorkLimit);
         }
         bytes = bytes.saturating_add(claim.path.logical_bytes().map_err(property_failure)?);
-        if bytes > limits.bytes().get() {
+        if bytes > limits.bytes() {
             return Err(SceneCompilationFailureKind::WorkLimit);
         }
         if let PrefabPropertyIntent::Set(value) = &claim.intent {
             check_value_cost(value, limits)?;
             let cost = value
-                .cost_up_to(limits.nodes().get() - nodes, limits.bytes().get() - bytes)
+                .cost_up_to(limits.nodes() - nodes, limits.bytes() - bytes)
                 .ok_or(SceneCompilationFailureKind::WorkLimit)?;
             nodes += cost.nodes();
             bytes += cost.logical_bytes();

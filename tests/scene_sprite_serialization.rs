@@ -3,7 +3,7 @@ use nara::{
     asset::{AssetPathScope, AssetSourcePath},
     diagnostic::DiagnosticValueRef,
     ecs::{bevy_ecs::lifecycle::Add, bevy_ecs::observer::On, system::ResMut},
-    scene::{SceneExportOptions, SceneSpawnReport, export_scene_with_options},
+    scene::{LiveSceneExportOptions, SceneSpawnReport, export_live_scene_with_options},
 };
 
 #[derive(Resource, Default)]
@@ -66,7 +66,7 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         Some(stable_id(PLAYER_STABLE_ID))
     );
 
-    let path_export = export_scene(&world, &registry);
+    let path_export = export_live_scene(&world, &registry);
     assert!(!path_export.diagnostics.has_errors());
     let path_document = &path_export.output().unwrap().document;
     assert_eq!(
@@ -74,13 +74,14 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         ("path", "textures/player.png")
     );
 
-    let stable_export = export_scene_with_options(
+    let stable_export = export_live_scene_with_options(
         &world,
         &registry,
-        SceneExportOptions {
+        LiveSceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
             ..Default::default()
         },
+        None,
     );
     assert!(!stable_export.diagnostics.has_errors());
     let stable_document = &stable_export.output().unwrap().document;

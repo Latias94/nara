@@ -1,6 +1,6 @@
 //! Persistent scene documents, authoring operations, and runtime materialization.
 
-mod asset_bindings;
+mod asset_reservations;
 mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_decode;
@@ -93,8 +93,8 @@ pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use draft::ExpandedSceneEntity;
 pub use export::{
-    SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
-    export_scene_with_asset_resolution, export_scene_with_options,
+    LiveSceneExportOptions, LiveSceneExportOutput, LiveSceneExportRemap, LiveSceneExportReport,
+    export_live_scene, export_live_scene_with_options,
 };
 #[cfg(feature = "serde")]
 pub use format::{
@@ -143,14 +143,14 @@ pub use source_hierarchy::SourceLocalSceneHierarchy;
 /// These contracts have a real reference-game consumer but are not ordinary scene-authoring
 /// surface. They may change while ADR 0089 remains Proposed.
 pub mod advanced {
-    pub use crate::asset_bindings::SceneAssetBindings;
+    pub use crate::asset_reservations::SceneAssetReservations;
     pub use crate::product_transaction::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
     };
     pub use crate::spawn::{
-        PreparedSceneReplacement, SceneNativeRetirementClaims,
-        prepare_expanded_scene_replacement_with_claims, replace_expanded_scene_with_product,
-        replace_expanded_scene_with_product_and_bindings,
+        SceneNativeRetirementClaims, StagedSceneReplacement, replace_expanded_scene_with_product,
+        replace_expanded_scene_with_product_and_reservations,
+        stage_expanded_scene_replacement_with_claims,
     };
 }
 pub use scene_components::{

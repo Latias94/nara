@@ -27,11 +27,11 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
 };
 use nara_scene::{
-    Name, SceneComponentBindings, SceneComponentBindingsPlugin, SceneComponentRecord,
+    LiveSceneExportOptions, LiveSceneExportOutput, LiveSceneExportReport, Name,
+    SceneComponentBindings, SceneComponentBindingsPlugin, SceneComponentRecord,
     SceneComponentsPlugin, SceneDataComponents, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SceneExportOptions, SceneExportOutput, SceneExportReport, SceneOccurrenceKey,
-    SourceDocumentKey, SourceDocumentKind, export_scene, export_scene_with_options,
-    retire_and_despawn_scene_entity, scene_component_bindings,
+    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, export_live_scene,
+    export_live_scene_with_options, retire_and_despawn_scene_entity, scene_component_bindings,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -243,7 +243,7 @@ fn live_entity(world: &World, instance: &SpawnedSceneInstance, name: &str) -> En
 }
 
 fn exported<'a>(
-    output: &'a SceneExportOutput,
+    output: &'a LiveSceneExportOutput,
     instance: &SpawnedSceneInstance,
     name: &str,
 ) -> &'a SceneEntityRecord {
@@ -259,12 +259,12 @@ fn exported<'a>(
         .unwrap()
 }
 
-fn output(report: SceneExportReport) -> SceneExportOutput {
+fn output(report: LiveSceneExportReport) -> LiveSceneExportOutput {
     assert!(!report.diagnostics.has_errors(), "{report:?}");
     report.into_output().unwrap()
 }
 
-fn rejected(report: SceneExportReport, code: &str) {
+fn rejected(report: LiveSceneExportReport, code: &str) {
     assert!(report.output().is_none(), "{report:?}");
     assert!(
         report
@@ -371,7 +371,7 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
     let later = spawn(&bindings, &mut world, later_document, "later", None);
     let source = live_entity(&world, &first, "source");
     world.get_mut::<Name>(source).unwrap().0 = "live native name".into();
-    let result = output(bindings.export_scene(&world));
+    let result = output(bindings.export_live_scene(&world));
     assert_eq!(result.document.entities.len(), 4);
     assert!(
         result
@@ -477,11 +477,11 @@ fn data_export_establishes_selected_context_and_reopens_with_the_same_bindings()
         let nodes = 2 * 2 + 2 * (1 + 1);
         let bytes =
             2 * ("target".len() + "entity_1".len()) + 2 * ("target".len() + "entity_1".len());
-        let export_options = SceneExportOptions {
+        let export_options = LiveSceneExportOptions {
             value_limits: limits(nodes, bytes, 2),
             ..Default::default()
         };
-        let result = output(bindings.export_scene_with_options(&world, export_options, None));
+        let result = output(bindings.export_live_scene_with_options(&world, export_options, None));
         let mut mapped_targets = BTreeSet::new();
         for instance in &instances {
             let source = exported(&result, instance, "source");
@@ -506,9 +506,9 @@ fn data_export_establishes_selected_context_and_reopens_with_the_same_bindings()
         assert_eq!(mapped_targets.len(), 2);
         for below in [limits(nodes - 1, bytes, 2), limits(nodes, bytes - 1, 2)] {
             rejected(
-                bindings.export_scene_with_options(
+                bindings.export_live_scene_with_options(
                     &world,
-                    SceneExportOptions {
+                    LiveSceneExportOptions {
                         value_limits: below,
                         ..export_options
                     },
@@ -557,28 +557,157 @@ fn native_only_missing_and_same_byte_foreign_selections_refuse_actual_data() {
         "data-only",
         None,
     );
-    output(bindings.export_scene(&world));
+    output(bindings.export_live_scene(&world));
     rejected(
-        export_scene(&world, &native),
+        export_live_scene(&world, &native),
         "scene.export-data-binding-unavailable",
     );
     rejected(
-        export_scene_with_options(&world, &native, SceneExportOptions::default()),
+        export_live_scene_with_options(&world, &native, LiveSceneExportOptions::default(), None),
         "scene.export-data-binding-unavailable",
     );
 
     let missing = SceneComponentBindings::new(native.clone(), []).unwrap();
     rejected(
-        missing.export_scene(&world),
+        missing.export_live_scene(&world),
         "scene.export-data-binding-unavailable",
     );
     let foreign = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     rejected(
-        foreign.export_scene(&world),
+        foreign.export_live_scene(&world),
         "scene.export-data-owner-mismatch",
     );
     let shared = SceneComponentBindings::new(native.clone(), [owner]).unwrap();
-    output(shared.export_scene(&world));
+    output(shared.export_live_scene(&world));
+}
+
+#[test]
+fn data_coverage_refusal_precedes_native_encoding_and_preserves_the_world() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let mut native = nara_reflect::ComponentRegistryBuilder::new();
+    native
+        .register_persistent_component_with_codec::<Name, _, _>(
+            native_registry()
+                .schema(&component("nara.scene.Name"))
+                .unwrap()
+                .clone(),
+            |value| {
+                value
+                    .as_str()
+                    .map(Name::new)
+                    .ok_or_else(|| ComponentCodecError::invalid_field("value", "string"))
+            },
+            move |name| {
+                observed.fetch_add(1, Ordering::Relaxed);
+                Ok(ComponentValue::String(name.as_str().to_owned()))
+            },
+        )
+        .unwrap();
+    let native = native.freeze().unwrap();
+    let owner = data_owner();
+    let bindings = SceneComponentBindings::new(native.clone(), [owner]).unwrap();
+    let mut world = World::new();
+    let instance = spawn(
+        &bindings,
+        &mut world,
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("a-native")).with_component(
+                component("nara.scene.Name"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::String("unchanged native".into()),
+                ),
+            ),
+            SceneEntityRecord::new(id("z-data"))
+                .with_component(component("game.Score"), data_record(ComponentValue::U64(7))),
+        ]),
+        "data-coverage-before-code",
+        None,
+    );
+    let native_entity = live_entity(&world, &instance, "a-native");
+    let data_entity = live_entity(&world, &instance, "z-data");
+    let before_count = world.iter_entities().count();
+    let before_tick = world.read_change_tick();
+    let before_roots = world
+        .resource::<nara_hierarchy::HierarchyRoots>()
+        .iter()
+        .collect::<Vec<_>>();
+    let before_data = {
+        let record = bindings
+            .data_component(&world, data_entity, &component("game.Score"))
+            .unwrap()
+            .unwrap();
+        (
+            record.schema_owner().cloned(),
+            record.version(),
+            record.value().clone(),
+        )
+    };
+    calls.store(0, Ordering::Relaxed);
+
+    let assert_unchanged = || {
+        assert_eq!(world.iter_entities().count(), before_count);
+        assert_eq!(world.read_change_tick(), before_tick);
+        assert_eq!(live_entity(&world, &instance, "a-native"), native_entity);
+        assert_eq!(live_entity(&world, &instance, "z-data"), data_entity);
+        assert_eq!(
+            world.get::<Name>(native_entity),
+            Some(&Name::new("unchanged native")),
+        );
+        assert_eq!(
+            world
+                .resource::<nara_hierarchy::HierarchyRoots>()
+                .iter()
+                .collect::<Vec<_>>(),
+            before_roots,
+        );
+        let record = bindings
+            .data_component(&world, data_entity, &component("game.Score"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.schema_owner(), before_data.0.as_ref());
+        assert_eq!(record.version(), before_data.1);
+        assert_eq!(record.value(), &before_data.2);
+    };
+    let assert_rejected = |report, code| {
+        rejected(report, code);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_unchanged();
+    };
+    assert_rejected(
+        export_live_scene(&world, &native),
+        "scene.export-data-binding-unavailable",
+    );
+    assert_rejected(
+        export_live_scene_with_options(&world, &native, LiveSceneExportOptions::default(), None),
+        "scene.export-data-binding-unavailable",
+    );
+    let missing = SceneComponentBindings::new(native.clone(), []).unwrap();
+    assert_rejected(
+        missing.export_live_scene(&world),
+        "scene.export-data-binding-unavailable",
+    );
+    let foreign = SceneComponentBindings::new(native, [data_owner()]).unwrap();
+    assert_rejected(
+        foreign.export_live_scene(&world),
+        "scene.export-data-owner-mismatch",
+    );
+
+    let result = output(bindings.export_live_scene(&world));
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(result.document.entities.len(), 2);
+    assert_eq!(
+        exported(&result, &instance, "a-native").components[&component("nara.scene.Name")].value,
+        ComponentValue::String("unchanged native".into()),
+    );
+    assert_eq!(
+        exported(&result, &instance, "z-data").components[&component("game.Score")],
+        data_record(ComponentValue::U64(7)),
+    );
+    assert_unchanged();
 }
 
 #[derive(Component)]
@@ -623,15 +752,15 @@ fn native_export_rejects_same_stable_id_bound_to_a_different_rust_type() {
         .unwrap();
     let incompatible = incompatible.freeze().unwrap();
     rejected(
-        export_scene(&world, &incompatible),
+        export_live_scene(&world, &incompatible),
         "scene.export-native-binding-unavailable",
     );
     let mixed = SceneComponentBindings::new(incompatible.clone(), []).unwrap();
     rejected(
-        mixed.export_scene(&world),
+        mixed.export_live_scene(&world),
         "scene.export-native-binding-unavailable",
     );
-    output(export_scene(&world, &registered));
+    output(export_live_scene(&world, &registered));
 }
 
 #[test]
@@ -654,12 +783,12 @@ fn native_export_rejects_unselected_live_members_but_allows_removed_members() {
     );
     let empty = empty_registry();
     rejected(
-        export_scene(&world, &empty),
+        export_live_scene(&world, &empty),
         "scene.export-native-binding-unavailable",
     );
     let unselected = SceneComponentBindings::new(empty.clone(), []).unwrap();
     rejected(
-        unselected.export_scene(&world),
+        unselected.export_live_scene(&world),
         "scene.export-native-binding-unavailable",
     );
     let entity = live_entity(&world, &instance, "named");
@@ -667,9 +796,9 @@ fn native_export_rejects_unselected_live_members_but_allows_removed_members() {
         .entity_mut(entity)
         .remove::<Name>()
         .insert(RuntimeOnly);
-    let result = output(export_scene(&world, &empty));
+    let result = output(export_live_scene(&world, &empty));
     assert!(exported(&result, &instance, "named").components.is_empty());
-    output(unselected.export_scene(&world));
+    output(unselected.export_live_scene(&world));
 }
 
 #[test]
@@ -696,11 +825,11 @@ fn native_export_rejects_known_persistent_members_without_their_entity_receipt()
     let unclaimed = live_entity(&world, &instance, "unclaimed");
     world.entity_mut(unclaimed).insert(Name::new("unguarded"));
     rejected(
-        export_scene(&world, &registry),
+        export_live_scene(&world, &registry),
         "scene.export-native-binding-unavailable",
     );
     world.entity_mut(unclaimed).remove::<Name>();
-    output(export_scene(&world, &registry));
+    output(export_live_scene(&world, &registry));
 }
 
 #[test]
@@ -727,7 +856,7 @@ fn moving_a_real_carrier_to_another_registered_entity_refuses_export() {
         .unwrap();
     world.entity_mut(other).insert(carrier);
     rejected(
-        bindings.export_scene(&world),
+        bindings.export_live_scene(&world),
         "scene.export-data-location-mismatch",
     );
 }
@@ -775,19 +904,19 @@ fn managed_export_requires_the_installed_exact_definitions() {
     app.add_plugin(ManagedExportFixture).unwrap();
     let app = app.seal().unwrap();
     let installed = scene_component_bindings(app.world()).unwrap();
-    let expected = output(installed.export_scene(app.world()));
+    let expected = output(installed.export_live_scene(app.world()));
     assert_eq!(expected.document.entities.len(), 1);
     let shared = SceneComponentBindings::new(installed.native_snapshot().clone(), [owner]).unwrap();
-    assert_eq!(output(shared.export_scene(app.world())), expected);
+    assert_eq!(output(shared.export_live_scene(app.world())), expected);
     let foreign =
         SceneComponentBindings::new(installed.native_snapshot().clone(), [data_owner()]).unwrap();
     rejected(
-        foreign.export_scene(app.world()),
+        foreign.export_live_scene(app.world()),
         "scene.export-bindings-authority-invalid",
     );
     let missing = SceneComponentBindings::new(installed.native_snapshot().clone(), []).unwrap();
     rejected(
-        missing.export_scene(app.world()),
+        missing.export_live_scene(app.world()),
         "scene.export-bindings-authority-invalid",
     );
 }
@@ -805,7 +934,7 @@ fn managed_export_cannot_install_caller_data_definitions_implicitly() {
     )
     .unwrap();
     rejected(
-        bindings.export_scene(app.world()),
+        bindings.export_live_scene(app.world()),
         "scene.export-bindings-authority-invalid",
     );
 }
@@ -836,11 +965,11 @@ fn a_retired_declared_target_refuses_the_entire_live_export() {
         "retired-target",
         None,
     );
-    output(bindings.export_scene(&world));
+    output(bindings.export_live_scene(&world));
     let target = live_entity(&world, &instance, "target");
     retire_and_despawn_scene_entity(&mut world, target).unwrap();
     rejected(
-        bindings.export_scene(&world),
+        bindings.export_live_scene(&world),
         "scene.export-entity-reference-rewrite-failed",
     );
 }
@@ -877,8 +1006,8 @@ fn images_value(references: impl IntoIterator<Item = (&'static str, AssetRef)>) 
     )])
 }
 
-fn options(policy: AssetRefExportPolicy) -> SceneExportOptions {
-    SceneExportOptions {
+fn options(policy: AssetRefExportPolicy) -> LiveSceneExportOptions {
+    LiveSceneExportOptions {
         asset_ref_export_policy: policy,
         ..Default::default()
     }
@@ -949,7 +1078,7 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
 
     let mut world = World::new();
     let instance = spawn(&bindings, &mut world, document, "scoped", Some(resolver));
-    let saved = output(bindings.export_scene_with_options(
+    let saved = output(bindings.export_live_scene_with_options(
         &world,
         options(AssetRefExportPolicy::Path),
         Some(resolver),
@@ -989,7 +1118,7 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
         Some(source)
     );
 
-    let cross_root = output(bindings.export_scene_with_options(
+    let cross_root = output(bindings.export_live_scene_with_options(
         &world,
         options(AssetRefExportPolicy::Path),
         Some(database.resolver(&foreign)),
@@ -1143,7 +1272,7 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         (AssetRefExportPolicy::Path, &path),
         (AssetRefExportPolicy::StableIdWhenKnown, &stable),
     ] {
-        let result = output(bindings.export_scene_with_options(
+        let result = output(bindings.export_live_scene_with_options(
             &world,
             options(policy),
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1167,7 +1296,7 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         Some(missing.resolver(&nara_asset::AssetPathScope::ROOT)),
     ] {
         rejected(
-            bindings.export_scene_with_options(
+            bindings.export_live_scene_with_options(
                 &world,
                 options(AssetRefExportPolicy::Path),
                 metadata,
@@ -1175,7 +1304,7 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
             "scene.export-data-asset-metadata-unavailable",
         );
     }
-    let preserved = output(bindings.export_scene_with_options(
+    let preserved = output(bindings.export_live_scene_with_options(
         &world,
         options(AssetRefExportPolicy::StableIdWhenKnown),
         None,
@@ -1211,7 +1340,7 @@ fn unknown_data_paths_remain_paths_without_native_handles_or_loading() {
         AssetRefExportPolicy::Path,
         AssetRefExportPolicy::StableIdWhenKnown,
     ] {
-        let result = output(bindings.export_scene_with_options(
+        let result = output(bindings.export_live_scene_with_options(
             &world,
             options(policy),
             Some(metadata.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1257,11 +1386,11 @@ fn native_and_data_values_share_exact_aggregate_output_limits() {
     let before = world.iter_entities().count();
     let mut export_options = options(AssetRefExportPolicy::Path);
     export_options.value_limits = limits(4, 18, 1);
-    output(bindings.export_scene_with_options(&world, export_options, None));
+    output(bindings.export_live_scene_with_options(&world, export_options, None));
     for below in [limits(3, 18, 1), limits(4, 17, 1)] {
         export_options.value_limits = below;
         rejected(
-            bindings.export_scene_with_options(&world, export_options, None),
+            bindings.export_live_scene_with_options(&world, export_options, None),
             "scene.export-value-budget-exceeded",
         );
     }
@@ -1270,6 +1399,107 @@ fn native_and_data_values_share_exact_aggregate_output_limits() {
 
 #[derive(Component)]
 struct NativeDefault;
+
+#[test]
+fn later_native_default_uses_the_remaining_export_budget() {
+    use std::sync::Mutex;
+
+    let observed_limits = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&observed_limits);
+    let mut native = nara_reflect::ComponentRegistryBuilder::new();
+    nara_scene::register_scene_components(&mut native).unwrap();
+    native
+        .register_persistent_component_codec_with_context::<NativeDefault, _, _>(
+            schema(
+                "zz.NativeDefault",
+                ComponentFieldSchema::optional_with_default(
+                    ComponentFieldId::new("value"),
+                    "Value",
+                    ComponentFieldPath::new([ComponentFieldPathSegment::index(0)]),
+                    ComponentValueShape::scalar(ComponentValueKind::String),
+                    ComponentValue::String("x".into()),
+                ),
+            ),
+            |_, _| Ok(PreparedComponentCandidate::insert(NativeDefault)),
+            move |_, _, context| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(context.materialization_limits());
+                Ok(ComponentValue::List(Vec::new()))
+            },
+        )
+        .unwrap();
+    let bindings = SceneComponentBindings::new(native.freeze().unwrap(), []).unwrap();
+    let mut world = World::new();
+    let instance = spawn(
+        &bindings,
+        &mut world,
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("a-native")).with_component(
+                component("nara.scene.Name"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::String("earlier".into()),
+                ),
+            ),
+            SceneEntityRecord::new(id("z-default")).with_component(
+                component("zz.NativeDefault"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::List(Vec::new()),
+                ),
+            ),
+        ]),
+        "later-native-default",
+        None,
+    );
+    let before_count = world.iter_entities().count();
+    let before_tick = world.read_change_tick();
+    observed_limits.lock().unwrap().clear();
+    let export_options = LiveSceneExportOptions {
+        value_limits: limits(3, 8, 2),
+        ..Default::default()
+    };
+    let result = output(bindings.export_live_scene_with_options(&world, export_options, None));
+    assert_eq!(
+        observed_limits.lock().unwrap().as_slice(),
+        &[limits(2, 1, 2)],
+    );
+    assert_eq!(
+        exported(&result, &instance, "z-default").components[&component("zz.NativeDefault")].value,
+        ComponentValue::List(vec![ComponentValue::String("x".into())]),
+    );
+    for (value_limits, remaining) in [
+        (limits(2, 8, 2), limits(1, 1, 2)),
+        (limits(3, 7, 2), limits(2, 1, 2).remaining(0, 1)),
+    ] {
+        observed_limits.lock().unwrap().clear();
+        rejected(
+            bindings.export_live_scene_with_options(
+                &world,
+                LiveSceneExportOptions {
+                    value_limits,
+                    ..export_options
+                },
+                None,
+            ),
+            "scene.export-value-budget-exceeded",
+        );
+        assert_eq!(observed_limits.lock().unwrap().as_slice(), &[remaining]);
+        assert_eq!(world.iter_entities().count(), before_count);
+        assert_eq!(world.read_change_tick(), before_tick);
+        assert_eq!(
+            world.get::<Name>(live_entity(&world, &instance, "a-native")),
+            Some(&Name::new("earlier")),
+        );
+        assert!(
+            world
+                .get::<NativeDefault>(live_entity(&world, &instance, "z-default"))
+                .is_some()
+        );
+    }
+}
 
 #[test]
 fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
@@ -1338,11 +1568,11 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
         let mut world = World::new();
         let instance = spawn(&bindings, &mut world, document, "defaults", None);
         let total_bytes = if zero_byte { 1 } else { 11 };
-        let export_options = SceneExportOptions {
+        let export_options = LiveSceneExportOptions {
             value_limits: limits(5, total_bytes, 2),
             ..Default::default()
         };
-        let result = output(bindings.export_scene_with_options(&world, export_options, None));
+        let result = output(bindings.export_live_scene_with_options(&world, export_options, None));
         let record = exported(&result, &instance, "defaulted");
         assert_eq!(
             record.components[&component("zz.NativeDefault")].value,
@@ -1351,9 +1581,9 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
         if !zero_byte {
             for bytes in [1, total_bytes - 1] {
                 rejected(
-                    bindings.export_scene_with_options(
+                    bindings.export_live_scene_with_options(
                         &world,
-                        SceneExportOptions {
+                        LiveSceneExportOptions {
                             value_limits: limits(5, bytes, 2),
                             ..export_options
                         },
@@ -1394,7 +1624,7 @@ fn generated_entity_reference_growth_uses_the_shared_output_budget() {
             None,
         );
     }
-    let expected = output(bindings.export_scene(&world));
+    let expected = output(bindings.export_live_scene(&world));
     let (nodes, bytes) = expected
         .document
         .entities
@@ -1407,12 +1637,12 @@ fn generated_entity_reference_growth_uses_the_shared_output_budget() {
     let mut export_options = options(AssetRefExportPolicy::Path);
     export_options.value_limits = limits(nodes, bytes, 4);
     assert_eq!(
-        output(bindings.export_scene_with_options(&world, export_options, None)),
+        output(bindings.export_live_scene_with_options(&world, export_options, None)),
         expected,
     );
     export_options.value_limits = limits(nodes, bytes - 1, 4);
     rejected(
-        bindings.export_scene_with_options(&world, export_options, None),
+        bindings.export_live_scene_with_options(&world, export_options, None),
         "scene.export-value-budget-exceeded",
     );
 }
@@ -1438,7 +1668,7 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
     let cost = expected.cost();
     let mut export_options = options(AssetRefExportPolicy::Path);
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes(), 5);
-    let result = output(bindings.export_scene_with_options(
+    let result = output(bindings.export_live_scene_with_options(
         &world,
         export_options,
         Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1449,7 +1679,7 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
     );
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes() - 1, 5);
     rejected(
-        bindings.export_scene_with_options(
+        bindings.export_live_scene_with_options(
             &world,
             export_options,
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1458,7 +1688,7 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
     );
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes(), 4);
     rejected(
-        bindings.export_scene_with_options(
+        bindings.export_live_scene_with_options(
             &world,
             export_options,
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1518,7 +1748,7 @@ fn native_coverage_refusal_happens_before_any_encoder_callback() {
         .unwrap();
     let subset = subset.freeze().unwrap();
     rejected(
-        export_scene(&world, &subset),
+        export_live_scene(&world, &subset),
         "scene.export-native-binding-unavailable",
     );
     assert_eq!(calls.load(Ordering::Relaxed), 0);
@@ -1579,10 +1809,10 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
         .unwrap();
     let foreign = foreign.freeze().unwrap();
     rejected(
-        export_scene(runtime.world(), &foreign),
+        export_live_scene(runtime.world(), &foreign),
         "scene.export-native-authority-invalid",
     );
-    output(export_scene(runtime.world(), installed));
+    output(export_live_scene(runtime.world(), installed));
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     runtime.finish().unwrap();
 }
@@ -1664,7 +1894,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             (AssetRefExportPolicy::Path, &path),
             (AssetRefExportPolicy::StableIdWhenKnown, &stable),
         ] {
-            let result = output(bindings.export_scene_with_options(
+            let result = output(bindings.export_live_scene_with_options(
                 &world,
                 options(policy),
                 Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -1676,11 +1906,11 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                     ComponentValue::map([("image", asset_value(expected))])
                 );
             }
-            let native_result = output(nara_scene::export_scene_with_asset_resolution(
+            let native_result = output(nara_scene::export_live_scene_with_options(
                 &native_world,
                 &native,
                 options(policy),
-                database.resolver(&nara_asset::AssetPathScope::ROOT),
+                Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
             ));
             assert_eq!(
                 native_result.document.entities[0].components[&component("game.NativeDefault")]
@@ -1690,7 +1920,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
         }
         if default == &stable {
             rejected(
-                bindings.export_scene_with_options(
+                bindings.export_live_scene_with_options(
                     &world,
                     options(AssetRefExportPolicy::Path),
                     None,
@@ -1698,10 +1928,11 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                 "scene.export-data-asset-metadata-unavailable",
             );
             rejected(
-                export_scene_with_options(
+                export_live_scene_with_options(
                     &native_world,
                     &native,
                     options(AssetRefExportPolicy::Path),
+                    None,
                 ),
                 "scene.export-data-asset-metadata-unavailable",
             );

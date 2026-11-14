@@ -5,7 +5,7 @@ use nara::{
     prelude::*,
     render::register_render_components,
     scene::{
-        SceneDocumentCandidate, SceneExportOptions, export_scene_with_options,
+        LiveSceneExportOptions, SceneDocumentCandidate, export_live_scene_with_options,
         register_scene_components,
     },
     sprite::register_sprite_components,
@@ -114,7 +114,7 @@ fn main() {
     assert!(!spawn_report.diagnostics.has_errors());
     assert_eq!(spawn_report.instance.as_ref().unwrap().len(), 3);
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     assert!(!export.diagnostics.has_errors());
     let export_document = &export.output().unwrap().document;
     let canonical_json = export_document.to_json_string().unwrap();
@@ -128,13 +128,14 @@ fn main() {
     .unwrap();
     assert_eq!(canonical_session.document(), export_document);
 
-    let stable_export = export_scene_with_options(
+    let stable_export = export_live_scene_with_options(
         &world,
         &registry,
-        SceneExportOptions {
+        LiveSceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
             ..Default::default()
         },
+        None,
     );
     assert!(!stable_export.diagnostics.has_errors());
     let stable_json = stable_export

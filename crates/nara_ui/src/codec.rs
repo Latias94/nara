@@ -232,7 +232,7 @@ fn prepare_image(
     let invalid = |message: String| {
         ComponentCodecError::invalid_asset_ref("background.image", reference.to_string(), message)
     };
-    let maximum = context.materialization_limits().bytes().get();
+    let maximum = context.materialization_limits().bytes();
     if let AssetRef::Path(path) = reference {
         let observed = context
             .asset_path_scope()

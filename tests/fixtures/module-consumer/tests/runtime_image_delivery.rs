@@ -57,7 +57,7 @@ use nara_scene::{
     SceneComponentBindings, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey,
     SourceDocumentKind,
     advanced::{
-        SceneAssetBindings, SceneNativeRetirementClaims, SceneProductResource,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductResource,
         SceneProductTransactionLimits,
     },
     retire_and_despawn_scene_instance,
@@ -819,7 +819,7 @@ fn imported_pixels_reach_source_free_native_scenes_and_prepared_packets_from_one
         world.get::<Portrait>(resolve(&world, &current)).unwrap().0,
         auxiliary_handle
     );
-    let exported = bindings.export_scene(&world).into_output().unwrap();
+    let exported = bindings.export_live_scene(&world).into_output().unwrap();
     let reference =
         &exported.document.entities[0].components[&ComponentTypeId::new(PORTRAIT)].value;
     assert_eq!(
@@ -1098,12 +1098,12 @@ fn failed_and_canceled_replacements_keep_current_image_before_atomic_binding_val
 
     let claims = SceneNativeRetirementClaims::default();
     let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);
-    let mut assets = SceneAssetBindings::from_world(&world);
+    let mut assets = SceneAssetReservations::from_world(&world);
     let rejected = assets.reserve_product::<ImageAsset>(auxiliary()).unwrap();
     let products = replacement_products(&world, primary_handle, rejected, &auxiliary_value);
     assert!(
         bindings
-            .prepare_runtime_scene_replacement_with_claims(
+            .stage_runtime_scene_replacement_with_claims(
                 &mut world,
                 &missing,
                 &current,
@@ -1128,11 +1128,11 @@ fn failed_and_canceled_replacements_keep_current_image_before_atomic_binding_val
             .is_none()
     );
     for action in ["rewrite", "cancel", "commit"] {
-        let mut assets = SceneAssetBindings::from_world(&world);
+        let mut assets = SceneAssetReservations::from_world(&world);
         let next_handle = assets.reserve_product::<ImageAsset>(auxiliary()).unwrap();
         let products = replacement_products(&world, primary_handle, next_handle, &auxiliary_value);
         let pending = bindings
-            .prepare_runtime_scene_replacement_with_claims(
+            .stage_runtime_scene_replacement_with_claims(
                 &mut world,
                 next.candidate(),
                 &current,

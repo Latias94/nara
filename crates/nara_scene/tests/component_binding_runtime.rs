@@ -152,7 +152,7 @@ fn preparation_is_private_and_commit_publishes_the_complete_group() {
     let entity = resolve(&world, &instance);
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("root")));
     assert!(world.get::<SceneDataComponents>(entity).is_some());
-    let output = bindings.export_scene(&world).into_output().unwrap();
+    let output = bindings.export_live_scene(&world).into_output().unwrap();
     let records = &output.document.entities[0].components;
     assert_eq!(records.len(), 3);
     assert_eq!(
@@ -242,7 +242,7 @@ fn invalid_source_recompilation_preserves_the_last_good_activation_and_data() {
     assert!(rejected.diagnostics.has_errors());
     assert_eq!(resolve(&world, &current), old_entity);
     assert_eq!(world.resource::<WorldIdentityDomain>().stats(), old_stats);
-    let output = bindings.export_scene(&world).into_output().unwrap();
+    let output = bindings.export_live_scene(&world).into_output().unwrap();
     assert_eq!(
         output.document.entities[0].components[&component("game.Score")].value,
         ComponentValue::U64(7)
@@ -388,8 +388,8 @@ fn exercise_managed_preparation(world: &mut World) {
         source_key(),
         None,
     );
-    let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
-    let result = nara_scene::advanced::prepare_expanded_scene_replacement_with_claims(
+    let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
+    let result = nara_scene::advanced::stage_expanded_scene_replacement_with_claims(
         world,
         &foreign_native,
         &empty,
@@ -453,9 +453,9 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
     let claims = nara_scene::advanced::SceneNativeRetirementClaims::from_component_ids([world
         .component_id::<NativeRetirementState>()
         .unwrap()]);
-    let assets = nara_scene::advanced::SceneAssetBindings::from_world(&world);
+    let assets = nara_scene::advanced::SceneAssetReservations::from_world(&world);
     let prepared = bindings
-        .prepare_scene_replacement_with_claims(
+        .stage_scene_replacement_with_claims(
             &mut world,
             &candidate(&bindings, ComponentValue::U64(19)),
             None,

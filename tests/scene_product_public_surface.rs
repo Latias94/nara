@@ -2,7 +2,7 @@
 
 use nara::advanced_prelude::{
     SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-    replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_bindings,
+    replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_reservations,
 };
 use nara::ecs::Resource;
 use std::sync::Arc;
@@ -30,8 +30,9 @@ fn advanced_scene_product_surface_is_available() {
     let _ = inspect;
     let _ = SceneProductTransactionLimits::new;
     let _ = replace_expanded_scene_with_product::<fn(&mut SceneProductOverlayWriter<'_>)>;
-    let _ =
-        replace_expanded_scene_with_product_and_bindings::<fn(&mut SceneProductOverlayWriter<'_>)>;
+    let _ = replace_expanded_scene_with_product_and_reservations::<
+        fn(&mut SceneProductOverlayWriter<'_>),
+    >;
 }
 
 #[test]

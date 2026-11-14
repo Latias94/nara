@@ -284,8 +284,8 @@ impl SceneComponentBindings {
         let (effective, _) = effective_component_value_with_budget(
             schema,
             &value,
-            limits.nodes().get() - retained.nodes(),
-            limits.bytes().get() - retained.logical_bytes(),
+            limits.nodes() - retained.nodes(),
+            limits.bytes() - retained.logical_bytes(),
             limits.depth(),
         )
         .map_err(|source| SceneDataComponentError::InvalidValue {
@@ -502,11 +502,11 @@ impl SceneComponentBindings {
                 limits
             };
             let (nodes, bytes) = if removed {
-                (admission.nodes().get(), admission.bytes().get())
+                (admission.nodes(), admission.bytes())
             } else {
                 (
-                    limits.nodes().get() - retained.nodes(),
-                    limits.bytes().get() - retained.logical_bytes(),
+                    limits.nodes() - retained.nodes(),
+                    limits.bytes() - retained.logical_bytes(),
                 )
             };
             let (effective, cost) = effective_component_value_with_budget(
@@ -588,7 +588,7 @@ fn validate_data_value(
             let observed = asset_resolution
                 .resolution_work_bytes(reference.asset_ref())
                 .unwrap_or(usize::MAX);
-            let maximum = limits.bytes().get();
+            let maximum = limits.bytes();
             if observed > maximum {
                 return Err(SceneDataComponentError::InvalidValue {
                     component: component.clone(),

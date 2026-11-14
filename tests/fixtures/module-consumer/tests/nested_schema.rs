@@ -12,9 +12,9 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
-    PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, SceneExportOptions, SourceDocumentKey, SourceDocumentKind,
-    export_scene_with_options,
+    LiveSceneExportOptions, PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
+    SourceDocumentKind, export_live_scene_with_options,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
 use support::{COMPONENT_ID, IMAGE_ID, PREFAB_ID, PREFAB_PATH, Relationships};
@@ -205,13 +205,14 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             EntityLookup::Resolved(_)
         ));
     }
-    let exported = export_scene_with_options(
+    let exported = export_live_scene_with_options(
         &world,
         &registry,
-        SceneExportOptions {
+        LiveSceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
             ..Default::default()
         },
+        None,
     );
     assert!(
         !exported.diagnostics.has_errors(),

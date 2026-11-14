@@ -103,8 +103,8 @@ fn copy_record(
         schema,
         &record.value,
         &record.contextual_defaults,
-        limits.nodes().get(),
-        limits.bytes().get(),
+        limits.nodes(),
+        limits.bytes(),
         limits.depth(),
     )
     .map_err(|error| value_error(source, error))?;

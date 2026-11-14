@@ -289,7 +289,7 @@ fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes(
     let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
     let defaults = component("game.Defaults");
-    let before = bindings.export_scene(&world).into_output().unwrap();
+    let before = bindings.export_live_scene(&world).into_output().unwrap();
     for budget in [limits(1, 9), limits(2, 8)] {
         assert!(
             bindings
@@ -319,7 +319,10 @@ fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes(
                 .is_err()
         );
     }
-    assert_eq!(bindings.export_scene(&world).into_output().unwrap(), before);
+    assert_eq!(
+        bindings.export_live_scene(&world).into_output().unwrap(),
+        before
+    );
     bindings
         .set_data_component(
             &mut world,
@@ -347,7 +350,7 @@ fn invalid_payload_and_declared_references_leave_the_complete_group_unchanged() 
     let mut world = World::new();
     let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
-    let before = bindings.export_scene(&world).into_output().unwrap();
+    let before = bindings.export_live_scene(&world).into_output().unwrap();
     for (name, value) in [
         ("game.Score", ComponentValue::Bool(false)),
         (
@@ -377,7 +380,10 @@ fn invalid_payload_and_declared_references_leave_the_complete_group_unchanged() 
                 .is_err()
         );
     }
-    assert_eq!(bindings.export_scene(&world).into_output().unwrap(), before);
+    assert_eq!(
+        bindings.export_live_scene(&world).into_output().unwrap(),
+        before
+    );
     bindings
         .set_data_component(
             &mut world,
@@ -426,7 +432,7 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
     retire_and_despawn_scene_entity(&mut world, target).unwrap();
     assert!(world.get_entity(target).is_err());
     // The existing self-link remains valid, so refusal must come from the proposed dead target.
-    let before = bindings.export_scene(&world).into_output().unwrap();
+    let before = bindings.export_live_scene(&world).into_output().unwrap();
 
     assert!(matches!(
         bindings.set_data_component(
@@ -472,7 +478,10 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
         ),
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
-    assert_eq!(bindings.export_scene(&world).into_output().unwrap(), before);
+    assert_eq!(
+        bindings.export_live_scene(&world).into_output().unwrap(),
+        before
+    );
 }
 
 #[test]

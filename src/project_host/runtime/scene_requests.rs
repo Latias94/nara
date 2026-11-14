@@ -135,7 +135,7 @@ enum Slot {
 struct ManagedTravelState {
     admission: Admission,
     attempt: ManagedSceneTravelAttempt,
-    prepared: Option<super::content_residency::PreparedProjectSceneReplacement>,
+    prepared: Option<super::content_residency::StagedProjectSceneReplacement>,
     published: Option<SpawnedSceneInstance>,
     retry_requested: bool,
     native_started: bool,

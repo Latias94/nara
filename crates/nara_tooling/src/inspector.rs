@@ -1154,8 +1154,8 @@ fn inspector_effective_component_value<'value>(
         schema,
         value,
         &record.contextual_defaults,
-        limits.nodes().get(),
-        limits.bytes().get(),
+        limits.nodes(),
+        limits.bytes(),
         limits.depth(),
     )
     .map(|(value, _)| value)

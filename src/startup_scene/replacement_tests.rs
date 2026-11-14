@@ -292,8 +292,8 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         let entities = world.entities().len();
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let next = mixed_source("b", false);
-        let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
-        let result = foreign.prepare_scene_replacement_with_claims(
+        let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
+        let result = foreign.stage_scene_replacement_with_claims(
             world,
             next.compiled_scene().unwrap(),
             None,

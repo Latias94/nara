@@ -45,7 +45,7 @@ must refuse before any live Scene/resource mutation.
 
 ## Use The Existing Publication Owner
 
-Stage complete typed bindings with `SceneAssetBindings::reserve_product::<TileSet>` and
+Stage complete typed reservations with `SceneAssetReservations::reserve_product::<TileSet>` and
 `reserve_product::<ImageAsset>`. Preserve the original Image output owner through
 `share_with_retention_owner`; the [Image guide](runtime-images.md) explains that custody.
 Construct `TileSetPublicationInput::from_product` using the actual descriptor, receiving Image

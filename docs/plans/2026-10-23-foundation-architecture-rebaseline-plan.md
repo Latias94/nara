@@ -4961,6 +4961,190 @@ matrices are not repeated. Foreign execution, external non-maintainer authorship
 metadata descriptors and the full foundation outcome retain their separate evidence gaps.
 Editor/UI, Dialogue and physical mixed-DPI development stay paused.
 
+### Scene Staging, Asset Reservations And Live Export
+
+Status: implemented with owning, independent/public and real source/headless qualification;
+the additional continuous-desktop repetition remains open as recorded below.
+The user separately resumes physical mixed-DPI qualification on November 14; Editor/component
+and Dialogue UI development remain paused. Native checks share the serial Cargo owner with
+this Runtime work.
+
+Keep ordinary `PreparedScene` unbound: dropping it releases private prepared values without
+requiring World cleanup. The advanced native-retirement path already allocates unpublished
+targets. Express that staged custody separately, retaining exact World/entity/definition facts,
+failed-commit ownership, explicit discard and original native retirement. Trace every synchronous
+wrapper before changing names; a failed discard must not silently release the sole cleanup owner.
+No generic transaction manager or Drop-based World cleanup is selected.
+
+Treat the asset scratch catalogue as reservations, not immutable component definitions or
+resource residency. Keep origin-World and original-catalogue revalidation, process-local ID
+non-reuse, typed Product/source admission and the existing content/resource publication owners.
+Add one independent public trajectory joining catalogue drift, commit refusal, blocked discard,
+retained candidate custody and successful explicit cleanup retry before declaring that contract
+qualified.
+
+Make live export's actual scope explicit: all registered current-live Scene identities in one
+World across instances, flattened Prefabs, current persistent native/data values and hierarchy,
+and an output-local identity remap. It is a new source snapshot, separate from source Save,
+root packing and a game checkpoint. Retain the existing complete disk/modify/export/reopen/
+instantiate/retire public consumer. Before any native encoder runs, check complete native and
+data membership, exact selected data admissions and export capability across the whole export.
+An incomplete late data owner must reject with zero earlier native encoder calls and unchanged
+World. Audit engine-owned default materialization against the caller's aggregate export budget;
+trusted codec allocations remain outside that guarantee.
+
+The selected public names are `StagedSceneReplacement`, `SceneAssetReservations` with
+`validate_baseline`, the advanced `stage_*_replacement_with_claims` methods, and
+`export_live_scene`/`export_live_scene_with_options` with `LiveSceneExport*` result/options types.
+The native free-function options entry accepts the same optional resolver as the mixed
+selection's method, replacing the separate asset-resolution entry. Ordinary unbound preparation
+keeps its existing names. No old-name aliases are retained.
+
+The encode context now carries exact materialization limits. Node and byte accessors return
+`usize`; `remaining` can produce zero and typed node/byte/depth failures preserve export's budget
+diagnostic. An initial typed-`ONE` floor was rejected during implementation because it could
+admit a positive-byte default copy after the actual allowance was exhausted. Reference-walker
+policy limits remain distinct from a subtractable value allowance; the three source-classification
+conversion sites explicitly recover their original positive policy types. This does not widen
+source limits or weaken the exact materialization remainder.
+
+The independent custody review finds no P1/P2 in the staged/reservation change or joint public
+test. Report-only synchronous wrappers still do not retain a failed discard token, but the review
+does not construct a safe public double-refusal between their exclusive staging/commit/discard
+steps: callbacks run before allocation and the wrapper exposes no intermediate World. This is
+not a formal impossibility proof for arbitrary trusted extensions. The staged caller's actual
+between-call mutation scenario must pass with the original token retained; do not substitute it
+as proof that the synchronous wrapper has the same reachable failure or invent another cleanup
+authority without that evidence.
+
+The owning Reflect/Scene libraries and eight selected integration targets pass 1070/1070 with
+zero skips in `86cf5314-3476-40d6-930d-f3bf16e9b49d` (53.724 seconds after a 23m02s release
+build). This includes complete existing cancellation, wrong-World, observer, default/reference,
+source/processed, hierarchy and publication controls alongside new data-coverage, field-capability
+and zero-remainder cases. The first compiler pass identifies three remaining positive reference
+policy conversions; the next finds one reference-level assertion typo, and a later lib-test
+compile identifies five constructor uses in nested tests. All are corrected without weakening
+limits or deleting assertions. A subsequent no-op-clone warning identifies a borrowed data
+"snapshot" in the new coverage regression: replace it with owned owner/version/value facts and
+rerun that affected export target separately. Independent consumer and managed/runtime results
+remain separate from this owning-suite evidence.
+
+That final export target passes 23/23 with zero skips in
+`7d5c473b-bc89-40a0-a480-ea2c7e5d3fb5` (1.828 seconds), retaining the zero-native-callback
+assertions and comparing independent pre-export data facts. Reflect/Scene production source is
+unchanged after the owning-suite pass; this rerun strengthens its new regression rather than
+repeating the unaffected complete suite. The first independent-workspace compile identifies
+five remaining `.bytes().get()` calls in Sprite, TileMap and the UI codec. Their mechanical
+accessor migration retains the original observed/maximum comparison and typed refusal; affected
+product/consumer checks qualify those owners separately.
+
+The independently locked module consumer passes 53/53 with zero skips in
+`18de4db8-fea8-4f47-8b22-4df94ae06d22` (4.252 seconds after the 11m22s release build). Its eight
+targets preserve source/processed preparation, exact native/data definition custody, complete
+Product/source identities, retained packs, resource incarnation barriers, Image/TileSet demand,
+claimed native retirement and explicit retry. The joined new reservation case changes the live
+catalogue, receives the same refused candidate, blocks candidate Despawn with an actual targeted
+observer and receives ownership again. Removing the observer permits explicit cleanup, releases
+the candidate resource's Weak witness, preserves the old Scene/resources and external catalogue
+write, and a new reservation does not reuse the cancelled handle ID. The original disk consumer
+still modifies live native/data membership, exports flattened repeated Prefabs plus another live
+instance, writes/reopens/reinstantiates the new source and retires instances independently.
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-scene-module-consumer --locked --offline --release --test scene_preparation --test scene_data_components --test nested_schema --test durable_identity --test runtime_scene_assets --test runtime_scene_delivery --test runtime_image_delivery --test runtime_tileset_delivery --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The locked/offline release workspace all-target check passes in 4m57s with existing warnings,
+including the unchanged Editor targets. This compiles the complete declared workspace consumer
+set without resuming paused UI work or claiming native Editor execution. Standalone fixtures and
+actual game execution retain their separate qualification below.
+
+The four selected root product integrations pass 24/24 with zero skips in
+`00133266-5fac-48f5-919b-fd215c685fd5` (228.021 seconds after the 13m04s release build). Current
+Scene startup/replacement/restart/source transition, explicit composition, dynamic observer/hook
+refusal, Sprite/TileMap references and source export policy remain. The first negative construction
+case spends 215.942 seconds compiling its actual external attempt and passes; the advanced-only
+surface case also executes all five existing compile-fail fixtures. Slow compilation is recorded
+separately from a product-performance result. No cases or visibility assertions are removed.
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara --no-default-features --features tooling,project-workflow,presentation-2d --test runtime_scene_activation --test scene_component_composition --test scene_sprite_serialization --test scene_product_public_surface --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The first continuous-desktop reconstruction attempt is not passing evidence:
+`623cfd69-8077-4c87-8bb9-0642cedada09` fails 0/1 in 291.406 seconds after its 11m22s outer
+release build. During preparation of the private-structure successor, the adopted B process
+exits before the Host's next capture. The original receipt observes exit code 1, empty containment,
+stopped readers and drained output without forced termination, but no successful game Close.
+The fixture retains its source/work copies. That run proves the copied project and original
+rebuild path reach actual B execution; it does not qualify complete C adoption or clean Close.
+The original error omitted the already bounded native diagnostic tail. Include that original
+tail in `Process::check_running` failures and rerun the same complete trajectory to distinguish
+game/desktop/renderer, protocol and timeout failures. Keep every original state/presentation/input/
+retirement assertion; do not relabel an unexpected process exit as successful cleanup.
+
+The unchanged-trajectory diagnostic rerun `edfb9ffa-677a-4045-98dd-281b877e4015` also fails 0/1
+(115.289 seconds after the 1m40s outer build), this time at the initial neutral-movement check
+after Resume: observed holds are `[false,false,true,false]`. An immediate independent Windows
+`GetAsyncKeyState` observation finds physical A and W down while D and S are up. The original
+fixture checked only D at entry; it now checks all four original scan-mapped movement keys,
+retains the complete neutral-state assertion and reports their actual high-bit state on refusal.
+It never releases or suppresses another owner's input. This environmental observation does not
+explain the earlier B exit, and neither failed run becomes complete native acceptance. Keep the
+first fault explicitly unresolved until an idle-desktop repeat produces its original diagnostic
+or completes the original trajectory. Source/headless execution remains a distinct real-process
+qualification while other authorized checks proceed.
+
+The complete source/headless A/B/C reconstruction and production Host adoption pass 2/2 in
+`42c36659-f79f-47c1-9d79-8028473a7c43` (257.759 seconds after the 9m42s release build). Their
+individual elapsed times are 172.457 and 85.301 seconds, including the original nested dev-profile
+Cargo work. Two ordinary tests are outside the ignored-only selection. Complete canonical state,
+actual body/private-structure changes, failed-build/probe/source drift, exact candidate tickets,
+discarded probe/fresh adopter, new logic during Pending predecessor cleanup and physical retirement
+remain. No test result establishes a performance improvement. These original public workflows
+qualify the changed Scene/value contracts through real processes; they do not replace the still
+unqualified continuous-desktop repetition. A subsequent native key observation still finds A down,
+so remaining static/document checks proceed without taking keyboard ownership.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --test development_host --test continuity --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Release all-target/all-feature correctness Clippy passes for Reflect, Scene, Sprite, TileMap,
+Tooling, UI and the root product, and separately for the game sample with every feature/target.
+Existing warnings remain. Reflect doctests pass 7/7 with one existing ignored example; Scene
+doctests pass 14/14, including the consumed unbound token and private candidate/asset-reservation
+construction controls. Independent reviews of staging/custody, export/default limits and native
+source selection report no P1/P2. The bounded review of the diagnostic/key-precondition correction
+also reports no P1/P2 while explicitly retaining the unresolved native exit and missing native
+acceptance. All eleven agents used across this continuation are closed.
+
+The independently locked language-consumer `languages` target and Prefab-extraction recovery
+consumer pass release compile checks (1m26s and 41.28 seconds respectively). These qualify the
+migrated public entry points and raw value-limit observations, not new Lua/C# execution or a
+recovery fault-injection run. Root workspace, independent module consumer and game sample format
+checks pass. Changed local document links/headings and ordinary whitespace checks pass. The six
+vendor layout changes retain the separately checked upstream-source formatting equivalence;
+no unrelated native implementation or product UI work is included.
+
+The Scene ownership/export unit's real public and source/headless workflows have passing evidence
+above. The additional continuous-desktop repetition remains unqualified and the first unexpected
+exit is still open; no new native game acceptance, full Runtime completion or complete R12 is
+claimed. The earlier bounded mixed-DPI controls retain their own successful geometry/input/
+retirement evidence at `1911bef`, distinct from continuous gameplay and Editor GPU presentation.
+
+With jobs one, the absolute root target, Rust 1.95.0 and offline resolution, the owning command is:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara_reflect -p nara_scene --all-features --lib --test encode_materialization_limits --test component_binding_export --test component_binding_runtime --test registry_contract --test effective_references --test registry_admission --test component_binding_data --test live_export_capabilities --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Delete superseded entry points rather than adding pre-1.0 aliases after the real callsite map
+selects coherent names. Reconcile ADR0006/0081/0098 and the persistent-component/runtime guides,
+then qualify owning tests, independent source/processed/resource consumers and affected managed
+replacement paths. Record actual source, commands, failures, corrections and platform limits;
+do not infer full R12, foreign execution, external-author or numerical-budget completion.
+
 The [registry ownership sub-unit](2026-11-01-component-registry-ownership-plan.md) addresses a
 concrete repeated consumer failure: successful registration followed by `schema` on a Building
 `ComponentRegistry` silently reports absence. The selected replacement separates mutable

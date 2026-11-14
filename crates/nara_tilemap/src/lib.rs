@@ -834,7 +834,7 @@ fn prepare_tileset_handle(
             .prefix()
             .map_or(0, |prefix| prefix.as_str().len().saturating_add(1))
             .saturating_add(path.as_str().len());
-        let maximum = context.materialization_limits().bytes().get();
+        let maximum = context.materialization_limits().bytes();
         if observed > maximum {
             return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
         }
@@ -853,7 +853,7 @@ fn prepare_tileset_handle(
             .validate_with_database_as(resolver, &expected_source_kind)
             .map_err(|error| invalid_asset_ref(field, &asset_ref, error))?;
         let observed = record.path().as_str().len();
-        let maximum = context.materialization_limits().bytes().get();
+        let maximum = context.materialization_limits().bytes();
         if observed > maximum {
             return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
         }

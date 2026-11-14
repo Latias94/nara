@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-14
 **Implemented Slices**: Scene/Prefab/Patch document foundation; RGF-U29 explicit persistent
 composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
@@ -113,12 +113,28 @@ the exact selection installed through App composition. Ordinary and advanced man
 require the exact native definition too; explicitly selected independent preview projections
 retain ADRs 0081/0098's separate definition contract.
 
+Ordinary `PreparedScene` retains decoded values before target allocation; dropping it cancels
+without World cleanup. Advanced native-retirement integration instead returns
+`StagedSceneReplacement`, which already owns allocated unpublished targets in one exact World.
+Failed publication returns that same staged token for retry. Abandonment requires explicit
+`discard(world)`, and a refused discard returns ownership again. Drop cannot clean a borrowed
+World. `SceneAssetReservations` separately owns the private typed catalogue reservations; its
+baseline validation is neither immutable component-definition selection nor content residency.
+
 Current-live export checks actual persistent membership for coverage before encoding. Selecting a
 smaller native catalog or omitting encountered data members rejects the complete export rather
 than producing a successful partial snapshot. A physically absent native member remains absent;
 arbitrary runtime-only ECS components do not become persistent. Export of flattened live instances
 is distinct from source Save. Data asset policy lowering uses admitted project metadata without
 native handles or asset loading.
+
+That coverage check includes every selected data owner's exact admission, current version and
+Scene capability across all exported identities before any native encoder runs. The public
+`export_live_scene` entry points name this whole-World current-live scope; they do not select a
+root, one activation or a game checkpoint. Output-local identity remaps belong to that output.
+Native registry encoding receives the caller's remaining materialization allowance through its
+existing encode context before engine-owned default expansion and native-reference validation.
+Trusted encoder code retains its ordinary allocation and side-effect contract.
 
 A successful live export produces a new source snapshot that ordinary admission can reopen under
 the same definitions. Where the Schema default requires a source context, the export establishes
@@ -179,7 +195,7 @@ owning current/candidate reference retires. A non-owning view cannot prolong tha
 
 Immutability and the exact witness carry the processed-value invariant into ordinary preflight;
 preparation does not repeat the complete pure admission pass or reopen source migration.
-Concrete content owners may stage newly admitted Product bindings through `SceneAssetBindings`
+Concrete content owners may stage newly admitted Product bindings through `SceneAssetReservations`
 alongside their actual resource values in the existing product transaction. Native codecs resolve
 only the supplied complete Product bindings. Unknown selections never become implicit reservations;
 failure or cancellation does not publish the private catalogue or resource overlay. ADR 0122 owns

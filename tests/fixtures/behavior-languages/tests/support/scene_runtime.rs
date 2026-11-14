@@ -189,7 +189,7 @@ impl Runtime {
     }
 
     pub fn export(&self) -> Result<SceneDocument, String> {
-        let report = self.definition.bindings.export_scene(&self.world);
+        let report = self.definition.bindings.export_live_scene(&self.world);
         if report.diagnostics.has_errors() {
             return Err(format!("{:?}", report.diagnostics));
         }

@@ -595,11 +595,7 @@ fn receiving_local_references_include_empty_entities_after_source_sorting_and_li
             &candidate,
             &occurrence(),
             None,
-            ComponentValueMaterializationLimits::new(
-                ItemLimit::ONE,
-                limits.bytes(),
-                limits.depth(),
-            ),
+            limits.with_nodes(ItemLimit::ONE),
         )
         .expect_err("source sealing cannot waive the receiving value allowance");
     assert!(rejected.diagnostics.has_errors());

@@ -6,13 +6,13 @@ use std::{
 };
 
 use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
-use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 #[cfg(feature = "serde")]
 use nara_reflect::ComponentDecodeContext;
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentRegistrySnapshot,
-    ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
+    ComponentValueMaterializationLimits,
 };
 
 #[cfg(feature = "serde")]
@@ -651,9 +651,7 @@ impl Display for SceneCompilationBudgetKind {
 pub struct SceneCompilationLimits {
     materialized_entities: ItemLimit,
     materialized_components: ItemLimit,
-    materialized_value_nodes: ItemLimit,
-    materialized_value_bytes: ByteLimit,
-    materialized_value_depth: DepthLimit,
+    materialized_value_limits: ComponentValueMaterializationLimits,
     source_value_limits: Option<ComponentValueMaterializationLimits>,
     resolved_instances: ItemLimit,
     overlay_declarations: ItemLimit,
@@ -672,11 +670,7 @@ impl Default for SceneCompilationLimits {
                 .expect("prefab expansion entity limit is non-zero"),
             materialized_components: ItemLimit::new(500_000)
                 .expect("prefab expansion component limit is non-zero"),
-            materialized_value_nodes: ItemLimit::new(5_000_000)
-                .expect("prefab expansion value node limit is non-zero"),
-            materialized_value_bytes: ByteLimit::new(64 * 1024 * 1024)
-                .expect("prefab expansion value byte limit is non-zero"),
-            materialized_value_depth: EntityReferenceTraversalLimits::default().depth(),
+            materialized_value_limits: ComponentValueMaterializationLimits::default(),
             source_value_limits: None,
             resolved_instances: ItemLimit::new(100_000)
                 .expect("prefab expansion instance limit is non-zero"),
@@ -746,13 +740,13 @@ impl SceneCompilationLimits {
     }
 
     #[must_use]
-    pub const fn materialized_value_nodes(self) -> ItemLimit {
-        self.materialized_value_nodes
+    pub const fn materialized_value_nodes(self) -> usize {
+        self.materialized_value_limits.nodes()
     }
 
     #[must_use]
-    pub const fn materialized_value_bytes(self) -> ByteLimit {
-        self.materialized_value_bytes
+    pub const fn materialized_value_bytes(self) -> usize {
+        self.materialized_value_limits.bytes()
     }
 
     #[must_use]
@@ -799,13 +793,13 @@ impl SceneCompilationLimits {
 
     #[must_use]
     pub const fn with_materialized_value_nodes(mut self, limit: ItemLimit) -> Self {
-        self.materialized_value_nodes = limit;
+        self.materialized_value_limits = self.materialized_value_limits.with_nodes(limit);
         self
     }
 
     #[must_use]
     pub const fn with_materialized_value_bytes(mut self, limit: ByteLimit) -> Self {
-        self.materialized_value_bytes = limit;
+        self.materialized_value_limits = self.materialized_value_limits.with_bytes(limit);
         self
     }
 
@@ -814,9 +808,7 @@ impl SceneCompilationLimits {
         mut self,
         limits: ComponentValueMaterializationLimits,
     ) -> Self {
-        self.materialized_value_nodes = limits.nodes();
-        self.materialized_value_bytes = limits.bytes();
-        self.materialized_value_depth = limits.depth();
+        self.materialized_value_limits = limits;
         self.source_value_limits = Some(limits);
         self
     }
@@ -852,11 +844,7 @@ impl SceneCompilationLimits {
     }
 
     fn materialization_limits(self) -> ComponentValueMaterializationLimits {
-        ComponentValueMaterializationLimits::new(
-            self.materialized_value_nodes(),
-            self.materialized_value_bytes(),
-            self.materialized_value_depth,
-        )
+        self.materialized_value_limits
     }
 }
 
@@ -2076,8 +2064,8 @@ where
         replacement_bytes: usize,
         anchor_id: &SceneEntityId,
     ) -> Option<(usize, usize)> {
-        let node_limit = self.options.limits.materialized_value_nodes().get();
-        let byte_limit = self.options.limits.materialized_value_bytes().get();
+        let node_limit = self.options.limits.materialized_value_nodes();
+        let byte_limit = self.options.limits.materialized_value_bytes();
         let Some(nodes) = self
             .usage
             .materialized_value_nodes

@@ -4,7 +4,7 @@ mod catalog;
 mod images;
 mod metadata;
 mod replacement;
-pub(super) use replacement::PreparedProjectSceneReplacement;
+pub(super) use replacement::StagedProjectSceneReplacement;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -22,8 +22,8 @@ use nara_image::ImageAsset;
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
-        PreparedSceneReplacement, SceneAssetBindings, SceneNativeRetirementClaims,
-        SceneProductOverlayWriter, SceneProductTransactionLimits,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
+        SceneProductTransactionLimits, StagedSceneReplacement,
     },
 };
 use nara_tilemap::{
@@ -113,7 +113,7 @@ fn publish_startup_content(
     let prepared = PreparedResidency::prepare(world, content, None)?;
     prepared
         .bindings
-        .validate(world)
+        .validate_baseline(world)
         .map_err(|_| binding_changed())?;
     prepared.catalog.validate(world)?;
     if prepared.inputs.is_empty() && prepared.retirements.is_empty() {
@@ -164,7 +164,7 @@ fn prepare_startup_resources(
 }
 
 struct PreparedResidency {
-    bindings: SceneAssetBindings,
+    bindings: SceneAssetReservations,
     staged_server: AssetServer,
     images: ImagePublications,
     inputs: Vec<TileSetPublicationInput>,
@@ -237,7 +237,7 @@ impl PreparedResidency {
         replacement::validate_native_resources(world, content, current)?;
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
         let catalog = PreparedCatalog::prepare(world, content, current)?;
-        let mut bindings = SceneAssetBindings::from_world(world);
+        let mut bindings = SceneAssetReservations::from_world(world);
         let owned_images = current.map_or(&[][..], |current| current.images.as_slice());
         let no_content = owned_images.is_empty() && content.image_count() == 0;
         let images = if no_content {
@@ -397,7 +397,7 @@ pub(super) fn replace_scene<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    match PreparedProjectSceneReplacement::prepare(
+    match StagedProjectSceneReplacement::stage(
         world,
         expected,
         content,

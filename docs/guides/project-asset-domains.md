@@ -245,7 +245,7 @@ actual format, membership and residency. Source database operations retain their
 contract. The [native processed consumer](../../tests/fixtures/module-consumer/tests/runtime_scene_assets.rs)
 uses actual primary/auxiliary values with native Scene codecs and no decode-time source database.
 
-The same consumer stages a new later-Scene Product through `SceneAssetBindings::reserve_product`
+The same consumer stages a new later-Scene Product through `SceneAssetReservations::reserve_product`
 and supplies its values through the existing product resource overlay. A final native failure or
 explicit discard leaves both the old catalogue and actual values intact. Successful replacement
 publishes all three together without changing the live server during preparation. Product-owned

@@ -328,12 +328,29 @@ pub struct ComponentEncodeContext<'a> {
     asset_ref_export_policy: AssetRefExportPolicy,
     asset_resolution: Option<AssetReferenceResolver<'a>>,
     asset_path_scope: Option<&'a AssetPathScope>,
+    materialization_limits: ComponentValueMaterializationLimits,
 }
 
 impl<'a> ComponentEncodeContext<'a> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the limits for default expansion and complete Native reference validation.
+    #[must_use]
+    pub const fn materialization_limits(&self) -> ComponentValueMaterializationLimits {
+        self.materialization_limits
+    }
+
+    /// Selects limits for registry-owned effective-value admission after the encoder returns.
+    #[must_use]
+    pub const fn with_materialization_limits(
+        mut self,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Self {
+        self.materialization_limits = limits;
+        self
     }
 
     #[must_use]

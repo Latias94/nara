@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-mod asset_bindings;
+mod asset_reservations;
 
 use super::*;
 use nara_asset::{
@@ -4869,7 +4869,7 @@ fn scene_spawn_and_export_preserve_ordered_runtime_topology() {
         child_id
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     let output = export
         .output()
@@ -4932,7 +4932,7 @@ fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
         [first_child, second_child]
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     assert_eq!(
         export
             .output()
@@ -4986,7 +4986,7 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
         .has_errors()
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     let output = export.output().unwrap();
     let ids = output
         .document
@@ -5059,7 +5059,7 @@ fn generated_export_ids_skip_every_authored_claim() {
         .has_errors()
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     let output = export.output().unwrap();
     let ids = output
         .document
@@ -5129,7 +5129,7 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
         .has_errors()
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     assert!(!export.diagnostics.has_errors());
     let output = export.output().unwrap();
     let ids = output
@@ -5229,7 +5229,7 @@ fn persistent_reference_to_exported_entity_rewrites_to_scene_local() {
     let target_entity = spawned_entity(&world, &spawn, &target);
     let persistent_locator = register_persistent_axis(&mut world, target_entity, persistent);
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(!export.diagnostics.has_errors());
     let output = export.output().unwrap();
@@ -5276,7 +5276,7 @@ fn resolved_external_persistent_reference_is_preserved() {
     let external = spawn_identity_entity(&mut world).unwrap().entity();
     register_persistent_axis(&mut world, external, persistent.clone());
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(!export.diagnostics.has_errors());
     let source_record = &export.output().unwrap().document.entities[0];
@@ -5314,7 +5314,7 @@ fn missing_persistent_reference_prevents_export_publication() {
         .has_errors()
     );
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
     assert!(export.output().is_none());
@@ -5366,7 +5366,7 @@ fn unloaded_persistent_reference_prevents_export_publication() {
             .unwrap();
     });
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
     assert!(export.output().is_none());
@@ -5424,7 +5424,7 @@ fn deleted_persistent_reference_prevents_export_publication() {
     });
     let before_entities = world.iter_entities().count();
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
     assert!(export.output().is_none());
@@ -5470,7 +5470,7 @@ fn stale_persistent_reference_prevents_export_publication() {
     register_persistent_axis(&mut world, external, persistent);
     assert!(world.despawn(external));
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
     assert!(export.output().is_none());
@@ -6093,7 +6093,7 @@ fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
     let parent = world.spawn_empty().id();
     place_runtime_child(&mut world, child, parent);
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
     assert!(export.output().is_none());
     assert_eq!(world.get::<Parent>(child).unwrap().parent(), parent);
     assert!(
@@ -6134,7 +6134,7 @@ fn export_component_encode_failure_is_an_error() {
     );
     assert!(!report.diagnostics.has_errors());
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
     assert!(export.output().is_none());

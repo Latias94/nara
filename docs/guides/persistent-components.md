@@ -171,20 +171,31 @@ owner/version, declared references and current Scene identity before mutation. R
 change the live carrier, not source documents or authoring history. Access and change tracking are
 currently at carrier granularity; this is not per-Schema ECS query/scheduler presence.
 
-`bindings.export_scene` snapshots all current live registered Scene identities, flattening Prefabs.
-`export_scene_with_options` additionally accepts an explicit scoped resolver for `Path` or
-`StableIdWhenKnown` asset lowering. Native free functions reject encountered data members rather
-than omit them; `export_scene_with_asset_resolution` provides the same metadata lowering for a
-native-only caller, including assets supplied by defaults after encoding. Managed native export
+`bindings.export_live_scene` snapshots all current live registered Scene identities across every
+instance in the World, flattening Prefabs. `bindings.export_live_scene_with_options` additionally
+accepts an explicit scoped resolver for `Path` or `StableIdWhenKnown` asset lowering. The native-only
+free functions are `export_live_scene(world, registry)` and
+`export_live_scene_with_options(world, registry, options, optional_resolver)`. They reject encountered
+data members rather than omit them, and support the same metadata lowering, including assets
+supplied by defaults after encoding. Managed native export
 uses the installed native definition. The independent preview publication exception does not
 transfer managed export authority. Source Save remains the authoring document owner's operation.
 
 A live export is a new source snapshot. For each Schema default that needs a source environment,
 it records the already resolved effective field as that new record's contextual default. Both
-the explicit value and this snapshot count toward `SceneExportOptions::value_limits` before
+the explicit value and this snapshot count toward `LiveSceneExportOptions::value_limits` before
 copying. The result can be compiled again under the same definitions; failure to establish a
 valid new context rejects the complete export. Use source Save or complete source conversion
 when the original hidden defaults and inheritance must be preserved.
+
+`ComponentEncodeContext::with_materialization_limits` carries the remaining allowance into
+native registry encoding before engine-owned default expansion and Native reference checks.
+`ComponentValueMaterializationLimits::nodes()` and `bytes()` return exact `usize` ceilings;
+`remaining(retained_nodes, retained_bytes)` subtracts admitted cost without rounding an exhausted
+ceiling upward. Zero bytes can admit zero-byte values/defaults; zero nodes admits no value.
+Materialization limit errors are typed and retain the live export's budget diagnostic. Trusted
+encoder code still constructs its own result before these checks; a logical value allowance is
+neither allocator isolation nor a process-memory ceiling.
 
 The default export policy requests Path spelling. Converting a Schema-declared StableId into a
 Path requires the actual scoped resolver, even when the native component stores `AssetRef`
@@ -194,7 +205,8 @@ policy; policy selection never proves that the referenced content exists.
 
 The carrier retains only data and exact owner-local Schema snapshots. Strict entity/instance
 retirement releases it without a hook exemption. A product owning native retirement work can use
-the advanced mixed claims preparation method and retain its existing commit/retry/discard custody.
+`stage_scene_replacement_with_claims` or `stage_runtime_scene_replacement_with_claims` and retain
+the returned `StagedSceneReplacement` across commit/retry/discard and native retirement.
 Plain data materialization does not install a language module, prove gameplay callbacks available,
 or replace the product recipe's required-contribution checks. Those execution-owner integrations
 remain separate from this storage family.
@@ -234,8 +246,8 @@ then resolve those existing bindings through the ordinary component context with
 database. Unknown or wrong-typed selections refuse; a reservation alone proves no residency.
 The [native asset consumer](../../tests/fixtures/module-consumer/tests/runtime_scene_assets.rs)
 exercises actual values, full reverse identities and replacement refusal through this path.
-For a later Scene that introduces new products, `SceneAssetBindings::reserve_product` stages their
-identities privately. Supply those bindings and the owner-prepared resource values to the existing
+For a later Scene that introduces new products, `SceneAssetReservations::reserve_product` stages their
+identities privately. Supply those reservations and the owner-prepared resource values to the existing
 advanced replacement transaction. Native decoding sees the private catalogue; cancellation or
 failure publishes neither its new bindings nor the resource overlay. Successful commit publishes
 the captured catalogue, resources and Scene through the same guarded path.
@@ -256,7 +268,11 @@ the bytes may select new compatible definitions; a managed World additionally re
 installed selection. Use `prepare_runtime_scene_replacement` for an existing activation. Both
 methods return ordinary `PreparedScene` tokens and use the existing guarded publication, cancellation
 and last-good replacement behavior. Advanced native retirement/product writes retain the existing
-`PreparedSceneReplacement` retry/discard protocol.
+`StagedSceneReplacement` retry/discard protocol. Unlike unbound `PreparedScene`, this advanced
+token already owns allocated unpublished targets. A rejected commit returns the same token for
+retry or explicit `discard(world)`; dropping it does not clean the World. Asset reservations have
+their own origin-World/catalogue baseline and do not establish resource residency or component
+definition authority.
 
 `RuntimeSceneLimits` combines ordinary `SceneFileLimits` with provenance and cumulative modeled
 working-byte bounds. The working ledger covers the processed owner's allocations and admitted

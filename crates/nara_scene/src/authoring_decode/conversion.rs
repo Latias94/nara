@@ -353,8 +353,10 @@ fn classify_materialized_record(
             record.version,
             effective.as_ref(),
             nara_reflect::EntityReferenceTraversalLimits::new(
-                limits.nodes(),
-                limits.bytes(),
+                nara_core::ItemLimit::new(limits.nodes())
+                    .expect("source reference node limits are nonzero"),
+                nara_core::ByteLimit::new(limits.bytes())
+                    .expect("source reference byte limits are nonzero"),
                 limits.depth(),
             ),
             |_, _, bytes| work.reserve("classification-asset-references", Some(bytes)),

@@ -6,15 +6,24 @@ use nara_reflect::__private::PreparedComponentApplyBatch;
 use super::*;
 use crate::product_transaction::PreparedSceneProductResources;
 
-/// Fully decoded replacement candidate retained across native-domain retirement.
+/// Replacement with allocated World targets and prepared native/data and product values.
 ///
-/// The owner must retain this token after native effects begin. A failed commit returns the same
-/// candidate; retry never reruns codecs or the product configuration callback. Candidate entities
-/// remain unpublished and must be discarded explicitly if preparation is abandoned before native
-/// retirement. Runtime Stop may instead destroy the owning World after domain shutdown.
+/// Staging has already allocated actual target entities in the originating World and bound the
+/// prepared values to them. The replacement activation remains unpublished until [`Self::commit`].
+/// This differs from ordinary [`PreparedScene`], which retains unbound values before allocation.
+///
+/// A failed commit returns the same token with the same allocated targets and prepared values;
+/// retry never reruns codecs or the product configuration callback. The owner must retain this
+/// token after native effects begin. Before native retirement begins, abandoning the replacement
+/// requires an explicit [`Self::discard`] with the originating World. Runtime Stop may instead
+/// destroy the owning World after native-domain shutdown.
+///
+/// Dropping this token releases its owned values and private catalogue, but does not despawn the
+/// allocated targets or perform any World cleanup. Allocated process-local identities remain
+/// consumed even when the replacement is discarded.
 #[doc(hidden)]
 #[must_use]
-pub struct PreparedSceneReplacement(pub(super) PreparedScenePublication);
+pub struct StagedSceneReplacement(pub(super) PreparedScenePublication);
 
 pub(super) struct PreparedScenePublication {
     pub(super) definition: preparation::ScenePreparationDefinition,
@@ -50,20 +59,26 @@ enum FinalSceneIdentityCommit {
     },
 }
 
-impl PreparedSceneReplacement {
+impl StagedSceneReplacement {
     /// Revalidates all captured World facts before the first native effect.
     pub fn validate_baseline(&self, world: &mut World) -> Result<(), SceneSpawnReport> {
         self.0.validate(world, false).map(|_| ())
     }
 
     /// Publishes after every native owner has removed its explicitly claimed components.
+    ///
+    /// Rejection returns `(self, report)`, preserving the same allocated targets and prepared
+    /// values for an explicit retry. Neither codecs nor the product callback run again.
     pub fn commit(self, world: &mut World) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
         self.0
             .commit(world)
             .map_err(|(prepared, report)| (Self(prepared), report))
     }
 
-    /// Abandons an unpublished candidate before native retirement has begun.
+    /// Despawns the allocated unpublished targets before native retirement has begun.
+    ///
+    /// Requires the originating World for cleanup. If safe cleanup is rejected, returns the
+    /// same token for an explicit retry. Dropping the token alone does not clean up the World.
     pub fn discard(self, world: &mut World) -> Result<(), Self> {
         self.0.discard(world).map_err(Self)
     }
@@ -684,23 +699,23 @@ mod tests {
         SceneProductTransactionLimits::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap())
     }
 
-    fn prepare_fixture_replacement(
+    fn stage_fixture_replacement(
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
         candidate: &CompiledSceneCandidate,
         current: &SpawnedSceneInstance,
-    ) -> PreparedSceneReplacement {
+    ) -> StagedSceneReplacement {
         let claims = SceneNativeRetirementClaims::from_component_ids([world
             .component_id::<NativeState>()
             .unwrap()]);
-        let bindings = SceneAssetBindings::from_world(world);
-        prepare_expanded_scene_replacement_with_claims(
+        let reservations = SceneAssetReservations::from_world(world);
+        stage_expanded_scene_replacement_with_claims(
             world,
             registry,
             candidate,
             None,
             current,
-            bindings,
+            reservations,
             &claims,
             limits(),
             &[],
@@ -708,14 +723,14 @@ mod tests {
                 overlay.replace_resource(ProductValue::new(2));
             },
         )
-        .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics))
+        .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics))
     }
 
     #[test]
     fn resource_changes_reject_before_native_retirement_and_remain_discardable() {
         for remove in [false, true] {
             let (mut world, registry, candidate, current, old, id) = fixture();
-            let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+            let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
             prepared.validate_baseline(&mut world).unwrap();
             if remove {
                 world.remove_resource::<ProductValue>().unwrap();
@@ -764,7 +779,7 @@ mod tests {
             let old_source = world.get::<SceneEntitySource>(old).unwrap().clone();
             let probe = Arc::new(NativePreparationProbe::default());
             let (registry, candidate) = native_value_candidate(id.clone(), &probe);
-            let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+            let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
             prepared.validate_baseline(&mut world).unwrap();
             // Model the native owner's completed retirement after the original admission.
             // The final commit must still compare the original product-resource baseline.
@@ -871,20 +886,20 @@ mod tests {
         let claims = SceneNativeRetirementClaims::from_component_ids([world
             .component_id::<NativeState>()
             .unwrap()]);
-        let bindings = SceneAssetBindings::from_world(&world);
-        let prepared = prepare_expanded_scene_replacement_with_claims(
+        let reservations = SceneAssetReservations::from_world(&world);
+        let prepared = stage_expanded_scene_replacement_with_claims(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
-            bindings,
+            reservations,
             &claims,
             limits(),
             &[retirement],
             |_| {},
         )
-        .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));
+        .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics));
         world.commands().queue(move |world: &mut World| {
             world.entity_mut(retirement.entity()).insert(NativeState);
         });
@@ -905,7 +920,7 @@ mod tests {
     #[test]
     fn discard_materializes_deferred_candidate_despawn_before_selecting_live_entities() {
         let (mut world, registry, candidate, current, old, id) = fixture();
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let scratch = prepared.0.spawned_by_id[&id];
         world.commands().queue(move |world: &mut World| {
             world.entity_mut(scratch).despawn();
@@ -928,7 +943,7 @@ mod tests {
             ]),
             &registry,
         );
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let missing = prepared.0.spawned_by_id[&id];
         let remaining = prepared.0.spawned_by_id[&other];
         world.entity_mut(missing).despawn();
@@ -941,7 +956,7 @@ mod tests {
     #[test]
     fn discard_does_not_clean_recycled_entity_generation() {
         let (mut world, registry, candidate, current, _, id) = fixture();
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let scratch = prepared.0.spawned_by_id[&id];
         let successor = world.despawn_no_free(scratch).unwrap();
         world.spawn_empty_at(successor).unwrap();
@@ -955,7 +970,7 @@ mod tests {
     #[test]
     fn discard_rejects_another_world_even_when_candidate_entities_are_missing() {
         let (mut world, registry, candidate, current, _, _) = fixture();
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let mut other_world = World::new();
         let other_domain =
             WorldIdentityDomain::new(&other_world, WorldIdentityDomainSettings::default()).unwrap();
@@ -973,7 +988,7 @@ mod tests {
     #[test]
     fn discard_rejects_a_new_identity_incarnation_on_the_same_entity() {
         let (mut world, registry, candidate, current, _, id) = fixture();
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let original = prepared.0.identity_tokens[&id];
         world.entity_mut(original.entity()).clear();
         let successor =
@@ -990,7 +1005,7 @@ mod tests {
     #[test]
     fn discard_rejects_candidate_with_a_new_semantic_identity_axis() {
         let (mut world, registry, candidate, current, _, id) = fixture();
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         let token = prepared.0.identity_tokens[&id];
         world.resource_scope(|world, mut domain: nara_ecs::Mut<WorldIdentityDomain>| {
             domain
@@ -1019,15 +1034,15 @@ mod tests {
         let claims = SceneNativeRetirementClaims::from_component_ids([world
             .component_id::<NativeState>()
             .unwrap()]);
-        let bindings = SceneAssetBindings::from_world(&world);
+        let reservations = SceneAssetReservations::from_world(&world);
         let count = Arc::clone(&calls);
-        let prepared = prepare_expanded_scene_replacement_with_claims(
+        let prepared = stage_expanded_scene_replacement_with_claims(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
-            bindings,
+            reservations,
             &claims,
             limits(),
             &[],
@@ -1036,7 +1051,7 @@ mod tests {
                 overlay.replace_resource(ProductValue::new(2));
             },
         )
-        .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));
+        .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics));
         assert_eq!(world.resource::<Removed>().0, 0);
         assert_eq!(world.resource::<ProductValue>().0, 1);
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
@@ -1090,7 +1105,7 @@ mod tests {
         let product_baseline = world.resource::<ProductValue>().capture_baseline();
         let probe = Arc::new(NativePreparationProbe::default());
         let (registry, candidate) = native_value_candidate(id.clone(), &probe);
-        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
         assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
         assert!(prepared.discard(&mut world).is_ok());
@@ -1114,20 +1129,20 @@ mod tests {
         let claims = SceneNativeRetirementClaims::from_component_ids([world
             .component_id::<NativeState>()
             .unwrap()]);
-        let bindings = SceneAssetBindings::from_world(&world);
-        let prepared = prepare_expanded_scene_replacement_with_claims(
+        let reservations = SceneAssetReservations::from_world(&world);
+        let prepared = stage_expanded_scene_replacement_with_claims(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
-            bindings,
+            reservations,
             &claims,
             limits(),
             &[retirement],
             |_| {},
         )
-        .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));
+        .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics));
 
         world.commands().queue(move |world: &mut World| {
             world.resource_scope(|world, mut domain: nara_ecs::Mut<WorldIdentityDomain>| {
@@ -1168,14 +1183,14 @@ mod tests {
             };
             world.flush();
             let count = world.entities().len();
-            let bindings = SceneAssetBindings::from_world(&world);
-            let result = prepare_expanded_scene_replacement_with_claims(
+            let reservations = SceneAssetReservations::from_world(&world);
+            let result = stage_expanded_scene_replacement_with_claims(
                 &mut world,
                 &registry,
                 &candidate,
                 None,
                 &current,
-                bindings,
+                reservations,
                 &claims,
                 limits(),
                 &[],

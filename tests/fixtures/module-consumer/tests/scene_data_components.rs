@@ -25,10 +25,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     AuthoringDocumentSource, CompiledSceneCandidate, CompiledSceneComponent,
-    InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-    SceneExportOptions, SceneExportOutput, SceneOccurrenceKey, ScenePatchDocument,
+    InMemoryPrefabSourceResolver, LiveSceneExportOptions, LiveSceneExportOutput, Name,
+    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, ScenePatchDocument,
     ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, retire_and_despawn_scene_entity,
     retire_and_despawn_scene_instance,
 };
@@ -243,14 +243,15 @@ fn assert_data_record(actual: &CompiledSceneComponent, expected: &SceneComponent
     assert_eq!(actual.value(), &expected.value);
 }
 
-fn export(bindings: &SceneComponentBindings, world: &World) -> SceneExportOutput {
-    let report = bindings.export_scene_with_options(world, SceneExportOptions::default(), None);
+fn export(bindings: &SceneComponentBindings, world: &World) -> LiveSceneExportOutput {
+    let report =
+        bindings.export_live_scene_with_options(world, LiveSceneExportOptions::default(), None);
     assert!(!report.diagnostics.has_errors(), "{report:?}");
     report.into_output().unwrap()
 }
 
 fn exported<'a>(
-    output: &'a SceneExportOutput,
+    output: &'a LiveSceneExportOutput,
     instance: &SpawnedSceneInstance,
     id: &SceneEntityId,
 ) -> &'a SceneEntityRecord {

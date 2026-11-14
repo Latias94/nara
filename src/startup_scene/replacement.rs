@@ -4,7 +4,7 @@ use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
 use nara_scene::{
     SceneComponentBindings, SceneSpawnReport,
     advanced::{
-        SceneAssetBindings, SceneNativeRetirementClaims, SceneProductOverlayWriter,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
         SceneProductTransactionLimits,
     },
     scene_component_bindings, validate_scene_component_bindings_authority,
@@ -118,10 +118,10 @@ where
                 "Current Scene candidate does not match the installed component definitions",
             );
         }
-        let assets = SceneAssetBindings::from_world(world);
+        let assets = SceneAssetReservations::from_world(world);
         let prepared = match &source.candidate {
             RetainedSceneCandidate::Compiled(candidate) => bindings
-                .prepare_scene_replacement_with_claims(
+                .stage_scene_replacement_with_claims(
                     world,
                     candidate,
                     source.asset_resolution(),
@@ -134,7 +134,7 @@ where
                 ),
             #[cfg(feature = "serde")]
             RetainedSceneCandidate::Runtime(candidate) => bindings
-                .prepare_runtime_scene_replacement_with_claims(
+                .stage_runtime_scene_replacement_with_claims(
                     world,
                     candidate,
                     &owner.receipt,

@@ -315,7 +315,7 @@ fn contextual_admission_preserves_source_output_and_semantic_failure_classes() {
     assert_budget(
         &contextual.compile(limits),
         "source-value-nodes",
-        raw_limits.nodes().get(),
+        raw_limits.nodes(),
     );
     let raw_bytes = ComponentValueMaterializationLimits::new(
         ItemLimit::new(32).unwrap(),
@@ -326,7 +326,7 @@ fn contextual_admission_preserves_source_output_and_semantic_failure_classes() {
         &Fixture::new(empty_list(), Some(long_reference()))
             .compile(output_limits().with_materialization_limits(raw_bytes)),
         "source-value-bytes",
-        raw_bytes.bytes().get(),
+        raw_bytes.bytes(),
     );
     let raw_depth = ComponentValueMaterializationLimits::new(
         ItemLimit::new(32).unwrap(),

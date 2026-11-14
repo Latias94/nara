@@ -378,17 +378,17 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
         bytes = bytes
             .saturating_add(cost.logical_bytes())
             .saturating_add(id.as_str().len());
-        if nodes > limits.nodes().get() {
+        if nodes > limits.nodes() {
             return Err(ComponentCodecError::MaterializationNodeLimit {
                 observed: nodes,
-                maximum: limits.nodes().get(),
+                maximum: limits.nodes(),
             }
             .into());
         }
-        if bytes > limits.bytes().get() {
+        if bytes > limits.bytes() {
             return Err(ComponentCodecError::MaterializationByteLimit {
                 observed: bytes,
-                maximum: limits.bytes().get(),
+                maximum: limits.bytes(),
             }
             .into());
         }

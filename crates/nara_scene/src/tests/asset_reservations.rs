@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use super::*;
 use crate::advanced::{
-    SceneAssetBindings, SceneProductResource, SceneProductTransactionLimits,
-    replace_expanded_scene_with_product_and_bindings,
+    SceneAssetReservations, SceneProductResource, SceneProductTransactionLimits,
+    replace_expanded_scene_with_product_and_reservations,
 };
 
 #[derive(Resource)]
@@ -58,16 +58,16 @@ impl Fixture {
         &mut self,
         candidate: &CompiledSceneCandidate,
         database: nara_asset::AssetReferenceResolver<'_>,
-        bindings: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         configure: impl FnOnce(&mut crate::advanced::SceneProductOverlayWriter<'_>),
     ) -> SceneSpawnReport {
-        replace_expanded_scene_with_product_and_bindings(
+        replace_expanded_scene_with_product_and_reservations(
             &mut self.world,
             &self.registry,
             candidate,
             Some(database),
             &self.current,
-            bindings,
+            reservations,
             SceneProductTransactionLimits::new(
                 ItemLimit::new(4).unwrap(),
                 ItemLimit::new(4).unwrap(),
@@ -136,7 +136,7 @@ fn next_source(
 }
 
 #[test]
-fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() {
+fn reserved_asset_identity_is_shared_by_decode_apply_and_the_committed_server() {
     let asset_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let dependency_id = stable_id("4e438770-1757-44f0-bbeb-6237cd6768ab");
     let mut database = test_database(asset_id, "textures/new.png");
@@ -157,15 +157,15 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
     ] {
         let mut fixture = Fixture::new(registry);
         let before = fixture.world.resource::<AssetServer>().clone();
-        let mut bindings = SceneAssetBindings::from_world(&fixture.world);
-        let expected = bindings
+        let mut reservations = SceneAssetReservations::from_world(&fixture.world);
+        let expected = reservations
             .reserve::<TestAsset>(
                 &AssetRef::StableId(asset_id),
                 database.resolver(&nara_asset::AssetPathScope::ROOT),
                 &AssetSourceKind::Image,
             )
             .unwrap();
-        let dependency = bindings
+        let dependency = reservations
             .reserve::<TestAsset>(
                 &AssetRef::StableId(dependency_id),
                 database.resolver(&nara_asset::AssetPathScope::ROOT),
@@ -173,22 +173,22 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
             )
             .unwrap();
         assert_eq!(
-            bindings
+            reservations
                 .staged_server()
                 .get_handle::<TestAsset>(expected.id()),
             Some(expected)
         );
         assert_eq!(
-            bindings.staged_server().stable_id(dependency.id()),
+            reservations.staged_server().stable_id(dependency.id()),
             Some(dependency_id)
         );
         assert_eq!(fixture.world.resource::<AssetServer>(), &before);
-        bindings.validate(&fixture.world).unwrap();
+        reservations.validate_baseline(&fixture.world).unwrap();
 
         let report = fixture.replace(
             &next_source(&fixture.registry, reference),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
-            bindings,
+            reservations,
             |_| {},
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
@@ -220,12 +220,12 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
 }
 
 #[test]
-fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation() {
+fn untouched_reservations_from_another_world_reject_before_overlay_or_scene_mutation() {
     let foreign = World::new();
-    let bindings = SceneAssetBindings::from_world(&foreign);
+    let reservations = SceneAssetReservations::from_world(&foreign);
     let mut fixture = Fixture::new(test_asset_registry());
     assert!(matches!(
-        bindings.validate(&fixture.world),
+        reservations.validate_baseline(&fixture.world),
         Err(ComponentCodecError::WrongWorld)
     ));
     let server = fixture.world.resource::<AssetServer>().clone();
@@ -238,16 +238,16 @@ fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation
     let candidate = compiled_scene(
         &fixture.registry,
         scene_source_key(
-            "untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation/candidate",
+            "untouched_reservations_from_another_world_reject_before_overlay_or_scene_mutation/candidate",
         ),
         Arc::new(SceneDocument::default()),
     );
     let report = fixture.replace(
         &candidate,
         ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
-        bindings,
+        reservations,
         |_| {
-            panic!("foreign bindings must reject before product configuration");
+            panic!("foreign reservations must reject before product configuration");
         },
     );
     assert!(report.instance.is_none());
@@ -255,20 +255,20 @@ fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation
         report
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == "scene.asset-bindings-invalid")
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.asset-reservations-invalid")
     );
     fixture.assert_current(&server, &entities, stats);
 }
 
 #[test]
-fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
+fn captured_asset_server_changes_reject_even_when_reservations_are_untouched() {
     let asset_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let database = test_database(asset_id, "textures/new.png");
-    for prebind in [false, true] {
+    for reserve_identity in [false, true] {
         let mut fixture = Fixture::new(test_asset_registry());
-        let mut bindings = SceneAssetBindings::from_world(&fixture.world);
-        if prebind {
-            bindings
+        let mut reservations = SceneAssetReservations::from_world(&fixture.world);
+        if reserve_identity {
+            reservations
                 .reserve::<TestAsset>(
                     &AssetRef::StableId(asset_id),
                     database.resolver(&nara_asset::AssetPathScope::ROOT),
@@ -289,15 +289,15 @@ fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
             .collect::<BTreeSet<_>>();
         let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
         assert!(matches!(
-            bindings.validate(&fixture.world),
+            reservations.validate_baseline(&fixture.world),
             Err(ComponentCodecError::AssetServerChanged)
         ));
         let report = fixture.replace(
             &next_source(&fixture.registry, AssetRef::StableId(asset_id)),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
-            bindings,
+            reservations,
             |_| {
-                panic!("stale bindings must reject before product configuration");
+                panic!("stale reservations must reject before product configuration");
             },
         );
         assert!(report.instance.is_none());
@@ -305,14 +305,14 @@ fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
             report
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code().as_str() == "scene.asset-bindings-invalid")
+                .any(|diagnostic| diagnostic.code().as_str() == "scene.asset-reservations-invalid")
         );
         fixture.assert_current(&server, &entities, stats);
     }
 }
 
 #[test]
-fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overlay_values() {
+fn apply_rejection_discards_reserved_catalogue_scratch_entities_and_owned_overlay_values() {
     let asset_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let database = test_database(asset_id, "textures/new.png");
     let mut fixture = Fixture::new(failing_apply_registry());
@@ -322,8 +322,8 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
         .insert_resource(RetainedProduct(Arc::clone(&original)));
     let replacement = Arc::new(());
     let released = Arc::downgrade(&replacement);
-    let mut bindings = SceneAssetBindings::from_world(&fixture.world);
-    let planned = bindings
+    let mut reservations = SceneAssetReservations::from_world(&fixture.world);
+    let planned = reservations
         .reserve::<TestAsset>(
             &AssetRef::StableId(asset_id),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
@@ -333,7 +333,7 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
     let candidate = compiled_scene(
         &fixture.registry,
         scene_source_key(
-            "apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overlay_values/candidate",
+            "apply_rejection_discards_reserved_catalogue_scratch_entities_and_owned_overlay_values/candidate",
         ),
         Arc::new(SceneDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("resolves")).with_component(
@@ -355,7 +355,7 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
     let report = fixture.replace(
         &candidate,
         database.resolver(&nara_asset::AssetPathScope::ROOT),
-        bindings,
+        reservations,
         |writer| {
             configured = true;
             writer.replace_resource(RetainedProduct(replacement));
@@ -392,23 +392,23 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
 }
 
 #[test]
-fn reservation_respects_source_kind_type_claims_and_dropping_bindings_publishes_nothing() {
+fn reservation_respects_source_kind_type_claims_and_dropping_reservations_publishes_nothing() {
     struct OtherAsset;
     let asset_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let database = test_database(asset_id, "textures/new.png");
     let fixture = Fixture::new(test_asset_registry());
     let before = fixture.world.resource::<AssetServer>().clone();
-    let mut bindings = SceneAssetBindings::from_world(&fixture.world);
+    let mut reservations = SceneAssetReservations::from_world(&fixture.world);
     let reference = AssetRef::StableId(asset_id);
     assert!(matches!(
-        bindings.reserve::<TestAsset>(
+        reservations.reserve::<TestAsset>(
             &reference,
             database.resolver(&nara_asset::AssetPathScope::ROOT),
             &AssetSourceKind::Prefab
         ),
         Err(AssetRefError::UnexpectedSourceKind { .. })
     ));
-    let planned = bindings
+    let planned = reservations
         .reserve::<TestAsset>(
             &reference,
             database.resolver(&nara_asset::AssetPathScope::ROOT),
@@ -416,7 +416,7 @@ fn reservation_respects_source_kind_type_claims_and_dropping_bindings_publishes_
         )
         .unwrap();
     assert!(matches!(
-        bindings.reserve::<OtherAsset>(
+        reservations.reserve::<OtherAsset>(
             &reference,
             database.resolver(&nara_asset::AssetPathScope::ROOT),
             &AssetSourceKind::Image
@@ -426,7 +426,7 @@ fn reservation_respects_source_kind_type_claims_and_dropping_bindings_publishes_
         ))
     ));
     assert_eq!(fixture.world.resource::<AssetServer>(), &before);
-    drop(bindings);
+    drop(reservations);
     assert_eq!(fixture.world.resource::<AssetServer>(), &before);
     assert!(
         fixture

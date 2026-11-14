@@ -12,13 +12,16 @@ use crate::{
 
 /// Bounds one expanded effective value using logical value cost rather than wire size.
 ///
+/// Node and byte ceilings can be zero after subtracting retained values. Zero bytes admits
+/// zero-byte values and defaults; zero nodes admits no value. Depth remains positive.
+///
 /// The caller owns admission of the source value. Default materialization applies these limits
 /// to the expanded value and returns no-insertion values without scanning them. Native admission
 /// also uses them for its complete effective-value reference check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentValueMaterializationLimits {
-    nodes: ItemLimit,
-    bytes: ByteLimit,
+    nodes: usize,
+    bytes: usize,
     depth: DepthLimit,
 }
 
@@ -26,25 +29,49 @@ impl ComponentValueMaterializationLimits {
     #[must_use]
     pub const fn new(nodes: ItemLimit, bytes: ByteLimit, depth: DepthLimit) -> Self {
         Self {
-            nodes,
-            bytes,
+            nodes: nodes.get(),
+            bytes: bytes.get(),
             depth,
         }
     }
 
     #[must_use]
-    pub const fn nodes(self) -> ItemLimit {
+    pub const fn nodes(self) -> usize {
         self.nodes
     }
 
     #[must_use]
-    pub const fn bytes(self) -> ByteLimit {
+    pub const fn bytes(self) -> usize {
         self.bytes
     }
 
     #[must_use]
     pub const fn depth(self) -> DepthLimit {
         self.depth
+    }
+
+    /// Replaces the node ceiling while retaining the exact byte ceiling and depth.
+    #[must_use]
+    pub const fn with_nodes(mut self, nodes: ItemLimit) -> Self {
+        self.nodes = nodes.get();
+        self
+    }
+
+    /// Replaces the byte ceiling while retaining the exact node ceiling and depth.
+    #[must_use]
+    pub const fn with_bytes(mut self, bytes: ByteLimit) -> Self {
+        self.bytes = bytes.get();
+        self
+    }
+
+    /// Subtracts retained logical value cost without rounding an exhausted allowance upward.
+    #[must_use]
+    pub const fn remaining(self, retained_nodes: usize, retained_bytes: usize) -> Self {
+        Self {
+            nodes: self.nodes.saturating_sub(retained_nodes),
+            bytes: self.bytes.saturating_sub(retained_bytes),
+            depth: self.depth,
+        }
     }
 }
 
@@ -476,8 +503,8 @@ fn preflight_materialization_cost<'admit>(
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
 ) -> Result<ComponentValueCost, ComponentCodecError> {
     let mut budget = MaterializationBudget {
-        maximum_nodes: limits.nodes().get(),
-        maximum_bytes: limits.bytes().get(),
+        maximum_nodes: limits.nodes(),
+        maximum_bytes: limits.bytes(),
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
@@ -804,8 +831,8 @@ fn validate_value_materialization_budget_impl<'admit>(
     reference_policy: ReferencePolicy,
 ) -> Result<(), ComponentCodecError> {
     MaterializationBudget {
-        maximum_nodes: limits.nodes().get(),
-        maximum_bytes: limits.bytes().get(),
+        maximum_nodes: limits.nodes(),
+        maximum_bytes: limits.bytes(),
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
@@ -1048,6 +1075,50 @@ mod budget_tests {
             ),
             Err(ComponentCodecError::MaterializationByteLimit { .. })
         ));
+    }
+
+    #[test]
+    fn typed_zero_remainder_checks_defaults_before_materialization() {
+        let limits = ComponentValueMaterializationLimits::new(
+            ItemLimit::new(2).unwrap(),
+            ByteLimit::ONE,
+            DepthLimit::new(2).unwrap(),
+        )
+        .remaining(0, 1);
+        let raw = ComponentValue::List(Vec::new());
+        for default in [String::new(), "x".to_owned()] {
+            let schema = ComponentSchema::new(
+                ComponentTypeId::new("test.ZeroByteDefault"),
+                "Zero-byte default",
+                ComponentSchemaVersion::ONE,
+            )
+            .with_fields([ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("value"),
+                "Value",
+                crate::ComponentFieldPath::new([crate::ComponentFieldPathSegment::index(0)]),
+                ComponentValueKind::String,
+                ComponentValue::String(default.clone()),
+            )]);
+            let expected = if default.is_empty() {
+                Ok(Cow::Owned(ComponentValue::List(vec![
+                    ComponentValue::String(default),
+                ])))
+            } else {
+                Err(ComponentCodecError::MaterializationByteLimit {
+                    observed: 1,
+                    maximum: 0,
+                })
+            };
+            assert_eq!(effective_component_value(&schema, &raw, limits), expected);
+            assert_eq!(
+                effective_component_value(&schema, &raw, limits.remaining(2, 0)),
+                Err(ComponentCodecError::MaterializationNodeLimit {
+                    observed: 1,
+                    maximum: 0,
+                }),
+            );
+            assert_eq!(raw, ComponentValue::List(Vec::new()));
+        }
     }
 
     #[test]

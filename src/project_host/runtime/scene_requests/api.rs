@@ -606,16 +606,15 @@ where
                 ManagedSceneTravelAttempt::prepare(registry, world, &view).map_err(|error| {
                     rejected_with_code(error.code(), "Native Scene domain preparation was rejected")
                 })?;
-            let candidate =
-                super::super::content_residency::PreparedProjectSceneReplacement::prepare(
-                    world,
-                    &admission.expected,
-                    &content,
-                    &attempt.combined_claims(),
-                    limits,
-                    additional_retirements,
-                    configure,
-                )?;
+            let candidate = super::super::content_residency::StagedProjectSceneReplacement::stage(
+                world,
+                &admission.expected,
+                &content,
+                &attempt.combined_claims(),
+                limits,
+                additional_retirements,
+                configure,
+            )?;
             Ok((attempt, candidate))
         })();
         match prepared {

@@ -202,7 +202,6 @@ fn asset_rewrite_limits(
         ItemLimit::new(
             values
                 .nodes()
-                .get()
                 .saturating_mul(2)
                 .saturating_add(references.len())
                 .saturating_add(path_nodes.saturating_mul(3)),
@@ -211,7 +210,6 @@ fn asset_rewrite_limits(
         ByteLimit::new(
             values
                 .bytes()
-                .get()
                 .saturating_mul(2)
                 .saturating_add(path_bytes.saturating_mul(3)),
         )

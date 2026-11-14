@@ -287,8 +287,8 @@ pub(super) fn prepare_ordinary_scene(
 ) -> Result<PreparedScene, SceneSpawnReport> {
     let definition = ScenePreparationDefinition::capture(world, registry)?;
     definition.require_managed_definition()?;
-    let bindings = SceneAssetBindings::from_world(world);
-    let unbound = SceneSpawner::new().prepare_unbound_with_asset_context_and_product_bindings(
+    let reservations = SceneAssetReservations::from_world(world);
+    let unbound = SceneSpawner::new().prepare_unbound_with_asset_context_and_product_reservations(
         world,
         registry,
         definition,
@@ -297,7 +297,7 @@ pub(super) fn prepare_ordinary_scene(
         asset_resolution,
         target,
         None,
-        bindings,
+        reservations,
         &SceneNativeRetirementClaims::default(),
         ComponentValueMaterializationLimits::default(),
     )?;
@@ -384,7 +384,7 @@ impl SceneComponentBindings {
 
     /// Prepares a processed Scene with its exact admitted native/data definitions.
     ///
-    /// Uses the candidate's aggregate value allowance and the receiving World's asset bindings.
+    /// Uses the candidate's aggregate value allowance and the receiving World's asset reservations.
     /// A managed World must have installed the same definitions during App composition.
     #[cfg(feature = "serde")]
     pub fn prepare_runtime_scene(
@@ -438,20 +438,21 @@ impl SceneComponentBindings {
     ) -> Result<PreparedScene, SceneSpawnReport> {
         let definition =
             ScenePreparationDefinition::capture_with_bindings(world, self.native_snapshot(), self)?;
-        let asset_bindings = SceneAssetBindings::from_world(world);
-        let unbound = SceneSpawner::new().prepare_unbound_with_asset_context_and_product_bindings(
-            world,
-            self.native_snapshot(),
-            definition,
-            candidate,
-            occurrence,
-            asset_resolution,
-            target,
-            None,
-            asset_bindings,
-            &SceneNativeRetirementClaims::default(),
-            limits,
-        )?;
+        let reservations = SceneAssetReservations::from_world(world);
+        let unbound = SceneSpawner::new()
+            .prepare_unbound_with_asset_context_and_product_reservations(
+                world,
+                self.native_snapshot(),
+                definition,
+                candidate,
+                occurrence,
+                asset_resolution,
+                target,
+                None,
+                reservations,
+                &SceneNativeRetirementClaims::default(),
+                limits,
+            )?;
         unbound.definition.validate(world)?;
         Ok(PreparedScene { unbound })
     }
@@ -1096,9 +1097,9 @@ mod tests {
                 .unwrap(),
             );
         let occurrence = SceneOccurrenceKey::new("scene.tests", "definition-identity").unwrap();
-        let bindings = SceneAssetBindings::from_world(&world);
+        let reservations = SceneAssetReservations::from_world(&world);
         let report = SceneSpawner::new()
-            .prepare_unbound_with_asset_context_and_product_bindings(
+            .prepare_unbound_with_asset_context_and_product_reservations(
                 &mut world,
                 &replacement,
                 definition,
@@ -1107,7 +1108,7 @@ mod tests {
                 None,
                 SceneIdentityCommit::Register,
                 None,
-                bindings,
+                reservations,
                 &SceneNativeRetirementClaims::default(),
                 ComponentValueMaterializationLimits::default(),
             )

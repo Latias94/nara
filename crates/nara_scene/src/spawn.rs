@@ -7,7 +7,7 @@ use preparation::UnboundScenePublication;
 pub use preparation::{PreparedScene, prepare_scene, prepare_scene_replacement};
 pub use projection::SceneProjection;
 use publication::PreparedScenePublication;
-pub use publication::PreparedSceneReplacement;
+pub use publication::StagedSceneReplacement;
 
 use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
@@ -47,7 +47,7 @@ use nara_reflect::{
 use crate::{
     CompiledSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
     SceneEntityProvenanceMap, SceneOccurrenceKey, SourceDocumentKey,
-    asset_bindings::SceneAssetBindings,
+    asset_reservations::SceneAssetReservations,
     candidate::SceneMaterializationInput,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     occurrence::{
@@ -307,8 +307,8 @@ impl SceneSpawner {
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
     ) -> SceneSpawnReport {
-        let bindings = SceneAssetBindings::from_world(world);
-        self.spawn_with_asset_context_and_product_bindings(
+        let reservations = SceneAssetReservations::from_world(world);
+        self.spawn_with_asset_context_and_product_reservations(
             world,
             registry,
             candidate,
@@ -316,11 +316,11 @@ impl SceneSpawner {
             asset_resolution,
             commit,
             product,
-            bindings,
+            reservations,
         )
     }
 
-    fn spawn_with_asset_context_and_product_bindings(
+    fn spawn_with_asset_context_and_product_reservations(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
@@ -329,9 +329,9 @@ impl SceneSpawner {
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
-        bindings: SceneAssetBindings,
+        reservations: SceneAssetReservations,
     ) -> SceneSpawnReport {
-        match self.prepare_with_asset_context_and_product_bindings(
+        match self.stage_with_asset_context_and_product_reservations(
             world,
             registry,
             candidate,
@@ -339,7 +339,7 @@ impl SceneSpawner {
             asset_resolution,
             commit,
             product,
-            bindings,
+            reservations,
             &SceneNativeRetirementClaims::default(),
         ) {
             Ok(prepared) => preparation::finish_scene_publication(world, prepared),
@@ -347,7 +347,7 @@ impl SceneSpawner {
         }
     }
 
-    fn prepare_with_asset_context_and_product_bindings(
+    fn stage_with_asset_context_and_product_reservations(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
@@ -356,14 +356,14 @@ impl SceneSpawner {
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
-        bindings: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
     ) -> Result<PreparedScenePublication, SceneSpawnReport> {
         let definition = preparation::ScenePreparationDefinition::capture(world, registry)?;
         if !matches!(commit, SceneIdentityCommit::Projection(_)) {
             definition.require_managed_definition()?;
         }
-        self.prepare_unbound_with_asset_context_and_product_bindings(
+        self.prepare_unbound_with_asset_context_and_product_reservations(
             world,
             registry,
             definition,
@@ -372,14 +372,14 @@ impl SceneSpawner {
             asset_resolution,
             commit,
             product,
-            bindings,
+            reservations,
             claims,
             ComponentValueMaterializationLimits::default(),
         )?
         .bind(world)
     }
 
-    fn prepare_unbound_with_asset_context_and_product_bindings(
+    fn prepare_unbound_with_asset_context_and_product_reservations(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
@@ -389,7 +389,7 @@ impl SceneSpawner {
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
-        bindings: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         value_limits: ComponentValueMaterializationLimits,
     ) -> Result<UnboundScenePublication, SceneSpawnReport> {
@@ -411,7 +411,7 @@ impl SceneSpawner {
                 let limits = candidate.limits().value_limits();
                 // Cook/admit validated this immutable input against these exact definitions.
                 // Reuse its pure admission and prepare only actual receiving World/asset work.
-                // Runtime product identities resolve only through the receiving asset bindings.
+                // Runtime product identities resolve only through the receiving asset reservations.
                 (None, limits, true)
             }
         };
@@ -423,14 +423,14 @@ impl SceneSpawner {
         }
         let document = candidate.document();
         let provenance = candidate.provenance();
-        let mut component_batch = match bindings.into_batch(world) {
+        let mut component_batch = match reservations.into_batch(world) {
             Ok(batch) => batch,
             Err(error) => {
                 let mut diagnostics = DiagnosticReport::default();
                 diagnostics.push(with_codec_error(
                     diagnostic_error(
-                        "scene.asset-bindings-invalid",
-                        "Prepared Scene asset bindings no longer match the target World",
+                        "scene.asset-reservations-invalid",
+                        "Scene asset reservations no longer match the target World",
                     ),
                     &error,
                     None,
@@ -675,23 +675,23 @@ pub fn replace_expanded_scene_with_product<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    let bindings = SceneAssetBindings::from_world(world);
-    replace_expanded_scene_with_product_and_bindings(
+    let reservations = SceneAssetReservations::from_world(world);
+    replace_expanded_scene_with_product_and_reservations(
         world,
         registry,
         candidate,
         asset_resolution,
         current,
-        bindings,
+        reservations,
         limits,
         additional_retirements,
         configure,
     )
 }
 
-/// Replaces a compiled Scene using the exact asset identities prepared by its content owner.
+/// Replaces a compiled Scene using the exact asset identities reserved by its content owner.
 ///
-/// Bindings must originate in this World and its unchanged live AssetServer. Component decoding
+/// Reservations must originate in this World and its unchanged live AssetServer. Component decoding
 /// extends their one scratch catalogue; successful Scene commit publishes that same catalogue.
 /// Rejection publishes neither the catalogue nor candidate components and leaves the prior receipt
 /// authoritative. No temporary entities escape this call.
@@ -700,13 +700,13 @@ where
 /// preflight its resource writes and retirement before calling, then perform only infallible commits
 /// after a successful report. The supplied asset_resolution must be the candidate's admitted source context.
 #[must_use]
-pub fn replace_expanded_scene_with_product_and_bindings<F>(
+pub fn replace_expanded_scene_with_product_and_reservations<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
     candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
-    bindings: SceneAssetBindings,
+    reservations: SceneAssetReservations,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
     configure: F,
@@ -718,7 +718,7 @@ where
         Ok(occurrence) => occurrence.clone(),
         Err(error) => return occurrence_rejection(DiagnosticReport::default(), error),
     };
-    SceneSpawner::new().spawn_with_asset_context_and_product_bindings(
+    SceneSpawner::new().spawn_with_asset_context_and_product_reservations(
         world,
         registry,
         candidate,
@@ -730,25 +730,30 @@ where
             additional_retirements,
             configure: Box::new(configure),
         }),
-        bindings,
+        reservations,
     )
 }
 
-/// Prepares every data and product write before a concrete native-domain owner retires handles.
-/// No codec or product callback is retained across the preparation boundary.
+/// Stages a complete replacement on allocated World targets before native-domain retirement.
+///
+/// Every native/data value and product write is prepared before this call returns. No codec or
+/// product callback crosses the staging boundary. The returned [`StagedSceneReplacement`] owns
+/// actual allocated target entities and requires explicit `discard(world)` if abandoned before
+/// native retirement; dropping it performs no World cleanup. A failed commit returns the same
+/// token and targets for retry without rerunning codecs or the callback.
 #[doc(hidden)]
-pub fn prepare_expanded_scene_replacement_with_claims<F>(
+pub fn stage_expanded_scene_replacement_with_claims<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
     candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
-    bindings: SceneAssetBindings,
+    reservations: SceneAssetReservations,
     claims: &SceneNativeRetirementClaims,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
     configure: F,
-) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+) -> Result<StagedSceneReplacement, SceneSpawnReport>
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
@@ -757,7 +762,7 @@ where
         Err(error) => return Err(occurrence_rejection(DiagnosticReport::default(), error)),
     };
     SceneSpawner::new()
-        .prepare_with_asset_context_and_product_bindings(
+        .stage_with_asset_context_and_product_reservations(
             world,
             registry,
             candidate,
@@ -769,40 +774,42 @@ where
                 additional_retirements,
                 configure: Box::new(configure),
             }),
-            bindings,
+            reservations,
             claims,
         )
-        .map(PreparedSceneReplacement)
+        .map(StagedSceneReplacement)
 }
 
 impl SceneComponentBindings {
-    /// Prepares a complete mixed replacement before product-owned native retirement starts.
+    /// Stages a complete native/data replacement before product-owned native retirement starts.
     ///
-    /// This advanced operation retains the existing claims, product writes and explicit
-    /// commit/retry/discard custody of [`PreparedSceneReplacement`]. Data definitions are captured
-    /// with the same managed authority as ordinary mixed preparation.
+    /// The returned [`StagedSceneReplacement`] owns actual allocated World targets, native/data
+    /// values and product writes. Abandoning it before native retirement requires explicit
+    /// `discard(world)`; dropping it performs no World cleanup. Failed commit returns the same
+    /// token and targets for retry without rerunning codecs or the callback. Data definitions
+    /// retain the same exact World and managed authority as ordinary mixed preparation.
     #[doc(hidden)]
-    pub fn prepare_scene_replacement_with_claims<F>(
+    pub fn stage_scene_replacement_with_claims<F>(
         &self,
         world: &mut World,
         candidate: &CompiledSceneCandidate,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
-        assets: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[WorldEntityToken],
         configure: F,
-    ) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+    ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
-        self.prepare_selected_scene_replacement_with_claims(
+        self.stage_selected_scene_replacement_with_claims(
             world,
             SceneMaterializationInput::Compiled(candidate),
             asset_resolution,
             current,
-            assets,
+            reservations,
             claims,
             SceneProductTransactionInput {
                 limits,
@@ -812,33 +819,36 @@ impl SceneComponentBindings {
         )
     }
 
-    /// Prepares a processed native/data replacement before native-domain retirement starts.
+    /// Stages a processed native/data replacement before native-domain retirement starts.
     ///
-    /// Product identities use the content owner's exact receiving asset bindings. The callback
-    /// runs once during preparation; commit and retry retain the existing native retirement
-    /// custody without rerunning codecs or consulting authoring sources.
+    /// Product identities use the content owner's exact receiving asset reservations. The
+    /// returned [`StagedSceneReplacement`] owns actual allocated World targets and requires
+    /// explicit `discard(world)` if abandoned before native retirement. Dropping it performs no
+    /// World cleanup. Failed commit returns the same token and targets for retry without
+    /// rerunning codecs or the callback, or consulting authoring sources. Exact World, definition
+    /// and native-retirement guards remain shared with source-backed replacement.
     #[cfg(feature = "serde")]
     #[doc(hidden)]
-    pub fn prepare_runtime_scene_replacement_with_claims<F>(
+    pub fn stage_runtime_scene_replacement_with_claims<F>(
         &self,
         world: &mut World,
         candidate: &crate::runtime_scene::RuntimeSceneCandidate,
         current: &SpawnedSceneInstance,
-        assets: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[WorldEntityToken],
         configure: F,
-    ) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+    ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
-        self.prepare_selected_scene_replacement_with_claims(
+        self.stage_selected_scene_replacement_with_claims(
             world,
             SceneMaterializationInput::Runtime(candidate),
             None,
             current,
-            assets,
+            reservations,
             claims,
             SceneProductTransactionInput {
                 limits,
@@ -848,16 +858,16 @@ impl SceneComponentBindings {
         )
     }
 
-    fn prepare_selected_scene_replacement_with_claims(
+    fn stage_selected_scene_replacement_with_claims(
         &self,
         world: &mut World,
         candidate: SceneMaterializationInput<'_>,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
-        assets: SceneAssetBindings,
+        reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         product: SceneProductTransactionInput<'_>,
-    ) -> Result<PreparedSceneReplacement, SceneSpawnReport> {
+    ) -> Result<StagedSceneReplacement, SceneSpawnReport> {
         let occurrence = occurrence_for_instance(world, current)
             .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
             .clone();
@@ -867,7 +877,7 @@ impl SceneComponentBindings {
             self,
         )?;
         SceneSpawner::new()
-            .prepare_unbound_with_asset_context_and_product_bindings(
+            .prepare_unbound_with_asset_context_and_product_reservations(
                 world,
                 self.native_snapshot(),
                 definition,
@@ -876,12 +886,12 @@ impl SceneComponentBindings {
                 asset_resolution,
                 SceneIdentityCommit::Replace(current),
                 Some(product),
-                assets,
+                reservations,
                 claims,
                 ComponentValueMaterializationLimits::default(),
             )?
             .bind(world)
-            .map(PreparedSceneReplacement)
+            .map(StagedSceneReplacement)
     }
 }
 
@@ -1677,9 +1687,9 @@ mod provenance_admission_tests {
                 assert!(report.instance.is_some());
             }
             let pending_slot = SceneOccurrenceKey::new("register", "pending").unwrap();
-            let bindings = SceneAssetBindings::from_world(&world);
+            let reservations = SceneAssetReservations::from_world(&world);
             let prepared = SceneSpawner::new()
-                .prepare_with_asset_context_and_product_bindings(
+                .stage_with_asset_context_and_product_reservations(
                     &mut world,
                     &registry,
                     &candidate,
@@ -1687,7 +1697,7 @@ mod provenance_admission_tests {
                     None,
                     SceneIdentityCommit::Register,
                     None,
-                    bindings,
+                    reservations,
                     &SceneNativeRetirementClaims::default(),
                 )
                 .unwrap_or_else(|report| panic!("{:?}", report.diagnostics));

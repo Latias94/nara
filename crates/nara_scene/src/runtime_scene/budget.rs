@@ -419,8 +419,8 @@ pub(super) fn value_cost(
     let limits = work.limits().value_limits();
     value
         .cost_up_to_with_admission(
-            limits.nodes().get().saturating_sub(used_nodes),
-            limits.bytes().get().saturating_sub(used_bytes),
+            limits.nodes().saturating_sub(used_nodes),
+            limits.bytes().saturating_sub(used_bytes),
             |bytes| work.reserve(bytes),
         )?
         .ok_or_else(|| {

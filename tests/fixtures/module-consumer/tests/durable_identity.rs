@@ -15,7 +15,7 @@ use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{
     InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneDocument,
     SceneDocumentCandidate, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
-    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, export_scene,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, export_live_scene,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
 use serde::{Deserialize, Serialize};
@@ -561,7 +561,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                     .resolve_entity_reference(&world, &reference, None),
                 EntityLookup::Missing,
             );
-            let missing_export = export_scene(&world, &registry);
+            let missing_export = export_live_scene(&world, &registry);
             assert!(missing_export.output().is_none());
             assert!(missing_export.diagnostics.has_errors());
 
@@ -578,7 +578,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 EntityLookup::Resolved(token.entity()),
             );
             apply_npc_visit(&mut world, first.entity()).unwrap();
-            let live_export = export_scene(&world, &registry);
+            let live_export = export_live_scene(&world, &registry);
             assert!(
                 !live_export.diagnostics.has_errors(),
                 "{:?}",
@@ -624,7 +624,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 "{:?}",
                 unloaded_spawn.diagnostics
             );
-            assert!(export_scene(&world, &registry).output().is_none());
+            assert!(export_live_scene(&world, &registry).output().is_none());
 
             let prefab_source = AssetRef::path("prefabs/durable-links.prefab.ron").unwrap();
             let universe: SourceUniverseId =
@@ -750,7 +750,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 "{:?}",
                 deleted_spawn.diagnostics
             );
-            assert!(export_scene(&world, &registry).output().is_none());
+            assert!(export_live_scene(&world, &registry).output().is_none());
             let forbidden = spawn_identity_entity(&mut world).unwrap();
             assert!(matches!(
                 register_persistent_identity(&mut world, forbidden, persistent.clone()),

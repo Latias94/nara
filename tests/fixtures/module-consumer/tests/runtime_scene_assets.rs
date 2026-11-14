@@ -1,8 +1,11 @@
 //! Native asset codecs consume complete Runtime product bindings without source metadata.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use nara_asset::{
@@ -10,7 +13,13 @@ use nara_asset::{
     AssetSourcePath, Assets, Handle, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
-use nara_ecs::{Component, Entity, Resource, World};
+use nara_ecs::{
+    Component, Entity, Resource, World,
+    bevy_ecs::{
+        lifecycle::Despawn,
+        observer::{Observer, On},
+    },
+};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -23,7 +32,7 @@ use nara_scene::{
     SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
     advanced::{
-        SceneAssetBindings, SceneNativeRetirementClaims, SceneProductResource,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductResource,
         SceneProductTransactionLimits,
     },
     retire_and_despawn_scene_instance,
@@ -253,7 +262,7 @@ fn processed_native_assets_resolve_actual_primary_and_auxiliary_values_without_s
             Some(references[index])
         );
     }
-    let output = bindings.export_scene(&world).into_output().unwrap();
+    let output = bindings.export_live_scene(&world).into_output().unwrap();
     for reference in references {
         assert!(output.document.entities.iter().any(|entity| {
             decode_asset_reference_value(&entity.components[&component()].value).unwrap()
@@ -398,17 +407,17 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
     let claims = SceneNativeRetirementClaims::default();
     let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);
 
-    let mut assets = SceneAssetBindings::from_world(&world);
-    let rejected_handle = assets.reserve_product::<String>(next_ref).unwrap();
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let rejected_handle = reservations.reserve_product::<String>(next_ref).unwrap();
     let values = replacement_values(&world, primary, auxiliary, rejected_handle);
     assert_eq!(world.resource::<AssetServer>(), &before);
     assert!(
         bindings
-            .prepare_runtime_scene_replacement_with_claims(
+            .stage_runtime_scene_replacement_with_claims(
                 &mut world,
                 &bad,
                 &current,
-                assets,
+                reservations,
                 &claims,
                 limits,
                 &[],
@@ -433,15 +442,15 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
             .is_none()
     );
 
-    let mut assets = SceneAssetBindings::from_world(&world);
-    let stale_handle = assets.reserve_product::<String>(next_ref).unwrap();
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let stale_handle = reservations.reserve_product::<String>(next_ref).unwrap();
     let values = replacement_values(&world, primary, auxiliary, stale_handle);
     let pending = bindings
-        .prepare_runtime_scene_replacement_with_claims(
+        .stage_runtime_scene_replacement_with_claims(
             &mut world,
             &next,
             &current,
-            assets,
+            reservations,
             &claims,
             limits,
             &[],
@@ -450,7 +459,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
                 writer.replace_resource(values);
             },
         )
-        .unwrap_or_else(|report| panic!("processed replacement prepare failed: {report:?}"));
+        .unwrap_or_else(|report| panic!("processed replacement stage failed: {report:?}"));
     pending.validate_baseline(&mut world).unwrap();
     let decoded = calls.load(Ordering::SeqCst);
     let ticks = world.get_resource_change_ticks::<TextProducts>().unwrap();
@@ -499,16 +508,16 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
     assert!(pending.discard(&mut world).is_ok());
     assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
 
-    let mut assets = SceneAssetBindings::from_world(&world);
-    let canceled_handle = assets.reserve_product::<String>(next_ref).unwrap();
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let canceled_handle = reservations.reserve_product::<String>(next_ref).unwrap();
     assert_ne!(rejected_handle.id(), canceled_handle.id());
     let values = replacement_values(&world, primary, auxiliary, canceled_handle);
     let pending = bindings
-        .prepare_runtime_scene_replacement_with_claims(
+        .stage_runtime_scene_replacement_with_claims(
             &mut world,
             &next,
             &current,
-            assets,
+            reservations,
             &claims,
             limits,
             &[],
@@ -517,7 +526,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
                 writer.replace_resource(values);
             },
         )
-        .unwrap_or_else(|report| panic!("processed replacement prepare failed: {report:?}"));
+        .unwrap_or_else(|report| panic!("processed replacement stage failed: {report:?}"));
     assert_eq!(callbacks.load(Ordering::SeqCst), 3);
     assert_eq!(world.resource::<AssetServer>(), &before);
     assert!(pending.discard(&mut world).is_ok());
@@ -531,16 +540,16 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
             .is_none()
     );
 
-    let mut assets = SceneAssetBindings::from_world(&world);
-    let next_handle = assets.reserve_product::<String>(next_ref).unwrap();
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let next_handle = reservations.reserve_product::<String>(next_ref).unwrap();
     assert_ne!(canceled_handle.id(), next_handle.id());
     let values = replacement_values(&world, primary, auxiliary, next_handle);
     let pending = bindings
-        .prepare_runtime_scene_replacement_with_claims(
+        .stage_runtime_scene_replacement_with_claims(
             &mut world,
             &next,
             &current,
-            assets,
+            reservations,
             &claims,
             limits,
             &[],
@@ -549,7 +558,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
                 writer.replace_resource(values);
             },
         )
-        .unwrap_or_else(|report| panic!("processed replacement prepare failed: {report:?}"));
+        .unwrap_or_else(|report| panic!("processed replacement stage failed: {report:?}"));
     let decoded = calls.load(Ordering::SeqCst);
     assert_eq!(world.resource::<AssetServer>(), &before);
     assert_eq!(resolve(&world, &current, 0), old);
@@ -584,5 +593,163 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
             .unwrap(),
         "new-processed-product"
     );
+    retire_and_despawn_scene_instance(&mut world, &current).unwrap();
+}
+
+#[test]
+fn stale_product_reservations_retain_candidate_values_until_blocked_discard_can_retry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let bindings = bindings(&calls);
+    let initial = cooked(&bindings, &[product(ImportedProductId::PRIMARY)]);
+    let next_ref = product(subproduct_id("c8e74ecd-cdea-4db1-a190-bb30434c1cbf"));
+    let next = cooked(&bindings, &[next_ref]);
+    let (mut world, primary, auxiliary) = world_with_products();
+    let current = bindings
+        .prepare_runtime_scene(&mut world, &initial, &occurrence())
+        .unwrap()
+        .commit(&mut world)
+        .instance
+        .unwrap();
+    let old = resolve(&world, &current, 0);
+    let identity = world.resource::<WorldIdentityDomain>().stats();
+    let original_server = world.resource::<AssetServer>().clone();
+    let original_values = world.resource::<TextProducts>().capture_baseline();
+    let original_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<BTreeSet<_>>();
+    let callbacks = AtomicUsize::new(0);
+    let decoded_before = calls.load(Ordering::SeqCst);
+
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let canceled = reservations.reserve_product::<String>(next_ref).unwrap();
+    let values = replacement_values(&world, primary, auxiliary, canceled);
+    let private_values = Arc::downgrade(&values.revision);
+    let pending = bindings
+        .stage_runtime_scene_replacement_with_claims(
+            &mut world,
+            &next,
+            &current,
+            reservations,
+            &SceneNativeRetirementClaims::default(),
+            SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
+            &[],
+            |writer| {
+                callbacks.fetch_add(1, Ordering::SeqCst);
+                writer.replace_resource(values);
+            },
+        )
+        .unwrap_or_else(|report| panic!("processed replacement stage failed: {report:?}"));
+    pending.validate_baseline(&mut world).unwrap();
+    assert_eq!(world.resource::<AssetServer>(), &original_server);
+    assert_eq!(calls.load(Ordering::SeqCst), decoded_before + 1);
+    let staged_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<BTreeSet<_>>();
+    let candidates = staged_entities
+        .difference(&original_entities)
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(candidates.len(), 1, "one unpublished target must be staged");
+    let candidate = candidates[0];
+
+    let external_ref = product(subproduct_id("6082cf35-9084-4c08-9e41-4d6d27e28814"));
+    let external = world
+        .resource_mut::<AssetServer>()
+        .reserve_product::<String>(external_ref)
+        .unwrap();
+    let external_server = world.resource::<AssetServer>().clone();
+    let assert_current = |world: &World| {
+        let server = world.resource::<AssetServer>();
+        assert_eq!(server, &external_server);
+        assert_eq!(server.product(external.id()), Some(external_ref));
+        assert_eq!(server.get_handle::<String>(external.id()), Some(external));
+        assert!(server.get_handle::<String>(canceled.id()).is_none());
+        assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
+        assert_eq!(resolve(world, &current, 0), old);
+        assert_eq!(world.get::<Sample>(old).unwrap().0, primary);
+        let products = world.resource::<TextProducts>();
+        assert!(products.matches_baseline(&original_values));
+        assert_eq!(products.values.len(), 2);
+        assert_eq!(products.values.get(primary).unwrap(), "processed-primary");
+        assert_eq!(
+            products.values.get(auxiliary).unwrap(),
+            "processed-auxiliary"
+        );
+        assert!(products.values.get(canceled).is_none());
+        assert_eq!(callbacks.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), decoded_before + 1);
+    };
+    assert_current(&world);
+    assert!(private_values.upgrade().is_some());
+
+    let (pending, report) = match pending.commit(&mut world) {
+        Err(failure) => failure,
+        Ok(_) => panic!("an intervening asset reservation must reject Scene publication"),
+    };
+    assert!(report.instance.is_none());
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.prepared-baseline-changed")
+    );
+    assert_current(&world);
+    assert!(world.get_entity(candidate).is_ok());
+    assert!(world.get::<Sample>(candidate).is_none());
+    assert!(private_values.upgrade().is_some());
+
+    let observer_calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&observer_calls);
+    let observer = world
+        .spawn(
+            Observer::new(move |_: On<Despawn<()>>| {
+                observed.fetch_add(1, Ordering::SeqCst);
+            })
+            .with_entity(candidate),
+        )
+        .id();
+    world.flush();
+    let pending = match pending.discard(&mut world) {
+        Err(pending) => pending,
+        Ok(()) => panic!("the candidate's despawn observer must block cleanup"),
+    };
+    assert_current(&world);
+    assert!(world.get_entity(candidate).is_ok());
+    assert!(world.get::<Sample>(candidate).is_none());
+    assert!(private_values.upgrade().is_some());
+    assert_eq!(observer_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .filter(|entity| *entity != observer)
+            .collect::<BTreeSet<_>>(),
+        staged_entities
+    );
+
+    world.entity_mut(observer).despawn();
+    world.flush();
+    pending
+        .discard(&mut world)
+        .unwrap_or_else(|_| panic!("removing the observer must allow cleanup to retry"));
+    assert_current(&world);
+    assert!(world.get_entity(candidate).is_err());
+    assert!(private_values.upgrade().is_none());
+    assert_eq!(observer_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<BTreeSet<_>>(),
+        original_entities
+    );
+
+    let mut reservations = SceneAssetReservations::from_world(&world);
+    let retried = reservations.reserve_product::<String>(next_ref).unwrap();
+    assert_ne!(retried.id(), canceled.id());
+    drop(reservations);
+    assert_current(&world);
     retire_and_despawn_scene_instance(&mut world, &current).unwrap();
 }

@@ -164,8 +164,8 @@ fn compilation_limits_json(limits: SceneCompilationLimits) -> Value {
     json!({
         "materialized_entities": limits.materialized_entities().get(),
         "materialized_components": limits.materialized_components().get(),
-        "materialized_value_nodes": limits.materialized_value_nodes().get(),
-        "materialized_value_bytes": limits.materialized_value_bytes().get(),
+        "materialized_value_nodes": limits.materialized_value_nodes(),
+        "materialized_value_bytes": limits.materialized_value_bytes(),
         "resolved_instances": limits.resolved_instances().get(),
         "overlay_declarations": limits.overlay_declarations().get(),
         "generated_identifier_bytes": limits.generated_identifier_bytes().get(),

@@ -59,8 +59,8 @@ use nara_scene::{
     SceneComponentBindings, SceneComponentRecord, SceneEntityId, SceneOccurrenceKey,
     SourceDocumentKey, SourceDocumentKind,
     advanced::{
-        PreparedSceneReplacement, SceneAssetBindings, SceneNativeRetirementClaims,
-        SceneProductResource, SceneProductTransactionLimits,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductResource,
+        SceneProductTransactionLimits, StagedSceneReplacement,
     },
     retire_and_despawn_scene_instance,
 };
@@ -1482,7 +1482,7 @@ struct PairHandles {
 }
 
 impl PairHandles {
-    fn reserve(bindings: &mut SceneAssetBindings, descriptor: TileSetDescriptor) -> Self {
+    fn reserve(bindings: &mut SceneAssetReservations, descriptor: TileSetDescriptor) -> Self {
         Self {
             tileset: bindings
                 .reserve_product::<TileSet>(descriptor.product())
@@ -1834,12 +1834,12 @@ fn prepare_next(
     current: &SpawnedSceneInstance,
     previous: PairHandles,
     claims: &SceneNativeRetirementClaims,
-) -> (PreparedSceneReplacement, PairHandles) {
+) -> (StagedSceneReplacement, PairHandles) {
     let scene = base.acquire_scene(product(LATER_SOURCE, false)).unwrap();
     let descriptor = acquire_descriptor(base, true);
     validate_cells(scene.candidate(), descriptor).unwrap();
     let image = acquire_image(base, true);
-    let mut assets = SceneAssetBindings::from_world(world);
+    let mut assets = SceneAssetReservations::from_world(world);
     let handles = PairHandles::reserve(&mut assets, descriptor);
     let products = replacement_products(
         world,
@@ -1854,7 +1854,7 @@ fn prepare_next(
         .plan()
         .schema_validation()
         .bindings()
-        .prepare_runtime_scene_replacement_with_claims(
+        .stage_runtime_scene_replacement_with_claims(
             world,
             scene.candidate(),
             current,
@@ -1990,7 +1990,7 @@ fn real_import_reaches_source_free_primary_and_auxiliary_tilemap_publication_and
         .plan()
         .schema_validation()
         .bindings()
-        .export_scene(&world)
+        .export_live_scene(&world)
         .into_output()
         .unwrap();
     let value = &exported.document.entities[0].components[&ComponentTypeId::new(TILEMAP)].value;
@@ -2133,7 +2133,7 @@ fn wrong_image_family_and_receiving_type_claim_reject_before_publication() {
         base.acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(descriptor.image_product())
             .is_ok()
     );
-    let mut bindings = SceneAssetBindings::from_world(&world);
+    let mut bindings = SceneAssetReservations::from_world(&world);
     bindings
         .reserve_product::<TileSet>(descriptor.image_product())
         .unwrap();
@@ -2157,7 +2157,7 @@ fn actual_image_extent_and_persisted_atlas_membership_reject_without_live_mutati
         let scene = base.acquire_scene(product(LATER_SOURCE, false)).unwrap();
         let descriptor = acquire_descriptor(&base, true);
         let image = acquire_image(&base, true);
-        let mut bindings = SceneAssetBindings::from_world(&world);
+        let mut bindings = SceneAssetReservations::from_world(&world);
         let handles = PairHandles::reserve(&mut bindings, descriptor);
         if matches!(case, FixtureCase::WrongImageExtent) {
             validate_cells(scene.candidate(), descriptor).unwrap();
@@ -2211,13 +2211,13 @@ fn cancellation_and_changed_asset_bindings_keep_the_current_tileset_and_scene() 
         assert_current(&world, &current, old, primary, &baseline);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
         let pending = if stale {
-            let bindings = SceneAssetBindings::from_world(&world);
+            let bindings = SceneAssetReservations::from_world(&world);
             world
                 .resource_mut::<AssetServer>()
                 .reserve_product::<String>(product(UNRELATED_SOURCE, false))
                 .unwrap();
             assert!(matches!(
-                bindings.validate(&world),
+                bindings.validate_baseline(&world),
                 Err(ComponentCodecError::AssetServerChanged)
             ));
             let server = world.resource::<AssetServer>().clone();

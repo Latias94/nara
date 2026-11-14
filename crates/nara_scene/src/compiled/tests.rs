@@ -899,7 +899,7 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
     let mut raw_bytes = 0usize;
     claims.entities[0].components[&component()]
         .value
-        .cost_up_to_with_admission(limits.nodes().get(), limits.bytes().get(), |bytes| {
+        .cost_up_to_with_admission(limits.nodes(), limits.bytes(), |bytes| {
             raw_bytes = raw_bytes.checked_add(bytes.unwrap()).unwrap();
             Ok::<_, Infallible>(())
         })

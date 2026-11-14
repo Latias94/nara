@@ -265,7 +265,7 @@ where
                     ) {
                         let overflow = || PrefabReferenceRemapError::MaterializedValue {
                             observed: usize::MAX,
-                            maximum: limits.materialized_value_bytes().get(),
+                            maximum: limits.materialized_value_bytes(),
                         };
                         let original = reference.cost();
                         let (replacement_nodes, replacement_bytes) = match origins

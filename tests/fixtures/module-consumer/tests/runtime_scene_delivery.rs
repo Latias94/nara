@@ -37,7 +37,7 @@ use nara_scene::{
     SceneEntityPlacement, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, ScenePlacement,
     ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
     advanced::{
-        SceneAssetBindings, SceneNativeRetirementClaims, SceneProductResource,
+        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductResource,
         SceneProductTransactionLimits,
     },
     retire_and_despawn_scene_instance, scene_component_bindings,
@@ -540,10 +540,10 @@ fn processed_replacement_shares_last_good_and_product_retry_without_repeating_ca
         .component_id::<NativeOwned>()
         .unwrap()]);
     let callbacks = AtomicUsize::new(0);
-    let assets = SceneAssetBindings::from_world(&world);
+    let assets = SceneAssetReservations::from_world(&world);
     let pending = definition
         .bindings
-        .prepare_runtime_scene_replacement_with_claims(
+        .stage_runtime_scene_replacement_with_claims(
             &mut world,
             &next,
             &current,

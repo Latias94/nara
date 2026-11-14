@@ -260,14 +260,14 @@ impl ExtractionWork {
                 remaining
                     .nodes()
                     .get()
-                    .min(self.limits.materialized_value_nodes().get()),
+                    .min(self.limits.materialized_value_nodes()),
             )
             .ok_or(ExtractionError::Capacity)?,
             ByteLimit::new(
                 remaining
                     .bytes()
                     .get()
-                    .min(self.limits.materialized_value_bytes().get()),
+                    .min(self.limits.materialized_value_bytes()),
             )
             .ok_or(ExtractionError::Capacity)?,
             remaining.depth(),

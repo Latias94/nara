@@ -696,19 +696,11 @@ fn selector_and_replacement_budgets_have_inclusive_boundaries_before_copy() {
         Ok(payload(ComponentValue::String("pin".into())))
     );
     assert_eq!(
-        evaluate(ComponentValueMaterializationLimits::new(
-            limits.nodes(),
-            ByteLimit::new(bytes - 1).unwrap(),
-            limits.depth(),
-        )),
+        evaluate(limits.with_bytes(ByteLimit::new(bytes - 1).unwrap())),
         Err(Conflict::WorkLimit)
     );
     assert_eq!(
-        evaluate(ComponentValueMaterializationLimits::new(
-            ItemLimit::new(nodes - 1).unwrap(),
-            limits.bytes(),
-            limits.depth(),
-        )),
+        evaluate(limits.with_nodes(ItemLimit::new(nodes - 1).unwrap())),
         Err(Conflict::WorkLimit)
     );
 
@@ -720,11 +712,8 @@ fn selector_and_replacement_budgets_have_inclusive_boundaries_before_copy() {
         ComponentValue::U64(2),
     );
     let defaults = ComponentValueMaterializationLimits::default();
-    let limits = ComponentValueMaterializationLimits::new(
-        defaults.nodes(),
-        ByteLimit::new(selected.path.logical_bytes().unwrap() - 1).unwrap(),
-        defaults.depth(),
-    );
+    let limits =
+        defaults.with_bytes(ByteLimit::new(selected.path.logical_bytes().unwrap() - 1).unwrap());
     assert_eq!(
         super::properties::apply_claims(
             &map,
@@ -746,11 +735,7 @@ fn selector_and_replacement_budgets_have_inclusive_boundaries_before_copy() {
             &value,
             &[],
             &BTreeMap::new(),
-            ComponentValueMaterializationLimits::new(
-                ItemLimit::new(value.cost().nodes() - 1).unwrap(),
-                defaults.bytes(),
-                defaults.depth(),
-            ),
+            defaults.with_nodes(ItemLimit::new(value.cost().nodes() - 1).unwrap()),
         ),
         Err(Conflict::WorkLimit)
     );

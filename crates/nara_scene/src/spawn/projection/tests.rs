@@ -129,9 +129,9 @@ impl ProjectionFixture {
     }
 
     fn prepare(&mut self, candidate: &CompiledSceneCandidate) -> PreparedScenePublication {
-        let bindings = SceneAssetBindings::from_world(&self.world);
+        let reservations = SceneAssetReservations::from_world(&self.world);
         SceneSpawner::new()
-            .prepare_with_asset_context_and_product_bindings(
+            .stage_with_asset_context_and_product_reservations(
                 &mut self.world,
                 &self.registry,
                 candidate,
@@ -139,7 +139,7 @@ impl ProjectionFixture {
                 Some(self.database.resolver(&nara_asset::AssetPathScope::ROOT)),
                 SceneIdentityCommit::Projection(self.projection.instance()),
                 None,
-                bindings,
+                reservations,
                 &SceneNativeRetirementClaims::default(),
             )
             .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics))
@@ -837,9 +837,9 @@ fn initial_detached_candidate_rejects_empty_installed_domain_replacement_or_remo
         let registry = registry();
         let database = ProjectAssetDatabase::default();
         let projection = SceneProjection::new(occurrence("projection"));
-        let bindings = SceneAssetBindings::from_world(&world);
+        let reservations = SceneAssetReservations::from_world(&world);
         let prepared = SceneSpawner::new()
-            .prepare_with_asset_context_and_product_bindings(
+            .stage_with_asset_context_and_product_reservations(
                 &mut world,
                 &registry,
                 &bound_scene(&registry, named_scene("candidate")),
@@ -847,7 +847,7 @@ fn initial_detached_candidate_rejects_empty_installed_domain_replacement_or_remo
                 Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
                 SceneIdentityCommit::Projection(projection.instance()),
                 None,
-                bindings,
+                reservations,
                 &SceneNativeRetirementClaims::default(),
             )
             .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));

@@ -9,7 +9,7 @@ use nara_asset::{
     ImportedProductId,
 };
 use nara_image::ImageAsset;
-use nara_scene::advanced::SceneAssetBindings;
+use nara_scene::advanced::SceneAssetReservations;
 
 use super::super::{HostFault, single_error};
 use super::ResidencyInput;
@@ -97,7 +97,7 @@ impl ImagePublications {
     pub(super) fn prepare(
         content: ResidencyInput<'_>,
         owned: &[OwnedImage],
-        bindings: &mut SceneAssetBindings,
+        bindings: &mut SceneAssetReservations,
         server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,

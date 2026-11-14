@@ -305,7 +305,7 @@ keep a retired current Scene or its decoded-output reservation alive.
 
 An admitted CPU asset is not automatically native-resident. A concrete resource owner must still
 stage complete Product bindings and actual values through its transaction before a native Scene
-codec can resolve them. Use `SceneAssetBindings::reserve_product` and an owned product resource
+codec can resolve them. Use `SceneAssetReservations::reserve_product` and an owned product resource
 overlay where appropriate. There is no source import fallback when the selected Runtime codec or
 residency owner is missing.
 

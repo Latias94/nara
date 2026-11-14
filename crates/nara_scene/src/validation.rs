@@ -380,7 +380,7 @@ fn validate_effective_component_values<'a, E>(
             let mut invalid_reference = None;
             for reference in &references {
                 let bytes = asset_resolution.resolution_work_bytes(reference.asset_ref());
-                if bytes.is_none_or(|bytes| bytes > limits.bytes().get()) {
+                if bytes.is_none_or(|bytes| bytes > limits.bytes()) {
                     invalid_reference = Some(reference);
                     break;
                 }
@@ -852,16 +852,14 @@ pub(crate) fn reference_traversal_limits(
         .saturating_add(limits.depth().get().saturating_mul(size_of::<u32>()))
         .saturating_add(20);
     EntityReferenceTraversalLimits::new(
-        ItemLimit::new(limits.nodes().get().saturating_mul(2))
-            .expect("non-zero value limits produce non-zero reference work limits"),
+        ItemLimit::new(limits.nodes().saturating_mul(2)).unwrap_or(ItemLimit::ONE),
         ByteLimit::new(
             limits
                 .bytes()
-                .get()
                 .saturating_mul(2)
-                .saturating_add(limits.nodes().get().saturating_mul(overhead)),
+                .saturating_add(limits.nodes().saturating_mul(overhead)),
         )
-        .expect("non-zero value limits produce non-zero reference byte limits"),
+        .unwrap_or(ByteLimit::ONE),
         limits.depth(),
     )
 }
@@ -1282,7 +1280,7 @@ fn preflight_source_values_with_context(
                 && let Some(reference) = asset_references.iter().find(|reference| {
                     asset_resolution
                         .resolution_work_bytes(reference.asset_ref())
-                        .is_none_or(|bytes| bytes > context.materialization_limits().bytes().get())
+                        .is_none_or(|bytes| bytes > context.materialization_limits().bytes())
                         || asset_resolution.resolve_ref(reference.asset_ref()).is_err()
                 })
             {
@@ -1398,8 +1396,8 @@ struct SceneValueBudget {
 impl SceneValueBudget {
     fn new(limits: ComponentValueMaterializationLimits) -> Self {
         Self {
-            nodes: limits.nodes().get(),
-            bytes: limits.bytes().get(),
+            nodes: limits.nodes(),
+            bytes: limits.bytes(),
             depth: limits.depth(),
         }
     }

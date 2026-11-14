@@ -16,7 +16,7 @@ use nara::{
     },
     scene::{
         PrefabDocument, SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, export_scene,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, export_live_scene,
     },
 };
 
@@ -190,7 +190,7 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     scene_world
         .entity_mut(scene_entity)
         .insert(RuntimeProjection);
-    let exported = export_scene(&scene_world, &registry)
+    let exported = export_live_scene(&scene_world, &registry)
         .into_output()
         .expect("eligible scene must export");
     assert_eq!(exported.document.entities.len(), 1);

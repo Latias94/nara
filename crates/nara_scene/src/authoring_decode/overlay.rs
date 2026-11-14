@@ -327,8 +327,10 @@ fn classify_record(
                     field,
                     payload,
                     nara_reflect::EntityReferenceTraversalLimits::new(
-                        limits.nodes(),
-                        limits.bytes(),
+                        nara_core::ItemLimit::new(limits.nodes())
+                            .expect("source reference node limits are nonzero"),
+                        nara_core::ByteLimit::new(limits.bytes())
+                            .expect("source reference byte limits are nonzero"),
                         limits.depth(),
                     ),
                     |nodes, bytes, allocated| {
@@ -448,8 +450,10 @@ fn classify_property(
                     // EntityRef leaves. Keep its typed syntax and admission errors together.
                     let limits = context.asset_reference_limits();
                     let traversal_limits = nara_reflect::EntityReferenceTraversalLimits::new(
-                        limits.nodes(),
-                        limits.bytes(),
+                        nara_core::ItemLimit::new(limits.nodes())
+                            .expect("source reference node limits are nonzero"),
+                        nara_core::ByteLimit::new(limits.bytes())
+                            .expect("source reference byte limits are nonzero"),
                         limits.depth(),
                     );
                     let references = {

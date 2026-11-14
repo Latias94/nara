@@ -240,7 +240,7 @@ pub mod prelude {
         PrefabInstanceBinding, PreparedScene, SceneAuthoringSession, SceneComponentRecord,
         SceneDocument, SceneEntityPlacement, SceneEntityRecord, SceneOccurrenceKey,
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
-        ScenePlacementSlot, SourceDocumentKey, SourceDocumentKind, Visibility, export_scene,
+        ScenePlacementSlot, SourceDocumentKey, SourceDocumentKind, Visibility, export_live_scene,
         prepare_scene, prepare_scene_replacement, spawn_scene,
     };
     pub use nara_transform::{
@@ -370,7 +370,7 @@ pub mod advanced_prelude {
     };
     pub use nara_scene::advanced::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-        replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_bindings,
+        replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_reservations,
     };
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,

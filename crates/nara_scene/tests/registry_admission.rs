@@ -23,7 +23,8 @@ use nara_scene::{
     CompiledSceneCandidate, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
     SceneComponentBindingsPlugin, SceneComponentRecord, SceneComponentsPlugin,
     SceneDataComponentError, SceneDocument, SceneEntityId, SceneEntityRecord, SceneOccurrenceKey,
-    SourceDocumentKey, SourceDocumentKind, export_scene, prepare_scene, scene_component_bindings,
+    SourceDocumentKey, SourceDocumentKind, export_live_scene, prepare_scene,
+    scene_component_bindings,
 };
 
 fn registry() -> ComponentRegistrySnapshot {
@@ -113,10 +114,10 @@ fn installed_unadmitted_owners_reject_native_and_mixed_preparation_and_export() 
             .unwrap_err();
         assert_code(&report.diagnostics, "scene.prepared-definition-changed");
 
-        let report = export_scene(world, &caller);
+        let report = export_live_scene(world, &caller);
         assert!(report.output().is_none());
         assert_code(&report.diagnostics, "scene.export-native-authority-invalid");
-        let report = bindings.export_scene(world);
+        let report = bindings.export_live_scene(world);
         assert!(report.output().is_none());
         assert_code(
             &report.diagnostics,
@@ -188,9 +189,9 @@ fn owner_free_worlds_keep_explicit_standalone_execution() {
         let report = prepared.commit(&mut world);
         assert!(report.instance.is_some(), "{report:?}");
         let report = if mixed {
-            bindings.export_scene(&world)
+            bindings.export_live_scene(&world)
         } else {
-            export_scene(&world, &registry)
+            export_live_scene(&world, &registry)
         };
         assert_eq!(report.output().unwrap().document, document());
     }

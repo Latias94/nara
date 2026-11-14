@@ -2,8 +2,8 @@
 
 use super::*;
 
-pub(crate) struct PreparedProjectSceneReplacement {
-    scene: Option<PreparedSceneReplacement>,
+pub(crate) struct StagedProjectSceneReplacement {
+    scene: Option<StagedSceneReplacement>,
     expected: SpawnedSceneInstance,
     content: PreparedSceneContent,
     staged_server: AssetServer,
@@ -14,8 +14,8 @@ pub(crate) struct PreparedProjectSceneReplacement {
     catalog: PreparedCatalog,
 }
 
-impl PreparedProjectSceneReplacement {
-    pub(crate) fn prepare<F>(
+impl StagedProjectSceneReplacement {
+    pub(crate) fn stage<F>(
         world: &mut World,
         expected: &SpawnedSceneInstance,
         content: &PreparedSceneContent,
@@ -62,7 +62,7 @@ impl PreparedProjectSceneReplacement {
         .map_err(rejected)?;
         let scene = match content {
             PreparedSceneContent::Source(snapshot) => component_bindings
-                .prepare_scene_replacement_with_claims(
+                .stage_scene_replacement_with_claims(
                     world,
                     snapshot.compiled_candidate(),
                     Some(snapshot.asset_resolution()),
@@ -74,7 +74,7 @@ impl PreparedProjectSceneReplacement {
                     configure,
                 ),
             PreparedSceneContent::Processed(content) => component_bindings
-                .prepare_runtime_scene_replacement_with_claims(
+                .stage_runtime_scene_replacement_with_claims(
                     world,
                     content.scene.candidate(),
                     expected,

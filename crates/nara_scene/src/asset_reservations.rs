@@ -7,26 +7,27 @@ use nara_asset::{
 use nara_ecs::World;
 use nara_reflect::{ComponentApplyBatch, ComponentCodecError};
 
-/// Asset identities prepared for one Scene transaction in one exact World.
+/// Asset identities reserved for one Scene transaction in one exact World.
 ///
-/// The input owns an otherwise empty component batch. It stages no entities, components or live
-/// resources. Its private constructor path prevents unrelated component writes from being smuggled
-/// into a Scene replacement. Dropping it abandons its private catalogue; allocated process-local
-/// identities remain consumed and are never reused.
+/// This input owns an otherwise empty component batch and a private asset catalogue. It allocates
+/// no target entities and stages no component or live resource writes. Its private constructor
+/// prevents unrelated component writes from entering a Scene replacement. Dropping it abandons
+/// the private catalogue without publishing it or cleaning up the World; allocated process-local
+/// identities remain consumed and are never reused. Reservations alone do not establish residency.
 ///
 /// ```compile_fail,E0451
 /// use nara_reflect::ComponentApplyBatch;
-/// use nara_scene::advanced::SceneAssetBindings;
-/// fn inject_component_writes(batch: ComponentApplyBatch) -> SceneAssetBindings {
-///     SceneAssetBindings { batch }
+/// use nara_scene::advanced::SceneAssetReservations;
+/// fn inject_component_writes(batch: ComponentApplyBatch) -> SceneAssetReservations {
+///     SceneAssetReservations { batch }
 /// }
 /// ```
 #[must_use]
-pub struct SceneAssetBindings {
+pub struct SceneAssetReservations {
     batch: ComponentApplyBatch,
 }
 
-impl SceneAssetBindings {
+impl SceneAssetReservations {
     /// Captures the originating World and its exact current asset catalogue.
     #[must_use]
     pub fn from_world(world: &World) -> Self {
@@ -50,15 +51,16 @@ impl SceneAssetBindings {
             .with_decode_context(Some(asset_resolution), |context| {
                 context
                     .resolve_asset_ref_with_kind(reference, expected_kind)
-                    .expect("Scene asset bindings always install a scratch AssetServer")
+                    .expect("Scene asset reservations always install a scratch AssetServer")
             })
     }
 
     /// Reserves an admitted Runtime Product without source metadata or live World mutation.
     ///
     /// The content owner must prepare actual values through its resource transaction. Native
-    /// codecs consume this binding through their ordinary decode context; unknown references
-    /// remain errors rather than implicit reservations. Dropping these bindings cancels them.
+    /// codecs consume this reservation through their ordinary decode context; unknown references
+    /// remain errors rather than implicit reservations. Dropping these reservations abandons the
+    /// private catalogue without publishing it; allocated identities remain consumed.
     pub fn reserve_product<T: 'static>(
         &mut self,
         reference: AssetProductRef,
@@ -73,7 +75,7 @@ impl SceneAssetBindings {
     }
 
     /// Rejects use in another World or after the originating live AssetServer changes.
-    pub fn validate(&self, world: &World) -> Result<(), ComponentCodecError> {
+    pub fn validate_baseline(&self, world: &World) -> Result<(), ComponentCodecError> {
         self.batch.validate_asset_server(world)
     }
 
@@ -81,15 +83,15 @@ impl SceneAssetBindings {
         self,
         world: &World,
     ) -> Result<ComponentApplyBatch, ComponentCodecError> {
-        self.validate(world)?;
+        self.validate_baseline(world)?;
         Ok(self.batch)
     }
 }
 
-impl fmt::Debug for SceneAssetBindings {
+impl fmt::Debug for SceneAssetReservations {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("SceneAssetBindings")
+            .debug_struct("SceneAssetReservations")
             .finish_non_exhaustive()
     }
 }

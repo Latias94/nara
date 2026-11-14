@@ -1171,6 +1171,9 @@ impl ComponentRegistrySnapshot {
         self.encode_component_with_context(id, world, entity, &context)
     }
 
+    /// Uses the caller's limits for default expansion and complete Native reference validation.
+    ///
+    /// The trusted encoder receives this context and constructs its result before admission.
     pub fn encode_component_with_context(
         &self,
         id: &ComponentTypeId,
@@ -1183,14 +1186,11 @@ impl ComponentRegistrySnapshot {
             .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
         let encoded = binding.codec.encode_with_context(world, entity, context)?;
         if let Some(value) = &encoded {
-            let effective = effective_component_value(
-                schema,
-                value,
-                ComponentValueMaterializationLimits::default(),
-            )?;
+            let effective =
+                effective_component_value(schema, value, context.materialization_limits())?;
             validate_native_component_value_references_with_limits(
                 effective.as_ref(),
-                ComponentValueMaterializationLimits::default(),
+                context.materialization_limits(),
             )?;
             let path_index = self
                 .0

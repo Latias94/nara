@@ -1,6 +1,5 @@
 //! Bounded component value helpers shared by property and staged value compilation.
 
-use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     ComponentCodecError, ComponentSchema, ComponentShapeError, ComponentShapeErrorKind,
     ComponentValue, ComponentValueMaterializationLimits, validate_component_value_with_limits,
@@ -13,23 +12,10 @@ pub(super) fn reserve_cost(
     nodes: usize,
     bytes: usize,
 ) -> Result<ComponentValueMaterializationLimits, SceneCompilationFailureKind> {
-    let nodes = limits
-        .nodes()
-        .get()
-        .checked_sub(nodes)
-        .and_then(ItemLimit::new)
-        .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-    let bytes = limits
-        .bytes()
-        .get()
-        .checked_sub(bytes)
-        .and_then(ByteLimit::new)
-        .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-    Ok(ComponentValueMaterializationLimits::new(
-        nodes,
-        bytes,
-        limits.depth(),
-    ))
+    if nodes > limits.nodes() || bytes > limits.bytes() {
+        return Err(SceneCompilationFailureKind::WorkLimit);
+    }
+    Ok(limits.remaining(nodes, bytes))
 }
 
 pub(super) fn check_value_cost(
@@ -37,7 +23,7 @@ pub(super) fn check_value_cost(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), SceneCompilationFailureKind> {
     value
-        .cost_up_to(limits.nodes().get(), limits.bytes().get())
+        .cost_up_to(limits.nodes(), limits.bytes())
         .ok_or(SceneCompilationFailureKind::WorkLimit)?;
     Ok(())
 }

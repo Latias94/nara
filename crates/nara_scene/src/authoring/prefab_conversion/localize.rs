@@ -59,13 +59,13 @@ where
     let value_nodes = nara_core::ItemLimit::new(
         history
             .max_entry_value_nodes()
-            .min(options.limits.materialized_value_nodes().get()),
+            .min(options.limits.materialized_value_nodes()),
     )
     .ok_or_else(|| PrefabConversionError::Source(copy_limit()))?;
     let value_bytes = nara_core::ByteLimit::new(
         history
             .max_entry_logical_bytes()
-            .min(options.limits.materialized_value_bytes().get()),
+            .min(options.limits.materialized_value_bytes()),
     )
     .ok_or_else(|| PrefabConversionError::Source(copy_limit()))?;
     let mut limits = options

@@ -17,7 +17,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, export_scene,
+    SceneDocument, SceneEntityId, SceneEntityRecord, export_live_scene,
 };
 #[cfg(feature = "serde")]
 use nara_scene::{SceneDocumentCandidate, SceneFileLimits};
@@ -301,7 +301,7 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
         instances.push(report.instance.unwrap());
     }
 
-    let export = export_scene(&world, &registry);
+    let export = export_live_scene(&world, &registry);
 
     assert!(!export.diagnostics.has_errors(), "{:?}", export.diagnostics);
     let output = export.output().unwrap();
@@ -401,7 +401,7 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
         ByteLimit::new(bytes).unwrap(),
         DepthLimit::new(2).unwrap(),
     );
-    let exact = export_scene_with_limits(&world, &registry, exact_limits);
+    let exact = export_live_scene_with_limits(&world, &registry, exact_limits);
     assert!(!exact.diagnostics.has_errors(), "{:?}", exact.diagnostics);
     assert!(exact.output().is_some());
     assert_eq!(world.iter_entities().count(), before_entities);
@@ -416,7 +416,7 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
             ByteLimit::new(bytes).unwrap(),
             DepthLimit::new(depth).unwrap(),
         );
-        let rejected = export_scene_with_limits(&world, &registry, below);
+        let rejected = export_live_scene_with_limits(&world, &registry, below);
         assert!(rejected.output().is_none());
         assert!(rejected.diagnostics.iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.export-value-budget-exceeded"
@@ -425,18 +425,19 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
     }
 }
 
-fn export_scene_with_limits(
+fn export_live_scene_with_limits(
     world: &World,
     registry: &ComponentRegistrySnapshot,
     value_limits: nara_reflect::ComponentValueMaterializationLimits,
-) -> nara_scene::SceneExportReport {
-    nara_scene::export_scene_with_options(
+) -> nara_scene::LiveSceneExportReport {
+    nara_scene::export_live_scene_with_options(
         world,
         registry,
-        nara_scene::SceneExportOptions {
+        nara_scene::LiveSceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::Path,
             value_limits,
         },
+        None,
     )
 }
 

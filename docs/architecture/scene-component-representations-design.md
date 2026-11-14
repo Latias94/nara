@@ -156,7 +156,7 @@ No rollback of arbitrary destructors, panic/OOM or already-performed native effe
 
 ## Live Export, Not A Second Roster
 
-Extend the current `export_scene_with_options` loop over live registered Scene identities.
+Extend the current `export_live_scene_with_options` loop over live registered Scene identities.
 Do not export all unregistered ECS entities or assume persistent-only entities enter this Scene
 export. For each eligible live entity, combine native encoding with all current carrier members.
 Check each member's exact selected owner Schema; reject duplicate native/data keys, stale basis,
