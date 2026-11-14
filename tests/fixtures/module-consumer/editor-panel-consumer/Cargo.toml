@@ -7,6 +7,23 @@ publish = false
 
 [features]
 snap-child-experiment = []
+diagnostic-capture = [
+    "nara/editor-work-observation",
+    "dep:serde",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:two-level-game",
+]
+
+[[example]]
+name = "diagnostic_capture"
+path = "examples/diagnostic_capture.rs"
+required-features = ["diagnostic-capture"]
+
+[[test]]
+name = "diagnostic_capture"
+path = "tests/diagnostic_capture.rs"
+required-features = ["diagnostic-capture"]
 
 [[bin]]
 name = "snap_local_position_child"
@@ -24,4 +41,8 @@ nara-asset-domain-consumer = { path = "../asset-domain-consumer" }
 nara-editor = { path = "../../../../editor" }
 nara_tooling = { path = "../../../../crates/nara_tooling" }
 serde_json = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["std", "registry"], optional = true }
+two-level-game = { path = "../../../../samples/two-level-game", features = ["desktop"], optional = true }
 winit = "=0.30.13"

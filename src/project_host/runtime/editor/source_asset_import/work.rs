@@ -25,6 +25,8 @@ pub(super) struct PendingSourceImport {
     publication: RetainedHost<FilePublicationHost>,
     _metadata_retention: crate::project_content::ProjectContentLease,
     outcome: Option<EditorSourceAssetImportAttempt>,
+    #[cfg(feature = "editor-work-observation")]
+    observation: Option<tracing::Span>,
 }
 
 pub(super) struct SourceImportWork {
@@ -51,6 +53,14 @@ impl PendingSourceImport {
         publication: RetainedHost<FilePublicationHost>,
         work: SourceImportWork,
     ) -> Result<Self, Rejection> {
+        #[cfg(feature = "editor-work-observation")]
+        let observation = tracing::info_span!(
+            target: "nara::editor::work",
+            "editor_source_import",
+            outcome = "pending",
+            task_id = tracing::field::Empty,
+            admission_to_start_ns = tracing::field::Empty,
+        );
         let metadata_retention = match work.budget.retain_editor_source_import_metadata(
             &work.metadata,
             work.previous.as_ref(),
@@ -59,6 +69,8 @@ impl PendingSourceImport {
             Ok(retention) => retention,
             Err(_) => {
                 publication.retire();
+                #[cfg(feature = "editor-work-observation")]
+                observation.record("outcome", "busy");
                 return Err(Rejection::Busy);
             }
         };
@@ -72,10 +84,18 @@ impl PendingSourceImport {
         let writer = publication.clone();
         let result = Arc::new(Mutex::new(SourceImportResult::default()));
         let worker_result = Arc::clone(&result);
+        #[cfg(feature = "editor-work-observation")]
+        let worker_dispatch = tracing::dispatcher::get_default(Clone::clone);
+        #[cfg(feature = "editor-work-observation")]
+        let worker_observation = observation.clone();
         let task = pools.spawn(
             TaskPoolKind::Io,
             TaskSpawnRequest::new(0, TaskDomainKey::new(0x736f_7572_696d_7074)),
             move |context| {
+                #[cfg(feature = "editor-work-observation")]
+                let _dispatch = tracing::dispatcher::set_default(&worker_dispatch);
+                #[cfg(feature = "editor-work-observation")]
+                let _observation = worker_observation.enter();
                 let mut retained_work = retained_work;
                 let SourceImportWork {
                     provider,
@@ -94,13 +114,35 @@ impl PendingSourceImport {
                     if context.is_cancelled() {
                         return cancelled();
                     }
-                    let validation = match provider.validate(
-                        assets,
-                        metadata,
-                        *expected_source,
-                        budget,
-                        previous.as_ref(),
-                    ) {
+                    let validation = {
+                        #[cfg(feature = "editor-work-observation")]
+                        let observation = tracing::info_span!(
+                            target: "nara::editor::work",
+                            parent: &worker_observation,
+                            "editor_source_import_validate",
+                            outcome = "pending",
+                        );
+                        #[cfg(feature = "editor-work-observation")]
+                        let _observation = observation.enter();
+                        let validation = provider.validate(
+                            assets,
+                            metadata,
+                            *expected_source,
+                            budget,
+                            previous.as_ref(),
+                        );
+                        #[cfg(feature = "editor-work-observation")]
+                        observation.record(
+                            "outcome",
+                            if validation.is_ok() {
+                                "complete"
+                            } else {
+                                "failed"
+                            },
+                        );
+                        validation
+                    };
+                    let validation = match validation {
                         Ok(validation) => validation,
                         Err(error) => {
                             return EditorSourceAssetImportAttempt::Failed {
@@ -111,7 +153,29 @@ impl PendingSourceImport {
                     if context.is_cancelled() {
                         return cancelled();
                     }
-                    if let Err(error) = validation.revalidate(assets) {
+                    let revalidation = {
+                        #[cfg(feature = "editor-work-observation")]
+                        let observation = tracing::info_span!(
+                            target: "nara::editor::work",
+                            parent: &worker_observation,
+                            "editor_source_import_revalidate",
+                            outcome = "pending",
+                        );
+                        #[cfg(feature = "editor-work-observation")]
+                        let _observation = observation.enter();
+                        let revalidation = validation.revalidate(assets);
+                        #[cfg(feature = "editor-work-observation")]
+                        observation.record(
+                            "outcome",
+                            if revalidation.is_ok() {
+                                "complete"
+                            } else {
+                                "failed"
+                            },
+                        );
+                        revalidation
+                    };
+                    if let Err(error) = revalidation {
                         return EditorSourceAssetImportAttempt::Failed {
                             diagnostics: error.diagnostics().clone(),
                         };
@@ -121,11 +185,31 @@ impl PendingSourceImport {
                     }
                     writer
                         .with_worker(|host| {
+                            #[cfg(feature = "editor-work-observation")]
+                            let observation = tracing::info_span!(
+                                target: "nara::editor::work",
+                                parent: &worker_observation,
+                                "editor_source_import_publish",
+                                outcome = "pending",
+                            );
+                            #[cfg(feature = "editor-work-observation")]
+                            let _observation = observation.enter();
                             worker_result
                                 .lock()
                                 .unwrap_or_else(|error| error.into_inner())
                                 .publication_started = true;
-                            match host.publish(encoded.as_bytes()) {
+                            let publication = host.publish(encoded.as_bytes());
+                            #[cfg(feature = "editor-work-observation")]
+                            observation.record(
+                                "outcome",
+                                match &publication {
+                                    FilePublicationOutcome::Published(_) => "published",
+                                    FilePublicationOutcome::Uncertain(_) => "reconcile",
+                                    FilePublicationOutcome::Rejected(_) => "rejected",
+                                    FilePublicationOutcome::Failed(_) => "failed",
+                                },
+                            );
+                            match publication {
                                 FilePublicationOutcome::Published(receipt) => {
                                     let (_, source) = receipt.into_parts();
                                     host.commit_published(source);
@@ -152,15 +236,26 @@ impl PendingSourceImport {
             },
         );
         match task.into_handle() {
-            Ok(task) => Ok(Self {
-                task,
-                result,
-                publication,
-                _metadata_retention: metadata_retention,
-                outcome: None,
-            }),
+            Ok(task) => {
+                #[cfg(feature = "editor-work-observation")]
+                {
+                    observation.record("task_id", task.id().raw());
+                    observation.record("outcome", "admitted");
+                }
+                Ok(Self {
+                    task,
+                    result,
+                    publication,
+                    _metadata_retention: metadata_retention,
+                    outcome: None,
+                    #[cfg(feature = "editor-work-observation")]
+                    observation: Some(observation),
+                })
+            }
             Err(_) => {
                 publication.retire();
+                #[cfg(feature = "editor-work-observation")]
+                observation.record("outcome", "busy");
                 Err(Rejection::Busy)
             }
         }
@@ -192,6 +287,26 @@ impl PendingSourceImport {
         }
         if !self.publication.retire() {
             return None;
+        }
+        #[cfg(feature = "editor-work-observation")]
+        if let Some(observation) = self.observation.take() {
+            observation.record(
+                "outcome",
+                match self.outcome.as_ref() {
+                    Some(EditorSourceAssetImportAttempt::MetadataPublished { .. }) => "published",
+                    Some(EditorSourceAssetImportAttempt::Failed { .. }) => "failed",
+                    Some(EditorSourceAssetImportAttempt::ReconcileRequired) => "reconcile",
+                    Some(EditorSourceAssetImportAttempt::Idle)
+                    | Some(EditorSourceAssetImportAttempt::Preparing)
+                    | None => "incomplete",
+                },
+            );
+            if let Some(admission_to_start) = self.task.admission_to_start() {
+                observation.record(
+                    "admission_to_start_ns",
+                    u64::try_from(admission_to_start.as_nanos()).unwrap_or(u64::MAX),
+                );
+            }
         }
         self.outcome.take()
     }
@@ -237,6 +352,10 @@ fn wait_at(gate: &mut Option<SourceImportTestGate>, phase: SourceImportTestPhase
 
 impl Drop for PendingSourceImport {
     fn drop(&mut self) {
+        #[cfg(feature = "editor-work-observation")]
+        if let Some(observation) = &self.observation {
+            observation.record("outcome", "abandoned");
+        }
         self.task.cancel();
         self.task.try_take();
         self.publication.retire();

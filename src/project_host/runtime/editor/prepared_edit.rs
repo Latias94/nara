@@ -181,15 +181,37 @@ impl EditorProjectSession {
         basis: &EditorDocumentQueryBasis,
         edits: &[AuthoringPropertyEdit],
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        self.validate_authoring_query_basis(basis)?;
-        let document = basis.document;
-        let prepared = self
-            .workspace
-            .prepare_authoring_property_edit(basis, edits)
-            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
-        self.verify_prepared_patch_contract(document, prepared.patch())
-            .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
-        Ok(prepared)
+        #[cfg(feature = "editor-work-observation")]
+        let work_span = tracing::info_span!(
+            target: "nara::editor::work",
+            "editor_property_edit_prepare",
+            document = basis.document.raw(),
+            source = tracing::field::Empty,
+            revision = basis.revision.generation(),
+            current_revision = tracing::field::Empty,
+            outcome = "pending",
+        )
+        .entered();
+        let result = (|| {
+            self.validate_authoring_query_basis(basis)?;
+            let document = basis.document;
+            let prepared = self
+                .workspace
+                .prepare_authoring_property_edit(basis, edits)
+                .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
+            self.verify_prepared_patch_contract(document, prepared.patch())
+                .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
+            Ok(prepared)
+        })();
+        #[cfg(feature = "editor-work-observation")]
+        work_span.record(
+            "outcome",
+            match &result {
+                Ok(_) => "prepared",
+                Err(error) => editor_edit_preparation_outcome(error),
+            },
+        );
+        result
     }
 
     /// Prepares an edit from the complete original observation without refreshing its basis.
@@ -198,13 +220,35 @@ impl EditorProjectSession {
         basis: &EditorDocumentQueryBasis,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        self.validate_authoring_query_basis(basis)?;
-        let document = basis.document;
-        self.verify_prepared_patch_contract(document, patch)
-            .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
-        self.workspace
-            .prepare_authoring_edit(basis, patch)
-            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
+        #[cfg(feature = "editor-work-observation")]
+        let work_span = tracing::info_span!(
+            target: "nara::editor::work",
+            "editor_edit_prepare",
+            document = basis.document.raw(),
+            source = tracing::field::Empty,
+            revision = basis.revision.generation(),
+            current_revision = tracing::field::Empty,
+            outcome = "pending",
+        )
+        .entered();
+        let result = (|| {
+            self.validate_authoring_query_basis(basis)?;
+            let document = basis.document;
+            self.verify_prepared_patch_contract(document, patch)
+                .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
+            self.workspace
+                .prepare_authoring_edit(basis, patch)
+                .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
+        })();
+        #[cfg(feature = "editor-work-observation")]
+        work_span.record(
+            "outcome",
+            match &result {
+                Ok(_) => "prepared",
+                Err(error) => editor_edit_preparation_outcome(error),
+            },
+        );
+        result
     }
 
     /// Consumes the accepted candidate; later project/domain changes cannot authorize it anew.
@@ -212,13 +256,30 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentEdit,
     ) -> EditorActionOutcome {
+        #[cfg(feature = "editor-work-observation")]
+        let base_revision = prepared.base_revision();
+        #[cfg(feature = "editor-work-observation")]
+        let work_span = tracing::info_span!(
+            target: "nara::editor::work",
+            "editor_edit_commit",
+            document = prepared.document().raw(),
+            source = tracing::field::Empty,
+            revision = base_revision.generation(),
+            current_revision = tracing::field::Empty,
+            outcome = "pending",
+        )
+        .entered();
         if self.authoring_operation_fenced() {
+            #[cfg(feature = "editor-work-observation")]
+            work_span.record("outcome", "busy");
             return EditorActionOutcome::Workspace(editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.schema-adoption-busy",
             ));
         }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            #[cfg(feature = "editor-work-observation")]
+            work_span.record("outcome", "closing");
             return EditorActionOutcome::Workspace(editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.workspace-intent-pending",
@@ -228,10 +289,22 @@ impl EditorProjectSession {
             && let Err(rejection) =
                 self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
         {
+            #[cfg(feature = "editor-work-observation")]
+            work_span.record("outcome", "structure_mismatch");
             return EditorActionOutcome::Rejected(rejection);
         }
         let report = self.workspace.commit_authoring_edit(prepared);
         let _ = self.diagnostics.extend(report.diagnostics.clone());
+        #[cfg(feature = "editor-work-observation")]
+        {
+            if let Some(revision) = report.revision {
+                work_span.record("current_revision", revision.generation());
+            }
+            work_span.record(
+                "outcome",
+                editor_edit_commit_outcome(&report, base_revision),
+            );
+        }
         EditorActionOutcome::Workspace(report)
     }
 
@@ -254,5 +327,69 @@ impl EditorProjectSession {
             return Err(EditorActionRejection::StructureContractMismatch { document });
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "editor-work-observation")]
+fn editor_edit_preparation_outcome(error: &EditorEditPreparationError) -> &'static str {
+    match error {
+        EditorEditPreparationError::WorkspaceUnavailable => "unavailable",
+        EditorEditPreparationError::Closing => "closing",
+        EditorEditPreparationError::Busy => "busy",
+        EditorEditPreparationError::StructureContractMismatch { .. } => "structure_mismatch",
+        EditorEditPreparationError::QueryBasis(rejection) => match rejection {
+            EditorDocumentQueryRejection::WorkspaceUnavailable
+            | EditorDocumentQueryRejection::DocumentNotOpen { .. } => "unavailable",
+            EditorDocumentQueryRejection::Closing => "closing",
+            EditorDocumentQueryRejection::StaleRevision => "stale_revision",
+            EditorDocumentQueryRejection::StaleIncarnation => "stale_source",
+            EditorDocumentQueryRejection::WrongWorkspace
+            | EditorDocumentQueryRejection::StaleSchema => "workspace_fenced",
+            EditorDocumentQueryRejection::UnsupportedDocumentKind { .. }
+            | EditorDocumentQueryRejection::DocumentKindChanged { .. } => "structure_mismatch",
+            EditorDocumentQueryRejection::Source(_)
+            | EditorDocumentQueryRejection::PrefabDeclaration(_) => "domain_rejected",
+            _ => "rejected",
+        },
+        EditorEditPreparationError::Document(report) => {
+            if report.patch_report.is_some() {
+                "domain_rejected"
+            } else {
+                "rejected"
+            }
+        }
+    }
+}
+
+#[cfg(feature = "editor-work-observation")]
+fn editor_edit_commit_outcome(
+    report: &EditorWorkspaceCommandReport,
+    base_revision: nara_scene::SceneAuthoringRevision,
+) -> &'static str {
+    if report.applied {
+        return if report.revision == Some(base_revision) {
+            "unchanged"
+        } else {
+            "committed"
+        };
+    }
+    if let Some(revision) = report.revision {
+        if revision.source_id() != base_revision.source_id() {
+            return "stale_source";
+        }
+        if revision != base_revision {
+            return "stale_revision";
+        }
+    }
+    match &report.patch_report {
+        Some(patch)
+            if patch.inverse.is_some()
+                && !patch.diagnostics.has_errors()
+                && !report.diagnostics.has_errors() =>
+        {
+            "unchanged"
+        }
+        Some(_) => "domain_rejected",
+        None => "rejected",
     }
 }

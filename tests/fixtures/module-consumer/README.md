@@ -84,6 +84,38 @@ native runner. See the [Editor import execution record](../../../docs/verificati
 for its precise scope. This facet validates source-backed CPU data and publishes metadata;
 native/GPU product publication remains domain-owned.
 
+## Scoped Execution Capture
+
+The optional `diagnostic-capture` feature of `nara-editor-panel-module-consumer` composes a
+finite, thread-local standard tracing Layer around actual source import, stale authoring-edit
+refusal and the original Two-Level Game desktop product. It does not open an Editor frontend.
+Run serially on an interactive Windows desktop with the existing root target and one build job:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-editor-panel-module-consumer --locked --offline --release --features diagnostic-capture --test diagnostic_capture --test source_import --test snap_local_position --test prepared_authoring --test compound_import --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 run --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-editor-panel-module-consumer --locked --offline --release --features diagnostic-capture --example diagnostic_capture -- ABSOLUTE_NEW_OUTPUT_DIRECTORY
+```
+
+Select the native backend explicitly for qualification, for example `WGPU_BACKEND=dx12` and
+`NARA_WGPU_FORCE_FALLBACK=0`. The new absolute output directory receives per-run Chrome Trace
+Event JSON and a final `results.json` only after original product cleanup. A deliberate export
+refusal preserves its existing file. Import worker return/publication retirement, unchanged
+stale-edit state/history and exact Undo/Redo remain independent of capture status. Each desktop
+run retains 12 original paused presentations, exact App/render/device completion associations,
+final complete game state, telemetry sealing, physical target destruction and loop recovery.
+
+The finite capture exports only whitelisted source-defined metadata/outcomes and numeric
+correlations. Complete asynchronous lifetimes use distinct observation tracks, not invented
+CPU thread identities; parent IDs remain explicit arguments. App-start-to-completion intervals
+include CPU/queue work and waits and are not GPU execution or scanout. Reserved-storage counts
+cover fixed Vec payload capacities, excluding Registry, Arc, allocator metadata and RSS. Disabled,
+enabled, overflow, collection-failure and export-refusal modes keep the same product workflow.
+Their finite sequential observations are not controlled cold starts or latency-tail budgets.
+Concurrent producers share a mutex only for bounded, preallocated numeric bookkeeping. Field
+visitation and parent lookup happen before acquiring it; product work and file I/O never run
+under it. This private collector can wait for that mutex and makes no lock-free or hard real-time
+claim. Capacity exhaustion and capture faults remain explicit incomplete observations.
+
 ## Persistent configuration and native reconciliation
 
 The plugin registers a plain persistent `Configuration` component and ordinary startup/update
