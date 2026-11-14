@@ -18,7 +18,7 @@ use crate::project_host::{
 use super::{
     BudgetTicket, ContentDigest, ProjectContentBudgetKind, ProjectContentError,
     ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate,
-    RELATIVE_OPEN_HANDLE_PEAK, RelativePath,
+    ProjectSourceObservations, RELATIVE_OPEN_HANDLE_PEAK, RelativePath,
 };
 
 const PROJECT_MANIFEST: &str = "nara.toml";
@@ -32,9 +32,10 @@ pub(super) struct SourceReadiness {
 }
 
 impl SourceReadiness {
-    pub(super) fn capture(
+    pub(super) fn capture_observed(
         loader: &ProjectContentLoader,
         candidate: &ProjectSettingsCandidate,
+        observations: Option<&mut ProjectSourceObservations>,
     ) -> Result<Self, ProjectContentError> {
         let mut budget = loader.budget_host.reserve();
         budget
@@ -51,6 +52,9 @@ impl SourceReadiness {
             .map_err(ProjectContentError::budget)?;
         let relative = RelativePath::new(PROJECT_MANIFEST)
             .expect("the engine-owned manifest name is a valid relative path");
+        if let Some(observations) = observations {
+            observations.record(None, PROJECT_MANIFEST)?;
+        }
         let manifest = loader
             .root
             .open_file(&relative)
@@ -106,8 +110,17 @@ impl SourceReadiness {
         loader: &ProjectContentLoader,
         candidate: &ProjectSettingsCandidate,
     ) -> Result<(), ProjectContentError> {
+        self.revalidate_observed(loader, candidate, None)
+    }
+
+    pub(super) fn revalidate_observed(
+        &self,
+        loader: &ProjectContentLoader,
+        candidate: &ProjectSettingsCandidate,
+        observations: Option<&mut ProjectSourceObservations>,
+    ) -> Result<(), ProjectContentError> {
         // Reopen through the root, rather than rereading a detached historical manifest leaf.
-        let current = Self::capture(loader, candidate)?;
+        let current = Self::capture_observed(loader, candidate, observations)?;
         if current.manifest.identity() != self.manifest.identity() || current.digest != self.digest
         {
             return Err(ProjectContentError::single(

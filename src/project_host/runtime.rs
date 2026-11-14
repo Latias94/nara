@@ -63,7 +63,7 @@ pub(crate) use scene_requests::{
 };
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 
@@ -1133,6 +1133,7 @@ impl ProjectHost {
                                 plan.clone(),
                                 loader,
                                 snapshot.input_action_map().cloned(),
+                                Some(snapshot.content_closure()),
                             ),
                             None => Ok(()),
                         },

@@ -833,6 +833,13 @@ pub fn materialize_startup_scene(
     Ok(report.diagnostics)
 }
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) fn materialized_startup_scene_receipt(world: &World) -> Option<&SpawnedSceneInstance> {
+    world
+        .get_resource::<StartupSceneActivationInput>()
+        .map(|pending| &pending.0.receipt)
+}
+
 fn consume_startup_scene_activation(world: &mut World) -> Result<(), BevyError> {
     if !world.contains_resource::<StartupSceneActivationInput>() {
         return Ok(());

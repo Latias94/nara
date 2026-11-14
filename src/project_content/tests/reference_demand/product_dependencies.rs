@@ -5,6 +5,8 @@ use crate::project_content::ProjectContentMemberReceipt;
 
 use super::*;
 
+mod source_observations;
+
 const SHADER: &[u8] = b"fn surface() -> f32 { return 1.0; }\n";
 const TEXTURE: &str = "fe612c0a-6a6b-4dd8-bb84-ad3a4dd678b8";
 const AUXILIARY: &str = "d9f0bb6f-4fc8-435d-b37c-287dd0c015a8";

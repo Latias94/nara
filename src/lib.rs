@@ -190,7 +190,7 @@ pub mod prelude {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub use crate::project_host::{
         PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-        ProjectSceneRequestState, ProjectScenes,
+        ProjectSceneRequestState, ProjectSceneSourceUpdateStatus, ProjectScenes,
     };
     pub use crate::{
         HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,

@@ -547,18 +547,60 @@ fn public_scene_cancel_waits_for_physical_return_then_acknowledges_and_reuses_th
 
 #[test]
 fn hosted_scene_request_close_cancels_held_preparation_and_retires_without_late_publication() {
+    close_held_preparation(false);
+}
+
+#[test]
+fn source_notification_close_retains_worker_custody_and_releases_source_interest() {
+    close_held_preparation(true);
+}
+
+fn close_held_preparation(automatic: bool) {
     let mut fixture = Fixture::new(true);
-    let (request, started, release, original) = fixture.step(|world| {
-        let original = current(world);
-        let (started, release) = hold_next_preparation(world);
-        let mut access = SystemState::<ProjectScenes>::new(world);
-        let request = access
-            .get_mut(world)
-            .unwrap()
-            .request(ProjectPath::new("b.scene.json").unwrap())
-            .unwrap();
+    let (request, started, release, original) = if automatic {
+        let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("updated-startup").unwrap(),
+        )]);
+        fs::write(
+            fixture._project.root.join("scenes/startup.scene.json"),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        let (started, release, original) = fixture.step(|world| {
+            let original = current(world);
+            let (started, release) = hold_next_preparation(world);
+            ProjectScenes::scope(world, |scenes| {
+                assert!(
+                    scenes
+                        .notify_source_change(&nara_asset::AssetSourceChange::new(
+                            nara_asset::AssetSourcePath::new("scenes/startup.scene.json").unwrap(),
+                            nara_asset::AssetSourceChangeKind::Modified,
+                        ))
+                        .unwrap()
+                );
+                assert!(scenes.source_update_status().unwrap().pending);
+            });
+            (started, release, original)
+        });
+        let request = fixture.step(|world| {
+            ProjectScenes::scope(world, |scenes| {
+                scenes.source_update_status().unwrap().request.unwrap()
+            })
+        });
         (request, started, release, original)
-    });
+    } else {
+        fixture.step(|world| {
+            let original = current(world);
+            let (started, release) = hold_next_preparation(world);
+            let mut access = SystemState::<ProjectScenes>::new(world);
+            let request = access
+                .get_mut(world)
+                .unwrap()
+                .request(ProjectPath::new("b.scene.json").unwrap())
+                .unwrap();
+            (request, started, release, original)
+        })
+    };
     assert!(started.recv_timeout(Duration::from_secs(5)).is_ok());
     assert_eq!(fixture.loader.budget_snapshot().active_generations(), 2);
     fixture.step(move |world| {

@@ -251,5 +251,5 @@ pub(crate) use runtime::{
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
 };

@@ -253,6 +253,13 @@ impl LoadContext<'_> {
             .expect("metadata suffix was selected");
         let path = AssetPath::new(source).map_err(|_| invalid_path(source))?;
         let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
+        if let Some(observations) = self.observations.as_deref_mut() {
+            let source_root = &self
+                .catalogue_roots
+                .as_ref()
+                .expect("catalogue roots remain bound")[root_index];
+            observations.record(Some(source_root), meta_path)?;
+        }
         let (bytes, digest) = self.read_file(root, meta_path, ceiling)?;
         #[cfg(all(test, feature = "project-workflow"))]
         measurement_tests::record(|counts| counts.identity_metadata_reads += 1);
@@ -685,6 +692,7 @@ impl LoadContext<'_> {
             [path.len(), ".meta".len(), STRING_ALLOCATION_OVERHEAD],
         )?)?;
         let meta_path = format!("{path}.meta");
+        self.observe_source_read(Some(root), &meta_path)?;
         let (_, digest) = self.read_native_file(
             directory,
             &meta_path,

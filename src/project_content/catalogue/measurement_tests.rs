@@ -190,6 +190,7 @@ fn warmed_loader_rechecks_duplicate_identity_and_changed_delivery_source() {
         None,
         None,
         false,
+        None,
     )
     .unwrap();
     context.catalogue_roots = Some(vec![
@@ -327,6 +328,7 @@ fn catalogue_capture_and_scene_copy_reject_budget_pressure_without_retaining_wor
         None,
         None,
         false,
+        None,
     )
     .unwrap();
     context.catalogue_roots = Some(vec![

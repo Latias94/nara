@@ -121,6 +121,18 @@ require exact-ID acknowledgement. Runtime close revokes publication interest and
 retain physical worker custody. A later selected closure is not another executable startup
 agreement: its records decode against the already admitted frozen native schema authority.
 
+Hosted source changes enter this same Scene owner as semantic principal/metadata observations.
+The successful closure and latest executed automatic failure's requested paths determine dependency
+interest, including a missing input. Relevant changes coalesce into one successor intent behind
+the original request/result slot; incomplete observation requests a full source rescan. A frozen
+Ready value is never re-read or silently replaced by a later notification, and game state still
+publishes through the explicit Scene commit/overlay. Stop and cancelled/stale preparation revoke
+interest without releasing physical worker custody early. Processed bases have no source route.
+This Scene-level route does not invent an asset UUID or publish through a competing generic
+asset reloader. Composition must select the actual publication owner; mixed asset/Scene routing
+requires explicit arbitration for shared real targets. Actual qualification and remaining watcher
+scope belong to the [Material/source successor plan](../../plans/2026-11-14-durable-material-and-shader-plan.md#scene-owned-source-updates).
+
 Managed Scene travel captures one owned attempt from each registered native domain before any
 retirement begins. Each domain returns the exact runtime component types whose lifecycle effects it
 owns together with the matching attempt prepared against the immutable target plus current World.

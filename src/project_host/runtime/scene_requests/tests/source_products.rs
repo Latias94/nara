@@ -470,12 +470,13 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
             // A foreign preparation has its own budget owner while sharing the actual root.
             let foreign_loader = ProjectContentLoader::new(loader.project_root()).unwrap();
             let foreign = foreign_loader
-                .load_scene_product_reusing_input(
+                .load_scene_product_observed_reusing_input(
                     &foreign_candidate,
                     &foreign_plan,
                     primary(2),
                     None,
                 )
+                .result
                 .unwrap();
             assert_eq!(foreign.selected_scene_product(), Some(primary(2)));
             assert_eq!(foreign.selected_scene_path(), &selected());

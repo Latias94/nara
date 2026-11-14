@@ -3,10 +3,11 @@
 mod api;
 pub(crate) mod domains;
 mod preparation;
+mod source_updates;
 
 pub use api::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -108,6 +109,7 @@ struct RequestOwner {
     context: Arc<Context>,
     closing: Arc<AtomicBool>,
     slot: Option<Slot>,
+    source_updates: Option<source_updates::SourceUpdates>,
     #[cfg(test)]
     gate: Option<preparation::TestGate>,
 }
@@ -145,6 +147,7 @@ struct ManagedTravelState {
     state: ProjectSceneRequestState,
     publication_diagnostics: DiagnosticReport,
     diagnostics: DiagnosticReport,
+    source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
 }
 
 struct ManagedTravelCleanup {
@@ -332,6 +335,7 @@ pub(super) fn install_context(
     plan: RuntimePlan,
     loader: Arc<ProjectContentLoader>,
     input: Option<crate::project_content::ProjectInputContent>,
+    source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
 ) -> Result<(), ProjectSceneRequestError> {
     if candidate.lineage() != plan.lineage() {
         return Err(ProjectSceneRequestError::Stale);
@@ -344,6 +348,7 @@ pub(super) fn install_context(
             loader,
             input,
         },
+        source_closure,
     )
 }
 
@@ -352,12 +357,13 @@ pub(super) fn install_runtime_context(
     world: &mut World,
     base: RuntimeContentBase,
 ) -> Result<(), ProjectSceneRequestError> {
-    install_request_owner(world, Context::Processed { base })
+    install_request_owner(world, Context::Processed { base }, None)
 }
 
 fn install_request_owner(
     world: &mut World,
     context: Context,
+    source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
 ) -> Result<(), ProjectSceneRequestError> {
     if world.contains_resource::<RequestOwner>() {
         return Err(ProjectSceneRequestError::Stale);
@@ -370,10 +376,26 @@ fn install_request_owner(
     if closing.load(Ordering::Acquire) {
         return Err(ProjectSceneRequestError::Unavailable);
     }
+    let source_updates = if let Some(source_closure) = source_closure {
+        let generation = world
+            .get_resource::<RuntimeGeneration>()
+            .copied()
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        let instance = crate::startup_scene::materialized_startup_scene_receipt(world)
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        Some(source_updates::SourceUpdates::new(
+            source_closure,
+            generation,
+            instance,
+        ))
+    } else {
+        None
+    };
     world.insert_resource(RequestOwner {
         context: Arc::new(context),
         closing,
         slot: None,
+        source_updates,
         #[cfg(test)]
         gate: None,
     });
@@ -393,6 +415,16 @@ pub(super) fn hold_next_preparation(
 
 /// The exclusive TaskUpdate poll is inert in runtimes without a project request owner.
 pub(crate) fn poll_project_scene_requests(world: &mut World) {
+    if world.get_resource::<RequestOwner>().is_some_and(|owner| {
+        owner.slot.is_none()
+            && !owner.closing.load(Ordering::Acquire)
+            && owner
+                .source_updates
+                .as_ref()
+                .is_some_and(|updates| updates.status().pending)
+    }) {
+        ProjectScenes::scope(world, |scenes| scenes.start_source_update());
+    }
     if world
         .get_resource::<RequestOwner>()
         .is_some_and(|owner| matches!(owner.slot, Some(Slot::Managed(_))))
@@ -452,11 +484,16 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
                     };
                     Slot::Ready { admission, content }
                 }
-                (None, Err(failure)) => Slot::Terminal {
-                    id,
-                    state: ProjectSceneRequestState::Rejected(failure.error),
-                    diagnostics: failure.diagnostics,
-                },
+                (None, Err(failure)) => {
+                    if let Some(updates) = &mut owner.source_updates {
+                        updates.failed(id, failure.error, failure.observations);
+                    }
+                    Slot::Terminal {
+                        id,
+                        state: ProjectSceneRequestState::Rejected(failure.error),
+                        diagnostics: failure.diagnostics,
+                    }
+                }
             };
         }
     } else if !valid && !matches!(slot, Slot::Managed(_)) {
@@ -625,6 +662,11 @@ fn drive_managed_travel(world: &mut World) {
                     }
                 };
                 travel.published = report.instance;
+                if let (Some(updates), Some(source_closure), Some(instance)) =
+                    (&mut owner.source_updates, travel.source_closure.take(), travel.published.as_ref())
+                {
+                    updates.publish(source_closure, instance);
+                }
                 travel.publication_diagnostics = report.diagnostics;
                 travel.diagnostics = travel.publication_diagnostics.clone();
             }
@@ -743,10 +785,13 @@ impl RuntimeCloseParticipant for CloseParticipant {
         context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
         self.0.store(true, Ordering::Release);
-        if let Some(owner) = context.world().get_resource::<RequestOwner>()
-            && let Some(Slot::Preparing { preparation, .. }) = &owner.slot
-        {
-            preparation.cancel();
+        if let Some(mut owner) = context.get_resource_mut::<RequestOwner>().map_err(|_| {
+            RuntimeCloseParticipantError::new("project.scene.close-owner-unavailable")
+        })? {
+            owner.source_updates = None;
+            if let Some(Slot::Preparing { preparation, .. }) = &owner.slot {
+                preparation.cancel();
+            }
         }
         Ok(RuntimeCloseProgress::Complete)
     }

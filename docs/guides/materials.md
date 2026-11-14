@@ -223,13 +223,72 @@ retain leases and the original immutable base without pointing back to a collect
 themselves. This does not give a clone publication authority or exempt it from native resource
 and submission checks.
 
+## Source Scene Updates
+
+A hosted source runtime accepts semantic notifications through
+`ProjectScenes::notify_source_change(&AssetSourceChange)`. Paths use the original project-root
+namespace, such as `assets/palette.wgsl`; metadata observations name the principal source path.
+Feed notices from the project's selected source route. The call performs no file I/O and does
+not publish an asset or replace the current Scene. Its boolean reports related or conservatively
+queued interest, rather than exclusive ownership of an event.
+
+The original TaskUpdate prepares one successor of the current Scene. Observe
+`source_update_status().request`, then use the ordinary request `state`, `prepared` and
+`diagnostics` APIs. Inspect Ready content to construct owned game data; explicitly call
+`commit_prepared_project_scene` with the game's overlay, or
+`begin_prepared_project_scene_travel` when native domains are installed. A source notification
+does not preserve arbitrary gameplay data automatically. A terminal result occupies the original
+slot until `acknowledge` receives its exact request identity.
+Status observation retains an automatic request ID even if its current-instance or Runtime
+generation basis becomes stale. That visibility permits terminal acknowledgement; it does not
+authorize another notification, preparation or commit against the stale basis.
+
+Ready content is immutable. A later notification queues one successor intent without changing
+that candidate or allocating a third prepared generation. Notices during automatic preparation,
+Ready inspection or managed native travel conservatively queue unknown dependency paths as well.
+After terminal acknowledgement, the next TaskUpdate can prepare the queued successor. Cancellation
+still waits for the original worker's physical return before releasing its slot. Admission errors
+remain observable in `source_update_status().error` and leave pending intent available for retry.
+An accepted pending intent also survives an intervening explicit Scene switch, so a shared
+dependency edit or full rescan observed while the target was frozen can update the actual new Scene.
+
+Successful publication replaces the dependency interest with its actual content closure. A valid
+failed automatic preparation retains the latest complete attempted-read cut as additional retry
+interest. For example, changing a Material from `a.wgsl` to missing `b.wgsl` preserves the usable
+old Scene, and a later creation notice for `assets/b.wgsl` can trigger recovery. Once the new
+closure publishes, obsolete paths stop triggering work. Failed-read paths use the original
+content budget and retain no decoded generation. An incomplete observation cut is refused and
+cannot replace the last complete retry interest.
+
+The Material importer propagates required Shader and Image dependency failures. A generic
+importer that handles a missing optional input and successfully returns a fallback has a different
+contract: that absent file is not a member of the successful content closure. Automatic recovery
+when it appears is not guaranteed by this route; supply a full rescan for that availability change.
+Successful fallback availability needs an explicit content read-interest contract before it can
+be qualified as dependency-directed watching.
+
+Call `request_source_rescan()` after queue overflow, broad observations or translation failure.
+Catalogue membership and identity availability also require a rescan: a newly created metadata
+file can introduce or conflict with a Product whose source path was previously unknown. Exact
+file-path interest does not subscribe to directory absence or unresolved UUID availability.
+The existing `AssetWatcher`, bounded `AssetWatchEventQueue` and `AssetWatchTranslator` can supply
+notices; this API does not install a native watcher. The stock `AssetWatchPlugin` drains into the
+generic per-asset reload route. Do not also send Scene-managed publications through that route:
+its independent asset-state changes would conflict with the Scene residency transaction.
+Composition must select the route for each publication; mixed routing needs explicit arbitration.
+
+Processed runtimes refuse this source ingress. Global Input and project settings retain their
+original startup selection and compatibility checks; a Scene source update does not replace them.
+Stop fences new notices and drops source interest while the original task/native owners retain
+unfinished cleanup.
+
 ## Independent Delivery Controls
 
 The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact
 Save/Reopen/Check, source material residency, source-free processed running and rejected content:
 
 ```text
-cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --test workflow --test persistent_workflow --test processed_workflow --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --test workflow --test persistent_workflow --test processed_workflow --test source_updates --test-threads=1 --no-fail-fast --no-tests fail
 ```
 
 The separate ignored delivery controls build actual executables through the public Cargo and

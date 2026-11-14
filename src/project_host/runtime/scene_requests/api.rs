@@ -105,6 +105,18 @@ impl ProjectSceneRequestState {
     }
 }
 
+/// Observations of the original Scene owner's coalesced source-update intent.
+/// This value contains no preparation, publication or acknowledgement authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectSceneSourceUpdateStatus {
+    /// The automatic request, retained through its exact terminal acknowledgement.
+    pub request: Option<ProjectSceneRequestId>,
+    /// A newer notification or full-rescan intent waiting for the original slot to be released.
+    pub pending: bool,
+    /// The last automatic admission or preparation failure, cleared on start or publication.
+    pub error: Option<ProjectSceneRequestError>,
+}
+
 /// Read-only target content for preparing ordinary owned game data before commit.
 ///
 /// This view exposes neither a snapshot/source owner nor loading or publication authority.
@@ -198,6 +210,127 @@ pub struct ProjectScenes<'w> {
 }
 
 impl ProjectScenes<'_> {
+    /// Records a canonical source observation for the current hosted source Scene.
+    ///
+    /// Relevant successful/retry paths queue one successor. During an automatic Preparing/Ready/Managed
+    /// request, unknown paths conservatively queue a successor before its new dependency cut is
+    /// known. No I/O, asset-state mutation, commit or acknowledgement occurs here. The returned
+    /// flag reports queued interest, not exclusive consumption of a shared source event.
+    pub fn notify_source_change(
+        &mut self,
+        change: &nara_asset::AssetSourceChange,
+    ) -> Result<bool, ProjectSceneRequestError> {
+        self.validate_source_update_authority()?;
+        let owner = self.owner.as_deref_mut().unwrap();
+        let automatic_in_flight = owner
+            .source_updates
+            .as_ref()
+            .unwrap()
+            .status()
+            .request
+            .is_some_and(|request| {
+                owner.slot.as_ref().is_some_and(|slot| {
+                    slot.id() == request
+                        && matches!(
+                            slot,
+                            Slot::Preparing { .. } | Slot::Ready { .. } | Slot::Managed(_)
+                        )
+                })
+            });
+        Ok(owner
+            .source_updates
+            .as_mut()
+            .unwrap()
+            .notify(change, automatic_in_flight))
+    }
+
+    /// Queues a complete source revalidation after observation overflow or uncertain scope.
+    /// The original worker builds its own candidate; the current Scene stays usable until commit.
+    pub fn request_source_rescan(&mut self) -> Result<(), ProjectSceneRequestError> {
+        self.validate_source_update_authority()?;
+        self.owner
+            .as_deref_mut()
+            .unwrap()
+            .source_updates
+            .as_mut()
+            .unwrap()
+            .rescan();
+        Ok(())
+    }
+
+    /// Observes source intent without advancing work or consuming its terminal request.
+    /// A stale current instance or generation does not hide a retained automatic request ID.
+    #[must_use]
+    pub fn source_update_status(&self) -> Option<ProjectSceneSourceUpdateStatus> {
+        self.owner
+            .as_deref()?
+            .source_updates
+            .as_ref()
+            .map(|updates| updates.status())
+    }
+
+    fn validate_source_update_authority(&self) -> Result<(), ProjectSceneRequestError> {
+        let owner = self
+            .owner
+            .as_deref()
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        let current = self
+            .current
+            .as_deref()
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        if owner.closing.load(Ordering::Acquire)
+            || self.generation.is_none()
+            || owner.source_updates.is_none()
+            || !owner.context.matches_current(current)
+        {
+            return Err(ProjectSceneRequestError::Unavailable);
+        }
+        if !owner
+            .source_updates
+            .as_ref()
+            .unwrap()
+            .matches_current(**self.generation.as_ref().unwrap(), current.receipt())
+        {
+            return Err(ProjectSceneRequestError::Stale);
+        }
+        Ok(())
+    }
+
+    pub(super) fn start_source_update(&mut self) {
+        let Some(owner) = self.owner.as_deref() else {
+            return;
+        };
+        if owner.closing.load(Ordering::Acquire)
+            || owner.slot.is_some()
+            || owner
+                .source_updates
+                .as_ref()
+                .is_none_or(|updates| !updates.status().pending)
+        {
+            return;
+        }
+        let selection = owner
+            .source_updates
+            .as_ref()
+            .unwrap()
+            .selected_scene()
+            .clone();
+        let result = self
+            .validate_source_update_authority()
+            .and_then(|()| self.request(ProjectSceneSelection::Source(selection)));
+        let updates = self
+            .owner
+            .as_deref_mut()
+            .unwrap()
+            .source_updates
+            .as_mut()
+            .unwrap();
+        match result {
+            Ok(request) => updates.started(request),
+            Err(error) => updates.refused(error),
+        }
+    }
+
     /// Runs a finite Scene request operation while exclusively borrowing the World.
     ///
     /// The callback receives the same request, inspection, cancellation, retry and acknowledgement
@@ -423,6 +556,9 @@ impl ProjectScenes<'_> {
             .is_some_and(|slot| slot.id() == request && slot.state().is_terminal())
         {
             owner.slot = None;
+            if let Some(updates) = &mut owner.source_updates {
+                updates.acknowledge(request);
+            }
             true
         } else {
             false
@@ -513,6 +649,13 @@ where
             )
         };
         let state = if !report.diagnostics.has_errors() && report.instance.is_some() {
+            if let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) = (
+                &mut owner.source_updates,
+                &content,
+                report.instance.as_ref(),
+            ) {
+                updates.publish(snapshot.content_closure(), instance);
+            }
             ProjectSceneRequestState::Committed
         } else {
             ProjectSceneRequestState::Rejected(ProjectSceneRequestError::CommitRejected)
@@ -634,6 +777,10 @@ where
                     state: ProjectSceneRequestState::Retiring,
                     publication_diagnostics: DiagnosticReport::default(),
                     diagnostics: DiagnosticReport::default(),
+                    source_closure: match &content {
+                        PreparedSceneContent::Source(snapshot) => Some(snapshot.content_closure()),
+                        PreparedSceneContent::Processed(_) => None,
+                    },
                 }));
                 Ok(())
             }

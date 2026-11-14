@@ -29,6 +29,7 @@ use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materiali
 
 mod processed;
 mod source_products;
+mod source_updates;
 
 #[test]
 fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
@@ -258,6 +259,19 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
         current.compiled_scene().roots(),
         [SceneEntityId::new("startup").unwrap()]
     );
+    let observations = failure.observations.as_ref().unwrap();
+    assert!(observations.is_complete());
+    assert!(
+        observations
+            .paths()
+            .iter()
+            .any(|path| path.as_str() == "scenes/second.scene.json")
+    );
+    assert_eq!(
+        loader.budget_snapshot().active_generations(),
+        baseline.active_generations()
+    );
+    drop(failure);
     assert_active_budget(&context, baseline);
     pools.shutdown_blocking().unwrap();
 }
@@ -565,7 +579,7 @@ fn with_context_world_and_startup(
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
             nara_render::RenderComponentsPlugin,
-            nara_sprite::SpritePlugin,
+            (nara_sprite::SpritePlugin, nara_material::Material2dPlugin),
             nara_tilemap::TilemapPlugin,
             nara_scene::SceneComponentBindingsPlugin::new(
                 schema.bindings().data_owners().iter().cloned(),
@@ -593,6 +607,9 @@ fn with_context_world_and_startup(
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
+                let source_closure = source_startup
+                    .as_ref()
+                    .map(|snapshot| snapshot.content_closure());
                 if let Some(snapshot) = source_startup {
                     super::super::content_residency::publish_startup(world, &snapshot).unwrap();
                 }
@@ -619,6 +636,7 @@ fn with_context_world_and_startup(
                             plan.clone(),
                             Arc::clone(loader),
                             input.clone(),
+                            source_closure,
                         )
                         .unwrap();
                     }

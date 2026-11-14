@@ -18,6 +18,54 @@ use crate::{
 };
 
 #[test]
+fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io() {
+    let fixture = ProcessedFixture::new();
+    let base = fixture.open(RuntimeContentLimits::default());
+    let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
+    with_context_world(
+        Arc::new(Context::Processed { base: base.clone() }),
+        source,
+        move |world| {
+            world.insert_resource(pools());
+            let expected = CurrentScene::get(world).unwrap().receipt().clone();
+            let notice = nara_asset::AssetSourceChange::new(
+                nara_asset::AssetSourcePath::new("assets/missing.wgsl").unwrap(),
+                nara_asset::AssetSourceChangeKind::Modified,
+            );
+            ProjectScenes::scope(world, |scenes| {
+                assert_eq!(scenes.source_update_status(), None);
+                assert_eq!(
+                    scenes.notify_source_change(&notice),
+                    Err(ProjectSceneRequestError::Unavailable)
+                );
+                assert_eq!(
+                    scenes.request_source_rescan(),
+                    Err(ProjectSceneRequestError::Unavailable)
+                );
+            });
+            poll_project_scene_requests(world);
+            assert_eq!(
+                world
+                    .resource::<TaskPools>()
+                    .stats()
+                    .for_kind(nara_tasks::TaskPoolKind::Io)
+                    .admitted,
+                0
+            );
+            assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+            assert!(
+                world
+                    .resource::<CurrentSceneOwner>()
+                    .hosted_runtime_base()
+                    .unwrap()
+                    .same_base(&base)
+            );
+            assert!(world.resource::<RequestOwner>().slot.is_none());
+        },
+    );
+}
+
+#[test]
 fn processed_graph_work_overlaps_the_scene_promise_and_refusal_returns_its_capacity() {
     let fixture = ProcessedFixture::new();
     let scene_limits = RuntimeSceneLimits::default();

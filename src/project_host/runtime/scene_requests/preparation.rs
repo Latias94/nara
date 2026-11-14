@@ -15,6 +15,7 @@ use super::{
 pub(super) struct PreparationFailure {
     pub(super) error: ProjectSceneRequestError,
     pub(super) diagnostics: DiagnosticReport,
+    pub(super) observations: Option<crate::project_content::ProjectSourceObservations>,
 }
 
 impl PreparationFailure {
@@ -23,10 +24,14 @@ impl PreparationFailure {
         Self {
             error,
             diagnostics: error_diagnostics(error),
+            observations: None,
         }
     }
 
-    fn source_content(error: crate::project_host::ProjectContentError) -> Self {
+    fn source_content(
+        error: crate::project_host::ProjectContentError,
+        observations: crate::project_content::ProjectSourceObservations,
+    ) -> Self {
         let undeclared = error.kind() == ProjectContentErrorKind::HostAuthorityRejected
             && error.diagnostics().iter().any(|diagnostic| {
                 diagnostic.code().as_str() == "project.content.scene-not-declared"
@@ -38,6 +43,7 @@ impl PreparationFailure {
                 ProjectSceneRequestError::Content(error.kind())
             },
             diagnostics: error.diagnostics().clone(),
+            observations: Some(observations),
         }
     }
 
@@ -51,6 +57,7 @@ impl PreparationFailure {
         Self {
             error: kind,
             diagnostics,
+            observations: None,
         }
     }
 }
@@ -105,24 +112,28 @@ impl Preparation {
                             },
                             selection,
                         ) => {
-                            let result = match selection {
+                            let attempt = match selection {
                                 ProjectSceneSelection::Source(path) => loader
-                                    .load_scene_reusing_input(
+                                    .load_scene_observed_reusing_input(
                                         candidate,
                                         plan,
                                         path,
                                         input.as_ref(),
                                     ),
                                 ProjectSceneSelection::Product(product) => loader
-                                    .load_scene_product_reusing_input(
+                                    .load_scene_product_observed_reusing_input(
                                         candidate,
                                         plan,
                                         *product,
                                         input.as_ref(),
                                     ),
                             };
-                            result.map_err(PreparationFailure::source_content).and_then(
-                                |snapshot| {
+                            attempt
+                                .result
+                                .map_err(|error| {
+                                    PreparationFailure::source_content(error, attempt.observations)
+                                })
+                                .and_then(|snapshot| {
                                     // Required dependencies are data, not public travel roots.
                                     if !work
                                         .context
@@ -132,11 +143,11 @@ impl Preparation {
                                         return Err(PreparationFailure {
                                             error,
                                             diagnostics: error_diagnostics(error),
+                                            observations: None,
                                         });
                                     }
                                     Ok(PreparedSceneContent::Source(snapshot))
-                                },
-                            )
+                                })
                         }
                         (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
                             base.prepare_scene_content(*product)
@@ -148,6 +159,7 @@ impl Preparation {
                             diagnostics: error_diagnostics(
                                 ProjectSceneRequestError::UndeclaredScene,
                             ),
+                            observations: None,
                         }),
                     });
                     #[cfg(test)]

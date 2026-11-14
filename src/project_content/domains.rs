@@ -519,6 +519,7 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 .relativize(record.path())
                 .ok_or_else(|| source_scope_mismatch(record.path()))?;
             let metadata_path = path.meta_path();
+            context.observe_source_read(Some(root), &metadata_path)?;
             let (bytes, digest) = context.read_file(
                 assets,
                 &metadata_path,
@@ -673,6 +674,8 @@ impl DomainSourceReader<'_, '_> {
         path: &AssetPath,
         limit: ByteLimit,
     ) -> Result<Arc<[u8]>, ProjectContentError> {
+        self.context
+            .observe_source_read(Some(self.root), path.as_str())?;
         if let Some(bytes) = self.cache.sources.get(path) {
             if bytes.len() > limit.get() {
                 return Err(ProjectContentError::single(
@@ -723,6 +726,8 @@ impl DomainSourceReader<'_, '_> {
         path: &AssetPath,
         limit: ByteLimit,
     ) -> Result<Arc<[u8]>, ProjectContentError> {
+        self.context
+            .observe_source_read(Some(self.root), path.as_str())?;
         self.context
             .add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
         self.read_source(path, limit)

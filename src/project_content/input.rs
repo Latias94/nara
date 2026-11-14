@@ -78,24 +78,24 @@ impl ProjectInputContent {
 
 impl ProjectContentLoader {
     /// Scene travel verifies the captured global selection and shares its original compiled owner.
-    pub(crate) fn load_scene_reusing_input(
+    pub(crate) fn load_scene_observed_reusing_input(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         scene: &nara_project::ProjectPath,
         input: Option<&ProjectInputContent>,
-    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_travel_with_input(candidate, plan, SourceSceneSelection::Path(scene), input)
+    ) -> ProjectSceneLoadAttempt {
+        self.load_travel_observed(candidate, plan, SourceSceneSelection::Path(scene), input)
     }
 
-    pub(crate) fn load_scene_product_reusing_input(
+    pub(crate) fn load_scene_product_observed_reusing_input(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         product: AssetProductRef,
         input: Option<&ProjectInputContent>,
-    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_travel_with_input(
+    ) -> ProjectSceneLoadAttempt {
+        self.load_travel_observed(
             candidate,
             plan,
             SourceSceneSelection::Product(product),
@@ -103,17 +103,36 @@ impl ProjectContentLoader {
         )
     }
 
-    fn load_travel_with_input(
+    fn load_travel_observed(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         scene: SourceSceneSelection<'_>,
         input: Option<&ProjectInputContent>,
+    ) -> ProjectSceneLoadAttempt {
+        let mut observations = ProjectSourceObservations::new(self);
+        let result = self.load_travel_with_input_inner(
+            candidate,
+            plan,
+            scene,
+            input,
+            Some(&mut observations),
+        );
+        ProjectSceneLoadAttempt::new(result, observations)
+    }
+
+    fn load_travel_with_input_inner(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        scene: SourceSceneSelection<'_>,
+        input: Option<&ProjectInputContent>,
+        observations: Option<&mut ProjectSourceObservations>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         if candidate.input_requirement().is_some() != input.is_some() {
             return Err(input_changed());
         }
-        self.load_inner_with_delivery_catalogue(
+        self.load_inner_with_source_mode(
             candidate,
             plan,
             Some(scene),
@@ -123,6 +142,9 @@ impl ProjectContentLoader {
             None,
             false,
             input,
+            SourceLoadMode::Current,
+            None,
+            observations,
         )
         .map(|(snapshot, _)| snapshot)
     }
@@ -144,6 +166,7 @@ impl LoadContext<'_> {
         let limits = self.loader.limits.input_file();
         // Exact project-relative input reads never infer an Assets alias scope.
         let root = self.loader.root.share();
+        self.observe_source_read(None, selected.as_str())?;
         let (bytes, digest) =
             self.read_native_file(&root, selected.as_str(), limits.encoded_bytes().get())?;
         let encoded = bytes.len();
@@ -323,6 +346,7 @@ impl LoadContext<'_> {
         root: &DirectoryCapability,
         path: &str,
     ) -> Result<Option<(Vec<u8>, ContentDigest)>, ProjectContentError> {
+        self.observe_source_read(None, path)?;
         let relative = self.observe_path(path)?;
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
         self.add_budget(

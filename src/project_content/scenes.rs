@@ -88,6 +88,7 @@ impl LoadContext<'_> {
         let meta_path = alias.meta_path();
         let directory = self.open_directory(&root)?;
         let result = (|| {
+            self.observe_source_read(Some(&root), &meta_path)?;
             let (metadata, digest) = self.read_native_file(
                 &directory,
                 &meta_path,
@@ -103,7 +104,7 @@ impl LoadContext<'_> {
                 digest,
             )?;
             drop(metadata);
-            self.check_source_readable(&directory, alias.as_str())
+            self.check_source_readable(&directory, &root, alias.as_str())
         })();
         drop((directory, meta_path, alias, root));
         self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
@@ -136,8 +137,10 @@ impl LoadContext<'_> {
     fn check_source_readable(
         &mut self,
         directory: &DirectoryCapability,
+        source_root: &nara_project::ProjectPath,
         alias: &str,
     ) -> Result<(), ProjectContentError> {
+        self.observe_source_read(Some(source_root), alias)?;
         let relative = self.observe_path(alias)?;
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
         self.add_budget(
@@ -450,6 +453,7 @@ impl LoadContext<'_> {
     ) -> Result<ProjectSceneContent, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
         let result = (|| {
+            self.observe_source_read(Some(source_root), path.as_str())?;
             let (bytes, digest) = self.read_native_file(
                 directory,
                 path.as_str(),

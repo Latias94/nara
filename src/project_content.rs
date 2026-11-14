@@ -8,6 +8,7 @@ mod domains;
 mod input;
 pub(crate) mod materials;
 mod scenes;
+mod source_observations;
 mod source_readiness;
 
 use std::{
@@ -86,6 +87,7 @@ pub(crate) use domains::{ErasedCollection, runtime_collection};
 pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
 pub use input::ProjectInputContent;
 use scenes::pending_scene_source_work_bytes;
+pub(crate) use source_observations::{ProjectSceneLoadAttempt, ProjectSourceObservations};
 use source_readiness::SourceReadiness;
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
@@ -1248,6 +1250,7 @@ impl ProjectContentLoader {
             None,
             SourceLoadMode::Current,
             Some(readiness),
+            None,
         )
     }
 
@@ -1272,6 +1275,7 @@ impl ProjectContentLoader {
             None,
             SourceLoadMode::Strict,
             Some(readiness),
+            None,
         )
     }
 
@@ -1299,6 +1303,7 @@ impl ProjectContentLoader {
             input_reuse,
             SourceLoadMode::Current,
             None,
+            None,
         )
     }
 
@@ -1315,6 +1320,7 @@ impl ProjectContentLoader {
         input_reuse: Option<&ProjectInputContent>,
         source_mode: SourceLoadMode,
         readiness: Option<&SourceReadiness>,
+        mut observations: Option<&mut ProjectSourceObservations>,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         // A delivery operation shares one entry observation across its immutable inputs and
         // all Scene roots. Standalone loads capture their own actual disk observation.
@@ -1322,7 +1328,8 @@ impl ProjectContentLoader {
         let readiness = match readiness {
             Some(readiness) => readiness,
             None => {
-                captured_readiness = self.validate_inputs(candidate, plan)?;
+                captured_readiness =
+                    self.validate_inputs_observed(candidate, plan, observations.as_deref_mut())?;
                 &captured_readiness
             }
         };
@@ -1360,23 +1367,36 @@ impl ProjectContentLoader {
             runtime_agreement,
             delivery_catalogue,
             capture_delivery_catalogue,
+            observations.as_deref_mut(),
         )?;
         context.source_mode = source_mode;
-        let snapshot = context.load(candidate, selected_scene, input_reuse)?;
+        let snapshot = context.load(candidate, selected_scene, input_reuse);
+        let catalogue = context.take_delivery_catalogue();
+        drop(context);
+        let snapshot = snapshot?;
         #[cfg(test)]
         if let Some(before_revalidation) = &self.before_source_readiness_revalidation {
             before_revalidation();
         }
         // Keep the completed snapshot and its leases alive during this separately budgeted
         // read. Only the final gate can authorize exposing the newly captured source content.
-        readiness.revalidate(self, candidate)?;
-        Ok((snapshot, context.take_delivery_catalogue()))
+        readiness.revalidate_observed(self, candidate, observations)?;
+        Ok((snapshot, catalogue))
     }
 
     fn validate_inputs(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
+    ) -> Result<SourceReadiness, ProjectContentError> {
+        self.validate_inputs_observed(candidate, plan, None)
+    }
+
+    fn validate_inputs_observed(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        observations: Option<&mut ProjectSourceObservations>,
     ) -> Result<SourceReadiness, ProjectContentError> {
         if candidate.lineage() != plan.lineage() {
             return Err(ProjectContentError::single(
@@ -1408,7 +1428,7 @@ impl ProjectContentLoader {
                 "Project schema validation fingerprint changed",
             ));
         }
-        SourceReadiness::capture(self, candidate)
+        SourceReadiness::capture_observed(self, candidate, observations)
     }
 }
 
@@ -1486,6 +1506,7 @@ struct LoadContext<'a> {
     capture_delivery_catalogue: bool,
     completed_delivery_catalogue: Option<DeliveryCatalogue>,
     source_mode: SourceLoadMode,
+    observations: Option<&'a mut ProjectSourceObservations>,
 }
 
 struct LoadedPrefabContent {
@@ -1566,6 +1587,7 @@ impl<'a> LoadContext<'a> {
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
         delivery_catalogue: Option<&DeliveryCatalogue>,
         capture_delivery_catalogue: bool,
+        observations: Option<&'a mut ProjectSourceObservations>,
     ) -> Result<Self, ProjectContentError> {
         let content_closure_work_bytes = content_closure_entry_work_bytes("nara.toml".len())?;
         let catalogue_work_bytes =
@@ -1614,6 +1636,7 @@ impl<'a> LoadContext<'a> {
             capture_delivery_catalogue,
             completed_delivery_catalogue: None,
             source_mode: SourceLoadMode::Current,
+            observations,
         })
     }
 
@@ -1723,6 +1746,7 @@ impl<'a> LoadContext<'a> {
             .checked_add(selected_path_work)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
 
+        self.observe_source_read(Some(&settings.paths.scenes), scene_path.as_str())?;
         let (scene_bytes, scene_digest) = self.read_selected_scene_file(
             &scenes,
             scene_path.as_str(),
@@ -2186,6 +2210,17 @@ impl<'a> LoadContext<'a> {
         }
     }
 
+    fn observe_source_read(
+        &mut self,
+        source_root: Option<&nara_project::ProjectPath>,
+        path: &str,
+    ) -> Result<(), ProjectContentError> {
+        if let Some(observations) = self.observations.as_deref_mut() {
+            observations.record(source_root, path)?;
+        }
+        Ok(())
+    }
+
     fn read_file(
         &mut self,
         directory: &DirectoryCapability,
@@ -2315,6 +2350,7 @@ impl<'a> LoadContext<'a> {
         identity_policy: nara_project::NativeDocumentIdentity,
         source_universe: nara_core::SourceUniverseId,
     ) -> Result<LoadedPrefabContent, ProjectContentError> {
+        self.observe_source_read(Some(prefab_root), path.as_str())?;
         let (bytes, digest) = self.read_native_file(
             prefabs,
             path.as_str(),
@@ -2420,6 +2456,7 @@ impl<'a> LoadContext<'a> {
                 })?;
                 let metadata_path = format!("{logical_path}.meta");
                 let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
+                self.observe_source_read(Some(source_root), &metadata_path)?;
                 let (metadata_bytes, metadata_digest) =
                     self.read_native_file(directory, &metadata_path, ceiling)?;
                 self.verify_catalogued_metadata(&project_path, source_root, metadata_digest)?;
@@ -2823,6 +2860,7 @@ impl<'a> LoadContext<'a> {
         path: &AssetPath,
     ) -> Result<(ProjectTileSetContent, WorkReservation), ProjectContentError> {
         let meta_path = path.meta_path();
+        self.observe_source_read(Some(asset_root), &meta_path)?;
         let (meta_bytes, meta_digest) = self.read_file(
             assets,
             &meta_path,
@@ -2874,6 +2912,7 @@ impl<'a> LoadContext<'a> {
         self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
         let stable_id = record.stable_id();
         let source_ceiling = TileSetSourceFileLimits::default().encoded_bytes().get();
+        self.observe_source_read(Some(asset_root), path.as_str())?;
         let (source_bytes, source_digest) =
             self.read_file(assets, path.as_str(), source_ceiling)?;
         let source =
@@ -2930,6 +2969,7 @@ impl<'a> LoadContext<'a> {
         path: &AssetPath,
     ) -> Result<ProjectImageContent, ProjectContentError> {
         let meta_path = path.meta_path();
+        self.observe_source_read(Some(asset_root), &meta_path)?;
         let (meta_bytes, meta_digest) = self.read_file(
             assets,
             &meta_path,
@@ -3001,6 +3041,7 @@ impl<'a> LoadContext<'a> {
             .limits()
             .max_encoded_bytes()
             .get();
+        self.observe_source_read(Some(asset_root), path.as_str())?;
         let (source_bytes, source_digest) = self.read_file(assets, path.as_str(), ceiling)?;
         let source_path_bytes = record.path().as_str().len();
         let import = self
@@ -4746,7 +4787,10 @@ mod tests {
                 for by_product in [false, true] {
                     let snapshot = if by_product {
                         loader
-                            .load_scene_product_reusing_input(&candidate, &plan, product, None)
+                            .load_scene_product_observed_reusing_input(
+                                &candidate, &plan, product, None,
+                            )
+                            .result
                             .unwrap()
                     } else {
                         loader
@@ -4794,7 +4838,8 @@ mod tests {
                 )
                 .unwrap();
                 let error = loader
-                    .load_scene_product_reusing_input(&candidate, &plan, product, None)
+                    .load_scene_product_observed_reusing_input(&candidate, &plan, product, None)
+                    .result
                     .unwrap_err();
                 assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
                 assert_eq!(loader.budget_snapshot().active_reservations(), 0);
@@ -5011,6 +5056,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         )
         .unwrap();
         let source = SourceDocumentKey::project_location(
@@ -5139,6 +5185,7 @@ mod tests {
                 None,
                 None,
                 false,
+                None,
             )
             .unwrap();
             let error = context.load(&candidate, None, None).unwrap_err();
@@ -5257,6 +5304,7 @@ mod tests {
                     None,
                     None,
                     false,
+                    None,
                 )
                 .unwrap();
                 context.asset_scope = scope.clone();
