@@ -133,6 +133,17 @@ asset reloader. Composition must select the actual publication owner; mixed asse
 requires explicit arbitration for shared real targets. Actual qualification and remaining watcher
 scope belong to the [Material/source successor plan](../../plans/2026-11-14-durable-material-and-shader-plan.md#scene-owned-source-updates).
 
+Optional native Scene observation binds its explicit absolute project path to the original source
+loader's directory identity during actual Host admission. It establishes coverage before initial
+reconciliation. Lost observation replaces the sticky queue and its watcher before requesting a
+full rescan; metadata/catalogue structural changes also require full revalidation. The source
+adapter selects this Scene route exclusively and conflicts with the stock generic watcher.
+Processed admission refuses it before acquiring native resources. Native watching and retirement
+remain with the existing watcher library and Runtime close owner: every acquired original worker
+is retained through setup failure, facade/receipt Drop and replacement until actual join. A
+read-only retirement observer grants no factory, publication or close authority. Platform-specific
+worker join, OS cleanup errors and Scene reconciliation have distinct evidence and failure states.
+
 Managed Scene travel captures one owned attempt from each registered native domain before any
 retirement begins. Each domain returns the exact runtime component types whose lifecycle effects it
 owns together with the matching attempt prepared against the immutable target plus current World.

@@ -2242,6 +2242,24 @@ review corrections and verification scope. Native watcher
 composition/close, successful optional fallback availability, Editor preview, foreign execution,
 numerical budgets and full R9b/R12 remain open.
 
+The [native Scene source-watching successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#native-scene-source-watching)
+at `f948da9`, with the shared watcher close owner at `bf8bda1` and independent game at `159da63`,
+implements the selected physical route without a second asset publisher. It matches the explicit
+native root to the original loader, watches selected directories plus uncovered ancestors and
+establishes fresh coverage before full reconciliation. The maintained notify Windows/Linux patch
+retains and joins the original worker; registry custody survives setup failure, Drop, rescan and
+Stop. Read-only observers can outlive the World without retaining a native backend after close.
+The owning/affected controls pass 112/112 in `cd789eef-abc3-435a-b9a4-f7b183027a98`; the full
+independent Material package passes 11/11 in `e30abfbf-4111-43b6-9d9a-c777bc3b4712`. Its actual
+file edits produce eight explicit commits and three refusals, preserving complete material/image
+facts and gameplay progress, with original workers joined before World destruction. Windows live
+descendant watches deny ancestor moves; separate gap controls retire/join them before real
+replacement and explicit recovery. Linux library/test and root production cross-compilation pass,
+but Linux execution remains unqualified. Workspace, owning/independent correctness Clippy, format
+and document gates pass. Windows undifferentiated native events currently require full rescan;
+native filtering costs, notification-to-GPU presentation, optional-fallback interest and full
+R9b/R12/Foundation completion remain open. Editor/component work remains paused.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

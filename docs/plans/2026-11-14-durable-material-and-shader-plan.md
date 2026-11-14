@@ -261,7 +261,170 @@ Neither successful file receipts nor an executed file-path cut subscribes to dir
 The later physical watcher composition must classify these structural observations as full rescans;
 the finite raw-path recovery in this unit does not establish a general catalogue watcher.
 
-### Source Update Qualification
+## Native Scene Source Watching
+
+Status: implemented at `f948da9`, with shared native custody at `bf8bda1` and independent
+consumers at `159da63`. Qualified on Windows; Linux cross-compilation only. Compose an optional
+`ProjectSceneWatchPlugin` through the existing product
+recipe. It starts native coverage only during actual source Host admission, after matching an
+explicit absolute native root to the loader's original directory capability. Processed Hosts
+reject the plugin before native acquisition. An unbound ordinary Runtime refuses startup rather
+than claiming active source coverage. The stock generic asset watcher is a conflicting route;
+Scene observations never enter its independent per-asset publication resolver.
+
+Use one original notify worker for the project root nonrecursively and the configured source
+directories recursively, plus uncovered schema/Input parents and intermediate ancestors watched
+nonrecursively. The latter detect nested parent replacement. Deduplicate coverage rather than
+recursively watching Cargo output, with a finite 128-path admission bound. Establish the watcher
+before requesting a mandatory initial
+source rescan, closing the capture-to-watch gap while retaining the original usable Scene.
+TaskUpdate translates a bounded queue prefix into the existing Scene source ingress before its
+request poll. Metadata/catalogue structural observations request full revalidation. Overflow,
+backend failure and uncertain translation replace the sticky queue and native watcher before
+requesting a full rescan; replacement failure is observable and explicitly retryable. Ready
+content, game overlays, exact commit/acknowledgement and the two-generation bound stay unchanged.
+
+The published notify 8.2.0 Windows/Linux Drop only requests worker shutdown. Maintain a bounded
+source patch retaining the original worker handle, polling completion and joining that worker;
+callback destruction alone cannot prove join. `AssetWatchRuntime` registers with the original
+Runtime close owner, retains every acquired native session before watch setup, and budgets active
+and retiring sessions together. Failed setup, facade/receipt Drop, rescan replacement and Stop
+cannot lose unfinished custody. Runtime close fences acquisition and remains Pending until all
+original workers are joined. Persistent joined failures remain errors. A read-only observer may
+outlive the stopped World without keeping a native worker alive. Managed join initially admits
+Windows/Linux only; native execution on another platform needs its own coherent backend contract.
+
+Acceptance must include actual filesystem edits through an independently locked game: initial
+reconciliation, valid/invalid/repaired/missing Shader input, Material/Image state, catalogue
+membership, frozen Ready interleavings and explicit game commits. Deterministic queue-loss
+controls remain separately labeled. Preserve original generic watcher/rescan controls and prove
+partial-setup cleanup, finite-capacity reuse, held receipt/facade shutdown, deadline/RetryClose and
+post-Stop started/joined equality through the read-only observer. Test changed integration and
+native ownership, not unrelated UI/GPU mechanisms. No automatic game-state replacement, general
+watcher framework, second task scheduler or numeric performance claim is selected.
+
+### Native Watching Qualification
+
+The initial owning library check passes on Windows/Rust 1.95.0. Its complete ordinary suite passes
+47/47 in `b58b122d-9cd6-41a4-b688-49726383a6d3` (2.342 seconds after a 40.38-second release
+build). It includes original generic routing/rescan controls, actual callback blocking through a
+zero-deadline CloseIncomplete and RetryClose, partial multi-path setup failure, finite-capacity
+reuse and retained facade/receipt/observer retirement. The maintained Windows backend's direct
+original-worker controls pass 2/2 in `86a73815-97aa-4c7e-9be0-d8bc04759773` (0.074 seconds;
+seven upstream cases outside the selection). Since notify is an excluded path dependency, its
+private tests use the imported package's own manifest and separately resolved development closure;
+the owning library run uses Nara's original locked production dependency closure. An initial
+workspace package test refusal and missing offline `trash` development dependency produce no
+execution evidence. The package-local retry downloads the missing development dependencies
+through the configured proxy without changing Nara's package versions.
+
+Independent review identifies three concrete P2 corrections. Inotify now distinguishes a queued
+Shutdown from a successful wake: failed wake is reported and retried without another Shutdown;
+losing the worker's waker does not certify its original thread was joined. Two deterministic
+controls exercise wake failure and disconnect-before-return, with Linux execution still separate.
+Scene coverage includes uncovered intermediate directory ancestors nonrecursively, so replacing
+a nested configured parent rebuilds the leaf watches. Lifecycle scope refusal revokes coverage,
+records an observable failure and returns the original classified Runtime fault rather than
+silently leaving `Watching`. Successful full-rescan admission clears its previous ingress error;
+it does not claim preparation or commit success. Bounded independent rereviews close all three
+findings without a second watcher, queue manager or Runtime authority.
+
+The first independently locked physical game run, `b3527007-cd31-4391-9fb0-57772d5ac47c`,
+builds in 3m40s and exposes a fixture expectation at initial reconciliation: Startup includes its
+own executable/schema attestation plan, while a later Scene request uses the already admitted
+native schema. Initial equivalence now compares schema, manifest and runtime-content digests;
+full Ready-candidate equality and the committed candidate's complete stamp remain strict. The
+next run, `497d6f7c-08a1-42b9-a7fc-32e50f5f9254`, completes its content transitions but fails a
+final per-queue counter assumption. Native recovery correctly creates a fresh zero-counter queue.
+The fixture now retains actual nonzero queue observations across frames instead of assuming the
+final queue accumulated every event. Neither failed run is a passing physical qualification.
+
+The published Windows notify backend emits undifferentiated `Any` create/modify/remove kinds.
+The original conservative adapter treats these as incomplete observation; the physical workflow
+must observe actual coverage recovery as well as exact accepted events. Its final activity check
+therefore accepts recorded incremental events or a real recovery, with an explicit Windows
+recovery assertion. This preserves the existing uncertain-scope contract rather than weakening
+it to infer file scope from a native path. Windows full-rescan cost and backend classification
+remain explicit future optimization work; native dependency-directed filtering is not claimed.
+
+The first combined owning/affected run passes 105/112 in
+`c9b8eaf0-a330-4494-b8ad-4782478b3bae` (13.026 seconds after an 8m41s release build;
+1745 cases outside the selection). All 47 watcher-library controls and the original selected
+Scene/Startup controls pass. Seven new hosted watcher controls fail before watcher assertions
+because their fixture independently reopens the settings and loader directory capabilities.
+The fixture now shares one original authority for both, preserving the production
+`ProjectRootMismatch` guard instead of weakening source identity.
+
+The corrected-capability run reaches 110/112 in
+`bc7ad5cd-f5bd-451b-9be2-391df79c9409` (13.258 seconds after an 8m20s release build).
+The remaining two failures are Windows `PermissionDenied` from moving ancestors of live watched
+directories. A standalone Win32 control reproduces that denial with share-delete descendant
+handles, including a `FileRenameInfoEx` POSIX request; moving with only the original root handle
+retained succeeds. Windows controls now first require the real denied move and unchanged state,
+then retire and join the exact original watches before moving directories through the coverage
+gap and requesting explicit recovery. Original root-mismatch, retry deduplication, sender
+disconnection, fresh coverage and Scene preservation assertions remain. Linux retains its active
+worker movement branch. The fixture validates every move against its own canonical workspace.
+Independent bounded review finds no P1/P2 in this correction. This is not a claim that Windows
+permits moving those ancestors while their descendant watches remain open.
+
+Both Linux cross-compilation checks pass with the installed Rust 1.95.0 target: the maintained
+notify package's production library and tests (12.52 seconds), and Nara's locked
+`nara_asset_watch` all-target surface (34.88 seconds). The latter retains the original production
+dependency versions. The former uses its separate package-local development lock; its first
+offline attempt lacks `errno` and then downloads the missing locked dependencies through the
+configured proxy. These checks type-check the Linux original-worker and wake-retry paths;
+they do not execute Linux native watching, faults or filesystem behavior.
+
+The final independently locked Material package passes 11/11 in
+`e30abfbf-4111-43b6-9d9a-c777bc3b4712` (1.987 seconds after a 4m42s release build).
+The physical filesystem trajectory completes eight explicit commits and three expected content
+refusals without manual semantic notices or rescan calls. It retains a Ready candidate across a
+later real edit, preserves last-good through invalid/missing WGSL, recovers after file creation,
+updates actual decoded PNG pixels and Material texture selection, and discovers a previously
+unknown Image through metadata/catalogue reconciliation. Every commit preserves owned gameplay
+progress through the explicit overlay and acknowledges the exact request. Duplicate native
+observations do not require a fixed OS event count. Initial schema/content equivalence, frozen
+complete candidates and committed exact stamps remain checked.
+
+An independent game close participant waits for started/joined equality and zero active/retiring
+native sessions while the original World still retains its lifetime marker. The retained
+read-only observer repeats those checks after Headless Host cleanup and World destruction. This
+is actual Windows filesystem and CPU-content evidence, not destination GPU presentation. The
+package also retains all ten original public Material, semantic source-update, source editing and
+source-free processed controls. The CI adds this opt-in trajectory to its existing Windows/Linux
+module-consumer job; only local Windows execution is claimed here.
+
+The final owning/affected selection passes 112/112 in
+`cd789eef-abc3-435a-b9a4-f7b183027a98` (13.342 seconds after an 8m23s release build;
+1745 cases outside the selection). All 17 new Source watcher controls pass, including exact
+configuration bytes, finite coverage admission, optional/unbound and processed refusal, route
+conflicts, initial reconciliation, all three loss recoveries, lifecycle faults and platform-aware
+directory controls. All 47 watcher-library controls and the 48 selected original Scene/Startup
+controls also pass. Counts across the focused, preliminary and final runs overlap.
+
+The root workspace release all-target check passes (1m53s). The root production Scene adapter
+also passes a Linux cross-compilation check with only `runtime-2d,serde,asset-watch` enabled
+(1m03s), supplementing the two library checks above without claiming Linux execution. Owning
+root/watcher all-target/all-feature correctness Clippy passes (2m17s); independent opt-in Material
+all-target correctness Clippy passes (20.63 seconds), with non-correctness warnings retained.
+Root and independent formatting checks pass. Dependency review confirms only twenty new package
+identities needed by the independently enabled watcher closure, with no existing package
+version/source/checksum change. The Nara root lock only replaces notify's registry provenance
+with the maintained path. Imported package-byte comparison, affected TOML/lock/YAML parsing,
+added local document links/fragments and whitespace checks pass.
+
+Whitespace checking excludes the two byte-identical imported notify license/README files, whose
+published trailing spaces include Markdown hard line breaks; maintained source and documentation
+checks pass without editing those upstream artifacts.
+
+The remaining scope is explicit: Windows undifferentiated events take full reconciliation;
+numerical costs, optimized native classification, source-notification-to-GPU presentation,
+successful optional-fallback interest and foreign native execution remain open. Managed watcher
+registration outside Windows/Linux refuses before acquisition. No UI/component work is resumed,
+and this qualified unit does not complete R9b, R12 or the full foundation Goal.
+
+## Source Update Qualification
 
 The first focused Windows/Rust 1.95.0 release run,
 `c3687b31-907b-42d9-bf01-ef7811cb057e`, passes 31/61 after a 16-minute build. The source

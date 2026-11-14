@@ -1234,6 +1234,21 @@ numerical costs remain separate. Final workspace, owning/independent correctness
 and document checks pass in the linked unit. The adjacent Input consumer migration is isolated at
 `a51ad6e`; no production Input semantics change. Full R9b/R12/Foundation completion is not implied.
 
+The [native Scene source-watching successor](2026-11-14-durable-material-and-shader-plan.md#native-scene-source-watching)
+at `f948da9`, with shared custody at `bf8bda1` and independent consumers at `159da63`, binds
+optional native coverage to the admitted loader before initial rescan. It feeds the original
+Scene owner, with one worker covering selected directories and a fresh queue before loss
+reconciliation. The Runtime close participant retains every original worker through failed
+setup, replacement and Stop until actual join. Owning/affected controls pass 112/112 in
+`cd789eef-abc3-435a-b9a4-f7b183027a98`; the independent Material package passes 11/11 in
+`e30abfbf-4111-43b6-9d9a-c777bc3b4712`, including real file edits, eight explicit commits,
+three refusals and join verification before World destruction. Windows directory controls
+respect live descendant-handle denial and test replacement after original watch retirement.
+Linux production/test cross-compilation, workspace build, correctness Clippy, format and document
+checks pass; foreign native execution is separate. Windows `Any` notifications currently use full
+rescan, so optimized native filtering and numerical costs remain open. Notification-to-GPU
+presentation and full R9b/R12/Foundation completion are not implied; paused Editor work stays paused.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

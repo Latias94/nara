@@ -282,6 +282,64 @@ original startup selection and compatibility checks; a Scene source update does 
 Stop fences new notices and drops source interest while the original task/native owners retain
 unfinished cleanup.
 
+## Native Source Scene Watching
+
+With `asset-watch`, opt into the Scene route through your existing product recipe:
+
+```rust,ignore
+use nara::project_host::ProjectSceneWatchPlugin;
+
+let watching = ProjectSceneWatchPlugin::new(absolute_project_root)?;
+let recipe = recipe
+    .add_configured_plugin::<ProjectSceneWatchPlugin, _, _>(watching, Clone::clone)?;
+```
+
+The root is explicit and absolute. Actual source Host admission compares its directory identity
+with the original loader, then starts one native worker for selected source directories. Recipe
+resolution itself starts no watcher. The project root is nonrecursive; configured Assets, Scenes
+and Prefabs directories are recursive, with uncovered schema/Input parents added. Missing optional
+directories use the nearest existing parent until a structural event rebuilds coverage. Normal
+Cargo output directories are not recursively observed. Uncovered intermediate ancestors are
+watched nonrecursively so replacing a nested source parent rebuilds coverage instead of leaving
+watchers on its old directory objects. Coverage admits at most 128 native paths on one worker;
+an excessive selection refuses before native acquisition rather than silently omitting paths.
+Processed Hosts reject this plugin, and
+ordinary unbound Runtime startup refuses it. Do not also add the generic `AssetWatchPlugin`.
+
+Coverage starts before a mandatory full source rescan. The admitted initial Scene stays usable;
+observe `ProjectScenes::source_update_status()` and explicitly inspect, overlay, commit and
+acknowledge the original request as above. The initial rescan closes the capture-to-watch gap.
+File changes feed dependency interest; metadata and catalogue changes request full revalidation.
+Global settings, schema selection and Input remain startup-owned rather than being silently
+reconfigured by this observer.
+
+Some backends provide only undifferentiated changes. notify's Win32 events use `Any` kinds;
+the existing conservative adapter marks them as incomplete observation. This path therefore
+rebuilds coverage and requests a full Scene rescan for those Windows edits. It does not establish
+dependency-directed native filtering or a numerical edit-cost budget. Exact semantic notices
+and backends with proven file scope retain the existing dependency-interest path.
+
+Queue overflow, backend errors and uncertain translation start fresh coverage before requesting
+another full rescan. The old queue's loss flag stays sticky; it is not reset in place. A failed
+replacement exposes `ProjectSceneWatchState::RetryRequired` and its error through
+`source_watch_status()`. After fixing the cause, call `retry_source_watch()` to request one
+TaskUpdate retry. `Watching` describes native coverage, not committed Scene freshness.
+An unsupported lifecycle access returns a classified Runtime fault; a watcher retry does not
+override the Runtime's fault/close decision or reopen an already closed Host.
+`rescan_pending` describes undelivered full-rescan intent; once delivered, pending/request/result
+state belongs to `source_update_status()`. Native counts and `restarts` distinguish coverage
+replacement from Scene publication.
+
+Before Stop, retain `source_watch_retirement()` if the application needs to observe physical
+worker completion after its World or Host receipt is retained. The read-only observer provides
+`stats()`: a successful completed close has no active/retiring sessions and equal started/joined
+counts. Every session, including failed watch setup and superseded coverage, remains with the
+original Runtime close participant until the original worker is joined. A joined panic remains
+an error; observing callback destruction alone is insufficient. Explicit Close/Retry and deadline
+semantics stay with Runtime. The maintained [notify source note](../../vendor/notify/NARA-PATCH.md)
+records the bounded Windows/Linux join patch and its OS cleanup/platform limits. Managed watcher
+registration on other platforms currently refuses before native acquisition.
+
 ## Independent Delivery Controls
 
 The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact
