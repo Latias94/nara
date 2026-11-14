@@ -136,6 +136,16 @@ impl Fixture {
             "the one nara path dependency"
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
+        let manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
+        let original = "path = \"../../vendor/winit\"";
+        assert_eq!(
+            manifest.matches(original).count(),
+            1,
+            "the one repaired Winit source selection"
+        );
+        let repaired_winit = fixture.repository.join("vendor/winit");
+        assert!(repaired_winit.join("Cargo.toml").is_file());
+        let absolute = serde_json::to_string(repaired_winit.to_str().unwrap()).unwrap();
         fixture.write(
             "Cargo.toml",
             &manifest.replacen(original, &format!("path = {absolute}"), 1),

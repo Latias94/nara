@@ -129,7 +129,7 @@ ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"]
 toml = "1.1"
 tracing = "0.1"
 uuid = "1.23.4"
-winit = "=0.30.13"
+winit = { version = "=0.30.13", path = "vendor/winit" }
 pollster = "0.4"
 proc-macro-crate = "3.5"
 proc-macro2 = "1"

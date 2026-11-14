@@ -15,7 +15,7 @@ old monitor while the held cursor reaches the other monitor. Native scale change
 between 1.25 and 1.5. Programmatic placement and explicit size requests outside a move loop
 pass on the same machine.
 
-The source changes are limited to four files:
+Behavior changes are limited to four files:
 
 - `src/platform_impl/windows/dark_mode.rs` exposes the existing cached Windows build observation
   to its sibling module. It adds no OS-version query or cache owner.
@@ -30,6 +30,14 @@ The source changes are limited to four files:
   representation. Windows adds a small shared flag allocation per DPI dispatch; no performance
   or allocation reduction is claimed.
 
+The normal stable `cargo fmt --all` also formats local path dependencies. Its six layout-only
+normalizations are retained in `linux/x11/{dnd.rs,event_processor.rs,mod.rs,util/input.rs}`,
+`macos/window_delegate.rs`, and `windows/window_state.rs`, all under `src/platform_impl`.
+Each was checked byte-for-byte against the same formatter's output from pristine published
+source. No behavioral edit is included in those files; every other imported source file remains
+byte-identical to the package. The four behaviorally maintained files also pass the restored
+upstream nightly formatting configuration.
+
 The Windows 11 policy follows upstream's merged
 [`488c036a05d418e13bbdcdc349e2db2f6b7f58e2`](https://github.com/rust-windowing/winit/commit/488c036a05d418e13bbdcdc349e2db2f6b7f58e2).
 The compatible unmerged [PR4694](https://github.com/rust-windowing/winit/pull/4694), head
@@ -41,10 +49,14 @@ split to obtain this repair.
 
 ## Integration And Retirement
 
-The root and independently locked application workspaces patch crates.io to this same directory.
-That selection applies to direct and transitive Winit users; application-level Cargo patches do
-not propagate into an unrelated consumer's root manifest. A downstream application must select
-the repaired source itself until a compatible upstream release provides the required behavior.
+The engine workspace depends directly on this path so an ordinary Git/path consumer receives
+the repaired engine adapter. The root and independently locked application workspaces also patch
+crates.io to this same directory, unifying direct and transitive Winit users. Application-level
+Cargo patches do not propagate into an unrelated consumer's root manifest: an application that
+also imports Winit or a Winit integration from crates.io must select this source for those users
+until a compatible upstream release provides the required behavior. The real game-reconstruction
+fixture rebases its known engine and Winit patch paths when copying the project outside this tree,
+while preserving the copied lockfile and ordinary public Cargo build path.
 
 The original Nara native owner remains responsible for windows, event loops, normalized input
 and physical retirement. This patch adds no platform interface or replacement native Host.

@@ -653,7 +653,7 @@ missing-display explanations.
 
 The compatible repair is a temporary vendored published crate at exact upstream
 `e9809ef54b18499bb4f2cac945719ecc2a61061b`, with its original license and four explicitly owned
-source deltas. The merged upstream Windows 11 policy supplies the suggested DPI rectangle;
+behavioral source deltas. The merged upstream Windows 11 policy supplies the suggested DPI rectangle;
 the local correction preserves an application's explicit size request even when it numerically
 equals the internal proposal, through synchronous and buffered event delivery. A first repair
 passes default drags and the first size override but fails the final return with client size
@@ -672,9 +672,15 @@ review reports no P1/P2 in the marker correction, native input custody or final 
 All fourteen locked application workspaces resolve one repaired Winit source with no unrelated
 package version/source changes; disabled-feature metadata alone is not enabled-path evidence.
 The adapter's release all-target/all-feature correctness Clippy passes with existing warnings;
-its Rust 1.95.0 package format check and the four maintained vendor files' upstream-configured
-nightly rustfmt check pass. Every other imported crate file remains byte-identical to the
-published upstream package. These are source/format checks, not another platform execution run.
+its Rust 1.95.0 package format check and the four behaviorally maintained vendor files'
+upstream-configured nightly rustfmt check pass. Subsequent ordinary workspace formatting also
+visits path dependencies: six layout-only source normalizations are retained and checked
+byte-for-byte against stable rustfmt output from pristine published files. The remaining imported
+source is byte-identical to the package. These are source/format checks, not another platform
+execution run. Engine dependencies select the path directly so ordinary Git/path consumers
+receive the repaired adapter; application patches still unify third-party Winit integrations.
+The real reconstruction fixture rebases its two known engine/patch paths when copied outside
+the repository, preserving the copied lockfile and original public Cargo execution.
 
 See the [source maintenance note](../../vendor/winit/NARA-PATCH.md) for upstream/local disposition
 and retirement conditions. Actual results cover injected `HTCAPTION`/OS mouse dragging on this
