@@ -280,6 +280,16 @@ repeat adds no Rust changes, and its owned processes have exited. This is fresh 
 OS-input evidence on the current desktop, with the same GPU, maximized/snap/keyboard and
 human-observation limits above; it does not resume the paused Editor/component or Dialogue work.
 
+A November 15 retry, completed at 00:11 +08:00, cannot enter either mixed-DPI trajectory.
+Run `098ad7d6-416a-467c-af10-90dbf6e3181f` reports 0/2 passing in 0.816 seconds after a
+2.21-second release build, with 81 cases outside the selection. Both probes explicitly fail
+their two-monitor prerequisite: only DISPLAY2 at `[0,0,3840,2160]`, DPI 144 (150%), is active.
+Independent Windows display enumeration also reports DISPLAY1 as unattached to the desktop
+and only one active physical monitor. This is an unavailable hardware configuration, not an
+observed cross-monitor regression or new passing qualification. The test windows retire and
+no owned Cargo or probe process remains. No Rust or display-configuration change is made;
+another physical crossing run requires a second active display at a different DPI.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work
