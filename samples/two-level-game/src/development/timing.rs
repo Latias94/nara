@@ -31,6 +31,14 @@ pub enum DevelopmentTimingPhase {
     ExecutableInstall,
     /// Original process startup through its READY handshake, before the Host's later observation.
     ChildStartup,
+    /// Project/store checks, private control directory, identities, lease and command preparation.
+    ChildNamespacePreparation,
+    /// Exact installed executable validation and restrictive executable/directory handle admission.
+    ChildLaunchAuthority,
+    /// Original native process, containment, mapped-image and output-reader admission.
+    ChildNativeSpawn,
+    /// Original protocol wait through exact initialized READY validation, including polling.
+    ChildReadyWait,
     StateRestore,
     ProbeStep,
     StateCapture,
@@ -45,7 +53,7 @@ pub enum DevelopmentTimingPhase {
 
 impl DevelopmentTimingPhase {
     /// Every fixed phase, including phases that have not been reached in this Host.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 23] = [
         Self::SourceCheck,
         Self::CargoBuild,
         Self::CargoAdmissionAndToolObservation,
@@ -56,6 +64,10 @@ impl DevelopmentTimingPhase {
         Self::CargoFinalValidation,
         Self::ExecutableInstall,
         Self::ChildStartup,
+        Self::ChildNamespacePreparation,
+        Self::ChildLaunchAuthority,
+        Self::ChildNativeSpawn,
+        Self::ChildReadyWait,
         Self::StateRestore,
         Self::ProbeStep,
         Self::StateCapture,

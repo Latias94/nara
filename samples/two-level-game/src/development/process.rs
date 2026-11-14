@@ -37,6 +37,7 @@ use super::protocol::{
     InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation,
     PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response, SemanticCommand,
 };
+use super::timing::{self, DevelopmentTimingPhase, DevelopmentTimingSnapshot};
 
 const STORE_PREFIX: &str = "nara-two-level-development-";
 const STORE_MARKER: &str = "owner";
@@ -486,92 +487,127 @@ pub(super) struct Process {
     retired: Option<Retirement>,
 }
 
+struct PreparedLaunch {
+    control: PathBuf,
+    directory: DirectoryCapability,
+    #[cfg(windows)]
+    control_lease: nara::fs::DirectoryNamespaceLease,
+    session: String,
+    generation: String,
+    command: SupervisedProductProcessCommand,
+    limits: ProcessLogLimits,
+}
+
 impl Process {
     pub(super) fn start(
         project: &Path,
         store: &mut Store,
         executable: Arc<Executable>,
         placement: DevelopmentPlacement,
+        timings: &mut Option<DevelopmentTimingSnapshot>,
     ) -> Result<Self, StartFailure> {
-        #[cfg(not(windows))]
-        if placement == DevelopmentPlacement::SourceDesktop {
-            return Err(
-                "source desktop development processes are supported only on Windows"
-                    .to_owned()
-                    .into(),
-            );
-        }
-        if !project.is_absolute() {
-            return Err("the game project path must be absolute".to_owned().into());
-        }
-        if !Arc::ptr_eq(&store.identity, &executable.store) {
-            return Err(
-                "executable and control directory must belong to the same store"
-                    .to_owned()
-                    .into(),
-            );
-        }
-        let project =
-            fs::canonicalize(project).map_err(|error| format!("resolve game project: {error}"))?;
-        physical_directory(&project)?;
-        if store.root().starts_with(&project) || project.starts_with(store.root()) {
-            return Err("the development store must be separate from project files"
-                .to_owned()
-                .into());
-        }
-        let control = store.next_directory("process")?;
-        let session = format!("{}-{:x}", store.identity.session_prefix, store.next);
-        let digest = executable.digest();
-        let generation = format!("build-{:x}-{:?}", store.next, digest);
-        if session.is_empty()
-            || session.len() > MAX_IDENTITY_BYTES
-            || generation.is_empty()
-            || generation.len() > MAX_IDENTITY_BYTES
-        {
-            return Err("generated process identities exceeded their protocol limit"
-                .to_owned()
-                .into());
-        }
-        let directory = host_fs::writable_directory(&control)
-            .map_err(|error| format!("open process control directory: {error}"))?;
-        directory
-            .preflight_replace(ExpectedTarget::Missing)
-            .map_err(|error| format!("preflight process control publication: {error}"))?;
-        #[cfg(windows)]
-        let control_lease = directory
-            .acquire_namespace_lease()
-            .map_err(|error| format!("retain process control directory: {error}"))?;
-        #[cfg(windows)]
-        let environment = SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession;
-        #[cfg(not(windows))]
-        let environment = SupervisedProductEnvironmentPolicy::Sealed;
-        let command = SupervisedProductProcessCommand::new(environment, &control).arguments([
-            OsStr::new("--project-root"),
-            project.as_os_str(),
-            OsStr::new("--control-dir"),
-            control.as_os_str(),
-            OsStr::new("--session"),
-            OsStr::new(&session),
-            OsStr::new("--generation"),
-            OsStr::new(&generation),
-            OsStr::new("--placement"),
-            OsStr::new(placement.argument()),
-        ]);
-        let limits = ProcessLogLimits::try_from_counts(MAX_LOG_RECORDS, MAX_LOG_BYTES)
-            .map_err(|error| format!("configure bounded process logs: {error}"))?;
-        let native =
-            SupervisedProcessOwner::spawn_exact(executable.launch_authority()?, &command, limits)
-                .map_err(|error| format!("spawn exact game process: {error}"))?;
+        let prepared = timing::measure(
+            timings,
+            DevelopmentTimingPhase::ChildNamespacePreparation,
+            |_| -> Result<PreparedLaunch, StartFailure> {
+                #[cfg(not(windows))]
+                if placement == DevelopmentPlacement::SourceDesktop {
+                    return Err(
+                        "source desktop development processes are supported only on Windows"
+                            .to_owned()
+                            .into(),
+                    );
+                }
+                if !project.is_absolute() {
+                    return Err("the game project path must be absolute".to_owned().into());
+                }
+                if !Arc::ptr_eq(&store.identity, &executable.store) {
+                    return Err(
+                        "executable and control directory must belong to the same store"
+                            .to_owned()
+                            .into(),
+                    );
+                }
+                let project = fs::canonicalize(project)
+                    .map_err(|error| format!("resolve game project: {error}"))?;
+                physical_directory(&project)?;
+                if store.root().starts_with(&project) || project.starts_with(store.root()) {
+                    return Err("the development store must be separate from project files"
+                        .to_owned()
+                        .into());
+                }
+                let control = store.next_directory("process")?;
+                let session = format!("{}-{:x}", store.identity.session_prefix, store.next);
+                let digest = executable.digest();
+                let generation = format!("build-{:x}-{:?}", store.next, digest);
+                if session.is_empty()
+                    || session.len() > MAX_IDENTITY_BYTES
+                    || generation.is_empty()
+                    || generation.len() > MAX_IDENTITY_BYTES
+                {
+                    return Err("generated process identities exceeded their protocol limit"
+                        .to_owned()
+                        .into());
+                }
+                let directory = host_fs::writable_directory(&control)
+                    .map_err(|error| format!("open process control directory: {error}"))?;
+                directory
+                    .preflight_replace(ExpectedTarget::Missing)
+                    .map_err(|error| format!("preflight process control publication: {error}"))?;
+                #[cfg(windows)]
+                let control_lease = directory
+                    .acquire_namespace_lease()
+                    .map_err(|error| format!("retain process control directory: {error}"))?;
+                #[cfg(windows)]
+                let environment = SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession;
+                #[cfg(not(windows))]
+                let environment = SupervisedProductEnvironmentPolicy::Sealed;
+                let command = SupervisedProductProcessCommand::new(environment, &control)
+                    .arguments([
+                        OsStr::new("--project-root"),
+                        project.as_os_str(),
+                        OsStr::new("--control-dir"),
+                        control.as_os_str(),
+                        OsStr::new("--session"),
+                        OsStr::new(&session),
+                        OsStr::new("--generation"),
+                        OsStr::new(&generation),
+                        OsStr::new("--placement"),
+                        OsStr::new(placement.argument()),
+                    ]);
+                let limits = ProcessLogLimits::try_from_counts(MAX_LOG_RECORDS, MAX_LOG_BYTES)
+                    .map_err(|error| format!("configure bounded process logs: {error}"))?;
+                Ok(PreparedLaunch {
+                    control,
+                    directory,
+                    #[cfg(windows)]
+                    control_lease,
+                    session,
+                    generation,
+                    command,
+                    limits,
+                })
+            },
+        )?;
+        let authority = timing::measure(
+            timings,
+            DevelopmentTimingPhase::ChildLaunchAuthority,
+            |_| executable.launch_authority(),
+        )?;
+        let native = timing::measure(timings, DevelopmentTimingPhase::ChildNativeSpawn, |_| {
+            SupervisedProcessOwner::spawn_exact(authority, &prepared.command, prepared.limits)
+                .map_err(|error| format!("spawn exact game process: {error}"))
+        })?;
         let mut process = Self {
             native,
             executable,
             placement,
-            control,
-            directory,
+            control: prepared.control,
+            directory: prepared.directory,
             #[cfg(windows)]
-            _control_lease: control_lease,
-            session,
-            generation,
+            _control_lease: prepared.control_lease,
+            session: prepared.session,
+            generation: prepared.generation,
             next_request: 1,
             fault: None,
             closing: false,
@@ -581,24 +617,26 @@ impl Process {
             cleanup_error: None,
             retired: None,
         };
-        let startup = process
-            .wait_response(READY_FILE, 0, Instant::now() + START_TIMEOUT)
-            .and_then(|response| match response.result {
-                Ok(Reply::Observed { observation })
-                    if observation.phase == "running"
-                        && !observation.restoring
-                        && observation.error.is_none()
-                        && observation.engine_tick == 0
-                        && observation.logical_tick == 0
-                        && observation.logical_elapsed_nanos == 0
-                        && observation.runtime_generation != 0 =>
-                {
-                    Ok(())
-                }
-                other => Err(format!(
-                    "bootstrap did not observe a fresh initialized paused game: {other:?}"
-                )),
-            });
+        let startup = timing::measure(timings, DevelopmentTimingPhase::ChildReadyWait, |_| {
+            process
+                .wait_response(READY_FILE, 0, Instant::now() + START_TIMEOUT)
+                .and_then(|response| match response.result {
+                    Ok(Reply::Observed { observation })
+                        if observation.phase == "running"
+                            && !observation.restoring
+                            && observation.error.is_none()
+                            && observation.engine_tick == 0
+                            && observation.logical_tick == 0
+                            && observation.logical_elapsed_nanos == 0
+                            && observation.runtime_generation != 0 =>
+                    {
+                        Ok(())
+                    }
+                    other => Err(format!(
+                        "bootstrap did not observe a fresh initialized paused game: {other:?}"
+                    )),
+                })
+        });
         if let Err(message) = startup {
             process.fence(&message);
             return Err(StartFailure {

@@ -835,7 +835,13 @@ impl DevelopmentHost {
         let digest = executable.captured().digest();
         let provenance = executable.captured().provenance().digest();
         match self.measure(DevelopmentTimingPhase::ChildStartup, |host| {
-            Process::start(&host.project, &mut host.store, executable, host.placement)
+            Process::start(
+                &host.project,
+                &mut host.store,
+                executable,
+                host.placement,
+                &mut host.timings,
+            )
         }) {
             Ok(process) => {
                 let generation = ActiveGeneration {
