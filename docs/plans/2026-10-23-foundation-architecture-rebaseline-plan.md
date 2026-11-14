@@ -4876,6 +4876,91 @@ reservations and current-live export naming match their actual workflows. Remove
 or entry points only after tracing real consumers. These follow-ups do not block the current
 closed Scene data-family implementation or require a generic extension framework.
 
+### Schema Registry And Advanced ECS Qualification
+
+Implementation: `3a5812f`; custom observer consumers: `a2dd183`; declaration-oracle correction:
+`7e72d2a`. Qualified within the Windows/Rust 1.95.0 scope below. This completes the concrete
+reflection-storage and advanced-observer follow-up, not complete R12 or the foundation Goal.
+
+The November 14 source audit at `23e01e6` finds no production caller of
+`register_reflected_type` or `type_registry`: the embedded Bevy registry is read only by the
+math-reflection integration test and private failed-provider probes. Remove that storage, its
+provider-merge work and both public entry points. The locked Bevy 0.20.0 `TypeRegistry::default`
+registers eighteen primitive types; each old owner-local candidate repeated that initialization
+and copied its registrations into the aggregate despite having no production reader. These are
+source-proven removed operations, not a measured speed or memory improvement. Preserve actual
+reflection use through the existing public `bevy_reflect::TypeRegistry`, and retain the math
+dynamic-value round trip with a caller-owned registry. Keep native Schema/type binding, provider
+admission, migration, definition fingerprints and failure atomicity under their existing owners. This does not remove
+Bevy reflection from the dependency graph or establish a measured memory/build improvement.
+
+Qualify the deletion through the owning Reflect suite, non-Reflect Scene/data consumers and
+ordinary game reconstruction. Independently exercise custom Event and EntityEvent observers
+through the explicit advanced substrate in the existing renamed-root and renamed-ECS fixtures;
+use official crate-path configuration where supported before introducing any derive wrapper.
+Keep registration, effects, targeted delivery and observer retirement observable. Record exact
+executed paths and unsupported derives rather than implying complete Bevy facade parity. The
+unrelated standalone-Editor metadata guard must reflect its already committed six local
+dependencies and declaration-level feature observations, preserving rejection of project-crate
+dependencies and exact path checks. UI and physical mixed-DPI development remain paused.
+
+The owning Reflect/Scene libraries and seven selected public targets pass 1042/1042, with zero
+skips, in run `10a3c262-716e-432f-8cee-0843279d8601` (61.172 seconds after the initial 26m08s
+release build). Both failed-provider aggregate-index controls still pass after the obsolete
+reflection probe field is deleted. The caller-owned math registry retains every dependency
+registration assertion and the complete dynamic-value round trip. The independently locked
+module consumer passes 23/23 in run `17c43e99-0b78-4239-a3ad-ea40b675f954` (1.470 seconds after
+a 16m56s feature-union build). Its six targets retain non-Reflect inventory/migration,
+document edit/Undo/Save/Reopen/Check, manual native codec, recursive Schema, native/data membership,
+exact prepared-definition custody, replacement and physical retirement assertions.
+
+The renamed dependency harness passes 4/4 in `e06e9f54-aaeb-46a6-be88-795853008737`, including
+actual nested Cargo execution of both independently locked fixtures. The custom Event and
+EntityEvent consumer at `a2dd183` uses the original Bevy 0.20 derives and a caller-local
+`bevy_ecs` import. The locked macros have no crate-path override; `bevy_macro_utils` explicitly
+documents this alias fallback. Payload effects, unrelated-target isolation, explicit observer
+retirement and observed-entity retirement all execute through both renamed dependency choices.
+This does not enlarge the six maintained derives' automatic dependency-resolution guarantee.
+The first complete harness reports 3/4 because its old Editor guard expected two local dependencies
+and a now-optional feature as a direct dependency declaration. `7e72d2a` replaces that stale oracle
+with the already committed six-module set and exact path checks. It preserves the existing
+`imgui-reference` feature forwarding without changing the Editor manifest or dependency graph.
+
+The original actual Rust body/private-state A/B/C reconstruction and production Development Host
+adoption both pass in `e7b7e681-a7bb-4a04-b8a3-8546552efa77`: 2/2, 305.672 seconds including
+nested Cargo (198.222 and 107.449 seconds respectively); two ordinary cases are outside this
+ignored-only selection. Their complete canonical state, source/build validation, discarded
+probe, fresh adopter, failed-build/probe/source-drift refusal, Pending-predecessor execution and
+physical-close assertions remain. These are source/headless Windows processes, not desktop
+graphics or foreign-platform qualification. Outer targets use release; original nested builds
+retain their dev selection and Rust 1.95.0. No performance result follows from the test durations.
+
+All-target/all-feature Reflect correctness Clippy passes with existing warnings. Reflect doctests
+pass 7/7, with one existing ignored inventory example; root workspace and both renamed-fixture
+format checks pass. Added local document targets/fragments and ordinary whitespace checks pass.
+The code audit no longer finds the deleted API/storage in Rust consumers; the direct Bevy
+dependency and reexports remain. The ledger also repairs an earlier N05 evidence link's missing
+month directory. This documentation repair does not repeat or extend the earlier runtime tests.
+
+The principal executed commands are reproducible with `CARGO_BUILD_JOBS=1`, the absolute root
+`CARGO_TARGET_DIR`, `RUSTUP_TOOLCHAIN=1.95.0` and offline resolution:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara_reflect -p nara_scene --all-features --lib --test registry_contract --test math_reflection --test schema_owner --test creation_templates --test derive_positive --test authored_value_wire --test catalog_format --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release -p nara --test derive_dependency_fixtures --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-scene-module-consumer --locked --offline --release --test component_inventory --test manual_component_codec --test nested_schema --test scene_data_components --test scene_spawn --test scene_preparation --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --test development_host --test continuity --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 clippy --locked --offline --release -p nara_reflect --all-features --all-targets -- -D clippy::correctness
+cargo +1.95.0 test --locked --offline --release -p nara_reflect --all-features --doc -- --test-threads=1
+```
+
+The bounded independent reviews find no P1/P2 in the storage removal, declaration-level metadata
+guard or advanced observer consumers. All three scoped agents are closed and all owned Cargo
+sequences are terminal. Native window/input/GPU implementations are unchanged; their unrelated
+matrices are not repeated. Foreign execution, external non-maintainer authorship, broader
+metadata descriptors and the full foundation outcome retain their separate evidence gaps.
+Editor/UI, Dialogue and physical mixed-DPI development stay paused.
+
 The [registry ownership sub-unit](2026-11-01-component-registry-ownership-plan.md) addresses a
 concrete repeated consumer failure: successful registration followed by `schema` on a Building
 `ComponentRegistry` silently reports absence. The selected replacement separates mutable
