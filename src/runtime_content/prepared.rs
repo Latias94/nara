@@ -233,6 +233,39 @@ impl RuntimeContentBase {
             })
             .map_err(RuntimeContentError::Tilemap)?;
         }
+        let material = nara_reflect::ComponentTypeId::new("nara.material2d");
+        for entity in std::iter::once(&scene)
+            .chain(dependencies.iter())
+            .flat_map(|scene| scene.candidate().document().entities())
+        {
+            let Some(record) = entity.components().get(&material) else {
+                continue;
+            };
+            let scratch =
+                crate::project_content::materials::material_record_work_bytes(record.value())
+                    .ok_or(RuntimeContentError::BudgetOverflow {
+                        kind: RuntimeContentBudgetKind::WorkBytes,
+                    })?;
+            let _work = self.inner.budget.reserve(0, scratch)?;
+            crate::project_content::materials::validate_material_record(
+                record.value(),
+                domains.collection::<nara_material::Material2dDomain>(),
+            )
+            .map_err(|_| {
+                RuntimeContentError::Asset(nara_asset::AssetRuntimeError::new(
+                    nara_diagnostic::Diagnostic::error(
+                        nara_diagnostic::DiagnosticCode::new(
+                            "runtime.content.material-binding-mismatch",
+                        )
+                        .expect("engine diagnostic code"),
+                        nara_diagnostic::SafeSummary::new(
+                            "Scene material values do not match the admitted material product",
+                        )
+                        .expect("engine diagnostic summary"),
+                    ),
+                ))
+            })?;
+        }
         Ok(Arc::new(ProcessedSceneContent {
             scene,
             dependencies,

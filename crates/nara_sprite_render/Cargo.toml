@@ -12,7 +12,7 @@ nara_core.workspace = true
 nara_ecs.workspace = true
 nara_hierarchy.workspace = true
 nara_image = { workspace = true, features = ["render-prepare", "runtime"] }
-nara_material = { workspace = true, features = ["material"] }
+nara_material = { workspace = true, features = ["persistent"] }
 nara_render = { workspace = true, features = ["runtime"] }
 nara_sprite.workspace = true
 nara_tilemap.workspace = true

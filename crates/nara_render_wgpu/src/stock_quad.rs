@@ -276,20 +276,42 @@ impl StockImagePreflight {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CachedQuadPipelineKey {
+    format: wgpu::TextureFormat,
+    alpha_mode: nara_material::AlphaMode2d,
+    material: Option<([u8; 32], [u8; 32])>,
+}
+
+impl From<&WgpuQuadPipelineKey> for CachedQuadPipelineKey {
+    fn from(key: &WgpuQuadPipelineKey) -> Self {
+        Self {
+            format: key.format,
+            alpha_mode: key.alpha_mode,
+            material: key
+                .material
+                .as_ref()
+                .map(|material| material.pipeline_digests()),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum CachedQuadPipeline {
-    Ready(WgpuQuadPipeline),
+    Ready {
+        key: CachedQuadPipelineKey,
+        pipeline: wgpu::RenderPipeline,
+    },
     Rejected {
-        key: WgpuQuadPipelineKey,
+        key: CachedQuadPipelineKey,
         message: String,
     },
 }
 
 impl CachedQuadPipeline {
-    fn key(&self) -> &WgpuQuadPipelineKey {
+    fn key(&self) -> &CachedQuadPipelineKey {
         match self {
-            Self::Ready(pipeline) => &pipeline.key,
-            Self::Rejected { key, .. } => key,
+            Self::Ready { key, .. } | Self::Rejected { key, .. } => key,
         }
     }
 }
@@ -549,10 +571,15 @@ impl StockQuadResources {
         key: &WgpuQuadPipelineKey,
     ) -> Result<(), WgpuRenderError> {
         check_device()?;
-        if let Some(index) = self.pipelines.iter().position(|cached| cached.key() == key) {
+        let cache_key = CachedQuadPipelineKey::from(key);
+        if let Some(index) = self
+            .pipelines
+            .iter()
+            .position(|cached| *cached.key() == cache_key)
+        {
             let cached = self.pipelines.remove(index);
             let result = match &cached {
-                CachedQuadPipeline::Ready(_) => Ok(()),
+                CachedQuadPipeline::Ready { .. } => Ok(()),
                 CachedQuadPipeline::Rejected { message, .. } => {
                     Err(WgpuRenderError::ContentRejected {
                         message: message.clone(),
@@ -581,13 +608,16 @@ impl StockQuadResources {
         // Device loss is a namespace failure even if it also invalidated a shader handle.
         check_device()?;
         match result {
-            Ok(pipeline) => {
-                self.pipelines.push(CachedQuadPipeline::Ready(pipeline));
+            Ok(WgpuQuadPipeline { key, pipeline }) => {
+                self.pipelines.push(CachedQuadPipeline::Ready {
+                    key: CachedQuadPipelineKey::from(&key),
+                    pipeline,
+                });
                 Ok(())
             }
             Err(WgpuRenderError::ContentRejected { message }) => {
                 self.pipelines.push(CachedQuadPipeline::Rejected {
-                    key: key.clone(),
+                    key: cache_key,
                     message: message.clone(),
                 });
                 Err(WgpuRenderError::ContentRejected { message })
@@ -610,8 +640,7 @@ impl StockQuadResources {
                 cached
                     .key()
                     .material
-                    .as_ref()
-                    .is_some_and(|material| material.declaration().binding_digest() == *digest)
+                    .is_some_and(|(_, binding_digest)| binding_digest == *digest)
             })
         });
     }
@@ -622,11 +651,12 @@ impl StockQuadResources {
     ) -> Result<Vec<WgpuQuadPipelineDrawRef>, WgpuRenderError> {
         keys.iter()
             .map(|key| {
+                let cache_key = CachedQuadPipelineKey::from(key);
                 let pipeline = self
                     .pipelines
                     .iter()
                     .find_map(|cached| match cached {
-                        CachedQuadPipeline::Ready(pipeline) if pipeline.key == *key => {
+                        CachedQuadPipeline::Ready { key, pipeline } if *key == cache_key => {
                             Some(pipeline)
                         }
                         _ => None,
@@ -638,7 +668,7 @@ impl StockQuadResources {
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
                     material: key.material.clone(),
-                    pipeline: pipeline.pipeline.clone(),
+                    pipeline: pipeline.clone(),
                 })
             })
             .collect()

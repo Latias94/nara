@@ -18,6 +18,41 @@ fn auxiliary() -> ImportedProductId {
     ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap()
 }
 
+#[test]
+fn product_handle_lookup_preserves_existing_type_claims_without_catalogue_mutation() {
+    let mut server = AssetServer::new();
+    let primary = product(1, ImportedProductId::PRIMARY);
+    let selected = product(1, auxiliary());
+    let absent = product(2, ImportedProductId::PRIMARY);
+    let primary_handle = server.reserve_product::<String>(primary).unwrap();
+    let selected_handle = server.reserve_product::<u32>(selected).unwrap();
+    let untyped = server
+        .reserve_record_id(&AssetRecord::new(
+            product(3, ImportedProductId::PRIMARY).source(),
+            AssetSourcePath::new("textures/untyped.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
+        .unwrap();
+    let before = server.clone();
+    assert_eq!(
+        server.get_product_handle::<String>(primary),
+        Some(primary_handle)
+    );
+    assert_eq!(
+        server.get_product_handle::<u32>(selected),
+        Some(selected_handle)
+    );
+    assert_eq!(server.get_product_handle::<u32>(primary), None);
+    assert_eq!(server.get_product_handle::<String>(selected), None);
+    assert_eq!(server.get_product_handle::<String>(absent), None);
+    assert_eq!(
+        server.get_product_handle::<String>(product(3, ImportedProductId::PRIMARY)),
+        None
+    );
+    assert_eq!(server.get_handle::<String>(untyped), None);
+    assert_eq!(server, before);
+}
+
 fn source_record() -> AssetRecord {
     AssetRecord::new(
         product(1, ImportedProductId::PRIMARY).source(),

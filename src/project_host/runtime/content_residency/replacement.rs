@@ -8,6 +8,7 @@ pub(crate) struct StagedProjectSceneReplacement {
     content: PreparedSceneContent,
     staged_server: AssetServer,
     images: ImagePublications,
+    materials: MaterialPublications,
     inputs: Vec<TileSetPublicationInput>,
     retirements: Vec<TileSetContentReceipt>,
     tileset_slots: Vec<AssetMutationBaseline<TileSet>>,
@@ -46,6 +47,7 @@ impl StagedProjectSceneReplacement {
             bindings,
             staged_server,
             images,
+            materials,
             inputs,
             retirements,
             tileset_slots,
@@ -91,6 +93,7 @@ impl StagedProjectSceneReplacement {
             content: content.clone(),
             staged_server,
             images,
+            materials,
             inputs,
             retirements,
             tileset_slots,
@@ -151,6 +154,7 @@ impl StagedProjectSceneReplacement {
                 )
                 .map_err(rejected)?;
         }
+        self.materials.validate(world).map_err(rejected)?;
         Ok(())
     }
 
@@ -206,7 +210,8 @@ impl StagedProjectSceneReplacement {
                 return Err((self, report));
             }
         };
-        let (images, tilesets) = commit_publications(world, self.images, tilesets);
+        let (images, tilesets, materials) =
+            commit_publications(world, self.images, tilesets, self.materials);
         let authority = self.catalog.commit(world);
         world.insert_resource(self.content.domain_assets().clone());
         world.resource_mut::<CurrentSceneOwner>().commit_source(
@@ -220,6 +225,7 @@ impl StagedProjectSceneReplacement {
         *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
             images,
             tilesets,
+            materials,
             authority,
         };
         Ok(report)
@@ -240,7 +246,12 @@ pub(super) fn commit_publications(
     world: &mut World,
     images: ImagePublications,
     tilesets: Option<PreparedTileSetPublications<'_>>,
-) -> (Vec<OwnedImage>, Vec<TileSetContentReceipt>) {
+    materials: MaterialPublications,
+) -> (
+    Vec<OwnedImage>,
+    Vec<TileSetContentReceipt>,
+    MaterialResidency,
+) {
     let images = if images.is_empty() {
         Vec::new()
     } else {
@@ -268,7 +279,21 @@ pub(super) fn commit_publications(
             .expect("TileSet residency resources passed preflight");
         prepared.commit(&server, &images, &mut values, &mut states, &mut events)
     });
-    (images, tilesets)
+    let materials = if materials.is_empty() {
+        MaterialResidency::default()
+    } else {
+        let mut access = SystemState::<(
+            Res<AssetServer>,
+            ResMut<Assets<Material2dAsset>>,
+            ResMut<AssetStates>,
+            ResMut<AssetEvents>,
+        )>::new(world);
+        let (server, mut values, mut states, mut events) = access
+            .get_mut(world)
+            .expect("Material residency resources passed preflight");
+        materials.commit(&server, &mut values, &mut states, &mut events)
+    };
+    (images, tilesets, materials)
 }
 
 fn share_inputs(
@@ -351,6 +376,8 @@ pub(super) fn validate_native_resources(
     let uses_images = uses_tilesets
         || content.image_count() != 0
         || current.is_some_and(|current| !current.images.is_empty());
+    let uses_materials = content.material_count() != 0
+        || current.is_some_and(|current| !current.materials.is_empty());
     if uses_images
         && (!world.contains_resource::<AssetServer>()
             || !world.contains_resource::<Assets<ImageAsset>>()
@@ -362,6 +389,14 @@ pub(super) fn validate_native_resources(
     if uses_tilesets
         && (!world.contains_resource::<TileSetAssets>()
             || !world.contains_resource::<Assets<TileSet>>()
+            || !world.contains_resource::<AssetStates>()
+            || !world.contains_resource::<AssetEvents>())
+    {
+        return Err(resources_missing());
+    }
+    if uses_materials
+        && (!world.contains_resource::<AssetServer>()
+            || !world.contains_resource::<Assets<Material2dAsset>>()
             || !world.contains_resource::<AssetStates>()
             || !world.contains_resource::<AssetEvents>())
     {

@@ -27,6 +27,36 @@ fn palette(textures: Vec<MaterialTextureDeclaration>) -> Material2dDeclaration {
 }
 
 #[test]
+fn semantic_ids_are_bounded_and_compatible_with_persistent_field_identity() {
+    for id in [
+        " leading",
+        ".leading",
+        "has space",
+        "bad/control",
+        "bad\ncontrol",
+        "颜色",
+        &"x".repeat(129),
+    ] {
+        assert!(
+            matches!(
+                MaterialUniformField::new(id, "tint", MaterialParameterKind::Vec4, 0),
+                Err(MaterialDeclarationError::InvalidId {
+                    target: "parameter"
+                }),
+            ),
+            "parameter identity {id:?}"
+        );
+        assert!(matches!(
+            MaterialTextureDeclaration::new(id, "palette_texture", 1),
+            Err(MaterialDeclarationError::InvalidId { target: "texture" }),
+        ));
+    }
+    for id in ["tint", "palette.tint-2_A", &"x".repeat(128)] {
+        assert!(MaterialUniformField::new(id, "tint", MaterialParameterKind::Vec4, 0).is_ok());
+    }
+}
+
+#[test]
 fn typed_and_dynamic_authors_construct_the_same_family() {
     let typed = palette(vec![texture("palette.lookup", "lookup_texture", 1)]);
     let dynamic = Material2dDeclaration::new(

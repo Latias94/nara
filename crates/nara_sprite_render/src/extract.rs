@@ -1,7 +1,8 @@
-use nara_asset::{AssetServer, AssetStates, Assets};
+use nara_asset::{AssetRef, AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
-use nara_material::Material2dBinding;
+use nara_image::ImageAsset;
+use nara_material::{Material2d, Material2dAsset, Material2dBinding};
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::PresentedSpatialSnapshot2d;
@@ -22,12 +23,23 @@ pub(crate) fn extract_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     mut scratch: ResMut<ExtractedSpriteScratch>,
     spatial: PresentedSpatialSnapshot2d,
-    sprites: Query<(Entity, &Sprite, Option<&Material2dBinding>)>,
-    tilemaps: Query<(Entity, &Tilemap, Option<&Material2dBinding>)>,
+    sprites: Query<(
+        Entity,
+        &Sprite,
+        Option<&Material2dBinding>,
+        Option<&Material2d>,
+    )>,
+    tilemaps: Query<(
+        Entity,
+        &Tilemap,
+        Option<&Material2dBinding>,
+        Option<&Material2d>,
+    )>,
+    materials: Option<Res<Assets<Material2dAsset>>>,
     tilesets: Option<Res<Assets<TileSet>>>,
     server: Option<Res<AssetServer>>,
     states: Option<Res<AssetStates>>,
-    images: Option<Res<Assets<nara_image::ImageAsset>>>,
+    images: Option<Res<Assets<ImageAsset>>>,
 ) -> Result<(), BevyError> {
     let hierarchy_order = spatial.order().map_err(BevyError::error)?;
     for (entity, ..) in sprites.iter() {
@@ -42,19 +54,40 @@ pub(crate) fn extract_sprites(
     scratch.stats = SpriteRenderStats::default();
 
     for entity in hierarchy_order.iter().copied() {
-        if let Ok((entity, sprite, material)) = sprites.get(entity) {
+        let sprite = sprites.get(entity).ok();
+        let tilemap = tilemaps.get(entity).ok();
+        let Some((binding, authored)) = sprite
+            .map(|(_, _, binding, authored)| (binding, authored))
+            .or_else(|| tilemap.map(|(_, _, binding, authored)| (binding, authored)))
+        else {
+            continue;
+        };
+        let material = match extract_material(
+            binding,
+            authored,
+            materials.as_deref(),
+            server.as_deref(),
+            states.as_deref(),
+            images.as_deref(),
+        ) {
+            Ok(material) => material,
+            Err(()) => {
+                scratch.stats.missing_materials = scratch.stats.missing_materials.saturating_add(1);
+                continue;
+            }
+        };
+        let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
+        if let Some((entity, sprite, ..)) = sprite {
             let source_order = scratch.sprites.len() as u64;
-            let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
             let mut extracted = extract_sprite(entity, sprite, matrix, source_order);
-            extracted.material_extension = material.cloned();
+            extracted.material_extension = material.clone();
             scratch.sprites.push(extracted);
             scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
         }
 
-        let Ok((entity, tilemap, material)) = tilemaps.get(entity) else {
+        let Some((entity, tilemap, ..)) = tilemap else {
             continue;
         };
-        let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
         let tileset = tilemap.tileset.and_then(|handle| {
             tilesets
                 .as_deref()
@@ -96,7 +129,7 @@ pub(crate) fn extract_sprites(
                     scratch.stats.invalid_tile_regions.saturating_add(1);
                 continue;
             };
-            extracted_cell.material_extension = material.cloned();
+            extracted_cell.material_extension = material.clone();
             scratch.sprites.push(extracted_cell);
             scratch.stats.extracted_tile_cells =
                 scratch.stats.extracted_tile_cells.saturating_add(1);
@@ -106,6 +139,72 @@ pub(crate) fn extract_sprites(
     extracted.replace(&mut scratch.sprites);
     *stats = scratch.stats;
     Ok(())
+}
+
+fn extract_material(
+    binding: Option<&Material2dBinding>,
+    authored: Option<&Material2d>,
+    materials: Option<&Assets<Material2dAsset>>,
+    server: Option<&AssetServer>,
+    states: Option<&AssetStates>,
+    images: Option<&Assets<ImageAsset>>,
+) -> Result<Option<Material2dBinding>, ()> {
+    match (binding, authored) {
+        (Some(_), Some(_)) => Err(()),
+        (Some(binding), None) => Ok(Some(binding.clone())),
+        (None, None) => Ok(None),
+        (None, Some(authored)) => {
+            let materials = materials.ok_or(())?;
+            let handle = authored.handle();
+            let asset = materials.get(handle).ok_or(())?;
+            let server = server.ok_or(())?;
+            if server.get_product_handle::<Material2dAsset>(asset.product()) != Some(handle) {
+                return Err(());
+            }
+            let states = states.ok_or(())?;
+            if states
+                .state(handle.id())
+                .is_none_or(|state| state.usable_version().is_none())
+                || states.published_slot_revision(handle.id())
+                    != Some(&materials.slot_revision(handle))
+            {
+                return Err(());
+            }
+            if asset
+                .textures()
+                .values()
+                .any(|reference| !matches!(reference, AssetRef::Product(_)))
+            {
+                return Err(());
+            }
+            let binding = authored
+                .bind(asset, |reference| match reference {
+                    AssetRef::Product(product) => server.get_product_handle::<ImageAsset>(*product),
+                    AssetRef::Path(_) | AssetRef::StableId(_) => None,
+                })
+                .map_err(|_| ())?;
+            if binding.textures().values().any(|handle| {
+                let Some(images) = images else {
+                    return true;
+                };
+                let Some(image) = images.get(*handle) else {
+                    return true;
+                };
+                let Some(product) = image.product() else {
+                    return true;
+                };
+                server.get_product_handle::<ImageAsset>(product) != Some(*handle)
+                    || states
+                        .state(handle.id())
+                        .is_none_or(|state| state.usable_version().is_none())
+                    || states.published_slot_revision(handle.id())
+                        != Some(&images.slot_revision(*handle))
+            }) {
+                return Err(());
+            }
+            Ok(Some(binding))
+        }
+    }
 }
 
 #[must_use]

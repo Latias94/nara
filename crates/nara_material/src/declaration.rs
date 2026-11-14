@@ -263,6 +263,14 @@ pub(crate) fn validate_id(id: &str, target: &'static str) -> Result<(), Material
     if id.trim().is_empty() {
         return Err(MaterialDeclarationError::EmptyId { target });
     }
+    if id.len() > 128
+        || !id.as_bytes()[0].is_ascii_alphanumeric()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        return Err(MaterialDeclarationError::InvalidId { target });
+    }
     Ok(())
 }
 
@@ -282,6 +290,11 @@ pub enum MaterialDeclarationError {
     /// A persistent identity was empty or whitespace-only.
     #[error("{target} requires a nonempty semantic id")]
     EmptyId { target: &'static str },
+    /// A semantic identity cannot be represented by the shared persistent field contract.
+    #[error(
+        "{target} semantic id must be at most 128 ASCII bytes, start with an alphanumeric character and contain only alphanumerics, '.', '_' or '-'"
+    )]
+    InvalidId { target: &'static str },
     /// A shader symbol was empty or whitespace-only.
     #[error("{target} requires a nonempty shader name")]
     EmptyName { target: &'static str },

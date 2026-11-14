@@ -1135,6 +1135,8 @@ const SLOT_SPRITE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite");
 const SLOT_TILEMAP: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tilemap");
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 const SLOT_TILESET_ASSETS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tileset-assets");
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+const SLOT_MATERIAL: PluginSlotId = PluginSlotId::new("nara.plugins.slot.material2d");
 #[cfg(any(
     feature = "runtime-2d",
     feature = "presentation-2d",
@@ -1363,10 +1365,15 @@ impl PluginGroup for Runtime2dPlugins {
                 PluginDefinition::for_default::<nara_image::ImagePlugin>(),
             );
         #[cfg(feature = "serde")]
-        let builder = builder.add_slot(
-            PluginSlot::optional(SLOT_TILESET_ASSETS, nara_tilemap::TILESET_ASSET_PLUGIN_ID),
-            PluginDefinition::for_default::<nara_tilemap::TileSetAssetPlugin>(),
-        );
+        let builder = builder
+            .add_slot(
+                PluginSlot::optional(SLOT_TILESET_ASSETS, nara_tilemap::TILESET_ASSET_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_tilemap::TileSetAssetPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::optional(SLOT_MATERIAL, nara_material::MATERIAL_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_material::Material2dPlugin>(),
+            );
         builder
     }
 }

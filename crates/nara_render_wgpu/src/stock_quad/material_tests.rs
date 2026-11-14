@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     allocation::AllocationFailureGuard,
+    output::OutputBudget,
     quad::{WgpuMaterial2dPipelineKey, WgpuQuadInstance, validate_material_device_limits},
     readback_tests::{
         MIXED_MATERIAL_FRAGMENT, MixedMaterialParameters, ReadbackGpu, TEXTURE_MATERIAL_FRAGMENT,
@@ -8,7 +9,11 @@ use crate::{
         mixed_material_binding, mixed_material_library, publish_material,
     },
 };
-use nara_material::{AlphaMode2d, MaterialParameters};
+use nara_material::{
+    AlphaMode2d, Material2dDeclaration, Material2dGeneration, MaterialParameters,
+    MaterialTextureDeclaration,
+};
+use std::sync::Weak;
 
 fn mixed_batch() -> WgpuQuadBatch {
     let (left, [red, _]) = image_versions_with_handle(1, 1);
@@ -24,6 +29,146 @@ fn mixed_batch() -> WgpuQuadBatch {
         ),
         vec![(2, red), (7, green)],
     )
+}
+
+fn source_retained_generation(
+    source_generations: &Arc<OutputBudget>,
+    fragment: &str,
+) -> (Material2dGeneration, Weak<OutputReservation>) {
+    let owner = Arc::new(source_generations.reserve(1).unwrap());
+    let weak = Arc::downgrade(&owner);
+    let declaration = Material2dDeclaration::from_parameters::<TestMaterialParameters>(
+        "test.cache-source-retention",
+        1,
+        AlphaMode2d::Opaque,
+        vec![MaterialTextureDeclaration::new("texture", "material_texture", 1).unwrap()],
+    )
+    .unwrap();
+    let generation = Material2dGeneration::from_shader_source(declaration, fragment)
+        .unwrap()
+        .with_lifetime_owner(owner);
+    (generation, weak)
+}
+
+#[test]
+fn native_ready_cache_releases_source_generations_and_draw_refs_keep_actual_captures() {
+    let gpu = ReadbackGpu::new();
+    let mut resources = StockQuadResources::default();
+    let source_generations = Arc::new(OutputBudget::new(2));
+    let (texture, [red, _]) = image_versions_with_handle(1, 1);
+    for revision in 0..3 {
+        let fragment = format!(
+            "{TEXTURE_MATERIAL_FRAGMENT}\nconst source_retention_revision: u32 = {revision}u;"
+        );
+        let mut draws = Vec::new();
+        let mut owners = Vec::new();
+        for _ in 0..2 {
+            let (generation, owner) = source_retained_generation(&source_generations, &fragment);
+            let binding = crate::readback_tests::material_binding(&generation, [1.0; 4], texture);
+            let batches = [material_batch(binding.clone(), vec![(1, red.clone())])];
+            let keys =
+                crate::required_quad_pipeline_keys(&batches, wgpu::TextureFormat::Rgba8Unorm);
+            assert_eq!(keys.len(), 1);
+            resources
+                .ensure_pipeline(&gpu.device, &|| Ok(()), &keys[0])
+                .unwrap();
+            let prepared = resources.pipeline_draw_refs(&keys).unwrap();
+            assert_eq!(prepared.len(), 1);
+            drop(keys);
+            drop(batches);
+            drop(binding);
+            drop(generation);
+            assert!(owner.upgrade().is_some());
+            draws.push(prepared);
+            owners.push(owner);
+        }
+        assert_eq!(resources.pipeline_stats(), (revision + 1, revision + 1, 1));
+        assert!(
+            resources
+                .pipelines
+                .iter()
+                .all(|entry| matches!(entry, CachedQuadPipeline::Ready { .. }))
+        );
+        assert_eq!(source_generations.retained(), 2);
+        assert!(source_generations.reserve(1).is_none());
+        let second = draws.pop().unwrap();
+        drop(draws);
+        assert!(owners[0].upgrade().is_none());
+        assert!(owners[1].upgrade().is_some());
+        assert_eq!(source_generations.retained(), 1);
+        drop(second);
+        assert!(owners[1].upgrade().is_none());
+        assert_eq!(source_generations.retained(), 0);
+        resources.trim_pipeline_cache();
+        assert_eq!(resources.pipeline_stats(), (revision + 1, revision + 1, 1));
+        assert_eq!(gpu.budget.retained(), 0);
+    }
+}
+
+#[test]
+fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases() {
+    let gpu = ReadbackGpu::new();
+    let mut resources = StockQuadResources::default();
+    let source_generations = Arc::new(OutputBudget::new(2));
+    let (retained, retained_owner) =
+        source_retained_generation(&source_generations, TEXTURE_MATERIAL_FRAGMENT);
+    let (texture, [red, _]) = image_versions_with_handle(1, 1);
+    for revision in 0..3 {
+        let fragment = format!(
+            "{TEXTURE_MATERIAL_FRAGMENT}\nconst source_retention_revision: u32 = {revision}u;"
+        );
+        let (generation, owner) = source_retained_generation(&source_generations, &fragment);
+        let binding = crate::readback_tests::material_binding(&generation, [1.0; 4], texture);
+        let batches = [material_batch(binding.clone(), vec![(1, red.clone())])];
+        let keys = crate::required_quad_pipeline_keys(&batches, wgpu::TextureFormat::Rgba8Unorm);
+        assert_eq!(keys.len(), 1);
+        let invalid =
+            crate::quad::QuadShaderSourceGuard::invalid(keys[0].material.as_ref().unwrap());
+        assert_eq!(source_generations.retained(), 2);
+        assert!(source_generations.reserve(1).is_none());
+        for _ in 0..2 {
+            let (result, prefix) = gpu.with_preparation::<()>(|preparation| {
+                let error = resources
+                    .prepare_batches(
+                        preparation,
+                        || Ok(()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        &batches,
+                        revision as u64,
+                    )
+                    .unwrap_err();
+                assert!(matches!(error, WgpuRenderError::ContentRejected { .. }));
+                assert_eq!(
+                    preparation.work_stats(),
+                    crate::WgpuNativeWorkStats::default()
+                );
+                Err(error)
+            });
+            assert!(result.is_err());
+            gpu.wait_for_prefix(&prefix);
+        }
+        drop(invalid);
+        drop(keys);
+        drop(batches);
+        drop(binding);
+        drop(generation);
+        assert!(owner.upgrade().is_none());
+        assert!(retained_owner.upgrade().is_some());
+        assert_eq!(source_generations.retained(), 1);
+        assert_eq!(resources.pipeline_stats(), (revision + 1, revision + 1, 1));
+        assert!(
+            resources
+                .pipelines
+                .iter()
+                .all(|entry| matches!(entry, CachedQuadPipeline::Rejected { .. }))
+        );
+        assert_eq!(resources.instance_charges(), (0, 0));
+        assert_eq!(gpu.budget.retained(), 0);
+    }
+    drop(retained);
+    assert!(retained_owner.upgrade().is_none());
+    assert_eq!(source_generations.retained(), 0);
+    assert_eq!(resources.pipeline_stats(), (3, 3, 1));
 }
 
 #[test]

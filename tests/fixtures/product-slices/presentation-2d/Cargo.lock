@@ -1503,10 +1503,16 @@ dependencies = [
  "encase",
  "glam",
  "naga",
+ "nara_app",
  "nara_asset",
+ "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
  "nara_image",
  "nara_material_derive",
+ "nara_reflect",
+ "serde",
+ "serde_json",
  "thiserror 2.0.19",
 ]
 

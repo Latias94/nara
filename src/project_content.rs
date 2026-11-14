@@ -6,6 +6,7 @@ mod closure;
 mod delivery;
 mod domains;
 mod input;
+pub(crate) mod materials;
 mod scenes;
 mod source_readiness;
 
@@ -1806,44 +1807,56 @@ impl<'a> LoadContext<'a> {
         sources.seen_scenes.insert(selected_source_path.clone());
         self.collect_source_candidates(compiled, &assets, &mut sources)?;
         let mut dependent_scenes = Vec::new();
-        while let Some((canonical, request)) = sources.scenes.pop_first() {
-            self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
-            let request_work = pending_scene_source_work_bytes(&canonical, &request.alias)?;
-            let entry_work =
-                self.reserve_work(size_of::<ProjectSceneContent>() + 3 * ARC_CONTROL_BLOCK_BYTES)?;
-            dependent_scenes
-                .try_reserve_exact(1)
-                .map_err(|_| allocation_failed("project.content.scene-dependencies-allocation"))?;
-            let root_work = self.reserve_work(string_retained_bytes(
-                self.catalogue_roots
+        let mut domain_collections = self.prepare_domain_collections()?;
+        loop {
+            while let Some((canonical, request)) = sources.scenes.pop_first() {
+                self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
+                let request_work = pending_scene_source_work_bytes(&canonical, &request.alias)?;
+                let entry_work = self
+                    .reserve_work(size_of::<ProjectSceneContent>() + 3 * ARC_CONTROL_BLOCK_BYTES)?;
+                dependent_scenes.try_reserve_exact(1).map_err(|_| {
+                    allocation_failed("project.content.scene-dependencies-allocation")
+                })?;
+                let root_work = self.reserve_work(string_retained_bytes(
+                    self.catalogue_roots
+                        .as_ref()
+                        .expect("source roots are bound")[request.reader]
+                        .as_str(),
+                )?)?;
+                let source_root = self
+                    .catalogue_roots
                     .as_ref()
                     .expect("source roots are bound")[request.reader]
-                    .as_str(),
-            )?)?;
-            let source_root = self
-                .catalogue_roots
-                .as_ref()
-                .expect("source roots are bound")[request.reader]
-                .clone();
-            let directory = self.open_directory(&source_root)?;
-            let captured = self.capture_scene_dependency(
-                &directory,
-                &source_root,
-                settings,
-                &request.alias,
-                &mut loaded_prefabs,
-                &mut prefab_cache_work,
+                    .clone();
+                let directory = self.open_directory(&source_root)?;
+                let captured = self.capture_scene_dependency(
+                    &directory,
+                    &source_root,
+                    settings,
+                    &request.alias,
+                    &mut loaded_prefabs,
+                    &mut prefab_cache_work,
+                )?;
+                drop((directory, source_root));
+                self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
+                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, root_work.reserved);
+                self.collect_source_candidates(captured.compiled_scene(), &assets, &mut sources)?;
+                dependent_scenes.push(captured);
+                self.commit_work_as_retained(entry_work, entry_work.reserved)?;
+                drop((canonical, request));
+                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, request_work);
+            }
+            self.load_domains(
+                &assets,
+                &settings.paths.assets,
+                &mut sources,
+                &mut domain_collections,
             )?;
-            drop((directory, source_root));
-            self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
-            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, root_work.reserved);
-            self.collect_source_candidates(captured.compiled_scene(), &assets, &mut sources)?;
-            dependent_scenes.push(captured);
-            self.commit_work_as_retained(entry_work, entry_work.reserved)?;
-            drop((canonical, request));
-            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, request_work);
+            if sources.scenes.is_empty() {
+                break;
+            }
         }
-        drop(sources.seen_scenes);
+        drop(std::mem::take(&mut sources.seen_scenes));
         self.subtract_budget(
             ProjectContentBudgetKind::WorkBytes,
             sources.scene_index_work_bytes,
@@ -1857,12 +1870,7 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        let domain_collections = self.load_domains(
-            &assets,
-            &settings.paths.assets,
-            sources.domains,
-            &mut sources.products,
-        )?;
+        self.finish_domain_dependencies(&domain_collections, &mut sources)?;
         drop(sources.products);
         self.subtract_budget(
             ProjectContentBudgetKind::WorkBytes,
@@ -1903,6 +1911,7 @@ impl<'a> LoadContext<'a> {
         }
         self.validate_tileset_image_extents(&tilesets, &images)?;
         self.validate_tilemap_membership(compiled, provenance, &tilesets)?;
+        materials::validate_source_materials(self, compiled, &domain_collections)?;
         self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
         let diagnostics = bindings.validate_compiled_scene(
             compiled,
@@ -1916,6 +1925,11 @@ impl<'a> LoadContext<'a> {
             ));
         }
         for dependency in &dependent_scenes {
+            materials::validate_source_materials(
+                self,
+                dependency.compiled_scene(),
+                &domain_collections,
+            )?;
             self.validate_tilemap_membership(
                 dependency.compiled.document(),
                 dependency.compiled.canonical_provenance(),
@@ -2049,6 +2063,7 @@ impl<'a> LoadContext<'a> {
         };
         self.commit_work_as_retained(scope_reservation, retained_scopes)?;
         self.path_scope_work_bytes = 0;
+        materials::reserve_source_material_views(self, &domain_collections)?;
         let budget = self
             .budget
             .take()
@@ -2082,6 +2097,11 @@ impl<'a> LoadContext<'a> {
                     diagnostics,
                 )
             })?;
+        materials::attach_source_material_views(
+            &mut domain_collections,
+            &runtime_lease,
+            &generation_lease,
+        );
         let sources = Arc::new(ProjectSourceContent {
             database,
             asset_scope: std::mem::replace(&mut self.asset_scope, AssetPathScope::ROOT),
@@ -2515,104 +2535,118 @@ impl<'a> LoadContext<'a> {
                 let (references, reference_work) =
                     collect_effective_asset_references(schema, record, self.budget_mut())?;
                 for reference in references {
-                    self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                    let (source, source_work) =
-                        self.discover_source_reference(assets, reference.asset_ref())?;
-                    let path = source.path();
-                    self.observe_path(path.as_str())?;
-                    if self.source_mode == SourceLoadMode::Current
-                        && reference.demand() == AssetReferenceDemand::Deferred
-                    {
-                        self.capture_resolved_source_target(
-                            reference.asset_ref(),
-                            source,
-                            source_work,
-                            sources,
-                        )?;
-                        continue;
-                    }
-                    if source.source_kind() == &AssetSourceKind::Scene {
-                        if !reference.asset_ref().is_primary() {
-                            return Err(unsupported_product_selection(reference.asset_ref()));
-                        }
-                        self.enqueue_scene(sources, &source)?;
-                        drop(source);
-                        self.subtract_budget(
-                            ProjectContentBudgetKind::WorkBytes,
-                            source_work.reserved,
-                        );
-                        continue;
-                    }
-                    if self.domains.supports(source.source_kind()) {
-                        let bytes = require_asset_product(
-                            &mut sources.products,
-                            self.budget_mut(),
-                            required_product(reference.asset_ref(), &source)?,
-                        )?;
-                        sources.product_work_bytes = sources
-                            .product_work_bytes
-                            .checked_add(bytes)
-                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-                    } else if !reference.asset_ref().is_primary() {
-                        return Err(unsupported_product_selection(reference.asset_ref()));
-                    }
-                    let paths = match source.source_kind() {
-                        AssetSourceKind::Image => &mut sources.images,
-                        AssetSourceKind::Other(kind) if kind == "tileset" => &mut sources.tilesets,
-                        kind if self.domains.supports(kind) => &mut sources.domains,
-                        _ => {
-                            return Err(ProjectContentError::with_identifier(
-                                ProjectContentErrorKind::UnsupportedAssetKind,
-                                "project.content.asset-kind-unsupported",
-                                "Project Scene content references an unsupported asset kind",
-                                "asset",
-                                path.as_str(),
-                            ));
-                        }
-                    };
-                    let local_bytes = self
-                        .asset_scope
-                        .relative_path(path)
-                        .ok_or_else(|| {
-                            ProjectContentError::with_identifier(
-                                ProjectContentErrorKind::HostAuthorityRejected,
-                                "project.content.asset-source-outside-scope",
-                                "Asset source is outside the admitted resource directory",
-                                "asset",
-                                path.as_str(),
-                            )
-                        })?
-                        .len();
-                    let queued_work = checked_plan_sum(
-                        ProjectContentBudgetKind::WorkBytes,
-                        [
-                            size_of::<AssetPath>(),
-                            BTREE_ENTRY_OVERHEAD,
-                            local_bytes,
-                            STRING_ALLOCATION_OVERHEAD,
-                        ],
+                    self.collect_source_reference(
+                        assets,
+                        reference.asset_ref(),
+                        None,
+                        reference.demand(),
+                        sources,
                     )?;
-                    let queue_reservation = self.reserve_work(queued_work)?;
-                    let local = self
-                        .asset_scope
-                        .relativize(path)
-                        .expect("the borrowed source relation was checked above");
-                    if !paths.contains(&local) {
-                        self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-                        paths.insert(local);
-                    } else {
-                        drop(local);
-                        self.subtract_budget(
-                            ProjectContentBudgetKind::WorkBytes,
-                            queue_reservation.reserved,
-                        );
-                    }
-                    drop(source);
-                    self.subtract_budget(ProjectContentBudgetKind::WorkBytes, source_work.reserved);
                 }
                 self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reference_work);
             }
         }
+        Ok(())
+    }
+
+    fn collect_source_reference(
+        &mut self,
+        assets: &DirectoryCapability,
+        reference: &AssetRef,
+        expected_kind: Option<&AssetSourceKind>,
+        demand: AssetReferenceDemand,
+        sources: &mut SourceCandidates,
+    ) -> Result<(), ProjectContentError> {
+        self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
+        let (source, source_work) = self.discover_source_reference(assets, reference)?;
+        let path = source.path();
+        self.observe_path(path.as_str())?;
+        if expected_kind.is_some_and(|kind| source.source_kind() != kind) {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::AssetReference,
+                "project.content.dependency-kind-mismatch",
+                "Asset product dependency has the wrong source kind",
+                "asset",
+                path.as_str(),
+            ));
+        }
+        if self.source_mode == SourceLoadMode::Current && demand == AssetReferenceDemand::Deferred {
+            return self.capture_resolved_source_target(reference, source, source_work, sources);
+        }
+        if source.source_kind() == &AssetSourceKind::Scene {
+            if !reference.is_primary() {
+                return Err(unsupported_product_selection(reference));
+            }
+            self.enqueue_scene(sources, &source)?;
+            drop(source);
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, source_work.reserved);
+            return Ok(());
+        }
+        if self.domains.supports(source.source_kind()) {
+            let bytes = require_asset_product(
+                &mut sources.products,
+                self.budget_mut(),
+                required_product(reference, &source)?,
+            )?;
+            sources.product_work_bytes = sources
+                .product_work_bytes
+                .checked_add(bytes)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        } else if !reference.is_primary() {
+            return Err(unsupported_product_selection(reference));
+        }
+        let paths = match source.source_kind() {
+            AssetSourceKind::Image => &mut sources.images,
+            AssetSourceKind::Other(kind) if kind == "tileset" => &mut sources.tilesets,
+            kind if self.domains.supports(kind) => &mut sources.domains,
+            _ => {
+                return Err(ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::UnsupportedAssetKind,
+                    "project.content.asset-kind-unsupported",
+                    "Project Scene content references an unsupported asset kind",
+                    "asset",
+                    path.as_str(),
+                ));
+            }
+        };
+        let local_bytes = self
+            .asset_scope
+            .relative_path(path)
+            .ok_or_else(|| {
+                ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::HostAuthorityRejected,
+                    "project.content.asset-source-outside-scope",
+                    "Asset source is outside the admitted resource directory",
+                    "asset",
+                    path.as_str(),
+                )
+            })?
+            .len();
+        let queue_reservation = self.reserve_work(checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                size_of::<AssetPath>(),
+                BTREE_ENTRY_OVERHEAD,
+                local_bytes,
+                STRING_ALLOCATION_OVERHEAD,
+            ],
+        )?)?;
+        let local = self
+            .asset_scope
+            .relativize(path)
+            .expect("the borrowed source relation was checked above");
+        if !paths.contains(&local) {
+            self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
+            paths.insert(local);
+        } else {
+            drop(local);
+            self.subtract_budget(
+                ProjectContentBudgetKind::WorkBytes,
+                queue_reservation.reserved,
+            );
+        }
+        drop(source);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, source_work.reserved);
         Ok(())
     }
 

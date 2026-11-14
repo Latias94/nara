@@ -63,8 +63,8 @@ fn source_collection(
     ProjectAssetCollection {
         storage: CollectionStorage::Source {
             scope,
-            records: records.into_boxed_slice(),
-            products: products.into_boxed_slice(),
+            records,
+            products,
             contains_product: CompoundDomain::contains_product,
         },
     }

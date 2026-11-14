@@ -287,6 +287,7 @@ serde = [
     "nara_input?/serde",
     "nara_gameplay?/serde",
     "nara_material?/serde",
+    "nara_material?/persistent",
     "nara_reflect?/serde",
     "nara_transform?/serde",
     "nara_render?/serde",

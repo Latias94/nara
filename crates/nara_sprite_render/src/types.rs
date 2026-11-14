@@ -310,6 +310,7 @@ impl SpriteBatches {
 pub struct SpriteRenderStats {
     pub extracted_sprites: u32,
     pub extracted_tile_cells: u32,
+    pub missing_materials: u32,
     pub missing_tilesets: u32,
     pub invalid_tile_regions: u32,
     pub unprepared_textures: u32,

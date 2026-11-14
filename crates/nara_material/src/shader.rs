@@ -1,5 +1,6 @@
 //! Bounded WGSL compilation for the stock 2D material interface.
 
+use std::any::Any;
 use std::error::Error;
 use std::fmt::{self, Write as _};
 use std::sync::Arc;
@@ -33,14 +34,50 @@ const STOCK_ENTRY_POINTS: [(&str, ShaderStage); 3] = [
 /// This artifact retains the complete assembled WGSL and its observed interface.
 /// It owns no GPU objects, device epochs, source files or publication authority.
 /// Successful compilation does not prove native GPU pipeline creation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct MaterialShaderArtifact {
+    user_source: Arc<str>,
     source: Arc<str>,
     digest: [u8; 32],
     interface_digest: [u8; 32],
+    retention: Option<Arc<dyn Any + Send + Sync>>,
 }
 
+impl fmt::Debug for MaterialShaderArtifact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MaterialShaderArtifact")
+            .field("user_source", &self.user_source)
+            .field("source", &self.source)
+            .field("digest", &self.digest)
+            .field("interface_digest", &self.interface_digest)
+            .field("retained", &self.retention.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for MaterialShaderArtifact {
+    fn eq(&self, other: &Self) -> bool {
+        self.user_source == other.user_source
+            && self.source == other.source
+            && self.digest == other.digest
+            && self.interface_digest == other.interface_digest
+    }
+}
+
+impl Eq for MaterialShaderArtifact {}
+
 impl MaterialShaderArtifact {
+    pub(crate) fn with_lifetime_owner(&self, owner: Arc<dyn Any + Send + Sync>) -> Self {
+        Self {
+            user_source: Arc::clone(&self.user_source),
+            source: Arc::clone(&self.source),
+            digest: self.digest,
+            interface_digest: self.interface_digest,
+            retention: Some(owner),
+        }
+    }
+
     /// Assembles and validates a material against the actual Naga type results.
     ///
     /// `source` supplies ordinary WGSL functions, including
@@ -102,9 +139,11 @@ impl MaterialShaderArtifact {
         let interface_digest = interface_digest(declaration, &module)?;
         let digest = *blake3::hash(assembled.as_bytes()).as_bytes();
         Ok(Self {
+            user_source: Arc::from(source),
             source: Arc::from(assembled),
             digest,
             interface_digest,
+            retention: None,
         })
     }
 
@@ -112,6 +151,12 @@ impl MaterialShaderArtifact {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Returns the original user WGSL before stock and declaration assembly.
+    #[must_use]
+    pub fn user_source(&self) -> &str {
+        &self.user_source
     }
 
     /// Returns the BLAKE3 digest of the exact complete source bytes.

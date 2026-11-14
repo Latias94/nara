@@ -35,14 +35,14 @@ fn import_error(error: AssetImportError<ProjectContentError>) -> ProjectContentE
 
 /// Typed products and their admitted identities for one selected Scene.
 pub struct ProjectAssetCollection<T> {
-    storage: CollectionStorage<T>,
+    pub(super) storage: CollectionStorage<T>,
 }
 
-enum CollectionStorage<T> {
+pub(super) enum CollectionStorage<T> {
     Source {
         scope: AssetPathScope,
-        records: Box<[AssetRecord]>,
-        products: Box<[T]>,
+        records: Vec<AssetRecord>,
+        products: Vec<T>,
         // Bound to the selected domain. This trusted query only inspects immutable values;
         // it must not allocate, load, perform I/O, mutate products or publish state.
         contains_product: fn(&T, ImportedProductId) -> bool,
@@ -160,6 +160,7 @@ impl<T> ExactSizeIterator for CollectionIter<'_, T> {}
 pub(crate) trait ErasedCollection: Any + Send + Sync {
     fn domain_type(&self) -> std::any::TypeId;
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn records(&self) -> &[AssetRecord];
     fn validate_product_selections(
         &self,
@@ -217,6 +218,9 @@ impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
     }
     fn as_any(&self) -> &dyn Any {
         &self.0
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        &mut self.0
     }
     fn records(&self) -> &[AssetRecord] {
         self.0.source_records_slice()
@@ -421,7 +425,8 @@ trait DomainProvider: Send + Sync {
         root: &nara_project::ProjectPath,
         records: Vec<AssetRecord>,
         cache: &mut SourceCache,
-        required_products: &mut RequiredAssetProducts,
+        sources: &mut SourceCandidates,
+        existing: Option<Box<dyn ErasedCollection>>,
     ) -> Result<Box<dyn ErasedCollection>, ProjectContentError>;
 }
 
@@ -442,18 +447,27 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
         root: &nara_project::ProjectPath,
         records: Vec<AssetRecord>,
         cache: &mut SourceCache,
-        required_products: &mut RequiredAssetProducts,
+        sources: &mut SourceCandidates,
+        mut existing: Option<Box<dyn ErasedCollection>>,
     ) -> Result<Box<dyn ErasedCollection>, ProjectContentError> {
         let limits = D::limits();
         let overhead = records.iter().try_fold(
             checked_plan_sum(
                 ProjectContentBudgetKind::RetainedBytes,
                 [
-                    size_of::<DomainCollection<D>>(),
-                    context
-                        .asset_scope
-                        .prefix()
-                        .map_or(Ok(0), |prefix| string_retained_bytes(prefix.as_str()))?,
+                    if existing.is_none() {
+                        size_of::<DomainCollection<D>>()
+                    } else {
+                        0
+                    },
+                    if existing.is_none() {
+                        context
+                            .asset_scope
+                            .prefix()
+                            .map_or(Ok(0), |prefix| string_retained_bytes(prefix.as_str()))?
+                    } else {
+                        0
+                    },
                     checked_plan_product(
                         ProjectContentBudgetKind::RetainedBytes,
                         records.len(),
@@ -469,6 +483,15 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
             },
         )?;
         context.add_budget(ProjectContentBudgetKind::RetainedBytes, overhead)?;
+        let transfer_work = if existing.is_some() {
+            Some(context.reserve_work(checked_plan_product(
+                ProjectContentBudgetKind::WorkBytes,
+                records.len(),
+                size_of::<D::Product>(),
+            )?)?)
+        } else {
+            None
+        };
         let mut products = Vec::new();
         products
             .try_reserve_exact(records.len())
@@ -534,23 +557,29 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 limits.retained_bytes().get(),
             )?;
             let work = context.reserve_work(limits.work_bytes().get())?;
-            let mut reader = DomainSourceReader {
-                context,
-                assets,
-                root,
-                cache,
+            let product = {
+                let mut reader = DomainSourceReader {
+                    context,
+                    assets,
+                    root,
+                    cache,
+                };
+                let bytes = reader.read_source(&path, limits.source_bytes())?;
+                let mut read_dependency =
+                    |path: &AssetPath, limit| reader.read_dependency(path, limit);
+                D::prepare(&mut AssetImportSource::new(
+                    &metadata,
+                    bytes,
+                    &mut read_dependency,
+                ))
+                .map_err(import_error)?
             };
-            let bytes = reader.read_source(&path, limits.source_bytes())?;
-            let mut read_dependency = |path: &AssetPath, limit| reader.read_dependency(path, limit);
-            let product = D::prepare(&mut AssetImportSource::new(
-                &metadata,
-                bytes,
-                &mut read_dependency,
-            ))
-            .map_err(import_error)?;
-            if let Some(required) = required_products.remove(&record.stable_id()) {
+            if let Some(required) = sources.products.remove(&record.stable_id()) {
                 validate_product_membership::<D>(&product, required).map_err(missing_product)?;
             }
+            D::visit_source_dependencies(&product, |reference, kind, demand| {
+                context.collect_source_reference(assets, reference, Some(kind), demand, sources)
+            })?;
             drop(metadata);
             drop(metadata_path);
             drop(path);
@@ -560,11 +589,55 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
             context.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
             products.push(product);
         }
+        if let Some(mut collection) = existing.take() {
+            let previous = collection
+                .as_any_mut()
+                .downcast_mut::<ProjectAssetCollection<D::Product>>()
+                .expect("the selected provider retains its original typed collection");
+            let CollectionStorage::Source {
+                scope,
+                records: previous_records,
+                products: previous_products,
+                ..
+            } = &mut previous.storage
+            else {
+                unreachable!("source import cannot append to a processed collection");
+            };
+            assert_eq!(*scope, context.asset_scope);
+            let movement = context.reserve_work(checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [
+                    checked_plan_product(
+                        ProjectContentBudgetKind::WorkBytes,
+                        previous_records.capacity(),
+                        size_of::<AssetRecord>(),
+                    )?,
+                    checked_plan_product(
+                        ProjectContentBudgetKind::WorkBytes,
+                        previous_products.capacity(),
+                        size_of::<D::Product>(),
+                    )?,
+                ],
+            )?)?;
+            previous_records
+                .try_reserve_exact(records.len())
+                .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
+            previous_products
+                .try_reserve_exact(products.len())
+                .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
+            previous_records.extend(records);
+            previous_products.extend(products);
+            context.subtract_budget(ProjectContentBudgetKind::WorkBytes, movement.reserved);
+            if let Some(reservation) = transfer_work {
+                context.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+            }
+            return Ok(collection);
+        }
         Ok(Box::new(DomainCollection::<D>(ProjectAssetCollection {
             storage: CollectionStorage::Source {
                 scope: context.asset_scope.clone(),
-                records: records.into_boxed_slice(),
-                products: products.into_boxed_slice(),
+                records,
+                products,
                 contains_product: D::contains_product,
             },
         })))
@@ -657,12 +730,8 @@ impl DomainSourceReader<'_, '_> {
 }
 
 impl LoadContext<'_> {
-    pub(super) fn load_domains(
+    pub(super) fn prepare_domain_collections(
         &mut self,
-        assets: &DirectoryCapability,
-        root: &nara_project::ProjectPath,
-        paths: BTreeSet<AssetPath>,
-        required_products: &mut RequiredAssetProducts,
     ) -> Result<Vec<Box<dyn ErasedCollection>>, ProjectContentError> {
         let providers = self.domains;
         let mut collections = Vec::new();
@@ -685,82 +754,127 @@ impl LoadContext<'_> {
         collections
             .try_reserve_exact(providers.providers.len())
             .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
-        // Each lookup retains at most one joined spelling. Query the resolver without cloning
-        // an authored reference, and reuse its largest scratch allowance for both passes.
-        let lookup_work = paths.iter().try_fold(0usize, |maximum, path| {
-            self.asset_resolution()
-                .path_resolution_work_bytes(path)
-                .map(|bytes| maximum.max(bytes))
-                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
-        })?;
+        Ok(collections)
+    }
+
+    pub(super) fn load_domains(
+        &mut self,
+        assets: &DirectoryCapability,
+        root: &nara_project::ProjectPath,
+        sources: &mut SourceCandidates,
+        collections: &mut Vec<Box<dyn ErasedCollection>>,
+    ) -> Result<(), ProjectContentError> {
+        let providers = self.domains;
         let mut cache = SourceCache::default();
-        for provider in &providers.providers {
-            let lookup_reservation = self.reserve_work(lookup_work)?;
-            let resolution = self.asset_resolution();
-            let mut selected_records = paths
+        loop {
+            let mut progressed = false;
+            for provider in &providers.providers {
+                let existing_index = collections
+                    .iter()
+                    .position(|collection| collection.domain_type() == provider.domain_type());
+                let loaded = existing_index
+                    .map(|index| collections[index].records())
+                    .unwrap_or(&[]);
+                let lookup_work = sources.domains.iter().try_fold(0usize, |maximum, path| {
+                    self.asset_resolution()
+                        .path_resolution_work_bytes(path)
+                        .map(|bytes| maximum.max(bytes))
+                        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
+                })?;
+                let lookup_reservation = self.reserve_work(lookup_work)?;
+                let resolution = self.asset_resolution();
+                let mut selected_records = sources.domains
                 .iter()
                 .filter_map(|path| resolution.record_for_path(path))
                 .filter(|record| {
                     matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == provider.source_kind())
-                });
-            let (count, records_work) =
-                selected_records.try_fold((0usize, 0usize), |(count, total), record| {
-                    Ok::<_, ProjectContentError>((
-                        count + 1,
-                        checked_plan_sum(
-                            ProjectContentBudgetKind::WorkBytes,
-                            [total, asset_record_retained_bytes(record)?],
-                        )?,
-                    ))
-                })?;
-            if count == 0 {
-                self.subtract_budget(
-                    ProjectContentBudgetKind::WorkBytes,
-                    lookup_reservation.reserved,
-                );
-                continue;
-            }
-            let records_reservation = self.reserve_work(records_work)?;
-            let mut records = Vec::new();
-            records
-                .try_reserve_exact(count)
-                .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
-            let resolution = self.asset_resolution();
-            records.extend(
-                paths
+                })
+                .filter(|record| !loaded.iter().any(|previous| previous.stable_id() == record.stable_id()));
+                let (count, records_work) =
+                    selected_records.try_fold((0usize, 0usize), |(count, total), record| {
+                        Ok::<_, ProjectContentError>((
+                            count + 1,
+                            checked_plan_sum(
+                                ProjectContentBudgetKind::WorkBytes,
+                                [total, asset_record_retained_bytes(record)?],
+                            )?,
+                        ))
+                    })?;
+                if count == 0 {
+                    self.subtract_budget(
+                        ProjectContentBudgetKind::WorkBytes,
+                        lookup_reservation.reserved,
+                    );
+                    continue;
+                }
+                let records_reservation = self.reserve_work(records_work)?;
+                let mut records = Vec::new();
+                records
+                    .try_reserve_exact(count)
+                    .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
+                let resolution = self.asset_resolution();
+                records.extend(
+                sources.domains
                     .iter()
                     .filter_map(|path| resolution.record_for_path(path))
                     .filter(|record| {
                         matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == provider.source_kind())
                     })
+                    .filter(|record| !loaded.iter().any(|previous| previous.stable_id() == record.stable_id()))
                     .cloned(),
             );
-            self.subtract_budget(
-                ProjectContentBudgetKind::WorkBytes,
-                lookup_reservation.reserved,
-            );
-            let collection = catch_unwind(AssertUnwindSafe(|| {
-                provider.load(self, assets, root, records, &mut cache, required_products)
-            }))
-            .map_err(|_| {
-                ProjectContentError::single(
-                    ProjectContentErrorKind::AssetDomain,
-                    "project.content.domain-panicked",
-                    "Asset domain preparation panicked",
-                )
-            })??;
-            collections.push(collection);
-            self.subtract_budget(
-                ProjectContentBudgetKind::WorkBytes,
-                records_reservation.reserved,
-            );
+                self.subtract_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    lookup_reservation.reserved,
+                );
+                let existing = existing_index.map(|index| collections.remove(index));
+                let collection = catch_unwind(AssertUnwindSafe(|| {
+                    provider.load(self, assets, root, records, &mut cache, sources, existing)
+                }))
+                .map_err(|_| {
+                    ProjectContentError::single(
+                        ProjectContentErrorKind::AssetDomain,
+                        "project.content.domain-panicked",
+                        "Asset domain preparation panicked",
+                    )
+                })??;
+                if let Some(index) = existing_index {
+                    collections.insert(index, collection);
+                } else {
+                    collections.push(collection);
+                }
+                progressed = true;
+                self.subtract_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    records_reservation.reserved,
+                );
+            }
+            if !progressed {
+                break;
+            }
         }
-        if let Some(reference) = required_products
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, cache.work_bytes);
+        Ok(())
+    }
+
+    pub(super) fn finish_domain_dependencies(
+        &mut self,
+        collections: &[Box<dyn ErasedCollection>],
+        sources: &mut SourceCandidates,
+    ) -> Result<(), ProjectContentError> {
+        for collection in collections {
+            collection
+                .validate_product_selections(&mut sources.products)
+                .map_err(missing_product)?;
+        }
+        if let Some(reference) = sources
+            .products
             .values()
             .find_map(|products| products.first())
         {
             return Err(missing_product(*reference));
         }
+        let paths = std::mem::take(&mut sources.domains);
         let queued_path_work = paths.iter().try_fold(0usize, |total, path| {
             checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
@@ -769,8 +883,7 @@ impl LoadContext<'_> {
         })?;
         drop(paths);
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_path_work);
-        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, cache.work_bytes);
-        Ok(collections)
+        Ok(())
     }
 }
 

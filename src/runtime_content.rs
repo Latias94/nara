@@ -14,6 +14,7 @@ mod codecs;
 mod deep;
 mod dependencies;
 mod input;
+mod materials;
 mod native;
 mod prepared;
 mod traversal;
@@ -607,7 +608,8 @@ impl RuntimeContentBase {
                 .reserve(promised, limits.work_bytes().get())?;
             let mut dependencies = DependencyInventory::new(self, member)?;
             let encoded = self.encoded_member(index)?;
-            let value = C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
+            let mut value =
+                C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
             drop(encoded);
             for reference in member.products() {
                 if !D::contains_product(&value, reference.product())
@@ -638,6 +640,8 @@ impl RuntimeContentBase {
                 metadata,
             )?;
             lease.finish_decode(retained)?;
+            let (lease, retained) =
+                materials::retain_acquisition(self, &mut value, lease, retained)?;
             Ok(RuntimeContentAsset {
                 inner: Arc::new(RuntimeContentAssetInner {
                     product: value,
@@ -731,7 +735,7 @@ pub struct RuntimeContentAsset<P> {
 struct RuntimeContentAssetInner<P> {
     // Drop the actual product before releasing its reservation or immutable encoded base.
     product: P,
-    _lease: DecodeLease,
+    _lease: Option<DecodeLease>,
     base: RuntimeContentBase,
     reference: AssetProductRef,
     retained_bytes: usize,

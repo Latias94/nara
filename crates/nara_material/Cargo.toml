@@ -11,11 +11,16 @@ encase = { workspace = true, optional = true }
 glam = { workspace = true, optional = true, features = ["encase-012"] }
 naga = { workspace = true, optional = true }
 nara_asset = { workspace = true, optional = true }
+nara_app = { workspace = true, optional = true }
+nara_core = { workspace = true, optional = true }
+nara_diagnostic = { workspace = true, optional = true }
 nara_ecs = { workspace = true, optional = true }
 nara_image = { workspace = true, optional = true }
 nara_material_derive = { workspace = true, optional = true }
+nara_reflect = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -31,6 +36,19 @@ material = [
     "dep:thiserror",
 ]
 serde = ["dep:serde"]
+asset = [
+    "material",
+    "serde",
+    "dep:nara_core",
+    "dep:nara_diagnostic",
+    "dep:serde_json",
+    "nara_asset/serde",
+]
+persistent = [
+    "asset",
+    "dep:nara_app",
+    "dep:nara_reflect",
+]
 
 [[test]]
 name = "generation_workflow"

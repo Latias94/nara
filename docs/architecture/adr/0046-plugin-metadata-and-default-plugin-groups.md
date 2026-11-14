@@ -51,8 +51,16 @@ provider registry, file-backed plugin settings, or missing-package workflow; tho
 Ordinary file-backed `HeadlessRunIntent`, `DesktopRunIntent`, and `EditorProjectIntent` accept one
 `ProductRecipe` plus execution policy. They do not expose raw configure, disable, relative-order or
 parallel schema-provider channels. A recipe may add or configure only entries it owns;
-profile-owned Image, Tilemap, window, presentation and backend choices remain project/profile
-facts.
+profile-owned Image, Tilemap, Material carrier, window, presentation and backend choices remain
+project/profile facts.
+
+With `runtime-2d` and `serde`, the default group selects the optional native `Material2dPlugin`
+carrier and its single Schema owner. A default-based recipe does not contribute that plugin
+again; the existing duplicate-definition rule still rejects overlap. A custom direct group can
+select its explicit Schema contribution or disable the default by plugin type. Material families,
+source domains and processed codecs remain separate compiled recipe choices. Existing projects
+refresh their current authoring bundles through the normal schema tool; Runtime agreement does
+not waive missing selected owners.
 
 A schema-owning replayable entry uses `SchemaContribution`. One non-replayable definition may enter
 through the explicitly named `project_host::advanced::RuntimeProbe`, which carries no independent

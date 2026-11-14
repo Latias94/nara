@@ -239,6 +239,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
         nara::render::RENDER_SCHEMA_PROVIDER,
         nara::sprite::SPRITE_SCHEMA_PROVIDER,
         nara::tilemap::TILEMAP_SCHEMA_PROVIDER,
+        nara::material::MATERIAL_SCHEMA_PROVIDER,
     ];
     let mut expected_owner_ids = providers
         .iter()

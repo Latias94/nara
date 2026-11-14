@@ -687,6 +687,8 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
         providers.push(nara_sprite::SPRITE_SCHEMA_PROVIDER);
         providers.push(nara_tilemap::TILEMAP_SCHEMA_PROVIDER);
     }
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    providers.push(nara_material::MATERIAL_SCHEMA_PROVIDER);
     #[cfg(any(
         feature = "runtime-2d",
         feature = "presentation-2d",

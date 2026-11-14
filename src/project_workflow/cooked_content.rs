@@ -1,4 +1,4 @@
-//! Finite production assembly of processed Scenes, verified groups, Input and TileSets.
+//! Finite production assembly of processed Scenes, verified groups and typed Runtime resources.
 //!
 //! Callers select and revalidate their current build inputs through the concrete build owners.
 //! A verified historical group alone does not prove freshness. This owner consumes its retained
@@ -500,7 +500,40 @@ impl CookedContentBuilder {
         )
     }
 
-    // Only the two concrete public operations above use this encoding/accounting helper.
+    /// Adds one validated material with canonical complete texture Product references.
+    ///
+    /// The caller resolves source references through its admitted catalogue before this call.
+    /// Texture products must also belong to the finished content; this operation performs no
+    /// source loading, publication or native preparation.
+    pub fn add_material(
+        &mut self,
+        material: &nara_material::Material2dAsset,
+    ) -> Result<(), CookedContentError> {
+        let mut dependencies = [(material.product(), AssetReferenceDemand::Immediate); 8];
+        let mut count = 0;
+        for reference in material.textures().values() {
+            let AssetRef::Product(product) = reference else {
+                return Err(CookedContentError::IncompleteProductReference);
+            };
+            if dependencies[..count]
+                .iter()
+                .any(|(previous, _)| previous == product)
+            {
+                continue;
+            }
+            let Some(slot) = dependencies.get_mut(count) else {
+                return Err(CookedContentError::Overflow);
+            };
+            *slot = (*product, AssetReferenceDemand::Immediate);
+            count += 1;
+        }
+        self.add_cpu::<nara_material::Material2dDomain, nara_material::Material2dRuntimeCodec>(
+            material.product(),
+            material,
+            &dependencies[..count],
+        )
+    }
+
     fn add_cpu<D, C>(
         &mut self,
         product: AssetProductRef,

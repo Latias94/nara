@@ -324,6 +324,17 @@ impl AssetServer {
             .map(|_| Handle::new(id))
     }
 
+    /// Returns an already reserved product with its existing exact Rust type claim.
+    ///
+    /// This read-only query neither reserves an identity nor establishes a type claim. A handle
+    /// proves catalogue association only; the original asset storage owns its resident value.
+    #[must_use]
+    pub fn get_product_handle<T: 'static>(&self, reference: AssetProductRef) -> Option<Handle<T>> {
+        self.products
+            .get(&reference)
+            .and_then(|id| self.get_handle(*id))
+    }
+
     #[must_use]
     #[cfg(any(feature = "runtime", test))]
     pub(crate) fn id_for_path(&self, path: &AssetSourcePath) -> Option<AssetId> {

@@ -361,6 +361,13 @@ failed. Cache capacity does not cap a legal operation's working set. An evicted 
 recreate its exact pipeline without acquiring current publication authority; eviction cannot
 revoke prepared or submitted resources or replace their original completion prefix.
 
+Retained cache entries also must not reserve old source/decode generations after their actual
+operation captures retire. Their lookup identity retains only the exact Shader/ABI digests and
+native format/alpha facts, with the native pipeline or bounded rejection diagnostic. A cache hit
+returns the incoming operation's exact capture rather than the generation that originally
+created the native pipeline. Prepared and submitted draw resources retain that incoming
+generation independently; immutable content equality grants reuse, not publication authority.
+
 Same-epoch last-good publication belongs to the original asset mutation authority, not pipeline
 cache retention. A late old capture can realize its own exact native resources without publishing
 itself over a newer current declaration. Cross-Feature inputs still require complete graph

@@ -327,12 +327,13 @@ const PROJECT_DIRECTORIES: [ProjectDirectory; 6] = [
     ProjectDirectory::SourceBinaries,
 ];
 
-const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 5] = [
+const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 6] = [
     nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
     nara_transform::TRANSFORM_SCHEMA_PROVIDER,
     nara_render::RENDER_SCHEMA_PROVIDER,
     nara_sprite::SPRITE_SCHEMA_PROVIDER,
     nara_tilemap::TILEMAP_SCHEMA_PROVIDER,
+    nara_material::MATERIAL_SCHEMA_PROVIDER,
 ];
 
 pub(crate) fn build_desktop_2d_v1_plan(

@@ -124,6 +124,10 @@ impl WgpuMaterial2dPipelineKey {
     pub(crate) fn declaration(&self) -> &Material2dDeclaration {
         self.generation.declaration()
     }
+
+    pub(crate) fn pipeline_digests(&self) -> ([u8; 32], [u8; 32]) {
+        (self.shader_digest, self.binding_digest)
+    }
 }
 
 impl PartialEq for WgpuMaterial2dPipelineKey {

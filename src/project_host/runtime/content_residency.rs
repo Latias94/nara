@@ -2,6 +2,7 @@
 
 mod catalog;
 mod images;
+mod materials;
 mod metadata;
 mod replacement;
 pub(super) use replacement::StagedProjectSceneReplacement;
@@ -19,6 +20,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, Res, ResMut, Resource, World, bevy_ecs::system::SystemState};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
 use nara_image::ImageAsset;
+use nara_material::{Material2dAsset, Material2dDomain};
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
@@ -40,12 +42,14 @@ use crate::{
 };
 use catalog::CatalogChange;
 use images::{ImagePublications, OwnedImage};
+use materials::{MaterialPublications, MaterialResidency};
 use metadata::{PreparedCatalog, ResidencyAuthority};
 
 #[derive(Resource)]
 struct ProjectSceneResidency {
     images: Vec<OwnedImage>,
     tilesets: Vec<TileSetContentReceipt>,
+    materials: MaterialResidency,
     // Resource values and their receipts retire before their metadata reservation and base.
     authority: ResidencyAuthority,
 }
@@ -65,7 +69,20 @@ impl<'a> From<&'a PreparedSceneContent> for ResidencyInput<'a> {
     }
 }
 
-impl ResidencyInput<'_> {
+impl<'a> ResidencyInput<'a> {
+    fn domain_assets(self) -> &'a crate::project_content::ProjectDomainAssets {
+        match self {
+            Self::Source(snapshot) => snapshot.domain_assets(),
+            Self::Processed(content) => &content.domains,
+        }
+    }
+
+    fn material_count(self) -> usize {
+        self.domain_assets()
+            .collection::<Material2dDomain>()
+            .map_or(0, |collection| collection.iter().len())
+    }
+
     fn image_count(self) -> usize {
         match self {
             Self::Source(snapshot) => snapshot.images().len(),
@@ -116,6 +133,7 @@ fn publish_startup_content(
         .validate_baseline(world)
         .map_err(|_| binding_changed())?;
     prepared.catalog.validate(world)?;
+    prepared.materials.validate(world)?;
     if prepared.inputs.is_empty() && prepared.retirements.is_empty() {
         prepared.commit_startup(world, domains, None);
     } else {
@@ -167,6 +185,7 @@ struct PreparedResidency {
     bindings: SceneAssetReservations,
     staged_server: AssetServer,
     images: ImagePublications,
+    materials: MaterialPublications,
     inputs: Vec<TileSetPublicationInput>,
     retirements: Vec<TileSetContentReceipt>,
     tileset_slots: Vec<AssetMutationBaseline<TileSet>>,
@@ -210,18 +229,21 @@ impl PreparedResidency {
             bindings,
             staged_server,
             images,
+            materials,
             inputs,
             retirements,
             tileset_slots,
         } = self;
         drop((bindings, inputs, retirements, tileset_slots));
         world.insert_resource(staged_server);
-        let (images, tilesets) = replacement::commit_publications(world, images, tilesets);
+        let (images, tilesets, materials) =
+            replacement::commit_publications(world, images, tilesets, materials);
         let authority = catalog.commit(world);
         world.insert_resource(domains.clone());
         world.insert_resource(ProjectSceneResidency {
             images,
             tilesets,
+            materials,
             authority,
         });
     }
@@ -235,6 +257,8 @@ impl PreparedResidency {
             current.authority.validate(content)?;
         }
         replacement::validate_native_resources(world, content, current)?;
+        let owned_materials = current.map(|current| &current.materials);
+        let material_custody = MaterialPublications::reserve(content, owned_materials)?;
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
         let catalog = PreparedCatalog::prepare(world, content, current)?;
         let mut bindings = SceneAssetReservations::from_world(world);
@@ -260,6 +284,14 @@ impl PreparedResidency {
                 catalog.runtime_lease(),
             )?
         };
+        let materials = MaterialPublications::prepare(
+            world,
+            content,
+            owned_materials,
+            &mut bindings,
+            &images,
+            material_custody,
+        )?;
         let owned_tilesets = current.map_or(&[][..], |current| current.tilesets.as_slice());
         let old_tilesets = owned_tilesets
             .iter()
@@ -376,6 +408,7 @@ impl PreparedResidency {
             bindings,
             staged_server,
             images,
+            materials,
             inputs,
             retirements,
             tileset_slots,

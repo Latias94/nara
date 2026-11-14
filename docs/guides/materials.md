@@ -105,5 +105,110 @@ Run the Palette example through the normal desktop product:
 cargo +1.95.0 run --locked --offline --release --example palette_material --features presentation-2d,desktop-winit,render-wgpu
 ```
 
-Its Shader source remains an explicit startup input until the persistent/source workflow in
-R9b completes; this guide does not imply an automatic file-watching Editor material panel.
+This code-first example supplies its Shader source explicitly. Persistent file-backed products
+use the separate workflow below; neither path installs an automatic file-watching material panel.
+
+## Persistent Products And Scene Values
+
+The `asset` feature adds `Material2dSource`, `Material2dDomain`, `Material2dAsset` and the
+`runtime_material2d` version-one `Material2dRuntimeCodec`. The `persistent` feature adds the
+single native `Material2d` carrier, `Material2dRecord` and `Material2dPlugin`. The product
+workflow's selected source/processed delivery has integrated qualification in the owning R9b
+plan. Automatic source watching, live Editor preview hydration and a material Inspector remain
+separate product work.
+
+`Material2dSource::new` receives the same validated declaration, ordered Shader input paths,
+complete default parameters and a complete map of default texture selections. `encode()` emits
+bounded versioned JSON. Source metadata supplies its actual source/Product identity and selects
+`AssetSourceKind::Other("material2d")` with unit settings. Shader reads use the supplied source
+capability. Default Images are typed product dependencies; reading raw WGSL does not substitute
+for importing them.
+
+The root `runtime-2d` plus `serde` combination includes the native carrier as an optional
+`Runtime2dPlugins` default. The first-party Editor preview and generated starter metadata know
+that same carrier; selecting a render recipe does not execute arbitrary Schema plugins in the
+Editor. Material families, source import and processed codecs remain explicit selections.
+Existing Runtime2d projects must refresh their authoring bundle after adopting the new default
+carrier: run `nara schema <project> --write`, then `nara schema <project> --check` through the
+normal project tool. Missing selected owners remain a Runtime-agreement error. Default-based
+recipes must not also add the same plugin explicitly; deliberate duplicate selection still
+rejects. A direct custom group can disable `Material2dPlugin` or install its explicit contribution.
+This admits source editing of the carrier; it does not add automatic Material asset hydration
+or Shader recompilation to the Editor Scene preview's existing Image/TileSet import owner.
+The independent runtime and Export workflows select the actual Material source domain.
+For a custom plugin group, select the material plugin and its schema through ordinary compiled
+composition:
+
+```rust
+use nara::{ProductRecipe, SchemaContribution};
+use nara::material::{MATERIAL_SCHEMA_PROVIDER, Material2dDomain, Material2dPlugin};
+
+let recipe = ProductRecipe::new()
+    .add_contribution(
+        SchemaContribution::<Material2dPlugin>::for_default([MATERIAL_SCHEMA_PROVIDER])?
+    )?
+    .add_asset_domain::<Material2dDomain>()?;
+```
+
+A Scene stores `Material2dRecord::new(material_reference, &declaration, parameters,
+texture_overrides)?.to_component_value()?` under `nara.material2d`. Parameters are complete
+semantic values in six required typed maps: `f32`, `i32`, `u32`, `vec2`, `vec3` and `vec4`.
+The literal path is `parameters.<kind>.<semantic-id>`, and a semantic ID may occur in exactly
+one map. Empty kind maps remain present, so the carrier has a complete typed data shape that
+the existing preservation-safe Editor field operation can validate. Native decoding additionally
+checks exact vector lengths and material declarations validate the complete actual key/type set.
+Texture overrides are optional per declared texture ID. Missing overrides use the Product's
+defaults. Handles, local sequences, Rust type identity and encoded GPU bytes are absent from
+this record. All semantic IDs are bounded to 128 ASCII bytes and follow persistent field-ID
+grammar. Declaration-derived tooling fields retain full literal paths; their namespaced digest
+IDs fit even when the original semantic key uses the whole allowance.
+
+Source and processed preparation validate each record against its own loaded material Product
+before startup or Scene replacement. The original Scene transaction reserves handles and
+publishes `Assets<Material2dAsset>` with Images through the shared states/events. Extraction
+captures one exact binding after checking actual Product association and published slots for
+the material and effective textures. A raw write revokes this managed derivation; explicit
+code-first `Material2dBinding` remains a valid separate input. Supplying both inputs on one
+entity is ambiguous and skips that entity with a `missing_materials` observation.
+
+For processed delivery, resolve default texture selections to complete Products through the
+admitted catalogue, select the material Runtime codec in the recipe, and call the existing
+`CookedContentBuilder::add_material` alongside the real Image artifact groups and Scene. The
+Runtime material format stores the original user WGSL body, declaration, defaults and complete
+Product dependencies. It compiles that body through the same Naga authority without inventing
+source paths or observations. Its source/processed generation uses sequence zero; sequence is
+not persistent identity.
+
+Public material, generation, Shader and input snapshots retain the original source byte/
+generation leases or Runtime acquisition budget. Cloning a Shader alone preserves that custody.
+The extra read-only views and canonicalized default maps are reserved before allocation. Owners
+retain leases and the original immutable base without pointing back to a collection containing
+themselves. This does not give a clone publication authority or exempt it from native resource
+and submission checks.
+
+## Independent Delivery Controls
+
+The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact
+Save/Reopen/Check, source material residency, source-free processed running and rejected content:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --test workflow --test persistent_workflow --test processed_workflow --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The separate ignored delivery controls build actual executables through the public Cargo and
+publication owners. Source Export exercises headless and desktop product observations before
+moving the distribution and deleting its source project; it then runs the relocated headless
+product from an unrelated working directory. Cooked delivery imports and cooks the actual PNGs,
+generates a Player bootstrap, binds the captured executable to the content, moves the three-file
+package and deletes the source/cache before sealed headless launch. It checks decoded pixel
+values and live Scene/material Product identities, not GPU scanout or a source-free desktop run.
+The source Export control requires an interactive Windows desktop; both require the pinned
+Rust toolchain and offline dependencies. Run them serially with `CARGO_BUILD_JOBS=1` and the
+absolute repository `target` selected through `CARGO_TARGET_DIR`:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --test material_source_export --test material_cooked_delivery --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Actual outcomes and remaining scopes belong in the
+[R9b qualification](../plans/2026-11-14-durable-material-and-shader-plan.md#persistent-product-successor).

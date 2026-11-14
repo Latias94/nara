@@ -28,6 +28,7 @@ use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{Transform2d, TransformPlugin};
 
+mod authored_material;
 mod material;
 mod visibility;
 

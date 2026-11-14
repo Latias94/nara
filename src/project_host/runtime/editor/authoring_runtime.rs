@@ -870,6 +870,7 @@ fn configure_authoring_app(app: &mut App) -> Result<(), DiagnosticReport> {
     .and_then(|app| app.add_plugins(super::persistence::HostCustodyPlugin))
     .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
     .and_then(|app| app.add_plugins(TileSetAssetPlugin))
+    .and_then(|app| app.add_plugins(nara_material::Material2dPlugin))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
     tilesets::install(app)?;
     // This Host owns its source imports through the admission driver, not the reload queue.

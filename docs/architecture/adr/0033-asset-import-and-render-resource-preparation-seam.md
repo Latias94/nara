@@ -101,6 +101,25 @@ Rules:
   declaration/artifact/value/resource cut independently from current publication and GPU caches.
   Complete persistent/source/Runtime consumer qualification remains in the
   [R9b unit](../../plans/2026-11-14-durable-material-and-shader-plan.md).
+- An imported `Material2dAsset` is a durable Product containing an exact Shader generation,
+  complete default values and durable default texture selections. The authored `Material2d`
+  component carries its typed asset handle, declaration identity/version, complete semantic
+  values and explicit texture overrides. Its Scene codec exports durable references rather
+  than handles or uniform bytes. Candidate-local content validation checks the actual loaded
+  material before gameplay publication. Extraction joins one authorized current product and
+  its effective authorized Images into the existing immutable binding. Explicit code-first
+  exact bindings remain a separate valid input, not another imported current store.
+- Source import inventories distinguish raw auxiliary reads from typed product dependencies.
+  A pure borrowed product-reference visitor supplies expected source kind and demand; the
+  existing content Host owns discovery, actual import, deduplication, finite cycles and strict
+  delivery. Runtime codecs retain their existing complete Product inventory. Default textures
+  referenced only inside a material must become real Image products and native residency.
+- Shared source, Shader and input snapshots carry their original content-budget lifetime through
+  every shallow owned clone, including public source collections and Runtime acquisitions.
+  Source retention holds the original byte and generation leases; Runtime retention holds the
+  original decode lease and immutable base. Neither may retain a collection or acquisition that
+  contains itself. New views, canonicalized defaults and publication metadata are reserved
+  before allocation; preserving the pixels or source bytes without their reservation is invalid.
 - Hot reload updates asset versions and dependency graph state behind stable handles. Render
   backends invalidate and rebuild their GPU resource cache from the prepared asset/resource data.
 - Managed mutation admission binds the actual typed value store and state store before issuing an

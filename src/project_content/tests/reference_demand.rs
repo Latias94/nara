@@ -6,6 +6,8 @@ use nara_reflect::{ComponentValueShape, encode_asset_reference_value};
 
 use super::*;
 
+mod product_dependencies;
+
 const IMMEDIATE: &str = "test.content.Immediate";
 const DEFERRED: &str = "test.content.Deferred";
 const B: &str = "137317af-05cf-42cc-9192-b5d66e25aa80";

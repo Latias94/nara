@@ -1,6 +1,6 @@
 //! Material-local Shader publication and immutable generation custody.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{any::Any, collections::BTreeMap, fmt, sync::Arc};
 
 use nara_asset::{
     AssetEvents, AssetMutationBaseline, AssetPath, AssetStateError, AssetStates, Assets, Handle,
@@ -19,12 +19,33 @@ const MAX_INPUTS: usize = 32;
 const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 
 /// One source actually returned by the caller's scoped reader before Shader assembly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct MaterialShaderInput {
     path: AssetPath,
     source: Arc<str>,
     digest: [u8; 32],
+    retention: Option<Arc<dyn Any + Send + Sync>>,
 }
+
+impl fmt::Debug for MaterialShaderInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MaterialShaderInput")
+            .field("path", &self.path)
+            .field("source", &self.source)
+            .field("digest", &self.digest)
+            .field("retained", &self.retention.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for MaterialShaderInput {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path && self.source == other.source && self.digest == other.digest
+    }
+}
+
+impl Eq for MaterialShaderInput {}
 
 impl MaterialShaderInput {
     fn new(path: AssetPath, source: Arc<str>) -> Self {
@@ -32,6 +53,16 @@ impl MaterialShaderInput {
             path,
             digest: *blake3::hash(source.as_bytes()).as_bytes(),
             source,
+            retention: None,
+        }
+    }
+
+    fn with_lifetime_owner(&self, owner: Arc<dyn Any + Send + Sync>) -> Self {
+        Self {
+            path: self.path.clone(),
+            source: Arc::clone(&self.source),
+            digest: self.digest,
+            retention: Some(owner),
         }
     }
 
@@ -82,36 +113,202 @@ struct Generation {
 ///
 /// Clones retain this generation after another is published or the library is dropped. Sequence
 /// numbers are local observations; only the original prepared update can publish into a library.
-#[derive(Debug, Clone)]
-pub struct Material2dGeneration(Arc<Generation>);
+#[derive(Clone)]
+pub struct Material2dGeneration {
+    inner: Arc<Generation>,
+    retention: Option<Arc<GenerationLifetimeView>>,
+}
+
+struct GenerationLifetimeView {
+    owner: Arc<dyn Any + Send + Sync>,
+    shader: MaterialShaderArtifact,
+    inputs: Box<[MaterialShaderInput]>,
+}
+
+struct GenerationLifetimeOwner<T> {
+    _previous: Option<Arc<dyn Any + Send + Sync>>,
+    _owner: Arc<T>,
+}
+
+impl fmt::Debug for Material2dGeneration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Material2dGeneration")
+            .field("inner", &self.inner)
+            .field("retained", &self.retention.is_some())
+            .finish()
+    }
+}
 
 impl PartialEq for Material2dGeneration {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 }
 
 impl Eq for Material2dGeneration {}
 
 impl Material2dGeneration {
+    /// Retains this exact generation, its previous owner and an additional opaque lifetime owner.
+    ///
+    /// This extends ownership without admitting a budget, source receipt or publication. The new
+    /// owner also follows owned Shader and input snapshots. A separate read-only view shares the
+    /// original source allocations; the immutable generation never points back to an owner or
+    /// view. A content Host can retain its original, unwrapped acquisition without a cycle.
+    #[must_use]
+    pub fn with_lifetime_owner<T: Send + Sync + 'static>(&self, owner: Arc<T>) -> Self {
+        let retention: Arc<dyn Any + Send + Sync> = Arc::new(GenerationLifetimeOwner {
+            _previous: self.retention.as_ref().map(|view| Arc::clone(&view.owner)),
+            _owner: owner,
+        });
+        let shader = self
+            .inner
+            .shader
+            .with_lifetime_owner(Arc::clone(&retention));
+        let inputs = self
+            .inner
+            .inputs
+            .iter()
+            .map(|input| input.with_lifetime_owner(Arc::clone(&retention)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self {
+            inner: Arc::clone(&self.inner),
+            retention: Some(Arc::new(GenerationLifetimeView {
+                owner: retention,
+                shader,
+                inputs,
+            })),
+        }
+    }
+
+    /// Modeled out-of-line bytes allocated by one call to [`Self::with_lifetime_owner`].
+    ///
+    /// This includes the owner link, shared view, input array and cloned paths. Shader and input
+    /// source allocations are shared. The caller separately owns the supplied acquisition's
+    /// charge, any previous owner's charge and the inline cloned value. Returns `None` on overflow.
+    #[must_use]
+    pub fn lifetime_owner_retained_bytes(&self) -> Option<usize> {
+        use std::mem::{size_of, size_of_val};
+
+        let arc_counters = 2 * size_of::<usize>();
+        let bytes = size_of::<GenerationLifetimeOwner<()>>()
+            .checked_add(arc_counters)?
+            .checked_add(size_of::<GenerationLifetimeView>())?
+            .checked_add(arc_counters)?
+            .checked_add(size_of_val(self.inner.inputs.as_ref()))?;
+        self.inner.inputs.iter().try_fold(bytes, |bytes, input| {
+            bytes.checked_add(input.path().as_str().len())
+        })
+    }
+
+    /// Compiles an independent immutable generation without publication or source observations.
+    ///
+    /// Sequence zero identifies a value constructed outside the code-first library. The supplied
+    /// body is compiled by the same stock assembly and Naga interface authority as library edits.
+    pub fn from_shader_source(
+        declaration: Material2dDeclaration,
+        body: &str,
+    ) -> Result<Self, MaterialUpdateError> {
+        let shader = MaterialShaderArtifact::compile(&declaration, body)?;
+        Ok(Self {
+            inner: Arc::new(Generation {
+                sequence: 0,
+                declaration: Arc::new(declaration.clone()),
+                shader,
+                inputs: Box::new([]),
+            }),
+            retention: None,
+        })
+    }
+
+    /// Compiles an ordered set of actual caller-read inputs without publishing a current value.
+    pub fn from_shader_inputs(
+        declaration: Material2dDeclaration,
+        inputs: Vec<(AssetPath, Arc<str>)>,
+    ) -> Result<Self, MaterialUpdateError> {
+        if inputs.is_empty() || inputs.len() > MAX_INPUTS {
+            return Err(MaterialUpdateError::SourceLimit);
+        }
+        inputs
+            .iter()
+            .try_fold(inputs.len(), |bytes, (_, source)| {
+                bytes
+                    .checked_add(source.len())
+                    .filter(|bytes| *bytes <= MAX_SOURCE_BYTES)
+            })
+            .ok_or(MaterialUpdateError::SourceLimit)?;
+        let paths: Vec<_> = inputs.iter().map(|(path, _)| path.clone()).collect();
+        validate_paths(&paths)?;
+        let inputs = inputs
+            .into_iter()
+            .map(|(path, source)| MaterialShaderInput::new(path.clone(), source))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        compile_inputs(0, Arc::new(declaration.clone()), inputs)
+    }
+
+    #[cfg(feature = "asset")]
+    pub(crate) fn product_retained_bytes(&self) -> Option<usize> {
+        use std::mem::size_of;
+
+        if self.sequence() != 0 || self.retention.is_some() {
+            return None;
+        }
+        let declaration = self.declaration();
+        let arc_counters = 2 * size_of::<usize>();
+        let mut bytes = size_of::<Generation>()
+            .checked_add(arc_counters)?
+            .checked_add(size_of::<Material2dDeclaration>())?
+            .checked_add(arc_counters)?
+            .checked_add(declaration.id().len())?
+            .checked_add(std::mem::size_of_val(declaration.parameters().fields()))?
+            .checked_add(std::mem::size_of_val(declaration.textures()))?;
+        for field in declaration.parameters().fields() {
+            bytes = bytes
+                .checked_add(field.id().len())?
+                .checked_add(field.name().len())?;
+        }
+        for texture in declaration.textures() {
+            bytes = bytes
+                .checked_add(texture.id().len())?
+                .checked_add(texture.name().len())?;
+        }
+        for source in [self.shader().user_source(), self.shader().source()] {
+            bytes = bytes.checked_add(source.len())?.checked_add(arc_counters)?;
+        }
+        bytes = bytes.checked_add(std::mem::size_of_val(self.inputs()))?;
+        for input in self.inputs() {
+            bytes = bytes
+                .checked_add(input.path().as_str().len())?
+                .checked_add(input.source().len())?
+                .checked_add(arc_counters)?;
+        }
+        Some(bytes)
+    }
+
     #[must_use]
     pub fn sequence(&self) -> u64 {
-        self.0.sequence
+        self.inner.sequence
     }
 
     #[must_use]
     pub fn declaration(&self) -> &Material2dDeclaration {
-        &self.0.declaration
+        &self.inner.declaration
     }
 
     #[must_use]
     pub fn shader(&self) -> &MaterialShaderArtifact {
-        &self.0.shader
+        self.retention
+            .as_ref()
+            .map_or(&self.inner.shader, |view| &view.shader)
     }
 
     #[must_use]
     pub fn inputs(&self) -> &[MaterialShaderInput] {
-        &self.0.inputs
+        self.retention
+            .as_ref()
+            .map_or(self.inner.inputs.as_ref(), |view| view.inputs.as_ref())
     }
 
     /// Joins typed values to this exact declaration through the dynamic-value encoder.
@@ -354,7 +551,7 @@ impl Material2dLibrary {
             .entries
             .get_mut(id)
             .ok_or_else(|| MaterialUpdateError::UnknownDeclaration(id.to_owned()))?;
-        if !Arc::ptr_eq(&entry.declaration, &prepared.candidate.0.declaration) {
+        if !Arc::ptr_eq(&entry.declaration, &prepared.candidate.inner.declaration) {
             return Err(MaterialUpdateError::StaleUpdate);
         }
         prepared
@@ -448,19 +645,43 @@ fn prepare(
         });
         inputs.push(input);
     }
-    let mut assembled = String::with_capacity(bytes.saturating_add(inputs.len()));
-    for input in &inputs {
+    let generation = compile_inputs(
+        sequence,
+        Arc::clone(&entry.declaration),
+        inputs.into_boxed_slice(),
+    )?;
+    entry.next_sequence = next_sequence;
+    Ok(generation)
+}
+
+fn compile_inputs(
+    sequence: u64,
+    declaration: Arc<Material2dDeclaration>,
+    inputs: Box<[MaterialShaderInput]>,
+) -> Result<Material2dGeneration, MaterialUpdateError> {
+    let bytes = inputs
+        .iter()
+        .try_fold(inputs.len(), |bytes, input| {
+            bytes
+                .checked_add(input.source().len())
+                .filter(|bytes| *bytes <= MAX_SOURCE_BYTES)
+        })
+        .ok_or(MaterialUpdateError::SourceLimit)?;
+    let mut assembled = String::with_capacity(bytes);
+    for input in inputs.iter() {
         assembled.push_str(input.source());
         assembled.push('\n');
     }
-    let shader = MaterialShaderArtifact::compile(&entry.declaration, &assembled)?;
-    entry.next_sequence = next_sequence;
-    Ok(Material2dGeneration(Arc::new(Generation {
-        sequence,
-        declaration: Arc::clone(&entry.declaration),
-        shader,
-        inputs: inputs.into_boxed_slice(),
-    })))
+    let shader = MaterialShaderArtifact::compile(&declaration, &assembled)?;
+    Ok(Material2dGeneration {
+        inner: Arc::new(Generation {
+            sequence,
+            declaration,
+            shader,
+            inputs,
+        }),
+        retention: None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

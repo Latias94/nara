@@ -293,6 +293,21 @@ realization and original submission custody. The
 Save/Reopen/Check/Export/run and native interleaving before those workflows are reported complete.
 Superseded static material interfaces are removed rather than retained as a second authority.
 
+Persistent authoring separates the reusable `Material2dAsset` Product and authored `Material2d`
+component from exact render bindings. The original Scene transaction reserves typed handles,
+validates the candidate's own loaded products and commits material/Image residency with its
+successful Scene publication. It cannot consult the incumbent's old domain values to validate
+a successor. The carrier's native schema owns durable reference traversal; concrete parameter
+and texture tooling projections derive from the same admitted declaration. Missing or revoked
+managed products omit affected draws with diagnostics; an unrelated stock/code-first draw
+remains independently usable. Public owned source/Shader snapshots keep the original content
+reservation alive after Scene retirement without introducing a second publication owner.
+
+The first-party carrier participates in the existing persistent Runtime2d defaults and native
+Editor authoring allowlist. It adds no per-material native component definition. Material
+families and source/processed import codecs remain compiled recipe choices, and the Editor's
+authoring lane does not execute arbitrary Runtime or Schema plugins from that recipe.
+
 ### Semantic input owns held-action lifetimes
 
 Physical button state and per-binding `ActionOutcomes` remain distinct from gameplay-facing
