@@ -4766,6 +4766,18 @@ formatting. The inherited logical-input match omission is corrected separately a
 without synthesizing UI activation. Startup attribution remains scoped to original owners;
 full R12, native Editor integration and paused UI/DPI scope remain open.
 
+The [original child startup attribution](../benchmarks/2026-11-14-development-runtime-costs.md#original-child-startup-attribution)
+at `ed4cd86` observes four operations under the existing default-disabled startup total. Twelve
+independent headless/desktop processes preserve initialized state and normal original cleanup;
+an excluded real post-spawn failure preserves candidate retirement. Retained startup medians
+are 145.984/1595.177 ms, with native creation 30.522/34.682 ms and broad initialized READY
+wait 89.252/1518.218 ms. Complete Host start, later exact presentation and physical cleanup
+remain distinct. No optimization follows from attributing that broad wait to a single GPU or
+source stage. Original continuous/paused adoption 2/2, desktop CPU 83/83, default-disabled
+ordinary 110/110, correctness Clippy, formatting and final consumer compilation pass. The report
+retains independent review, raw-source/test-only correction and platform/cost limits. Further
+child-stage attribution and full R12 remain open; UI and mixed-DPI work stay paused.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

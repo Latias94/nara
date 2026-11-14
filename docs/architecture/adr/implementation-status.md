@@ -2661,6 +2661,17 @@ reviews pass; source/tool/lease revalidation, failure custody and physical clean
 original owners. The linked raw data keeps actual source/tool/platform and cost limits; full
 R12 and paused Editor/UI work remain open.
 
+The [original child startup qualification](../../benchmarks/2026-11-14-development-runtime-costs.md#original-child-startup-attribution)
+at `ed4cd86` preserves the original process/namespace/executable/native/READY owners and adds
+four opt-in elapsed phases. Twelve actual independent startup processes and one excluded
+post-spawn failure pass. Headless/desktop startup medians are 145.984/1595.177 ms; most desktop
+time lies within initialized READY wait, not the separately measured native creation. Original
+continuous/paused adoption 2/2, desktop CPU 83/83 and default-disabled ordinary tests 110/110
+pass. Correctness Clippy, formatting, latest consumer compilation and independent reviews pass;
+the report keeps the test-only P3 correction, original raw-source digest and unexecuted injected
+panic scope explicit. No startup optimization, CPU/cold-start/tail budget or full R12 completion
+is selected; original presentation and physical retirement retain separate qualification.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

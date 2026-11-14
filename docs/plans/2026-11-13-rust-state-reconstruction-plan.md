@@ -1356,3 +1356,51 @@ to remove the neutral keyboard inventory's full paused-frame/maintenance precond
 fresh restored presentation separate from READY and preserve complete workflow/state/failure
 and physical cleanup acceptance. This qualified preparation change does not complete R12 or
 resume paused Editor UI and physical mixed-DPI work.
+
+### Original Child Startup Attribution
+
+Status: qualified within the finite Windows scope below, at `ed4cd86`.
+Split the original `ChildStartup` total into namespace preparation,
+exact executable launch authority, original native spawn and initialized READY wait. Keep these
+as default-disabled elapsed observations inside the existing game process owner. Namespace
+preparation includes original project/store checks, private control-directory admission, retained
+lease, identities and command construction. Exact launch still checks original installed bytes
+and restrictive file/directory handles. Native spawn still owns suspended-image/containment/output
+admission, and READY wait still validates the exact original protocol response and startup state.
+Errors belong to their actual phase without losing pre-spawn or post-spawn custody.
+
+Measure six alternating headless/desktop rounds through public `DevelopmentHost`, excluding the
+first original process for each placement and retaining five independent starts per placement.
+Compile the two explicit feature selections with the same pinned tools and inventory. Verify
+fresh complete state, zero progressed logical ticks, exact active generation, per-host phase
+counts and normal original physical retirement. Desktop presentation remains a separate fresh
+receipt after READY; the two placements' recipes/configuration are deliberately distinct.
+Write raw results only after every original owner and source fixture closes. Preserve disabled
+instrumentation's zero clock reads, ordinary operation results and all existing limits.
+
+Choose any startup optimization only from the measured owning phase and evidence of redundant
+work. Do not remove source/executable/namespace validation, native admission, neutral input
+maintenance, fresh restored presentation or normal cleanup to make startup numbers smaller.
+Keep complete rebuild/adoption, Running controls and prior failures in their appropriate existing
+regression scope. Full R12, foreign native execution and paused UI/DPI scope remain open.
+
+Actual run `15323d4f` passes in 81.953 seconds with twelve independent successful starts and
+an excluded real malformed-project failure after spawn. Five retained per-placement medians
+place `ChildStartup` at 145.984 ms headless and 1595.177 ms desktop. Original native spawn is
+30.522/34.682 ms, exact launch authority 23.813/34.087 ms, namespace preparation 4.437/5.099 ms,
+and initialized READY wait 89.252/1518.218 ms. Complete public Host start is separately
+242.078/1780.243 ms, including installation and immediate post-READY observation. Children fit
+inside the original startup total with small construction gaps; neither parent/child values nor
+separately computed medians are additive. The [report](../benchmarks/2026-11-14-development-runtime-costs.md#original-child-startup-attribution)
+retains all raw observations, complete canonical bases, original presentation identities and
+cleanup receipts, including the actual failed child without a normal-exit claim.
+
+No startup optimization is selected. Most desktop startup falls inside the broad original READY
+wait, which includes source/Runtime/native/GPU, protocol transport and polling. Next attribution
+must separate those original child stages before choosing a change. Original continuous/paused
+adoption passes 2/2 in `45251983`, desktop CPU 83/83 in `1a4a8738` and final default-disabled
+ordinary tests 110/110 in `94a9563c`. All-target/all-feature correctness Clippy, formatting and
+latest consumer compilation pass. Process and measurement reviews close with no remaining P1/P2.
+A test-only P3 panic/fixture retention issue is fixed after measurement and compile-checked;
+its raw record retains the earlier source digest, and injected-panic runtime proof is not claimed.
+All three scoped agents close. Full R12 and the paused UI/DPI scope remain active/open as before.

@@ -72,6 +72,21 @@
     "complete_workflow_command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_cost --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
     "child_startup_disposition": "source inspection finds no justified deletion: the current startup total includes namespace preparation, exact executable validation, native creation and READY; further attribution must distinguish those before changing original authority or maintenance"
   },
+  "child_startup_attribution": {
+    "base_revision": "55ef557",
+    "qualified_implementation_revision": "ed4cd866c133dcedfdd8178e1ca15ab035c77657",
+    "source_state": "four optional startup phases and the independent startup consumer were uncommitted during measurement; owning report records qualified source after commit",
+    "cpu_run": "1a4a8738-2e4c-42bf-bd74-34958f1557b1",
+    "native_measurement_run": "15323d4f-4bc7-4f8c-a9f7-a73e6cbf9f06",
+    "native_adoption_regression_run": "45251983-2d33-459f-a861-7f69ea75d224",
+    "ordinary_default_run": "94a9563c-edda-40c9-b41a-c869aff01e7e",
+    "postmeasurement_test_correction": "The consumer source later fixes a P3 so successful physical cleanup releases Host/fixture before propagating an earlier measurement panic; raw measured source digest and successful values remain unchanged. The latest branch is source-reviewed and compile-checked, without injected-panic execution evidence.",
+    "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_startup --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+    "output_environment": "NARA_DEVELOPMENT_STARTUP_OUTPUT selects an explicit absolute new result file",
+    "scope": "six alternating independent headless/desktop rounds, one excluded warmup and five retained starts per placement; deliberately distinct recipes/features; post-READY presentation and physical cleanup separately verified",
+    "excluded_failure": "one actual malformed-project headless process fails after native spawn before READY; original candidate and physical cleanup remain observable; not a successful game exit or a performance sample",
+    "decision": "no startup optimization selected; desktop READY wait dominates the measured parent boundary but combines child startup, source/Runtime/native/GPU, protocol and polling costs"
+  },
   "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
   "data_sha256": {
     "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
@@ -81,6 +96,7 @@
     "control-after.json": "d43078ed3e369d7953370b9dd24b82444425df28beb465511df91a1f009c3f8b",
     "workflow-after.json": "cda33048754068158adeabb5fbdb89303de169d501897c10033c1c0168fc8516",
     "metadata-command-exploration.json": "2f03a22df6d5503bcebc88a91a63ff329384d572da041fb0ce007f00a3ce6f7a",
-    "workflow-declarations.json": "a263747574d09391c3f13fb7fc73e7f95c8fdcde65651d5869301ac652052f15"
+    "workflow-declarations.json": "a263747574d09391c3f13fb7fc73e7f95c8fdcde65651d5869301ac652052f15",
+    "startup-attribution.json": "05172b58376ff1cad27319da023b915475bc5fef29356711dbe1f5aeffb37f80"
   }
 }

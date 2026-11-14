@@ -424,3 +424,93 @@ scoped agents are closed. The previous startup investigation remains a source-gr
 attribution, not a measured native-spawn/GPU bottleneck or an authorization to delete checks.
 All Cargo/native observations are terminal. Complete R12, representative latency tails, hard
 compiler interruption, foreign Nara execution and paused Editor/UI work remain open.
+
+## Original Child Startup Attribution
+
+The qualified implementation is `ed4cd866c133dcedfdd8178e1ca15ab035c77657`.
+
+The existing game process owner now observes namespace preparation, exact executable launch
+authority, native spawn and initialized READY wait separately within `ChildStartup`. These
+default-disabled elapsed observations preserve original operation order, errors, startup deadline
+and post-spawn custody. A private prepared-launch value retains the original control directory,
+namespace lease, command and identities until they enter the original process. No alternative
+process, input, device or trace owner is introduced. Disabled observation adds no timing clock
+reads; the process's pre-existing deadlines still use their original clock.
+
+The public `development_startup` consumer builds explicit headless and desktop executables once,
+then alternates six rounds of fresh independent Hosts/processes. The first process per placement
+is an excluded warmup; five are retained. Each original process installs the exact captured
+executable, reaches initialized READY, produces complete canonical state with zero progressed
+ticks and neutral input, then retires normally. Canonical bytes are equal within each placement;
+the two placements have deliberately distinct feature/recipe/configuration observations.
+Desktop additionally confirms a fresh original non-CPU presentation with the exact state digest
+and original frame/window/device identities after the startup timer ends.
+
+Run `15323d4f-4bc7-4f8c-a9f7-a73e6cbf9f06` passes 1/1 in 81.953 seconds, including both actual
+builds, twelve successful starts, later assertions and cleanup, plus a separate failure control.
+Initial build work is excluded from per-start timing. Outer code uses release and captured
+children use dev with the recorded actual Rust 1.95.0 tools, locked/offline resolution and jobs
+one. The contained desktop reports a discrete Vulkan adapter, independently of the parent DX12
+environment hint.
+
+| Parent-observed elapsed boundary | Headless median | Headless range | Desktop median | Desktop range |
+| --- | ---: | ---: | ---: | ---: |
+| Complete public Host start | 242.078 ms | 238.991–272.646 ms | 1780.243 ms | 1653.903–1822.121 ms |
+| Executable installation | 79.547 ms | 70.433–91.299 ms | 132.720 ms | 88.935–146.471 ms |
+| ChildStartup | 145.984 ms | 142.926–156.933 ms | 1595.177 ms | 1456.503–1694.717 ms |
+| Namespace/control preparation | 4.437 ms | 4.180–5.062 ms | 5.099 ms | 4.157–7.199 ms |
+| Exact launch authority | 23.813 ms | 17.786–28.758 ms | 34.087 ms | 24.364–40.941 ms |
+| Original native spawn | 30.522 ms | 27.412–34.248 ms | 34.682 ms | 33.279–39.715 ms |
+| Initialized READY wait | 89.252 ms | 81.936–96.447 ms | 1518.218 ms | 1377.181–1631.502 ms |
+
+The timing snapshot is copied immediately after `host.start` returns, before later capture,
+status, presentation and cleanup. That complete API includes executable installation,
+`ChildStartup` and an immediate post-READY observation. Four named child operations fit inside
+the original startup total with small unmeasured construction gaps; they are not an exact
+partition. Independently computed medians must not be summed to reconstruct a parent median.
+READY wait covers child loader/startup, source/Runtime/native/GPU work, response transport and
+parent polling after native admission. It is not GPU initialization alone or native spawn time.
+
+An excluded thirteenth process uses the actual captured headless executable with malformed
+`nara.toml`. Native spawn succeeds, the child exits before READY and both `ChildReadyWait` and
+`ChildStartup` record failure while earlier phases remain successful. The original candidate
+receipt records non-successful process exit, no successful game Close, empty containment,
+stopped readers and drained output; it is not relabeled as a normal success. Cleanup completes
+without fallback termination, the manifest is restored, and the source fixture is removed before
+the new output file is created.
+
+The [raw startup observations](data/2026-11-14-development-runtime/startup-attribution.json)
+retain tool/input/executable provenance, all sample times/counts, complete per-placement canonical
+bases, original presentation responses and successful/failing cleanup facts. Five independent
+processes per placement improve on repeated requests in one child, but share a machine, loaded
+driver/code caches and sequential source/build preparation. They are not controlled cold starts,
+stable tails, foreign-platform qualification or a before/after optimization comparison.
+
+The observation places most desktop startup inside the broad initialized READY wait, rather than
+namespace preparation or native creation. No startup optimization is selected from this parent
+attribution alone. The next useful measurement separates original child source/Runtime startup,
+first native/GPU drive and neutral-input maintenance; it must preserve exact launch, full paused
+frame eligibility, separate restored presentation and normal original retirement.
+
+### Startup Attribution Qualification
+
+| Scope | Actual result |
+| --- | --- |
+| Desktop-feature library, child and CLI CPU controls | 83/83, run `1a4a8738-2e4c-42bf-bd74-34958f1557b1`, 7.348 seconds; one ignored native consumer separate. |
+| Independent original startup measurement/failure | 1/1, run `15323d4f-4bc7-4f8c-a9f7-a73e6cbf9f06`, 81.953 seconds, twelve successful original processes plus one excluded actual failure. |
+| Original continuous/paused desktop rebuild adoption | 2/2, run `45251983-2d33-459f-a861-7f69ea75d224`, 202.622 seconds; original complete state/source/presentation/input, stale refusal and Running Close assertions retained. |
+| Final default-disabled ordinary sample | 110/110, run `94a9563c-edda-40c9-b41a-c869aff01e7e`, 11.101 seconds; two actual-build consumers remain separate. |
+
+All-target/all-feature correctness Clippy, sample formatting and the final startup-consumer
+compile check pass. Existing warnings remain. Independent process-diff and measurement reviews
+find no remaining P1/P2. The latter identifies a P3 in test-only panic cleanup: after successful
+physical cleanup, a failed measurement assertion still retained its source fixture. The corrected
+consumer now drops the Host/fixture before propagating that original panic; only cleanup failure
+retains them. The invalid-manifest restoration stays inside the proven cleanup path.
+
+The raw successful measurement retains its pre-correction consumer source digest and unchanged
+operation/response/cleanup values. The latest test-only panic branch is source-reviewed and
+compiled, not claimed to have been exercised by injected panic. No production process code
+changes after its native measurements. All three scoped agents close, all owned executions reach
+terminal observations, and no unrelated UI/native framework matrices are repeated. Full R12,
+representative cold/tail/CPU budgets and paused Editor/UI work remain open.

@@ -339,6 +339,28 @@ to its endpoints; the compilation segment also includes Cargo output decoding an
 hashing. An error completes only its current segment as failed. These segments partition the
 observed adapter interval, but adding them to `CargoBuild` would count the same work twice.
 
+`ChildStartup` contains `ChildNamespacePreparation`, `ChildLaunchAuthority`, `ChildNativeSpawn`
+and `ChildReadyWait`. They describe the original directory/command preparation, exact installed
+executable admission, native process creation and initialized READY wait. Their sum is contained
+by the parent with small construction gaps; adding parent and children would count work twice.
+Complete `start` also includes executable installation and the immediate post-READY observation.
+READY is separate from restored state or exact original presentation.
+
+The ignored `development_startup` consumer alternates six independent headless/desktop starts,
+excluding one warmup and retaining five processes per placement. Their features/recipes differ
+deliberately. Each verifies initialized complete state and original physical cleanup; desktop
+additionally checks a fresh original presentation. An excluded invalid-manifest case checks
+post-spawn failure custody. Set an explicit absolute **new** `NARA_DEVELOPMENT_STARTUP_OUTPUT`
+JSON path and the same toolchain/offline/jobs/target environment used below:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_startup --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+Output is written only after every process and the copied source fixture retire. Startup spans
+are elapsed parent observations, not pure native creation, GPU initialization, CPU execution or
+scanout. A failing READY wait retains the original process for physical cleanup.
+
 The ignored `development_turnaround` consumer measures one excluded warmup and ten retained
 requests for each of capture, execution status and fresh canonical presentation. Request order
 rotates within one hidden, input-isolated paused game. Every result must retain the complete
