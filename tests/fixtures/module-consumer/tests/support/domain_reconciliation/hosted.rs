@@ -7,6 +7,7 @@ use nara_engine::{
         PluginDefinitionId, PluginError, PluginId, PluginShutdownContext, StartupStage,
         VirtualTime,
     },
+    asset::{AssetSourceChange, AssetSourceChangeKind, AssetSourcePath},
     core::ItemLimit,
     ecs::{
         Component, Entity, Resource, World,
@@ -744,6 +745,25 @@ fn maintenance(world: &mut World) {
             world.resource_mut::<Outcome>().done = true;
             return;
         }
+        if control.scenario == Scenario::Recover {
+            let published = effects.reconciliation_calls != [0, 0];
+            ProjectScenes::scope(world, |scenes| {
+                assert_eq!(scenes.source_update_status().unwrap().request, None);
+                let next = AssetSourceChange::new(
+                    AssetSourcePath::new("scenes/next.scene.json").unwrap(),
+                    AssetSourceChangeKind::Modified,
+                );
+                assert_eq!(scenes.notify_source_change(&next), Ok(published));
+                assert_eq!(scenes.source_update_status().unwrap().pending, published);
+                if published {
+                    let previous = AssetSourceChange::new(
+                        AssetSourcePath::new("scenes/startup.scene.json").unwrap(),
+                        AssetSourceChangeKind::Modified,
+                    );
+                    assert_eq!(scenes.notify_source_change(&previous), Ok(false));
+                }
+            });
+        }
         let phases = {
             let mut progress = world.resource_mut::<Progress>();
             if !progress.waited {
@@ -801,6 +821,8 @@ fn maintenance(world: &mut World) {
             !scenes.diagnostics(request).unwrap().has_errors(),
             "successful retry must not retain the resolved native failure as a final error"
         );
+        assert!(scenes.source_update_status().unwrap().pending);
+        assert_eq!(scenes.source_update_status().unwrap().request, None);
         world.resource_mut::<Outcome>().done = true;
     }
 }
