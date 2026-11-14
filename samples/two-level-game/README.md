@@ -401,6 +401,19 @@ hardware scope. Optional `NARA_RUNTIME_COST_OUTPUT` writes the structured report
 absolute new file; ordinary game startup text still goes to stdout. Without it, stdout ends
 with one `two-level-runtime-cost/v2` JSON record after those startup messages.
 
+Both comparison recipes also select the original `DesktopRunOptions::with_startup_timings()`.
+Their additive `startup` diagnostics retain content preparation, Runtime startup, native session
+construction, first native poll and accumulated native polling through first actual presentation.
+The aggregate includes the remainder of the presenting poll and excludes caller gaps; it overlaps
+the first-poll duration. A fast first poll can defer most initialization to later polls.
+Separate public-call wall spans cover initial paused settlement and neutral keyboard
+restoration/maintenance. The completed snapshot is copied after neutral maintenance and canonical
+capture, before reveal and running-frame warmup; later work and physical cleanup must leave it
+unchanged. Missing phase values are `null`, not zero. Native-poll wall time includes its original
+window/device/frame work; it is not pure GPU initialization. The six runs share a process, loaded
+driver/code caches and recovered physical event loop, so these observations are not independent
+cold-process startups.
+
 The opt-in `cost-measurement` feature enables read-only Windows current-process counters through
 the already locked SDK dependency. It does not enter normal desktop or reconstructed-child
 features. Whole-process CPU/working-set/private observations are separate from frame wall

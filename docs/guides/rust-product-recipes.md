@@ -641,6 +641,32 @@ affinity applies to construction, polling, operations and retirement.
 poll; it does not impose a hard deadline on synchronous source/startup work, user callbacks,
 managed frames, graphics drivers or compiler/build-script calls. Keep callbacks prompt.
 
+Select `DesktopRunOptions::with_startup_timings()` before constructing the action to observe
+five original startup spans without changing execution policy. `startup_timings()` copies an
+optional snapshot of completed observations; `get(DesktopStartupPhase)` returns an optional
+elapsed `Duration`. Missing observations can fill as startup progresses.
+`ContentPreparation` includes original source checking or processed-base binding, planning and
+start admission. `RuntimeStartup` covers completing that original startup attempt.
+`NativeSessionConstruction` includes the initial Pause request and original presentation/native
+session construction. `FirstNativePoll` covers the first nonblocking native drive, including any
+window/device/frame work performed there. It does not establish that native initialization has
+finished: recovered event loops can defer that work to later polls.
+`NativePollingToFirstPresentation` accumulates original native `poll()` call durations through
+the poll that observes the first actual presentation receipt, including the remainder of that
+poll and excluding gaps between calls. It remains absent until that receipt, and overlaps
+`FirstNativePoll`; do not add the two. Entering blocking `execute()` before the receipt abandons
+the aggregate. Blocking execution never reports its whole lifetime as a native startup span.
+An already-started Runtime has no content/startup spans.
+
+Disabled actions perform no startup-instrumentation clock reads. Returned spans remain fixed
+through later controls, frames and cleanup, but do not establish success, readiness, complete
+paused capture, presentation or retirement. Missing spans mean unobserved or unreached work;
+they differ from measured zero. Gaps and later initialization can lie outside these operations,
+so the values are not a complete startup partition, pure CPU/GPU times or performance budgets.
+The ordinary Two-Level Game `runtime_cost` consumer records the same public observations with
+original frame/telemetry/cleanup checks; ordinary game and development child options leave them
+disabled. No game protocol or Runtime permission changes.
+
 Use `DesktopRunOptions::with_initial_pause()` for a game-owned controlled session and
 `with_initial_visibility(false)` to create its original native window hidden and non-activating.
 `reveal()` acts on that live original window and requests another native frame; it does not

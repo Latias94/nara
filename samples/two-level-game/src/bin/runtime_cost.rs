@@ -5,6 +5,8 @@
 //! CPU execution time nor GPU execution or scanout time. Telemetry is enabled equally in both
 //! recipes. Run on an interactive Windows desktop without keyboard input or window manipulation.
 //! Poll deadlines are cooperative and cannot interrupt native calls or game callbacks.
+//! Startup diagnostics observe original elapsed operations before running-frame warmup. Sequential
+//! runs share this process and recover the same physical event loop; they are not cold processes.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -29,7 +31,8 @@ use nara::{
     input::KeyboardHold,
     project_host::{
         DesktopControlError, DesktopRun, DesktopRunIntent, DesktopRunOptions, DesktopRunProgress,
-        DesktopTelemetrySealOutcome, WinitEventLoop, WinitInputActivation,
+        DesktopStartupPhase, DesktopStartupTimings, DesktopTelemetrySealOutcome, WinitEventLoop,
+        WinitInputActivation,
     },
     render_wgpu::WgpuBackendTelemetryConfig,
     window::{WindowId, backend::WindowTargetPhase},
@@ -180,6 +183,8 @@ fn compare(options: Options) -> Result<Value, String> {
         "frame_wall_definition": "FrameExecutionStart.started_at to post-Host observation.now; App plus native Host/submit wall including waits, not CPU execution/GPU execution/scanout",
         "gpu_completion_definition": "original App frame start to queue-completion callback observation, not GPU execution/scanout",
         "telemetry_enabled_both": true,
+        "startup_timings_enabled_both": true,
+        "startup_sampling_definition": "additive v2 diagnostics; each run has new original Runtime/native owners in one process and recovers the same physical event loop; loaded code and driver caches are shared, not independent cold-process starts",
         "manual_step_or_delta": false,
         "same_physical_event_loop": true,
         "same_workload_adapter_extent": true,
@@ -190,6 +195,7 @@ fn compare(options: Options) -> Result<Value, String> {
 struct Experiment {
     run: Option<DesktopRun>,
     observed: Rc<RefCell<Collector>>,
+    startup: Option<DesktopStartupTimings>,
 }
 
 impl Experiment {
@@ -278,7 +284,14 @@ impl Experiment {
 
     fn measure(&mut self, options: Options) -> Result<Value, String> {
         let deadline = Instant::now() + TIMEOUT;
+        let initial_settle_started = Instant::now();
         self.settle(deadline)?;
+        let initial_settle_wall = initial_settle_started.elapsed();
+        let initial_startup = self
+            .run()
+            .startup_timings()
+            .ok_or("original desktop startup timing was not enabled")?;
+        let neutral_started = Instant::now();
         self.run()
             .restore_keyboard_holds(
                 movement_keyboard_bindings()
@@ -291,10 +304,67 @@ impl Experiment {
             )
             .map_err(|error| error.to_string())?;
         let baseline = self.maintenance(deadline)?;
+        let neutral_hold_and_maintenance_wall = neutral_started.elapsed();
         let canonical = capture_desktop_resume(self.run()).map_err(|error| error.to_string())?;
         if canonical.held != [false; 4] || baseline.tick != 0 || canonical.clock.ticks != 0 {
             return Err("initial neutral paused workload was not fresh".into());
         }
+        let startup = self
+            .run()
+            .startup_timings()
+            .ok_or("original desktop startup timing was not retained")?;
+        for phase in DesktopStartupPhase::ALL {
+            let completed = startup
+                .get(phase)
+                .ok_or("neutral source desktop is missing an original startup observation")?;
+            if initial_startup
+                .get(phase)
+                .is_some_and(|initial| initial != completed)
+            {
+                return Err("neutral maintenance replaced a completed startup observation".into());
+            }
+        }
+        self.startup = Some(startup);
+        self.verify_startup_timings()?;
+        let phases = DesktopStartupPhase::ALL
+            .into_iter()
+            .map(|phase| {
+                let scope = match phase {
+                    DesktopStartupPhase::ContentPreparation => {
+                        "original source check, plan creation and begin-start admission"
+                    }
+                    DesktopStartupPhase::RuntimeStartup => {
+                        "complete original Runtime startup attempt before native transfer"
+                    }
+                    DesktopStartupPhase::NativeSessionConstruction => {
+                        "initial Pause request, presentation driver and original WinitSession construction"
+                    }
+                    DesktopStartupPhase::FirstNativePoll => {
+                        "first nonblocking native poll, including window, device and render work it performs"
+                    }
+                    DesktopStartupPhase::NativePollingToFirstPresentation => {
+                        "sum of original native poll calls through first actual presentation, including the remainder of that poll and excluding caller gaps; overlaps FirstNativePoll"
+                    }
+                };
+                Ok(json!({
+                    "phase": format!("{phase:?}"),
+                    "optional_ns": startup.get(phase).map(ns).transpose()?,
+                    "scope": scope,
+                }))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let startup_report = json!({
+            "scope": "caller-observed original operation elapsed wall time, including existing waits; not raw CPU or GPU execution, scanout, or an exact total startup partition",
+            "observation_point": "completed original snapshot copied after neutral keyboard inventory, paused maintenance and canonical capture; earlier completed phases are unchanged from initial initialized paused settle; before reveal, input activation, Resume and running-frame warmup",
+            "missing_phase_definition": "null optional_ns means the phase was not reached or observed; zero is a measured completed duration",
+            "outcome_authority": "diagnostic snapshot only; original progress, complete paused capture, presentation and physical retirement APIs remain authoritative",
+            "phases": phases,
+            "public_call_boundaries": {
+                "initial_settle_ns": ns(initial_settle_wall)?,
+                "neutral_hold_and_maintenance_ns": ns(neutral_hold_and_maintenance_wall)?,
+                "scope": "initial settle includes original cooperative poll/capture/maintenance until initialized paused state; the separate neutral interval includes restore_keyboard_holds and paused maintenance, excluding later canonical capture; public spans overlap the internal phases and must not be summed with them",
+            },
+        });
         self.observed.borrow_mut().baseline = Some(baseline);
         self.run().reveal().map_err(|error| error.to_string())?;
         self.maintenance(deadline)?;
@@ -356,7 +426,9 @@ impl Experiment {
         {
             return Err("no-input game changed its semantic workload".into());
         }
+        self.verify_startup_timings()?;
         let mut report = self.observed.borrow().report()?;
+        report["startup"] = startup_report;
         report["workload"]["schema"] = json!(canonical.compatibility.schema);
         report["workload"]["level_stamps"] = json!(canonical.compatibility.levels);
         report["workload"]["timestep_nanos"] = json!(canonical.clock.timestep_nanos);
@@ -372,6 +444,18 @@ impl Experiment {
             "canonical_capture_valid": true,
         });
         Ok(report)
+    }
+
+    fn verify_startup_timings(&mut self) -> Result<(), String> {
+        let expected = self
+            .startup
+            .ok_or("missing original startup timing snapshot")?;
+        if self.run().startup_timings() != Some(expected) {
+            return Err(
+                "later desktop operations changed the original startup timing snapshot".into(),
+            );
+        }
+        Ok(())
     }
 
     fn counters(&mut self) -> Result<(u64, u64, u64), String> {
@@ -489,6 +573,7 @@ fn run_one(
     )));
     let observer = Rc::clone(&observed);
     let mut execution = DesktopRunOptions::new()
+        .with_startup_timings()
         .with_initial_pause()
         .with_initial_visibility(false)
         .with_input_isolation(true)
@@ -506,6 +591,7 @@ fn run_one(
                 .with_execution(execution),
         )),
         observed,
+        startup: None,
     };
     let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure(options)))
         .unwrap_or_else(|_| Err("measurement panicked; closing original desktop owners".into()));
@@ -532,6 +618,8 @@ fn run_one(
         }
     };
     let mut report = measured?;
+    experiment.verify_startup_timings()?;
+    report["startup"]["snapshot_unchanged_through_cleanup"] = json!(true);
     experiment.observed.borrow().add_completions(&mut report)?;
     report["cleanup"] = json!({ "normal_exit": true, "telemetry_sealed": true,
         "native_destroyed": true, "surface_retired": true, "provider_released": true,

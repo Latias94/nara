@@ -14,6 +14,7 @@ use nara_winit::{WinitControlFlow, WinitEventLoop, WinitRunProgress, WinitRunner
 mod control;
 mod poll;
 mod presentation;
+mod startup;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(super) mod verification;
 
@@ -39,6 +40,8 @@ pub use presentation::{
 use presentation::{
     DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
 };
+pub(in crate::project_host) use startup::{DesktopStartupObservation, StartupTimer};
+pub use startup::{DesktopStartupPhase, DesktopStartupTimings};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use verification::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -56,6 +59,7 @@ pub struct DesktopRunOptions {
     runner: WinitRunner,
     presentation: DesktopPresentationOptions,
     initially_paused: bool,
+    pub(super) observe_startup: bool,
 }
 
 impl Default for DesktopRunOptions {
@@ -68,6 +72,7 @@ impl Default for DesktopRunOptions {
             runner: WinitRunner::default(),
             presentation: DesktopPresentationOptions::default(),
             initially_paused: false,
+            observe_startup: false,
         }
     }
 }
@@ -76,6 +81,16 @@ impl DesktopRunOptions {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Observes completed original startup operations without changing their execution policy.
+    ///
+    /// Disabled actions perform no startup-instrumentation clock reads. Read fixed observations
+    /// through [`DesktopRun::startup_timings`]; elapsed spans do not establish startup success.
+    #[must_use]
+    pub fn with_startup_timings(mut self) -> Self {
+        self.observe_startup = true;
+        self
     }
 
     #[must_use]
@@ -215,6 +230,7 @@ pub struct DesktopRun {
     pub(super) telemetry_seal: Option<DesktopTelemetrySealReport>,
     pub(super) event_loop: Option<WinitEventLoop>,
     pub(super) close_requested: bool,
+    pub(super) startup_timings: Option<DesktopStartupObservation>,
 }
 
 impl fmt::Debug for DesktopRun {
@@ -250,6 +266,9 @@ impl DesktopRun {
         mut execution: DesktopRunOptions,
     ) -> Self {
         let event_loop = execution.event_loop.take();
+        let startup_timings = execution
+            .observe_startup
+            .then(DesktopStartupObservation::default);
         Self {
             state: DesktopRunState::FreshRuntime { runtime, execution },
             diagnostics: DiagnosticReport::default(),
@@ -260,6 +279,20 @@ impl DesktopRun {
             telemetry_seal: None,
             event_loop,
             close_requested: false,
+            startup_timings,
+        }
+    }
+
+    /// Copies completed original startup observations, or `None` when timing was not enabled.
+    ///
+    /// Completed spans are never replaced. Native polling remains unobserved until its first
+    /// actual presentation; after startup completion later work does not extend the snapshot.
+    /// Original progress, capture, presentation and retirement APIs remain authoritative for outcomes.
+    #[must_use]
+    pub const fn startup_timings(&self) -> Option<DesktopStartupTimings> {
+        match &self.startup_timings {
+            Some(observation) => Some(observation.snapshot()),
+            None => None,
         }
     }
 
@@ -307,7 +340,8 @@ impl DesktopRun {
                 self.drive_cleanup(hosts, terminal, mode)
             }
             DesktopRunState::Native(mut native) => {
-                native.progress = mode.drive(&mut native.session);
+                native.progress =
+                    self.drive_native(mode, &mut native.session, &native.reports, false);
                 self.finish_native(*native)
             }
             DesktopRunState::Completed(exit) => DesktopRunState::Completed(exit),
@@ -334,6 +368,7 @@ impl DesktopRun {
         >,
         mode: DesktopDriveMode,
     ) -> DesktopRunState {
+        let construction = StartupTimer::start(&self.startup_timings);
         let startup_failed =
             execution.initially_paused && request_initial_pause(&mut runtime).is_err();
         if startup_failed {
@@ -342,7 +377,8 @@ impl DesktopRun {
                 "Desktop Runtime refused the selected initial Pause",
             ));
         }
-        let reports = DesktopPresentationReports::default();
+        let reports =
+            DesktopPresentationReports::with_startup_observation(self.startup_timings.is_some());
         let driver = DesktopPresentationDriver::new(
             &runtime,
             execution.presentation,
@@ -360,7 +396,11 @@ impl DesktopRun {
         if self.close_requested || startup_failed {
             session.request_close();
         }
-        let progress = mode.drive(&mut session);
+        construction.finish(
+            &mut self.startup_timings,
+            DesktopStartupPhase::NativeSessionConstruction,
+        );
+        let progress = self.drive_native(mode, &mut session, &reports, true);
         self.finish_native(DesktopNativeRun {
             session,
             progress,
@@ -371,6 +411,33 @@ impl DesktopRun {
             verification,
             reports,
         })
+    }
+
+    fn drive_native(
+        &mut self,
+        mode: DesktopDriveMode,
+        session: &mut WinitSession,
+        reports: &DesktopPresentationReports,
+        first: bool,
+    ) -> WinitRunProgress {
+        match mode {
+            DesktopDriveMode::Poll(_) => {
+                let timer = StartupTimer::native_poll(&self.startup_timings, first);
+                let progress = mode.drive(session);
+                if let (Some(elapsed), Some(timings)) =
+                    (timer.elapsed(), self.startup_timings.as_mut())
+                {
+                    timings.record_native_poll(elapsed, first, reports.has_presented());
+                }
+                progress
+            }
+            DesktopDriveMode::Blocking => {
+                if let Some(timings) = self.startup_timings.as_mut() {
+                    timings.stop_native_poll_observation();
+                }
+                mode.drive(session)
+            }
+        }
     }
 
     fn finish_native(&mut self, native: DesktopNativeRun) -> DesktopRunState {

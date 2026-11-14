@@ -200,15 +200,27 @@ impl fmt::Debug for DesktopPresentationOptions {
 
 /// This shared value holds CPU diagnostics only. WinitSession alone owns the live Host.
 #[derive(Clone, Default)]
-pub(super) struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>);
+pub(super) struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>, bool);
 
 #[derive(Default)]
 struct DesktopPresentationReportState {
     telemetry_seal: Option<DesktopTelemetrySealReport>,
     exit: Option<AppExit>,
+    first_presentation_observed: bool,
 }
 
 impl DesktopPresentationReports {
+    pub(super) fn with_startup_observation(enabled: bool) -> Self {
+        Self(
+            Rc::new(RefCell::new(DesktopPresentationReportState::default())),
+            enabled,
+        )
+    }
+
+    pub(super) fn has_presented(&self) -> bool {
+        self.0.borrow().first_presentation_observed
+    }
+
     pub(super) fn telemetry_seal(&self) -> Option<DesktopTelemetrySealReport> {
         self.0.borrow().telemetry_seal.clone()
     }
@@ -479,6 +491,10 @@ impl DesktopPresentationDriver {
         presented: Option<WgpuPresentedFrameReceipt>,
         now: Instant,
     ) -> Result<__WinitPresentationProgress, AppRunError> {
+        if self.reports.1 && presented.is_some() {
+            self.reports.0.borrow_mut().first_presentation_observed = true;
+            self.reports.1 = false;
+        }
         let mut progress = __WinitPresentationProgress {
             exit: None,
             next_wake: None,

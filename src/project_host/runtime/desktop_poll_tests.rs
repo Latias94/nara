@@ -83,6 +83,7 @@ fn startup_cleanup_poll_retains_incomplete_budget_until_explicit_execute() {
         telemetry_seal: None,
         event_loop: None,
         close_requested: false,
+        startup_timings: None,
     };
     assert_eq!(desktop.progress(), DesktopRunProgress::Retiring);
     assert_eq!(

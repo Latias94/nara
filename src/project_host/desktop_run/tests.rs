@@ -11,6 +11,29 @@ use nara_app::{
 };
 
 #[test]
+fn code_first_startup_observation_begins_without_source_or_runtime_spans() {
+    for enabled in [false, true] {
+        let runtime = RuntimeInstance::start(App::new()).unwrap();
+        let generation = runtime.generation();
+        let mut options = DesktopRunOptions::new();
+        if enabled {
+            options = options.with_startup_timings();
+        }
+        let run = DesktopRun::from_runtime(runtime, options);
+        assert_eq!(
+            run.startup_timings(),
+            enabled.then(DesktopStartupTimings::default)
+        );
+        assert_eq!(run.runtime_generation(), Some(generation));
+        let DesktopRunState::FreshRuntime { mut runtime, .. } = run.state else {
+            panic!("construction must retain the original unexecuted Runtime");
+        };
+        assert_eq!(runtime.generation(), generation);
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
 fn initial_pause_refuses_pending_resume_and_other_controls_before_any_frame() {
     for initially_paused in [false, true] {
         let mut runtime = RuntimeInstance::start(App::new()).unwrap();
@@ -211,6 +234,7 @@ fn deadline_close_incomplete_reports_shutdown_timeout() {
             telemetry_seal: None,
             event_loop: None,
             close_requested: false,
+            startup_timings: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -253,6 +277,7 @@ fn participant_close_incomplete_is_not_misclassified_as_timeout() {
         telemetry_seal: None,
         event_loop: None,
         close_requested: false,
+        startup_timings: None,
     }
     .report();
     assert_eq!(report.outcome(), DesktopRunOutcome::Failed);

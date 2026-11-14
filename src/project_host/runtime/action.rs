@@ -10,7 +10,8 @@ use nara_winit::WinitControlFlow;
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::super::desktop_run::{
-    DesktopRun, DesktopRunOptions, DesktopRunState, PendingDesktopTerminal,
+    DesktopRun, DesktopRunOptions, DesktopRunState, DesktopStartupObservation, DesktopStartupPhase,
+    PendingDesktopTerminal, StartupTimer,
     verification::{DesktopFirstPresentRequest, DesktopFirstPresentVerification},
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -378,6 +379,9 @@ impl DesktopRun {
         mut execution: DesktopRunOptions,
     ) -> Self {
         let event_loop = execution.event_loop.take();
+        let startup_timings = execution
+            .observe_startup
+            .then(DesktopStartupObservation::default);
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs::Processed { base, execution }),
             diagnostics: DiagnosticReport::default(),
@@ -386,6 +390,7 @@ impl DesktopRun {
             telemetry_seal: None,
             event_loop,
             close_requested: false,
+            startup_timings,
         }
     }
 
@@ -395,6 +400,10 @@ impl DesktopRun {
         overlay: Option<RuntimePluginOverlay>,
     ) -> Self {
         let event_loop = intent.execution.event_loop.take();
+        let startup_timings = intent
+            .execution
+            .observe_startup
+            .then(DesktopStartupObservation::default);
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs::Source {
                 project_root,
@@ -407,6 +416,7 @@ impl DesktopRun {
             telemetry_seal: None,
             event_loop,
             close_requested: false,
+            startup_timings,
         }
     }
 
@@ -469,6 +479,7 @@ impl DesktopRun {
         inputs: DesktopRunInputs,
         mode: crate::project_host::desktop_run::DesktopDriveMode,
     ) -> DesktopRunState {
+        let preparation = StartupTimer::start(&self.startup_timings);
         let (prepared, execution, verification) = match inputs {
             DesktopRunInputs::Source {
                 project_root,
@@ -485,6 +496,10 @@ impl DesktopRun {
                     .as_ref()
                     .is_some_and(|request| !request.is_bound_to_project_root(&project_root))
                 {
+                    preparation.finish(
+                        &mut self.startup_timings,
+                        DesktopStartupPhase::ContentPreparation,
+                    );
                     self.diagnostics.extend(single_error(
                         "project.desktop.supervised-project-root-mismatch",
                         "Desktop supervised activation was verified against another project capability",
@@ -509,6 +524,10 @@ impl DesktopRun {
                 None,
             ),
         };
+        preparation.finish(
+            &mut self.startup_timings,
+            DesktopStartupPhase::ContentPreparation,
+        );
         let PreparedProjectStart {
             mut host,
             mut attempt,
@@ -524,7 +543,13 @@ impl DesktopRun {
         };
         self.startup_content_closure = startup_content_closure;
         self.diagnostics.extend(plan_diagnostics);
-        match host.complete_start(&mut attempt) {
+        let startup = StartupTimer::start(&self.startup_timings);
+        let completed = host.complete_start(&mut attempt);
+        startup.finish(
+            &mut self.startup_timings,
+            DesktopStartupPhase::RuntimeStartup,
+        );
+        match completed {
             Ok(diagnostics) => {
                 self.diagnostics.extend(diagnostics);
             }

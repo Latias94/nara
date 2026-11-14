@@ -92,19 +92,23 @@ fn retire(runtime: RuntimeInstance) {
 fn sealed_reports() -> DesktopPresentationReports {
     // Native sealing is upstream of this CPU control test. Inject its immutable final report,
     // then exercise the actual observer invocation and exit reconciliation used by maintenance.
-    DesktopPresentationReports(Rc::new(RefCell::new(DesktopPresentationReportState {
-        telemetry_seal: Some(DesktopTelemetrySealReport {
-            outcome: DesktopTelemetrySealOutcome::Complete,
-            observation: WgpuRenderObservation::default(),
-            completion: WgpuFrameCompletionStats::default(),
-            resources: WgpuGpuResourceStats::default(),
-            samples: Vec::new(),
-            instance_id: 1,
-            device_epoch: 1,
-            adapter: None,
-        }),
-        exit: None,
-    })))
+    DesktopPresentationReports(
+        Rc::new(RefCell::new(DesktopPresentationReportState {
+            telemetry_seal: Some(DesktopTelemetrySealReport {
+                outcome: DesktopTelemetrySealOutcome::Complete,
+                observation: WgpuRenderObservation::default(),
+                completion: WgpuFrameCompletionStats::default(),
+                resources: WgpuGpuResourceStats::default(),
+                samples: Vec::new(),
+                instance_id: 1,
+                device_epoch: 1,
+                adapter: None,
+            }),
+            exit: None,
+            first_presentation_observed: false,
+        })),
+        false,
+    )
 }
 
 #[test]

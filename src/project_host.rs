@@ -13,7 +13,8 @@ mod desktop_run;
 pub use desktop_run::{
     DesktopControlError, DesktopPresentationControl, DesktopPresentationObservation, DesktopRun,
     DesktopRunOptions, DesktopRunOutcome, DesktopRunProgress, DesktopRunReport,
-    DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
+    DesktopStartupPhase, DesktopStartupTimings, DesktopTelemetrySealOutcome,
+    DesktopTelemetrySealReport,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use nara_winit::{WinitEventLoop, WinitInputActivation, WinitKeyboardContinuationError};
