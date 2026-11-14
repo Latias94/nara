@@ -49,3 +49,6 @@ name = "gpui_view"
 
 [[test]]
 name = "gpui_view"
+
+[patch.crates-io]
+winit = { path = "../../../vendor/winit" }

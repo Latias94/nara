@@ -27,3 +27,6 @@ pollster = "0.4"
 serde_json = "1"
 tempfile = "3"
 uuid = "1.23.4"
+
+[patch.crates-io]
+winit = { path = "../../../vendor/winit" }

@@ -6,8 +6,10 @@ use nara_window::{WindowPlugin, backend::WindowTargetPhase};
 use std::sync::mpsc::{self, Sender};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+mod geometry;
 mod maintenance;
 mod reusable;
+mod titlebar;
 
 #[derive(Debug)]
 pub(super) enum NativeTestEvent {

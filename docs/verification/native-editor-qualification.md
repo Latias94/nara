@@ -226,6 +226,49 @@ metadata, refuses overwrite and bounds images to 2048×2048 physical pixels. It 
 panel texels at original fitted bounds with nearest sampling, rather than reading the final OS
 swapchain. Record that limit during visual review; capture work is outside cost measurements.
 
+## Mixed-DPI Window Controls
+
+Run the adapter's ignored geometry control on a Windows desktop with at least two monitors
+whose DPI differs:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara_winit --lib --run-ignored only -E 'test(native_tests::geometry::) | test(native_tests::titlebar::)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The probe inventories actual physical bounds, work areas and native/Winit DPI, then moves the
+same original HWND in both directions. It compares ordinary programmatic placement, explicit
+`InnerSizeWriter` requests outside a move loop and native move-marker branches. Ordinary and
+size-writer controls require actual Moved/ScaleFactorChanged/Resized delivery and the requested
+monitor and logical size. Marker legs record their actual settled outcome and require consistent
+native/Winit/Runtime geometry without prescribing the arbitrary cursor's grab position. All
+legs require original native/provider retirement. Missing mixed-DPI hardware is an explicit
+failure, not a passing substitute. A bounded child watchdog reports a native hang without
+claiming graceful retirement.
+
+Move markers use the existing arbitrary cursor position; they are a programmatic branch
+comparison, not physical title-bar dragging. They cannot qualify grab anchoring, maximized
+restoration, keyboard monitor moves, snap, GPU presentation on the destination display or
+explicit size overrides during a live drag. The separate title-bar probe validates an actual
+`HTCAPTION` grab point and uses OS `SendInput` while the original native loop is pumped. It
+requires both crossing directions at the default size and with explicit `InnerSizeWriter`
+overrides, exact target/DPI/client/Runtime geometry, original HWND destruction and cursor/button
+cleanup. It is injected OS dragging rather than human-hand observation; move-loop entry/exit
+messages are not directly counted. Run it on an idle interactive desktop without manipulating
+the pointer during the finite trajectory. The
+[platform maintenance record](../plans/2026-11-12-nara-ui-integration-handoff.md#platform-ownership-and-dependency-maintenance)
+owns source selection and the remaining dependency gaps.
+
+The November 14 Windows 11 qualification uses actual 125%/150% displays with negative desktop
+coordinates. The registry version first fails the OS title-bar path while ordinary placement
+passes. The repaired source passes both controls in run
+`8d346234-a2c4-4811-9c14-18cccb5e33ed` (2/2, 10.505 seconds), ordinary adapter cases in
+`3d13a3ee-d892-4319-9691-043e0cb380e3` (64/64), and the other original native cases in
+`c2bc3c1e-ec7f-487e-924e-e69bc9189721` (17/17). These qualify the affected native geometry,
+input and retirement paths. They do not establish destination GPU presentation, maximized/snap/
+keyboard movements, human manual feel or foreign-platform behavior. The
+[maintained source note](../../vendor/winit/NARA-PATCH.md) distinguishes the upstream Windows 11
+policy from the local explicit-request correction and records the patch's retirement condition.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

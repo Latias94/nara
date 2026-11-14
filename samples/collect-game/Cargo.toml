@@ -32,3 +32,6 @@ path = "src/bin/headless.rs"
 name = "desktop"
 path = "src/bin/desktop.rs"
 required-features = ["desktop"]
+
+[patch.crates-io]
+winit = { path = "../../vendor/winit" }

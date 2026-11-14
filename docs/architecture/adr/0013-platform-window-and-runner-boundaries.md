@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-20 (explicit startup window-mode lowering)
+**Last Revised**: 2026-11-14 (bounded Windows DPI dependency repair)
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
 Input Routing, Actions, Text Input, UI Focus, and Accessibility
 **Managed Execution**: Accepted ADR 0084 and its ADR 0117 refinement own the implemented managed
@@ -46,6 +46,13 @@ Rules:
   allowed. This does not promise live reconfiguration of an existing window from component writes.
 - The accepted contract is a top-level driver authority and lifecycle boundary, not a public
   `Runner` trait. Its reusable Rust shape waits for OQ-038 evidence from a second production Adapter.
+- A qualified native dependency defect may use a bounded maintained source patch while Nara's
+  existing window/event-loop, input and render owners remain unchanged. The temporary
+  [Winit 0.30.13 patch](../../../vendor/winit/NARA-PATCH.md) retains exact upstream provenance,
+  the original license, the upstream Windows 11 position policy and a separately identified local
+  explicit-size-request correction. Each application workspace selects one source for direct and
+  transitive users. Remove the patch when a compatible upstream revision satisfies the affected
+  native controls; this does not select a new platform library or qualify other operating systems.
 
 ## Alternatives Considered
 

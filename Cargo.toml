@@ -16,6 +16,7 @@ exclude = [
     "tests/fixtures/stock-composition-consumer",
     "samples/collect-game",
     "samples/two-level-game",
+    "vendor/winit",
 ]
 members = [
     "crates/nara_app",
@@ -142,6 +143,7 @@ windows-sys = "0.61.2"
 
 [patch.crates-io]
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+winit = { path = "vendor/winit" }
 
 [dependencies]
 blake3 = { workspace = true, optional = true }

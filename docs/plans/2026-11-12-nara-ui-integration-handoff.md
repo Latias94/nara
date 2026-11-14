@@ -545,7 +545,143 @@ observation. Compare a released correction or narrowly pinned backport through t
 loop before selecting a dependency change. Also retain the reported
 [size-writer regression #4721](https://github.com/rust-windowing/winit/issues/4721) in that
 comparison; do not fix dragging by silently dropping caller-requested DPI sizes. Current Nara
-manifests and lockfiles are unchanged by this investigation.
+Winit source and version pins are unchanged by this investigation.
+
+### Platform Ownership And Dependency Maintenance
+
+The November 13 maintenance recommendation follows Accepted
+[ADR0013](../architecture/adr/0013-platform-window-and-runner-boundaries.md): Nara owns its
+platform contract and engine policies; a mature window-system dependency supplies native
+implementation. Keep Winit as the current desktop adapter. A narrowly maintained Winit fork
+is an available repair mechanism, not a decision to create another general platform library.
+This recommendation does not create a fork or change source pins.
+
+| Owner | Responsibility |
+| --- | --- |
+| `nara_app`, `nara_window` and `nara_input` | Runtime lifecycle, engine window identities and normalized data, time and input policy. They do not require Winit types in game systems. |
+| `nara_winit` and each concrete native Host | Original event-loop/window authority, native event conversion, OS lifecycle, raw handles and the exact window-to-Runtime association. |
+| Nara Render/Host | Device, queue, surface acquisition, presentation, recovery and resource retirement. Replacing a window adapter does not transfer these owners to GPUI. |
+| Open-GPUI | UI roots, layout, text, retained interaction and its platform adapter contracts. An externally hosted Nara root uses the existing native Host rather than creating another window or event loop. |
+
+Retaining engine ownership does not require reimplementing Win32, AppKit, Wayland and X11.
+Native IME, accessibility, drag/drop, display/DPI changes, device input, suspension and teardown
+are long-lived maintenance obligations. Editor and game products may use different concrete
+Hosts while sharing suitable normalized mechanisms and keeping one native owner per window.
+Do not introduce a universal platform trait or an extra crate before a second real adapter
+demonstrates the missing contract.
+
+A temporary dependency fork is justified when a supported consumer is blocked, the correction
+is absent from a compatible release, and a reviewed upstream revision is insufficient. Keep
+an exact upstream base, distinguish imported fixes from local changes, record affected
+platforms and integration tests, and state how the patch retires or rebases. Cargo applications
+must select a single Winit source across direct and transitive consumers; patches in one
+workspace do not propagate into independently locked workspaces. A Git source is acceptable;
+pin its revision rather than relying on a moving branch.
+
+The mixed-DPI investigation meets the dependency-gap condition, but has not yet qualified a
+complete replacement. Official `v0.30.x` at
+`e9809ef54b18499bb4f2cac945719ecc2a61061b` has the same Windows event-loop source as released
+0.30.13. Unmerged PR4694 at `39c4009c41e5977d779cf8a365792c8153ca77c5` changes the live
+move/resize branch; the merged mainline fix at `488c036a05d418e13bbdcdc349e2db2f6b7f58e2`
+instead distinguishes older Windows from Windows 11. Neither source closes the explicit
+size-writer issue. Avoid adopting the 0.31 beta workspace merely to obtain this narrow fix.
+Keep ordinary dragging, programmatic placement, maximized restoration, keyboard monitor moves,
+snap and explicit requested DPI sizes separate in source disposition and actual evidence.
+
+### November 13 Paused Checkpoint
+
+The user deferred mixed-DPI development at approximately 10:34 +08:00 and explained that the
+physical monitors were switched off. The subsequent clarification resumes the overall
+foundation/component/Dialogue plan; only this native repair remains deferred. Preserve the
+uncommitted native geometry probe, its Windows-only test
+dependency/lock edge and these plan/qualification updates. No Winit source change, Open-GPUI
+edit, new fork, commit or remote publication occurred in this continuation.
+
+The new probe compiles. Its initial run incorrectly expected `AppExit::Requested` after the
+fixture's ordinary shutdown; that assertion now uses the actual `AppExit::Success`. The rerun
+`dd8bf9c4-d04d-48df-9421-b03370c9d443` fails explicitly after the original retirement assertions
+because only `DISPLAY15` is active: 3840x2160 physical, work area 3840x2088, DPI 144, scale 1.5.
+An independent Windows Forms inventory confirms one active screen. This is unmet mixed-DPI
+hardware, not a reproduced movement defect or a passing cross-monitor qualification.
+
+Unchanged adapter controls pass: ordinary library tests 32/32, 13 skipped, run
+`cb2b28c6-6117-4e3c-b6d8-860c9b2f1d90`; selected native window creation, retained-pump handoff,
+startup failure and early-exit controls 4/4, 41 skipped, run
+`2e3021fb-bcc4-4876-a6a1-339aea46ff5e`.
+
+Independent review found one pending P2 in `native_tests/geometry.rs`: arbitrary-cursor move
+markers still share hard target-monitor/size assertions with the real geometry controls.
+Separate those diagnostic marker comparisons before accepting the probe; they can otherwise
+produce a fixture-induced failure without a real title-bar grab. Keep ordinary two-monitor
+and outside-marker writer assertions strict. The review stopped at the user's pause, all
+agents for that investigation are closed, and its serial Cargo sequence finished. When this
+repair resumes, correct the marker comparison and perform the actual mixed-DPI comparison
+while both monitors are on, then select any dependency repair from evidence. Continue the
+original component/Dialogue plan independently of that deferred hardware work.
+
+### November 14 Resumed Mixed-DPI Qualification
+
+The user resumes the mixed-DPI repair now that the physical displays are available. The other
+Editor/component and Dialogue UI work remains paused; Runtime work continues independently.
+An initial Windows Forms inventory sees two active displays, including negative desktop
+coordinates. The original Winit probe must establish actual physical geometry and differing
+native DPI before any mixed-DPI claim.
+
+First correct the existing arbitrary-cursor marker comparison: ordinary placement and explicit
+outside-move-loop size requests keep strict destination and logical-size assertions. Marker
+legs only check settled native/Winit/Runtime consistency and record their actual outcome; an
+arbitrary cursor cannot prescribe a genuine title-bar grab position. Then add a separate bounded
+native title-bar input trajectory through the original HWND, actual OS mouse input and Win32
+move loop. Preserve cursor/button cleanup, both movement directions, logical size, native DPI,
+Runtime synchronization and original native retirement. Keep programmatic controls separate
+from injected title-bar evidence and human manual observation.
+
+Select any dependency repair only after the failing original source path is reproduced. Retain
+the explicit size-writer regression control and one native window/event-loop owner. Missing
+hardware, failed input injection or watchdog termination must not become passing evidence.
+Record exact source, commands, results and residual native/GPU/product scope here after execution.
+
+The original published Winit 0.30.13 reproduces the reported title-bar failure in
+`8d531d35-92eb-4fdf-9a5d-3e4e3f679c93`: 0/1, after the original HWND/provider/Runtime retirement
+assertions. On Windows 11 build 26300, DISPLAY1 has physical bounds `[-2560,533,0,1973]`, work
+area `[-2560,533,0,1913]` and scale 1.25; DISPLAY2 has physical bounds `[0,0,3840,2160]`, work
+area `[0,0,3840,2088]` and scale 1.5. The held cursor reaches `[-1280,1057]` on DISPLAY1 while
+the original window stays at `[-233,1049]` on DISPLAY2; the failed leg receives 34 scale changes
+and 34 resizes. Its ordinary geometry control already passes 1/1 in
+`cb42febf-64b9-40cb-bfdc-9f56d4081a71`. This separates the real drag failure from placement or
+missing-display explanations.
+
+The compatible repair is a temporary vendored published crate at exact upstream
+`e9809ef54b18499bb4f2cac945719ecc2a61061b`, with its original license and four explicitly owned
+source deltas. The merged upstream Windows 11 policy supplies the suggested DPI rectangle;
+the local correction preserves an application's explicit size request even when it numerically
+equals the internal proposal, through synchronous and buffered event delivery. A first repair
+passes default drags and the first size override but fails the final return with client size
+446x291 instead of 540x360 in `f533de99-47ec-45ab-b9bb-8e7bc6eea0e9` (1/2). Explicit request
+tracking inside the original size mutex resolves that counterexample. Older or unknown Windows
+versions retain the previous code; no registry source checkout or reference repository is edited.
+
+The final geometry plus four-drag trajectory passes 2/2 in
+`8d346234-a2c4-4811-9c14-18cccb5e33ed` (10.505 seconds). Both default crossings have one DPI
+event; explicit-size crossings have one and three finite events respectively, ending at the
+requested 424x272 and 360x240 logical extents. All original HWND, actual client/outer geometry,
+Runtime resolution, input cleanup and native retirement assertions pass. Ordinary adapter cases
+pass 64/64 in `3d13a3ee-d892-4319-9691-043e0cb380e3` (3.509 seconds); the other original native
+cases pass 17/17 in `c2bc3c1e-ec7f-487e-924e-e69bc9189721` (8.120 seconds). A bounded independent
+review reports no P1/P2 in the marker correction, native input custody or final source changes.
+All fourteen locked application workspaces resolve one repaired Winit source with no unrelated
+package version/source changes; disabled-feature metadata alone is not enabled-path evidence.
+The adapter's release all-target/all-feature correctness Clippy passes with existing warnings;
+its Rust 1.95.0 package format check and the four maintained vendor files' upstream-configured
+nightly rustfmt check pass. Every other imported crate file remains byte-identical to the
+published upstream package. These are source/format checks, not another platform execution run.
+
+See the [source maintenance note](../../vendor/winit/NARA-PATCH.md) for upstream/local disposition
+and retirement conditions. Actual results cover injected `HTCAPTION`/OS mouse dragging on this
+desktop; no move-loop entry/exit counter, human-hand feel, complete Editor GPU presentation,
+maximized/snap/keyboard movement, Windows 10 execution or foreign-native execution is claimed.
+Editor/component and Dialogue UI remain paused. This bounded platform repair does not close the
+foundation Goal or the remaining Runtime Scene work.
 
 ### Component Responsibilities
 

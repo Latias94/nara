@@ -56,3 +56,6 @@ required-features = ["native"]
 [[test]]
 name = "conformance_native"
 required-features = ["native"]
+
+[patch.crates-io]
+winit = { path = "../../../vendor/winit" }

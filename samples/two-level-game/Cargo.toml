@@ -82,3 +82,6 @@ path = "src/bin/runtime_cost.rs"
 required-features = ["desktop", "cost-measurement"]
 test = false
 bench = false
+
+[patch.crates-io]
+winit = { path = "../../vendor/winit" }
