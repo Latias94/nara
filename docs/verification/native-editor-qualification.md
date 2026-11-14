@@ -305,6 +305,15 @@ unattached. The probes retire before reporting the refusal. These repeats supply
 cross-monitor movement qualification; a second active desktop display at a different DPI is
 still required.
 
+The user-requested retry at 05:59 +08:00 has the same result. Run
+`70d9c94f-2889-450f-aa00-eebb3ceaaee5` reports 0/2 passing in 0.788 seconds after a
+2.16-second release build, with 81 cases outside the selection. Both original probes see only
+DISPLAY2 at `[0,0,3840,2160]`, DPI 144 (150%), and retire their windows before refusing the
+missing mixed-DPI pair. A DPI-aware native inventory independently confirms DISPLAY1 is not
+attached to the desktop and this is not a Remote Desktop session. The Windows Forms inventory
+uses virtualized coordinates; its 2560x1440 report is not an additional display. No source or
+display-configuration change is made, and no owned probe remains.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work
