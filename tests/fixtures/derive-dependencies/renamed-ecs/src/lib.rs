@@ -36,6 +36,10 @@ use substrate as ecs;
 #[path = "../../facade_contract.rs"]
 mod facade_contract;
 
+#[cfg(test)]
+#[path = "../../observer_contract.rs"]
+mod observer_contract;
+
 #[derive(Component)]
 #[component(storage = "SparseSet", immutable)]
 pub struct RenamedEcsComponent;
@@ -52,4 +56,21 @@ pub struct RenamedSet;
 pub fn insert_component(world: &mut World) {
     world.spawn(RenamedEcsComponent);
     world.init_resource::<RenamedEcsResource<u32>>();
+}
+
+#[cfg(test)]
+#[test]
+fn renamed_substrate_exposes_advanced_observers_without_a_second_facade() {
+    use ecs::bevy_ecs::{lifecycle::Add, observer::On};
+
+    let mut world = World::new();
+    world.init_resource::<RenamedEcsResource<u32>>();
+    world.add_observer(
+        |_: On<Add<RenamedEcsComponent>>, mut resource: ecs::ResMut<RenamedEcsResource<u32>>| {
+            resource.0 += 1;
+        },
+    );
+
+    world.spawn(RenamedEcsComponent);
+    assert_eq!(world.resource::<RenamedEcsResource<u32>>().0, 1);
 }

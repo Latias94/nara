@@ -8,6 +8,10 @@ use engine::ecs;
 mod facade_contract;
 
 #[cfg(test)]
+#[path = "../../observer_contract.rs"]
+mod observer_contract;
+
+#[cfg(test)]
 #[derive(engine::prelude::Bundle)]
 pub struct RootBundle(RenamedRoot);
 
