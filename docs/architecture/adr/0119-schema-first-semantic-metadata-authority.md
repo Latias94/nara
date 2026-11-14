@@ -28,8 +28,11 @@ components, owner-local reload, a general object model or a second native bindin
    does not admit incomplete runtime records by bypassing native freeze checks.
 3. Bevy reflection may support native inspection/access where a concrete caller uses it. It is
    an adapter, not a prerequisite for every persistent provider or a parallel mutable source of
-   persistent Schema truth. Removal of unused reflection storage is an implementation change to
-   verify separately, not a consequence inferred from this documentation commit.
+   persistent Schema truth. `ComponentRegistryBuilder` and `ComponentRegistrySnapshot` own
+   semantic definitions and their executable bindings, not a Bevy `TypeRegistry`. A caller that
+   needs native dynamic reflection owns that registry through the existing `bevy_reflect`
+   substrate. This separation keeps reflection derive/access available without requiring Schema
+   admission or copying native type registrations into each provider composition.
 4. Keep metadata planes distinct: persistence/eligibility, semantic constraints, presentation
    preferences and domain-specific interaction/binding descriptors. Base capabilities may stay
    closed. New domain metadata needs a typed/versioned owner and explicit unknown-required-data
@@ -60,7 +63,8 @@ Proposed ADR 0120. They do not become supported through this accepted metadata c
 - Persistent providers need one complete semantic declaration, not parallel Bevy/Serde/Nara
   declarations manually synchronized by authors.
 - Current recursive non-Reflect consumers and native binding/format tests are the implementation
-  evidence to retain when code changes. This documentation correction did not rerun them.
+  evidence to retain when code changes. Caller-owned native reflection must retain its separate
+  dependency-registration and dynamic-value round-trip consumer.
 - New storage families require their own prepare/encode/retire and missing-data qualification;
   they do not weaken the current native mapping.
 - Backend-free `ComponentSchemaOwnerSnapshot` admission now shares catalog/lineage validation

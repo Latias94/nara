@@ -9,7 +9,6 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use nara_diagnostic::{DiagnosticCode, SafeSummary};
 use nara_ecs::{
     __private::{PersistentComponentMetadataError, validate_persistent_component_registration},
@@ -735,7 +734,6 @@ struct RegistryData {
     contributions: BTreeMap<ComponentSchemaOwnerId, ComponentSchemaContributionReceipt>,
     provider_owners: BTreeMap<nara_app::PluginSchemaProviderId, ComponentSchemaOwnerId>,
     component_owners: BTreeMap<ComponentTypeId, ComponentSchemaOwnerId>,
-    type_registry: TypeRegistry,
     rust_type_ids: HashMap<TypeId, ComponentTypeId>,
     bindings: BTreeMap<ComponentTypeId, NativeComponentBinding>,
     migrations: BTreeMap<(ComponentTypeId, ComponentSchemaVersion), ComponentMigration>,
@@ -800,7 +798,6 @@ impl RegistryData {
             contributions: BTreeMap::new(),
             provider_owners: BTreeMap::new(),
             component_owners: BTreeMap::new(),
-            type_registry: TypeRegistry::default(),
             rust_type_ids: HashMap::new(),
             bindings: BTreeMap::new(),
             migrations: BTreeMap::new(),
@@ -1717,15 +1714,6 @@ impl ComponentRegistryBuilder {
         Ok(self)
     }
 
-    pub fn register_reflected_type<T>(&mut self) -> Result<&mut Self, ComponentRegistryError>
-    where
-        T: GetTypeRegistration,
-    {
-        self.raw_building_mut()?.type_registry.register::<T>();
-        self.commit_raw_registration();
-        Ok(self)
-    }
-
     pub fn register_component_migration<Migrate>(
         &mut self,
         id: &ComponentTypeId,
@@ -1827,11 +1815,6 @@ impl ComponentRegistrySnapshot {
             .bindings
             .get(id)
             .map(|binding| binding.rust_type_path)
-    }
-
-    #[must_use]
-    pub fn type_registry(&self) -> &TypeRegistry {
-        &self.0.type_registry
     }
 
     pub fn validate_whole_value_capabilities(
@@ -2046,7 +2029,6 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
         contributions,
         provider_owners,
         component_owners,
-        type_registry,
         rust_type_ids,
         bindings,
         migrations,
@@ -2066,9 +2048,6 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
         insert_contribution(aggregate, receipt);
     }
     aggregate.component_owners.extend(component_owners);
-    for registration in type_registry.iter().cloned() {
-        aggregate.type_registry.add_registration(registration);
-    }
     aggregate.rust_type_ids.extend(rust_type_ids);
     aggregate.bindings.extend(bindings);
     aggregate.migrations.extend(migrations);
@@ -3791,7 +3770,6 @@ mod owner_composition_tests {
         sync::Arc,
     };
 
-    use bevy_reflect::Reflect;
     use nara_app::PluginSchemaProviderId;
     use nara_ecs::Component;
 
@@ -3807,7 +3785,7 @@ mod owner_composition_tests {
     const FAILURE_PROVIDER: PluginSchemaProviderId =
         PluginSchemaProviderId::new("nara.test.atomic-failure-provider");
 
-    #[derive(Component, Reflect)]
+    #[derive(Component)]
     struct FailureProbe;
 
     #[derive(Debug, PartialEq)]
@@ -3819,7 +3797,6 @@ mod owner_composition_tests {
         build_mode: RegistryBuildMode,
         contributions: BTreeMap<ComponentSchemaOwnerId, ComponentSchemaContributionReceipt>,
         provider_owners: BTreeMap<PluginSchemaProviderId, ComponentSchemaOwnerId>,
-        reflected_types: BTreeSet<TypeId>,
         rust_type_ids: BTreeMap<TypeId, ComponentTypeId>,
         binding_ids: BTreeSet<ComponentTypeId>,
         migration_ids: BTreeSet<(ComponentTypeId, ComponentSchemaVersion)>,
@@ -3839,11 +3816,6 @@ mod owner_composition_tests {
             build_mode: data.build_mode,
             contributions: data.contributions.clone(),
             provider_owners: data.provider_owners.clone(),
-            reflected_types: data
-                .type_registry
-                .iter()
-                .map(|registration| registration.type_id())
-                .collect(),
             rust_type_ids: data
                 .rust_type_ids
                 .iter()
@@ -3905,7 +3877,6 @@ mod owner_composition_tests {
             |_| Ok(ComponentValue::Null),
         )?;
         registry.register_component_migration(&id, ComponentSchemaVersion::ONE, version_two, Ok)?;
-        registry.register_reflected_type::<FailureProbe>()?;
         Ok(())
     }
 
@@ -3988,12 +3959,6 @@ mod owner_composition_tests {
         assert_eq!(snapshot.provider_receipt(FAILURE_PROVIDER), None);
         assert_eq!(snapshot.owner_receipt(FAILURE_OWNER), None);
         assert!(snapshot.schema_for_type::<FailureProbe>().is_none());
-        assert!(
-            snapshot
-                .type_registry()
-                .get(TypeId::of::<FailureProbe>())
-                .is_none()
-        );
     }
 
     #[test]

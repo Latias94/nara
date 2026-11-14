@@ -1,4 +1,8 @@
 //! Reflection and schema metadata boundary for nara data-facing components.
+//!
+//! Nara's component registry owns semantic Schemas, native bindings and codecs. Native dynamic
+//! reflection is independent: callers can own a [`bevy_reflect::TypeRegistry`] directly without
+//! admitting a Nara Schema. The Bevy types and derives below remain available for that adapter.
 
 pub use bevy_reflect;
 pub use bevy_reflect::prelude::*;

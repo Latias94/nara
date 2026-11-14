@@ -82,6 +82,14 @@ error so the caller can repair and retry. Use `into_error` only when explicitly 
 candidate. Missing native bindings reject before snapshot publication. Retain one snapshot for
 a complete operation or batch so all component work uses the same validated definition.
 
+Native dynamic reflection has a separate lifetime. If a tool needs Bevy's reflected type
+registration or dynamic values, own a `nara::reflect::bevy_reflect::TypeRegistry` directly and
+register its Rust types there. This does not require a Nara Schema or `freeze`; conversely,
+registering a persistent provider needs no `Reflect` implementation. The component registry
+does not retain or merge that caller-owned native reflection catalog. The
+[public math consumer](../../crates/nara_reflect/tests/math_reflection.rs) exercises dependent
+math registrations and a complete dynamic-value round trip through this direct adapter.
+
 The inventory generates `schemas`, `initial_catalog` and `register` callbacks from one explicit
 list of type identifiers. Import or alias qualified component types into the invocation module
 before listing them. It performs no discovery or installation. `initial_catalog` is a generation-one
@@ -876,6 +884,16 @@ only the renamed root dependency. The shared
 nested bundles, parameter lifetimes, const generics, field attributes and deferred commands through
 both root and direct-ECS fixtures. `tests/derive_dependency_fixtures.rs` owns their independent
 locked compilation/execution checks. These selected derives do not promise full Bevy API compatibility.
+
+For version-bound APIs such as custom events and observers, use the explicit
+`nara::ecs::bevy_ecs` substrate. With the currently selected Bevy 0.20.0, its `Event` and
+`EntityEvent` derives resolve a local `bevy_ecs` import when no direct Bevy dependency is
+declared. For example, a renamed-root consumer uses `use engine::ecs::bevy_ecs;`, then
+`#[derive(bevy_ecs::event::Event)]`; a direct renamed ECS consumer uses
+`use substrate::bevy_ecs;`. These upstream derives have no Nara crate-path attribute or automatic
+facade resolution. The shared [observer consumer](../../tests/fixtures/derive-dependencies/observer_contract.rs)
+exercises registration, custom payloads, targeted delivery and observer retirement through both
+dependency selections. This uses Bevy's original types and supported alias workaround.
 
 Use `#[nara(crate = "path::to::reexport")]` for `PersistentComponent` only when a custom
 re-export prevents normal direct dependency discovery; it is not an ECS derive path attribute.

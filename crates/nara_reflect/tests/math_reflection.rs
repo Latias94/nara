@@ -2,6 +2,7 @@ use std::any::TypeId;
 
 use nara_core::{Mat3, Vec2, Vec3};
 use nara_ecs::{Component, World};
+use nara_reflect::bevy_reflect::TypeRegistry;
 use nara_reflect::{
     ComponentFieldPath, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
@@ -17,13 +18,9 @@ struct SpatialConfiguration {
 }
 
 #[test]
-fn public_math_types_share_registration_and_dynamic_reflection() {
-    let mut registry = ComponentRegistryBuilder::new();
-    registry
-        .register_reflected_type::<SpatialConfiguration>()
-        .expect("public math configuration registers through the ordinary reflection API");
-    let registry = registry.freeze().expect("reflection registry freezes");
-    let types = registry.type_registry();
+fn public_math_types_support_caller_owned_registration_and_dynamic_reflection() {
+    let mut types = TypeRegistry::default();
+    types.register::<SpatialConfiguration>();
     for id in [
         TypeId::of::<SpatialConfiguration>(),
         TypeId::of::<Vec2>(),
