@@ -142,6 +142,7 @@ pub(crate) fn project_timeline_entry(
     }
 
     let input = match entry.kind() {
+        InputEventKind::KeyRestored { .. } => return UiTimelineProjection::PassThrough,
         InputEventKind::PointerMoved => {
             let Some(pointer) = pointer else {
                 return rejected_projection(UiInputProjectionIssue::MissingPointer);
