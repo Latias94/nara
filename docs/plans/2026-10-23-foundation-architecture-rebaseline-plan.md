@@ -573,6 +573,77 @@ Replace 0008's long-term model only with a complete successor; reconcile
 0003/0010/0039/0042/0052/0057/0082/0084 for affected contracts.
 Delete extra physical owners and accidental hardcoded phase knowledge when superseded.
 
+### Retained Stop Control Observation
+
+Status: the F4 correction is implemented at `0e784ec` and qualified through the owning and
+independent/public Windows CPU workflows below. The public regression repeats 48 valid retryable
+close attempts and completes the original physical close before checking observations. Run
+`0dbc5041-9de8-4d0f-91d1-3fb65d59a2b5` passes the ordinary-history control and fails Stop retention
+(1/2): the reissuable original Stop result is `None` instead of its original
+`Failed(CloseIncomplete)`.
+
+Keep the original Stop operation record in its owning Runtime for that Runtime's lifetime,
+independently of the unchanged bounded ordinary history. Repeated Stop returns that exact ticket
+where already admitted. Each RetryClose keeps its separate attempt ticket/result; a successful
+later retry does not rewrite the first failed Stop observation. Current pending/active controls
+remain observable; ordinary completed results can expire, and foreign-generation queries remain
+unavailable. Preserve the existing public Option/status shape with explicit documented lifetime
+semantics rather than adding another Host cache, operation hierarchy or unbounded history.
+
+Qualify through the original App close/control suite and an independently locked public consumer
+that crosses the history cap, keeps exact ticket/attempt identity and completes real cleanup.
+Reconcile ADRs0076/0084, the owning ledger and actual caller assumptions. No new driver, lifecycle,
+quarantine or physical-retirement owner is selected, and no performance gain follows from the
+retention correction. Full R4c, R12 and the foundation Goal retain their other requirements.
+
+The owning regression now passes 2/2 in `cabf01ed-6954-4604-a185-d2481bc5e922` (0.091 seconds
+after an 18.24-second release build). The full App library/public suite passes 180/180, with one
+existing disposable-child skip, in `9a40ec20-2718-44d1-94c9-81e5fd2c972f` (6.804 seconds after
+a 1m15s build). This retains startup failure, thread-bound ownership, close dependency/retry,
+fault, custom schedule, exact simulation, pause and time-continuation controls. The original
+Stop record is stored once outside the unchanged 32-entry ordinary history; no new public type
+or physical cleanup owner is introduced. The bounded independent source review finds no P1/P2
+in Stop/fault/supersession, active Retry retention, generation admission or original close custody.
+
+The root `runtime_instance` and `runtime_runner_contract` targets pass 68/68 without skips in
+`3f709683-4181-4bcb-9e59-aaf6039d6be2` (243.533 seconds after a 2m58s release build). The
+renamed-root ordinary product recipe actually builds and runs its independently locked fixture
+in the original target; its 239.561-second case is a passing build/consumer observation, not a
+latency comparison. Existing fault, superseded control, exact-step, terminal error, retained
+participant and generation controls remain intact. Caller inspection confirms that Headless
+Resume observes its exact current ticket, Desktop forwards the original Runtime observation
+and trusted Play keeps physical close evidence separate from its pending operation result.
+
+The independently locked module consumer passes 1/1 in
+`455d497f-a312-4012-a9b2-3d66288930f1` (0.038 seconds after a 9m27s release build). Two actual
+Runtimes retain distinct generations and original system-local counters. After 48 failed
+close retries, the first Runtime completes its original participant on the final retry while the
+other has continued 50 ordinary frames. Exact Pending/final retry results, 32-entry history
+expiry, retained first Stop failure, foreign-ticket refusal, close evidence and real participant
+close/drop counts pass. Both `finish` calls precede the disputed behavior assertions. The existing
+module-consumer CI workspace invocation discovers this target without a new job or scanner.
+These are Windows CPU/Rust 1.95.0 results; native implementations are unchanged, and their earlier
+mixed-DPI/continuous-desktop evidence is not repeated or expanded by this correction.
+
+Owning all-target release Clippy passes with `-D clippy::correctness` (15.22 seconds), and the
+independent public target passes strict `-D warnings` (34.56 seconds); existing dependency
+warnings remain. Root and independently locked workspace `cargo fmt --all -- --check` pass.
+The normal stable formatter reports the imported nightly-only Winit options; vendor files have
+no new changes. Added local Markdown links/fragments and ordinary staged/working whitespace
+checks pass. The implementation and independent consumer were reviewed before formatting and
+precise staging. Both scoped implementation/review agents are closed, all owned Cargo commands
+are terminal, and paused Editor/Dialogue work remains outside these commits. Full R4c/R12 and
+the foundation Goal remain active.
+
+All commands use jobs one, the original absolute root target and offline resolution:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara_app --test runtime_control_retention --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release -p nara_app --lib --tests --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release -p nara --test runtime_instance --test runtime_runner_contract --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --offline --release -p nara-scene-module-consumer --test runtime_stop_retention --test-threads=1 --no-fail-fast --no-tests fail
+```
+
 ## R5: Durable Addressing, Prefab Overlays And Projection Lifetime
 
 **Design:** D04, D05. **State:** qualified sub-units are recorded in the

@@ -2457,6 +2457,18 @@ select the composite, with a separate renamed-root consumer. ADRs 0003/0010/0042
 the scoped ownership contract. Actual Editor graphics/SDK migration, arbitrary dependency graphs,
 R4b/R4c and full R4a remain open; this is not native cleanup qualification.
 
+The November 14 [retained Stop correction](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#retained-stop-control-observation)
+at `0e784ec` implements ADR0076/0084's operation-result lifetime separately from physical close
+authority. The original Stop record survives ordinary-history eviction and preserves its initial failed
+attempt when a later RetryClose succeeds. Each retry has a distinct ticket; current Pending
+observations remain available, ordinary completed results can expire and foreign generations
+remain unavailable. The owning public regression passes 2/2 after reproducing the original
+failure, and the complete App suite passes 180/180 with one existing disposable-child skip.
+The root Runtime/renamed-dependency targets pass 68/68, and the independently locked two-Runtime
+consumer passes 1/1, retaining the survivor's original systems and real participant close/drop
+counts. The linked plan records exact commands, results, review and Windows CPU limits. This
+does not close full R4c/R12 or add a lifecycle, observation-cache or physical-retirement owner.
+
 The [retained native-graphics successor](../../knowledge/engineering/verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md)
 replaces the Editor's best-effort drop/reinstall path with retained partial/live graphics custody,
 an exact device/queue drain token and completion-gated renderer/view/platform phases. Semantic
