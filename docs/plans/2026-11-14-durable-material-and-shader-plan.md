@@ -177,8 +177,10 @@ an in-place asset-only or automatic event-driven update.
 
 The missing automatic bridge has three concrete obligations. `project_content/domains.rs`
 records raw dependency reads in content receipts but does not retain failed-attempt recovery
-paths or live source subscriptions. Those must join the original `AssetDependencyGraph`
-Published/Retry sets: changing `a.wgsl` to missing `b.wgsl`, then creating `b.wgsl`, must recover.
+paths or live source intent. Changing `a.wgsl` to missing `b.wgsl`, then creating `b.wgsl`,
+must recover. The original proposal to reuse `AssetDependencyGraph` Published/Retry sets is
+superseded by the concrete source-route selection below: ordinary Scene roots need no asset UUID,
+and the per-asset request resolver can invalidate Scene-owned publication baselines.
 Second, source intent must be accepted by the original Scene/residency owner. Registering a
 parallel Material reloader would advance `AssetStates` independently and invalidate its exact
 slot/state baseline. `SourceAssetBuildPlugin` publishes `BuiltSourceAsset<Product>` and does not
@@ -193,6 +195,147 @@ original two-distinct-generation budget, last-good capture, managed native retir
 processed-base isolation. A test manually requesting Scene reload after every edit only proves
 the explicit workflow; it cannot qualify automatic dependency-directed updates. No watcher,
 second current map or additional scheduler follows from this source study alone.
+
+## Scene-Owned Source Updates
+
+Status: implemented at `c03b940`, with independent consumers at `55b0ae4`.
+Canonical semantic source notifications automatically prepare a
+successor of the current hosted source Scene through its original request/residency owner.
+Game code still inspects Ready data, supplies its gameplay overlay, explicitly commits through
+the ordinary or managed-native API, and acknowledges the exact terminal request. Do not replace
+the current Scene, discard game state or infer native success from a file notification.
+
+`ProjectScenes::notify_source_change` accepts existing `AssetSourceChange` data without I/O,
+asset-state mutation or another event queue. Match raw principal and metadata paths against the
+current successful closure and latest executed automatic failure's bounded attempted-read cut. A matching
+notice sets one pending intent; `request_source_rescan` records incomplete observation as a full
+rebuild intent. Starting an automatic request consumes that intent, while newer notices remain
+pending until the original request physically returns and its terminal result is acknowledged.
+An automatic Preparing/Ready/Managed request conservatively retains even currently unknown paths, closing
+the window before its newly discovered dependencies become observable. Its frozen candidate is
+never reinterpreted from disk. Publish replaces successful paths and clears obsolete retry paths;
+valid failed preparation preserves last-good and records requested missing inputs before open.
+Cancellation, stale completion and Stop cannot publish a late retry cut or candidate. Source ingress
+also checks the original Runtime generation and current Scene domain/instance identity, rather than
+retargeting old successful interest after an unrelated current-instance replacement.
+Pure status observation still exposes a retained automatic ID after that basis becomes stale, so
+physical return and exact terminal acknowledgement remain possible. Publishing an explicit Scene
+switch preserves accepted pending intent; its successor targets the newly published current Scene.
+Failure of an explicit travel request keeps its own diagnostics without subscribing the current
+Scene to a different unpublished target's failed inputs.
+
+The current successful closure receipt retains its original source-fact allowance. Failed-read
+observations use the original content budget, finite paths/bytes and no decoded generation claim.
+The existing two-distinct-generation bound, task return custody, one request/result slot, exact
+current-instance predicates and native travel remain unchanged. Processed Hosts refuse source
+intent without reading files or changing their immutable base. Admission failures are observable;
+they must not silently consume pending intent or manufacture an admitted request ID.
+
+Scene source routing is selected by composition. Do not broadcast these same publications into
+the generic asset reload resolver, which has independent per-asset UUID/generation/type/state
+authority. Unrelated generic asset compositions retain their existing graph and consumers. A
+mixed publication route requires its own real-target arbitration; a Scene match is not an
+exclusive event-consumption claim. The existing `AssetWatcher`, bounded `AssetWatchEventQueue`
+and `AssetWatchTranslator` can feed this concrete ingress. The stock `AssetWatchPlugin` drain is
+hardwired to the generic route and is not silently redirected. Queue overflow, broad scope or
+translation failure requires the Scene owner's full rescan entry. This unit first qualifies
+actual semantic notifications, not a new native watcher implementation or its physical close.
+
+Acceptance includes compatible/invalid/repaired WGSL, a missing new dependency followed by its
+creation, Image content/default-reference edits, removed dependency notifications, preparation
+and Ready interleavings, explicit cancellation/acknowledgement, unaffected last-good/native input
+and Stop. The independent consumer must trigger updates with semantic notices rather than call
+`request` after every edit. Existing explicit source/processed and native travel tests remain
+controls. No Editor UI work or automatic global Input/settings replacement is selected.
+
+Successful optional fallback availability remains a separate source-interest decision. A generic
+importer may handle a raw dependency error and successfully return; its complete attempt observations
+then include the absent path, while its successful content closure contains only actual captured
+members. Ordinary startup and later successful publication do not retain that absent path as live
+interest in this unit. The Material importer propagates all required Shader/Image failures and has
+no such fallback branch. Preserve that compatibility, use explicit rescan for optional availability,
+and qualify an original closure/read-interest extension before claiming general fallback watching.
+Catalogue membership and unresolved Product availability have the same explicit rescan boundary:
+an unknown new metadata file can introduce a missing UUID or conflict with an existing identity.
+Neither successful file receipts nor an executed file-path cut subscribes to directory absence.
+The later physical watcher composition must classify these structural observations as full rescans;
+the finite raw-path recovery in this unit does not establish a general catalogue watcher.
+
+### Source Update Qualification
+
+The first focused Windows/Rust 1.95.0 release run,
+`c3687b31-907b-42d9-bf01-ef7811cb057e`, passes 31/61 after a 16-minute build. The source
+observation controls pass, including complete failed reads, exact/one-short accounting, allocation
+refusal and frozen Input reuse. The remaining failures expose two integration corrections. The
+minimal Scene fixture omitted the Material provider selected by its current default recipe; it
+now installs the real plugin instead of relaxing schema agreement. Actual Host admission has
+already allocated its Runtime generation, but its exact Scene owner still resides in the original
+`StartupSceneActivationInput` until Startup consumption. Source interest now borrows that pending
+instance receipt during admission; it neither publishes early nor lazily binds to a later Scene.
+The corrected runtime/public-consumer results follow.
+
+Independent review also corrects source-interest custody: requested raw paths are observed before
+dependency/work admission, canonical strings reserve exact capacity and charge their actual retained
+capacity, and list-allocation refusal restores the previous retained prefix and budget. A sticky
+observation refusal rejects the complete attempt even if an importer handles the reader error.
+Ordinary handled I/O errors retain their existing semantics when the attempted path was completely
+observed. The Scene owner preserves pending rescan across explicit root changes and exposes stale
+automatic IDs for exact acknowledgement. These corrections use the original budget, task, startup
+activation and request owners. The final bounded source/startup reviews find no remaining P1/P2.
+
+The independently locked public consumer passes 2/2 in
+`10ce4b29-8252-4a04-9f33-f7b161b9c997` (0.231 seconds after a 4-minute-3-second release build).
+Its actual game-owned HeadlessRun completes eleven automatic requests: eight explicit commits,
+two content refusals and one cancellation. It observes the real Scene receipts/content stamps,
+AssetStates revisions and versions, Material binding, decoded Image pixels/hashes/allocations and
+gameplay overlay after each transition. The source edits include compatible/invalid/repaired WGSL,
+missing `b.wgsl` followed by creation, obsolete Shader/Image notices, default Image selection/content
+and Ready/pending/terminal interleavings. The startup Scene has no UUID sidecar and remains byte
+identical. The consumer never calls manual `ProjectScenes::request` to trigger these updates.
+The corrected owning/affected selection passes 145/145 in
+`ba5bb798-cfd1-4936-a313-c57f92bbd684` (24.100 seconds after an 8-minute release rebuild;
+1648 tests outside the selection). It includes all source-content controls, eleven source-update
+lifecycle tests, original explicit source/Product/processed requests, residency, processed Input,
+Startup/current-Scene and actual Host Stop while an automatic preparation remains physically held.
+The fixture's plugin list uses the existing nested group interface after reaching its eight-element
+tuple bound; the production plugin API is unchanged.
+
+The complete independently locked Material package passes 10/10 in
+`da08a271-6156-4ddb-93bf-1abdd81fdd77` (1.194 seconds after a 56.17-second build), including the
+new consumer plus original source editing/Undo/Save/Reopen/Check, retained captures, processed
+source-free residency, codec/target refusals and explicit carrier selection.
+
+The independently locked managed-domain controls pass 16/16 in
+`ebdb3fa5-15cf-4c77-92cb-130a3ad95eb6` (0.902 seconds after a 10-minute-16-second release
+build for their feature combination). Both independent native-effect plugins retain their
+original retirement, one-shot configuration, retry, lifecycle-hook, failure and shutdown checks.
+The recovery trajectory additionally observes source interest before publication and after a
+reconciliation failure: the unpublished target's notice is unrelated; once that exact target
+publishes, its notice queues pending intent and the old Scene notice is unrelated. Pending intent
+survives successful native retry while the original unacknowledged terminal slot remains occupied.
+This is real managed travel through the public Host/domain protocol, not physical GPU or OS-window
+execution.
+
+The adjacent Input consumer migration at `a51ad6e` repairs assumptions exposed by the final
+independent all-target check. Its exhaustive origin match omitted the existing `Restored` variant,
+and its old exact-step assertion contradicted
+the current fixed Prepare input contract. The consumer now explicitly refuses restored input in
+this non-restoration workflow, observes outcomes in fixed Finalize and ordinary Update with
+frame-identity deduplication, and requires exactly one input/command/gameplay step without Resume
+replay. Original source/context/mapping/capacity assertions remain. No production Input behavior
+changes. Its complete bounded Input selection passes 3/3 in
+`4af6fb23-401f-4de1-a317-e873ba42d9d4` (0.178 seconds after an 8.52-second build), following
+the initial outdated-contract failure in `62a19e60-6eba-4773-852b-0d03032a33a5`.
+
+Final Windows 11/Rust 1.95.0 locked/offline closure passes: workspace release all-target check,
+owning all-feature/all-target correctness Clippy, independently locked Scene/Material all-feature/
+all-target correctness Clippy, root and independent workspace format checks, added local document
+targets/fragments and whitespace checks. Existing unrelated warnings remain. All Cargo work is
+serial with one build job and the original root target.
+Physical watcher event delivery/routing/close, structural catalogue availability, successful
+optional fallback availability, Editor hydration, GPU/OS-window execution of this notification
+workflow, foreign-native execution and numerical performance budgets remain unqualified. The
+complete R9b/R12/Foundation Goal stays active.
 
 ## Baseline Source Findings
 

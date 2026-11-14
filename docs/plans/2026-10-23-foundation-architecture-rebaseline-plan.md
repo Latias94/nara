@@ -1215,6 +1215,25 @@ Game View; native presentation remains separate. The same plan records failed fi
 corrections, exact storage lifetime, passing feature/workspace/Clippy/format/document closure
 and remaining source-update/Editor/cost qualification.
 
+The [Scene-owned source-update successor](2026-11-14-durable-material-and-shader-plan.md#scene-owned-source-updates)
+at `c03b940`, with independent consumers at `55b0ae4`, accepts semantic principal/metadata notices
+through the original Project Scene request owner.
+The published closure and complete valid automatic-failure read cut retain dependency interest,
+including a newly missing WGSL path. One coalesced intent prepares a frozen candidate; game code
+still inspects, supplies its overlay, explicitly commits and acknowledges the exact terminal ID.
+Current Runtime/Scene identity, physical task return, two-generation capacity and managed native
+publication remain with their original owners. The owning/affected selection passes 145/145 in
+`ba5bb798-cfd1-4936-a313-c57f92bbd684`; the complete independent Material package passes 10/10 in
+`da08a271-6156-4ddb-93bf-1abdd81fdd77`, including an actual eleven-request game workflow driven
+only by semantic notices. The independent managed-domain controls pass 16/16 in
+`ebdb3fa5-15cf-4c77-92cb-130a3ad95eb6`, including source-interest publication before degraded
+reconciliation and pending preservation through native retry. Successful optional fallback
+availability and structural catalogue observations need explicit rescan under this read-interest
+contract. Physical watcher routing/close, live Editor hydration, foreign-native execution and
+numerical costs remain separate. Final workspace, owning/independent correctness Clippy, format
+and document checks pass in the linked unit. The adjacent Input consumer migration is isolated at
+`a51ad6e`; no production Input semantics change. Full R9b/R12/Foundation completion is not implied.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

@@ -2220,6 +2220,28 @@ and numerical budgets remain outside this qualification. Feature-matrix/workspac
 correctness/strict independent Clippy, format and document checks pass in the linked plan.
 The full R9b/Foundation Goal stays open.
 
+The [Scene-owned source-update successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#scene-owned-source-updates)
+at `c03b940`, with independent consumers at `55b0ae4`, adds semantic source ingress to the existing
+`ProjectScenes` surface. Original successful closure facts and the latest complete valid
+automatic-failure read cut drive one coalesced successor;
+missing newly referenced WGSL can recover after a creation notice. Ready content stays frozen,
+gameplay overlay and publication remain explicit, and terminal slots require exact acknowledgement.
+Source interest captures the original Runtime generation and materialized startup instance without
+early current-Scene publication. Actual ordinary/managed commit advances its closure, including
+publication preceding degraded reconciliation. No generic asset UUID, second publisher, watcher or
+scheduler is introduced. The owning/affected controls pass 145/145 in
+`ba5bb798-cfd1-4936-a313-c57f92bbd684`; the full independent Material package passes 10/10 in
+`da08a271-6156-4ddb-93bf-1abdd81fdd77`, including eleven automatic requests with eight commits,
+two refusals and one cancellation while preserving real asset state, decoded pixels and gameplay
+progress. The independent managed-domain controls pass 16/16 in
+`ebdb3fa5-15cf-4c77-92cb-130a3ad95eb6`, retaining original native custody assertions plus
+source-interest checks before publication and during degraded reconciliation/retry. Final workspace
+build, owning/independent correctness Clippy, format and document checks pass. The adjacent public
+Input consumer migration at `a51ad6e` changes no production Input behavior. The linked plan records
+review corrections and verification scope. Native watcher
+composition/close, successful optional fallback availability, Editor preview, foreign execution,
+numerical budgets and full R9b/R12 remain open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
