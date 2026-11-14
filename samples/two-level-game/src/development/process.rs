@@ -995,7 +995,10 @@ impl Process {
 
     fn check_running(&mut self) -> Result<(), String> {
         if self.advance()? || self.native.state() != SupervisedProcessState::Running {
-            return Err("the original native game is no longer running".into());
+            return Err(format!(
+                "the original native game is no longer running; {}",
+                self.diagnostics(),
+            ));
         }
         Ok(())
     }

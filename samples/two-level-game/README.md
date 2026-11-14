@@ -318,7 +318,9 @@ paused captures, real Rust body/private-structure rebuilds and post-adoption nat
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test continuous_desktop --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-Keep the desktop available and physical D initially Up. Its bounded native input guard releases
+Keep the desktop idle and physical A/D/W/S initially Up. Other keyboard input during the trajectory
+invalidates its neutral movement oracle. The guard rejects existing holds instead of releasing
+keys it does not own. Its bounded native input guard releases
 an injected hold during failure cleanup. Actual results and limits belong to the
 [continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
 

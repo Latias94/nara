@@ -62,22 +62,29 @@ pub struct NativeInput {
     original: Option<NativeWindow>,
     target: Option<NativeWindow>,
     virtual_key: u32,
+    movement_keys: [u32; 4],
     down: bool,
 }
 
 impl NativeInput {
     pub fn new() -> Self {
-        let virtual_key =
-            unsafe { MapVirtualKeyExW(0x20, MAPVK_VSC_TO_VK_EX, GetKeyboardLayout(0)) };
-        assert_ne!(virtual_key, 0, "physical D requires a mapped scan code");
+        let layout = unsafe { GetKeyboardLayout(0) };
+        let movement_keys = [0x1e, 0x20, 0x11, 0x1f]
+            .map(|scan| unsafe { MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK_EX, layout) });
         assert!(
-            unsafe { GetAsyncKeyState(virtual_key as i32) } >= 0,
-            "physical D must initially be Up; do not run this test while holding it",
+            movement_keys.iter().all(|key| *key != 0),
+            "physical A/D/W/S require mapped scan codes",
+        );
+        let held = movement_keys.map(|key| unsafe { GetAsyncKeyState(key as i32) < 0 });
+        assert!(
+            held == [false; 4],
+            "physical A/D/W/S must initially be Up; native movement keys held: {held:?}",
         );
         Self {
             original: NativeWindow::foreground(),
             target: None,
-            virtual_key,
+            virtual_key: movement_keys[1],
+            movement_keys,
             down: false,
         }
     }
@@ -122,6 +129,11 @@ impl NativeInput {
 
     pub fn physical_down(&self) -> bool {
         unsafe { GetAsyncKeyState(self.virtual_key as i32) < 0 }
+    }
+
+    fn physical_movement(&self) -> [bool; 4] {
+        self.movement_keys
+            .map(|key| unsafe { GetAsyncKeyState(key as i32) < 0 })
     }
 
     pub fn press(&mut self) {
@@ -335,7 +347,12 @@ pub fn continuous_native_motion(
 ) -> (ResumeState, Duration) {
     let started = Instant::now();
     let initial = status(host, generation, ExecutionState::Running);
-    assert_eq!(initial.observation.held, [false; 4]);
+    assert_eq!(
+        initial.observation.held,
+        [false; 4],
+        "continuous input requires an idle desktop; physical A/D/W/S={:?}",
+        input.physical_movement(),
+    );
     let runtime = initial.observation.runtime_generation;
     for _ in 0..8 {
         std::thread::sleep(POLL);

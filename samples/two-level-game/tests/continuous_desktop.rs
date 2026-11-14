@@ -37,7 +37,7 @@ use continuous::{
 use support::Fixture;
 
 #[test]
-#[ignore = "actual nested Cargo, hardware desktop and matched native D Down/Up; run serially with physical D initially Up"]
+#[ignore = "actual nested Cargo, hardware desktop and matched native D Down/Up; run serially on an idle desktop with physical A/D/W/S initially Up"]
 fn production_continuous_desktop_adopts_real_body_and_structure_edits() {
     assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
     let started = Instant::now();
