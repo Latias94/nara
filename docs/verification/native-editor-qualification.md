@@ -297,7 +297,13 @@ DISPLAY2 at 3840x2160, DPI 144 (150%). Independent `EnumDisplayDevicesW` observa
 that DISPLAY2 is attached and primary, while DISPLAY1 is not attached to the desktop; this
 is not a Remote Desktop session. Both probes retire their original windows before reporting
 the prerequisite failure, and no owned probe remains. No native source or display settings
-change is made. This repeat supplies no new cross-monitor movement qualification.
+change is made. A repeat at 04:18 +08:00 on `cc249e9` produces the same prerequisite refusal:
+`6392353e-5cf6-4517-9a5b-027195649a83`, 0/2 passing in 0.779 seconds after a 2.62-second
+release build, with 81 cases outside the selection. Native monitor enumeration, Windows Forms
+and WMI agree that only DISPLAY2 is active; `EnumDisplayDevicesW` again reports DISPLAY1
+unattached. The probes retire before reporting the refusal. These repeats supply no new
+cross-monitor movement qualification; a second active desktop display at a different DPI is
+still required.
 
 ## UI Work Probes
 
