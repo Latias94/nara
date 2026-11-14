@@ -242,6 +242,8 @@ jobs:
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
           fi
+      - name: Test physical Scene source watching and native retirement
+        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch --test source_watching --test-threads=1 --no-fail-fast --no-tests fail
       - name: Check Collect Game sample all features
         run: cargo check --manifest-path samples/collect-game/Cargo.toml --locked --workspace --all-features --all-targets
       - name: Test Collect Game sample headless

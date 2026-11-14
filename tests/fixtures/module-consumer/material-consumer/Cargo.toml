@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[features]
+native-source-watch = ["nara/asset-watch"]
+
 [dependencies]
 nara_asset = { path = "../../../../crates/nara_asset" }
 nara_core = { path = "../../../../crates/nara_core" }
@@ -15,3 +18,7 @@ nara_tilemap = { path = "../../../../crates/nara_tilemap" }
 
 [dev-dependencies]
 nara = { path = "../../../..", default-features = false, features = ["tooling", "project-workflow", "presentation-2d"] }
+
+[[test]]
+name = "source_watching"
+required-features = ["native-source-watch"]

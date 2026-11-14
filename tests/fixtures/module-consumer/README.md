@@ -149,3 +149,31 @@ The legacy scene and ECS lifecycle-free guards remain intact. Direct scene synch
 clear still rejects a configuration entity with an attached hook-owning native component. Domain
 retirement must happen before that transaction; adding hooks to its rollback path is not a supported
 shortcut. This concrete consumer does not introduce a universal hydrator or native-state manager.
+
+## Native Scene source watching
+
+The material member's opt-in `native-source-watch` feature enables the independent
+`material-consumer/tests/source_watching.rs` consumer on Windows and Linux. The default package
+feature set does not enable it. Run it serially with the shared target directory:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --features native-source-watch --test source_watching --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The game configures `ProjectSceneWatchPlugin` against its actual absolute source root and
+explicitly commits the mandatory initial reconciliation. Later writes are real filesystem
+edits: compatible, invalid, repaired and initially missing WGSL, PNG pixels, Material texture
+selection and a previously unknown Image metadata file that requires catalogue revalidation.
+The test makes no semantic change notifications or manual rescan requests. It holds a Ready
+candidate across another edit, preserves the original content until explicit game commit,
+retains gameplay progress through the overlay and acknowledges exact request IDs. Duplicate
+native events are drained by content and request identity, with finite wall-clock deadlines.
+The shared residency observer checks source stamps, complete Material bindings, Image pixels,
+handles, state revisions and usable generations throughout failed and successful preparation.
+
+Actual Headless Host Stop must join every original native watcher. A close participant verifies
+`started == joined > 0`, with no active or retiring sessions, while the original World still
+contains its lifetime marker; a held read-only observer verifies the same counters after Host
+cleanup and World destruction. This is a native filesystem/CPU-content test, with no window,
+renderer or GPU qualification. Retaining and directly inspecting an already stopped World is
+separate Runtime-owner coverage because the public Headless Host releases it during close.
