@@ -2672,6 +2672,19 @@ the report keeps the test-only P3 correction, original raw-source digest and une
 panic scope explicit. No startup optimization, CPU/cold-start/tail budget or full R12 completion
 is selected; original presentation and physical retirement retain separate qualification.
 
+The [original DesktopRun startup observations](../../benchmarks/2026-11-14-development-runtime-costs.md#original-desktop-startup-operations)
+at `11c1a67` add five default-disabled public spans to the same action and original presentation
+receipt.
+Unfinished native-poll accumulation stays private; the public Copy/Eq/Debug snapshot contains
+completed values only. Six release/DX12 comparisons preserve exact frames, canonical witnesses,
+neutral state, telemetry sealing and physical-loop recovery. Later microsecond first polls defer
+substantial initialization: accumulated native calls through first presentation take 622–1043 ms.
+These elapsed values overlap other observations and are not GPU time or cold-start/tail budgets.
+Ordinary game/child options remain disabled; no protocol, Runtime, native or render owner changes.
+Root/public controls 28/28, original continuous desktop adoption 1/1, minimal feature checking,
+correctness Clippy, formatting and document/data checks pass; source review closes all P1/P2.
+Further owning-operation attribution and full R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

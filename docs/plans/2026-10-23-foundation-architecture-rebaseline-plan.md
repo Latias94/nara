@@ -4778,6 +4778,19 @@ ordinary 110/110, correctness Clippy, formatting and final consumer compilation 
 retains independent review, raw-source/test-only correction and platform/cost limits. Further
 child-stage attribution and full R12 remain open; UI and mixed-DPI work stay paused.
 
+The [original DesktopRun startup observations](../benchmarks/2026-11-14-development-runtime-costs.md#original-desktop-startup-operations)
+at `11c1a67` add a default-disabled public snapshot over content, Runtime, session construction,
+first native poll and accumulated polling through the first actual presentation. Private incomplete progress
+does not enter the public completed-value snapshot. Six actual release/DX12 runtime comparisons
+preserve all original frames, canonical witnesses, neutral state and physical cleanup. Later
+first polls take microseconds while complete polling through first presentation still takes
+622–1043 ms; first return is not initialization completion. The aggregate overlaps first-poll
+and public-call spans, excludes caller gaps and is not GPU execution or scanout. Normal game
+and reconstructed-child options remain disabled. Root/public controls 28/28, original continuous
+desktop rebuild/adoption 1/1, minimal code-first checking, correctness Clippy, formatting and
+document/data checks pass; source review closes all P1/P2. Further window/device/resource/
+first-frame attribution, representative budgets and full R12 remain open.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

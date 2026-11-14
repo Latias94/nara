@@ -514,3 +514,97 @@ compiled, not claimed to have been exercised by injected panic. No production pr
 changes after its native measurements. All three scoped agents close, all owned executions reach
 terminal observations, and no unrelated UI/native framework matrices are repeated. Full R12,
 representative cold/tail/CPU budgets and paused Editor/UI work remain open.
+
+## Original Desktop Startup Operations
+
+The qualified implementation and ordinary consumer are
+`11c1a6733bfc1b466de637da1ccde108c301c28d`. Final native measurements use that production source;
+no production code changes after the final six-run observation.
+
+The optional `DesktopRunOptions::with_startup_timings()` observes original content preparation,
+Runtime startup completion, native session construction, first native poll and accumulated native
+polling through the first actual presentation. `DesktopStartupTimings` returns completed elapsed
+observations through the public desktop action. Ordinary game and reconstructed-child options
+leave it disabled, with no startup-instrumentation clock reads. This API adds no game protocol,
+process, input, native window or render owner.
+
+The polling aggregate uses the original `WgpuPresentedFrameReceipt`. It sums complete native
+poll calls through the first receipt, including the remainder of that poll and excluding caller
+gaps. It overlaps the first-poll span. It is absent before presentation and remains unavailable
+if blocking execution interrupts the observation; a whole blocking game lifetime is never
+reported as startup. Completed observations do not extend during subsequent controls, frames
+or cleanup. A returned source-preparation span can describe a failure, so timing values alone
+do not grant readiness, successful startup or a complete interactive outcome.
+
+An earlier four-span exploration passed the selected CPU/public tests 26/26 in
+`22aed45a-1f11-4d37-90b5-9aa1355c0311` and all six complete native runtime comparisons. It
+exposed the need for the aggregate: the first run spent 699.092 ms in its initial native poll,
+while the five later runs returned from that poll in approximately 0.002–0.004 ms despite
+initial settlement taking 666–916 ms. The original physical event loop is recovered between
+runs, so a fast first return does not identify the amount or completion of initialization.
+That exploratory record is not the five-span successor's qualification or a speedup comparison.
+
+The existing `runtime_cost` consumer now copies the completed snapshot after neutral keyboard
+restoration, original paused maintenance and canonical capture, before reveal, input activation,
+Resume and warmup. Each already-completed observation must agree with its earlier initialized
+paused snapshot. The same final snapshot must survive the original measured frames, telemetry
+seal and physical event-loop recovery. Initial settlement and neutral-maintenance wall spans
+remain separate public-call observations; they overlap internal spans and cannot be summed
+with them. All original frame, canonical-witness, process-counter and retirement checks remain.
+
+The final six-run release consumer exits successfully on the recorded hardware DX12 RTX 4090
+at 960 by 540. Each run retains 30 excluded warmup frames and 120 exact accepted samples.
+Every witness sample matches its canonical Seal and original receipt, all six completed startup
+snapshots remain unchanged through cleanup, paused idle advances no simulation or logical ticks,
+and all six original Runtime/native/telemetry owners retire before physical-loop recovery.
+
+| Run | Recipe | Content | Runtime | Session construction | First native poll | Native polls through first presentation | Initial settle | Neutral maintenance |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | Plain | 10.069 ms | 4.310 ms | 101.053 ms | 708.712 ms | 708.712 ms | 824.173 ms | 28.088 ms |
+| 2 | Witness | 39.273 ms | 4.969 ms | 0.004 ms | 0.003 ms | 1043.260 ms | 1087.528 ms | 32.729 ms |
+| 3 | Witness | 9.210 ms | 2.963 ms | 0.004 ms | 0.003 ms | 621.888 ms | 634.077 ms | 28.413 ms |
+| 4 | Plain | 10.659 ms | 3.164 ms | 0.005 ms | 0.003 ms | 768.033 ms | 781.877 ms | 22.878 ms |
+| 5 | Plain | 9.763 ms | 3.118 ms | 0.005 ms | 0.004 ms | 741.466 ms | 754.371 ms | 21.413 ms |
+| 6 | Witness | 15.942 ms | 5.152 ms | 0.006 ms | 0.004 ms | 765.473 ms | 786.588 ms | 31.194 ms |
+
+The [complete raw record](data/2026-11-14-development-runtime/runtime-startup-operations.json)
+retains all five durations, public-call spans, exact frame associations, workload, actual adapter,
+process counters, completion samples and cleanup facts. The runs share a process, physical event
+loop, loaded code and driver caches; they are not independent cold starts or representative tail
+samples. The first run also constructs the physical loop. Later fast session construction and
+first polls do not imply that the new window, device or first-frame work is absent.
+
+Native polling remains the dominant observed direct-call span. Further attribution should
+distinguish the original window/device/resource/first-frame operations before choosing a cache,
+retention or pipeline change. The aggregate includes waits and the presenting poll's remainder;
+it is not pure GPU initialization, GPU execution, scanout or an exact presentation timestamp.
+The prior contained-child observation uses dev and Vulkan and includes loader/protocol/parent
+work, whereas this direct consumer uses release and DX12. Neither set can be subtracted from
+the other to infer an unmeasured residual. No startup optimization or performance budget is
+selected from these observations alone.
+
+### Desktop Startup Qualification
+
+| Scope | Actual result |
+| --- | --- |
+| Final selected root desktop/presentation and public controls | 28/28, run `a085eacd-15bb-4d08-ba5d-7e2f527a2d9d`, 2.836 seconds; 654 cases outside the filter. Includes default-disabled and code-first construction, missing/failed preparation, pre-start Close, original observer veto/cleanup, interrupted accumulation and unchanged public snapshots while incomplete. |
+| Actual five-span runtime consumer | Six complete release/DX12 runs, each with 30 excluded warmup frames and 120 exact accepted frames, both recipe variants, full canonical/telemetry and physical cleanup checks; normal exit. |
+| Original default-disabled continuous desktop rebuild/adoption | 1/1, run `50d3eb09-54ef-4608-88e2-9bbd94ae521c`, 129.347 seconds including nested actual Cargo. Function-body and private-structure edits, full restoration, native input, stale refusal, Pending-time execution and Running Close retain their original assertions. |
+| Minimal code-first desktop feature closure | Locked/offline release library check passes with only `desktop-winit,render-wgpu`, without runtime-2d or serde. |
+
+The independent review first catches the existing presentation-test fixture's missing state and
+tuple fields after the report extension; the fixture is corrected without weakening its original
+assertions. A subsequent P2 identifies unpublished accumulation leaking through the public
+snapshot's derived equality and debug output. The corrected private observer retains that
+accumulation, while the public Copy/Eq/Debug value contains only completed phases. An additional
+non-presenting poll now explicitly preserves snapshot equality before the first real receipt
+publishes the full sum. The driver also latches the first receipt once rather than repeatedly
+writing the same diagnostic on later frames. Final source rereview finds no remaining P1/P2.
+
+Selected root-library correctness Clippy and all-target/all-feature sample correctness Clippy
+pass, alongside affected root and sample formatting. Existing style/dead-code warnings remain.
+All ten raw-data SHA256 values are checked against canonical LF bytes, including staged blobs.
+Three scoped agents in this unit are closed, and all owned Cargo/native executions are terminal.
+The selected Windows/Rust 1.95.0 evidence does not qualify foreign execution, independent cold
+starts, numerical CPU/GPU/tail budgets, cross-domain trace-viewer capture, complete R12 or the
+paused Editor/UI/mixed-DPI work.

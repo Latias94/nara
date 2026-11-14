@@ -1404,3 +1404,47 @@ latest consumer compilation pass. Process and measurement reviews close with no 
 A test-only P3 panic/fixture retention issue is fixed after measurement and compile-checked;
 its raw record retains the earlier source digest, and injected-panic runtime proof is not claimed.
 All three scoped agents close. Full R12 and the paused UI/DPI scope remain active/open as before.
+
+### Original Desktop Startup Operations
+
+Status: qualified within the finite Windows scope below, at `11c1a67`.
+The parent READY interval is dominated by desktop initialization, but
+does not identify source, Runtime, native session or first-render work. Observe these original
+operations in `DesktopRun` through an explicit default-disabled option and fixed read-only
+snapshot: content preparation, Runtime startup completion, native session construction, the
+first nonblocking native poll and accumulated native polling through first actual presentation.
+The aggregate observes the original receipt, includes the remainder of the presenting poll and
+excludes caller gaps; it overlaps the first-poll span. Keep it absent before presentation or when
+blocking execution interrupts polling. Reuse the existing owner and preserve its failure, context transfer,
+cleanup, input and presentation order. Completed elapsed spans do not imply successful startup.
+Missing phases are explicitly unobserved; an already-started Runtime has no source/startup spans,
+and blocking execution must not mislabel its whole lifetime as a first native poll.
+
+Consume the observations in the existing ordinary desktop runtime comparison, alongside its
+original paused initialization, neutral keyboard maintenance, actual accepted frames, canonical
+witness, telemetry seal and physical event-loop recovery. The root API requires no game process
+protocol extension, trace registry, scheduler or alternate runtime owner. Keep it disabled in
+ordinary game and development child recipes. The same direct consumer may distinguish wall
+spans around initial settlement and neutral maintenance, but not identify pure GPU initialization
+from native polls that also create windows and execute frames. Initial exploratory measurements
+showed why the first poll is insufficient: subsequent runs reused the physical loop and returned
+from the first poll in microseconds while initial settlement still took hundreds of milliseconds.
+Keep that exploration distinct from the completed aggregate's qualification.
+
+Verify default-off behavior, unobserved/failed preparation, already-started and pre-start-close
+paths, stable snapshots after later work, relevant native product regressions and the actual
+consumer. Choose further optimization only from attribution that identifies the responsible
+original operation. Keep shared-driver/cache, sample/platform and cost limits explicit; full R12
+and paused UI/DPI work remain open.
+
+The [qualification and raw observations](../benchmarks/2026-11-14-development-runtime-costs.md#original-desktop-startup-operations)
+retain the corrected five-span consumer: six release/DX12 runs preserve all original 30-frame
+warmups, 120 exact measured frames, canonical witnesses and physical cleanup. Later first polls
+take 0.003–0.004 ms while total native polling through first presentation takes 622–1043 ms;
+neither is GPU execution or a cold-start/tail budget. The public Copy/Eq/Debug snapshot excludes
+private unfinished accumulation and stays fixed after completion. Final root/public controls
+pass 28/28 in `a085eacd`; original default-disabled continuous desktop rebuild/adoption passes
+1/1 in `50d3eb09`. Minimal code-first feature checking, selected root and all-target/all-feature
+sample correctness Clippy, formatting and document/data checks pass. Independent source review
+closes its two P2 findings; all three unit agents close. Further attribution should distinguish
+original window/device/resource/first-frame operations before selecting any optimization.

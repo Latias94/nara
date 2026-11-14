@@ -87,6 +87,25 @@
     "excluded_failure": "one actual malformed-project headless process fails after native spawn before READY; original candidate and physical cleanup remain observable; not a successful game exit or a performance sample",
     "decision": "no startup optimization selected; desktop READY wait dominates the measured parent boundary but combines child startup, source/Runtime/native/GPU, protocol and polling costs"
   },
+  "desktop_startup_operations": {
+    "base_revision": "da18777",
+    "qualified_implementation_revision": "11c1a6733bfc1b466de637da1ccde108c301c28d",
+    "cpu_run": "a085eacd-15bb-4d08-ba5d-7e2f527a2d9d",
+    "default_disabled_native_regression_run": "50d3eb09-54ef-4608-88e2-9bbd94ae521c",
+    "default_disabled_native_regression_command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test continuous_desktop --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail",
+    "source_state": "The optional original DesktopRun observer and additive runtime_cost consumer were uncommitted during measurement; the owning report records the qualified implementation after commit.",
+    "command": "cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --bin runtime_cost",
+    "output_environment": "NARA_RUNTIME_COST_OUTPUT selected a distinct absolute new file, written after all six original cleanup outcomes.",
+    "environment": {
+      "WGPU_BACKEND": "dx12",
+      "NARA_WGPU_FORCE_FALLBACK": "0"
+    },
+    "native_scope": "six alternating plain/witness runs, each with 30 excluded warmup frames and 120 exact accepted samples on hardware DX12 at 960x540; same process and recovered physical event loop, not independent cold starts",
+    "phase_definition": "ContentPreparation, RuntimeStartup, NativeSessionConstruction, FirstNativePoll and NativePollingToFirstPresentation; the last sums original poll durations through the presenting poll, including its remainder and excluding caller gaps, and overlaps FirstNativePoll",
+    "snapshot_endpoint": "after neutral keyboard restoration, original paused maintenance and canonical capture, before reveal, activation, Resume and warmup; every earlier completed phase and the final snapshot through cleanup remain unchanged",
+    "exploration_disposition": "An earlier four-phase six-run experiment and CPU run 22aed45a-1f11-4d37-90b5-9aa1355c0311 exposed initialization deferred beyond the first poll; it is not the final five-phase qualification or a before/after optimization comparison.",
+    "decision": "no startup optimization selected; further attribution must distinguish original window/device/resource/first-frame operations; native elapsed calls are not GPU execution or scanout and cannot be subtracted from the separate dev/Vulkan child READY measurements"
+  },
   "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
   "data_sha256": {
     "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
@@ -97,6 +116,7 @@
     "workflow-after.json": "cda33048754068158adeabb5fbdb89303de169d501897c10033c1c0168fc8516",
     "metadata-command-exploration.json": "2f03a22df6d5503bcebc88a91a63ff329384d572da041fb0ce007f00a3ce6f7a",
     "workflow-declarations.json": "a263747574d09391c3f13fb7fc73e7f95c8fdcde65651d5869301ac652052f15",
-    "startup-attribution.json": "05172b58376ff1cad27319da023b915475bc5fef29356711dbe1f5aeffb37f80"
+    "startup-attribution.json": "05172b58376ff1cad27319da023b915475bc5fef29356711dbe1f5aeffb37f80",
+    "runtime-startup-operations.json": "a939b83e0987769b26183427047923a56e84bd7b0d2348afb36da334f4a23826"
   }
 }
