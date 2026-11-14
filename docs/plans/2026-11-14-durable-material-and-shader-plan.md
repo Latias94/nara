@@ -4,6 +4,8 @@ Status: active. This is the complete R9b successor of the
 [foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md#r9-material-artifacts-views-color-and-domain-render-locality),
 starting from `4bd02b9`. Editor/component and Dialogue UI development remain paused. Native
 qualification shares the original serial Cargo owner with Runtime work.
+The declaration/Shader/native prerequisite is implemented at `899d64b` with the evidence below;
+the complete persistent product outcome remains active.
 
 ## Product Outcome
 

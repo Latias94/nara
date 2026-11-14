@@ -2167,6 +2167,21 @@ Full0121, durable materials, broader View/time facts, reproducible cost attribut
 Nara-drawn Inspector remain open. The separately reviewed registry builder/snapshot plan is
 unimplemented R12 work, not qualification from these render tests.
 
+The November 14 [material declaration/Shader successor](../../plans/2026-11-14-durable-material-and-shader-plan.md)
+at `899d64b` replaces static Palette definitions with one typed/dynamic field declaration,
+actual Encase layout and Naga interface admission, original asset-baseline publication and
+immutable exact bindings. Sprite/Tilemap and native stock drawing consume all declared Image versions; value/texture
+content does not specialize pipelines. The final combined material/derive/Sprite/native suite
+passes 498/498 with 65 explicit skips; independent Palette and renamed-root material consumers
+each pass 1/1. The selected native group passes 13/13, with its production Host reporting
+Vulkan/RTX 4090. The same five Host trajectories also pass on DX12. These overlapping scopes include
+nonzero mixed layouts, integer/texture controls, same-epoch compatible B/rejected C/late A,
+whole-program budgets, partial-OOM original-prefix recovery and bounded Ready/Rejected cache
+history without restricting a single 66-variant working set. The linked plan retains the actual
+failed fixtures, independent review corrections and remaining product scope. Complete persistent
+Schema/source/Runtime material delivery, graph-shared material resources, full R9b/R12 and the
+foundation Goal remain open. These scoped results do not admit the full Proposed0121.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

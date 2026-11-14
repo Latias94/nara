@@ -1158,6 +1158,26 @@ Delete central package-specific payload/match growth and tests prohibiting any p
 unit and its scoped evidence; complete R9a, durable materials and measured geometry locality
 remain open. **Owners:** shader/material/view owners and domain projection.
 
+The November 14 [durable material and tracked Shader unit](2026-11-14-durable-material-and-shader-plan.md)
+starts from `4bd02b9` after the Runtime Stop-retention correction. It replaces the static
+Palette extension through two-layout declarations, exact Shader generations, original native
+resource preparation and complete persistent/public delivery. Its source findings and acceptance
+do not qualify that still-active replacement or reopen paused Editor/Dialogue UI development.
+
+The declaration/Shader/native prerequisite is now implemented at `899d64b`: actual Encase
+layout/encoding and Naga interface admission produce one immutable generation, published through
+original asset mutation baselines. Sprite/Tilemap and the stock native adapter retain exact
+values and Image versions through compatible updates, rejected interfaces and late old captures.
+The combined owning cohort passes 498/498 with 65 explicit skips; direct and renamed-root
+independent material consumers each pass 1/1. The focused native group passes 13/13 with the
+production Host on Vulkan/RTX 4090, and the same five Host trajectories pass on DX12. Bounded
+Ready/Rejected cache history, one 66-variant working set, complete preflight and partial-OOM
+original-prefix retirement have actual pixel/resource evidence. The linked unit retains failed
+fixtures, reviewed derive/cache corrections, source commands, overlap and qualification limits.
+Complete persistent Schema/source/Runtime material delivery, graph-shared resource inputs,
+representative numerical budgets and full R9b/R12 remain open. The former static APIs are removed
+after consumer migration; this does not select a second renderer or publication owner.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
