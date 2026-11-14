@@ -1495,7 +1495,7 @@ the original Adapter request cost before changing policy, scheduling or device r
 
 ## Host-Composed Execution Capture
 
-Status: active runtime successor under foundation R12. The bounded Adapter source follow-up
+Status: qualified within the finite Windows scope below, at `3e8ba7d`/`588e698`. The bounded Adapter source follow-up
 finds no justified change to current selection or ownership. Continue the complete diagnostic
 workflow without turning that source inspection into a performance claim or speculative cache.
 
