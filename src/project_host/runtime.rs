@@ -53,6 +53,8 @@ mod content_residency;
 #[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
 mod desktop_poll_tests;
 mod scene_requests;
+#[cfg(feature = "asset-watch")]
+mod source_watch;
 pub use scene_requests::domains::{
     ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
     ManagedSceneDomainPhase, ManagedSceneDomainPreparation, ManagedSceneDomains,
@@ -65,6 +67,11 @@ pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
+};
+#[cfg(feature = "asset-watch")]
+pub use source_watch::{
+    PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
+    ProjectSceneWatchState, ProjectSceneWatchStatus,
 };
 
 #[cfg(feature = "tooling")]
@@ -1127,14 +1134,18 @@ impl ProjectHost {
                 .and_then(|diagnostics| {
                     let context = match &admission_content {
                         RuntimeStartContent::Source { plan, snapshot } => match scene_preparation {
-                            Some((candidate, loader)) => scene_requests::install_context(
-                                world,
-                                candidate,
-                                plan.clone(),
-                                loader,
-                                snapshot.input_action_map().cloned(),
-                                Some(snapshot.content_closure()),
-                            ),
+                            Some((candidate, loader)) => {
+                                #[cfg(feature = "asset-watch")]
+                                source_watch::bind_source_watch(world, &candidate, &loader)?;
+                                scene_requests::install_context(
+                                    world,
+                                    candidate,
+                                    plan.clone(),
+                                    loader,
+                                    snapshot.input_action_map().cloned(),
+                                    Some(snapshot.content_closure()),
+                                )
+                            }
                             None => Ok(()),
                         },
                         RuntimeStartContent::Processed { base, .. } => {
@@ -1754,8 +1765,9 @@ fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), 
         let source_execution = plugin == nara_asset::ASSET_SOURCE_PLUGIN_ID
             || plugin == nara_image::IMAGE_SOURCE_PLUGIN_ID;
         #[cfg(feature = "asset-watch")]
-        let source_execution =
-            source_execution || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID;
+        let source_execution = source_execution
+            || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID
+            || plugin == PROJECT_SCENE_WATCH_PLUGIN_ID;
         if source_execution {
             return Err(HostFault::new(single_diagnostic(attach_identifier(
                 Diagnostic::error(

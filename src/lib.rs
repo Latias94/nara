@@ -192,6 +192,11 @@ pub mod prelude {
         PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
         ProjectSceneRequestState, ProjectSceneSourceUpdateStatus, ProjectScenes,
     };
+    #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "asset-watch"))]
+    pub use crate::project_host::{
+        ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin, ProjectSceneWatchState,
+        ProjectSceneWatchStatus,
+    };
     pub use crate::{
         HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
         ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,

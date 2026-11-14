@@ -248,6 +248,11 @@ pub(crate) use runtime::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
     register_project_scene_close_participant,
 };
+#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "asset-watch"))]
+pub use runtime::{
+    PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
+    ProjectSceneWatchState, ProjectSceneWatchStatus,
+};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,

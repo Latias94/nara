@@ -207,9 +207,35 @@ pub struct ProjectScenes<'w> {
     current: Option<Res<'w, CurrentSceneOwner>>,
     generation: Option<Res<'w, RuntimeGeneration>>,
     pools: Option<Res<'w, TaskPools>>,
+    #[cfg(feature = "asset-watch")]
+    source_watch: Option<ResMut<'w, super::super::source_watch::SourceWatchDriver>>,
 }
 
 impl ProjectScenes<'_> {
+    /// Observes optional native source coverage without polling or admitting a request.
+    #[cfg(feature = "asset-watch")]
+    #[must_use]
+    pub fn source_watch_status(&self) -> Option<super::super::ProjectSceneWatchStatus> {
+        self.source_watch.as_deref().map(|driver| driver.status())
+    }
+
+    /// Retains read-only original-worker join counts through Runtime close and World retention.
+    #[cfg(feature = "asset-watch")]
+    #[must_use]
+    pub fn source_watch_retirement(&self) -> Option<nara_asset_watch::AssetWatchRuntimeObserver> {
+        self.source_watch
+            .as_deref()
+            .map(|driver| driver.retirement())
+    }
+
+    /// Requests one retry after native coverage failed. Native I/O occurs in TaskUpdate.
+    #[cfg(feature = "asset-watch")]
+    pub fn retry_source_watch(&mut self) -> bool {
+        self.source_watch
+            .as_deref_mut()
+            .is_some_and(|driver| driver.retry())
+    }
+
     /// Records a canonical source observation for the current hosted source Scene.
     ///
     /// Relevant successful/retry paths queue one successor. During an automatic Preparing/Ready/Managed
