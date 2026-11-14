@@ -4963,8 +4963,8 @@ Editor/UI, Dialogue and physical mixed-DPI development stay paused.
 
 ### Scene Staging, Asset Reservations And Live Export
 
-Status: implemented with owning, independent/public and real source/headless qualification;
-the additional continuous-desktop repetition remains open as recorded below.
+Status: implemented at `88798b0`, with owning, independent/public, real source/headless and
+continuous-desktop qualification below. The first historical unexpected exit remains unexplained.
 The user separately resumes physical mixed-DPI qualification on November 14; Editor/component
 and Dialogue UI development remain paused. Native checks share the serial Cargo owner with
 this Runtime work.
@@ -5127,11 +5127,30 @@ checks pass. Changed local document links/headings and ordinary whitespace check
 vendor layout changes retain the separately checked upstream-source formatting equivalence;
 no unrelated native implementation or product UI work is included.
 
-The Scene ownership/export unit's real public and source/headless workflows have passing evidence
-above. The additional continuous-desktop repetition remains unqualified and the first unexpected
-exit is still open; no new native game acceptance, full Runtime completion or complete R12 is
-claimed. The earlier bounded mixed-DPI controls retain their own successful geometry/input/
-retirement evidence at `1911bef`, distinct from continuous gameplay and Editor GPU presentation.
+The subsequent idle-desktop run at `88798b0` passes the unchanged complete continuous trajectory
+in `7d3718dd-2228-433e-94b5-d7b7f41ca6ed`: 1/1, zero skips, 111.572 seconds after a 38.29-second
+outer release build. Its original nested dev builds execute actual A160, B80 and private-structure
+C, exact restored state/presentation, naturally completed ticks through matched native input,
+stale-candidate refusal/cancellation, Pending-predecessor play and final Running Close. The child
+reports hardware Vulkan; this is Windows x64 execution, not a DX12 or foreign-platform result.
+The reported per-stage elapsed observations include compile/probe/native/control/cleanup work and
+are not a new latency distribution or speedup. The original physical process/input/foreground
+cleanup assertions pass and no owned Cargo or game processes remain after this run.
+
+This supplies the current continuous-desktop evidence missing from the two failed attempts above.
+It does not explain the first B exit or prove that the added diagnostic alone fixes that incident:
+the original bounded tail was unavailable at that failure, and the same failure does not recur
+here. Preserve the historical outcome and the new diagnostic for any recurrence instead of
+inventing a root cause. No product implementation changes follow `88798b0`; documentation closure
+does not require another complete execution cycle. The Scene ownership/export unit's selected
+public, source/headless and continuous-native workflows now have passing evidence, while the full
+foundation Goal/R12, representative numerical budgets and foreign execution remain open.
+The earlier mixed-DPI geometry/input/retirement evidence at `1911bef`/`ad36985` is distinct from
+continuous gameplay and complete Editor GPU presentation.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test continuous_desktop --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
 
 With jobs one, the absolute root target, Rust 1.95.0 and offline resolution, the owning command is:
 

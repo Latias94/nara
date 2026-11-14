@@ -1070,6 +1070,19 @@ numeric performance budget from one acceptance run. UI and physical mixed-DPI re
 ### Continuous Development Qualification
 
 Date: 2026-11-14. Production implementation: `a1490b9`; actual native consumer: `ec57133`.
+The later Scene/value and Winit integration changes retain complete native execution at
+`88798b0`, run `7d3718dd-2228-433e-94b5-d7b7f41ca6ed`: 1/1 in 111.572 seconds after a
+38.29-second outer release build. The complete original A160/B80/private-structure C trajectory,
+restored presentation, continuous native gameplay, stale refusal, Pending cleanup and Running
+Close pass on hardware Vulkan. The
+[foundation successor record](2026-10-23-foundation-architecture-rebaseline-plan.md#scene-staging-asset-reservations-and-live-export)
+retains the earlier unexpected B exit and externally held-key refusal separately. The first
+failure remains unexplained; this repeat does not establish its root cause or a performance gain.
+`522e707` preserves the existing bounded process diagnostics and requires all original scan-mapped
+A/D/W/S keys to be Up before the probe takes input ownership. No assertion or external held key is
+silently cleared. Editor/Dialogue UI remain paused; bounded mixed-DPI qualification has resumed
+and is recorded under its own native geometry contract.
+
 The concrete child uses the original
 `DesktopRun::observe` for `ExecutionStatus`, separately reporting managed Running/Paused,
 native activation and game observation. Pause/Resume wait for their exact original control
