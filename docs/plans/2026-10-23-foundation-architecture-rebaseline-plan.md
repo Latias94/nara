@@ -4753,6 +4753,19 @@ fresh receipt, source/tool validation and physical retirement keep their existin
 Metadata/rechecks and two-child startup remain the next attribution targets. Full R12 remains
 active; paused UI and physical mixed-DPI scope is preserved.
 
+The [declaration-only build preparation](../benchmarks/2026-11-14-development-runtime-costs.md#declaration-only-cargo-preparation-successor)
+at `215ef54` uses Cargo's `--no-deps` target declarations in the finite synchronous adapter,
+while full graph/Editor consumers retain strict metadata. The same selected artifact decoder,
+source/tool/lease checks, diagnostics and cleanup remain. An unavailable metadata feature
+observation is explicitly different from an observed empty set. Metadata/recheck medians drop
+from 1.3–1.5 seconds to 0.15–0.17 seconds in all eighteen qualified game rebuild workflows;
+varying compiler cost makes one complete cohort slower, so no general end-to-end speedup follows.
+Root facts/cleanup 44/44, independent public API 3/3, actual native/foreign Cargo consumers 2/2,
+Editor build facts 11/11 and affected UI CPU 124/124 pass, alongside correctness Clippy and
+formatting. The inherited logical-input match omission is corrected separately at `eec5f00`
+without synthesizing UI activation. Startup attribution remains scoped to original owners;
+full R12, native Editor integration and paused UI/DPI scope remain open.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

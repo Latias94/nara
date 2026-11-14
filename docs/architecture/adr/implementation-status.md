@@ -2648,6 +2648,19 @@ The linked record preserves correlated-sample, shared-source, compiler/cache/loa
 scope limits; neither full-workflow tails nor a shipping CPU budget is established. Full R12 and
 Editor integration remain open.
 
+The subsequent [declaration-only finite build qualification](../../benchmarks/2026-11-14-development-runtime-costs.md#declaration-only-cargo-preparation-successor)
+at `215ef54` separates target declarations from full resolved metadata using the same pure
+bounded selectors and artifact decoder. The finite adapter uses `--no-deps`, while full graph
+facts/Editor remain strict. Optional invocation metadata features distinguish unobserved from
+resolved-empty sets. All eighteen complete game workflows pass; metadata/recheck medians fall
+to 0.15–0.17 seconds from 1.3–1.5 seconds. Compiler variation prevents a general full-workflow
+speedup claim. Root facts/cleanup 44/44, independent API 3/3, actual native/foreign builds 2/2,
+Editor build facts 11/11 and affected UI CPU 124/124 pass. The inherited restored-input adapter
+omission is corrected at `eec5f00`. Correctness Clippy, formatting and bounded independent
+reviews pass; source/tool/lease revalidation, failure custody and physical cleanup retain their
+original owners. The linked raw data keeps actual source/tool/platform and cost limits; full
+R12 and paused Editor/UI work remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

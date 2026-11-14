@@ -1295,3 +1295,64 @@ Final all-feature/default ordinary tests pass 113/113 and 110/110 in `fdc5fbf1`/
 hardware/actual-build cases kept separate. All-target/all-feature correctness Clippy and sample
 formatting pass. Four scoped agents close; existing warnings and broader platform/product limits
 remain. UI and physical mixed-DPI work stay paused, and full R12 remains active.
+
+### Declaration-Only Cargo Preparation
+
+Status: qualified within the finite Windows scope below, at `215ef54`; the affected logical-input
+adapter integration is corrected independently at `eec5f00`.
+A bounded alternating command-only experiment on the same pinned
+toolchain/desktop selection observes full metadata around 1.064 seconds and 1.32 MB, versus
+`--no-deps` declarations around 72 ms and 7 KB. This exploratory result is not complete build
+acceptance and does not remove graph/feature requirements from consumers that actually need them.
+
+The finite synchronous build adapter needs Cargo's selected workspace package, binary declaration,
+required features, source path and output directory before execution. Its actual compiler artifact
+already owns the resolved compiled feature observation. Add an explicit declaration constructor
+on the existing `CargoBuildInvocation`, sharing metadata bounds and selectors, and use
+`cargo metadata --no-deps` only in that concrete adapter. Keep full `CargoMetadataFacts` strict
+for Editor/graph consumers. Represent unavailable workspace feature observations explicitly;
+`None` is different from a resolved empty set. Do not infer feature closure, target eligibility
+or dependency resolution in Nara, cache metadata, or add a second Cargo/process authority.
+
+Retain the selected artifact's exact manifest/package/target/source/required-feature/profile/output
+binding, existing checkpoints, source/tool/lease revalidation, bounded diagnostics, immutable
+executable capture and cleanup custody. Update affected public callers for the explicit optional
+observation rather than returning a misleading empty feature set. Compare matched complete
+no-edit/body/private-structure workflows against the current six-segment baseline and execute
+the existing independent native Cargo consumer, failure/stale controls and relevant Editor
+build-facts regressions. Full R12, foreign execution and paused UI/DPI scope remain open.
+
+The original exact binding, decoder and cleanup CPU cohort passes 44/44 in `16fc6ee6`;
+the independent declaration/decoder API consumer passes 3/3 in `d836b769`. Existing actual
+native/foreign Cargo consumers pass 2/2 in `963fd950`, retaining dependency-qualified
+`required-features`, metadata-only decoy features, failed compilation diagnostics, source drift,
+revocation, immutable last-good output and source-removed native execution.
+
+Complete run `c4051bab` passes all eighteen game workflows in 424.893 seconds. Metadata/recheck
+medians fall from 1.5414/1.2933/1.3158 seconds to 0.1685/0.1586/0.1464 seconds across the
+three classes. Correct-running medians are 11.7132/21.8066/22.0341 seconds. The body compilation
+segment grows on this local run, so its full median is slower despite the metadata improvement.
+The [report](../benchmarks/2026-11-14-development-runtime-costs.md#declaration-only-cargo-preparation-successor)
+keeps this attribution and all raw observations separate from an overall speedup claim.
+
+An affected Editor compile exposes an inherited missing `KeyRestored` match arm in the original
+UI timeline adapter. Restore is a logical held-member admission, not a physical Press/Started
+edge. Explicitly pass it through without synthesizing navigation or activation; preserve the
+original input owner and execute the affected UI/Editor CPU regressions. This small integration
+correction does not resume paused UI feature work. Final verification is recorded with the
+qualified source and report rather than inferred from the independent Cargo tests.
+
+The corrected Editor build-facts cohort passes 11/11 in `7ca6cf6e`, and affected UI library
+tests pass 124/124 in `1a0b57af`. Root tooling and independent all-target correctness Clippy,
+affected root/Editor/UI and independent formatting pass. The declaration API migration is
+explicitly breaking: invocation `metadata_features()` returns an optional observation, and
+finite-build metadata digests now cover declaration-only responses. Strict full graph facts
+keep their existing interface and Editor lifecycle. Two independent bounded reviews find no
+remaining P1/P2; all four scoped agents close. No dependency versions change.
+
+The next startup attribution should distinguish namespace preparation, exact launch authority,
+native spawn and initialized READY within the existing game process owner. There is no evidence
+to remove the neutral keyboard inventory's full paused-frame/maintenance preconditions. Keep
+fresh restored presentation separate from READY and preserve complete workflow/state/failure
+and physical cleanup acceptance. This qualified preparation change does not complete R12 or
+resume paused Editor UI and physical mixed-DPI work.

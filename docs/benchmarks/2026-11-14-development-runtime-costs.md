@@ -306,3 +306,121 @@ observation contract, with no remaining P1/P2. All four scoped agents are closed
 process/file owners retain their earlier qualification; unrelated Editor, UI and complete
 framework matrices are not repeated. No shipping CPU saving, general cached-state mechanism,
 foreign native execution or full R12 completion follows from these results.
+
+## Declaration-Only Cargo Preparation Successor
+
+The qualified implementation is `215ef548c7871b69baa871057bb6382ebed4cc00`. The independent
+input-adapter integration correction is `eec5f0079009e35373d3d4cec500c9f1cd565b93`.
+Measurements precede these commits; the recorded production source is unchanged by committing.
+
+The synchronous finite build owner needs a selected workspace package/bin declaration before
+execution, then exact compiler-artifact binding and immutable executable capture. It does not
+consume the full dependency graph or metadata's workspace feature union. Full
+`CargoMetadataFacts` remains a strict graph observation for its existing consumers; the new
+`CargoBuildInvocation::from_metadata_declarations` instead requires explicit `resolve: null`
+from `cargo metadata --no-deps`. Both use the same bounded package/target selectors and original
+artifact decoder. Invocation metadata features are explicitly optional: unavailable differs from
+an observed empty set. Cargo still owns dependency-qualified target eligibility and actual
+compiled features. No graph cache, dependency resolver or process owner is added.
+
+An alternating command-only experiment uses the installed Rust 1.95.0 Cargo, the same actual
+Two-Level Game manifest, desktop features, native target, locked/offline environment, jobs one
+and shared root target. Each mode has one excluded warmup and five retained commands. The
+selected package ID, manifest, complete target declaration, workspace root and output directory
+are identical across all twelve outputs.
+
+| Cargo metadata mode | Retained median | Retained range | Output bytes |
+| --- | ---: | ---: | ---: |
+| Full dependency graph | 1063.828 ms | 988.259–1265.279 ms | 1,316,920 |
+| Declarations with `--no-deps` | 72.328 ms | 70.445–76.059 ms | 7,044 |
+
+This is command elapsed time and output size, not complete build/capture latency or compiler CPU.
+It uses the current source workspace, without physically isolated dependencies or controlled
+hardware/background load. The [raw command observations](data/2026-11-14-development-runtime/metadata-command-exploration.json)
+retain exact arguments and selected output facts. The complete workflow, independent actual
+Cargo consumer and affected build-facts regressions supply separate qualification below.
+
+The finite adapter changes only metadata acquisition/preparation. Existing checkpoints,
+source/tool/output leases, required-feature/profile/output artifact matching, compilation
+diagnostics and incomplete-cleanup custody remain. The supervised Editor still obtains full
+metadata. Its invocation digest now distinguishes unavailable from observed-empty workspace
+features while preserving the previous full-observation encoding.
+
+### Complete Declaration-Prepared Workflow
+
+Run `c4051bab-a36c-4066-b4e2-6b5d2f5ab907` passes all eighteen workflows in 424.893 seconds.
+The exact consumer, six Cargo timing intervals, native placement, source-edit classes and complete
+correct-running endpoint are unchanged from `workflow-after.json`. Each class retains five
+measurements after its warmup; every phase has zero returned failures. No-edit still yields one
+executable digest across six builds; the body and private-structure classes each yield six.
+Original probe retirement, fresh adopter, final source/state/presentation revalidation,
+post-adoption Step, activation, naturally resumed execution and normal native cleanup all remain.
+
+| Retained median | No edit | Body | Private structure |
+| --- | ---: | ---: | ---: |
+| Complete correct-running, previous full-metadata adapter | 12.6964 s | 20.9315 s | 23.1441 s |
+| Complete correct-running, declaration adapter | 11.7132 s | 21.8066 s | 22.0341 s |
+| Declaration-adapter complete range | 11.4283–15.9017 s | 20.3299–22.7349 s | 21.5621–22.1121 s |
+| Prepare | 9.9907 s | 19.9302 s | 20.1119 s |
+| Adopt | 0.6632 s | 0.7556 s | 0.7361 s |
+| Separate predecessor retirement | 0.3481 s | 0.4130 s | 0.3880 s |
+| Previous metadata/rechecks segment | 1.5414 s | 1.2933 s | 1.3158 s |
+| Declaration metadata/rechecks segment | 0.1685 s | 0.1586 s | 0.1464 s |
+| Previous compilation/checks/decoding/artifact segment | 1.9607 s | 10.4497 s | 12.2498 s |
+| Declaration-adapter compilation/checks/decoding/artifact segment | 2.2332 s | 12.4603 s | 12.4625 s |
+| Declaration-adapter complete CargoBuild | 2.9563 s | 13.0643 s | 13.0381 s |
+
+The same metadata/rechecks interval drops by roughly 1.1–1.4 seconds per build. These intervals
+include source/tool validation around the original command, so their complete-workflow values
+are distinct from the command-only 72 ms observation. No source/tool/lease check was deleted.
+Compilation variation offsets that reduction in the body cohort, whose complete median is
+slower on this run. The combined test duration also includes initial compilation, warmups,
+preparation and cleanup. Neither the total run nor the three complete medians establish a stable
+overall speedup, a CPU budget or a latency tail; do not sum independent phase medians.
+
+The [declaration workflow observations](data/2026-11-14-development-runtime/workflow-declarations.json)
+retain all eighteen samples. Original two-child startup remains about 3.16–3.20 seconds.
+Source inspection finds no justified startup deletion: the boundary includes namespace setup,
+exact executable admission, native creation and waiting for initialized READY. Existing neutral
+input installation and its maintenance have real original-owner preconditions. Further startup
+work should first distinguish those intervals, without treating READY as exact restored
+presentation or weakening launch/cleanup authority.
+
+### Declaration Preparation Verification
+
+The root Cargo facts/native owner selection passes 44/44 in
+`16fc6ee6-f6a0-4236-b9c7-d610e03073c6`, 1.773 seconds, with 846 cases outside the focused
+filter. The independent declaration/decoder API passes 3/3 in
+`d836b769-8f37-4419-989c-b1518b8483f3`, 0.090 seconds. Actual native and foreign Cargo consumers
+pass 2/2 in `963fd950-f547-4c68-bf3f-9f73ed8e3d17`, 157.590 seconds. They retain custom
+package/bin/profile selection, expanded/dependency-qualified features, deliberately wider full
+metadata, failed compilation diagnostics, stale-source rejection, revocation, immutable A after
+failed B, source-removed native Player execution and build-only WASI bytes. No foreign Nara
+Runtime execution follows from that target build.
+
+The affected Editor CPU compilation initially fails because an existing UI timeline match omits
+the runtime's `InputEventKind::KeyRestored`. Its documented logical hold admission has no
+physical Press/Started edge. The adapter now explicitly passes it through without synthesizing
+UI navigation or activation. This integration correction preserves the existing route and input
+owners and does not resume UI feature development. The initial failure is not counted as
+successful Editor qualification; its affected rerun has separate results.
+
+After the logical-input match correction, the affected Editor build-facts cohort passes 11/11
+in `7ca6cf6e-0a1c-4884-b18b-2c895aa6085e`, 1.244 seconds, with 214 cases outside the filter.
+Full metadata still requires its selected resolve node, actual compiler features remain separate,
+and the invocation digest distinguishes unobserved from resolved-empty features while preserving
+the original encoding of full observations. No native Editor or UI product qualification is
+claimed by these CPU build tests.
+
+The affected UI library passes 124/124 in `1a0b57af-a851-44b8-869e-7fc848b33e69`, 4.299 seconds,
+after the explicit restored-input integration correction. Root `project-tooling` library and
+independent all-target correctness Clippy pass; affected root/Editor/UI and independent workspace
+formatting pass. Existing style/dead-code warnings remain. No manifest/lock dependency versions
+change. Final document checks cover added targets/fragments, raw observation consistency and
+repository-byte SHA256 digests.
+
+Independent architecture and actual-diff correctness reviews find no remaining P1/P2. Four
+scoped agents are closed. The previous startup investigation remains a source-grounded next
+attribution, not a measured native-spawn/GPU bottleneck or an authorization to delete checks.
+All Cargo/native observations are terminal. Complete R12, representative latency tails, hard
+compiler interruption, foreign Nara execution and paused Editor/UI work remain open.

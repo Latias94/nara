@@ -56,6 +56,22 @@
     "native_scope": "parent DX12 hint; sealed child reports its actual discrete Vulkan adapter",
     "shared_root_scope": "root dependencies were not modified by this unit and are not frozen by child provenance; recorded HEAD/status are setup observations, not an isolated complete source snapshot"
   },
+  "declaration_preparation_successor": {
+    "base_revision": "fc53c8e",
+    "qualified_implementation_revision": "215ef548c7871b69baa871057bb6382ebed4cc00",
+    "input_adapter_integration_revision": "eec5f0079009e35373d3d4cec500c9f1cd565b93",
+    "source_state": "declaration preparation changes uncommitted during measurement; owning report records qualified revisions after commit",
+    "experiment_command": "cargo +1.95.0 metadata --locked --format-version 1 --manifest-path samples/two-level-game/Cargo.toml --filter-platform x86_64-pc-windows-msvc --no-default-features --features desktop; alternate with --no-deps",
+    "experiment_scope": "command-only exploration, one excluded warmup plus five retained commands per mode; same selected declaration/output facts, not full build/capture or isolated hardware/source evidence",
+    "root_cpu_run": "16fc6ee6-f6a0-4236-b9c7-d610e03073c6",
+    "independent_cpu_run": "d836b769-8f37-4419-989c-b1518b8483f3",
+    "independent_native_cargo_run": "963fd950-f547-4c68-bf3f-9f73ed8e3d17",
+    "complete_workflow_run": "c4051bab-a36c-4066-b4e2-6b5d2f5ab907",
+    "editor_build_facts_run": "7ca6cf6e-0a1c-4884-b18b-2c895aa6085e",
+    "ui_input_adapter_run": "1a0b57af-a851-44b8-869e-7fc848b33e69",
+    "complete_workflow_command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_cost --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+    "child_startup_disposition": "source inspection finds no justified deletion: the current startup total includes namespace preparation, exact executable validation, native creation and READY; further attribution must distinguish those before changing original authority or maintenance"
+  },
   "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
   "data_sha256": {
     "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
@@ -63,6 +79,8 @@
     "runtime-wall-exploratory.json": "01cb28de7a89d748e6de60ee2d24b56c31a7110638662285b3aaf618cf9facc7",
     "control-before.json": "fb927aca36b11e6edeb92cd9ada8e09e4a3ec91599962fe10f7c9c0febe8af91",
     "control-after.json": "d43078ed3e369d7953370b9dd24b82444425df28beb465511df91a1f009c3f8b",
-    "workflow-after.json": "cda33048754068158adeabb5fbdb89303de169d501897c10033c1c0168fc8516"
+    "workflow-after.json": "cda33048754068158adeabb5fbdb89303de169d501897c10033c1c0168fc8516",
+    "metadata-command-exploration.json": "2f03a22df6d5503bcebc88a91a63ff329384d572da041fb0ce007f00a3ce6f7a",
+    "workflow-declarations.json": "a263747574d09391c3f13fb7fc73e7f95c8fdcde65651d5869301ac652052f15"
   }
 }
