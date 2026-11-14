@@ -242,9 +242,8 @@ fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
             .material_extension
             .as_ref()
             .map(|material| WgpuMaterial2d {
-                definition: material.instance.definition(),
-                parameters: material.instance.parameters(),
-                texture: material.texture.clone(),
+                binding: material.binding.clone(),
+                textures: material.textures.clone(),
             }),
     }
 }

@@ -5,7 +5,8 @@
 **Amended**: 2026-10-23 for Image-owned immutable prepared captures; 2026-10-29 for
 source-independent Image/TileSet content and neutral prepared-content hashes; 2026-10-30 for
 scope-bound source declarations and frame-independent dependency maintenance; 2026-10-31 for
-actual source import recipes and explicit CPU target cooking
+actual source import recipes and explicit CPU target cooking; 2026-11-14 for material declaration,
+Shader artifact and original asset-publication custody
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -87,6 +88,19 @@ Rules:
   pipelines.
 - Gameplay-facing components store typed handles to domain assets or backend-neutral descriptors,
   not GPU handles.
+- R9b's material declaration owns stable semantic field IDs/types/version and a distinct binding
+  ABI projection. Typed Rust authoring and a future Shader-authored route join the same validated
+  declaration family; neither Rust type identity nor raw uniform bytes are persistent meaning.
+  Actual Encase encoding/layout and Naga compilation validate supported parameter and Shader
+  interfaces. Tooling Schema is generated from that declaration, not maintained separately.
+- Material Shader edits retain exact source observations, complete immutable artifacts and their
+  expected original asset mutation baseline. Current/failed publication delegates to the original
+  `Assets`/`AssetStates` pair; no material-local mirror grants a second current authority. Source
+  Hosts must use those same actual stores rather than synchronize independent current values.
+  Failed compilation retains usable last-good, while an old capture retains its original
+  declaration/artifact/value/resource cut independently from current publication and GPU caches.
+  Complete persistent/source/Runtime consumer qualification remains in the
+  [R9b unit](../../plans/2026-11-14-durable-material-and-shader-plan.md).
 - Hot reload updates asset versions and dependency graph state behind stable handles. Render
   backends invalidate and rebuild their GPU resource cache from the prepared asset/resource data.
 - Managed mutation admission binds the actual typed value store and state store before issuing an
@@ -265,7 +279,7 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   `AssetRefExportPolicy` to choose path output or stable-ID output without serializing runtime
   `AssetId` values.
 - `nara_material` owns `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`,
-  `Material2dDescriptor`, semantic image references, and material hashing/keying.
+  semantic material declarations, exact bound parameter/resource values and Shader artifacts.
 - `nara_image::ImageAsset` and `PreparedImageResource` intentionally do not store sampler data.
   Changing sampler policy is a material change, not an image import or prepare change.
 - Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet` inside

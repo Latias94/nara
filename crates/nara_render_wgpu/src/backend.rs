@@ -1680,6 +1680,18 @@ impl WgpuRenderBackend {
             let draws = lowered_views.iter();
             #[cfg(feature = "stock-ui")]
             let draws = draws.chain(std::iter::once(&lowered_ui));
+            let device = self
+                .device_owner
+                .device_queue()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .0;
+            let draws_for_limits = lowered_views.iter();
+            #[cfg(feature = "stock-ui")]
+            let draws_for_limits = draws_for_limits.chain(std::iter::once(&lowered_ui));
+            self.stock_quad.preflight_material_device_limits(
+                draws_for_limits.flat_map(|draw| draw.batches.iter()),
+                &device.limits(),
+            )?;
             self.stock_quad
                 .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))?;
             let draws = lowered_views.iter();

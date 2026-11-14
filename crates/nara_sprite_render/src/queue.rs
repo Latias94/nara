@@ -257,16 +257,28 @@ fn resolve_sprite_material(
         }),
         None => None,
     };
-    let material_extension = match sprite.material_extension {
-        Some(instance) => Some(PreparedMaterial2d {
-            texture: resolve_image(instance.texture(), prepared_images, stats)?,
-            instance,
-        }),
+    let material_extension = match &sprite.material_extension {
+        Some(binding) => {
+            let declaration = binding.generation().declaration();
+            let mut textures = Vec::with_capacity(declaration.textures().len());
+            for field in declaration.textures() {
+                let texture = *binding.textures().get(field.id())?;
+                textures.push((
+                    field.binding(),
+                    resolve_image(texture, prepared_images, stats)?,
+                ));
+            }
+            textures.sort_unstable_by_key(|(binding, _)| *binding);
+            Some(PreparedMaterial2d {
+                binding: binding.clone(),
+                textures,
+            })
+        }
         None => None,
     };
     let mut material = SpriteMaterialKey::from_material(sprite.material);
     if let Some(extension) = &material_extension {
-        material.alpha_mode = extension.instance.definition().alpha_mode;
+        material.alpha_mode = extension.binding.generation().declaration().alpha_mode();
     }
     Some((material, image, material_extension, sprite.texture_region))
 }

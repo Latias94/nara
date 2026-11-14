@@ -1,6 +1,7 @@
 #![cfg(feature = "stock-sprite")]
 
 use super::*;
+use crate::readback_tests::{material_binding, material_generation};
 use crate::{
     WgpuImageOutput, WgpuPolicyDefinition, WgpuSceneColor, WgpuStockCapture, WgpuStockPolicy,
     WgpuWorldColor,
@@ -12,9 +13,7 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
-use nara_material::{
-    AlphaMode2d, Material2dDefinition, Material2dDefinitions, Material2dInput, SamplerDescriptor,
-};
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{
     Camera2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderImage2d, RenderTarget,
     ViewportRect, WorldCanvas, build_render_frame_packet_with_world_canvas,
@@ -26,21 +25,7 @@ use nara_window::{Window, WindowResolution};
 
 const CAMERA_CLEAR: LinearColor = LinearColor::rgba(0.8, 0.4, 0.2, 0.25);
 const BAR_CLEAR: LinearColor = LinearColor::rgba(0.125, 0.75, 0.375, 0.5);
-const MATERIAL_FRAGMENT: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return material_parameters; }";
-static MATERIALS: [Material2dDefinition; 2] = [
-    Material2dDefinition {
-        id: "test.stock-alpha.opaque",
-        fragment_shader: MATERIAL_FRAGMENT,
-        input: Material2dInput::SPRITE_FRAGMENT_V1,
-        alpha_mode: AlphaMode2d::Opaque,
-    },
-    Material2dDefinition {
-        id: "test.stock-alpha.blend",
-        fragment_shader: MATERIAL_FRAGMENT,
-        input: Material2dInput::SPRITE_FRAGMENT_V1,
-        alpha_mode: AlphaMode2d::Blend,
-    },
-];
+const MATERIAL_FRAGMENT: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return material_parameters.value; }";
 
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
@@ -199,10 +184,18 @@ fn captured_stock(
             .unwrap();
         handle
     });
-    let materials = Material2dDefinitions::new(&MATERIALS).unwrap();
     app.insert_resource(images).unwrap();
     app.insert_resource(states).unwrap();
-    app.insert_resource(materials.clone()).unwrap();
+    let opaque_generation = material_generation(
+        "test.stock-alpha.opaque",
+        AlphaMode2d::Opaque,
+        MATERIAL_FRAGMENT,
+    );
+    let blend_generation = material_generation(
+        "test.stock-alpha.blend",
+        AlphaMode2d::Blend,
+        MATERIAL_FRAGMENT,
+    );
     let world = app.world_mut().unwrap();
     let mut entities = Vec::new();
     for (order, color) in [(0, LinearColor::rgba(0.75, 0.125, 0.5, 0.625)), (1, clear)] {
@@ -254,7 +247,12 @@ fn captured_stock(
                     6 => ("test.stock-alpha.opaque", [0.25, 0.625, 0.875, 0.0]),
                     _ => ("test.stock-alpha.blend", [0.75, 0.125, 0.5, 0.5]),
                 };
-                entity.insert(materials.instantiate(id, parameters, textures[0]).unwrap());
+                let generation = if id == "test.stock-alpha.opaque" {
+                    &opaque_generation
+                } else {
+                    &blend_generation
+                };
+                entity.insert(material_binding(generation, parameters, textures[0]));
             }
             entities.push(entity.id());
         }

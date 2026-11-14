@@ -5,9 +5,7 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
-use nara_material::{
-    AlphaMode2d, Material2dDefinition, Material2dDefinitions, Material2dInput, SamplerDescriptor,
-};
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
 use nara_sprite::Sprite;
 use nara_sprite_render::__private::SpriteBatches;
@@ -15,19 +13,16 @@ use nara_tilemap::{TileCell, TileCoord, TileIndex, Tilemap};
 use nara_transform::Transform2d;
 
 use crate::{
-    quad::WgpuQuadBatch,
-    readback_tests::{readback_pixel, render_batches_to_rgba},
+    quad::{QuadShaderSourceGuard, WgpuMaterial2dPipelineKey, WgpuQuadBatch},
+    readback_tests::{
+        material_binding, material_generation, readback_pixel, render_batches_to_rgba,
+    },
     sprite::collect_sprite_quad_batches,
 };
 
 mod visibility;
 
-static MATERIALS: [Material2dDefinition; 1] = [Material2dDefinition {
-    id: "probe.palette",
-    fragment_shader: include_str!("../../../examples/support/palette_material.wgsl"),
-    input: Material2dInput::SPRITE_FRAGMENT_V1,
-    alpha_mode: AlphaMode2d::Blend,
-}];
+const PALETTE_MATERIAL_FRAGMENT: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { let width = i32(textureDimensions(material_texture).x); let index = clamp(i32(round(sampled.r * f32(width - 1) + material_parameters.value.x)), 0, width - 1); let palette_color = textureLoad(material_texture, vec2<i32>(index, 0), 0); let color = mix(sampled.rgb, palette_color.rgb, clamp(material_parameters.value.y, 0.0, 1.0)); return vec4<f32>(color * tint.rgb, sampled.a * palette_color.a * tint.a); }";
 
 #[test]
 fn native_ordered_tiles_and_palette_material_render_captured_pixels() {
@@ -59,7 +54,8 @@ fn invalid_material_shader_is_a_local_content_rejection() {
         .iter_mut()
         .find_map(|batch| batch.material_extension.as_mut())
         .unwrap();
-    material.definition.fragment_shader = "this is not valid WGSL";
+    let key = WgpuMaterial2dPipelineKey::new(material.binding.generation());
+    let _native_rejection = QuadShaderSourceGuard::invalid(&key);
 
     assert!(matches!(
         render_batches_to_rgba(&batches),
@@ -101,8 +97,11 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
     );
     app.insert_resource(images).unwrap();
     app.insert_resource(states).unwrap();
-    let materials = Material2dDefinitions::new(&MATERIALS).unwrap();
-    app.insert_resource(materials.clone()).unwrap();
+    let generation = material_generation(
+        "probe.palette",
+        AlphaMode2d::Blend,
+        PALETTE_MATERIAL_FRAGMENT,
+    );
     let world = app.world_mut().unwrap();
     let mut entities = vec![
         world
@@ -168,9 +167,7 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
                     Sprite::from_texture(indices, Vec2::splat(16.0))
                         .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
                         .with_layer(1),
-                    materials
-                        .instantiate("probe.palette", [offset, 1.0, 0.0, 0.0], texture)
-                        .unwrap(),
+                    material_binding(&generation, [offset, 1.0, 0.0, 0.0], texture),
                     Transform2d::from_translation(center),
                 ))
                 .id(),

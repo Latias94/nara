@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-04 (shared Feature/native frontend device requirements)
+**Last Revised**: 2026-11-14 (exact stock material declaration and Shader artifact realization)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -341,6 +341,31 @@ policy/capture adapter. Picking retains its own exact source geometry rather tha
 downcast to the default renderer. The [production unit](../render-program-production-design.md#next-production-unit-public-stock-composition)
 owns implementation, independent blur/second-effect consumers and affected native qualification.
 This accepted selection is not evidence that those consumers already pass.
+
+### Exact Stock Material Realization
+
+The [R9b unit](../../plans/2026-11-14-durable-material-and-shader-plan.md) replaces the stock
+Sprite/Tilemap static-text extension through one admitted declaration and its actual compiled
+Shader interface. Captures retain their exact generation, uniform bytes and prepared Image
+versions. Native realization consumes those artifacts without looking up a current material by
+name. Its pipeline key includes the actual Shader artifact, binding ABI, alpha and target facts;
+semantic IDs, publication sequence, uniform values and ordinary texture content are not Shader
+specializations. Binding layout, uniform/texture capacity preflight and original submission-held
+resources change together. GPU content rejection, allocation deferral and device loss retain
+their existing distinct outcomes.
+
+Continuous Shader editing must not make acceleration caches an unbounded history owner.
+Bound retained Ready/Rejected entries and remove orphaned layout lookup entries only after
+the complete prepare operation has produced its independently held native draw resources or
+failed. Cache capacity does not cap a legal operation's working set. An evicted old capture may
+recreate its exact pipeline without acquiring current publication authority; eviction cannot
+revoke prepared or submitted resources or replace their original completion prefix.
+
+Same-epoch last-good publication belongs to the original asset mutation authority, not pipeline
+cache retention. A late old capture can realize its own exact native resources without publishing
+itself over a newer current declaration. Cross-Feature inputs still require complete graph
+versions and declared reads. This bounded stock-material selection neither establishes arbitrary
+Shader Graph/frontends nor qualifies the still-active persistent, native and interleaving tests.
 
 ## Candidate Extensions, Not Accepted Decisions
 

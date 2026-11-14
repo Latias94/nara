@@ -442,10 +442,9 @@ fn required_quad_pipeline_keys(
         .map(|batch| crate::quad::WgpuQuadPipelineKey {
             format,
             alpha_mode: batch.material.alpha_mode,
-            material: batch
-                .material_extension
-                .as_ref()
-                .map(|material| material.definition),
+            material: batch.material_extension.as_ref().map(|material| {
+                crate::quad::WgpuMaterial2dPipelineKey::new(material.binding.generation())
+            }),
         })
     {
         if !keys.contains(&key) {

@@ -2,22 +2,31 @@ use nara::ecs::{With, schedule::IntoScheduleConfigs};
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
-use nara::material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
+use nara::material::{
+    Material2dDeclaration, Material2dLibrary, MaterialParameters, MaterialTextureDeclaration,
+};
 use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::{advanced_prelude::*, backend_prelude::*};
-use std::error::Error;
+use std::{collections::BTreeMap, error::Error, sync::Arc};
 
 #[path = "support/desktop_run.rs"]
 mod desktop_run;
 #[path = "support/procedural_image.rs"]
 mod procedural_image;
 
-static MATERIALS: [Material2dDefinition; 1] = [Material2dDefinition {
-    id: "example.palette",
-    fragment_shader: include_str!("support/palette_material.wgsl"),
-    input: Material2dInput::SPRITE_FRAGMENT_V1,
-    alpha_mode: AlphaMode2d::Blend,
-}];
+const MATERIAL_ID: &str = "example.palette";
+
+#[derive(MaterialParameters)]
+struct PaletteParameters {
+    #[material(id = "palette.offset")]
+    x: f32,
+    #[material(id = "palette.strength")]
+    y: f32,
+    #[material(id = "palette.reserved-z")]
+    z: f32,
+    #[material(id = "palette.reserved-w")]
+    w: f32,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
@@ -33,7 +42,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         WgpuBackendPlugins,
         WgpuStockSpritePlugin,
     ))?;
-    app.insert_resource(Material2dDefinitions::new(&MATERIALS)?)?;
+    let mut materials = Material2dLibrary::default();
+    materials.declare(Material2dDeclaration::from_parameters::<PaletteParameters>(
+        MATERIAL_ID,
+        1,
+        AlphaMode2d::Blend,
+        vec![MaterialTextureDeclaration::new(
+            "palette",
+            "material_texture",
+            1,
+        )?],
+    )?)?;
+    let shader_path = nara::asset::AssetPath::new("examples/support/palette_material.wgsl")?;
+    let read_shader = |path: &nara::asset::AssetPath| match path.as_str() {
+        "examples/support/palette_material.wgsl" => Ok(Arc::<str>::from(include_str!(
+            "support/palette_material.wgsl"
+        ))),
+        _ => Err(format!("unknown palette shader source {path}")),
+    };
+    let prepared =
+        materials.prepare_update(MATERIAL_ID, std::slice::from_ref(&shader_path), read_shader)?;
+    materials.publish(&prepared, read_shader)?;
+    app.insert_resource(materials)?;
     app.insert_resource(nara::transform::FixedTransformInterpolation)?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.add_systems(
@@ -63,7 +93,7 @@ fn setup_scene(
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
     mut events: ResMut<AssetEvents>,
-    materials: Res<Material2dDefinitions>,
+    materials: Res<Material2dLibrary>,
 ) {
     let indices = procedural_image::publish_rgba(
         &mut asset_server,
@@ -93,6 +123,9 @@ fn setup_scene(
         ))
         .id();
     let mut entities = vec![camera];
+    let generation = materials
+        .current(MATERIAL_ID)
+        .expect("the palette generation is published at startup");
     for (x, offset) in [(-140.0, 0.0), (140.0, 1.0)] {
         entities.push(
             commands
@@ -100,8 +133,16 @@ fn setup_scene(
                     PaletteMotion,
                     Sprite::from_texture(indices, Vec2::new(200.0, 200.0))
                         .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
-                    materials
-                        .instantiate("example.palette", [offset, 1.0, 0.0, 0.0], palette)
+                    generation
+                        .bind(
+                            &PaletteParameters {
+                                x: offset,
+                                y: 1.0,
+                                z: 0.0,
+                                w: 0.0,
+                            },
+                            BTreeMap::from([("palette".to_owned(), palette)]),
+                        )
                         .unwrap(),
                     Transform2d::from_translation(Vec2::new(x, 0.0)),
                 ))

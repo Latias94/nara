@@ -1,12 +1,12 @@
 use super::*;
-use std::time::Duration;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use nara_app::{
     App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
     RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 use nara_asset::{
-    AssetEvents, AssetSourcePath, AssetStates, Assets, Handle, ImportDependencyDigest,
+    AssetEvents, AssetPath, AssetSourcePath, AssetStates, Assets, Handle, ImportDependencyDigest,
     ImportRecipe, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
@@ -19,13 +19,53 @@ use nara_image::{
     ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
     PreparedImageSnapshot, PreparedImages, image_resource_key,
 };
-use nara_material::{AlphaMode2d, SamplerDescriptor};
+use nara_material::{
+    AlphaMode2d, Material2dDeclaration, Material2dLibrary, MaterialParameters,
+    MaterialTextureDeclaration, SamplerDescriptor,
+};
 use nara_render::{Camera2d, ExtractedView, RenderImage2d, RenderTarget, ViewportRect};
 use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{Transform2d, TransformPlugin};
 
+mod material;
 mod visibility;
+
+#[derive(MaterialParameters)]
+struct PaletteParameters {
+    #[material(id = "palette.offset")]
+    x: f32,
+    #[material(id = "palette.strength")]
+    y: f32,
+    #[material(id = "palette.reserved-z")]
+    z: f32,
+    #[material(id = "palette.reserved-w")]
+    w: f32,
+}
+
+fn palette_materials(id: &str, alpha_mode: AlphaMode2d) -> Material2dLibrary {
+    let mut materials = Material2dLibrary::default();
+    materials
+        .declare(
+            Material2dDeclaration::from_parameters::<PaletteParameters>(
+                id,
+                1,
+                alpha_mode,
+                vec![MaterialTextureDeclaration::new("palette", "material_texture", 1).unwrap()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let path = AssetPath::new("palette.wgsl").unwrap();
+    let read_shader = |_: &AssetPath| {
+        Ok(Arc::<str>::from(include_str!(
+            "../../../examples/support/palette_material.wgsl"
+        )))
+    };
+    let prepared = materials.prepare_update(id, &[path], read_shader).unwrap();
+    materials.publish(&prepared, read_shader).unwrap();
+    materials
+}
 
 fn test_view() -> ExtractedView {
     ExtractedView {
@@ -792,17 +832,20 @@ fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
 
 #[test]
 fn custom_material_captures_second_texture_and_preserves_stock_order() {
-    use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
-    static DEFINITIONS: [Material2dDefinition; 1] = [Material2dDefinition {
-        id: "test.palette",
-        fragment_shader: include_str!("../../../examples/support/palette_material.wgsl"),
-        input: Material2dInput::SPRITE_FRAGMENT_V1,
-        alpha_mode: AlphaMode2d::Opaque,
-    }];
     let texture = nara_asset::allocate_anonymous_handle().unwrap();
-    let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
-    let material = definitions
-        .instantiate("test.palette", [1.0, 0.5, 0.0, 0.0], texture)
+    let materials = palette_materials("test.palette", AlphaMode2d::Opaque);
+    let material = materials
+        .current("test.palette")
+        .unwrap()
+        .bind(
+            &PaletteParameters {
+                x: 1.0,
+                y: 0.5,
+                z: 0.0,
+                w: 0.0,
+            },
+            BTreeMap::from([("palette".to_owned(), texture)]),
+        )
         .unwrap();
     let mut app = sprite_app();
     insert_loaded_image(&mut app, texture);
@@ -827,14 +870,14 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
     let custom = world
         .spawn((
             Sprite::from_color(Vec2::ONE, Color::WHITE),
-            material,
+            material.clone(),
             Transform2d::default(),
         ))
         .id();
     let mut tilemap = Tilemap::new(Vec2::ONE);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
     let tile = world
-        .spawn((tilemap, material, Transform2d::default()))
+        .spawn((tilemap, material.clone(), Transform2d::default()))
         .id();
     place_roots(world, &[camera, stock, custom, tile]);
     let mut runtime = RuntimeInstance::start(app).unwrap();
@@ -855,12 +898,14 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
     assert!(queued[0].material_extension.is_none());
     for item in &queued[1..] {
         let extension = item.material_extension.as_ref().unwrap();
-        assert_eq!(extension.instance, material);
+        assert_eq!(extension.binding, material);
+        assert_eq!(extension.textures.len(), 1);
+        assert_eq!(extension.textures[0].0, 1);
         assert_eq!(
-            extension.texture.identity().key(),
+            extension.textures[0].1.identity().key(),
             image_resource_key(texture)
         );
-        assert_eq!(extension.texture.resource().pixels(), &[255; 16]);
+        assert_eq!(extension.textures[0].1.resource().pixels(), &[255; 16]);
         assert_eq!(item.material.alpha_mode, AlphaMode2d::Opaque);
     }
     assert_eq!(batches.total_instances(), 3);
@@ -868,19 +913,21 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
 
 #[test]
 fn missing_custom_material_texture_skips_only_that_item() {
-    use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
-    static DEFINITIONS: [Material2dDefinition; 1] = [Material2dDefinition {
-        id: "test.palette",
-        fragment_shader: "fn material_fragment() {}",
-        input: Material2dInput::SPRITE_FRAGMENT_V1,
-        alpha_mode: AlphaMode2d::Blend,
-    }];
-    let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
-    let material = definitions
-        .instantiate(
-            "test.palette",
-            [0.0; 4],
-            nara_asset::allocate_anonymous_handle().unwrap(),
+    let materials = palette_materials("test.palette", AlphaMode2d::Blend);
+    let material = materials
+        .current("test.palette")
+        .unwrap()
+        .bind(
+            &PaletteParameters {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 0.0,
+            },
+            BTreeMap::from([(
+                "palette".to_owned(),
+                nara_asset::allocate_anonymous_handle().unwrap(),
+            )]),
         )
         .unwrap();
     let mut app = sprite_app();

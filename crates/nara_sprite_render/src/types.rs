@@ -4,7 +4,7 @@ use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
-use nara_material::{AlphaMode2d, Material2dInstance, SamplerDescriptor};
+use nara_material::{AlphaMode2d, Material2dBinding, SamplerDescriptor};
 use nara_render::RenderTarget;
 use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
@@ -38,7 +38,7 @@ pub struct ExtractedSprite {
     pub kind: ExtractedSpriteKind,
     pub material: ExtractedSpriteMaterial,
     pub image_content: Option<ImageContentSnapshot>,
-    pub material_extension: Option<Material2dInstance>,
+    pub material_extension: Option<Material2dBinding>,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,
     pub world_x_axis: Vec2,
@@ -192,10 +192,12 @@ pub struct QueuedSpriteItem {
     pub instance: SpriteInstance,
 }
 
+/// One captured material binding and its exact prepared Image versions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedMaterial2d {
-    pub instance: Material2dInstance,
-    pub texture: PreparedImageSnapshot,
+    pub binding: Material2dBinding,
+    /// Additional textures sorted by their declared shader binding.
+    pub textures: Vec<(u32, PreparedImageSnapshot)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

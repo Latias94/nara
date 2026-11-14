@@ -33,6 +33,7 @@ members = [
     "crates/nara_input",
     "crates/nara_gameplay",
     "crates/nara_material",
+    "crates/nara_material_derive",
     "crates/nara_project",
     "crates/nara_reflect",
     "crates/nara_reflect_derive",
@@ -78,6 +79,7 @@ nara_identity = { path = "crates/nara_identity" }
 nara_input = { path = "crates/nara_input" }
 nara_gameplay = { path = "crates/nara_gameplay" }
 nara_material = { path = "crates/nara_material" }
+nara_material_derive = { path = "crates/nara_material_derive" }
 nara_project = { path = "crates/nara_project" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_reflect_derive = { path = "crates/nara_reflect_derive" }
@@ -109,12 +111,14 @@ dear-imgui-rs = { version = "=0.21.0", features = ["multi-viewport"] }
 dear-imgui-wgpu = { version = "=0.21.0", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
 dear-imgui-winit = { version = "=0.21.0", features = ["multi-viewport"] }
 dunce = "1.0.5"
+encase = "=0.12.1"
 glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 icu_segmenter = { version = "2.2", default-features = false, features = ["compiled_data"] }
 notify = "8.2.0"
+naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007", features = ["wgsl-in"] }
 parley = { version = "=0.11.0", default-features = false, features = ["std", "complex-scripts"] }
 taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 raw-window-handle = "0.6"
@@ -243,6 +247,7 @@ runtime-2d = [
     "runtime-core",
     "dep:nara_image",
     "dep:nara_material",
+    "nara_material/material",
     "dep:nara_render",
     "dep:nara_sprite",
     "dep:nara_tilemap",

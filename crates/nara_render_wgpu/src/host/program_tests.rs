@@ -7,6 +7,8 @@ use crate::{
 };
 
 mod alpha;
+#[cfg(feature = "stock-sprite")]
+mod material;
 
 #[cfg(feature = "stock-ui")]
 mod ui_mesh;

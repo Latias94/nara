@@ -1363,8 +1363,7 @@ mod tests {
 
         use crate::{
             quad::{
-                WgpuQuadPipelineDrawRef, create_material_bind_group_layout,
-                create_quad_batch_buffers, create_quad_pipeline,
+                WgpuQuadPipelineDrawRef, create_quad_batch_buffers, create_quad_pipeline,
                 create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
             },
             readback_tests::ReadbackGpu,
@@ -1403,7 +1402,7 @@ mod tests {
         let target = RenderTarget::Window(WindowId::PRIMARY);
         let gpu = ReadbackGpu::new();
         let texture_layout = create_quad_texture_bind_group_layout(&gpu.device).unwrap();
-        let material_layout = create_material_bind_group_layout(&gpu.device).unwrap();
+        let material_layouts = crate::quad::WgpuMaterial2dLayouts::new();
         let mut texture_cache = WgpuSpriteTextureCache::default();
         let mut frame_index = 0;
         // Every readback uses the original device/queue and texture cache, including old
@@ -1422,15 +1421,11 @@ mod tests {
                 let pipelines = crate::required_quad_pipeline_keys(&batches, format)
                     .into_iter()
                     .map(|key| {
-                        let pipeline = create_quad_pipeline(
-                            device,
-                            key,
-                            &texture_layout,
-                            Some(&material_layout),
-                        )?;
+                        let pipeline =
+                            create_quad_pipeline(device, key.clone(), &texture_layout, None)?;
                         Ok(WgpuQuadPipelineDrawRef {
                             alpha_mode: key.alpha_mode,
-                            material: key.material,
+                            material: key.material.clone(),
                             pipeline: pipeline.pipeline,
                         })
                     })
@@ -1439,7 +1434,7 @@ mod tests {
                     preparation,
                     &batches,
                     &texture_layout,
-                    Some(&material_layout),
+                    &material_layouts,
                     &mut texture_cache,
                     frame_index,
                 )

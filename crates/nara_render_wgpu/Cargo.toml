@@ -13,7 +13,7 @@ bytemuck = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_ecs.workspace = true
 nara_image = { workspace = true, optional = true, features = ["render-prepare"] }
-nara_material = { workspace = true, optional = true }
+nara_material = { workspace = true, optional = true, features = ["material"] }
 nara_render = { workspace = true, features = ["runtime"] }
 nara_sprite_render = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true, features = ["runtime"] }

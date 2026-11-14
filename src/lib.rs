@@ -258,8 +258,12 @@ pub mod prelude {
     };
     #[cfg(feature = "runtime-2d")]
     pub use nara_material::{
-        AddressMode, AlphaMode2d, FilterMode, Material2dDefinition, Material2dDefinitions,
-        Material2dError, Material2dInput, Material2dInstance, SamplerDescriptor,
+        AddressMode, AlphaMode2d, FilterMode, Material2dBinding, Material2dDeclaration,
+        Material2dGeneration, Material2dLibrary, MaterialDeclarationError, MaterialParameterKind,
+        MaterialParameterLayout, MaterialParameterValue, MaterialParameterValues,
+        MaterialParameters, MaterialShaderArtifact, MaterialShaderError,
+        MaterialTextureDeclaration, MaterialUniformField, MaterialUpdateError,
+        PreparedMaterial2dUpdate, SamplerDescriptor,
     };
     #[cfg(any(
         feature = "runtime-2d",

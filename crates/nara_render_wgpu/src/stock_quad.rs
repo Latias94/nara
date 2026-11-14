@@ -10,10 +10,10 @@ use crate::{
     output::OutputReservation,
     preparation::WgpuFeatureAllocation,
     quad::{
-        WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipeline, WgpuQuadPipelineDrawRef,
-        WgpuQuadPipelineKey, admit_quad_instance_buffers, create_material_bind_group_layout,
-        create_quad_batch_buffers, create_quad_pipeline, create_quad_texture_bind_group_layout,
-        quad_batch_draw_stats,
+        WgpuMaterial2dLayouts, WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipeline,
+        WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
+        create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
+        create_quad_texture_bind_group_layout, quad_batch_draw_stats,
     },
     submission::WgpuSubmissionReservation,
     texture::{
@@ -23,6 +23,8 @@ use crate::{
 };
 #[cfg(test)]
 use crate::{PreparedSubmitterDraw, frame::WgpuLoweredFrameDraw};
+
+pub(crate) const MAX_CACHED_QUAD_PIPELINES: usize = 64;
 
 /// Shared quad native work. Domain facts and one-shot completion remain in the domain adapter.
 #[derive(Debug, Default)]
@@ -98,7 +100,8 @@ pub(crate) struct StockImagePreflight {
 /// Additional engine-owned capacity for one candidate's captured stock work.
 ///
 /// This counts inline records, Arc counters, automatic retention boxes and Vec capacity, using
-/// actual Rust type sizes. It excludes image pixels, indirect user payloads, WGPU driver memory,
+/// actual Rust type sizes and encoded material uniforms. It excludes image pixels, other indirect
+/// user payloads, WGPU driver memory,
 /// allocator rounding and BTree node/allocation overhead. It is an envelope, not live memory.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StockPreparationCost {
@@ -116,23 +119,47 @@ impl StockPreparationCost {
         let overflow = || GraphError::LimitExceeded(LimitKind::MetadataBytes);
         let mut count = 0_usize;
         let mut extensions = 0_usize;
+        let mut material_textures = 0_usize;
+        let mut material_bytes = 0_usize;
         for batch in batches.filter(|batch| !batch.instances.is_empty()) {
             count = count.checked_add(1).ok_or_else(overflow)?;
-            if batch.material_extension.is_some() {
+            if let Some(material) = &batch.material_extension {
                 extensions = extensions.checked_add(1).ok_or_else(overflow)?;
+                material_textures = material_textures
+                    .checked_add(material.textures.len())
+                    .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
+                material_bytes = material_bytes
+                    .checked_add(material.binding.uniform_bytes().len())
+                    .ok_or_else(overflow)?;
             }
         }
-        Self::for_counts(count, extensions)
+        Self::for_resources(count, extensions, material_textures, material_bytes)
     }
 
+    #[cfg(test)]
     fn for_counts(batches: usize, extensions: usize) -> Result<Self, WgpuRenderProgramError> {
-        // Texture allocation guard + upload + cached binding/view, followed by buffer guard +
-        // the actual buffer/guard pair. An extension repeats this for its image and uniform.
+        Self::for_resources(batches, extensions, extensions, 0)
+    }
+
+    fn for_resources(
+        batches: usize,
+        extensions: usize,
+        material_textures: usize,
+        material_bytes: usize,
+    ) -> Result<Self, WgpuRenderProgramError> {
         let textures = batches
+            .checked_add(material_textures)
+            .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
+        let buffers = batches
             .checked_add(extensions)
             .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
         let custody_entries = textures
-            .checked_mul(5)
+            .checked_mul(3)
+            .and_then(|count| {
+                buffers
+                    .checked_mul(2)
+                    .and_then(|extra| count.checked_add(extra))
+            })
             .ok_or(GraphError::LimitExceeded(LimitKind::SubmissionResources))?;
         if batches == 0 {
             return Ok(Self::default());
@@ -176,7 +203,19 @@ impl StockPreparationCost {
             (capture_capacity, size_of::<WgpuQuadPipelineDrawRef>()),
             (pipeline_capacity, size_of::<CachedQuadPipeline>()),
             (textures, texture_records),
-            (textures, buffer_records),
+            (buffers, buffer_records),
+            (
+                material_textures.checked_mul(4).ok_or_else(overflow)?,
+                size_of::<WgpuCachedImageView>()
+                    + size_of::<wgpu::BindGroupEntry<'_>>()
+                    + size_of::<wgpu::BindGroupLayoutEntry>(),
+            ),
+            (extensions, size_of::<([u8; 32], wgpu::BindGroupLayout)>()),
+            (
+                extensions.checked_mul(4).ok_or_else(overflow)?,
+                size_of::<wgpu::BindGroupEntry<'_>>() + size_of::<wgpu::BindGroupLayoutEntry>(),
+            ),
+            (material_bytes, 1),
         ] {
             let table = count
                 .checked_mul(stride)
@@ -213,7 +252,13 @@ impl StockImagePreflight {
         Ok(())
     }
 
-    pub(crate) fn validate(&self, resources: &StockQuadResources) -> Result<(), WgpuRenderError> {
+    pub(crate) fn validate(
+        &self,
+        resources: &StockQuadResources,
+        limits: &wgpu::Limits,
+    ) -> Result<(), WgpuRenderError> {
+        let batches = self.batches.iter().flat_map(|batches| batches.iter());
+        resources.preflight_material_device_limits(batches, limits)?;
         resources.preflight_image_residency(self.batches.iter().flat_map(|batches| batches.iter()))
     }
 
@@ -221,6 +266,13 @@ impl StockImagePreflight {
     /// The caller admits compiled metadata plus this cost and reserves complete original custody.
     pub(crate) fn cost(&self) -> Result<StockPreparationCost, WgpuRenderProgramError> {
         StockPreparationCost::for_batches(self.batches.iter().flat_map(|batches| batches.iter()))
+    }
+
+    pub(crate) fn allocation_bytes(
+        &self,
+        resources: &StockQuadResources,
+    ) -> Result<u64, WgpuRenderError> {
+        resources.pending_allocation_bytes(self.batches.iter().flat_map(|batches| batches.iter()))
     }
 }
 
@@ -234,10 +286,10 @@ enum CachedQuadPipeline {
 }
 
 impl CachedQuadPipeline {
-    fn key(&self) -> WgpuQuadPipelineKey {
+    fn key(&self) -> &WgpuQuadPipelineKey {
         match self {
-            Self::Ready(pipeline) => pipeline.key,
-            Self::Rejected { key, .. } => *key,
+            Self::Ready(pipeline) => &pipeline.key,
+            Self::Rejected { key, .. } => key,
         }
     }
 }
@@ -249,7 +301,7 @@ impl CachedQuadPipeline {
 #[derive(Debug, Default)]
 pub(crate) struct StockQuadResources {
     texture_layout: Option<wgpu::BindGroupLayout>,
-    material_layout: Option<wgpu::BindGroupLayout>,
+    material_layouts: WgpuMaterial2dLayouts,
     pipelines: Vec<CachedQuadPipeline>,
     #[cfg(test)]
     pipeline_attempts: usize,
@@ -258,6 +310,36 @@ pub(crate) struct StockQuadResources {
 }
 
 impl StockQuadResources {
+    pub(crate) fn pending_allocation_bytes<'a>(
+        &self,
+        batches: impl Iterator<Item = &'a WgpuQuadBatch> + Clone,
+    ) -> Result<u64, WgpuRenderError> {
+        let mut bytes = self.textures.pending_allocation_bytes(batches.clone())?;
+        for batch in batches.filter(|batch| !batch.instances.is_empty()) {
+            bytes = bytes
+                .checked_add(
+                    u64::try_from(batch.instances.len())
+                        .ok()
+                        .and_then(|count| {
+                            count.checked_mul(size_of::<crate::quad::WgpuQuadInstance>() as u64)
+                        })
+                        .ok_or(crate::preparation::NativePreparationError::ResourceCapacity)?,
+                )
+                .ok_or(crate::preparation::NativePreparationError::ResourceCapacity)?;
+            if let Some(material) = &batch.material_extension {
+                let uniform = material.binding.uniform_bytes().len() as u64;
+                let aligned = uniform
+                    .checked_add(wgpu::COPY_BUFFER_ALIGNMENT - 1)
+                    .map(|size| size & !(wgpu::COPY_BUFFER_ALIGNMENT - 1))
+                    .ok_or(crate::preparation::NativePreparationError::ResourceCapacity)?;
+                bytes = bytes
+                    .checked_add(aligned)
+                    .ok_or(crate::preparation::NativePreparationError::ResourceCapacity)?;
+            }
+        }
+        Ok(bytes)
+    }
+
     pub(crate) fn preflight_image_residency<'a>(
         &self,
         batches: impl Iterator<Item = &'a WgpuQuadBatch>,
@@ -265,6 +347,41 @@ impl StockQuadResources {
         self.textures
             .preflight_image_residency(batches)
             .map_err(WgpuRenderError::from)
+    }
+
+    pub(crate) fn preflight_material_device_limits<'a>(
+        &self,
+        batches: impl Iterator<Item = &'a WgpuQuadBatch>,
+        limits: &wgpu::Limits,
+    ) -> Result<(), WgpuRenderError> {
+        for batch in batches.filter(|batch| !batch.instances.is_empty()) {
+            crate::texture::validate_quad_texture_device_limits(&batch.texture, limits)?;
+            if batch.material.texture != batch.texture.key() {
+                return Err(crate::texture::WgpuTextureError::TextureIdentityMismatch {
+                    expected: batch.material.texture,
+                    actual: batch.texture.key(),
+                }
+                .into());
+            }
+            let Some(material) = &batch.material_extension else {
+                continue;
+            };
+            crate::quad::validate_material_capture(material).map_err(WgpuRenderError::from)?;
+            for (_, snapshot) in &material.textures {
+                crate::texture::validate_image_device_limits(snapshot, limits)?;
+            }
+            let declaration = material.binding.generation().declaration();
+            crate::quad::validate_material_device_limits(declaration, limits)?;
+            if batch.material.alpha_mode != declaration.alpha_mode() {
+                return Err(WgpuRenderError::ContentRejected {
+                    message: format!(
+                        "material {:?} capture disagrees with its admitted alpha mode",
+                        declaration.id(),
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn reset_instance_budget(&mut self) {
@@ -281,7 +398,7 @@ impl StockQuadResources {
 
     pub(crate) fn clear(&mut self) {
         self.texture_layout = None;
-        self.material_layout = None;
+        self.material_layouts.clear();
         self.pipelines.clear();
         self.textures.clear();
     }
@@ -336,10 +453,32 @@ impl StockQuadResources {
         batches: &[WgpuQuadBatch],
         frame_index: u64,
     ) -> Result<StockQuadPrepared, WgpuRenderError> {
+        let result = self.prepare_batches_inner(
+            preparation,
+            check_device,
+            view_format,
+            batches,
+            frame_index,
+        );
+        self.trim_pipeline_cache();
+        result
+    }
+
+    fn prepare_batches_inner(
+        &mut self,
+        preparation: &mut crate::preparation::NativePreparation<'_>,
+        check_device: impl Fn() -> Result<(), WgpuRenderError>,
+        view_format: wgpu::TextureFormat,
+        batches: &[WgpuQuadBatch],
+        frame_index: u64,
+    ) -> Result<StockQuadPrepared, WgpuRenderError> {
         let stats = quad_batch_draw_stats(batches);
         if batches.is_empty() {
             return Ok(StockQuadPrepared::default());
         }
+        check_device()?;
+        self.preflight_material_device_limits(batches.iter(), &preparation.device().limits())?;
+        preparation.preflight_allocation_bytes(self.pending_allocation_bytes(batches.iter())?)?;
         let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
             WgpuRenderError::ContentRejected {
                 message: error.to_string(),
@@ -355,14 +494,14 @@ impl StockQuadResources {
         let device = preparation.device();
         let texture_layout = self.ensure_texture_layout(device)?;
         for key in &pipeline_keys {
-            self.ensure_pipeline(device, &check_device, *key)?;
+            self.ensure_pipeline(device, &check_device, key)?;
         }
         let pipelines = self.pipeline_draw_refs(&pipeline_keys)?;
         let buffers = create_quad_batch_buffers(
             preparation,
             &batches,
             &texture_layout,
-            self.material_layout.as_ref(),
+            &self.material_layouts,
             &mut self.textures,
             frame_index,
         )
@@ -392,12 +531,14 @@ impl StockQuadResources {
     fn ensure_material_layout(
         &mut self,
         device: &wgpu::Device,
+        declaration: &nara_material::Material2dDeclaration,
     ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
-        if let Some(layout) = &self.material_layout {
+        let digest = declaration.binding_digest();
+        if let Some(layout) = self.material_layouts.get(&digest) {
             return Ok(layout.clone());
         }
-        let layout = create_material_bind_group_layout(device)?;
-        self.material_layout = Some(layout.clone());
+        let layout = create_material_bind_group_layout(device, declaration)?;
+        self.material_layouts.insert(digest, layout.clone());
         Ok(layout)
     }
 
@@ -405,11 +546,12 @@ impl StockQuadResources {
         &mut self,
         device: &wgpu::Device,
         check_device: &impl Fn() -> Result<(), WgpuRenderError>,
-        key: WgpuQuadPipelineKey,
+        key: &WgpuQuadPipelineKey,
     ) -> Result<(), WgpuRenderError> {
         check_device()?;
-        if let Some(cached) = self.pipelines.iter().find(|cached| cached.key() == key) {
-            return match cached {
+        if let Some(index) = self.pipelines.iter().position(|cached| cached.key() == key) {
+            let cached = self.pipelines.remove(index);
+            let result = match &cached {
                 CachedQuadPipeline::Ready(_) => Ok(()),
                 CachedQuadPipeline::Rejected { message, .. } => {
                     Err(WgpuRenderError::ContentRejected {
@@ -417,17 +559,25 @@ impl StockQuadResources {
                     })
                 }
             };
+            self.pipelines.push(cached);
+            return result;
         }
         let texture_layout = self.ensure_texture_layout(device)?;
         let material_layout = key
             .material
-            .map(|_| self.ensure_material_layout(device))
+            .as_ref()
+            .map(|material| self.ensure_material_layout(device, material.declaration()))
             .transpose()?;
         #[cfg(test)]
         {
             self.pipeline_attempts += 1;
         }
-        let result = create_quad_pipeline(device, key, &texture_layout, material_layout.as_ref());
+        let result = create_quad_pipeline(
+            device,
+            key.clone(),
+            &texture_layout,
+            material_layout.as_ref(),
+        );
         // Device loss is a namespace failure even if it also invalidated a shader handle.
         check_device()?;
         match result {
@@ -437,13 +587,33 @@ impl StockQuadResources {
             }
             Err(WgpuRenderError::ContentRejected { message }) => {
                 self.pipelines.push(CachedQuadPipeline::Rejected {
-                    key,
+                    key: key.clone(),
                     message: message.clone(),
                 });
                 Err(WgpuRenderError::ContentRejected { message })
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Limits cross-call cache custody after prepared draws have cloned their native resources.
+    /// A single admitted working set may exceed this cache; original submissions remain owners.
+    fn trim_pipeline_cache(&mut self) {
+        let excess = self
+            .pipelines
+            .len()
+            .saturating_sub(MAX_CACHED_QUAD_PIPELINES);
+        self.pipelines.drain(..excess);
+        let pipelines = &self.pipelines;
+        self.material_layouts.retain(|digest, _| {
+            pipelines.iter().any(|cached| {
+                cached
+                    .key()
+                    .material
+                    .as_ref()
+                    .is_some_and(|material| material.declaration().binding_digest() == *digest)
+            })
+        });
     }
 
     fn pipeline_draw_refs(
@@ -467,7 +637,7 @@ impl StockQuadResources {
                     })?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
-                    material: key.material,
+                    material: key.material.clone(),
                     pipeline: pipeline.pipeline.clone(),
                 })
             })
@@ -491,20 +661,34 @@ impl StockQuadResources {
     pub(crate) fn textures_mut(&mut self) -> &mut WgpuSpriteTextureCache {
         &mut self.textures
     }
+
+    #[cfg(test)]
+    pub(crate) fn pipeline_stats(&self) -> (usize, usize, usize) {
+        (
+            self.pipeline_attempts,
+            self.pipelines.len(),
+            self.material_layouts.len(),
+        )
+    }
 }
+
+#[cfg(test)]
+mod material_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::device::WgpuDeviceOwner;
     use crate::quad::{
-        WgpuMaterial2d, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey,
-        WgpuScissorRect, draw_quad_batch_buffers,
+        QuadShaderSourceGuard, WgpuMaterial2d, WgpuMaterial2dPipelineKey, WgpuQuadInstance,
+        WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey, WgpuScissorRect,
+        draw_quad_batch_buffers,
     };
     use crate::readback_tests::{
-        ReadbackGpu, image_versions, readback_pixel, readback_viewport, render_to_rgba,
+        ReadbackGpu, TEXTURE_MATERIAL_FRAGMENT, image_versions, image_versions_with_handle,
+        material_binding, material_generation, readback_pixel, readback_viewport, render_to_rgba,
     };
-    use nara_material::{AlphaMode2d, Material2dDefinition, Material2dInput, SamplerDescriptor};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
 
     fn cost_test_batch() -> WgpuQuadBatch {
         WgpuQuadBatch {
@@ -555,18 +739,20 @@ mod tests {
 
     #[test]
     fn stock_preparation_cost_adds_five_entries_for_a_material_extension() {
-        let [image, _] = image_versions(1, 1);
+        let (handle, [image, _]) = image_versions_with_handle(1, 1);
         let mut batch = cost_test_batch();
         let primary = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
         batch.material_extension = Some(WgpuMaterial2d {
-            definition: Material2dDefinition {
-                id: "test.stock-preparation-cost",
-                fragment_shader: "",
-                input: Material2dInput::SPRITE_FRAGMENT_V1,
-                alpha_mode: AlphaMode2d::Opaque,
-            },
-            parameters: [0.0; 4],
-            texture: image,
+            binding: material_binding(
+                &material_generation(
+                    "test.stock-preparation-cost",
+                    AlphaMode2d::Opaque,
+                    TEXTURE_MATERIAL_FRAGMENT,
+                ),
+                [0.0; 4],
+                handle,
+            ),
+            textures: vec![(1, image)],
         });
         let extended = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
         assert_eq!(extended.custody_entries, 10);
@@ -645,16 +831,19 @@ mod tests {
     fn permanent_pipeline_rejection_is_cached_per_device_and_valid_material_renders() {
         use crate::allocation::AllocationFailureGuard;
 
-        let bad_material = Material2dDefinition {
-            id: "test.pipeline-rejection",
-            fragment_shader: "this is not valid WGSL",
-            input: Material2dInput::SPRITE_FRAGMENT_V1,
-            alpha_mode: AlphaMode2d::Opaque,
-        };
-        let good_material = Material2dDefinition {
-            fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * material_parameters * tint; }",
-            ..bad_material
-        };
+        let bad_generation = material_generation(
+            "test.pipeline-rejection",
+            AlphaMode2d::Opaque,
+            &format!("{TEXTURE_MATERIAL_FRAGMENT}\n"),
+        );
+        let good_generation = material_generation(
+            "test.pipeline-rejection",
+            AlphaMode2d::Opaque,
+            TEXTURE_MATERIAL_FRAGMENT,
+        );
+        let bad_material = WgpuMaterial2dPipelineKey::new(&bad_generation);
+        let good_material = WgpuMaterial2dPipelineKey::new(&good_generation);
+        let _native_rejection = QuadShaderSourceGuard::invalid(&bad_material);
         let gpu = ReadbackGpu::new();
         let mut owner = WgpuDeviceOwner::default();
         owner.install_probe_device(gpu.device.clone(), gpu.queue.clone());
@@ -716,17 +905,16 @@ mod tests {
         let (pixels, format) = render(&mut resources, std::slice::from_ref(&ordinary), 1).unwrap();
         assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 0, 255, 255]);
         assert!(!failure.was_consumed());
-        assert!(resources.material_layout.is_none());
+        assert!(resources.material_layouts.is_empty());
         assert_eq!(resources.pipeline_attempts, 1);
         assert_eq!(resources.pipelines.len(), 1);
 
-        let [red, green] = image_versions(1, 1);
+        let (handle, [red, green]) = image_versions_with_handle(1, 1);
         let mut custom = ordinary.clone();
         custom.instances[0].color = [1.0; 4];
         custom.material_extension = Some(WgpuMaterial2d {
-            definition: good_material,
-            parameters: [1.0; 4],
-            texture: green,
+            binding: material_binding(&good_generation, [1.0; 4], handle),
+            textures: vec![(1, green)],
         });
         let before = resources.texture_stats();
         assert!(matches!(
@@ -736,7 +924,7 @@ mod tests {
                     && message.contains("injected allocation failure")
         ));
         assert!(failure.was_consumed());
-        assert!(resources.material_layout.is_none());
+        assert!(resources.material_layouts.is_empty());
         assert_eq!(resources.pipeline_attempts, 1);
         assert_eq!(resources.pipelines.len(), 1);
         assert_eq!(resources.texture_stats(), before);
@@ -751,7 +939,7 @@ mod tests {
         for _ in 1..=4 {
             resources.reset_instance_budget();
             assert!(matches!(
-                resources.ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), bad_key),
+                resources.ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), &bad_key),
                 Err(WgpuRenderError::ContentRejected { .. })
             ));
         }
@@ -759,19 +947,19 @@ mod tests {
         assert_eq!(resources.pipelines.len(), 2);
         let good_key = WgpuQuadPipelineKey {
             material: Some(good_material),
-            ..bad_key
+            ..bad_key.clone()
         };
         for _ in 5..=8 {
             resources.reset_instance_budget();
             resources
-                .ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), good_key)
+                .ensure_pipeline(&gpu.device, &|| owner.fail_if_device_lost(), &good_key)
                 .unwrap();
         }
         assert_eq!(resources.pipeline_attempts, 3);
 
         let (pixels, _) = render(&mut resources, std::slice::from_ref(&custom), 3).unwrap();
         assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 255, 0, 255]);
-        assert!(resources.material_layout.is_some());
+        assert!(!resources.material_layouts.is_empty());
         assert_eq!(resources.pipeline_attempts, 3);
         assert_eq!(resources.pipelines.len(), 3);
         let stats = resources.texture_stats();
@@ -787,8 +975,9 @@ mod tests {
                 height: 64,
             });
         }
-        repeated[1].material_extension.as_mut().unwrap().parameters = [1.0, 0.0, 1.0, 1.0];
-        repeated[2].material_extension.as_mut().unwrap().texture = red;
+        repeated[1].material_extension.as_mut().unwrap().binding =
+            material_binding(&good_generation, [1.0, 0.0, 1.0, 1.0], handle);
+        repeated[2].material_extension.as_mut().unwrap().textures = vec![(1, red)];
         let reuse_failure = AllocationFailureGuard::at("nara_material_2d_bind_group_layout");
         for frame_index in 4..=5 {
             let (pixels, _) = render(&mut resources, &repeated, frame_index).unwrap();
@@ -812,7 +1001,7 @@ mod tests {
         resources.clear();
         owner.clear();
         assert!(resources.texture_layout.is_none());
-        assert!(resources.material_layout.is_none());
+        assert!(resources.material_layouts.is_empty());
         assert!(resources.pipelines.is_empty());
         assert_eq!(resources.logical_texture_bytes(), 0);
         assert_eq!(gpu.budget.retained(), 0);
@@ -821,7 +1010,7 @@ mod tests {
             owner.install_probe_device(device.clone(), queue.clone());
             for _ in 0..3 {
                 assert!(matches!(
-                    resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), bad_key,),
+                    resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), &bad_key,),
                     Err(WgpuRenderError::ContentRejected { .. })
                 ));
             }
@@ -837,7 +1026,7 @@ mod tests {
                 replacement.ensure_pipeline(
                     device,
                     &|| replacement_owner.fail_if_device_lost(),
-                    bad_key,
+                    &bad_key,
                 ),
                 Err(WgpuRenderError::ContentRejected { .. })
             ));
@@ -858,32 +1047,33 @@ mod tests {
             let mut owner = WgpuDeviceOwner::default();
             owner.install_probe_device(device.clone(), queue.clone());
             let mut resources = StockQuadResources::default();
+            let material = WgpuMaterial2dPipelineKey::new(&material_generation(
+                "test.pipeline-allocation",
+                AlphaMode2d::Opaque,
+                TEXTURE_MATERIAL_FRAGMENT,
+            ));
+            let _native_rejection = QuadShaderSourceGuard::invalid(&material);
             let key = WgpuQuadPipelineKey {
                 format,
                 alpha_mode: AlphaMode2d::Opaque,
-                material: Some(Material2dDefinition {
-                    id: "test.pipeline-allocation",
-                    fragment_shader: "invalid WGSL",
-                    input: Material2dInput::SPRITE_FRAGMENT_V1,
-                    alpha_mode: AlphaMode2d::Opaque,
-                }),
+                material: Some(material),
             };
             // Allocation failure takes priority over WGSL rejection and remains retryable.
             QUAD_PIPELINE_ALLOCATION_FAILURE.with(|failure| failure.set(true));
             assert!(matches!(
-                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), key,),
+                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), &key,),
                 Err(WgpuRenderError::UploadDeferred { .. })
             ));
             assert!(resources.pipelines.is_empty());
             assert_eq!(resources.pipeline_attempts, 1);
             assert!(matches!(
-                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), key,),
+                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), &key,),
                 Err(WgpuRenderError::ContentRejected { .. })
             ));
             assert_eq!(resources.pipeline_attempts, 2);
             owner.mark_probe_lost();
             assert_eq!(
-                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), key,),
+                resources.ensure_pipeline(device, &|| owner.fail_if_device_lost(), &key,),
                 Err(WgpuRenderError::DeviceLost)
             );
             assert_eq!(resources.pipeline_attempts, 2);

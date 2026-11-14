@@ -93,6 +93,19 @@ impl<'a> NativePreparation<'a> {
         self.device
     }
 
+    /// Refuses a complete known allocation demand before its first upload or native resource.
+    pub(crate) fn preflight_allocation_bytes(
+        &self,
+        bytes: u64,
+    ) -> Result<(), NativePreparationError> {
+        let admitted = self
+            .budget
+            .reserve(bytes)
+            .ok_or(NativePreparationError::ResourceCapacity)?;
+        drop(admitted);
+        Ok(())
+    }
+
     pub(crate) fn reserve_bytes(
         &mut self,
         bytes: u64,

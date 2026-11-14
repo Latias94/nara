@@ -422,7 +422,7 @@ pub(crate) fn prepare_and_encode(
         }
     }
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    stock_images.validate(stock_resources)?;
+    stock_images.validate(stock_resources, &enabled_limits)?;
 
     compiled
         .modeled_metadata_bytes
@@ -462,11 +462,27 @@ pub(crate) fn prepare_and_encode(
     };
     reservation.reserve_entries(automatic_entries)?;
 
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    let stock_allocation = match stock_images.allocation_bytes(stock_resources)? {
+        0 => None,
+        bytes => Some(
+            budget
+                .reserve(bytes)
+                .ok_or(WgpuRenderProgramError::Backend(
+                    crate::WgpuRenderError::UploadDeferred {
+                        message: "native stock render-resource reservations are at capacity".into(),
+                    },
+                ))?,
+        ),
+    };
+
     // Refuse the complete known local working set before any native allocation or prefix
     // retention. On refusal the temporary table drops every earlier guard immediately.
     let mut allocations =
         reserve_local_allocations(graph, budget, local_target.map(|target| &target.version))?
             .into_iter();
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    drop(stock_allocation);
 
     // Keep original captures/definitions and all imports even if state creation or preparation
     // fails. This custody ends with the prefix and is never transferred into published outputs.

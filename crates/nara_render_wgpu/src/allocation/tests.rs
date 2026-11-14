@@ -6,10 +6,13 @@ use crate::{
         WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
         create_quad_texture_bind_group_layout,
     },
-    readback_tests::{readback_pixel, readback_viewport, render_to_rgba, two_image_versions},
+    readback_tests::{
+        TEXTURE_MATERIAL_FRAGMENT, image_versions_with_handle, material_binding,
+        material_generation, readback_pixel, readback_viewport, render_to_rgba, two_image_versions,
+    },
     texture::WgpuSpriteTextureCache,
 };
-use nara_material::{AlphaMode2d, Material2dDefinition, Material2dInput, SamplerDescriptor};
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::RenderTarget;
 
 std::thread_local! {
@@ -43,7 +46,7 @@ impl Drop for BatchGuard {
 
 #[test]
 fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
-    let [snapshot, _] = two_image_versions();
+    let (handle, [snapshot, _]) = image_versions_with_handle(1, 1);
     let batch = WgpuQuadBatch {
         material: WgpuQuadMaterialKey {
             texture: WgpuQuadTexture::Image(snapshot.clone()).key(),
@@ -67,14 +70,16 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
         }],
         counts_as_sprites: true,
         material_extension: Some(WgpuMaterial2d {
-            definition: Material2dDefinition {
-                id: "test.checked-allocation",
-                fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * material_parameters * tint; }",
-                input: Material2dInput::SPRITE_FRAGMENT_V1,
-                alpha_mode: AlphaMode2d::Opaque,
-            },
-            parameters: [1.0; 4],
-            texture: snapshot,
+            binding: material_binding(
+                &material_generation(
+                    "test.checked-allocation",
+                    AlphaMode2d::Opaque,
+                    TEXTURE_MATERIAL_FRAGMENT,
+                ),
+                [1.0; 4],
+                handle,
+            ),
+            textures: vec![(1, snapshot)],
         }),
     };
     let labels = [

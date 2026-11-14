@@ -228,11 +228,15 @@ impl WgpuSpriteTextureCache {
                 WgpuQuadTexture::Image(snapshot) => Some(snapshot),
                 _ => None,
             };
+            if let Some(material) = &batch.material_extension {
+                crate::quad::validate_material_capture(material)?;
+            }
             let extension = batch
                 .material_extension
                 .as_ref()
-                .map(|material| &material.texture);
-            for snapshot in [primary, extension].into_iter().flatten() {
+                .into_iter()
+                .flat_map(|material| material.textures.iter().map(|(_, snapshot)| snapshot));
+            for snapshot in primary.into_iter().chain(extension) {
                 let versions = images.entry(snapshot.identity().key()).or_default();
                 if !versions
                     .iter()
@@ -287,6 +291,67 @@ impl WgpuSpriteTextureCache {
             });
         }
         Ok(())
+    }
+
+    /// Counts exact missing textures without changing cache state or issuing uploads.
+    pub(crate) fn pending_allocation_bytes<'a>(
+        &self,
+        batches: impl Iterator<Item = &'a WgpuQuadBatch>,
+    ) -> Result<u64, WgpuTextureError> {
+        let mut images = BTreeMap::<RenderResourceKey, Vec<&PreparedImageSnapshot>>::new();
+        let mut fallback = false;
+        #[cfg(feature = "stock-ui")]
+        let mut glyphs = BTreeMap::new();
+        for batch in batches.filter(|batch| !batch.instances.is_empty()) {
+            let primary = match &batch.texture {
+                WgpuQuadTexture::Fallback => {
+                    fallback = true;
+                    None
+                }
+                WgpuQuadTexture::Image(snapshot) => Some(snapshot),
+                #[cfg(feature = "stock-ui")]
+                WgpuQuadTexture::Glyph(page) => {
+                    glyphs.entry(page.key()).or_insert(page);
+                    None
+                }
+            };
+            let material = batch
+                .material_extension
+                .as_ref()
+                .into_iter()
+                .flat_map(|material| material.textures.iter().map(|(_, snapshot)| snapshot));
+            for snapshot in primary.into_iter().chain(material) {
+                if self.has_exact_image(snapshot) {
+                    continue;
+                }
+                let versions = images.entry(snapshot.identity().key()).or_default();
+                if !versions
+                    .iter()
+                    .any(|image| image.identity() == snapshot.identity())
+                {
+                    versions.push(snapshot);
+                }
+            }
+        }
+        let mut bytes = if fallback && self.fallback_texture.is_none() {
+            4_u64
+        } else {
+            0
+        };
+        for image in images.values().flatten() {
+            bytes = bytes
+                .checked_add(image.resource().pixels().len() as u64)
+                .ok_or(WgpuTextureError::NativeResourceCapacity)?;
+        }
+        #[cfg(feature = "stock-ui")]
+        for (key, page) in glyphs {
+            if !self.glyph_pages.contains_key(&key) {
+                bytes = bytes
+                    .checked_add(page.pixels().len() as u64)
+                    .ok_or(WgpuTextureError::NativeResourceCapacity)?;
+            }
+        }
+        Ok(bytes)
     }
 
     fn ensure_fallback(
@@ -936,7 +1001,16 @@ fn admit_texture_extent(
     width: u32,
     height: u32,
 ) -> Result<(), WgpuTextureError> {
-    let maximum = device.limits().max_texture_dimension_2d;
+    admit_texture_extent_for_limits(&device.limits(), texture, width, height)
+}
+
+fn admit_texture_extent_for_limits(
+    limits: &wgpu::Limits,
+    texture: WgpuQuadTextureKey,
+    width: u32,
+    height: u32,
+) -> Result<(), WgpuTextureError> {
+    let maximum = limits.max_texture_dimension_2d;
     if width == 0 || height == 0 || width > maximum || height > maximum {
         return Err(WgpuTextureError::TextureExtentUnsupported {
             texture,
@@ -946,6 +1020,57 @@ fn admit_texture_extent(
         });
     }
     Ok(())
+}
+
+pub(crate) fn validate_image_device_limits(
+    snapshot: &PreparedImageSnapshot,
+    limits: &wgpu::Limits,
+) -> Result<(), WgpuTextureError> {
+    let key = snapshot.identity().key();
+    if key.kind() != RenderResourceKind::IMAGE_2D {
+        return Err(WgpuTextureError::WrongImageResourceKind {
+            key,
+            kind: key.kind().as_str(),
+        });
+    }
+    validate_image_snapshot(snapshot)?;
+    let extent = snapshot.resource().extent();
+    admit_texture_extent_for_limits(
+        limits,
+        WgpuQuadTextureKey::Image(key),
+        extent.width,
+        extent.height,
+    )
+}
+
+pub(crate) fn validate_quad_texture_device_limits(
+    texture: &WgpuQuadTexture,
+    limits: &wgpu::Limits,
+) -> Result<(), WgpuTextureError> {
+    match texture {
+        WgpuQuadTexture::Fallback => {
+            admit_texture_extent_for_limits(limits, WgpuQuadTextureKey::Fallback, 1, 1)
+        }
+        WgpuQuadTexture::Image(snapshot) => validate_image_device_limits(snapshot, limits),
+        #[cfg(feature = "stock-ui")]
+        WgpuQuadTexture::Glyph(page) => {
+            admit_texture_extent_for_limits(
+                limits,
+                WgpuQuadTextureKey::Glyph(page.key()),
+                page.width(),
+                page.height(),
+            )?;
+            let expected = (page.width() as usize).checked_mul(page.height() as usize);
+            if expected != Some(page.pixels().len()) {
+                return Err(WgpuTextureError::InvalidGlyphPageLength {
+                    key: page.key(),
+                    expected: expected.unwrap_or(usize::MAX),
+                    actual: page.pixels().len(),
+                });
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_image_snapshot(snapshot: &PreparedImageSnapshot) -> Result<(), WgpuTextureError> {

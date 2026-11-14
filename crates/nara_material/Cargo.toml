@@ -6,12 +6,32 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-nara_asset.workspace = true
-nara_ecs.workspace = true
-nara_image.workspace = true
-thiserror.workspace = true
+blake3 = { workspace = true, optional = true }
+encase = { workspace = true, optional = true }
+glam = { workspace = true, optional = true, features = ["encase-012"] }
+naga = { workspace = true, optional = true }
+nara_asset = { workspace = true, optional = true }
+nara_ecs = { workspace = true, optional = true }
+nara_image = { workspace = true, optional = true }
+nara_material_derive = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [features]
 default = []
+material = [
+    "dep:blake3",
+    "dep:encase",
+    "dep:glam",
+    "dep:naga",
+    "dep:nara_asset",
+    "dep:nara_ecs",
+    "dep:nara_image",
+    "dep:nara_material_derive",
+    "dep:thiserror",
+]
 serde = ["dep:serde"]
+
+[[test]]
+name = "generation_workflow"
+required-features = ["material"]

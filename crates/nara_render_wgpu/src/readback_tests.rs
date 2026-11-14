@@ -2,9 +2,9 @@ use crate::{
     output::OutputBudget,
     preparation::NativePreparation,
     quad::{
-        WgpuQuadBatch, WgpuQuadPipelineDrawRef, create_material_bind_group_layout,
-        create_quad_batch_buffers, create_quad_pipeline, create_quad_texture_bind_group_layout,
-        draw_quad_batch_buffers,
+        WgpuMaterial2dLayouts, WgpuQuadBatch, WgpuQuadPipelineDrawRef,
+        create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
+        create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
     },
     submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
     texture::WgpuSpriteTextureCache,
@@ -23,13 +23,23 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
 }
 
 pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedImageSnapshot; 2] {
+    image_versions_with_handle(width, height).1
+}
+
+pub(crate) fn image_versions_with_handle(
+    width: u32,
+    height: u32,
+) -> (
+    nara_asset::Handle<nara_image::ImageAsset>,
+    [nara_image::PreparedImageSnapshot; 2],
+) {
     use nara_asset::{AssetEvents, AssetStates, Assets};
     use nara_image::PreparedImageSnapshot;
     let handle = nara_asset::allocate_anonymous_handle::<nara_image::ImageAsset>().unwrap();
     let mut images = Assets::<nara_image::ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
-    image_assets(width, height).map(|image| {
+    let snapshots = image_assets(width, height).map(|image| {
         assert!(image.product().is_none());
         assert!(image.source().is_none());
         let version = images
@@ -42,7 +52,200 @@ pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedIm
             &images.slot_revision(handle)
         );
         snapshot
-    })
+    });
+    (handle, snapshots)
+}
+
+#[derive(nara_material::MaterialParameters)]
+pub(crate) struct TestMaterialParameters {
+    #[material(id = "value")]
+    pub(crate) value: nara_material::Vec4,
+}
+
+pub(crate) const TEXTURE_MATERIAL_FRAGMENT: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * material_parameters.value * tint; }";
+
+#[derive(nara_material::MaterialParameters)]
+pub(crate) struct MixedMaterialParameters {
+    #[material(id = "gain")]
+    pub(crate) gain: f32,
+    #[material(id = "bias")]
+    pub(crate) bias: nara_material::Vec3,
+    #[material(id = "mode")]
+    pub(crate) mode: u32,
+    #[material(id = "shift")]
+    pub(crate) shift: nara_material::Vec2,
+}
+
+impl Default for MixedMaterialParameters {
+    fn default() -> Self {
+        Self {
+            gain: 0.0,
+            bias: nara_material::Vec3::ZERO,
+            mode: 0,
+            shift: nara_material::Vec2::ZERO,
+        }
+    }
+}
+
+pub(crate) const MIXED_MATERIAL_FRAGMENT: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { let left = textureLoad(material_left, vec2<i32>(0, 0), 0); let right = textureLoad(material_right, vec2<i32>(0, 0), 0); if material_parameters.mode == 1u { return vec4<f32>(0.0, 0.0, 1.0, 1.0) * tint; } let color = mix(left.rgb, right.rgb, material_parameters.gain) + material_parameters.bias + vec3<f32>(material_parameters.shift, 0.0); return vec4<f32>(color, 1.0) * tint; }";
+
+pub(crate) fn mixed_material_library(id: &str) -> nara_material::Material2dLibrary {
+    let mut library = nara_material::Material2dLibrary::default();
+    library
+        .declare(
+            nara_material::Material2dDeclaration::from_parameters::<MixedMaterialParameters>(
+                id,
+                1,
+                nara_material::AlphaMode2d::Opaque,
+                vec![
+                    nara_material::MaterialTextureDeclaration::new("right", "material_right", 7)
+                        .unwrap(),
+                    nara_material::MaterialTextureDeclaration::new("left", "material_left", 2)
+                        .unwrap(),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    library
+}
+
+pub(crate) fn mixed_material_binding(
+    generation: &nara_material::Material2dGeneration,
+    parameters: &MixedMaterialParameters,
+    left: nara_asset::Handle<nara_image::ImageAsset>,
+    right: nara_asset::Handle<nara_image::ImageAsset>,
+) -> nara_material::Material2dBinding {
+    generation
+        .bind(
+            parameters,
+            std::collections::BTreeMap::from([
+                ("left".to_owned(), left),
+                ("right".to_owned(), right),
+            ]),
+        )
+        .unwrap()
+}
+
+pub(crate) fn material_batch(
+    binding: nara_material::Material2dBinding,
+    textures: Vec<(u32, nara_image::PreparedImageSnapshot)>,
+) -> WgpuQuadBatch {
+    let texture = crate::quad::WgpuQuadTexture::Fallback;
+    WgpuQuadBatch {
+        material: crate::quad::WgpuQuadMaterialKey {
+            texture: texture.key(),
+            sampler: nara_material::SamplerDescriptor::NEAREST_CLAMP,
+            alpha_mode: binding.generation().declaration().alpha_mode(),
+        },
+        texture,
+        scissor: None,
+        instances: vec![crate::quad::WgpuQuadInstance {
+            center: [0.0; 2],
+            x_axis: [1.0, 0.0],
+            y_axis: [0.0, 1.0],
+            color: [1.0; 4],
+            uv_min: [0.0; 2],
+            uv_size: [1.0; 2],
+            texture_mode: 0,
+            shape_mode: 0,
+            rect_size: [1.0; 2],
+            corner_radius: 0.0,
+            border_width: 0.0,
+        }],
+        counts_as_sprites: true,
+        material_extension: Some(crate::quad::WgpuMaterial2d { binding, textures }),
+    }
+}
+
+pub(crate) fn material_library(
+    id: &str,
+    alpha_mode: nara_material::AlphaMode2d,
+) -> nara_material::Material2dLibrary {
+    let mut library = nara_material::Material2dLibrary::default();
+    library
+        .declare(
+            nara_material::Material2dDeclaration::from_parameters::<TestMaterialParameters>(
+                id,
+                1,
+                alpha_mode,
+                vec![
+                    nara_material::MaterialTextureDeclaration::new(
+                        "texture",
+                        "material_texture",
+                        1,
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    library
+}
+
+pub(crate) fn publish_material(
+    library: &mut nara_material::Material2dLibrary,
+    id: &str,
+    fragment: &str,
+) -> nara_material::Material2dGeneration {
+    let path = nara_asset::AssetPath::new("native-material/fragment.wgsl").unwrap();
+    let prepared = library
+        .prepare_update(id, std::slice::from_ref(&path), |_| Ok(Arc::from(fragment)))
+        .unwrap();
+    library
+        .publish(&prepared, |_| Ok(Arc::from(fragment)))
+        .unwrap()
+}
+
+pub(crate) fn material_generation(
+    id: &str,
+    alpha_mode: nara_material::AlphaMode2d,
+    fragment: &str,
+) -> nara_material::Material2dGeneration {
+    publish_material(&mut material_library(id, alpha_mode), id, fragment)
+}
+
+pub(crate) fn material_binding(
+    generation: &nara_material::Material2dGeneration,
+    parameters: [f32; 4],
+    texture: nara_asset::Handle<nara_image::ImageAsset>,
+) -> nara_material::Material2dBinding {
+    generation
+        .bind(
+            &TestMaterialParameters {
+                value: nara_material::Vec4::from_array(parameters),
+            },
+            std::collections::BTreeMap::from([("texture".to_owned(), texture)]),
+        )
+        .unwrap()
+}
+
+pub(crate) fn material_layouts(
+    device: &wgpu::Device,
+    batches: &[WgpuQuadBatch],
+) -> Result<WgpuMaterial2dLayouts, crate::texture::WgpuTextureError> {
+    let mut layouts = WgpuMaterial2dLayouts::new();
+    for material in batches
+        .iter()
+        .filter(|batch| !batch.instances.is_empty())
+        .filter_map(|batch| batch.material_extension.as_ref())
+    {
+        let declaration = material.binding.generation().declaration();
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            layouts.entry(declaration.binding_digest())
+        {
+            entry.insert(create_material_bind_group_layout(device, declaration)?);
+        }
+    }
+    Ok(layouts)
+}
+
+pub(crate) fn pipeline_material_layout<'a>(
+    layouts: &'a WgpuMaterial2dLayouts,
+    key: &crate::quad::WgpuQuadPipelineKey,
+) -> Option<&'a wgpu::BindGroupLayout> {
+    layouts.get(&key.material.as_ref()?.declaration().binding_digest())
 }
 
 pub(crate) fn image_assets(width: u32, height: u32) -> [nara_image::ImageAsset; 2] {
@@ -73,21 +276,19 @@ fn image_extent_admission_readback(auxiliary: bool) {
     let (pixels, ()) = render_to_rgba(|device, _, format, output_view, encoder, preparation| {
         assert_eq!(device.limits().max_texture_dimension_2d, 8_192);
         let texture_layout = create_quad_texture_bind_group_layout(device)?;
-        let material_layout = auxiliary
-            .then(|| create_material_bind_group_layout(device))
-            .transpose()?;
         let mut cache = WgpuSpriteTextureCache::default();
         cache.begin_frame(1);
         for width in [8_192, 8_193, 16_384] {
-            let [snapshot, _] = image_versions(width, 1);
+            let (handle, [snapshot, _]) = image_versions_with_handle(width, 1);
             let texture = crate::quad::WgpuQuadTextureKey::Image(snapshot.identity().key());
-            let batch = image_extent_admission_batch(snapshot, auxiliary);
+            let batch = image_extent_admission_batch(handle, snapshot, auxiliary);
+            let layouts = material_layouts(device, std::slice::from_ref(&batch))?;
             let before = cache.stats();
             let result = create_quad_batch_buffers(
                 preparation,
                 &[batch],
                 &texture_layout,
-                material_layout.as_ref(),
+                &layouts,
                 &mut cache,
                 1,
             );
@@ -115,16 +316,21 @@ fn image_extent_admission_readback(auxiliary: bool) {
                 );
             }
         }
-        let [snapshot, _] = two_image_versions();
-        let batch = image_extent_admission_batch(snapshot, auxiliary);
+        let (handle, [snapshot, _]) = image_versions_with_handle(1, 1);
+        let batch = image_extent_admission_batch(handle, snapshot, auxiliary);
+        let layouts = material_layouts(device, std::slice::from_ref(&batch))?;
         let pipelines = crate::required_quad_pipeline_keys(std::slice::from_ref(&batch), format)
             .into_iter()
             .map(|key| {
-                let pipeline =
-                    create_quad_pipeline(device, key, &texture_layout, material_layout.as_ref())?;
+                let pipeline = create_quad_pipeline(
+                    device,
+                    key.clone(),
+                    &texture_layout,
+                    pipeline_material_layout(&layouts, &key),
+                )?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
-                    material: key.material,
+                    material: key.material.clone(),
                     pipeline: pipeline.pipeline,
                 })
             })
@@ -133,7 +339,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
             preparation,
             &[batch],
             &texture_layout,
-            material_layout.as_ref(),
+            &layouts,
             &mut cache,
             1,
         )
@@ -162,11 +368,12 @@ fn image_extent_admission_readback(auxiliary: bool) {
 }
 
 fn image_extent_admission_batch(
+    handle: nara_asset::Handle<nara_image::ImageAsset>,
     snapshot: nara_image::PreparedImageSnapshot,
     auxiliary: bool,
 ) -> WgpuQuadBatch {
     use crate::quad::{WgpuMaterial2d, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture};
-    use nara_material::{AlphaMode2d, Material2dDefinition, Material2dInput, SamplerDescriptor};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
 
     let texture = if auxiliary {
         WgpuQuadTexture::Fallback
@@ -196,14 +403,16 @@ fn image_extent_admission_batch(
         }],
         counts_as_sprites: true,
         material_extension: auxiliary.then_some(WgpuMaterial2d {
-            definition: Material2dDefinition {
-                id: "readback.extent-admission",
-                fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * tint; }",
-                input: Material2dInput::SPRITE_FRAGMENT_V1,
-                alpha_mode: AlphaMode2d::Opaque,
-            },
-            parameters: [0.0; 4],
-            texture: snapshot,
+            binding: material_binding(
+                &material_generation(
+                    "readback.extent-admission",
+                    AlphaMode2d::Opaque,
+                    TEXTURE_MATERIAL_FRAGMENT,
+                ),
+                [1.0; 4],
+                handle,
+            ),
+            textures: vec![(1, snapshot)],
         }),
     }
 }
@@ -261,13 +470,15 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
     let (pixels, (first, repeated)) =
         render_to_rgba(|device, _, format, output_view, encoder, preparation| {
             let texture_layout = create_quad_texture_bind_group_layout(device)?;
+            let material_layouts = WgpuMaterial2dLayouts::new();
             let pipelines = crate::required_quad_pipeline_keys(&batches, format)
                 .into_iter()
                 .map(|key| {
-                    let pipeline = create_quad_pipeline(device, key, &texture_layout, None)?;
+                    let pipeline =
+                        create_quad_pipeline(device, key.clone(), &texture_layout, None)?;
                     Ok(WgpuQuadPipelineDrawRef {
                         alpha_mode: key.alpha_mode,
-                        material: key.material,
+                        material: key.material.clone(),
                         pipeline: pipeline.pipeline,
                     })
                 })
@@ -278,7 +489,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 preparation,
                 &batches,
                 &texture_layout,
-                None,
+                &material_layouts,
                 &mut cache,
                 1,
             )
@@ -289,7 +500,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 preparation,
                 &batches,
                 &texture_layout,
-                None,
+                &material_layouts,
                 &mut cache,
                 2,
             )
@@ -458,7 +669,14 @@ fn processed_tileset_captures_render_exact_versions_after_native_retirement() {
             .map(|(index, (tileset, snapshot))| {
                 let region = tileset.normalized_region(TileIndex(1)).unwrap();
                 assert_eq!(region.min, Vec2::new(0.5, 0.0));
-                let mut batch = image_extent_admission_batch(snapshot, false);
+                let mut batch = image_extent_admission_batch(
+                    tileset
+                        .material()
+                        .image
+                        .expect("the retained TileSet names its Image"),
+                    snapshot,
+                    false,
+                );
                 batch.material.sampler = tileset.material().sampler;
                 batch.material.alpha_mode = tileset.material().alpha_mode;
                 batch.instances[0].center = [-0.5 + index as f32, 0.0];
@@ -504,19 +722,19 @@ pub(crate) fn render_batches_to_rgba(
 ) -> Result<Vec<u8>, crate::WgpuRenderError> {
     render_to_rgba(|device, _, format, output_view, encoder, preparation| {
         let texture_layout = create_quad_texture_bind_group_layout(device)?;
-        let material_layout = batches
-            .iter()
-            .any(|batch| !batch.instances.is_empty() && batch.material_extension.is_some())
-            .then(|| create_material_bind_group_layout(device))
-            .transpose()?;
+        let layouts = material_layouts(device, batches)?;
         let pipelines = crate::required_quad_pipeline_keys(batches, format)
             .into_iter()
             .map(|key| {
-                let pipeline =
-                    create_quad_pipeline(device, key, &texture_layout, material_layout.as_ref())?;
+                let pipeline = create_quad_pipeline(
+                    device,
+                    key.clone(),
+                    &texture_layout,
+                    pipeline_material_layout(&layouts, &key),
+                )?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
-                    material: key.material,
+                    material: key.material.clone(),
                     pipeline: pipeline.pipeline,
                 })
             })
@@ -527,7 +745,7 @@ pub(crate) fn render_batches_to_rgba(
             preparation,
             batches,
             &texture_layout,
-            material_layout.as_ref(),
+            &layouts,
             &mut texture_cache,
             1,
         )
@@ -603,7 +821,7 @@ impl ReadbackGpu {
         Self::with_limits(wgpu::Limits::default())
     }
 
-    fn with_limits(limits: wgpu::Limits) -> Self {
+    pub(crate) fn with_limits(limits: wgpu::Limits) -> Self {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,

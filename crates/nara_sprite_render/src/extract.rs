@@ -1,7 +1,7 @@
 use nara_asset::{AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
-use nara_material::Material2dInstance;
+use nara_material::Material2dBinding;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::PresentedSpatialSnapshot2d;
@@ -22,8 +22,8 @@ pub(crate) fn extract_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     mut scratch: ResMut<ExtractedSpriteScratch>,
     spatial: PresentedSpatialSnapshot2d,
-    sprites: Query<(Entity, &Sprite, Option<&Material2dInstance>)>,
-    tilemaps: Query<(Entity, &Tilemap, Option<&Material2dInstance>)>,
+    sprites: Query<(Entity, &Sprite, Option<&Material2dBinding>)>,
+    tilemaps: Query<(Entity, &Tilemap, Option<&Material2dBinding>)>,
     tilesets: Option<Res<Assets<TileSet>>>,
     server: Option<Res<AssetServer>>,
     states: Option<Res<AssetStates>>,
@@ -46,7 +46,7 @@ pub(crate) fn extract_sprites(
             let source_order = scratch.sprites.len() as u64;
             let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
             let mut extracted = extract_sprite(entity, sprite, matrix, source_order);
-            extracted.material_extension = material.copied();
+            extracted.material_extension = material.cloned();
             scratch.sprites.push(extracted);
             scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
         }
@@ -96,7 +96,7 @@ pub(crate) fn extract_sprites(
                     scratch.stats.invalid_tile_regions.saturating_add(1);
                 continue;
             };
-            extracted_cell.material_extension = material.copied();
+            extracted_cell.material_extension = material.cloned();
             scratch.sprites.push(extracted_cell);
             scratch.stats.extracted_tile_cells =
                 scratch.stats.extracted_tile_cells.saturating_add(1);

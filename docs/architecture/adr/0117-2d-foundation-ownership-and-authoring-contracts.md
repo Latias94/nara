@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-10-15
 **Amended**: 2026-10-23 for explicit phase spatial cuts, common asset mutation admission and
-borrowed/scoped current-Scene access; refined 2026-11-01 for captured View lifetimes
+borrowed/scoped current-Scene access; refined 2026-11-01 for captured View lifetimes and
+2026-11-14 for admitted material/Shader generations
 **Owner**: game composition, managed execution, content, domain plugins, rendering, and tooling
 **Implementation Plan**: [2D foundation contracts](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 
@@ -281,10 +282,16 @@ authority. A fixed canvas allocation is retained across destination-only resize 
 backend owner on configuration/extent or device/runtime replacement. This is a finite first-party
 path, not a public image-target scheduler, render graph or raw backend escape.
 
-Material contributions are trusted Rust startup declarations with parameters, textures, alpha semantics,
-and supported renderer capabilities, proven by one palette example. Shader code changes require restart
-in this scope. Scripts/data select admitted definitions and values without Device/Queue authority.
-Unused duplicate material descriptors are removed; public intermediate renderer orchestration is narrowed.
+Material declarations join stable semantic parameters/resources, actual binding ABI and Shader
+interface as one compatible generation. R9b replaces the original startup-only Palette extension
+through two typed layouts and tracked Shader edits; invalid or incompatible candidates retain
+usable same-epoch last-good. Captures pin original artifacts, values and resource versions,
+including when first realized after newer publication. Data selects admitted fields/references
+without Device/Queue authority. ADR0033 owns asset publication; ADR0094 owns exact native
+realization and original submission custody. The
+[complete R9b consumer](../../plans/2026-11-14-durable-material-and-shader-plan.md) must qualify
+Save/Reopen/Check/Export/run and native interleaving before those workflows are reported complete.
+Superseded static material interfaces are removed rather than retained as a second authority.
 
 ### Semantic input owns held-action lifetimes
 

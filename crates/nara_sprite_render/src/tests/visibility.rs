@@ -1,7 +1,6 @@
 use super::*;
 use nara_core::Mat3;
 use nara_ecs::bevy_ecs::system::RunSystemOnce;
-use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
 
 #[test]
 fn clip_bounds_keep_touching_affine_and_uncertain_quads() {
@@ -119,12 +118,7 @@ fn affine_camera_and_offset_viewport_cull_the_projected_quad() {
 
 #[test]
 fn each_view_keeps_its_order_while_offscreen_material_diagnostics_run_once() {
-    static DEFINITIONS: [Material2dDefinition; 1] = [Material2dDefinition {
-        id: "test.visibility-material",
-        fragment_shader: "fn material_fragment() {}",
-        input: Material2dInput::SPRITE_FRAGMENT_V1,
-        alpha_mode: AlphaMode2d::Blend,
-    }];
+    let materials = palette_materials("test.visibility-material", AlphaMode2d::Blend);
     let half_x = Vec2::new(0.1, 0.0);
     let half_y = Vec2::new(0.0, 0.1);
     let mut sprites = vec![
@@ -153,12 +147,20 @@ fn each_view_keeps_its_order_while_offscreen_material_diagnostics_run_once() {
     sprites[5].material.image = Some(nara_asset::allocate_anonymous_handle().unwrap());
     sprites[6].texture_region = TextureUvRect::new(Vec2::ZERO, Vec2::splat(-1.0));
     sprites[7].material_extension = Some(
-        Material2dDefinitions::new(&DEFINITIONS)
+        materials
+            .current("test.visibility-material")
             .unwrap()
-            .instantiate(
-                "test.visibility-material",
-                [0.0; 4],
-                nara_asset::allocate_anonymous_handle().unwrap(),
+            .bind(
+                &PaletteParameters {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    w: 0.0,
+                },
+                BTreeMap::from([(
+                    "palette".to_owned(),
+                    nara_asset::allocate_anonymous_handle().unwrap(),
+                )]),
             )
             .unwrap(),
     );
