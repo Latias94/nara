@@ -269,6 +269,17 @@ keyboard movements, human manual feel or foreign-platform behavior. The
 [maintained source note](../../vendor/winit/NARA-PATCH.md) distinguishes the upstream Windows 11
 policy from the local explicit-request correction and records the patch's retirement condition.
 
+The same-day repeat at `09f170f`, completed at 22:28 +08:00, passes the unchanged two probes
+in `d157dce5-e662-4d47-b695-fa97dd036a2b`: 2/2 in 11.441 seconds after a 57.30-second
+release build; 81 cases are outside this selection. The actual desktop still has DISPLAY1
+at `[-2560,533,0,1973]`, 2560x1440, DPI 120 (125%), and DISPLAY2 at `[0,0,3840,2160]`,
+3840x2160, DPI 144 (150%). Both default title-bar crossings settle at 360x240 logical pixels;
+the explicit-size legs settle at 424x272 and 360x240. Native, Winit and Runtime geometry agree,
+and the original HWND destruction plus mouse-button/cursor restoration assertions pass. This
+repeat adds no Rust changes, and its owned processes have exited. This is fresh injected
+OS-input evidence on the current desktop, with the same GPU, maximized/snap/keyboard and
+human-observation limits above; it does not resume the paused Editor/component or Dialogue work.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

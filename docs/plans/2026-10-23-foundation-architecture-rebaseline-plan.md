@@ -3659,6 +3659,17 @@ keeps Nara's platform and Render/Host contracts independent of Winit while retai
 desktop adapter. A small dependency fork may carry a demonstrated native repair; the current
 mixed-DPI source gap alone does not justify replacing the cross-platform window system.
 
+**November 14 physical-display repeat:** the unchanged repair at `1911bef`/`ad36985` is
+requalified at `09f170f` on the available 125%/150% displays, including the negative-coordinate
+monitor. The original geometry and injected OS title-bar probes pass 2/2 in 11.441 seconds,
+run `d157dce5-e662-4d47-b695-fa97dd036a2b`, after a 57.30-second release build. Original
+HWND retirement, mouse cleanup, both drag directions, explicit size requests and synchronized
+native/Winit/Runtime geometry remain asserted. No additional source repair is needed by these
+observations. The [native qualification record](../verification/native-editor-qualification.md#mixed-dpi-window-controls)
+retains actual bounds and the separate destination-GPU, maximized/snap/keyboard and manual-feel
+gaps. This bounded resumed hardware check leaves Editor/component and Dialogue work paused;
+Runtime development and the full foundation Goal remain active.
+
 The [component responsibility and quality sequence](2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development)
 builds on existing `open-gpui-ui-core`/`open-gpui-ui-components`, then Nara theme and Editor
 composites. Those generic components are fork-owned implementations and need focused acceptance
