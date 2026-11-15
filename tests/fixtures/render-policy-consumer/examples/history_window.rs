@@ -297,7 +297,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return DesktopPresentationControl::Exit(AppExit::Requested);
             }
             let Some(receipt) = observation.presented_frame() else {
-                return DesktopPresentationControl::Continue;
+                return DesktopPresentationControl::WakeAt(deadline);
             };
             let captured = world
                 .resource::<CapturedFrameSlot>()
@@ -416,7 +416,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if frames.len() == PRESENTATIONS {
                 DesktopPresentationControl::Exit(AppExit::Success)
             } else {
-                DesktopPresentationControl::Continue
+                DesktopPresentationControl::WakeAt(deadline)
             }
         });
     let mut desktop = DesktopRun::from_runtime(runtime, options);

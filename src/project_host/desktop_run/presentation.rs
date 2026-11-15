@@ -30,14 +30,17 @@ pub(super) const DEFAULT_TELEMETRY_SEAL_TIMEOUT: Duration = Duration::from_secs(
 /// Finite decisions available to a CPU-only desktop presentation observer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopPresentationControl {
+    /// Keeps observing at future native/frame/owner boundaries without requesting a timer.
     Continue,
+    /// Requests maintenance by this absolute time without requesting an App frame.
+    ///
+    /// Other original owners may deliver an earlier observation. Return the current deadline
+    /// on each pending callback; Continue withdraws only this observer's request.
+    WakeAt(Instant),
     /// Requests exit; `Requested` vetoes `Success`, including an automatic seal success.
     Exit(AppExit),
     /// Stops native submissions immediately, drains the original telemetry, then exits.
-    SealTelemetryAndExit {
-        exit: AppExit,
-        deadline: Instant,
-    },
+    SealTelemetryAndExit { exit: AppExit, deadline: Instant },
 }
 
 /// Read-only facts at the actual post-Host boundary, including maintenance without a frame.
@@ -509,6 +512,12 @@ impl DesktopPresentationDriver {
         let maintenance = self.host.poll_runtime_maintenance();
         let samples = maintenance.samples;
         let now = Instant::now().max(now);
+        if maintenance.needs_poll || self.pending_result.is_some() {
+            progress.next_wake = earlier(
+                progress.next_wake,
+                now.checked_add(MAINTENANCE_POLL_INTERVAL),
+            );
+        }
         progress.exit = merge_exit(
             progress.exit,
             self.poll_seal(now, maintenance.error.is_some(), &samples),
@@ -551,6 +560,9 @@ impl DesktopPresentationDriver {
             });
             match control {
                 DesktopPresentationControl::Continue => {}
+                DesktopPresentationControl::WakeAt(deadline) => {
+                    progress.next_wake = earlier(progress.next_wake, Some(deadline));
+                }
                 DesktopPresentationControl::Exit(request) => {
                     progress.exit = merge_exit(progress.exit, Some(request));
                 }
@@ -566,11 +578,6 @@ impl DesktopPresentationDriver {
                     }
                 }
             }
-            // A finite consumer deadline must keep progressing even under Winit Wait/occlusion.
-            progress.next_wake = earlier(
-                progress.next_wake,
-                now.checked_add(MAINTENANCE_POLL_INTERVAL),
-            );
             self.seal_report_delivered = report.is_some();
         }
         if let Some(seal) = &self.seal {

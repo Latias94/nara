@@ -127,6 +127,10 @@ impl DesktopRunOptions {
     }
 
     /// Observes actual post-Host CPU facts and finite maintenance, without native GPU access.
+    ///
+    /// Installing an observer does not select a periodic wake. Return `WakeAt(deadline)` while
+    /// an observation is required by an absolute time, or `Continue` without that request.
+    /// Original native, submission, first-present and telemetry-seal work may call it earlier.
     #[must_use]
     pub fn with_presentation_observer(
         mut self,

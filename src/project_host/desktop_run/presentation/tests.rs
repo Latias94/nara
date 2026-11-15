@@ -9,6 +9,8 @@ use nara_render::{FrameStats, RenderFrame, RenderFrameState};
 
 use super::*;
 
+mod observer_deadlines;
+
 fn live_runtime() -> RuntimeInstance {
     RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -291,6 +293,7 @@ fn final_observer_evidence_failure_vetoes_seal_success_and_is_delivered_once() {
         },
     );
     assert_eq!(final_progress.exit, Some(AppExit::Requested));
+    assert_eq!(final_progress.next_wake, None);
     assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
     let later_progress = driver.observe_consumer(
         &runtime,
@@ -303,6 +306,7 @@ fn final_observer_evidence_failure_vetoes_seal_success_and_is_delivered_once() {
         },
     );
     assert_eq!(later_progress.exit, None);
+    assert_eq!(later_progress.next_wake, None);
     assert_eq!(deliveries.get(), 1);
     drop(driver);
     retire(runtime);
@@ -423,6 +427,7 @@ fn repeated_active_seal_request_preserves_veto_without_resetting_deadline() {
         "an active seal drains before returning its exit"
     );
     assert_eq!(driver.seal.as_ref().unwrap().exit, Some(AppExit::Success));
+    assert_eq!(first.next_wake, Some(now + MAINTENANCE_POLL_INTERVAL));
     let repeated = driver.observe_consumer(
         &runtime,
         None,
@@ -434,6 +439,7 @@ fn repeated_active_seal_request_preserves_veto_without_resetting_deadline() {
         },
     );
     assert_eq!(repeated.exit, None);
+    assert_eq!(repeated.next_wake, Some(now + MAINTENANCE_POLL_INTERVAL));
     assert_eq!(driver.seal.as_ref().unwrap().exit, Some(AppExit::Requested));
     assert_eq!(driver.seal.as_ref().unwrap().deadline, original_deadline);
     assert_eq!(deliveries.get(), 2);

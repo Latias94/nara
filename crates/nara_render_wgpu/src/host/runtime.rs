@@ -28,6 +28,11 @@ pub struct WgpuRuntimeHostFacts {
 pub struct WgpuRuntimeMaintenance {
     pub samples: Vec<WgpuFrameCompletionSample>,
     pub error: Option<WgpuRenderHostError>,
+    /// Original submission or telemetry custody still needs a later nonblocking poll.
+    ///
+    /// This is independent of observer installation and telemetry enablement. It does not
+    /// describe future cache-lifetime changes or promise that every retained cache is empty.
+    pub needs_poll: bool,
 }
 
 pub(super) struct RuntimeWorldPresentation {
@@ -58,6 +63,12 @@ impl WgpuRenderHost {
         let owner_error = self.maintain_producers().err();
         let telemetry_error = self.backend.poll_telemetry_completions().err();
         let samples = self.backend.drain_frame_completion_samples();
+        let completion = self.backend.frame_completion_stats();
+        let resources = self.backend.gpu_resource_stats();
+        let needs_poll = !self.retiring_prefixes.is_empty()
+            || completion.pending_samples() != 0
+            || completion.buffered_samples() != 0
+            || resources.pending_retirements() != 0;
         let error = match (owner_error, telemetry_error) {
             (Some(owner), Some(telemetry)) => Some(WgpuRenderHostError::NativeExecution {
                 message: format!("{owner}; telemetry maintenance failed: {telemetry}"),
@@ -66,7 +77,11 @@ impl WgpuRenderHost {
             (None, Some(error)) => Some(error.into()),
             (None, None) => None,
         };
-        WgpuRuntimeMaintenance { samples, error }
+        WgpuRuntimeMaintenance {
+            samples,
+            error,
+            needs_poll,
+        }
     }
 
     #[doc(hidden)]
@@ -556,5 +571,7 @@ fn runtime_error(error: &WgpuRenderHostError) -> WgpuRenderError {
     }
 }
 
+#[cfg(test)]
+mod maintenance_tests;
 #[cfg(test)]
 mod tests;

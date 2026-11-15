@@ -179,7 +179,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if observation.now() >= deadline {
                 return DesktopPresentationControl::Exit(AppExit::Requested);
             }
-            DesktopPresentationControl::Continue
+            DesktopPresentationControl::WakeAt(deadline)
         });
     let mut desktop = DesktopRun::from_runtime(runtime, options);
     let mut report = desktop.execute();

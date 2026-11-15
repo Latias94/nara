@@ -53,7 +53,7 @@ fn main() -> scene::Result<()> {
             let Some(input) = world.resource::<RetainedInputs>().0.iter().find(|input| {
                 input.packet().frame_index() == receipt.render_transaction_frame_index()
             }) else {
-                return DesktopPresentationControl::Continue;
+                return DesktopPresentationControl::WakeAt(deadline);
             };
             assert_eq!(
                 input.packet().source_generation().runtime_generation(),
@@ -63,7 +63,7 @@ fn main() -> scene::Result<()> {
                 .captured::<CompositionPolicy>()
                 .expect("the recipe-selected external policy");
             if capture.stock.ui_packets().is_empty() {
-                return DesktopPresentationControl::Continue;
+                return DesktopPresentationControl::WakeAt(deadline);
             }
             let ui = nara::ui_render::advanced::latest_presented_ui_observation(world)
                 .expect("the original HUD sidecar must complete through the product bridge");
@@ -90,7 +90,7 @@ fn main() -> scene::Result<()> {
             *observed.borrow_mut() = Some((input.clone(), receipt.backend_instance_id()));
             return DesktopPresentationControl::Exit(AppExit::Success);
         }
-        DesktopPresentationControl::Continue
+        DesktopPresentationControl::WakeAt(deadline)
     });
     let mut run = DesktopRun::new(
         open_explicit_product_project_root(fixture.root())?,

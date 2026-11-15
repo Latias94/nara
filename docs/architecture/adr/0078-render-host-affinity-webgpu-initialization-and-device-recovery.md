@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-11-04 (native frontend declarations in the original closed device request)
+**Last Revised**: 2026-11-16
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -167,6 +167,14 @@ Returned original CPU results join UI completion and first-present/READY at the 
 Every maintenance service advances deadlines and pending publication with an optional None result
 and arranges its next required wake. This boundary neither reruns arbitrary Last systems nor drives
 an extra simulation frame to publish readiness.
+
+A CPU presentation observer declares its own next required observation time. Merely installing
+one does not select a permanent maintenance frequency. Original submitted GPU work supplies
+maintenance demand independently of observer installation and telemetry configuration; its
+prefix custody and callback completion remain authoritative. Merge these requirements with
+first-present/READY and finite seal deadlines in the existing native driver. Maintenance does
+not advance App stages or reset the frame clock. A consumer still explicitly drives work that
+has no native demand source; this does not introduce general task or cache-lifetime wakes.
 
 Connection authentication precedes one-shot collection, not just native transfer or result return.
 Direct Drop settles the original completion obligations before releasing the logical in-flight

@@ -160,6 +160,11 @@ is pending, or accept deferring that work until a native event or explicit opera
 does not automatically choose Wait, and Wait while Running still uses the original elapsed
 time caps and fixed catch-up policy on the next frame.
 
+A presentation observer's `WakeAt(deadline)` requests maintenance without an App frame.
+`Continue` supplies no observer timer. Original submitted GPU work, first-present/READY and
+telemetry sealing retain their own wake requirements independently; see the
+[desktop observer guide](rust-product-recipes.md#native-desktop-execution).
+
 `capture_time_continuation()` requires a healthy full paused frame and no pending control.
 Its portable value records actual timestep, caps, catch-up policy, scale, maximum delta and
 pending virtual time. It contains no prior Runtime/frame/tick identity. Construct a value from

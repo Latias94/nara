@@ -1384,6 +1384,52 @@ impl WgpuRenderHost {
     }
 
     fn maintain_producers(&mut self) -> Result<(), WgpuRenderHostError> {
+        self.maintain_cached_owners()?;
+        let prefix_count = self.retiring_prefixes.len();
+        for prefix in &self.retiring_prefixes {
+            let result = if prefix.callback_abandoned() {
+                prefix.recover_abandoned()
+            } else {
+                prefix.poll()
+            };
+            match result {
+                Ok(_) => {}
+                Err(crate::submission::WgpuSubmissionPrefixError::CallbackAbandoned) => {
+                    prefix.recover_abandoned().map_err(|error| {
+                        WgpuRenderError::RetirementPollFailed {
+                            message: error.to_string(),
+                        }
+                    })?;
+                }
+                Err(error) => {
+                    return Err(WgpuRenderError::RetirementPollFailed {
+                        message: error.to_string(),
+                    }
+                    .into());
+                }
+            }
+        }
+        let mut abandoned = 0_u64;
+        let mut cleanup_faults = 0_u64;
+        self.retiring_prefixes.retain(|prefix| {
+            // An original clone may complete on another polling thread. Decide removal once,
+            // after which its final observations are immutable and can transfer together.
+            if !prefix.is_complete() {
+                return true;
+            }
+            abandoned = abandoned.saturating_add(u64::from(prefix.callback_abandoned()));
+            cleanup_faults = cleanup_faults.saturating_add(prefix.cleanup_fault_count());
+            false
+        });
+        self.abandoned_submission_count = self.abandoned_submission_count.saturating_add(abandoned);
+        self.cleanup_faults = self.cleanup_faults.saturating_add(cleanup_faults);
+        if self.retiring_prefixes.len() != prefix_count {
+            self.maintain_cached_owners()?;
+        }
+        Ok(())
+    }
+
+    fn maintain_cached_owners(&mut self) -> Result<(), WgpuRenderHostError> {
         for view in self.views.values_mut() {
             view.policies.maintain();
             view.histories
@@ -1427,43 +1473,6 @@ impl WgpuRenderHost {
             }
             self.backend.retire_editor_world_presentation(id);
         }
-        for prefix in &self.retiring_prefixes {
-            let result = if prefix.callback_abandoned() {
-                prefix.recover_abandoned()
-            } else {
-                prefix.poll()
-            };
-            match result {
-                Ok(_) => {}
-                Err(crate::submission::WgpuSubmissionPrefixError::CallbackAbandoned) => {
-                    prefix.recover_abandoned().map_err(|error| {
-                        WgpuRenderError::RetirementPollFailed {
-                            message: error.to_string(),
-                        }
-                    })?;
-                }
-                Err(error) => {
-                    return Err(WgpuRenderError::RetirementPollFailed {
-                        message: error.to_string(),
-                    }
-                    .into());
-                }
-            }
-        }
-        let mut abandoned = 0_u64;
-        let mut cleanup_faults = 0_u64;
-        self.retiring_prefixes.retain(|prefix| {
-            // An original clone may complete on another polling thread. Decide removal once,
-            // after which its final observations are immutable and can transfer together.
-            if !prefix.is_complete() {
-                return true;
-            }
-            abandoned = abandoned.saturating_add(u64::from(prefix.callback_abandoned()));
-            cleanup_faults = cleanup_faults.saturating_add(prefix.cleanup_fault_count());
-            false
-        });
-        self.abandoned_submission_count = self.abandoned_submission_count.saturating_add(abandoned);
-        self.cleanup_faults = self.cleanup_faults.saturating_add(cleanup_faults);
         Ok(())
     }
 

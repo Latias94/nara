@@ -465,7 +465,7 @@ pub fn options(mode: ContentMode) -> (DesktopRunOptions, Rc<RefCell<CaptureResul
             ));
             return DesktopPresentationControl::Exit(AppExit::Requested);
         }
-        observe_presented(observation, mode, &observed)
+        observe_presented(observation, mode, &observed, deadline)
     });
     (options, result)
 }
@@ -474,9 +474,10 @@ fn observe_presented(
     observation: DesktopPresentationObservation<'_>,
     mode: ContentMode,
     result: &RefCell<CaptureResult>,
+    deadline: Instant,
 ) -> DesktopPresentationControl {
     let Some(receipt) = observation.presented_frame() else {
-        return DesktopPresentationControl::Continue;
+        return DesktopPresentationControl::WakeAt(deadline);
     };
     let world = observation
         .world()
@@ -485,12 +486,12 @@ fn observe_presented(
     let mut result = result.borrow_mut();
     let index = usize::from(result.frames[0].is_some());
     let Some(frame) = &state.frames[index] else {
-        return DesktopPresentationControl::Continue;
+        return DesktopPresentationControl::WakeAt(deadline);
     };
     if receipt.app_frame_index() != frame.app_frame
         || receipt.render_transaction_frame_index() != frame.input.packet().frame_index()
     {
-        return DesktopPresentationControl::Continue;
+        return DesktopPresentationControl::WakeAt(deadline);
     }
     assert_eq!(frame.mode, mode);
     assert_eq!(receipt.runtime_generation(), frame.runtime);
@@ -563,7 +564,7 @@ fn observe_presented(
         result.frames[0] = Some(frame.clone());
         // Only this actual post-Host red receipt allows normal gameplay to request the later Scene.
         state.red_presented.store(true, Ordering::Release);
-        DesktopPresentationControl::Continue
+        DesktopPresentationControl::WakeAt(deadline)
     } else {
         assert!(state.stores_emptied && world.resource::<TravelState>().committed);
         assert!(world.resource::<Assets<ImageAsset>>().is_empty());

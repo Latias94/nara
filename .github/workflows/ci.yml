@@ -137,6 +137,12 @@ jobs:
         run: |
           cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(invalid_capture_preflight_refuses_before_known_native_resource_budget)' --test-threads=1
           cargo nextest run --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting)' --test-threads=1
+      - name: Test original submission maintenance with and without telemetry
+        if: runner.os == 'Windows'
+        env:
+          WGPU_BACKEND: dx12
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: cargo nextest run -p nara_render_wgpu --locked --features stock-sprite,stock-ui --lib --run-ignored only -E 'test(host::runtime::maintenance_tests::)' --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test live physical Scene updates through an external DX12 Host
         if: runner.os == 'Windows'
         env:

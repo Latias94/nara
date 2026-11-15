@@ -335,7 +335,7 @@ impl ObservationState {
                 deadline,
             });
         }
-        Ok(DesktopPresentationControl::Continue)
+        Ok(DesktopPresentationControl::WakeAt(deadline))
     }
 
     fn record_presentation(

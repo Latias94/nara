@@ -461,6 +461,17 @@ measurement, request `SealTelemetryAndExit` and inspect the final telemetry seal
 lost and epoch facts, before treating its samples as complete. An ordinary observer failure can veto
 a scheduled successful exit.
 
+`Continue` requests no observer timer. Return `WakeAt(absolute_deadline)` on each callback while
+the observer needs another observation by that time. A native/frame event or another original
+owner may deliver it earlier. Returning Continue later withdraws only the observer's deadline;
+pending GPU submissions, first-present/READY work and telemetry sealing retain their own wakes.
+A deadline requests maintenance, not another App frame. An expired deadline requests immediate
+maintenance, so resolve it or return the next required time instead of repeatedly requesting an
+expired deadline. Caller-supplied `poll(max_wait)` caps remain independent of these owner requests.
+Consumers previously relying on the implicit 2 ms observer timer must declare their actual
+deadline. External observer-state changes still need caller polling or an existing native demand
+source; installing an observer is not a background-task or cache-lifetime notification service.
+
 File-backed and processed product constructors add their content/configuration custody to this
 same native owner. Explicit platform-only consumers use owned `WinitRunner::run(runtime)` and retain
 its `WinitSession`; that entry rejects a Runtime expecting a presentation backend.
