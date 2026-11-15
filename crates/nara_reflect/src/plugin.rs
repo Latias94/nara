@@ -28,8 +28,21 @@ const PRELOADED_COMPONENT_REGISTRY_DEFINITION_ID: PluginDefinitionId =
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ComponentRegistryPlugin;
 
-struct PreloadedComponentRegistryPlugin {
+/// Installs an already admitted immutable registry through the ordinary managed App owner.
+///
+/// This replaces [`ComponentRegistryPlugin`] in the composition. Providers validate their exact
+/// receipts against the supplied snapshot instead of registering a second set of codecs. The
+/// installed snapshot becomes readable only after Finish and retains the same authority checks.
+#[derive(Clone)]
+pub struct PreloadedComponentRegistryPlugin {
     snapshot: ComponentRegistrySnapshot,
+}
+
+impl PreloadedComponentRegistryPlugin {
+    #[must_use]
+    pub fn new(snapshot: ComponentRegistrySnapshot) -> Self {
+        Self { snapshot }
+    }
 }
 
 /// Creates the file-backed registry definition used by a resolved project plan.

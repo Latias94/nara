@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-11-02 (construction ownership and canonical first-party UI baseline)
+**Last Revised**: 2026-11-15 (direct code-first installation of admitted registry snapshots)
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -356,6 +356,13 @@ checks its exact admitted receipts without replaying those callbacks. Direct bui
 call `validate_persistent_component::<T>` and `register_persistent_component::<T>` with the same
 Schema/binding checks. The registry owner consumes the complete candidate during plugin finish;
 the derive cannot publish, replace, or unfreeze a catalog.
+
+Code-first consumers may supply an already admitted snapshot through
+`PreloadedComponentRegistryPlugin::new`, replacing the builder-backed registry plugin in that
+composition. This is the existing managed owner with the same snapshot, Finish and authority
+checks, not standalone fallback during App configuration. Installed schema-owning plugins still
+require their exact original provider receipts. The plan-local delayed preparation adapter
+retains its own input-cell lifetime; ordinary callers with a ready snapshot need no such cell.
 
 The first admitted field types are `i64`, `u64`, `Vec2`, and `EntityReference`.
 Entity references require `entity_ref`; `asset_ref`, collections, generics, enums, tuple

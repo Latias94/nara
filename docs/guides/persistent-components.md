@@ -345,6 +345,14 @@ admitted snapshot or an empty Scene. The
 [interaction lab](../../crates/nara_ui/examples/interaction_lab/fixture.rs) demonstrates this path
 and publishes its entity handles only after successful materialization.
 
+Code-first compositions that already hold an admitted snapshot can install
+`PreloadedComponentRegistryPlugin::new(snapshot)` instead of `ComponentRegistryPlugin`.
+This uses the same managed registry owner and exact immutable snapshot; providers validate
+their original receipts without rerunning registration callbacks. It is not a second registry
+or permission to materialize during configuration. Wait for Startup just as with the ordinary
+builder-backed plugin. Register provider receipts in the original builder when later installed
+plugins will validate those providers against the preloaded snapshot.
+
 The [independently compiled consumer](../../tests/fixtures/module-consumer/tests/scene_preparation.rs)
 exercises prepare/cancel, reverse-order commits, exact replacement, and retained-state rejection.
 

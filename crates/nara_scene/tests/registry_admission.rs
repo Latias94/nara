@@ -3,8 +3,6 @@
 #[path = "support/compiled_scene.rs"]
 mod compiled_scene;
 
-use std::sync::{Arc, OnceLock};
-
 use nara_app::App;
 use nara_asset::AssetServer;
 use nara_diagnostic::DiagnosticReport;
@@ -16,7 +14,7 @@ use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
-    component_registry, component_registry_is_installed, preloaded_component_registry_plugin,
+    PreloadedComponentRegistryPlugin, component_registry, component_registry_is_installed,
     validate_component_registry_authority,
 };
 use nara_scene::{
@@ -66,7 +64,7 @@ fn occurrence() -> SceneOccurrenceKey {
 fn install_unfinished_owner(app: &mut App, preloaded: bool, snapshot: &ComponentRegistrySnapshot) {
     if preloaded {
         app.add_plugins((
-            preloaded_component_registry_plugin(Arc::new(OnceLock::from(snapshot.clone()))),
+            PreloadedComponentRegistryPlugin::new(snapshot.clone()),
             SceneComponentsPlugin,
         ))
         .unwrap();
