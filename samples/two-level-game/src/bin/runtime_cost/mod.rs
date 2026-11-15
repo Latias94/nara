@@ -42,6 +42,7 @@ pub(super) struct Collector {
     wanted: usize,
     accepted: usize,
     last_presented: Option<(u64, u64, u64)>,
+    presentations: u64,
     first_presentation: Option<Value>,
     pub(super) baseline: Option<GameSnapshot>,
     pub(super) collect_running: bool,
@@ -67,6 +68,7 @@ impl Collector {
             wanted,
             accepted: 0,
             last_presented: None,
+            presentations: 0,
             first_presentation: None,
             baseline: None,
             collect_running: false,
@@ -87,6 +89,11 @@ impl Collector {
 
     pub(super) fn sample_count(&self) -> usize {
         self.frames.len()
+    }
+
+    /// Counts unique original receipts independently of running-frame sampling.
+    pub(super) fn presentation_count(&self) -> u64 {
+        self.presentations
     }
 
     pub(super) fn observe(
@@ -177,9 +184,6 @@ impl Collector {
             validate_workload(snapshot, baseline)?;
         }
         let measuring = self.collect_running && self.frames.len() < self.wanted;
-        if !measuring && self.first_presentation.is_some() {
-            return Ok(());
-        }
         let Some(receipt) = observation.presented_frame() else {
             return Ok(());
         };
@@ -216,6 +220,14 @@ impl Collector {
                 "post-Host receipt is not the exact current original App/render/device transaction"
                     .into(),
             );
+        }
+        self.last_presented = Some(key);
+        self.presentations = self
+            .presentations
+            .checked_add(1)
+            .ok_or("original presentation counter overflowed")?;
+        if !measuring && self.first_presentation.is_some() {
+            return Ok(());
         }
         let extent = backend
             .configured_surface_extent(receipt.window_id())
@@ -268,7 +280,6 @@ impl Collector {
         }) {
             return Err("native target or device changed within the measured run".into());
         }
-        self.last_presented = Some(key);
         self.accepted += 1;
         if self.accepted <= self.warmup {
             return Ok(());

@@ -25,6 +25,8 @@ const POLL: Duration = Duration::from_millis(2);
 /// for physical close rather than retrying restoration in a partially changed candidate.
 /// Successful canonical capture does not prove a restored presentation. The caller must observe
 /// its original presentation receipt before adopting the route and revealing this same window.
+/// Pending reconstruction explicitly requests full paused frames, including under Wait cadence,
+/// so asynchronous Scene results can be integrated by the original App stages.
 pub fn restore_desktop_resume(
     run: &mut DesktopRun,
     state: &ResumeState,
@@ -108,6 +110,8 @@ pub fn restore_desktop_resume(
 }
 
 fn paused_maintenance(run: &mut DesktopRun, deadline: Instant) -> Result<(), GameResumeError> {
+    check_deadline(deadline)?;
+    run.request_paused_maintenance()?;
     loop {
         poll(run, deadline)?;
         match run.capture(|_| ()) {

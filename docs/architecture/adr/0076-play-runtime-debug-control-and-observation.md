@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-11-14
+**Last Revised**: 2026-11-16
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
@@ -472,6 +472,12 @@ refuse continuous execution before admitting mutation. Pause does not discard de
 manufacture an extra simulation tick to make capture pass. A failure after control admission
 retains its original outcome and cleanup owner; a pre-admission refusal remains recoverable.
 These game-owned controls do not extend the separate supervised Editor Play launch protocol.
+
+The game-owned source-desktop child may explicitly select original native Wait cadence for
+its known paused inventory and Poll for continuous play. Native events, semantic operations,
+exact stepping and presentation confirmation still request original work. This is a workload
+policy, not a Runtime Pause side effect or a promise that arbitrary asynchronous services and
+real-time shaders update without frames; ADR0039 owns that distinction and elapsed-time rules.
 
 Concrete development cost observations remain Host-local and explicitly enabled. Fixed elapsed
 phase aggregates describe original calls, including their existing waits and failures; they do

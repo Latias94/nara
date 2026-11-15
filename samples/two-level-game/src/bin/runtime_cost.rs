@@ -7,9 +7,21 @@
 //! Poll deadlines are cooperative and cannot interrupt native calls or game callbacks.
 //! Startup diagnostics observe original elapsed operations before running-frame warmup. Sequential
 //! runs share this process and recover the same physical event loop; they are not cold processes.
+//!
+//! Format v3 retains the v2 running/startup evidence and adds paired 300 ms paused Poll/Wait
+//! intervals after 100 ms cooperative settling, alternating order by run. Each interval compares
+//! complete original `encode_resume` bytes and observes unique original presentation receipts,
+//! App/fixed/logical counters and whole-process CPU. `paused_cadence` replaces v2's `paused_idle`.
+//! Scoped manual-step fields replace v2's global field: intervals and running samples never Step
+//! or supply a delta; separate paused validation requests one original StepFixedTick, full paused
+//! maintenance and subsequent Resume/Pause. Acceptance requires at least 80% fewer aggregate Wait
+//! App frames. Quantized CPU counters and the observer's 2 ms maintenance polling remain visible;
+//! this known paused workload does not establish CPU-free idle or a universal presentation policy.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[path = "runtime_cost/idle.rs"]
+mod idle;
 #[path = "runtime_cost/process_cost.rs"]
 mod process_cost;
 #[path = "runtime_cost/mod.rs"]
@@ -102,7 +114,13 @@ fn main() -> ExitCode {
     let result = Options::parse().and_then(compare);
     match result {
         Ok(report) => match write_report(&report) {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(()) if report["paused_cadence"]["accepted"] == true => ExitCode::SUCCESS,
+            Ok(()) => {
+                eprintln!(
+                    "runtime_cost: paused App-frame reduction gate failed; observations retained in the report"
+                );
+                ExitCode::FAILURE
+            }
             Err(error) => {
                 eprintln!("runtime_cost: write report: {error}");
                 ExitCode::FAILURE
@@ -154,7 +172,8 @@ fn compare(options: Options) -> Result<Value, String> {
                 pair + 1,
                 if witness { "witness" } else { "plain" }
             );
-            let (physical, mut report) = run_one(event_loop.take(), witness, options)?;
+            let (physical, mut report) =
+                run_one(event_loop.take(), witness, options, reports.len())?;
             event_loop = Some(physical);
             if workload
                 .as_ref()
@@ -175,8 +194,9 @@ fn compare(options: Options) -> Result<Value, String> {
         }
     }
     drop(event_loop);
+    let paused_cadence = idle::summarize(&reports)?;
     Ok(json!({
-        "format": "two-level-runtime-cost/v2",
+        "format": "two-level-runtime-cost/v3",
         "pairs": options.pairs,
         "warmup_accepted_frames": options.warmup,
         "sample_accepted_frames": options.frames,
@@ -185,9 +205,12 @@ fn compare(options: Options) -> Result<Value, String> {
         "telemetry_enabled_both": true,
         "startup_timings_enabled_both": true,
         "startup_sampling_definition": "additive v2 diagnostics; each run has new original Runtime/native owners in one process and recovers the same physical event loop; loaded code and driver caches are shared, not independent cold-process starts",
-        "manual_step_or_delta": false,
+        "running_manual_step_or_delta": false,
+        "paused_interval_manual_step_or_delta": false,
+        "paused_control_validation_fixed_steps_per_run": 1,
         "same_physical_event_loop": true,
         "same_workload_adapter_extent": true,
+        "paused_cadence": paused_cadence,
         "runs": reports,
     }))
 }
@@ -261,7 +284,8 @@ impl Experiment {
         let expected = match control {
             RuntimeControl::Pause => RuntimeState::Paused,
             RuntimeControl::Resume => RuntimeState::Running,
-            _ => return Err("cost comparison admits only Pause and Resume".into()),
+            RuntimeControl::StepFixedTick => RuntimeState::Paused,
+            _ => return Err("cost comparison admits only Pause, Resume and StepFixedTick".into()),
         };
         let ticket = self
             .run()
@@ -282,7 +306,7 @@ impl Experiment {
         Ok(())
     }
 
-    fn measure(&mut self, options: Options) -> Result<Value, String> {
+    fn measure(&mut self, options: Options, run_index: usize) -> Result<Value, String> {
         let deadline = Instant::now() + TIMEOUT;
         let initial_settle_started = Instant::now();
         self.settle(deadline)?;
@@ -402,22 +426,7 @@ impl Experiment {
         self.observed.borrow_mut().collect_running = false;
         self.control(RuntimeControl::Pause)?;
         self.settle(Instant::now() + TIMEOUT)?;
-        let before = self.counters()?;
-        let idle_started = Instant::now();
-        let idle_end = idle_started + IDLE;
-        let mut idle_polls = 0_u64;
-        while Instant::now() < idle_end {
-            self.poll(idle_end + POLL)?;
-            idle_polls += 1;
-        }
-        let idle_wall = idle_started.elapsed();
-        let after = self.counters()?;
-        if before.1 != after.1
-            || before.2 != after.2
-            || self.run().state() != Some(RuntimeState::Paused)
-        {
-            return Err("paused idle advanced original simulation or logical game time".into());
-        }
+        let paused_cadence = self.measure_paused_cadence(run_index)?;
         let final_state = capture_desktop_resume(self.run()).map_err(|error| error.to_string())?;
         if final_state.held != [false; 4]
             || final_state.player != canonical.player
@@ -435,14 +444,7 @@ impl Experiment {
         report["workload"]["runtime_time_policy"] = json!(canonical.runtime_time);
         report["recipe_configuration"] = json!(canonical.compatibility.configuration);
         report["running_poll_calls"] = json!(polls);
-        report["paused_idle"] = json!({
-            "requested_ns": ns(IDLE)?, "wall_ns": ns(idle_wall)?, "poll_calls": idle_polls,
-            "app_frames": after.0.checked_sub(before.0).ok_or("App frame counter regressed")?,
-            "simulation_ticks": after.1 - before.1, "logical_ticks": after.2 - before.2,
-            "start_app_frame": before.0, "end_app_frame": after.0,
-            "start_simulation_tick": before.1, "end_simulation_tick": after.1,
-            "canonical_capture_valid": true,
-        });
+        report["paused_cadence"] = paused_cadence;
         Ok(report)
     }
 
@@ -556,6 +558,7 @@ fn run_one(
     event_loop: Option<WinitEventLoop>,
     witness: bool,
     options: Options,
+    run_index: usize,
 ) -> Result<(WinitEventLoop, Value), String> {
     let root = two_level_game::open_project_root().map_err(|error| error.to_string())?;
     let recipe = two_level_game::product_recipe();
@@ -593,7 +596,7 @@ fn run_one(
         observed,
         startup: None,
     };
-    let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure(options)))
+    let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure(options, run_index)))
         .unwrap_or_else(|_| Err("measurement panicked; closing original desktop owners".into()));
     let cleanup = catch_unwind(AssertUnwindSafe(|| experiment.retire(measured.is_ok())))
         .unwrap_or_else(|_| Err("native cleanup panicked; retaining original live owners".into()));

@@ -313,18 +313,24 @@ impl Fixture {
         } else {
             "\n"
         };
-        let old = format!(
-            "#[derive(Resource, Default)]{newline}pub(super) struct Session {{{newline}    held: [bool; 4],"
-        );
+        let session = struct_text(&source, "pub(super) struct Session {");
+        let field = "    held: [bool; 4],";
         assert_eq!(
-            source.matches(&old).count(),
+            session.matches(field).count(),
             1,
             "the private baseline Session field"
         );
+        let old = format!("#[derive(Resource, Default)]{newline}{session}");
+        assert_eq!(
+            source.matches(&old).count(),
+            1,
+            "the private Session declaration"
+        );
         assert!(!source.contains("struct MovementIntent"));
+        let rewritten = session.replacen(field, "    movement: MovementIntent,", 1);
         let replacement = format!(
             "#[derive(Default)]{newline}struct MovementIntent {{{newline}    held: [bool; 4],{newline}}}{newline}{newline}\
-             #[derive(Resource, Default)]{newline}pub(super) struct Session {{{newline}    movement: MovementIntent,",
+             #[derive(Resource, Default)]{newline}{rewritten}",
         );
         let mut changed = BTreeSet::new();
         let mut accesses = 0;

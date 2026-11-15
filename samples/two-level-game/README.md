@@ -436,6 +436,13 @@ Call `pause`, settle any original pending Input through explicit controls if nec
 silently inserts a simulation tick. After adoption, call `activate_input` and `resume` explicitly.
 Predecessor cleanup may stay Pending while the adopted game runs.
 
+The source-desktop child explicitly uses original Wait cadence for its known paused workload
+and Poll for continuous play. Pause itself does not change the engine-wide default. Frame,
+Step, reconstruction, native events and presentation confirmation still request original work;
+reconstruction requests full paused frames while asynchronous Scene preparation is pending.
+This recipe does not install a source watcher or require continuously animated paused shaders.
+Consumers adding such work must retain Poll or explicitly drive the required App stages.
+
 Successful execution controls return `result.execution_status`. Complete capture remains a
 separate `capture` or `capture_error` field: expected refusal to capture a Running Runtime cannot
 turn an applied Resume into an unsuccessful control response. Repeated controls return the actual
@@ -522,8 +529,9 @@ cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --lo
 The separate `runtime_cost` executable compares three alternating pairs of ordinary desktop
 execution and the same game with `DevelopmentPresentationPlugin`. Both groups use identical
 native pacing, neutral input and original telemetry. Each excludes 30 successful frames and
-retains 120, then observes paused idle and physical retirement before reusing the same event
-loop. Keep the desktop available and do not manipulate its input or windows during the run.
+retains 120, then compares explicit paused cadence and physical retirement before reusing the
+same event loop. Keep the desktop available and do not manipulate its input or windows during
+the run.
 
 ```text
 cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --bin runtime_cost
@@ -534,7 +542,17 @@ One frame contains zero between-frame CPU intervals and is unsuitable for sustai
 comparison. Set `WGPU_BACKEND=dx12` and `NARA_WGPU_FORCE_FALLBACK=0` for the recorded Windows
 hardware scope. Optional `NARA_RUNTIME_COST_OUTPUT` writes the structured report to an explicit
 absolute new file; ordinary game startup text still goes to stdout. Without it, stdout ends
-with one `two-level-runtime-cost/v2` JSON record after those startup messages.
+with one `two-level-runtime-cost/v3` JSON record after those startup messages.
+
+Each run compares 300 ms Poll and Wait paused intervals in alternating order, with 100 ms
+settling excluded. Complete canonical bytes and simulation/logical ticks must remain unchanged;
+App frames, actual unique presentation receipts, poll calls and quantized whole-process CPU
+are observed separately. The complete comparison requires at least an 80% aggregate App-frame
+reduction under Wait. Separate controls exercise explicit Wait maintenance, one exact Step
+followed by full paused maintenance, resumed gameplay and original telemetry/native retirement.
+`paused_cadence` replaces the historical v2 `paused_idle` field with both intervals and controls.
+Wait may still poll presentation maintenance every 2 ms, so this comparison does not establish
+CPU-free idle, stable CPU savings or a general background-task wake mechanism.
 
 Both comparison recipes also select the original `DesktopRunOptions::with_startup_timings()`.
 Their additive `startup` diagnostics retain content preparation, Runtime startup, native session

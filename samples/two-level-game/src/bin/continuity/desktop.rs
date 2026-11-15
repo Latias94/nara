@@ -26,6 +26,7 @@ use nara::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
         DesktopRunOptions, DesktopRunProgress, WinitInputActivation,
     },
+    winit::WinitControlFlow,
 };
 use two_level_game::{
     GamePhase, GameSnapshot, capture_desktop_resume,
@@ -61,6 +62,7 @@ impl DesktopGame {
         let presentations = Rc::new(RefCell::new(Presentations::default()));
         let observed = Rc::clone(&presentations);
         let options = DesktopRunOptions::new()
+            .with_control_flow(WinitControlFlow::Wait)
             .with_initial_pause()
             .with_initial_visibility(false)
             .with_input_isolation(true)
@@ -211,6 +213,7 @@ impl DesktopGame {
             if expected == RuntimeState::Paused {
                 self.maintenance(deadline)?;
             }
+            self.select_execution_cadence(expected)?;
             return self.execution_status();
         }
         if control == RuntimeControl::Resume {
@@ -224,6 +227,9 @@ impl DesktopGame {
             .request_control(control)
             .map_err(|error| format!("original desktop execution control was refused: {error}"))?;
         let applied = (|| {
+            if control == RuntimeControl::Resume {
+                self.select_execution_cadence(RuntimeState::Running)?;
+            }
             loop {
                 self.poll_runtime(deadline)?;
                 match self.run.control_status(ticket) {
@@ -241,6 +247,7 @@ impl DesktopGame {
             }
             if expected == RuntimeState::Paused {
                 self.wait_quiescent(deadline)?;
+                self.select_execution_cadence(expected)?;
             }
             check_deadline(deadline)?;
             self.execution_status()
@@ -249,6 +256,16 @@ impl DesktopGame {
             self.execution_failed = true;
         }
         applied
+    }
+
+    fn select_execution_cadence(&mut self, state: RuntimeState) -> Result<(), String> {
+        self.run
+            .set_control_flow(if state == RuntimeState::Paused {
+                WinitControlFlow::Wait
+            } else {
+                WinitControlFlow::Poll
+            })
+            .map_err(|error| format!("select original desktop execution cadence: {error}"))
     }
 
     fn snapshot(&self) -> Result<GameSnapshot, String> {
