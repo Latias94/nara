@@ -14,6 +14,8 @@ mod presentation;
 mod runtime;
 mod target;
 #[cfg(feature = "runtime")]
+mod time;
+#[cfg(feature = "runtime")]
 mod view;
 mod view_id;
 #[cfg(feature = "runtime")]
@@ -38,6 +40,8 @@ pub use target::{
     Extent2d, RenderFrameTarget, RenderImage2d, RenderImagePacket, RenderTarget,
     RenderWindowPacket, ViewportRect,
 };
+#[cfg(feature = "runtime")]
+pub use time::CapturedRenderTime;
 #[cfg(feature = "runtime")]
 pub use view::{
     Camera2d, ExtractedView, ExtractedViews, ViewLoadOp, ViewMapping2d, viewport_clip_to_physical,

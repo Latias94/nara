@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-14
+**Last Revised**: 2026-11-15
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -63,6 +63,14 @@ The product contract is:
   advances immediately before each fixed schedule run.
 - **Render interpolation** uses fixed overstep/interpolation data and must not mutate simulation
   state.
+- Render extraction copies the existing clocks and time settings together with the validated
+  presented-spatial sample and actual interpolation decision. That immutable observation belongs
+  to its original capture; later preparation, target adaptation and replay cannot replace it
+  with Host time or a newer World sample. The clock remainder alone does not prove that spatial
+  interpolation was applied. Exact Step does not run Extract, so the preceding captured sample
+  remains intact until the next ordinary presentation extraction. App frame, fixed tick and
+  render transaction counters remain distinct. The render owner defines the bounded GPU
+  projection of these facts without becoming another time owner.
 - Fresh-runtime continuation carries pending fixed scheduling phase and actual time policy
   through the original managed time owner. The receiver validates its own policy, preserves its
   local clock history and derives interpolation from the applied phase. Initialization is outside

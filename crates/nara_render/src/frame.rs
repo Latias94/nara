@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_RENDER_SOURCE: AtomicU64 = AtomicU64::new(1);
 
 use crate::{
-    Extent2d, ExtractedView, ExtractedViews, RenderFramePacketError, RenderFrameTarget,
-    RenderImagePacket, RenderTarget, RenderWindowPacket, ViewLoadOp, WorldCanvas, WorldCanvasFrame,
+    CapturedRenderTime, Extent2d, ExtractedView, ExtractedViews, RenderFramePacketError,
+    RenderFrameTarget, RenderImagePacket, RenderTarget, RenderWindowPacket, ViewLoadOp,
+    WorldCanvas, WorldCanvasFrame,
 };
 
 /// Maximum serial views in one exclusive target transaction.
@@ -92,6 +93,7 @@ pub struct RenderFramePacket {
     pub(crate) target: RenderFrameTarget,
     views: Vec<ExtractedView>,
     world_canvas: Option<WorldCanvasFrame>,
+    captured_time: Option<CapturedRenderTime>,
 }
 
 impl RenderFramePacket {
@@ -116,12 +118,21 @@ impl RenderFramePacket {
         self.world_canvas
     }
 
+    /// The frozen original Extract sample, unavailable for manually supplied views.
+    ///
+    /// Packet construction and target adaptation never sample current World clocks. The packet's
+    /// frame index and source generation retain their existing render producer ownership.
+    #[must_use]
+    pub const fn captured_time(&self) -> Option<CapturedRenderTime> {
+        self.captured_time
+    }
+
     /// Copies this window transaction to an image execution target of the same physical extent.
     ///
     /// The source packet remains unchanged. Its source, frame index, logical view targets and
     /// View lifetime identities and fixed world canvas are preserved, including the original
-    /// world-to-window mapping. Only the execution target changes; this copies at most
-    /// [`MAX_VIEWS_PER_TARGET`] captured views.
+    /// world-to-window mapping and captured time sample. Only the execution target changes;
+    /// this copies at most [`MAX_VIEWS_PER_TARGET`] captured views.
     ///
     /// Returns an error if this packet does not target a window or the image extent differs from
     /// the captured physical window extent, even when a fixed world canvas has a smaller extent.
@@ -149,6 +160,7 @@ impl RenderFramePacket {
             target: RenderFrameTarget::Image(target),
             views: self.views.to_vec(),
             world_canvas: self.world_canvas,
+            captured_time: self.captured_time,
         })
     }
 }
@@ -304,6 +316,7 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
         target,
         views: views.as_slice().to_vec(),
         world_canvas,
+        captured_time: views.captured_time(),
     }))
 }
 

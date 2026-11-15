@@ -1,7 +1,7 @@
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Component, Entity, Resource};
 
-use crate::{RenderTarget, RenderViewId, ViewportRect, WorldCanvas};
+use crate::{CapturedRenderTime, RenderTarget, RenderViewId, ViewportRect, WorldCanvas};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Camera2d {
@@ -75,6 +75,18 @@ impl ViewMapping2d {
     pub fn clip_to_world(self, point: Vec2) -> Vec2 {
         self.clip_to_world.transform_point2(point)
     }
+
+    /// Returns the captured affine world-to-clip projection for uniform packing.
+    #[must_use]
+    pub const fn world_to_clip_matrix(self) -> Mat3 {
+        self.world_to_clip
+    }
+
+    /// Returns the captured inverse projection for uniform packing.
+    #[must_use]
+    pub const fn clip_to_world_matrix(self) -> Mat3 {
+        self.clip_to_world
+    }
 }
 
 /// Color attachment operation. A clear affects the entire target, including outside the viewport.
@@ -133,26 +145,37 @@ pub fn viewport_clip_to_physical(viewport: ViewportRect, clip: Vec2) -> Vec2 {
 pub struct ExtractedViews {
     views: Vec<ExtractedView>,
     world_canvas: Option<WorldCanvas>,
+    captured_time: Option<CapturedRenderTime>,
 }
 
 impl ExtractedViews {
     pub fn clear(&mut self) {
         self.views.clear();
         self.world_canvas = None;
+        self.captured_time = None;
     }
     /// Appends a manually supplied view. The caller owns consistency with the explicit frame
     /// builder configuration and retains its identity with the View owner across captures;
-    /// ordinary extraction publishes its configuration atomically instead.
+    /// ordinary extraction publishes its configuration atomically instead. Appending a manual
+    /// view invalidates the captured time sample for the entire collection.
     pub fn push(&mut self, view: ExtractedView) {
         self.views.push(view);
+        self.captured_time = None;
     }
     pub(crate) fn replace(
         &mut self,
         candidate: &mut Vec<ExtractedView>,
         world_canvas: Option<WorldCanvas>,
+        captured_time: CapturedRenderTime,
     ) {
         std::mem::swap(&mut self.views, candidate);
         self.world_canvas = world_canvas;
+        self.captured_time = Some(captured_time);
+    }
+    /// The original Extract sample, unavailable for cleared or manually supplied views.
+    #[must_use]
+    pub const fn captured_time(&self) -> Option<CapturedRenderTime> {
+        self.captured_time
     }
     /// Exact canvas configuration used to derive this extracted camera projection.
     /// First-party capture must use this value rather than a subsequently changed resource.

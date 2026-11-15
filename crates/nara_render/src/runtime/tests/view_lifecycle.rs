@@ -472,6 +472,11 @@ fn failed_extraction_observes_all_camera_lifetimes_without_recreating_them_on_re
     world.init_resource::<ExtractedViewScratch>();
     world.init_resource::<CameraViewLifetimes>();
     world.init_resource::<ClearColor>();
+    world.init_resource::<RealTime>();
+    world.init_resource::<VirtualTime>();
+    world.init_resource::<FixedTime>();
+    world.init_resource::<RenderTime>();
+    world.init_resource::<RuntimeTimeSettings>();
     let prior = test_extracted_view();
     world.resource_mut::<ExtractedViews>().push(prior);
     let camera = world.spawn(Camera2d::default()).id();

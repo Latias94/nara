@@ -205,6 +205,10 @@ fn readers_reject_missing_foreign_world_generation_phase_and_time() {
             assert_eq!(historical.stamp(), Err(SpatialSnapshotError::Unavailable));
             assert_eq!(fixed.stamp(), Err(SpatialSnapshotError::Unavailable));
             assert_eq!(presented.stamp(), Err(SpatialSnapshotError::Unavailable));
+            assert_eq!(
+                presented.spatial_interpolated(),
+                Err(SpatialSnapshotError::Unavailable)
+            );
         },
     );
     schedule.run(&mut missing);
@@ -248,6 +252,86 @@ fn readers_reject_missing_foreign_world_generation_phase_and_time() {
             Some(SpatialSnapshotError::MissingClock)
         );
         world.insert_resource(clock);
+    });
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn presented_interpolation_rejects_invalid_and_stale_publications() {
+    use crate::snapshot::PresentationSnapshot;
+    use nara_ecs::bevy_ecs::system::SystemState;
+
+    fn read(world: &mut World) -> Result<bool, SpatialSnapshotError> {
+        let mut parameter = SystemState::<PresentedSpatialSnapshot2d>::new(world);
+        parameter.get(world).unwrap().spatial_interpolated()
+    }
+
+    let mut runtime = RuntimeInstance::start(spatial_app().unwrap()).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    check_world(&mut runtime, |world| {
+        let stamp = world.resource::<PresentationSnapshot>().stamp.unwrap();
+        assert_eq!(read(world), Ok(false));
+
+        world
+            .resource_mut::<PresentationSnapshot>()
+            .stamp
+            .as_mut()
+            .unwrap()
+            .world = World::new().id();
+        assert_eq!(read(world), Err(SpatialSnapshotError::WrongWorld));
+        world.resource_mut::<PresentationSnapshot>().stamp = Some(stamp);
+
+        let generation = world.remove_resource::<RuntimeGeneration>().unwrap();
+        assert_eq!(
+            read(world),
+            Err(SpatialSnapshotError::WrongRuntimeGeneration)
+        );
+        world.insert_resource(generation);
+
+        world
+            .resource_mut::<PresentationSnapshot>()
+            .stamp
+            .as_mut()
+            .unwrap()
+            .phase = SpatialSnapshotPhase::Fixed;
+        assert_eq!(
+            read(world),
+            Err(SpatialSnapshotError::WrongPhase {
+                expected: SpatialSnapshotPhase::Presented,
+                actual: SpatialSnapshotPhase::Fixed,
+            })
+        );
+        world.resource_mut::<PresentationSnapshot>().stamp = Some(stamp);
+
+        world.resource_mut::<RealTime>().frame += 1;
+        assert_eq!(read(world), Err(SpatialSnapshotError::WrongTime));
+        world.resource_mut::<RealTime>().frame -= 1;
+        world
+            .resource_mut::<PresentationSnapshot>()
+            .stamp
+            .as_mut()
+            .unwrap()
+            .tick += 1;
+        assert_eq!(read(world), Err(SpatialSnapshotError::WrongTime));
+        world.resource_mut::<PresentationSnapshot>().stamp = Some(stamp);
+
+        let clock = world.remove_resource::<FixedTime>().unwrap();
+        assert_eq!(read(world), Err(SpatialSnapshotError::MissingClock));
+        world.insert_resource(clock);
+
+        let source_publication = world.resource::<PresentationSnapshot>().source_publication;
+        world
+            .resource_mut::<PresentationSnapshot>()
+            .source_publication = 0;
+        assert_eq!(read(world), Err(SpatialSnapshotError::Unavailable));
+        world
+            .resource_mut::<PresentationSnapshot>()
+            .source_publication = source_publication;
+
+        let presentation = world.remove_resource::<PresentationSnapshot>().unwrap();
+        assert_eq!(read(world), Err(SpatialSnapshotError::Unavailable));
+        world.insert_resource(presentation);
+        assert_eq!(read(world), Ok(false));
     });
     runtime.finish().unwrap();
 }
@@ -368,6 +452,7 @@ struct PhaseProbe {
     fixed_ticks: Vec<u64>,
     captured_ticks: Vec<u64>,
     positions: Vec<Vec2>,
+    interpolated: Vec<bool>,
 }
 
 fn move_using_history(
@@ -403,6 +488,9 @@ fn capture_fixed(world: &mut World) {
 fn observe_presented(spatial: PresentedSpatialSnapshot2d, mut probe: ResMut<PhaseProbe>) {
     let position = spatial.global(probe.entity).unwrap().translation();
     probe.positions.push(position);
+    probe
+        .interpolated
+        .push(spatial.spatial_interpolated().unwrap());
 }
 
 #[test]
@@ -416,6 +504,7 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
         fixed_ticks: Vec::new(),
         captured_ticks: Vec::new(),
         positions: Vec::new(),
+        interpolated: Vec::new(),
     })
     .unwrap();
     app.add_systems(
@@ -439,10 +528,12 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
     assert_eq!(probe.fixed_ticks, [1, 2]);
     assert_eq!(probe.captured_ticks, [1, 2]);
     assert!((probe.positions[0].x - 1.5).abs() < 1e-5);
+    assert_eq!(probe.interpolated, [true]);
     runtime.drive(Duration::ZERO).unwrap();
     let probe = runtime.world().resource::<PhaseProbe>();
     assert_eq!(probe.fixed_ticks.len(), 2);
     assert!((probe.positions[1].x - 1.5).abs() < 1e-5);
+    assert_eq!(probe.interpolated, [true, true]);
     assert!(matches!(
         runtime.request_control(RuntimeControl::Pause),
         RuntimeControlRequestResult::Accepted(_)
@@ -451,6 +542,17 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
     assert_eq!(
         runtime.world().resource::<PhaseProbe>().positions.last(),
         Some(&Vec2::new(2.0, 0.0))
+    );
+    assert_eq!(
+        runtime.world().resource::<PhaseProbe>().interpolated,
+        [true, true, false]
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<nara_app::RenderTime>()
+            .interpolation_alpha
+            > 0.0
     );
     assert!(matches!(
         runtime.request_control(RuntimeControl::StepFixedTick),
@@ -461,10 +563,18 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
         runtime.world().resource::<PhaseProbe>().captured_ticks,
         [1, 2, 3]
     );
+    assert_eq!(
+        runtime.world().resource::<PhaseProbe>().interpolated,
+        [true, true, false]
+    );
     runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(
         runtime.world().resource::<PhaseProbe>().positions.last(),
         Some(&Vec2::new(3.0, 0.0))
+    );
+    assert_eq!(
+        runtime.world().resource::<PhaseProbe>().interpolated,
+        [true, true, false, false]
     );
     assert!(matches!(
         runtime.request_control(RuntimeControl::Resume),
@@ -474,6 +584,10 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
     assert_eq!(
         runtime.world().resource::<PhaseProbe>().positions.last(),
         Some(&Vec2::new(3.0, 0.0))
+    );
+    assert_eq!(
+        runtime.world().resource::<PhaseProbe>().interpolated,
+        [true, true, false, false, false]
     );
     runtime.finish().unwrap();
 }

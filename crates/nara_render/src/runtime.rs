@@ -1,6 +1,6 @@
 use crate::{
-    Camera2d, Color, ExtractedView, ExtractedViews, RenderTarget, RenderViewId, ViewLoadOp,
-    ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
+    Camera2d, CapturedRenderTime, Color, ExtractedView, ExtractedViews, RenderTarget, RenderViewId,
+    ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
@@ -15,7 +15,10 @@ impl Default for ClearColor {
 
 #[cfg(test)]
 use nara_app::RuntimeGeneration;
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
+use nara_app::{
+    App, CoreStage, FixedTime, Plugin, PluginError, PluginPreflightContext, RealTime, RenderTime,
+    RuntimeTimeSettings, VirtualTime,
+};
 #[cfg(test)]
 use nara_core::Vec2;
 use nara_ecs::{
@@ -729,6 +732,11 @@ struct ViewExtraction<'w, 's> {
     lifetimes: Res<'w, CameraViewLifetimes>,
     clear_color: Res<'w, ClearColor>,
     spatial: PresentedSpatialSnapshot2d<'w>,
+    real_time: Res<'w, RealTime>,
+    virtual_time: Res<'w, VirtualTime>,
+    fixed_time: Res<'w, FixedTime>,
+    render_time: Res<'w, RenderTime>,
+    time_settings: Res<'w, RuntimeTimeSettings>,
     primary_window_id: Option<Res<'w, PrimaryWindowId>>,
     windows: Query<'w, 's, &'static Window>,
     canvas: Option<Res<'w, WorldCanvas>>,
@@ -751,12 +759,27 @@ fn extract_views(
         lifetimes,
         clear_color,
         spatial,
+        real_time,
+        virtual_time,
+        fixed_time,
+        render_time,
+        time_settings,
         primary_window_id,
         windows,
         canvas,
         cameras,
     } = state.get_mut(world).map_err(BevyError::error)?;
-    spatial.stamp().map_err(BevyError::error)?;
+    let spatial_stamp = spatial.stamp().map_err(BevyError::error)?;
+    let spatial_interpolated = spatial.spatial_interpolated().map_err(BevyError::error)?;
+    let captured_time = CapturedRenderTime::new(
+        *real_time,
+        *virtual_time,
+        *fixed_time,
+        *render_time,
+        *time_settings,
+        spatial_stamp,
+        spatial_interpolated,
+    );
     scratch.0.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
@@ -816,7 +839,7 @@ fn extract_views(
             view.load = ViewLoadOp::Clear(clear_color.0);
         }
     }
-    extracted_views.replace(&mut scratch.0, canvas.as_deref().copied());
+    extracted_views.replace(&mut scratch.0, canvas.as_deref().copied(), captured_time);
     frame.begin_extract();
     Ok(())
 }
@@ -861,6 +884,7 @@ fn viewport_for_target(
 
 #[cfg(test)]
 mod tests {
+    mod captured_time;
     mod view_lifecycle;
     mod world_canvas;
     use super::*;
@@ -1495,6 +1519,27 @@ mod tests {
             ViewportRect::new(0, 0, 320, 180).unwrap()
         );
         assert_eq!(views.as_slice()[0].load, ViewLoadOp::Clear(Color::WHITE));
+        let captured_time = views.captured_time().unwrap();
+        assert_eq!(
+            captured_time.real(),
+            *runtime.world().resource::<RealTime>()
+        );
+        assert_eq!(
+            captured_time.spatial_stamp().runtime_generation,
+            Some(runtime.generation())
+        );
+        let RenderTarget::Image(image) = views.as_slice()[0].target else {
+            panic!("the extracted camera must retain its image target");
+        };
+        let packet = build_image_render_frame_packet(
+            runtime.generation().into(),
+            runtime.world().resource::<RenderFrame>().index,
+            views,
+            RenderImagePacket::new(image, Extent2d::new(320, 180).unwrap()).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(packet.captured_time(), Some(captured_time));
         runtime.finish().unwrap();
     }
 

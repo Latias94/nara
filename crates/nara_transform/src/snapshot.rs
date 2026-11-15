@@ -417,6 +417,19 @@ impl PresentedSpatialSnapshot2d<'_> {
         self.read()?.stamp()
     }
 
+    /// Whether this frame's validated publication uses interpolated affine values.
+    ///
+    /// This reports the spatial owner's actual payload selection, independently of render alpha.
+    /// Missing, foreign or stale publications fail with the same errors as other presented reads.
+    pub fn spatial_interpolated(&self) -> Result<bool, SpatialSnapshotError> {
+        self.read()?;
+        Ok(self
+            .presentation
+            .as_deref()
+            .ok_or(SpatialSnapshotError::Unavailable)?
+            .interpolated)
+    }
+
     pub fn structural_index(&self, entity: Entity) -> Result<usize, SpatialSnapshotError> {
         self.read()?.structural_index(entity)
     }

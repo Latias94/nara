@@ -1,0 +1,364 @@
+use super::*;
+use nara_app::{FixedUpdateSet, RuntimeControl, RuntimeControlRequestResult};
+use nara_core::Mat3;
+use nara_transform::{
+    FixedTransformInterpolation, SpatialSnapshotPhase, presented_spatial_snapshot,
+};
+
+const TIMESTEP: Duration = Duration::from_millis(20);
+
+fn advance_camera(mut cameras: Query<&mut Transform2d, nara_ecs::With<Camera2d>>) {
+    for mut transform in &mut cameras {
+        transform.translation.x += 1.0;
+    }
+}
+
+fn moving_camera_app() -> App {
+    let mut app = render_app(true);
+    app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
+        .unwrap();
+    app.insert_resource(FixedTransformInterpolation).unwrap();
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        advance_camera.in_set(FixedUpdateSet::Simulate),
+    )
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .spawn((Camera2d::default(), Transform2d::default()));
+    app
+}
+
+fn capture_packet(runtime: &RuntimeInstance) -> RenderFramePacket {
+    let world = runtime.world();
+    let views = world.resource::<ExtractedViews>();
+    build_render_frame_packet_with_world_canvas(
+        runtime.generation(),
+        world.resource::<RenderFrame>().index,
+        Some(WindowId::PRIMARY),
+        [&Window::default()],
+        views,
+        views.world_canvas(),
+    )
+    .unwrap()
+    .unwrap()
+}
+
+fn assert_current_sample(runtime: &RuntimeInstance) -> CapturedRenderTime {
+    let world = runtime.world();
+    let sample = world.resource::<ExtractedViews>().captured_time().unwrap();
+    assert_eq!(sample.real(), *world.resource::<RealTime>());
+    assert_eq!(sample.virtual_time(), *world.resource::<VirtualTime>());
+    assert_eq!(sample.fixed(), *world.resource::<FixedTime>());
+    assert_eq!(sample.render(), *world.resource::<RenderTime>());
+    assert_eq!(sample.settings(), *world.resource::<RuntimeTimeSettings>());
+    assert_eq!(
+        sample.spatial_stamp(),
+        presented_spatial_snapshot(world).unwrap().stamp().unwrap()
+    );
+    assert_eq!(sample.spatial_stamp().frame, sample.real().frame);
+    assert_eq!(sample.spatial_stamp().tick, sample.fixed().tick());
+    assert_eq!(
+        sample.spatial_stamp().runtime_generation,
+        Some(runtime.generation())
+    );
+    assert_eq!(
+        sample.spatial_stamp().phase,
+        SpatialSnapshotPhase::Presented
+    );
+    sample
+}
+
+#[test]
+fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks() {
+    let mut app = moving_camera_app();
+    app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    assert_eq!(
+        runtime.world().resource::<ExtractedViews>().captured_time(),
+        None
+    );
+
+    runtime.drive(TIMESTEP).unwrap();
+    let first = assert_current_sample(&runtime);
+    assert_eq!(first.real().delta, TIMESTEP);
+    assert_eq!(first.real().elapsed, TIMESTEP);
+    assert_eq!(first.real().frame, 1);
+    assert_eq!(first.virtual_time().delta, TIMESTEP / 2);
+    assert_eq!(first.virtual_time().elapsed, TIMESTEP / 2);
+    assert_eq!(first.virtual_time().frame, 1);
+    assert_eq!(first.fixed().tick(), 0);
+    assert_eq!(first.fixed().steps_this_frame(), 0);
+    assert_eq!(first.render().remainder, TIMESTEP / 2);
+    assert_eq!(first.render().interpolation_alpha, 0.5);
+    assert!(!first.spatial_interpolated());
+    let old_packet = capture_packet(&runtime);
+    let old_views = old_packet.views().to_vec();
+    assert_eq!(old_packet.captured_time(), Some(first));
+
+    runtime.drive(TIMESTEP * 4).unwrap();
+    let second = assert_current_sample(&runtime);
+    assert_eq!(second.real().delta, TIMESTEP * 4);
+    assert_eq!(second.real().elapsed, TIMESTEP * 5);
+    assert_eq!(second.virtual_time().delta, TIMESTEP * 2);
+    assert_eq!(second.virtual_time().elapsed, TIMESTEP * 2 + TIMESTEP / 2);
+    assert_eq!(second.fixed().tick(), 2);
+    assert_eq!(second.fixed().steps_this_frame(), 2);
+    assert_eq!(second.fixed().elapsed(), TIMESTEP * 2);
+    assert_eq!(second.render().remainder, TIMESTEP / 2);
+    assert_eq!(second.settings().time_scale(), 0.5);
+    assert!(second.spatial_interpolated());
+    let next_packet = capture_packet(&runtime);
+    assert_eq!(next_packet.captured_time(), Some(second));
+    assert!(
+        next_packet.views()[0]
+            .mapping
+            .clip_to_world(Vec2::ZERO)
+            .abs_diff_eq(Vec2::new(1.5, 0.0), 1.0e-5)
+    );
+    assert_eq!(old_packet.captured_time(), Some(first));
+    assert_eq!(old_packet.views(), old_views.as_slice());
+    assert_eq!(
+        old_packet.views()[0].mapping.clip_to_world(Vec2::ZERO),
+        Vec2::ZERO
+    );
+
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
+    let mut runtime = RuntimeInstance::start(moving_camera_app()).unwrap();
+    runtime.drive(TIMESTEP * 2 + TIMESTEP / 2).unwrap();
+    assert!(assert_current_sample(&runtime).spatial_interpolated());
+
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::from_millis(30)).unwrap();
+    let paused = assert_current_sample(&runtime);
+    assert!(paused.settings().paused());
+    assert_eq!(paused.real().delta, Duration::from_millis(30));
+    assert_eq!(paused.virtual_time().delta, Duration::ZERO);
+    assert_eq!(paused.fixed().tick(), 2);
+    assert_eq!(paused.fixed().steps_this_frame(), 0);
+    assert_eq!(paused.render().interpolation_alpha, 0.5);
+    assert!(!paused.spatial_interpolated());
+    let paused_views = runtime.world().resource::<ExtractedViews>().clone();
+    let paused_packet = capture_packet(&runtime);
+    assert_eq!(paused_packet.frame_index(), 2);
+    assert!(
+        paused_packet.views()[0]
+            .mapping
+            .clip_to_world(Vec2::ZERO)
+            .abs_diff_eq(Vec2::new(2.0, 0.0), 1.0e-5)
+    );
+
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::StepFixedTick),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::from_millis(7)).unwrap();
+    assert_eq!(runtime.world().resource::<RealTime>().frame, 3);
+    assert_eq!(runtime.world().resource::<VirtualTime>().delta, TIMESTEP);
+    assert_eq!(runtime.world().resource::<FixedTime>().tick(), 3);
+    assert_eq!(*runtime.world().resource::<RenderTime>(), paused.render());
+    assert_eq!(runtime.world().resource::<ExtractedViews>(), &paused_views);
+    assert_eq!(capture_packet(&runtime), paused_packet);
+
+    runtime.drive(Duration::from_millis(5)).unwrap();
+    let after_step = assert_current_sample(&runtime);
+    let after_step_packet = capture_packet(&runtime);
+    assert_eq!(after_step.real().frame, 4);
+    assert_eq!(after_step.virtual_time().frame, 4);
+    assert_eq!(after_step.real().delta, Duration::from_millis(5));
+    assert_eq!(after_step.virtual_time().delta, Duration::ZERO);
+    assert_eq!(
+        after_step.virtual_time().elapsed,
+        paused.virtual_time().elapsed + TIMESTEP
+    );
+    assert_eq!(after_step.fixed().tick(), 3);
+    assert_eq!(after_step.render(), paused.render());
+    assert!(!after_step.spatial_interpolated());
+    assert_eq!(after_step_packet.frame_index(), 3);
+    assert_ne!(after_step_packet.frame_index(), after_step.real().frame);
+    assert_eq!(after_step_packet.captured_time(), Some(after_step));
+    assert!(
+        after_step_packet.views()[0]
+            .mapping
+            .clip_to_world(Vec2::ZERO)
+            .abs_diff_eq(Vec2::new(3.0, 0.0), 1.0e-5)
+    );
+    assert_eq!(paused_packet.captured_time(), Some(paused));
+    assert_eq!(paused_packet.views(), paused_views.as_slice());
+
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn delayed_packet_build_and_target_adaptation_preserve_the_original_sample() {
+    let mut app = moving_camera_app();
+    let canvas = WorldCanvas::new(320, 180).unwrap();
+    app.insert_resource(canvas).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(TIMESTEP + TIMESTEP / 2).unwrap();
+    let views = runtime.world().resource::<ExtractedViews>().clone();
+    let sample = views.captured_time().unwrap();
+    let frame_index = runtime.world().resource::<RenderFrame>().index;
+    let original = capture_packet(&runtime);
+    let target = RenderImagePacket::new(
+        nara_asset::allocate_anonymous_handle().unwrap(),
+        original.target().extent(),
+    )
+    .unwrap();
+
+    runtime.drive(TIMESTEP * 2).unwrap();
+    assert_ne!(assert_current_sample(&runtime), sample);
+    let delayed = build_render_frame_packet_with_world_canvas(
+        runtime.generation(),
+        frame_index,
+        Some(WindowId::PRIMARY),
+        [&Window::default()],
+        &views,
+        views.world_canvas(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(delayed, original);
+    let adapted = delayed.with_image_target(target).unwrap();
+    assert_eq!(adapted.captured_time(), Some(sample));
+    assert_eq!(adapted.views(), original.views());
+    assert_eq!(adapted.frame_index(), original.frame_index());
+    assert_eq!(adapted.source_generation(), original.source_generation());
+    assert_eq!(adapted.world_canvas(), original.world_canvas());
+    assert_eq!(adapted.target(), RenderFrameTarget::Image(target));
+    assert!(matches!(original.target(), RenderFrameTarget::Window(_)));
+
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn manual_views_need_no_runtime_and_mutations_invalidate_the_captured_sample() {
+    let source = RenderFrameSourceGeneration::try_acquire().unwrap();
+    let target = RenderImagePacket::new(
+        nara_asset::allocate_anonymous_handle().unwrap(),
+        Extent2d::new(1280, 720).unwrap(),
+    )
+    .unwrap();
+    let mut manual = ExtractedViews::default();
+    manual.push(ExtractedView {
+        target: RenderTarget::Image(target.image()),
+        ..test_extracted_view()
+    });
+    let manual_packet = build_image_render_frame_packet(source, 91, &manual, target)
+        .unwrap()
+        .unwrap();
+    assert_eq!(manual.captured_time(), None);
+    assert_eq!(manual_packet.captured_time(), None);
+    assert_eq!(manual_packet.frame_index(), 91);
+    assert_eq!(manual_packet.source_generation(), source);
+
+    let mut runtime = RuntimeInstance::start(moving_camera_app()).unwrap();
+    runtime.drive(TIMESTEP + TIMESTEP / 2).unwrap();
+    let captured = runtime.world().resource::<ExtractedViews>().clone();
+    let sample = captured.captured_time().unwrap();
+    let mut appended = captured.clone();
+    let first = appended.as_slice()[0];
+    appended.push(ExtractedView {
+        id: first.id.subview(1),
+        order: 1,
+        load: ViewLoadOp::Load,
+        ..first
+    });
+    assert_eq!(appended.captured_time(), None);
+    let appended_packet = build_render_frame_packet(
+        runtime.generation(),
+        92,
+        Some(WindowId::PRIMARY),
+        [&Window::default()],
+        &appended,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(appended_packet.captured_time(), None);
+    let adapted_manual = appended_packet.with_image_target(target).unwrap();
+    assert_eq!(adapted_manual.captured_time(), None);
+    let mut cleared = captured.clone();
+    cleared.clear();
+    assert!(cleared.is_empty());
+    assert_eq!(cleared.captured_time(), None);
+    assert_eq!(captured.captured_time(), Some(sample));
+
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn failed_extraction_keeps_the_previous_views_and_time_sample_together() {
+    fn invalidate_projection(real: Res<RealTime>, mut cameras: Query<&mut Camera2d>) {
+        if real.frame > 1 {
+            for mut camera in &mut cameras {
+                camera.viewport_height = 0.0;
+            }
+        }
+    }
+
+    let mut app = moving_camera_app();
+    app.add_systems(CoreStage::PostUpdate, invalidate_projection)
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(TIMESTEP).unwrap();
+    let original_views = runtime.world().resource::<ExtractedViews>().clone();
+    let original = capture_packet(&runtime);
+
+    assert!(runtime.drive(TIMESTEP).is_err());
+    assert_eq!(
+        runtime.world().resource::<ExtractedViews>(),
+        &original_views
+    );
+    assert_eq!(capture_packet(&runtime), original);
+    assert_eq!(original.captured_time().unwrap().real().frame, 1);
+    assert_eq!(runtime.world().resource::<RealTime>().frame, 2);
+
+    retire_runtime(runtime);
+}
+
+#[test]
+fn matrix_accessors_preserve_the_captured_affine_projection_and_inverse() {
+    let world_from_camera = Transform2d {
+        translation: Vec2::new(27.0, -13.0),
+        rotation: 0.7,
+        scale: Vec2::new(2.0, 0.5),
+    }
+    .matrix();
+    let mapping = ViewMapping2d::orthographic(
+        world_from_camera,
+        100.0,
+        ViewportRect::new(40, 20, 400, 200).unwrap(),
+    )
+    .unwrap();
+    let world_to_clip = mapping.world_to_clip_matrix();
+    let clip_to_world = mapping.clip_to_world_matrix();
+    let world_corner = world_from_camera.transform_point2(Vec2::new(100.0, 50.0));
+    assert!(
+        world_to_clip
+            .transform_point2(world_corner)
+            .abs_diff_eq(Vec2::ONE, 1.0e-5)
+    );
+    assert!(
+        clip_to_world
+            .transform_point2(Vec2::ONE)
+            .abs_diff_eq(world_corner, 1.0e-4)
+    );
+    assert!((world_to_clip * clip_to_world).abs_diff_eq(Mat3::IDENTITY, 1.0e-5));
+    assert!((clip_to_world * world_to_clip).abs_diff_eq(Mat3::IDENTITY, 1.0e-4));
+    assert_eq!(
+        world_to_clip.transform_point2(world_corner),
+        mapping.world_to_clip(world_corner)
+    );
+    assert_eq!(
+        clip_to_world.transform_point2(Vec2::ONE),
+        mapping.clip_to_world(Vec2::ONE)
+    );
+}
