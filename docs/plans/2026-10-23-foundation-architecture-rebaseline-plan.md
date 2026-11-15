@@ -524,8 +524,23 @@ comparison and thin real borrowed-solver consumer. It retains public sets and na
 Ack for that bounded workflow and makes the production automatic serial baseline explicit under
 feature unification. Its successors qualify captured discontinuity and a closed same-World
 prediction/offline-PCM model, including exact attempt identity and preservation of the confirmed
-prefix. Private raw parallel execution is not a production profile. Remaining complete-consumer
-gates keep R4c open; these experiments do not freeze a new phase interface.
+prefix. That predecessor's private raw parallel execution did not qualify a production profile.
+The [November 15 explicit executor successor](2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
+now installs Bevy's original automatic executor from an immutable composition choice. Serial
+remains default under feature unification; native Parallel requires the explicit build feature
+and an existing nonempty Host-initialized ComputeTaskPool. All Startup/Core/private cleanup
+schedules share the choice, custom schedules retain their owner policy, and Runtime retirement
+does not destroy the process-global pool. App configuration identity includes the selected policy
+separately from plugin-plan identity. Actual App cohorts pass 182/183, independent motion
+default/unified/Parallel passes 30/31/36, and the original captured-history trajectory passes
+on DX12 hardware under both profiles. A separate parallel Material/history software trajectory
+also passes. Product compatibility and final checks are recorded in the owning successor.
+Implementation `40e8e81` and consumer `6d45b7b` are locally committed; the separately discovered
+game Material qualification fix `81916c9` restores all 111 ordinary game tests while explicitly
+refusing unrepresented material state. The selected root Host/public cohort passes 93/93,
+desktop game targets compile, and owning Clippy/format/portable-build checks pass.
+Remaining complete-consumer gates keep R4c open; this selects no new phase interface, universal
+parallel prediction policy or throughput claim.
 
 Bring the R10 motion oracle into this comparison before selecting the schedule API: motion intent,
 kinematic target/solve, solver pose commit and spatial publication need an explicit same-tick join.
@@ -1435,6 +1450,12 @@ retiring it on later travel. Their bounded CPU evidence does not complete R10 or
 The [Headless exact-entry successor](2026-11-03-joint-motion-execution-plan.md#headless-exact-run-entry-maintenance-november-13)
 follows the initial-pause contract through source and processed product Hosts, with explicit
 one-time paused maintenance, readiness publication and exit before any exact transaction.
+The [explicit production executor successor](2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
+extends this Runtime priority through independently authored real Animation/Rapier execution
+and captured GPU histories under both admitted policies. It preserves same-tick borrowed joins,
+NonSend driver placement, narrow command Ack, sticky faults and original physical cleanup.
+The closed prediction/offline-PCM model keeps its original explicit custom schedules; automatic
+Parallel admission does not establish arbitrary effects or general replay under that profile.
 
 The [seat/gamepad/replay replacement](2026-11-13-seat-gamepad-and-input-replay-plan.md)
 continues this runtime priority. It replaces global mutable mapping state with bounded seat-local

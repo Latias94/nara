@@ -137,9 +137,9 @@ composition only. Configuration observations must not silently substitute one id
 other. Arbitrary Rust systems, resource values, binary provenance and physical worker counts
 retain their separate compatibility contracts. The
 [joint motion successor](../../plans/2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
-qualifies the actual managed Animation/Rapier, temporal/effect, fault and retirement controls
-before claiming production parallel support. Its work-in-progress state is not qualification or
-a new automatic phase-plan interface.
+records executed managed Animation/Rapier, captured GPU history, fault and retirement controls
+for code-first profile selection. Its bounded Windows qualification is not a blanket claim for
+every plugin, arbitrary parallel effects/prediction or a new automatic phase-plan interface.
 
 For the first-playable schedule-label anchors, seal validation specifically requires automatic
 deferred insertion to remain enabled and reasserts each schedule's final deferred application

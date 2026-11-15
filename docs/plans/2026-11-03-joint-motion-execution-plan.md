@@ -73,9 +73,12 @@ not selected. New borrowed solver work must finish before its pose commit, indep
 
 ## Explicit Production Executor Successor
 
-Status: active from `3152f5e`. Runtime work continues while Editor/Dialogue product work remains
-paused. The existing serial and raw-parallel comparison is the baseline; this successor admits
-an explicitly selected production policy through the original managed owner.
+Status: implemented and qualified for the selected Windows code-first workflow. Implementation
+is `40e8e81`, independent consumers/CI are `6d45b7b`, and the discovered game Material eligibility
+correction is `81916c9`. Full R4c/R10 and the foundation Goal remain active. Runtime work continues
+while Editor/Dialogue product work remains paused. The existing serial and raw-parallel comparison
+is the baseline; this successor admits an explicitly selected production policy through the
+original managed owner.
 
 Keep `App::new()` serial. Add a configuration-time `ExecutionProfile` selection for all engine
 automatic Startup, Core and private frame-cleanup schedules. Parallel uses Bevy's existing
@@ -142,8 +145,8 @@ consumer 36/36 (`430f4da4-c81d-4c9b-aa46-c83a7f5a11b5`), the complete App defaul
 close-custody test unselected. Independent default motion passes 30/30
 (`2ec3261e-96d0-4c47-92ff-8d1d525f7b67`), and dependency-unified motion passes 31/31
 (`1f99c588-1544-4ca1-9d04-7e6fc6009425`), retaining the original collision and closed
-prediction/offline-PCM assertions. Captured history is qualified below. Product compatibility
-and final build/lint checks remain in progress; this is not final qualification.
+prediction/offline-PCM assertions. Captured history, ordinary game compatibility and final
+build/lint checks are qualified below.
 
 The original `history` target retains its strict native hardware gate. The CI software control
 instead selects the existing complete `joint_history` Material/motion trajectory with
@@ -179,11 +182,50 @@ The actual independently locked Two-Level Game default run
 native/build tests unselected. Every failure reaches the same stale game-owned eligibility
 inventory: the default Runtime2d recipe now installs `nara.material2d`, but the game has not
 classified that service. Ten resume tests reject healthy capture; the continuity-bin control
-panics on the same refusal and aborts during its unwind. This is an executed product gate,
+panics on the same refusal and its test process exits with `0xc0000409`. That exit does not
+independently establish a general panic-cleanup diagnosis. This is an executed product gate,
 not a green compile-only compatibility claim. Correct the sample's explicit inventory after
 inspecting the Material plugin; schema plus empty storage does not authorize omission of
 actual material assets/components from a claimed complete state. Preserve unknown-service
 refusal and rerun the original full default tests.
+
+Source inspection confirms that `Material2dPlugin` installs only the native Schema/codec and
+empty `Assets<Material2dAsset>`. The game now classifies that installation while explicitly
+refusing any populated Material asset storage or any actual Material2d component. Both Headless
+and Desktop capture use the same game-owned eligibility check. A public negative control uses
+a real Material domain/Shader to exercise asset-only and component-only state independently,
+checks repeated refusal without mutating tick/queue/player state, then continues gameplay and
+physically closes the original Session. Existing unknown-service refusal and all full-state
+comparison assertions remain. Independent review finds no confirmed P1/P2; final execution
+of the corrected ordinary game cohort `69da58bc-b05f-4664-81b7-f681450c4758` passes 111/111
+across 16 binaries, with two original native/build tests unselected. All 11 earlier failures
+pass, alongside the new Material negative control, full three-instance state reconstruction,
+continued semantic steps, nonzero phase/debt, content/configuration refusal, unknown services,
+SaveSlot refusal and original command/Close custody. The standalone lock is unchanged. This is
+ordinary source/headless execution; the ignored actual-build/native trajectories are not rerun
+by this cohort.
+
+Final verification uses Rust 1.95.0, locked offline dependencies, one build job, the original
+root target and serial nextest execution. The Two-Level Game `desktop` feature passes an
+all-target compile check. Correctness Clippy passes for App/ECS all targets with the feature,
+the root library/public plugin-composition target with the explicit feature, independent motion
+all targets with `production-parallel`, both selected native history targets, and the game's
+desktop library/resume target. Existing non-correctness warnings remain; no warning-free claim
+or unrelated cleanup is implied. Root, motion, render-policy and game formatting checks pass.
+Changed manifest/lock TOML, CI YAML, added local document links/fragments and whitespace checks
+pass. CI selections are configured locally; no remote execution or publication occurred.
+
+Stable `wasm32-unknown-unknown` App production-library checks pass with the feature disabled and
+enabled. The enabled build retains explicit `UnsupportedTarget` admission; no browser execution
+or Wasm Parallel support follows from compiling that refusal path. Actual native execution in
+this unit is Windows/DX12 hardware/software only. Other platforms, worker/latency budgets,
+solver-internal parallelism, arbitrary parallel plugin effects, closed-model prediction under
+Parallel and a persisted project execution setting remain unqualified. Runtime close retains
+its original schedule/work/NonSend obligations without claiming process-global pool destruction.
+
+The next runtime work follows the remaining R4c/R10 consumer and domain gates in the foundation
+plan. This unit adds neither a new automatic phase-plan abstraction nor a scheduler, task pool,
+render-thread owner or whole-Foundation completion claim.
 
 ## Shared temporal selection
 
