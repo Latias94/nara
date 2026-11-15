@@ -46,10 +46,15 @@ fn helper_process() {
             eprintln!("helper stderr");
         }
         "wait" => std::thread::sleep(std::time::Duration::from_secs(30)),
-        "spawn-descendant-and-wait" | "spawn-descendant-and-exit" => {
+        "exit-shortly" => std::thread::sleep(std::time::Duration::from_millis(25)),
+        "spawn-descendant-and-wait"
+        | "spawn-descendant-and-exit"
+        | "spawn-short-descendant-and-exit" => {
             let wait_for_descendant = mode == "spawn-descendant-and-wait";
             let descendant_mode = if wait_for_descendant {
                 "exit-success"
+            } else if mode == "spawn-short-descendant-and-exit" {
+                "exit-shortly"
             } else {
                 "wait"
             };
@@ -178,6 +183,20 @@ mod cleanup_evidence_tests {
             "the containment must still hold the live descendant"
         );
 
+        let now = Instant::now();
+        owner.advance(now).unwrap();
+        assert_eq!(owner.state(), SupervisedProcessState::Draining);
+        assert!(!owner.termination_requested);
+        let deadline = owner.natural_exit_deadline.unwrap();
+        assert_eq!(deadline, now + super::super::DEFAULT_NATURAL_EXIT_GRACE);
+        assert_eq!(owner.next_deadline(), Some(deadline));
+        owner.advance(deadline - Duration::from_nanos(1)).unwrap();
+        assert!(!owner.termination_requested);
+        assert_eq!(owner.natural_exit_deadline, Some(deadline));
+        owner.advance(deadline).unwrap();
+        assert!(owner.termination_requested);
+        assert!(owner.natural_exit_deadline.is_none());
+
         let receipt = drive_to_complete(&mut owner);
 
         assert!(receipt.exit().success(), "the direct child exited normally");
@@ -187,6 +206,20 @@ mod cleanup_evidence_tests {
             !receipt.force_killed(),
             "automatic residual-tree termination is recorded without escalation"
         );
+    }
+
+    #[test]
+    fn a_short_lived_descendant_can_drain_naturally_after_its_parent_exits() {
+        let mut owner = SupervisedProcessOwner::spawn(
+            &helper_command("spawn-short-descendant-and-exit"),
+            default_log_limits(),
+        )
+        .unwrap();
+        wait_for_direct_exit(&mut owner);
+        let receipt = drive_to_complete(&mut owner);
+        assert!(receipt.exit().success());
+        assert!(!receipt.termination_requested());
+        assert!(!receipt.force_killed());
     }
 
     #[test]

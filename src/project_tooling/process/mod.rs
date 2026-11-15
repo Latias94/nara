@@ -36,6 +36,7 @@ use unix as platform;
 use windows as platform;
 
 const DEFAULT_TERMINATE_GRACE: Duration = Duration::from_secs(2);
+const DEFAULT_NATURAL_EXIT_GRACE: Duration = Duration::from_millis(250);
 const DEFAULT_FORCE_KILL_GRACE: Duration = Duration::from_secs(2);
 const DEFAULT_OUTPUT_DRAIN_GRACE: Duration = Duration::from_millis(500);
 
@@ -426,6 +427,7 @@ pub struct SupervisedProcessOwner {
     logs: ProcessLogRing,
     state: SupervisedProcessState,
     exit: Option<SupervisedProcessExit>,
+    natural_exit_deadline: Option<Instant>,
     terminate_deadline: Option<Instant>,
     force_kill_deadline: Option<Instant>,
     drain_deadline: Option<Instant>,
@@ -501,6 +503,7 @@ impl SupervisedProcessOwner {
             logs: ProcessLogRing::new(log_limits),
             state: SupervisedProcessState::Running,
             exit: None,
+            natural_exit_deadline: None,
             terminate_deadline: None,
             force_kill_deadline: None,
             drain_deadline: None,
@@ -639,11 +642,7 @@ impl SupervisedProcessOwner {
                     .containment_empty()
                     .map_err(SupervisedProcessError::Containment)?;
                 if !self.containment_observed_empty {
-                    self.termination_requested = true;
-                    self.process
-                        .request_terminate()
-                        .map_err(SupervisedProcessError::Terminate)?;
-                    self.terminate_deadline = Some(now + DEFAULT_TERMINATE_GRACE);
+                    self.natural_exit_deadline = Some(now + DEFAULT_NATURAL_EXIT_GRACE);
                 }
             }
             self.state = SupervisedProcessState::Draining;
@@ -699,6 +698,20 @@ impl SupervisedProcessOwner {
                 .containment_empty()
                 .map_err(SupervisedProcessError::Containment)?;
             self.containment_observed_empty = containment_empty;
+            if containment_empty || self.terminate_deadline.is_some() || self.force_killed {
+                self.natural_exit_deadline = None;
+            }
+            if self
+                .natural_exit_deadline
+                .is_some_and(|deadline| now >= deadline)
+            {
+                self.termination_requested = true;
+                self.process
+                    .request_terminate()
+                    .map_err(SupervisedProcessError::Terminate)?;
+                self.terminate_deadline = Some(now + DEFAULT_TERMINATE_GRACE);
+                self.natural_exit_deadline = None;
+            }
             if !containment_empty
                 && !self.force_killed
                 && self
@@ -761,6 +774,7 @@ impl SupervisedProcessOwner {
             SupervisedProcessState::Terminating => self.terminate_deadline,
             SupervisedProcessState::ForceKilling => self.force_kill_deadline,
             SupervisedProcessState::Draining => [
+                self.natural_exit_deadline,
                 (!self.containment_observed_empty && !self.force_killed)
                     .then_some(self.terminate_deadline)
                     .flatten(),

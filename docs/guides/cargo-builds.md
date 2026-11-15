@@ -180,7 +180,9 @@ so a false `force_killed` escalation flag does not establish a graceful shutdown
 explicit requests, automatic residual-tree termination after direct-child exit, and force-kill
 escalation or retries. Attempts remain recorded even if they race with natural exit or fail before
 later cleanup succeeds. After direct-child exit, the owner first inspects containment and skips
-automatic termination if it is already empty. Live residual descendants still require termination
+automatic termination if it is already empty. Otherwise a 250ms observation allowance lets the
+original containment drain naturally after direct-child exit; its deadline is fixed rather than
+renewed by polling. Live residual descendants after that allowance still require termination
 and cannot be reported as a naturally exited tree. Consumers requiring cleanup without native
 termination must check `!receipt.termination_requested()` alongside their own successful Close
 protocol. Failed cleanup keeps the same owner for `retry_cleanup`. Drop is a fail-safe and
