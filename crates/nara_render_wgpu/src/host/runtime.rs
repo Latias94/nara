@@ -431,7 +431,8 @@ impl WgpuRenderHost {
                 app_frame_index,
                 packet.frame_index(),
             );
-            *presented_world = self.commit_runtime_world_presentation(id, &packet)?;
+            *presented_world =
+                self.commit_runtime_world_presentation(id, &packet, input.world_input_mapping())?;
             self.backend.commit_runtime_presentation(receipt);
             #[cfg(feature = "stock-ui")]
             if let Some(facts) = submitted_ui {
@@ -495,12 +496,18 @@ impl WgpuRenderHost {
         &mut self,
         id: super::WgpuRenderProducerId,
         packet: &nara_render::RenderFramePacket,
+        mapping: Option<nara_render::WorldInputMapping2d>,
     ) -> Result<Option<nara_render::__private::PresentedWorldFrame>, WgpuRenderHostError> {
         let RenderFrameTarget::Window(window) = packet.target() else {
             return Ok(None);
         };
         self.invalidate_replaced_world_presentations(window.id, Some(id));
-        let Some((snapshot, guard)) = nara_render::__private::prepare_world_presentation(packet)
+        let Some(mapping) = mapping else {
+            self.invalidate_runtime_presentation(id);
+            return Ok(None);
+        };
+        let Some((snapshot, guard)) =
+            nara_render::__private::prepare_world_presentation(packet, mapping)
         else {
             return Ok(None);
         };

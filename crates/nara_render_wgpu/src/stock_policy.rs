@@ -5,7 +5,7 @@ pub use adapter::WgpuStockCaptureAdapter;
 
 use std::sync::Arc;
 
-use nara_render::{RenderFramePacket, ViewLoadOp};
+use nara_render::{RenderFramePacket, ViewLoadOp, WorldInputMapping2d};
 #[cfg(feature = "stock-ui")]
 use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "stock-sprite")]
@@ -587,6 +587,10 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
 
     fn device_requirements(&self) -> WgpuDeviceRequirements {
         self.stages.device_requirements()
+    }
+
+    fn world_input_mapping(&self, _capture: &Self::Capture) -> Option<WorldInputMapping2d> {
+        Some(WorldInputMapping2d::identity())
     }
 
     fn bind(

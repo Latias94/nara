@@ -1253,6 +1253,66 @@ the native fixture premise correction are closed. CI configuration is local only
 run remotely. This closes the bounded depth/unit successor while full R8/R9/R12/Foundation,
 general 3D authoring, foreign native execution and numerical production budgets remain open.
 
+## Presented Drawing And Picking Successor
+
+Status: active, starting from `6304a7e`. Complete the remaining R9 drawing/picking inverse,
+mirrored-camera and DPI consumer through the ordinary Runtime and original DesktopRun. Source
+inspection identifies an owning-contract gap: arbitrary custom policies currently receive the
+original camera picking mapping after presentation even when their output changes coordinates.
+Keep Editor/Dialogue product work paused; the shared Game presentation bridge must follow the
+same corrected capture contract without new Editor functionality.
+
+The render policy explicitly declares optional `WorldInputMapping2d` with its immutable CPU
+capture. The validated finite invertible affine maps final-target physical pixels to original
+packet-target physical pixels. Identity explicitly preserves coordinates. No declaration means
+World picking is unavailable, while drawing can still succeed. Freeze the result once in the
+original `WgpuRenderInput`; cloning and equal-extent image adaptation preserve it. Do not derive
+it from the currently installed policy, parse Shader source or guess from successful rendering.
+The ordinary stock policy declares identity; custom policies opt in only to a mapping they own.
+Arbitrary nonlinear or channel-dependent effects remain unpickable without a qualified inverse.
+
+After genuine presentation, the original guard joins that declared transform to captured Views,
+Window resolution and WorldCanvas mapping. Convert native logical points to final physical
+pixels once, apply the captured inverse, then use the original display/camera mapping. Reject
+nonfinite, singular or projective declarations, target/source out-of-bounds, bars and half-open
+View maximum edges. A successful unmapped successor revokes previous picking; a prepared,
+unpresented capture cannot activate its mapping. Existing resize/DPI/close/producer revocation,
+other-window isolation and immutable image output remain authoritative. The Editor Game bridge
+uses the same frozen input fact rather than granting identity before native preparation.
+
+The independent ordinary consumer uses real Camera/Sprite extraction with an asymmetric color
+pattern, parented nonuniform/mirrored camera transforms, camera changes and a concrete horizontal
+post-effect. Query public `WorldPointer` through a `SystemState` created on the original App
+World and used in the genuine post-Host observer. Match the exact original capture to its
+present receipt. Qualify identity, tint, declared mirror and undeclared mirror; the latter must
+render successfully and refuse picking. Hold old captures across changes and native retirement,
+then replay their exact CPU inputs offscreen for complete pixel comparison. An independent f64
+oracle derives camera/world positions and color coverage, not the uploaded matrix or GPU bytes.
+Use fixed `1e-5` world-unit and `1e-3` physical-pixel bounds for the bounded affine controls,
+one UNORM byte for covered RGB and exact alpha/clear/retained bytes. Pixel-center inputs avoid
+ambiguous coverage boundaries. These are correctness gates, not production performance budgets.
+
+CPU controls cover scales 1, 1.5 and 2, offset Viewports, all mirror-axis combinations, a parented
+sheared basis and unavailable/invalid declaration cases. Native Windows qualification separately
+moves the original process/window across two actually active displays with different DPI and
+joins native geometry, event-driven Window facts, genuine presentations and picking. A bounded
+Win32 automation helper may locate only its own exact PID/title HWND and reposition that borrowed
+window; it does not create/destroy a window, modify desktop configuration, replace Winit or
+publish a presented guard. This is OS automation evidence, not a new engine window-control API.
+Missing requested display hardware is a failed prerequisite, not a passing skip. A single-display
+native path retains its separate scope. Keep original native retirement and output cleanup on
+assertion unwind; window scanout and physical mouse delivery remain separate from callback
+queries unless actually exercised.
+
+Pinned source constraints: Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_camera/src/camera.rs`, preserves the full global affine inverse;
+`crates/bevy_sprite_render/src/mesh2d/mesh.rs` disables culling for 2D meshes.
+Godot `7a37606a433c0e7735525037cdf774f043146a21`, `scene/main/viewport.cpp`, localizes
+input through the final viewport transform, while `core/math/rect2.h` excludes maximum edges.
+Its Camera2D rebuilds position/rotation/zoom and does not prove full inherited shear. Neither
+engine automatically provides a unique inverse for arbitrary post-processing Shader sampling.
+Keep these source constraints distinct from Nara's still-pending executable qualification.
+
 ## Live Native Source Updates Through External GPU Execution
 
 Status: implemented and locally qualified at `0602b5d`. Extend the independently

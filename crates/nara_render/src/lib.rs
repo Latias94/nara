@@ -49,4 +49,4 @@ pub use view::{
 };
 pub use view_id::RenderViewId;
 #[cfg(feature = "runtime")]
-pub use world_pointer::WorldPointer;
+pub use world_pointer::{WorldInputMapping2d, WorldPointer};

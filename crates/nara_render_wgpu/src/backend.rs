@@ -963,7 +963,10 @@ impl WgpuRenderBackend {
             work_started_at,
         } = captured;
         let source_generation = packet.source_generation();
-        let world_presentation = nara_render::__private::prepare_world_presentation(&packet);
+        let world_presentation = nara_render::__private::prepare_world_presentation(
+            &packet,
+            nara_render::WorldInputMapping2d::identity(),
+        );
         stats.draw_calls = 0;
         stats.sprites = 0;
         self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));

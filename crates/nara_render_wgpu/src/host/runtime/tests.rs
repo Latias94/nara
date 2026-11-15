@@ -83,8 +83,11 @@ impl PresentedWorld {
 
     // These CPU state-transition cases deliberately do not claim native presentation.
     fn seed(&mut self, host: &mut WgpuRenderHost, producer: &super::super::WgpuRenderProducer) {
-        let (snapshot, guard) =
-            nara_render::__private::prepare_world_presentation(&self.packet).unwrap();
+        let (snapshot, guard) = nara_render::__private::prepare_world_presentation(
+            &self.packet,
+            nara_render::WorldInputMapping2d::identity(),
+        )
+        .unwrap();
         guard.mark_presented();
         let view = host.views.get_mut(&producer.id()).unwrap();
         view.admission.source_generation = Some(self.packet.source_generation());
@@ -134,13 +137,59 @@ fn producer_drop_revokes_current_and_delayed_world_permissions_without_host_main
 }
 
 #[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn an_unmapped_presented_successor_revokes_only_its_window_and_mapped_output_recovers() {
+    let runtime = RuntimeInstance::start(App::new()).unwrap();
+    let mut host = WgpuRenderHost::offscreen();
+    let _namespace = host.prepare_namespace(None).unwrap();
+    let producer = host.create_producer().unwrap();
+    let other = host.create_producer().unwrap();
+    let mut first = PresentedWorld::new(&runtime, WindowId::new(1), 1);
+    let mut second = PresentedWorld::new(&runtime, WindowId::new(2), 1);
+    first.seed(&mut host, &producer);
+    second.seed(&mut host, &other);
+    assert!(first.can_pick());
+    assert!(second.can_pick());
+    let mut successor = PresentedWorld::new(&runtime, WindowId::new(1), 2);
+    assert!(
+        host.commit_runtime_world_presentation(producer.id(), &successor.packet, None)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!first.can_pick());
+    assert!(second.can_pick());
+    let mapping = nara_render::WorldInputMapping2d::affine(nara_core::Mat3::from_cols_array(&[
+        -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 64.0, 0.0, 1.0,
+    ]))
+    .unwrap();
+    let presented = host
+        .commit_runtime_world_presentation(producer.id(), &successor.packet, Some(mapping))
+        .unwrap()
+        .unwrap();
+    successor.world.insert_resource(presented);
+    let mut state = SystemState::<WorldPointer>::new(&mut successor.world);
+    let actual = state
+        .get(&successor.world)
+        .unwrap()
+        .window_to_world(successor.camera, nara_core::Vec2::new(16.0, 32.0))
+        .unwrap();
+    assert!(actual.abs_diff_eq(nara_core::Vec2::new(16.0, 0.0), 1.0e-5));
+    assert!(second.can_pick());
+    drop(host);
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn a_closed_producer_refuses_and_revokes_a_new_world_permission() {
     let runtime = RuntimeInstance::start(App::new()).unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let mut frame = PresentedWorld::new(&runtime, WindowId::new(1), 1);
-    let (snapshot, guard) =
-        nara_render::__private::prepare_world_presentation(&frame.packet).unwrap();
+    let (snapshot, guard) = nara_render::__private::prepare_world_presentation(
+        &frame.packet,
+        nara_render::WorldInputMapping2d::identity(),
+    )
+    .unwrap();
     guard.mark_presented();
     frame.world.insert_resource(snapshot);
     assert!(frame.can_pick());
@@ -198,23 +247,35 @@ fn native_runtime_world_guards_replace_and_retire_per_producer_and_revoke_on_dev
     let mut first = PresentedWorld::new(&runtime, WindowId::new(1), 1);
     let mut second = PresentedWorld::new(&runtime, WindowId::new(2), 1);
     first.world.insert_resource(
-        host.commit_runtime_world_presentation(a.id(), &first.packet)
-            .unwrap()
-            .unwrap(),
+        host.commit_runtime_world_presentation(
+            a.id(),
+            &first.packet,
+            Some(nara_render::WorldInputMapping2d::identity()),
+        )
+        .unwrap()
+        .unwrap(),
     );
     second.world.insert_resource(
-        host.commit_runtime_world_presentation(b.id(), &second.packet)
-            .unwrap()
-            .unwrap(),
+        host.commit_runtime_world_presentation(
+            b.id(),
+            &second.packet,
+            Some(nara_render::WorldInputMapping2d::identity()),
+        )
+        .unwrap()
+        .unwrap(),
     );
     assert!(first.can_pick());
     assert!(second.can_pick());
 
     let mut successor = PresentedWorld::new(&runtime, WindowId::new(1), 2);
     successor.world.insert_resource(
-        host.commit_runtime_world_presentation(a.id(), &successor.packet)
-            .unwrap()
-            .unwrap(),
+        host.commit_runtime_world_presentation(
+            a.id(),
+            &successor.packet,
+            Some(nara_render::WorldInputMapping2d::identity()),
+        )
+        .unwrap()
+        .unwrap(),
     );
     assert!(!first.can_pick());
     assert!(successor.can_pick());
@@ -222,9 +283,13 @@ fn native_runtime_world_guards_replace_and_retire_per_producer_and_revoke_on_dev
     let replacement = host.create_producer().unwrap();
     let mut same_window = PresentedWorld::new(&runtime, WindowId::new(1), 1);
     same_window.world.insert_resource(
-        host.commit_runtime_world_presentation(replacement.id(), &same_window.packet)
-            .unwrap()
-            .unwrap(),
+        host.commit_runtime_world_presentation(
+            replacement.id(),
+            &same_window.packet,
+            Some(nara_render::WorldInputMapping2d::identity()),
+        )
+        .unwrap()
+        .unwrap(),
     );
     assert!(
         !successor.can_pick(),
@@ -284,19 +349,31 @@ fn native_unpickable_successor_revokes_displaced_world_without_issuing_permissio
         let mut second = PresentedWorld::new(&runtime, WindowId::new(2), 1);
         let mut third = PresentedWorld::new(&runtime, WindowId::new(3), 1);
         first.world.insert_resource(
-            host.commit_runtime_world_presentation(a.id(), &first.packet)
-                .unwrap()
-                .unwrap(),
+            host.commit_runtime_world_presentation(
+                a.id(),
+                &first.packet,
+                Some(nara_render::WorldInputMapping2d::identity()),
+            )
+            .unwrap()
+            .unwrap(),
         );
         second.world.insert_resource(
-            host.commit_runtime_world_presentation(b.id(), &second.packet)
-                .unwrap()
-                .unwrap(),
+            host.commit_runtime_world_presentation(
+                b.id(),
+                &second.packet,
+                Some(nara_render::WorldInputMapping2d::identity()),
+            )
+            .unwrap()
+            .unwrap(),
         );
         third.world.insert_resource(
-            host.commit_runtime_world_presentation(c.id(), &third.packet)
-                .unwrap()
-                .unwrap(),
+            host.commit_runtime_world_presentation(
+                c.id(),
+                &third.packet,
+                Some(nara_render::WorldInputMapping2d::identity()),
+            )
+            .unwrap()
+            .unwrap(),
         );
         assert!(first.can_pick());
         assert!(second.can_pick());
@@ -305,9 +382,13 @@ fn native_unpickable_successor_revokes_displaced_world_without_issuing_permissio
         let successor = PresentedWorld::with_scale(&runtime, WindowId::new(1), 2, 0.0);
         let owner = if same_producer { a.id() } else { c.id() };
         assert!(
-            host.commit_runtime_world_presentation(owner, &successor.packet)
-                .unwrap()
-                .is_none()
+            host.commit_runtime_world_presentation(
+                owner,
+                &successor.packet,
+                Some(nara_render::WorldInputMapping2d::identity())
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(!first.can_pick());
         assert!(second.can_pick());

@@ -1,13 +1,14 @@
 use super::*;
 use nara_ecs::bevy_ecs::system::SystemState;
 
-use crate::__private::prepare_world_presentation;
+use crate::{__private::prepare_world_presentation, WorldInputMapping2d};
 
 fn publish(
     world: &mut World,
     packet: &RenderFramePacket,
 ) -> crate::__private::WorldPresentationGuard {
-    let (presented, guard) = prepare_world_presentation(packet).unwrap();
+    let (presented, guard) =
+        prepare_world_presentation(packet, WorldInputMapping2d::identity()).unwrap();
     guard.mark_presented();
     world.insert_resource(presented);
     guard
@@ -111,7 +112,8 @@ fn presented_world_pointer_requires_present_current_geometry_and_live_owner() {
     let packet = canvas_packet(&window, camera, canvas);
     world.insert_resource(packet.source_generation().runtime_generation().unwrap());
     world.insert_resource(canvas);
-    let (presented, guard) = prepare_world_presentation(&packet).unwrap();
+    let (presented, guard) =
+        prepare_world_presentation(&packet, WorldInputMapping2d::identity()).unwrap();
     let rect = packet.world_canvas().unwrap().mapping().content_rect();
     let center = Vec2::new(
         (rect.min[0] + rect.max[0]) * 0.5,
@@ -261,7 +263,8 @@ fn presented_pointer_rejects_other_viewports_and_runtime_generations() {
     let generation = packet.source_generation().runtime_generation().unwrap();
     world.insert_resource(generation);
     world.insert_resource(canvas);
-    let (presented, guard) = prepare_world_presentation(&packet).unwrap();
+    let (presented, guard) =
+        prepare_world_presentation(&packet, WorldInputMapping2d::identity()).unwrap();
     guard.mark_presented();
     world.insert_resource(presented);
     let mut parameter = SystemState::<WorldPointer>::new(&mut world);
@@ -356,7 +359,8 @@ fn native_world_pointer_uses_the_presented_camera_without_canvas_configuration()
     .unwrap();
     assert!(packet.world_canvas().is_none());
     world.insert_resource(packet.source_generation().runtime_generation().unwrap());
-    let (presented, guard) = prepare_world_presentation(&packet).unwrap();
+    let (presented, guard) =
+        prepare_world_presentation(&packet, WorldInputMapping2d::identity()).unwrap();
     guard.mark_presented();
     world.insert_resource(presented);
     let mut parameter = SystemState::<WorldPointer>::new(&mut world);
@@ -504,7 +508,8 @@ fn callback_revocation_before_activation_cannot_be_undone_by_late_present() {
     let packet = canvas_packet(&window, camera, canvas);
     world.insert_resource(packet.source_generation().runtime_generation().unwrap());
     world.insert_resource(canvas);
-    let (presented, guard) = prepare_world_presentation(&packet).unwrap();
+    let (presented, guard) =
+        prepare_world_presentation(&packet, WorldInputMapping2d::identity()).unwrap();
     let revoker = guard.revoker();
     std::thread::spawn(move || revoker.invalidate())
         .join()

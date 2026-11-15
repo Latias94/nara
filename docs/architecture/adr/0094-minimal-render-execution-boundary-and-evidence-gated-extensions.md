@@ -173,6 +173,14 @@ cross-owner composition work; this subsection does not promote that entire propo
   capture and reports retain their original definition through actual cleanup. No current registry
   lookup can retarget old work. Closing an instance refuses new admission without invalidating
   another instance or releasing its submitted uses.
+- A render policy declares optional World input mapping with the original CPU capture. The
+  input freezes a validated final-target-physical to original-target-physical affine inverse;
+  identity is explicit, and absence disables World picking without refusing rendering. The
+  stock policy selects identity. Custom Shader output does not imply coordinate preservation.
+  Equal-extent target adaptation retains this captured fact. Native presentation and Editor Game
+  completion join it through the original presented guard; they cannot infer it from a current
+  policy or successful output. The [presented drawing/picking successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor)
+  owns implementation and qualification; no Shader analyzer or second input authority is selected.
 - Requirements from immutable Feature definitions and native frontend initialization aggregate
   in the same Host before device acquisition, using WGPU's direction for every limit.
   Adapter support, requested and actually enabled capabilities remain distinct. A late subset may

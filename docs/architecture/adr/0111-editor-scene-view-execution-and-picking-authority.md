@@ -85,6 +85,16 @@ default-policy downcast is not picking authority. Effects preserve the selected 
 and a materially different geometric mapping needs its own explicit tooling support. This does not
 grant a generic data-only Editor permission to execute arbitrary project Rust.
 
+World input mapping is a separate captured policy fact. An input freezes an optional validated
+affine inverse from final-target physical pixels to original packet-target physical pixels.
+Stock rendering declares identity; absence keeps rendering available but disables World picking.
+Successful output or presentation alone cannot imply coordinate preservation. Native Runtime and
+embedded Game completion join the frozen mapping with the original presented guard and Views;
+an unmapped displayed successor revokes its previous picking authority. A later installed policy
+or mutable camera cannot reinterpret that presented sample. The
+[presented drawing/picking successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor)
+tracks implementation and actual qualification separately from this decision.
+
 - One concrete render Host owns the instance, adapter, device, queue, epochs, admitted targets,
   serialized native submissions and actual completion custody. Runtime, Editor and offscreen
   consumers use that same device and stock drawing implementation; no second offscreen backend

@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use nara_app::RuntimeGeneration;
-use nara_core::Vec2;
+use nara_core::{Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, Resource, system::SystemParam};
 use nara_window::{Window, WindowEvent, WindowEvents};
 
@@ -16,6 +16,49 @@ use crate::{
 const PREPARED: u8 = 0;
 const PRESENTED: u8 = 1;
 const REVOKED: u8 = 2;
+
+/// A frozen affine inverse from final-target physical pixels to original-target physical pixels.
+///
+/// Policies declare this value with their original capture. Identity explicitly preserves pixel
+/// coordinates; successful rendering alone does not establish an input mapping.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldInputMapping2d {
+    final_to_source_physical: Mat3,
+}
+
+impl WorldInputMapping2d {
+    #[must_use]
+    pub const fn identity() -> Self {
+        Self {
+            final_to_source_physical: Mat3::IDENTITY,
+        }
+    }
+
+    /// Accepts only finite, invertible affine matrices with an exact bottom row of `[0, 0, 1]`.
+    /// The inverse must also be finite; no approximate singularity threshold is applied.
+    #[must_use]
+    pub fn affine(final_to_source_physical: Mat3) -> Option<Self> {
+        if !final_to_source_physical.is_finite()
+            || final_to_source_physical.x_axis.z != 0.0
+            || final_to_source_physical.y_axis.z != 0.0
+            || final_to_source_physical.z_axis.z != 1.0
+        {
+            return None;
+        }
+        let determinant = final_to_source_physical.determinant();
+        if !determinant.is_finite() || determinant == 0.0 {
+            return None;
+        }
+        final_to_source_physical.try_inverse().map(|_| Self {
+            final_to_source_physical,
+        })
+    }
+
+    #[must_use]
+    pub const fn final_to_source_physical(self) -> Mat3 {
+        self.final_to_source_physical
+    }
+}
 
 /// Read-only world picking through the last successfully presented camera and display mapping.
 ///
@@ -82,7 +125,8 @@ pub struct PresentedWorldFrame {
     source_generation: RenderFrameSourceGeneration,
     frame_index: u64,
     canvas: Option<WorldCanvas>,
-    mapping: DisplayMapping2d,
+    display_mapping: DisplayMapping2d,
+    input_mapping: WorldInputMapping2d,
     views: Vec<ExtractedView>,
     live: Arc<AtomicU8>,
 }
@@ -104,31 +148,58 @@ impl PresentedWorldFrame {
     }
 
     fn window_to_world(&self, camera: Entity, position: Vec2) -> Option<Vec2> {
-        let rect = self.mapping.content_rect();
-        if !position.is_finite()
-            || position.x < rect.min[0]
-            || position.y < rect.min[1]
-            || position.x >= rect.max[0]
-            || position.y >= rect.max[1]
-        {
+        let resolution = self.window.resolution;
+        let contains_target = |point: Vec2| {
+            point.is_finite()
+                && point.x >= 0.0
+                && point.y >= 0.0
+                && point.x < resolution.physical_width as f32
+                && point.y < resolution.physical_height as f32
+        };
+        let final_physical = position * resolution.scale_factor as f32;
+        if !contains_target(final_physical) {
             return None;
         }
-        let point = self.mapping.panel_to_target(position.to_array())?;
+        let source_physical = self
+            .input_mapping
+            .final_to_source_physical()
+            .transform_point2(final_physical);
+        if !contains_target(source_physical) {
+            return None;
+        }
+        let point = if self.canvas.is_some() {
+            let source_logical = source_physical / self.display_mapping.pixels_per_point();
+            let rect = self.display_mapping.content_rect();
+            if source_logical.x < rect.min[0]
+                || source_logical.y < rect.min[1]
+                || source_logical.x >= rect.max[0]
+                || source_logical.y >= rect.max[1]
+            {
+                return None;
+            }
+            Vec2::from_array(
+                self.display_mapping
+                    .panel_to_target(source_logical.to_array())?,
+            )
+        } else {
+            source_physical
+        };
         let view = self
             .views
             .iter()
             .find(|view| view.camera_entity == camera)?;
         let viewport = view.viewport;
-        if point[0] < viewport.physical_x as f32
-            || point[1] < viewport.physical_y as f32
-            || point[0]
+        if point.x < viewport.physical_x as f32
+            || point.y < viewport.physical_y as f32
+            || point.x
                 >= (u64::from(viewport.physical_x) + u64::from(viewport.physical_width)) as f32
-            || point[1]
+            || point.y
                 >= (u64::from(viewport.physical_y) + u64::from(viewport.physical_height)) as f32
         {
             return None;
         }
-        view.viewport_to_world(Vec2::from_array(point))
+        view.viewport_to_world(point)
+            .filter(|world| world.is_finite())
     }
 }
 
@@ -186,12 +257,13 @@ impl Drop for WorldPresentationGuard {
 #[must_use]
 pub fn prepare_world_presentation(
     packet: &RenderFramePacket,
+    mapping: WorldInputMapping2d,
 ) -> Option<(PresentedWorldFrame, WorldPresentationGuard)> {
     let RenderFrameTarget::Window(window) = packet.target() else {
         return None;
     };
     let canvas = packet.world_canvas();
-    let mapping = match canvas {
+    let display_mapping = match canvas {
         Some(canvas) => canvas.mapping(),
         None => {
             let pixels_per_point = window.resolution.scale_factor as f32;
@@ -216,10 +288,14 @@ pub fn prepare_world_presentation(
             source_generation: packet.source_generation(),
             frame_index: packet.frame_index(),
             canvas: canvas.map(|canvas| canvas.canvas()),
-            mapping,
+            display_mapping,
+            input_mapping: mapping,
             views: packet.views().to_vec(),
             live: Arc::clone(&live),
         },
         WorldPresentationGuard { live },
     ))
 }
+
+#[cfg(test)]
+mod tests;

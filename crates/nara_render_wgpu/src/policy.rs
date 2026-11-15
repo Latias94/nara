@@ -15,7 +15,7 @@ use std::{
 };
 
 use nara_ecs::Resource;
-use nara_render::{FrameStats, RenderFramePacket, RenderImagePacket};
+use nara_render::{FrameStats, RenderFramePacket, RenderImagePacket, WorldInputMapping2d};
 
 use crate::{
     WgpuDeviceRequirements, WgpuFeatureDeclaration, WgpuFeatureInstance, WgpuProgramTexture,
@@ -45,6 +45,13 @@ pub trait WgpuRenderPolicy: Send + Sync + 'static {
     /// Return the clone frozen with the domain's semantic sample, not a clone of a later current
     /// owner. Admission must not refresh a pre-discontinuity capture's semantic revision.
     fn history_lineage(&self, _capture: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
+        None
+    }
+
+    /// Declares the mapping from final-target physical pixels to original packet-target pixels.
+    /// It is evaluated once at original capture admission and retained across reconstruction.
+    /// Return `None` when this policy does not provide World picking for its output.
+    fn world_input_mapping(&self, _capture: &Self::Capture) -> Option<WorldInputMapping2d> {
         None
     }
 
@@ -224,10 +231,14 @@ impl<P: WgpuRenderPolicy> WgpuPolicyInstallation<P> {
         if !self.is_open() {
             return Err(WgpuRenderProgramError::PolicyClosed);
         }
-        let lineage = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.definition.0.policy.history_lineage(&capture)
-        }))
-        .map_err(|_| WgpuRenderProgramError::PolicyPanicked)?;
+        let (lineage, world_input_mapping) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (
+                    self.definition.0.policy.history_lineage(&capture),
+                    self.definition.0.policy.world_input_mapping(&capture),
+                )
+            }))
+            .map_err(|_| WgpuRenderProgramError::PolicyPanicked)?;
         if let Some(lineage) = &lineage {
             lineage.validate_current()?;
         }
@@ -236,6 +247,7 @@ impl<P: WgpuRenderPolicy> WgpuPolicyInstallation<P> {
             definition: Arc::clone(&self.definition.0),
             capture,
             lineage,
+            world_input_mapping,
         }))
     }
 }
@@ -288,6 +300,12 @@ impl WgpuRenderInput {
     #[must_use]
     pub fn installation(&self) -> WgpuPolicyInstallationId {
         self.capture.admission().id
+    }
+
+    /// Returns the World input mapping frozen by this input's original policy and capture.
+    #[must_use]
+    pub fn world_input_mapping(&self) -> Option<WorldInputMapping2d> {
+        self.capture.world_input_mapping()
     }
 
     /// Borrows this input's original typed capture for inspection, without current lookup.
@@ -572,6 +590,7 @@ pub(crate) trait CapturedPolicy: Send + Sync {
     fn definition_id(&self) -> u64;
     fn requirements(&self) -> &WgpuDeviceRequirements;
     fn lineage(&self) -> Option<&crate::WgpuHistoryLineage>;
+    fn world_input_mapping(&self) -> Option<WorldInputMapping2d>;
     fn metadata_bytes(&self) -> Result<usize, WgpuRenderProgramError>;
     fn validate(&self, packet: &RenderFramePacket) -> Result<(), WgpuRenderProgramError>;
     fn bind(
@@ -590,6 +609,7 @@ struct TypedPolicyCapture<P: WgpuRenderPolicy> {
     definition: Arc<PolicyDefinition<P>>,
     capture: Arc<P::Capture>,
     lineage: Option<crate::WgpuHistoryLineage>,
+    world_input_mapping: Option<WorldInputMapping2d>,
 }
 
 impl<P: WgpuRenderPolicy> CapturedPolicy for TypedPolicyCapture<P> {
@@ -610,6 +630,10 @@ impl<P: WgpuRenderPolicy> CapturedPolicy for TypedPolicyCapture<P> {
 
     fn lineage(&self) -> Option<&crate::WgpuHistoryLineage> {
         self.lineage.as_ref()
+    }
+
+    fn world_input_mapping(&self) -> Option<WorldInputMapping2d> {
+        self.world_input_mapping
     }
 
     fn metadata_bytes(&self) -> Result<usize, WgpuRenderProgramError> {
@@ -1065,5 +1089,7 @@ impl PolicyInstances {
     }
 }
 
+#[cfg(test)]
+mod input_mapping_tests;
 #[cfg(test)]
 mod tests;

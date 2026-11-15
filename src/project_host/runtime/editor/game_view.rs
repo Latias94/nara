@@ -831,7 +831,10 @@ impl EditorGameViewBridge {
             frame_index: captured.input.packet().frame_index(),
             sequence,
         };
-        self.pending_world_presentation = prepare_world_presentation(captured.input.packet());
+        self.pending_world_presentation = captured
+            .input
+            .world_input_mapping()
+            .and_then(|mapping| prepare_world_presentation(captured.input.packet(), mapping));
         self.slot = EditorGameViewBridgeSlot::Buffered(PendingEditorGameViewCandidate {
             identity,
             input: captured.input,
@@ -930,6 +933,8 @@ impl EditorGameViewBridge {
             guard.mark_presented();
             world.insert_resource(presented);
             self.world_presentation_guard = Some(guard);
+        } else {
+            self.world_presentation_guard = None;
         }
     }
 }
@@ -2064,12 +2069,16 @@ mod world_presentation_tests {
     struct PickingPolicy;
 
     impl WgpuRenderPolicy for PickingPolicy {
-        type Capture = ();
+        type Capture = bool;
         type Bindings = ();
+
+        fn world_input_mapping(&self, mapped: &bool) -> Option<nara_render::WorldInputMapping2d> {
+            mapped.then_some(nara_render::WorldInputMapping2d::identity())
+        }
 
         fn bind(
             &self,
-            _: &(),
+            _: &bool,
             _: &mut WgpuPolicyBindingContext<'_>,
         ) -> Result<(), WgpuRenderProgramError> {
             panic!("world-presentation ownership tests do not execute a renderer")
@@ -2078,7 +2087,7 @@ mod world_presentation_tests {
         fn build(
             &self,
             _: &(),
-            _: &(),
+            _: &bool,
             _: WgpuPolicyBuildContext<'_>,
         ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
             panic!("world-presentation ownership tests do not execute a renderer")
@@ -2106,11 +2115,12 @@ mod world_presentation_tests {
     fn capture(
         world: &mut World,
         packet: RenderFramePacket,
+        mapped: bool,
     ) -> EditorGameViewRuntimeCandidateIdentity {
         let generation = packet.source_generation().runtime_generation().unwrap();
         let installation = WgpuPolicyDefinition::new(PickingPolicy).install().unwrap();
         let input = installation
-            .capture(packet, std::sync::Arc::new(()))
+            .capture(packet, std::sync::Arc::new(mapped))
             .unwrap();
         let mut bridge = world.resource_mut::<EditorGameViewBridge>();
         bridge
@@ -2190,7 +2200,7 @@ mod world_presentation_tests {
             .unwrap()
         };
 
-        let first = capture(&mut world, packet(1));
+        let first = capture(&mut world, packet(1), true);
         assert!(
             pick(&mut world, camera).is_none(),
             "capture does not confer display authority"
@@ -2203,7 +2213,7 @@ mod world_presentation_tests {
         assert!(pick(&mut world, camera).is_none());
         assert!(world.resource::<EditorGameViewBridge>().can_capture());
 
-        let retired = capture(&mut world, packet(2));
+        let retired = capture(&mut world, packet(2), true);
         invalidate(&mut world);
         complete(&mut world, retired);
         assert!(
@@ -2211,9 +2221,18 @@ mod world_presentation_tests {
             "a discarded pending guard cannot revive"
         );
 
-        let fresh = capture(&mut world, packet(3));
+        let fresh = capture(&mut world, packet(3), true);
         assert!(pick(&mut world, camera).is_none());
         complete(&mut world, fresh);
+        assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+
+        let unmapped = capture(&mut world, packet(4), false);
+        assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+        complete(&mut world, unmapped);
+        assert!(pick(&mut world, camera).is_none());
+        let recovered = capture(&mut world, packet(5), true);
+        assert!(pick(&mut world, camera).is_none());
+        complete(&mut world, recovered);
         assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
     }
 }

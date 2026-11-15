@@ -61,6 +61,24 @@ Queue or presentation authority. Return `WgpuPolicyProgram` with its published f
 explicit observation counters. The Host checks the final texture's actual extent, format,
 transfer and alpha contract before execution.
 
+World picking also requires an explicit captured coordinate contract. Implement
+`world_input_mapping(capture)` to return `Some(WorldInputMapping2d::identity())` for an output
+that preserves coordinates, or a validated `WorldInputMapping2d::affine` inverse from final
+target physical pixels to the original packet target's physical pixels. Return `None` when
+there is no qualified inverse; rendering stays available but World picking is disabled.
+Custom policies default to `None`; the stock policy explicitly declares identity. The input
+freezes this declaration once, and cloning or equal-extent image adaptation preserves it.
+It is not recomputed from a current policy, camera or Shader text during presentation.
+
+The original Runtime presentation guard admits this frozen inverse only after genuine present.
+It converts logical input to final physical pixels once, applies the inverse and then uses
+the captured WorldCanvas and View mapping. Half-open target/View bounds and bars still reject.
+An unpresented candidate grants no picking, and a successfully displayed unmapped successor
+revokes the previous mapping. This contract covers World picking; it does not retarget UI
+hit testing or provide an inverse for arbitrary nonlinear/channel-dependent effects. See the
+[presented drawing/picking unit](../plans/2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor)
+for implementation and execution evidence.
+
 Use `host.validate_input(&producer, &input, format)` for CPU graph/target/Feature-ownership
 diagnostics before native acquisition. It runs the same policy callbacks and may reserve their
 CPU installation/history tables. It does not reserve a candidate, publish bindings/history or

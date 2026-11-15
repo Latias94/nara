@@ -846,7 +846,9 @@ mod tests {
                     .unwrap()
                     .unwrap();
             world.insert_resource(generation);
-            let (frame, guard) = prepare_world_presentation(&packet).unwrap();
+            let (frame, guard) =
+                prepare_world_presentation(&packet, nara_render::WorldInputMapping2d::identity())
+                    .unwrap();
             let signal = DeviceLossSignal::default();
             if lost_before_registration {
                 signal.mark_lost();
