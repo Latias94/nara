@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-14 (exact stock material declaration and Shader artifact realization)
+**Last Revised**: 2026-11-15 (captured View and Shader clock facts)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -380,6 +380,31 @@ cache retention. A late old capture can realize its own exact native resources w
 itself over a newer current declaration. Cross-Feature inputs still require complete graph
 versions and declared reads. This bounded stock-material selection neither establishes arbitrary
 Shader Graph/frontends nor qualifies the still-active persistent, native and interleaving tests.
+
+### Captured View Clock Facts
+
+The original Extract owner publishes an immutable observation of existing App clocks, time
+settings and validated presented-spatial identity atomically with its extracted views. The
+actual spatial interpolation decision accompanies the original RenderTime remainder/alpha.
+Frame packets and target adaptation retain that exact observation. It is data, not authority
+to advance a World or accept history. A manually supplied view without this observation
+advertises unavailable clock data rather than borrowing the Host's current time.
+
+Stock material Shaders receive projection, physical viewport and captured clock facts through
+a separate engine-owned View uniform. This binding is distinct from the authored material
+parameter layout and its semantic field identity. Real, virtual and fixed domains are explicit;
+Shader authors select the intended domain instead of inheriting an ambiguous TIME value. CPU
+elapsed values retain Duration precision. The bounded stock GPU representation uses a declared
+3,600-second period plus integer period/counter words, with explicit clock availability,
+pause and spatial-interpolation flags. It does not promise arbitrary long-duration floating
+precision or smooth effects across the wrap boundary.
+
+Native preparation owns immutable per-capture buffer contents through the existing allocation
+and submission reservations. Time/value changes do not enter material pipeline variant keys.
+Late execution and replay consume the original projection/time, while the existing temporal
+policy independently decides history compatibility. Neither the GPU Host nor a Shader may
+reconstruct current simulation state to repair an older capture. Qualification belongs to the
+[Material successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor).
 
 ### Graph-Shared Stock Material Inputs
 

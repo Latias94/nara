@@ -2293,6 +2293,23 @@ window pixels/scanout, source-edit latency and numerical production budgets rema
 No new renderer, GPU/World owner, batch publisher or native loop is introduced. Full R9b/R12/
 Foundation remains open and paused Editor/Dialogue changes are preserved.
 
+The [captured View and Shader time successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor)
+is implemented from `ac6828a` through the current WGPU realization. The Extract owner freezes
+the existing App real/virtual/fixed/render clocks, settings, validated spatial stamp and actual
+interpolation decision with each ordinary View; target adaptation and delayed preparation retain
+that sample, while manually supplied views advertise unavailable clock data. The stock Material
+interface admits the engine-owned 224-byte `NaraView` at group 2 binding 0, outside authored
+parameters; WGPU uses bounded per-preparation byte-sharing and the original allocation/submission
+custody, with time excluded from pipeline variants. Owning Material/Render/Transform controls pass
+179/179 in `fa56fe66-85fc-4be6-88e0-a32d85f96d29`, the corrected all-feature owning cohort passes
+558/558 with 67 skips in `c423765c-ff30-4d49-8a99-cdc742456eb6`, and the independent ordinary
+consumer passes 1/1 on Vulkan RTX 4090 (`05d558a5-e4d3-485c-a0ce-44cf0c0a5cb3`), DX12 RTX 4090
+(`6ff5a302-73b7-435c-9c28-b85ed6ba2e99`) and DX12 Microsoft Basic Render Driver fallback
+(`bb70dc1d-8ac6-425b-86a6-11584d4fe038`). Each consumer run captures/publishes seven frames,
+retains one pipeline, replays old View/time data after a real Camera change and releases its
+original World. These results do not qualify arbitrary View effects, full temporal compatibility,
+scanout or numerical production budgets; full R9b/R12/Foundation remains open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

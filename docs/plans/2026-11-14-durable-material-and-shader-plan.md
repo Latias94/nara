@@ -7,8 +7,9 @@ qualification shares the original serial Cargo owner with Runtime work.
 The declaration/Shader/native prerequisite is implemented at `899d64b`. The selected persistent
 source/processed Material product workflow is implemented and qualified below. Native Scene
 watching, live external GPU execution and ordinary windowed source updates are also qualified
-below, the latter at `177684e`. Representative production costs and remaining View/time work
-stay open. Live Editor Material/Shader hydration remains paused with the Editor work. The
+below, the latter at `177684e`. The captured View/time successor below is now implemented and
+qualified for its ordinary Material consumer; broader View/history compatibility and numerical
+production costs remain open. Live Editor Material/Shader hydration remains paused with the Editor work. The
 graph-shared texture workflow is implemented and qualified below; complete R9b and the
 foundation Goal are not finished.
 The persistent implementation/migration is `2535b46`; independent/public and real executable
@@ -918,6 +919,82 @@ hydration waits for that product's selected work; Editor/component and Dialogue 
 remain paused. Physical mixed-DPI needs its own available multi-monitor setup. Numerical
 large-game budgets, foreign execution, remaining View/history work and full R9b/R12/foundation
 completion remain open.
+
+## Captured View And Shader Time Successor
+
+Status: active. R9a now extends the existing immutable frame packet through an ordinary
+independent Material consumer. At the original Extract boundary, capture the existing App
+real, virtual, fixed and render clocks, time settings and validated presented-spatial stamp
+together with the actual spatial interpolation decision. Publish these facts atomically with
+the extracted views and preserve them through target adaptation and delayed execution. Exact
+Step without Extract retains the preceding captured view/time sample. No Host wall-clock
+lookup or additional clock, scheduler, history or spatial owner is introduced.
+
+The stock material shader receives a separate engine-owned View uniform, outside the authored
+material parameter layout. It exposes the original projection/viewport, explicitly available
+real/virtual/fixed time facts and pause/interpolation state. CPU elapsed time remains Duration;
+GPU elapsed values use an explicit 3,600-second period with integer period/counter words.
+Manually authored views without a clock sample advertise unavailable time rather than claim a
+current Runtime sample. Ordinary time changes must not create material pipeline variants.
+
+Qualify zero/multiple fixed ticks, Pause, exact Step and subsequent Extract, scaled virtual
+time, actual interpolation, real-versus-virtual shader output and delayed replay using original
+public capture and Host execution. Read back ordinary Material pixels, preserve the original
+capture after later frames and check unchanged pipeline counts. Retain existing motion/history
+discontinuity controls; camera/material compatibility classifications and broader View effects
+remain separately open. Match owning API, feature-disabled and independent checks to the changed
+seams, and record real execution, failures and limits before claiming qualification.
+
+Primary-source comparison pins Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`
+(`crates/bevy_render/src/globals.rs`, `crates/bevy_time/src/{time,virt,fixed}.rs`) and Godot
+`7a37606a433c0e7735525037cdf774f043146a21` (`main/main.cpp`,
+`servers/rendering/renderer_rd/{renderer_compositor_rd,renderer_canvas_render_rd}.cpp`,
+`scene/main/scene_tree.cpp`). Bevy copies the existing virtual clock during Extract and wraps
+GPU elapsed time at 3,600 seconds; ordinary pause freezes it. Godot advances renderer TIME using
+the supplied scaled frame step and the same default rollover, while ordinary SceneTree Pause
+does not freeze that Shader value. Neither source establishes Nara's required immutable delayed
+replay or a high/low precision guarantee. Nara therefore retains its existing App semantics and
+exposes both captured real and virtual facts rather than copying an ambiguous shared TIME policy.
+
+### Implementation And Review
+
+The CPU prerequisite is implemented at `ac6828a`. Owning Material/Render/Transform controls
+pass 179/179 in `fa56fe66-85fc-4be6-88e0-a32d85f96d29` (11.009 seconds after a 1m47s
+release build), and neutral Render/Material library checks pass. Independent core review finds
+no P1/P2 in original sample custody, Step, failed publication or manual-view invalidation.
+
+The native realization uses the existing private allocation/submission owners. Each distinct
+View allocation contains a 224-byte uniform and one bind group. A temporary table compares
+complete bytes, including signed zero, and indexes at most 16 entries per preparation;
+additional distinct values still render through separately budgeted allocations. Preflight
+charges the conservative per-batch upper bound, including metadata and original custody.
+There is no persistent mutable View cache or time-dependent pipeline key.
+
+Review first exposes an unnecessary local-name ban that cannot be inferred completely from
+lowered Naga IR. The correction removes that extra policy and leaves ordinary WGSL scope to
+Naga, retaining exact global resource/layout validation and global-redeclaration refusal.
+An actual two-case red run, `bb709756-7b6a-452d-b7ae-a916be992a1a`, also reproduces the
+new View allocation-stage cache assertion: the original primary texture binding is already
+cached before that failure. The corrected control explicitly requires zero or one binding at
+the appropriate stage, preserving retry, upload and retirement assertions. No backend cache
+flush or additional source parser is introduced to satisfy the test.
+
+Independent consumer review strengthens the pixel oracle with nonzero asymmetric forward and
+inverse matrix probes, then a real Camera transform/projection change between captures A/B.
+The old View identity continues while its mapping changes. Late first preparation and replay of
+A must retain old time, mapping and motion coverage while retained B remains unchanged. Final
+source rereviews close all four reported P2s; actual native results are recorded separately.
+
+### Owning Qualification
+
+The corrected Material/Sprite/native-owner selection passes **558/558**, with 67 explicit
+skips, in `c423765c-ff30-4d49-8a99-cdc742456eb6` (157.534 seconds after a 3m58s release
+build). This uses Windows 11, Rust 1.95.0 and explicit DX12 selection. It includes the actual
+allocation-failure recovery, strict-byte View sharing/custody tests, all Naga/native member
+offsets and span, legal local-scope controls, stock/UI/native Host regressions and retained
+Source-generation controls. The 179-case prerequisite and this aggregate overlap in Material
+coverage; their counts are not additive. The initial two-case red run builds in 6m47s and
+fails both intended controls before the correction. Build times are not runtime cost evidence.
 
 ## Live Native Source Updates Through External GPU Execution
 

@@ -22,9 +22,13 @@ use nara::{
 };
 use nara_app::{
     App, CoreStage, FixedTime, FixedUpdateSet, RealTime, RenderTime, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeInstance, RuntimeTimeSettings, VirtualTime,
+    RuntimeControlRequestResult, RuntimeInstance, RuntimeRetirement, RuntimeStartFailure,
+    RuntimeTimeSettings, VirtualTime,
 };
-use nara_ecs::{Entity, Query, Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Entity, Query, Res, ResMut, Resource, World,
+    schedule::{IntoScheduleConfigs, ScheduleLabel},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionFrame {
@@ -32,6 +36,7 @@ pub struct MotionFrame {
     pub virtual_elapsed: Duration,
     pub real_elapsed: Duration,
     pub interpolation_alpha: f32,
+    pub spatial_interpolated: bool,
     pub paused: bool,
     pub kinematic: Vec2,
     pub dynamic: Vec2,
@@ -56,13 +61,24 @@ struct FixedPositions([Vec2; 2]);
 #[derive(Default, Resource)]
 struct PresentedFrame(Option<MotionFrame>);
 
+#[derive(Resource)]
+struct ScaleControl(Arc<Mutex<Option<f32>>>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+struct ApplyTimeScale;
+
 pub struct MotionRuntime {
     runtime: RuntimeInstance,
     correction: Arc<Mutex<Option<Vec2>>>,
+    scale: Arc<Mutex<Option<f32>>>,
 }
 
 impl MotionRuntime {
     pub fn new() -> Self {
+        Self::with_app(|_| {}).unwrap()
+    }
+
+    pub fn with_app(configure: impl FnOnce(&mut App)) -> Result<Self, RuntimeStartFailure> {
         let mut app = App::new();
         app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
             .unwrap();
@@ -74,6 +90,7 @@ impl MotionRuntime {
         ))
         .unwrap();
         let correction = Arc::new(Mutex::new(None));
+        let scale = Arc::new(Mutex::new(None));
         let world = app.world_mut().unwrap();
         let sample = world.resource::<Solver>().sample();
         let parent_translation = Vec2::new(10.0, 0.0);
@@ -120,6 +137,7 @@ impl MotionRuntime {
         });
         world.insert_resource(OtherParent(other_parent));
         world.insert_resource(Correction(Arc::clone(&correction)));
+        world.insert_resource(ScaleControl(Arc::clone(&scale)));
         world.insert_resource(MotionInput {
             tick: 0,
             delta: Vec2::new(0.25, 0.0),
@@ -148,15 +166,35 @@ impl MotionRuntime {
         .unwrap();
         add_fixed_transform_projection_systems(&mut app, observe_fixed).unwrap();
         add_presented_transform_projection_systems(&mut app, observe_presented).unwrap();
-        Self {
-            runtime: RuntimeInstance::start(app).unwrap(),
+        app.add_systems(ApplyTimeScale, apply_time_scale).unwrap();
+        configure(&mut app);
+        Ok(Self {
+            runtime: RuntimeInstance::start(app)?,
             correction,
-        }
+            scale,
+        })
     }
 
     pub fn drive(&mut self, delta: Duration) -> MotionFrame {
         self.runtime.drive(delta).unwrap();
         self.runtime.world().resource::<PresentedFrame>().0.unwrap()
+    }
+
+    pub fn observe<T>(&self, observe: impl FnOnce(&World) -> T) -> T {
+        observe(self.runtime.world())
+    }
+
+    pub fn set_time_scale(&mut self, scale: f32) {
+        assert!(scale.is_finite() && scale >= 0.0);
+        *self.scale.lock().unwrap() = Some(scale);
+        self.runtime.run_schedule(ApplyTimeScale).unwrap();
+        assert_eq!(
+            self.runtime
+                .world()
+                .resource::<RuntimeTimeSettings>()
+                .time_scale(),
+            scale
+        );
     }
 
     pub fn pause(&mut self) {
@@ -195,6 +233,16 @@ impl MotionRuntime {
 
     pub fn finish(self) {
         self.runtime.finish().unwrap();
+    }
+
+    pub fn begin_retirement(self) -> RuntimeRetirement {
+        self.runtime.begin_retirement()
+    }
+}
+
+fn apply_time_scale(control: Res<ScaleControl>, mut settings: ResMut<RuntimeTimeSettings>) {
+    if let Some(scale) = control.0.lock().unwrap().take() {
+        settings.set_time_scale(scale).unwrap();
     }
 }
 
@@ -304,6 +352,7 @@ fn observe_presented(
         virtual_elapsed: virtual_time.elapsed,
         real_elapsed: real_time.elapsed,
         interpolation_alpha: render_time.interpolation_alpha,
+        spatial_interpolated: spatial.spatial_interpolated().unwrap(),
         paused: settings.paused(),
         kinematic: spatial.global(actors.kinematic).unwrap().translation(),
         dynamic: spatial.global(actors.dynamic).unwrap().translation(),

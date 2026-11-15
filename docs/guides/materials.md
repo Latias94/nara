@@ -416,6 +416,61 @@ native target and join-before-World-drop checks. An abort, timeout or nonzero ex
 cleanup evidence. This contains the fixture's assertions; production engine panic policy is
 unchanged.
 
+## Captured View And Shader Time
+
+Stock material WGSL can read the engine-owned `nara_view` uniform at group 2 binding 0.
+It is separate from `material_parameters`; no authored parameter or texture slot is needed
+for a clock. The original Extract stage captures App clocks and settings with the validated
+presented-spatial sample. Later Host preparation, target adaptation and replay retain that
+sample rather than reading current World or Host time.
+
+```wgsl
+fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    if nara_view.clock_available == 0u {
+        return sampled * tint;
+    }
+    let pulse = 0.75 + 0.25 * cos(nara_view.virtual_elapsed * 2.0);
+    return vec4<f32>((sampled * tint).rgb * pulse, sampled.a * tint.a);
+}
+```
+
+Choose the clock domain explicitly:
+
+| Fields | Meaning |
+| --- | --- |
+| `real_elapsed`, `real_delta` | Original unscaled App time, including paused maintenance |
+| `virtual_elapsed`, `virtual_delta` | Original scaled, pausable App time |
+| `fixed_elapsed`, `fixed_delta`, `fixed_timestep`, `fixed_steps` | Original fixed clock; delta is the latest tick's delta, while steps can be zero in this App frame |
+| `interpolation_alpha`, `spatial_interpolated` | Original render fraction and whether spatial interpolation actually ran; alpha alone cannot establish it |
+| `time_scale`, `paused`, `clock_available` | Original settings and explicit `0u`/`1u` flags |
+| `world_to_clip`, `clip_to_world`, `viewport` | Original homogeneous 2D mapping and physical `[x, y, width, height]` |
+
+The viewport is the original world raster rectangle. With a fixed WorldCanvas, these are
+canvas pixels; the later window presentation rectangle remains a separate mapping.
+
+CPU `RenderFramePacket::captured_time()` retains exact Duration values, clock counters and
+the original spatial stamp. Manually supplied views without that sample return None and
+advertise `clock_available == 0u`; their projection and viewport remain available. Exact Step
+advances simulation without running Extract, so it does not change the preceding captured
+View/time. The next ordinary presentation extraction captures the new state.
+
+GPU elapsed fields use seconds in `[0, NARA_TIME_PERIOD_SECONDS)`, with the declared period
+of 3,600 seconds. Corresponding `real_period`, `virtual_period` and `fixed_period` count whole
+periods as `[low, high]` u32 words. `frame`, `virtual_frame` and `fixed_tick` use the same word
+representation for their original 64-bit counters. App frame counters and the packet's render
+transaction index are distinct. This bounded representation does not guarantee smooth effects
+across rollover or arbitrary long-duration floating precision; retain exact CPU time for those
+requirements and design the effect's phase explicitly.
+
+Time and projection values do not create material pipeline variants. They use immutable GPU
+buffers retained by the original Host allocation/submission owners. The existing temporal
+policy still decides history compatibility; a clock sample does not authorize history updates.
+Custom device requests need `max_bind_groups >= 3`,
+`max_bind_groups_plus_vertex_buffers >= 4` and `max_uniform_buffers_per_shader_stage >= 2`;
+the engine validates these limits before material uploads.
+See the [captured-time unit](../plans/2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor)
+for qualification scope and the independent ordinary Material consumer.
+
 ## Independent Delivery Controls
 
 The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact

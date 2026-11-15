@@ -1,11 +1,12 @@
 # Independent Renderer Policy Consumer
 
-This standalone workspace replaces the stock renderer with an independently authored
-screen-space scalar-field renderer through the production policy selection and Host APIs.
-The root `nara` dependency disables default features and enables only `desktop-winit` and
-`render-wgpu`. WGPU is a development dependency pinned to `30.0.1`; the shared policy is
-compiled by integration tests and the window example. No engine source contains a fixture
-branch, and this workspace supplies no executor or native submission authority.
+This standalone workspace exercises independently authored renderer policies and an ordinary
+stock Material through the production capture, policy selection and Host APIs. The root
+`nara` dependency disables default features and enables `desktop-winit`, `presentation-2d`
+and `render-wgpu`. The WGPU development dependency follows the maintained git revision
+`cddb2f5d80dc0009b2ef6767635140cacf90a007` (package version `30.0.0`) with resource counters
+enabled. Integration tests and window examples compile the shared policies. No engine source
+contains a fixture branch, and this workspace supplies no executor or native submission authority.
 
 ## Concrete renderer
 
@@ -166,3 +167,63 @@ cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-
 The history window test launches the prebuilt executable on a real main thread and never invokes
 Cargo. `NARA_RENDER_POLICY_HISTORY_WINDOW_EXE` selects an explicit executable path when needed.
 Missing hardware, expected presentation or retirement fails; no adapter-failure skip qualifies it.
+
+## Ordinary Material Captured View And Time
+
+`tests/material_view_time.rs` is an independent ordinary stock Material consumer. It uses the
+same real Animation/Rapier App as the motion/history control, with a fixture-local 16 ms fixed
+timestep. Two actual Cameras have distinct physical viewports and mappings. A small Sprite
+is attached directly to the solver's original kinematic entity. Its Material reads only the
+engine-owned `nara_view` for View/time facts; the sole authored parameter is a constant gain.
+
+The consumer compares the original packet sample with App clocks and the actual Presented
+spatial publication. A separate CPU oracle derives the complete 64 by 24 linear RGBA8 image
+from source poses, known Camera geometry, exact Duration arithmetic and public clock facts.
+The Sprite edges fall on integer pixel boundaries. Four UV bands encode real/virtual
+elapsed time, deltas, fixed time/ticks, View mapping/viewport and pause/interpolation state.
+The horizontal halves independently probe `clip_to_world * (0.5, -0.25, 1)` and
+`world_to_clip * (0.75, 2.375, 1)`, exercising both linear columns with asymmetric nonzero
+coordinates. The CPU derives the probe bytes from the known Camera parameters rather than
+the uploaded matrices. Covered RGB allows one UNORM byte of rounding; alpha and every clear
+pixel are exact.
+
+The trajectory covers initial and advancing zero-tick frames, multiple fixed ticks, a 0.5
+time scale and Pause with real time advancing while virtual time freezes. Paused presentation
+retains a nonzero alpha but reports no applied spatial interpolation. Exact Step advances
+the original fixed state without another capture; only the following ordinary Extract
+publishes the new Presented sample. App frame words remain distinct from render packet indices.
+
+An original A input is held before later B is published. Between their captures, a fixture-local
+request changes the original Cameras' translations and viewport heights through the App's
+ordinary Update system. Each Sample freezes its known Camera configuration. View IDs remain
+stable while actual extracted mappings, raster coverage and both probe bytes change beyond
+the RGB tolerance. A is first prepared after B, then replayed after further scaled/paused/stepped
+frames through a separate producer on the same Host. Adaptation preserves the exact installation,
+source/frame, Views, time and stock capture pointer. Full image comparisons retain A's old
+projection, pose and time and prove B's output stays unchanged. The original device's enabled
+WGPU render-pipeline counter must be positive and stable.
+
+The test keeps Runtime and Host owners outside its assertion-unwind boundary. It physically
+closes the original Runtime, observes the original World drop, retires original producers,
+checks retained outputs and submission prefixes, and verifies zero retained native/candidate
+bytes and cleanup faults. Assertion failures also run that explicit cleanup before unwinding.
+
+This correctness test accepts either explicit `NARA_WGPU_FORCE_FALLBACK=0` for local hardware
+or `1` for a requested software adapter in CI. It reports the actual adapter and checks the
+requested backend. A missing requested adapter fails rather than skips. Existing history and
+window qualification retain their own hardware prerequisites. This source adds no executed
+native result or performance claim, and does not test the 3,600-second wrap boundary.
+
+The manifest enables the facade's `presentation-2d` API and WGPU `counters`. Run serially
+against the checked-in standalone lock:
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = (Join-Path (Get-Location) 'target')
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --test material_view_time --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The exact test is
+`ordinary_material_captures_view_time_motion_and_replays_original_frames`.
