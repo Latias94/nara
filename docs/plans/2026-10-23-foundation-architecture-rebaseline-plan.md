@@ -1249,6 +1249,24 @@ checks pass; foreign native execution is separate. Windows `Any` notifications c
 rescan, so optimized native filtering and numerical costs remain open. Notification-to-GPU
 presentation and full R9b/R12/Foundation completion are not implied; paused Editor work stays paused.
 
+The [live Source-to-GPU successor](2026-11-14-durable-material-and-shader-plan.md#live-native-source-updates-through-external-gpu-execution)
+at `0602b5d` now drives actual native file edits through the same Source request/explicit commit
+owner and caller-driven `HeadlessSession`, taking original sealed stock inputs in Publish and executing
+them between live Runtime frames through one external WGPU Host. File-backed defaults install
+native-window publication only for a requested desktop capability, avoiding competing batch
+consumers in a headless GPU product. The independently locked package passes 14/14; actual
+Vulkan and DX12 workflows each pass 1/1 in `3f66fcc3-00c3-483a-846e-17758f7c1403` and
+`ebade381-d85b-4155-9364-0c35535c5c6b`. Both cover eight commits, three refusals with fresh
+last-good pixels, original CPU capture replay across separate Shader/Image publications,
+14 retained outputs reread after Stop/producer retirement, all 11 watcher workers joined and
+zero final retained GPU bytes/cleanup faults. Old CPU captures are explicitly released before
+a third Source revision; the original two-generation budget remains enforced. This is live
+offscreen Windows/Rust 1.95.0 evidence. Window/scanout presentation, foreign execution and
+numerical latency/resource budgets remain separate; full R9b/R12/Foundation stays active.
+The affected root composition/configuration targets pass 73/73, final independent controls
+14/14, owning/independent correctness Clippy and format/document checks pass. Detailed failures,
+corrections, exact run IDs and pixel/retention limits remain in the linked unit.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

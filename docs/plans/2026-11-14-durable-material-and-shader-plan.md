@@ -917,6 +917,117 @@ remain paused. Physical mixed-DPI needs its own available multi-monitor setup. N
 large-game budgets, foreign execution, remaining View/history work and full R9b/R12/foundation
 completion remain open.
 
+## Live Native Source Updates Through External GPU Execution
+
+Status: implemented and locally qualified at `0602b5d`. Extend the independently
+locked Material consumer's existing physical-file workflow without replacing its CPU-only
+trajectory. Drive the ordinary public `HeadlessSession` one frame at a time. A selected Publish
+system takes the original sealed render-only batch once and retains immutable CPU input and
+game observations. The caller executes that input between live Runtime frames through one
+external `WgpuRenderHost`; no native GPU owner or second Scene publisher enters the World.
+
+Use a logical 32 by 24 target, a game-owned Camera and an eight-unit white Sprite. Resolve any
+ordinary product-composition gap at its original owner rather than using Editor-only placement
+or reconstructing stock packets. The optional GPU test retains the complete existing filesystem,
+Ready, explicit commit, rejection, gameplay-overlay, exact acknowledgement and watcher-close
+assertions. An independent fixed-tolerance oracle checks actual center and transparent corner
+pixels after every distinct committed Shader/Image/Material state. New captures submitted while
+invalid or missing source is rejected must still produce last-good pixels; rereading an earlier
+output does not establish this behavior.
+
+Hold the original startup input without native execution until the first Shader successor is
+published and rendered live. First-submit it through another producer in the same Host, verify
+its original pixels, then release it before preparing another Source generation. Repeat with
+one unsubmitted palette input across the next Image publication. Original immutable captures
+retain their original Source content budget; preserving the two-generation bound requires this
+explicit release before a third generation, rather than increasing the limit or detaching its
+accounting. This also respects each producer's original monotonic frame authority. Retain
+published outputs across all later publication and Runtime Stop, verify their
+pixels again, retire original producer prefixes, release CPU captures and outputs, then require
+final Host retirement with zero retained native bytes and cleanup faults. Drive original watcher
+join and World cleanup even on a failed assertion. Qualify the exact ignored trajectory separately
+on local Vulkan and DX12, with a missing adapter or timeout reported as a failure. No OS-window
+scanout, device reconstruction, foreign native execution or numeric performance budget follows
+from this offscreen workflow. Full R9b/R12 and foundation completion remain open.
+
+### Live Source-To-GPU Qualification
+
+The independently locked ordinary Material package passes 14/14 in
+`69ae5455-06f0-4391-805e-7fbb0b2d1115` (2.265 seconds after a 13m05s release build).
+This includes the ten original Material/source/processed controls, the actual native watcher
+workflow and three independent oracle controls. The oracle fixes a three-byte channel tolerance
+before native execution, distinguishes every selected gain, stale palette and incorrect linear
+sampling, and keeps source alpha linear with one association over transparent black.
+
+The first native attempt, `5565b649-f67d-49ca-94c9-9e503ea0068c`, faults in the first Runtime
+frame before pixel comparison: the CPU fixture's Sprite has no spatial Transform. The game-owned
+View setup now inserts a missing `Transform2d` before extraction, without replacing an existing
+Transform. The next attempt, `856ab678-73bb-492c-9664-8535d8255d8f`, reaches native submission but
+finds a fixture assertion confusing Host maintenance sequence with the original capture sequence.
+The image receipt and typed final output retain the original packet frame index; Host maintenance
+keeps its independent increasing clock. Neither failed run qualifies the full trajectory.
+
+The following Vulkan run, `339d8448-e440-4480-9d55-8fac1d6ea564`, reads correct initial and
+successor Shader pixels, then the original Source owner refuses a third retained content revision.
+Holding the startup CPU capture indefinitely is incompatible with the established two-generation
+budget. A bounded ownership study confirms that native material pipelines retain compiled native
+state and digest keys, Image caches retain native textures and resource identities, and published
+outputs retain native allocation budgets. These do not retain the original Source generation.
+CPU Material/Shader/input snapshots and unfinished submission custody do. The corrected trajectory
+replays and releases each old CPU input across one publication boundary, with actual copy-prefix
+completion before preparing another generation. It retains 14 representative published outputs
+throughout, covering the distinct commit/refusal states and the two late submissions;
+no limit increase, detached accounting or cache-policy replacement is introduced.
+
+The complete trajectory then passes Vulkan 1/1 in
+`3f66fcc3-00c3-483a-846e-17758f7c1403` (1.382 seconds after a 20.92-second fixture build), and
+DX12 1/1 in `ebade381-d85b-4155-9364-0c35535c5c6b` (1.682 seconds after a 3.46-second build).
+Both use Windows 11, Rust 1.95.0 and an actual adapter with fallback disabled. They perform eight
+explicit Scene commits, three content refusals and two late first submissions of original CPU
+captures on another producer in the same Host. The original startup frame still reads
+`[2,48,182,255]` after the 0.75 Shader successor reads `[2,36,137,255]`. The old palette capture
+still reads `[0,6,23,255]` after the edited PNG reads `[0,1,8,255]`. Invalid/missing/unknown
+source receives new captured and submitted frames with last-good pixels. Transparent corners
+remain exact zero; typed output source generation, producer and frame identity remain exact.
+
+Vulkan performs 120 image submissions and DX12 117; these are fixture observations, not fixed
+native-event or performance requirements. Each retains 14 exact published outputs, rereads them
+after Runtime Stop and producer retirement, and joins all 11 original native watcher workers.
+Both finish with zero active/retiring workers, zero retained logical native/candidate bytes and
+zero GPU cleanup faults. Pixel comparison covers the center and four corners, not a complete
+image-equality oracle. This proves retained GPU outputs after Stop, not first submission of a
+CPU input after Stop. Gameplay score/inventory and unchanged authored Scene bytes remain
+checked. The external Host stays outside the World throughout actual execution.
+
+Independent review corrects one P2 in failure cleanup: a physically terminal Runtime `Failed`
+observation cannot skip producer-prefix retirement or final Host drain. Each stage is protected
+separately, remaining cleanup always runs, and the original trajectory panic is preserved with
+specific secondary diagnostics. Bounded rereview closes that finding. The CI adds the actual
+ignored workflow to its existing Windows DX12 consumer lane and compiles/runs the ordinary
+oracle controls in the module lane; local execution does not attest remote CI.
+
+The final bounded independent review finds no remaining P1/P2 in the two replay windows,
+original capture/Source budget custody, post-Stop output reads, failure cleanup or requested
+desktop composition. All seven scoped research/implementation/review agents are closed.
+
+The final ordinary independent package repeats 14/14 in
+`8d499386-3dc1-40ea-a4e1-6f0c545321e2` (2.750 seconds after a 2.17-second build), with the
+actual GPU case separately qualified above. The complete affected root plugin/configuration
+composition targets pass 73/73 in `cc472f8c-93bb-4c07-9e9b-05c6d80178ca` (3.388 seconds
+after a 4m04s release build). They retain the positive requested Desktop/WGPU composition,
+unrequested native-consumer absence, shared policy/contribution deduplication, executable
+identity and direct/file-backed parity. Root owning-target and independent all-target
+correctness Clippy pass in 17.74 and 13.93 seconds respectively, with existing warnings.
+Root and independent `cargo fmt --all -- --check`, affected TOML/lock/workflow parsing,
+added local document links/fragments and normal whitespace checks pass. No dependency version
+or source changes; the independent lock adds only the explicit existing WGPU edge. Verification
+uses serial Cargo, one build job and the original target directory without cleaning.
+
+Windows `Any` notifications still recover through full rescan. This unit selects no native
+filtering optimization, numerical latency/memory budget, OS-window/scanout proof, device
+reconstruction, Linux/macOS execution or full R9b/R12/Foundation completion. Editor/component
+and Dialogue work remain paused. No remote publication or branch/main movement is performed.
+
 The first implementation replaces static definition/instance APIs with `Material2dBinding`,
 exact immutable generations and two-layout parameter/Shader admission. The library's current
 and failed values delegate to original `Assets<Material2dGeneration>`/`AssetStates` and captured

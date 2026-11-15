@@ -2260,6 +2260,24 @@ and document gates pass. Windows undifferentiated native events currently requir
 native filtering costs, notification-to-GPU presentation, optional-fallback interest and full
 R9b/R12/Foundation completion remain open. Editor/component work remains paused.
 
+The [live Source-to-GPU successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#live-native-source-updates-through-external-gpu-execution)
+at `0602b5d` adds an ordinary caller-driven `HeadlessSession` consumer of the original sealed
+stock batch. Its external WGPU Host executes and reads pixels between live Runtime frames. File-backed
+defaults reserve native-window Publish consumption for projects requesting desktop capability;
+compiled desktop support cannot steal an external consumer's batch. The complete independent
+Material package passes 14/14. Actual Vulkan and DX12 each pass 1/1 in
+`3f66fcc3-00c3-483a-846e-17758f7c1403` and `ebade381-d85b-4155-9364-0c35535c5c6b`, covering
+eight explicit commits, three refusals with new last-good frames and two first submissions of
+retained CPU inputs after Shader/Image successors. Old CPU inputs release their original Source
+budget before a third revision; native pipeline/Image caches and 14 published outputs retain
+their separate native custody. Outputs survive Stop and producer retirement, all 11 watcher
+workers join, and final GPU retained bytes/candidate bytes/cleanup faults are zero. These are
+Windows/Rust 1.95.0 live offscreen results, not OS-window scanout, foreign-native execution or
+numeric production budgets. Full R9b/R12/Foundation and paused Editor work remain open.
+Affected root composition/configuration passes 73/73, with final independent controls 14/14;
+owning/independent correctness Clippy, format and document checks pass. The linked unit owns
+the failed attempts, corrections and exact final scope.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
