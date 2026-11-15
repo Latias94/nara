@@ -5,12 +5,12 @@ use std::{num::NonZeroU64, sync::Arc};
 use nara_ecs::Resource;
 use nara_render::{FrameStats, RenderFramePacket, ViewportRect};
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
-    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
-    WgpuFeatureInstance, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
-    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram,
-    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuDeviceRequirements, WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition,
+    WgpuFeatureEncodeContext, WgpuFeatureInstance, WgpuFeaturePreflightContext,
+    WgpuFeaturePrepareContext, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
+    WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTexture, WgpuProgramTextureDescriptor,
+    WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
 pub const GRID_SIDE: u32 = 4;
@@ -139,12 +139,14 @@ impl WgpuRenderPolicy for HeatmapPolicy {
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if format.has_srgb_suffix() {
-                TextureTransfer::Srgb
-            } else {
-                TextureTransfer::Linear
+            interpretation: TextureInterpretation::Color {
+                transfer: if format.has_srgb_suffix() {
+                    TextureTransfer::Srgb
+                } else {
+                    TextureTransfer::Linear
+                },
+                alpha: TextureAlpha::Premultiplied,
             },
-            alpha: TextureAlpha::Premultiplied,
         })?;
         builder.operation(
             17,

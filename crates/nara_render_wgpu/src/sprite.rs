@@ -429,8 +429,9 @@ fn sprite_quad_instance(instance: &SpriteInstance) -> WgpuQuadInstance {
 mod tests {
     use super::*;
     use crate::{
-        AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
-        WgpuProgramTextureDescriptor, WgpuRenderHost, WgpuRenderProgramBuilder,
+        AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+        WgpuFeatureDefinition, WgpuProgramTextureDescriptor, WgpuRenderHost,
+        WgpuRenderProgramBuilder,
     };
     use nara_core::{Color, Vec2};
     use nara_material::{AlphaMode2d, SamplerDescriptor};
@@ -468,8 +469,10 @@ mod tests {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 },
-                transfer: TextureTransfer::Linear,
-                alpha: TextureAlpha::Premultiplied,
+                interpretation: TextureInterpretation::Color {
+                    transfer: TextureTransfer::Linear,
+                    alpha: TextureAlpha::Premultiplied,
+                },
             })
             .unwrap();
         let viewport = ViewportRect::new(4, 8, 32, 16).unwrap();
@@ -562,8 +565,10 @@ mod tests {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 },
-                transfer: TextureTransfer::Linear,
-                alpha: TextureAlpha::Premultiplied,
+                interpretation: TextureInterpretation::Color {
+                    transfer: TextureTransfer::Linear,
+                    alpha: TextureAlpha::Premultiplied,
+                },
             })
             .unwrap();
         let lower = |views: &[ExtractedView], time: Option<CapturedRenderTime>| {

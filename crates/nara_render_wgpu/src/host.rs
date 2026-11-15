@@ -1928,8 +1928,11 @@ impl WgpuRenderHost {
                 || native.size.width != surface.acquired.extent.width
                 || native.size.height != surface.acquired.extent.height
                 || !native.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
-                || (meaning.transfer == crate::TextureTransfer::Srgb)
-                    != native.format.has_srgb_suffix()
+                || !matches!(
+                    meaning.interpretation,
+                    crate::TextureInterpretation::Color { transfer, .. }
+                        if (transfer == crate::TextureTransfer::Srgb) == native.format.has_srgb_suffix()
+                )
             {
                 return Err(crate::WgpuRenderProgramError::feature(
                     "the final program image does not match its acquired surface",
@@ -2903,10 +2906,12 @@ impl WgpuRenderHost {
             || native.size.width != extent.width
             || native.size.height != extent.height
             || !native.usage.contains(usage)
-            || (meaning.transfer == crate::TextureTransfer::Srgb) != format.has_srgb_suffix()
             || !matches!(
-                meaning.alpha,
-                crate::TextureAlpha::Premultiplied | crate::TextureAlpha::Opaque
+                meaning.interpretation,
+                crate::TextureInterpretation::Color {
+                    transfer,
+                    alpha: crate::TextureAlpha::Premultiplied | crate::TextureAlpha::Opaque,
+                } if (transfer == crate::TextureTransfer::Srgb) == format.has_srgb_suffix()
             )
         {
             return Err(crate::WgpuRenderProgramError::feature(
@@ -3148,6 +3153,23 @@ impl WgpuRenderHost {
         self.backend
             .wait_for_editor_idle(std::time::Duration::from_secs(5))?;
         Ok(())
+    }
+
+    /// Observes this producer's latest original Queue prefix, including failed native preparation.
+    ///
+    /// A prefix does not prove output publication. Retain this exact clone before another attempt
+    /// replaces the observation; it remains independently pollable through producer retirement.
+    /// Admission or preflight refusal may leave an older bound observation unchanged.
+    /// Foreign or retired producers, and producers without a bound attempt, return None.
+    #[must_use]
+    pub fn producer_submission_prefix(
+        &self,
+        producer: &WgpuRenderProducer,
+    ) -> Option<WgpuSubmissionPrefix> {
+        if producer.backend_instance_id != self.backend.instance_id() {
+            return None;
+        }
+        self.views.get(&producer.id)?.submitted_prefix.clone()
     }
 
     /// Releases a final view lifetime. The Host never reuses its identity after this call.

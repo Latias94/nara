@@ -10,7 +10,8 @@ use std::{
 use nara::{
     render::{Extent2d, RenderImage2d, RenderImagePacket},
     render_wgpu::{
-        TextureAlpha, TextureTransfer, WgpuImageOutput, WgpuRenderHost, WgpuSubmittedImageReceipt,
+        TextureAlpha, TextureInterpretation, TextureTransfer, WgpuImageOutput, WgpuRenderHost,
+        WgpuSubmittedImageReceipt,
     },
 };
 use two_level_game::resume::ResumeState;
@@ -119,8 +120,13 @@ fn readback(host: &mut WgpuRenderHost, output: &WgpuImageOutput) -> Result<Vec<u
     require(
         output.extent() == WINDOW_EXTENT
             && output.format() == wgpu::TextureFormat::Rgba8Unorm
-            && descriptor.transfer == TextureTransfer::Linear
-            && descriptor.alpha == TextureAlpha::Premultiplied,
+            && matches!(
+                descriptor.interpretation,
+                TextureInterpretation::Color {
+                    transfer: TextureTransfer::Linear,
+                    alpha: TextureAlpha::Premultiplied,
+                }
+            ),
         "game replay readback requires the original same-sized linear associated RGBA8 output",
     )?;
     let row_bytes = WINDOW_EXTENT.width * 4;

@@ -1,5 +1,7 @@
 use nara_render::RenderFrameSourceGeneration;
-use nara_render_wgpu::{GraphLimits, TextureAlpha, TextureTransfer, WgpuProgramTextureDescriptor};
+use nara_render_wgpu::{
+    GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer, WgpuProgramTextureDescriptor,
+};
 
 pub const WIDTH: u32 = 64;
 pub const HEIGHT: u32 = 64;
@@ -51,8 +53,10 @@ pub fn texture_descriptor() -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 

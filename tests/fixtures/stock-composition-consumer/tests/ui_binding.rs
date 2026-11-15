@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use nara::render::{Extent2d, RenderImage2d, RenderImagePacket, RenderTarget, ViewportRect};
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDeclaration,
-    WgpuFeatureDefinition, WgpuFeatureInstance, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
-    WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTextureDescriptor,
-    WgpuRenderHost, WgpuRenderHostError, WgpuRenderPolicy, WgpuRenderProgramBuilder,
-    WgpuRenderProgramError, WgpuUiCapture, WgpuUiFeature, WgpuUiProgramBinding,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance, WgpuPolicyBindingContext,
+    WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyProgram,
+    WgpuProgramTextureDescriptor, WgpuRenderHost, WgpuRenderHostError, WgpuRenderPolicy,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuUiCapture, WgpuUiFeature,
+    WgpuUiProgramBinding,
 };
 use nara_stock_composition_consumer::{oracle, readback};
 use nara_ui_render::UiPaintPacket;
@@ -87,12 +88,14 @@ impl WgpuRenderPolicy for UiPolicy {
                     | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
-            transfer: if context.format().has_srgb_suffix() {
-                TextureTransfer::Srgb
-            } else {
-                TextureTransfer::Linear
+            interpretation: TextureInterpretation::Color {
+                transfer: if context.format().has_srgb_suffix() {
+                    TextureTransfer::Srgb
+                } else {
+                    TextureTransfer::Linear
+                },
+                alpha: TextureAlpha::Premultiplied,
             },
-            alpha: TextureAlpha::Premultiplied,
         };
         let ui_target = builder.texture::<FinalUi>(descriptor.clone())?;
         let viewport = ViewportRect::from_extent(extent).unwrap();

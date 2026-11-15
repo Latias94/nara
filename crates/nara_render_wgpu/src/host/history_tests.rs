@@ -2,12 +2,12 @@
 
 use super::*;
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuEmptyHistoryReason,
-    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
-    WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture, WgpuPolicyBindingContext,
-    WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyProgram,
-    WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder,
-    WgpuRenderProgramError,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuEmptyHistoryReason, WgpuFeatureDeclaration, WgpuFeatureDefinition,
+    WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts,
+    WgpuPolicyProgram, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 use nara_core::Mat3;
 use nara_ecs::Entity;
@@ -124,8 +124,10 @@ impl WgpuRenderPolicy for TemporalPolicy {
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: TextureTransfer::Linear,
-            alpha: TextureAlpha::Premultiplied,
+            interpretation: TextureInterpretation::Color {
+                transfer: TextureTransfer::Linear,
+                alpha: TextureAlpha::Premultiplied,
+            },
         })?;
         builder.initialize(
             9,
@@ -159,8 +161,10 @@ fn history_descriptor() -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 

@@ -201,8 +201,13 @@ fn shape<S: 'static>(port: &WgpuProgramTexture<S>, width: u32, height: u32) -> b
     let desc = port.descriptor();
     desc.native.size == descriptor(width, height).native.size
         && desc.native.format == wgpu::TextureFormat::Rgba32Float
-        && desc.transfer == nara_render_wgpu::TextureTransfer::Linear
-        && desc.alpha == nara_render_wgpu::TextureAlpha::Premultiplied
+        && matches!(
+            desc.interpretation,
+            nara_render_wgpu::TextureInterpretation::Color {
+                transfer: nara_render_wgpu::TextureTransfer::Linear,
+                alpha: nara_render_wgpu::TextureAlpha::Premultiplied,
+            }
+        )
 }
 
 pub struct Pattern(pub Arc<AtomicUsize>);

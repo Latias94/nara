@@ -9,13 +9,14 @@ use nara_app::{App, CoreStage};
 use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
 use nara_render::{RenderFramePacket, RenderTarget, ViewportRect};
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuCapturePlugin,
-    WgpuDeviceRequirements, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance,
-    WgpuFrameCaptureError, WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyCaptureSet,
-    WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyFrameWriter, WgpuPolicyInstallation,
-    WgpuPolicyProgram, WgpuPolicyUiCaptureFailure, WgpuProgramTextureDescriptor, WgpuRenderPolicy,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuUiCapture, WgpuUiFeature,
-    WgpuUiProgramBinding, WgpuUiSubmission, install_wgpu_policy,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuCapturePlugin, WgpuDeviceRequirements, WgpuFeatureDeclaration, WgpuFeatureDefinition,
+    WgpuFeatureInstance, WgpuFrameCaptureError, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
+    WgpuPolicyCaptureSet, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyFrameWriter,
+    WgpuPolicyInstallation, WgpuPolicyProgram, WgpuPolicyUiCaptureFailure,
+    WgpuProgramTextureDescriptor, WgpuRenderPolicy, WgpuRenderProgramBuilder,
+    WgpuRenderProgramError, WgpuUiCapture, WgpuUiFeature, WgpuUiProgramBinding, WgpuUiSubmission,
+    install_wgpu_policy,
 };
 use nara_ui_render::{
     UiPaintPacket, UiPresentationAttemptId, UiPresentationCapabilityGeneration,
@@ -97,12 +98,14 @@ impl WgpuRenderPolicy for CustomUiPolicy {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if context.format().has_srgb_suffix() {
-                TextureTransfer::Srgb
-            } else {
-                TextureTransfer::Linear
+            interpretation: TextureInterpretation::Color {
+                transfer: if context.format().has_srgb_suffix() {
+                    TextureTransfer::Srgb
+                } else {
+                    TextureTransfer::Linear
+                },
+                alpha: TextureAlpha::Premultiplied,
             },
-            alpha: TextureAlpha::Premultiplied,
         })?;
         let ui = Arc::new(WgpuUiCapture::new(
             &capture.packets,

@@ -8,8 +8,8 @@ mod policy;
 
 use nara::render::RenderFrameSourceGeneration;
 use nara_render_wgpu::{
-    GraphLimits, TextureAlpha, TextureTransfer, WgpuProgramTextureDescriptor,
-    WgpuRenderProgramBuilder,
+    GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
 };
 use nara_stock_grade_effect::GradeParameters;
 
@@ -59,12 +59,14 @@ pub fn descriptor(format: wgpu::TextureFormat) -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: if format.has_srgb_suffix() {
-            TextureTransfer::Srgb
-        } else {
-            TextureTransfer::Linear
+        interpretation: TextureInterpretation::Color {
+            transfer: if format.has_srgb_suffix() {
+                TextureTransfer::Srgb
+            } else {
+                TextureTransfer::Linear
+            },
+            alpha: TextureAlpha::Premultiplied,
         },
-        alpha: TextureAlpha::Premultiplied,
     }
 }
 

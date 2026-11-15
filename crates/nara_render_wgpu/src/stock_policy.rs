@@ -16,11 +16,11 @@ use nara_ui_render::UiPaintPacket;
 use nara_window::WindowId;
 
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
-    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance, WgpuPolicyBindingContext,
-    WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramOutput,
-    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderPolicy, WgpuRenderProgramBuilder,
-    WgpuRenderProgramError,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuDeviceRequirements, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram,
+    WgpuProgramOutput, WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderPolicy,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
 pub(crate) fn premultiplied_clear_color(color: nara_render::Color) -> wgpu::Color {
@@ -325,12 +325,14 @@ impl WgpuStockProgramBuilder<'_> {
                     | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
-            transfer: if format.has_srgb_suffix() {
-                TextureTransfer::Srgb
-            } else {
-                TextureTransfer::Linear
+            interpretation: TextureInterpretation::Color {
+                transfer: if format.has_srgb_suffix() {
+                    TextureTransfer::Srgb
+                } else {
+                    TextureTransfer::Linear
+                },
+                alpha: TextureAlpha::Premultiplied,
             },
-            alpha: TextureAlpha::Premultiplied,
         }
     }
 
@@ -387,7 +389,10 @@ impl WgpuStockProgramBuilder<'_> {
             world_descriptor.native.size.width = canvas.extent().width;
             world_descriptor.native.size.height = canvas.extent().height;
             world_descriptor.native.format = crate::canvas::WORLD_CANVAS_FORMAT;
-            world_descriptor.transfer = TextureTransfer::Srgb;
+            world_descriptor.interpretation = TextureInterpretation::Color {
+                transfer: TextureTransfer::Srgb,
+                alpha: TextureAlpha::Premultiplied,
+            };
         }
         let scene = self.graph.texture::<WgpuWorldColor>(world_descriptor)?;
         let Some(ViewLoadOp::Clear(clear)) = packet.views().first().map(|view| view.load) else {

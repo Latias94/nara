@@ -10,9 +10,10 @@ use nara_render::{
 };
 
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirementsError,
-    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeaturePreflightContext,
-    WgpuFeaturePrepareContext, WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuDeviceRequirementsError, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeaturePreflightContext, WgpuFeaturePrepareContext, WgpuProgramTextureDescriptor,
+    WgpuRenderProgramBuilder,
 };
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -510,8 +511,10 @@ fn clear_program_with_limits(
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     })?;
     let writes = [output.clear(color, AccessRole::Attachment)];
     if let Some(feature) = feature {

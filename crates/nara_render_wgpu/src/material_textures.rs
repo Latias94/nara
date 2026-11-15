@@ -8,7 +8,8 @@ use std::hash::{Hash, Hasher};
 #[cfg(feature = "stock-sprite")]
 use crate::{AccessRole, WgpuProgramTexture};
 use crate::{
-    TextureTransfer, WgpuProgramRead, WgpuProgramTextureDescriptor, WgpuRenderProgramError,
+    TextureInterpretation, TextureTransfer, WgpuProgramRead, WgpuProgramTextureDescriptor,
+    WgpuRenderProgramError,
 };
 
 /// A typed resource read retained without changing its original semantic identity.
@@ -70,9 +71,12 @@ fn validate_source(
     } else {
         TextureTransfer::Linear
     };
-    if descriptor.transfer != transfer {
+    if !matches!(
+        descriptor.interpretation,
+        TextureInterpretation::Color { transfer: actual, .. } if actual == transfer
+    ) {
         return Err(WgpuRenderProgramError::feature(
-            "material program texture transfer must match its native sampling format",
+            "material program textures require color interpretation matching their native sampling format",
         ));
     }
     Ok(())
@@ -161,5 +165,39 @@ impl WgpuMaterialTextureBinding {
 
     pub(crate) fn source(&self) -> WgpuMaterialTextureSource {
         self.source.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampled_depth_cannot_be_used_as_an_ordinary_material_image() {
+        let mut descriptor = WgpuProgramTextureDescriptor {
+            native: wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: 4,
+                    height: 4,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            interpretation: TextureInterpretation::Depth,
+        };
+        assert!(validate_source(&descriptor).is_err());
+        descriptor.native.format = wgpu::TextureFormat::Rgba8Unorm;
+        assert!(validate_source(&descriptor).is_err());
+        descriptor.interpretation = TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: crate::TextureAlpha::Straight,
+        };
+        assert!(validate_source(&descriptor).is_ok());
     }
 }

@@ -9,10 +9,10 @@ use std::{
 
 use nara::material::{Material2dBinding, MaterialParameterValue, SamplerDescriptor};
 use nara_render_wgpu::{
-    GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer, WgpuMaterialTextureBinding,
-    WgpuNativeWorkStats, WgpuProgramTextureOutput, WgpuPublishedFrame, WgpuRenderHost,
-    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProgramBuilder, WgpuRenderProgramError,
-    WgpuStockCapture, WgpuWorldColor,
+    GraphError, GraphLimits, LimitKind, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuMaterialTextureBinding, WgpuNativeWorkStats, WgpuProgramTextureOutput, WgpuPublishedFrame,
+    WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProgramBuilder,
+    WgpuRenderProgramError, WgpuStockCapture, WgpuWorldColor,
 };
 use nara_stock_composition_consumer::{CompositionPolicy, readback};
 
@@ -83,7 +83,14 @@ fn graph_material_bindings_preserve_the_original_descriptor_and_semantic_texture
             wgpu::TextureFormat::Rgba8UnormSrgb,
         ] {
             let mut descriptor = descriptor(format);
-            descriptor.alpha = alpha;
+            let TextureInterpretation::Color {
+                alpha: descriptor_alpha,
+                ..
+            } = &mut descriptor.interpretation
+            else {
+                panic!("expected a color texture");
+            };
+            *descriptor_alpha = alpha;
             let source = graph.texture::<Palette>(descriptor.clone()).unwrap();
             let binding = WgpuMaterialTextureBinding::new(&fixture.material, PALETTE_ID, &source)
                 .expect("whole baseline float sources retain their explicit interpretation");
@@ -129,7 +136,14 @@ fn graph_material_bindings_refuse_integer_unfilterable_unsampled_and_mislabelled
         (wgpu::TextureFormat::Rgba8UnormSrgb, TextureTransfer::Linear),
     ] {
         let mut mislabelled = descriptor(format);
-        mislabelled.transfer = transfer;
+        let TextureInterpretation::Color {
+            transfer: descriptor_transfer,
+            ..
+        } = &mut mislabelled.interpretation
+        else {
+            panic!("expected a color texture");
+        };
+        *descriptor_transfer = transfer;
         let source = graph.texture::<Palette>(mislabelled).unwrap();
         assert!(matches!(
             WgpuMaterialTextureBinding::new(&fixture.material, PALETTE_ID, &source),
@@ -406,8 +420,21 @@ impl Retained {
         assert_eq!(branch.frame_index(), world.frame_index());
         assert_eq!(palette.descriptor().native.size.width, 2);
         assert_eq!(palette.descriptor().native.size.height, 2);
-        assert_eq!(palette.descriptor().alpha, TextureAlpha::Premultiplied);
-        assert_eq!(world.descriptor().alpha, TextureAlpha::Premultiplied);
+        let TextureInterpretation::Color {
+            alpha: palette_alpha,
+            ..
+        } = palette.descriptor().interpretation
+        else {
+            panic!("expected a color texture");
+        };
+        let TextureInterpretation::Color {
+            alpha: world_alpha, ..
+        } = world.descriptor().interpretation
+        else {
+            panic!("expected a color texture");
+        };
+        assert_eq!(palette_alpha, TextureAlpha::Premultiplied);
+        assert_eq!(world_alpha, TextureAlpha::Premultiplied);
         Self {
             palette,
             branch,

@@ -848,6 +848,21 @@ fn initialize(
                     ..Default::default()
                 });
             }
+            (Initialization::ClearDepth(depth), NativeResource::Texture { view, .. }) => {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("nara_render_program_initialize_depth"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(*depth),
+                            store: write.store_op(),
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+            }
             (Initialization::Zero, NativeResource::Buffer(buffer)) => {
                 encoder.clear_buffer(buffer, 0, Some(buffer.size()));
             }

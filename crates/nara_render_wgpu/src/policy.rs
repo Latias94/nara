@@ -528,7 +528,11 @@ impl WgpuPolicyProgram {
         facts: WgpuPolicyFrameFacts,
     ) -> Result<Self, WgpuRenderProgramError> {
         let resource = program.0.graph.resource(&final_texture.version)?;
-        if !matches!(&resource.desc, ResourceDescriptor::Texture { .. }) {
+        if !matches!(
+            &resource.desc,
+            ResourceDescriptor::Texture { meaning, .. }
+                if matches!(meaning.interpretation, crate::TextureInterpretation::Color { .. })
+        ) {
             return Err(WgpuRenderProgramError::ResourceKind);
         }
         if !program.0.graph.outputs().contains(&final_texture.version) {

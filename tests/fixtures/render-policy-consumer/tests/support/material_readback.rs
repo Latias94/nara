@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use nara_render_wgpu::{TextureTransfer, WgpuImageOutput, WgpuRenderHost};
+use nara_render_wgpu::{TextureInterpretation, TextureTransfer, WgpuImageOutput, WgpuRenderHost};
 
 use crate::support::image::{NATIVE_TIMEOUT, settle};
 
@@ -16,7 +16,10 @@ pub fn read(host: &mut WgpuRenderHost, image: &WgpuImageOutput) -> Vec<[u8; 4]> 
     let size = u64::from(row_stride) * u64::from(extent.height);
     assert!(size > 0 && size <= 4 * 1024 * 1024);
     assert_eq!(image.format(), wgpu::TextureFormat::Rgba8Unorm);
-    assert_eq!(image.descriptor().transfer, TextureTransfer::Linear);
+    let TextureInterpretation::Color { transfer, .. } = image.descriptor().interpretation else {
+        panic!("expected a color texture");
+    };
+    assert_eq!(transfer, TextureTransfer::Linear);
     assert!(
         image
             .descriptor()

@@ -75,7 +75,8 @@ pub use crate::frame::{
     take_captured_policy_batch,
 };
 pub use crate::graph::{
-    AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
+    AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureInterpretation,
+    TextureTransfer,
 };
 pub use crate::history::{
     WgpuEmptyHistoryReason, WgpuHistoryBinding, WgpuHistoryBuffer, WgpuHistoryLineage,

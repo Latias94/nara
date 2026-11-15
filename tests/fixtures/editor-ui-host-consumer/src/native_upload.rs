@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use nara_render::Extent2d;
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureAllocation,
-    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
-    WgpuFeaturePrepareContext, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
-    WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTexture, WgpuProgramTextureDescriptor,
-    WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeatureInstance, WgpuFeaturePrepareContext, WgpuPolicyBindingContext,
+    WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTexture,
+    WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder,
+    WgpuRenderProgramError,
 };
 
 pub struct CpuImage {
@@ -83,8 +84,10 @@ impl WgpuRenderPolicy for CpuImagePolicy {
                     | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             },
-            transfer: TextureTransfer::Linear,
-            alpha: TextureAlpha::Premultiplied,
+            interpretation: TextureInterpretation::Color {
+                transfer: TextureTransfer::Linear,
+                alpha: TextureAlpha::Premultiplied,
+            },
         })?;
         builder.operation(
             1,

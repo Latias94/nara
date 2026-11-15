@@ -2,7 +2,7 @@ use super::*;
 
 use crate::graph::{
     AccessRole, BufferMeaning, GraphBuilder, GraphLimits, ResourceWrite, TextureAlpha,
-    TextureMeaning, TextureTransfer,
+    TextureInterpretation, TextureMeaning, TextureTransfer,
 };
 
 struct Values;
@@ -40,8 +40,25 @@ fn texture_resource(width: u32, height: u32) -> ResourceDescriptor {
             view_formats: &[],
         },
         range: wgpu::ImageSubresourceRange::default(),
-        meaning: TextureMeaning::of::<Values>(TextureTransfer::Linear, TextureAlpha::Opaque),
+        meaning: TextureMeaning::of::<Values>(TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Opaque,
+        }),
     }
+}
+
+fn depth_resource(width: u32, height: u32) -> ResourceDescriptor {
+    let mut descriptor = texture_resource(width, height);
+    let ResourceDescriptor::Texture {
+        native, meaning, ..
+    } = &mut descriptor
+    else {
+        unreachable!()
+    };
+    native.format = wgpu::TextureFormat::Depth32Float;
+    native.usage |= wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
+    meaning.interpretation = TextureInterpretation::Depth;
+    descriptor
 }
 
 #[test]
@@ -87,6 +104,107 @@ fn foreign_and_undeclared_ports_reject_before_physical_index_lookup() {
 }
 
 #[test]
+fn foreign_and_undeclared_depth_ports_reject_before_physical_index_lookup() {
+    let descriptor = depth_resource(64, 64);
+    let ResourceDescriptor::Texture {
+        native, meaning, ..
+    } = &descriptor
+    else {
+        unreachable!()
+    };
+    let port_descriptor = super::super::WgpuProgramTextureDescriptor {
+        native: native.clone(),
+        interpretation: meaning.interpretation,
+    };
+    let mut builder = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let first = builder.reserve_resource(descriptor.clone()).unwrap();
+    let second = builder.reserve_resource(descriptor.clone()).unwrap();
+    let first = WgpuProgramTexture::<Values>::new(first, port_descriptor.clone());
+    let second = WgpuProgramTexture::<Values>::new(second, port_descriptor.clone());
+    builder
+        .add_operation(1, &[], &[first.clear_depth(1.0, AccessRole::Attachment).0])
+        .unwrap();
+    builder
+        .add_operation(2, &[], &[second.clear_depth(0.0, AccessRole::Attachment).0])
+        .unwrap();
+    builder.set_output_group(&[second.version.clone()]).unwrap();
+    let graph = builder.compile().unwrap();
+    let resources = WgpuOperationResources {
+        graph: &graph,
+        operation: graph.operations().next().unwrap(),
+        physical: &[],
+    };
+    let mut other = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let foreign = other.reserve_resource(descriptor).unwrap();
+    let foreign = WgpuProgramTexture::<Values>::new(foreign, port_descriptor);
+    assert_eq!(first.version.index(), foreign.version.index());
+    for native in [false, true] {
+        let access = |port| {
+            if native {
+                resources.texture_native(port).map(|_| ())
+            } else {
+                resources.texture(port).map(|_| ())
+            }
+        };
+        assert!(matches!(
+            access(&foreign),
+            Err(WgpuRenderProgramError::Graph(GraphError::ForeignCandidate))
+        ));
+        assert!(matches!(
+            access(&second),
+            Err(WgpuRenderProgramError::UndeclaredResource)
+        ));
+        assert!(matches!(
+            access(&first),
+            Err(WgpuRenderProgramError::Graph(GraphError::UnknownResource(
+                0
+            )))
+        ));
+    }
+}
+
+#[test]
+fn depth_preservation_reserves_exactly_16384_local_bytes_and_rolls_back_one_short() {
+    let descriptor = depth_resource(64, 64);
+    assert_eq!(resource_bytes(&descriptor).unwrap(), 16_384);
+    let mut builder = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let predecessor = builder.import_resource(descriptor.clone()).unwrap();
+    let successor = builder.reserve_resource(descriptor).unwrap();
+    builder
+        .add_operation(
+            1,
+            &[],
+            &[ResourceWrite {
+                version: successor.clone(),
+                role: AccessRole::Attachment,
+                initialization: Initialization::Preserve(predecessor.clone()),
+            }],
+        )
+        .unwrap();
+    builder.set_output_group(&[predecessor, successor]).unwrap();
+    let graph = builder.compile().unwrap();
+    assert_eq!(graph.modeled_resource_bytes(), 2 * 16_384);
+    let short = Arc::new(OutputBudget::new(16_383));
+    assert!(matches!(
+        reserve_local_allocations(&graph, &short, None),
+        Err(WgpuRenderProgramError::ResourceCapacity)
+    ));
+    assert_eq!(short.retained(), 0);
+    let exact = Arc::new(OutputBudget::new(16_384));
+    let mut allocations = reserve_local_allocations(&graph, &exact, None).unwrap();
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(exact.retained(), 16_384);
+    assert!(exact.reserve(1).is_none());
+    let output = Arc::new(allocations.pop().unwrap());
+    let submitted = Arc::clone(&output);
+    drop(allocations);
+    drop(output);
+    assert_eq!(exact.retained(), 16_384);
+    drop(submitted);
+    assert_eq!(exact.retained(), 0);
+}
+
+#[test]
 fn texture_accounting_uses_the_exact_native_format_and_checked_products() {
     let mut descriptor = texture_resource(1920, 1080);
     assert_eq!(resource_bytes(&descriptor).unwrap(), 1920 * 1080);
@@ -94,14 +212,18 @@ fn texture_accounting_uses_the_exact_native_format_and_checked_products() {
         native.format = wgpu::TextureFormat::Rgba16Float;
     }
     assert_eq!(resource_bytes(&descriptor).unwrap(), 1920 * 1080 * 8);
-    if let ResourceDescriptor::Texture { native, .. } = &mut descriptor {
-        native.size.width = u32::MAX;
-        native.size.height = u32::MAX;
+    let depth = depth_resource(1920, 1080);
+    assert_eq!(resource_bytes(&depth).unwrap(), 1920 * 1080 * 4);
+    for mut descriptor in [descriptor, depth] {
+        if let ResourceDescriptor::Texture { native, .. } = &mut descriptor {
+            native.size.width = u32::MAX;
+            native.size.height = u32::MAX;
+        }
+        assert!(matches!(
+            resource_bytes(&descriptor),
+            Err(WgpuRenderProgramError::ResourceCapacity)
+        ));
     }
-    assert!(matches!(
-        resource_bytes(&descriptor),
-        Err(WgpuRenderProgramError::ResourceCapacity)
-    ));
     assert_eq!(resource_bytes(&buffer_resource(4096)).unwrap(), 4096);
 }
 
@@ -335,8 +457,10 @@ fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
     let port = builder
         .texture::<Values>(super::super::WgpuProgramTextureDescriptor {
             native: native.clone(),
-            transfer: TextureTransfer::Linear,
-            alpha: TextureAlpha::Opaque,
+            interpretation: TextureInterpretation::Color {
+                transfer: TextureTransfer::Linear,
+                alpha: TextureAlpha::Opaque,
+            },
         })
         .unwrap();
     builder

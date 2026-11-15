@@ -8,8 +8,9 @@ use super::{
     CANVAS_MAPPING_BYTES, CanvasCompositeMapping, CanvasCompositePipeline, WORLD_CANVAS_FORMAT,
 };
 use crate::{
-    TextureTransfer, WgpuFeatureAllocation, WgpuFeatureEncodeContext, WgpuFeaturePreflightContext,
-    WgpuFeaturePrepareContext, WgpuProgramTexture, WgpuRenderFeature, WgpuRenderProgramError,
+    TextureInterpretation, TextureTransfer, WgpuFeatureAllocation, WgpuFeatureEncodeContext,
+    WgpuFeaturePreflightContext, WgpuFeaturePrepareContext, WgpuProgramTexture, WgpuRenderFeature,
+    WgpuRenderProgramError,
 };
 
 pub(crate) struct CanvasCompositeFeature<Source: 'static, Dest: 'static>(
@@ -46,11 +47,26 @@ impl<Source: 'static, Dest: 'static> CanvasCompositeCapture<Source, Dest> {
     pub(crate) fn validate(&self) -> Result<(), WgpuRenderProgramError> {
         let source = self.source.descriptor();
         let destination = self.target.descriptor();
+        let (
+            TextureInterpretation::Color {
+                transfer: source_transfer,
+                alpha: source_alpha,
+            },
+            TextureInterpretation::Color {
+                transfer: destination_transfer,
+                alpha: destination_alpha,
+            },
+        ) = (source.interpretation, destination.interpretation)
+        else {
+            return Err(WgpuRenderProgramError::feature(
+                "world canvas composition requires color source and destination textures",
+            ));
+        };
         let extent = self.frame.extent();
         if source.native.size.width != extent.width
             || source.native.size.height != extent.height
             || source.native.format != WORLD_CANVAS_FORMAT
-            || source.transfer != TextureTransfer::Srgb
+            || source_transfer != TextureTransfer::Srgb
         {
             return Err(WgpuRenderProgramError::feature(
                 "world canvas source must match the captured raster extent and sRGB format",
@@ -86,7 +102,7 @@ impl<Source: 'static, Dest: 'static> CanvasCompositeCapture<Source, Dest> {
                 "world canvas destination must preserve the supported RGBA color and alpha channels",
             ));
         }
-        if destination.transfer != transfer || source.alpha != destination.alpha {
+        if destination_transfer != transfer || source_alpha != destination_alpha {
             return Err(WgpuRenderProgramError::feature(
                 "world canvas composite must preserve alpha and use the native color transfer",
             ));

@@ -121,7 +121,14 @@ fn native_declared_program_clears_remain_raw_with_a_premultiplied_descriptor() {
         let (program, target) = clear(source, frame, raw);
         let outputs = host.submit_program(&producer, &program).unwrap();
         let output = outputs.texture(&target).unwrap();
-        assert_eq!(output.descriptor().alpha, TextureAlpha::Premultiplied);
+        let TextureInterpretation::Color {
+            alpha: descriptor_alpha,
+            ..
+        } = output.descriptor().interpretation
+        else {
+            panic!("expected a color texture");
+        };
+        assert_eq!(descriptor_alpha, TextureAlpha::Premultiplied);
         let expected = [255, 128, 64, (alpha * 255.0).round() as u8];
         let actual = pixels(&mut host, &output);
         assert!(
@@ -312,8 +319,11 @@ fn submit_stock(
 
 fn assert_stock_descriptor(output: &WgpuImageOutput, canvas: bool) {
     let descriptor = output.descriptor();
-    assert_eq!(descriptor.alpha, TextureAlpha::Premultiplied);
-    assert_eq!(descriptor.transfer, TextureTransfer::Linear);
+    let TextureInterpretation::Color { transfer, alpha } = descriptor.interpretation else {
+        panic!("expected a color texture");
+    };
+    assert_eq!(alpha, TextureAlpha::Premultiplied);
+    assert_eq!(transfer, TextureTransfer::Linear);
     assert_eq!(descriptor.native.format, wgpu::TextureFormat::Rgba8Unorm);
     assert_eq!(descriptor.native.size.width, output.extent().width);
     assert_eq!(descriptor.native.size.height, output.extent().height);

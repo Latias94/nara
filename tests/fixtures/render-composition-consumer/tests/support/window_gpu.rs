@@ -16,8 +16,8 @@ use nara_render::{
     build_image_render_frame_packet,
 };
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDeclaration,
-    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
     WgpuFeaturePrepareContext, WgpuImageOutput, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
     WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTexture, WgpuProgramTextureDescriptor,
     WgpuProgramTextureOutput, WgpuRenderFeature, WgpuRenderHost, WgpuRenderPolicy,
@@ -182,8 +182,10 @@ fn descriptor(format: wgpu::TextureFormat) -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 

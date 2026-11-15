@@ -1,7 +1,11 @@
 use super::*;
-use crate::{AccessRole, TextureAlpha, TextureTransfer, WgpuRenderHost, WgpuRenderHostError};
+use crate::{
+    AccessRole, TextureAlpha, TextureTransfer, WgpuRenderHost, WgpuRenderHostError,
+    graph::TextureInterpretation,
+};
 
 struct SceneColor;
+struct SceneDepth;
 struct Composite;
 
 struct EmptyFeature;
@@ -57,9 +61,19 @@ fn descriptor() -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
+}
+
+fn depth_descriptor() -> WgpuProgramTextureDescriptor {
+    let mut descriptor = descriptor();
+    descriptor.native.label = Some("public-scene-depth");
+    descriptor.native.format = wgpu::TextureFormat::Depth32Float;
+    descriptor.interpretation = TextureInterpretation::Depth;
+    descriptor
 }
 
 fn builder() -> WgpuRenderProgramBuilder {
@@ -162,6 +176,182 @@ fn explicit_copy_changes_output_semantics_without_relabeling_its_predecessor() {
             std::any::TypeId::of::<Composite>()
         ]
     );
+}
+
+#[test]
+fn public_depth_ports_retain_exact_descriptors_and_preservation_dependencies() {
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let instance = host
+        .create_feature_instance(&producer, &WgpuFeatureDefinition::new(EmptyFeature))
+        .unwrap();
+    let mut builder = builder();
+    let original = builder.texture::<SceneDepth>(depth_descriptor()).unwrap();
+    let successor = builder.texture::<Composite>(depth_descriptor()).unwrap();
+    let color = builder.texture::<SceneColor>(descriptor()).unwrap();
+    assert_eq!(original.clone().descriptor(), &depth_descriptor());
+    assert_eq!(
+        original.read(AccessRole::Sampled).0.expected,
+        depth_descriptor().resource::<SceneDepth>()
+    );
+    builder
+        .operation(
+            1,
+            &instance,
+            Arc::new(()),
+            &[successor.read(AccessRole::Sampled)],
+            &[color.clear(wgpu::Color::BLACK, AccessRole::Attachment)],
+        )
+        .unwrap();
+    builder
+        .initialize(2, &[successor.preserve(&original, AccessRole::Attachment)])
+        .unwrap();
+    builder
+        .initialize(9, &[original.clear_depth(0.625, AccessRole::Attachment)])
+        .unwrap();
+    let program = builder
+        .finish(&[original.output(), successor.output(), color.output()])
+        .unwrap();
+    assert_eq!(
+        program
+            .0
+            .graph
+            .operations()
+            .map(|op| op.key)
+            .collect::<Vec<_>>(),
+        [9, 2, 1]
+    );
+    assert_eq!(
+        program.0.graph.resource(&original.version).unwrap().desc,
+        depth_descriptor().resource::<SceneDepth>()
+    );
+    assert_eq!(
+        program.0.graph.resource(&successor.version).unwrap().desc,
+        depth_descriptor().resource::<Composite>()
+    );
+    let copies = program.0.graph.copy_dependencies().collect::<Vec<_>>();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].source, original.version);
+    assert_eq!(copies[0].destination, successor.version);
+    assert_eq!(copies[0].before, 2);
+    assert_eq!(program.0.graph.modeled_resource_bytes(), 3 * 8 * 8 * 4);
+    assert_eq!(host.device_epoch(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
+}
+
+#[test]
+fn public_texture_admission_requires_matching_interpretation_before_issuing_a_port() {
+    let mut builder = builder();
+    let mut color_as_depth = descriptor();
+    color_as_depth.interpretation = TextureInterpretation::Depth;
+    let mut depth_as_color = depth_descriptor();
+    depth_as_color.interpretation = descriptor().interpretation;
+    let mut stencil = depth_descriptor();
+    stencil.native.format = wgpu::TextureFormat::Depth24PlusStencil8;
+    for rejected in [color_as_depth, depth_as_color, stencil] {
+        assert!(matches!(
+            builder.texture::<SceneDepth>(rejected),
+            Err(WgpuRenderProgramError::Graph(
+                GraphError::UnsupportedTextureFormat
+            ))
+        ));
+    }
+    let mut storage = depth_descriptor();
+    storage.native.usage |= wgpu::TextureUsages::STORAGE_BINDING;
+    assert!(matches!(
+        builder.texture::<SceneDepth>(storage),
+        Err(WgpuRenderProgramError::Graph(GraphError::UnsupportedUsage))
+    ));
+    let depth = builder.texture::<SceneDepth>(depth_descriptor()).unwrap();
+    assert_eq!(depth.version.index(), 0);
+    builder
+        .initialize(1, &[depth.clear_depth(1.0, AccessRole::Attachment)])
+        .unwrap();
+    builder.finish(&[depth.output()]).unwrap();
+}
+
+#[test]
+fn public_depth_refusals_leave_writers_keys_and_operation_allowances_available() {
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let instance = host
+        .create_feature_instance(&producer, &WgpuFeatureDefinition::new(EmptyFeature))
+        .unwrap();
+    let mut builder = WgpuRenderProgramBuilder::new(
+        source(),
+        1,
+        GraphLimits {
+            max_operations: 1,
+            max_accesses: 2,
+            ..GraphLimits::default()
+        },
+    )
+    .unwrap();
+    let color = builder.texture::<SceneColor>(descriptor()).unwrap();
+    let depth = builder.texture::<SceneDepth>(depth_descriptor()).unwrap();
+    let metadata = builder.modeled_metadata_bytes;
+    for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.125, 1.125] {
+        assert!(matches!(
+            builder.operation(
+                7,
+                &instance,
+                Arc::new(()),
+                &[],
+                &[
+                    color.clear(wgpu::Color::BLACK, AccessRole::Attachment),
+                    depth.clear_depth(invalid, AccessRole::Attachment),
+                ],
+            ),
+            Err(WgpuRenderProgramError::Graph(
+                GraphError::InvalidInitialization(1)
+            ))
+        ));
+    }
+    for write in [
+        depth.clear(wgpu::Color::BLACK, AccessRole::Attachment),
+        color.clear_depth(1.0, AccessRole::Attachment),
+    ] {
+        assert!(matches!(
+            builder.initialize(7, &[write]),
+            Err(WgpuRenderProgramError::Graph(
+                GraphError::InvalidInitialization(_)
+            ))
+        ));
+    }
+    for role in [AccessRole::StorageWrite, AccessRole::StorageReadWrite] {
+        assert!(matches!(
+            builder.initialize(7, &[depth.clear_depth(1.0, role)]),
+            Err(WgpuRenderProgramError::Graph(GraphError::IllegalAccess(actual))) if actual == role
+        ));
+    }
+    for write in [
+        color.preserve(&depth, AccessRole::Attachment),
+        depth.preserve(&color, AccessRole::Attachment),
+    ] {
+        assert!(matches!(
+            builder.initialize(7, &[write]),
+            Err(WgpuRenderProgramError::Graph(
+                GraphError::IncompatiblePreserve(_)
+            ))
+        ));
+    }
+    assert_eq!(builder.modeled_metadata_bytes, metadata);
+    assert!(builder.operations.is_empty());
+    builder
+        .operation(
+            7,
+            &instance,
+            Arc::new(()),
+            &[],
+            &[
+                color.clear(wgpu::Color::BLACK, AccessRole::Attachment),
+                depth.clear_depth(1.0, AccessRole::Attachment),
+            ],
+        )
+        .unwrap();
+    builder.finish(&[color.output(), depth.output()]).unwrap();
+    assert_eq!(host.device_epoch(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
 }
 
 #[test]

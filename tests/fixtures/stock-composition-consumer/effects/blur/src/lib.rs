@@ -14,9 +14,10 @@
 use std::marker::PhantomData;
 
 use nara_render_wgpu::{
-    TextureAlpha, TextureTransfer, WgpuDeviceRequirements, WgpuFeatureAllocation,
-    WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
-    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderProgramError,
+    TextureAlpha, TextureInterpretation, TextureTransfer, WgpuDeviceRequirements,
+    WgpuFeatureAllocation, WgpuFeatureEncodeContext, WgpuFeaturePreflightContext,
+    WgpuFeaturePrepareContext, WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature,
+    WgpuRenderProgramError,
 };
 
 /// Bounds the per-pass work to at most 65 equally weighted, edge-clamped taps.
@@ -98,7 +99,13 @@ fn validate_color(
     } else {
         TextureTransfer::Linear
     };
-    if descriptor.transfer != transfer || descriptor.alpha != TextureAlpha::Premultiplied {
+    if !matches!(
+        descriptor.interpretation,
+        TextureInterpretation::Color {
+            transfer: actual_transfer,
+            alpha: TextureAlpha::Premultiplied,
+        } if actual_transfer == transfer
+    ) {
         return Err(WgpuRenderProgramError::feature(
             "blur requires native color transfer and linear-premultiplied alpha semantics",
         ));

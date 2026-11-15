@@ -2,11 +2,12 @@
 
 use super::*;
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDeclaration,
-    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuHistoryLineage,
-    WgpuHistoryTexture, WgpuHistoryView, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
-    WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTextureDescriptor,
-    WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture, WgpuHistoryView,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts,
+    WgpuPolicyProgram, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 use nara_core::Mat3;
 use nara_ecs::Entity;
@@ -157,8 +158,10 @@ fn final_descriptor(extra_usage: wgpu::TextureUsages) -> WgpuProgramTextureDescr
                 | extra_usage,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 
@@ -361,8 +364,12 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     let original_descriptor = image_texture_b.descriptor();
     assert_eq!(image_b.descriptor(), original_descriptor);
     let mut detached_descriptor = image_b.descriptor();
-    detached_descriptor.alpha = crate::TextureAlpha::Straight;
-    detached_descriptor.transfer = crate::TextureTransfer::Srgb;
+    let TextureInterpretation::Color { transfer, alpha } = &mut detached_descriptor.interpretation
+    else {
+        panic!("expected a color texture");
+    };
+    *alpha = TextureAlpha::Straight;
+    *transfer = TextureTransfer::Srgb;
     detached_descriptor.native.size.width += 1;
     assert_ne!(detached_descriptor, original_descriptor);
     assert_eq!(image_b.descriptor(), original_descriptor);

@@ -5,8 +5,9 @@
 //! allocates distinct storage for every local version, executes every write's full initialization
 //! before its operation, and retains imports and submitted uses through physical completion.
 //!
-//! Shared textures are whole, single-sample, one-mip 2D color resources. Shared buffers are whole,
-//! unmapped and four-byte aligned. Unsupported scopes reject rather than approximate their ranges.
+//! Shared textures are whole, single-sample, one-mip 2D color or explicit Depth32Float resources.
+//! Shared buffers are whole, unmapped and four-byte aligned. Unsupported scopes reject rather
+//! than approximate their ranges.
 //! All shared attachment writes must Store, including initialization clears and subsequent passes.
 //! Native adapters remain trusted to obey these declarations; this is not a shader verifier or RHI.
 
@@ -86,21 +87,32 @@ pub enum TextureAlpha {
     Premultiplied,
 }
 
+/// Content interpretation carried by a texture port and its exact physical lease.
+///
+/// Color retains its RGB transfer and alpha facts. Depth has neither and requires Depth32Float
+/// storage; a native format alone cannot change the declared interpretation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextureInterpretation {
+    Color {
+        transfer: TextureTransfer,
+        alpha: TextureAlpha,
+    },
+    Depth,
+}
+
 /// Code-owned port identity and content interpretation, independent of native shape. The Host
 /// and adapter must agree on that interpretation; a native format alone does not select a port.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TextureMeaning {
     pub(crate) semantic: TypeId,
-    pub(crate) transfer: TextureTransfer,
-    pub(crate) alpha: TextureAlpha,
+    pub(crate) interpretation: TextureInterpretation,
 }
 
 impl TextureMeaning {
-    pub(crate) fn of<T: 'static>(transfer: TextureTransfer, alpha: TextureAlpha) -> Self {
+    pub(crate) fn of<T: 'static>(interpretation: TextureInterpretation) -> Self {
         Self {
             semantic: TypeId::of::<T>(),
-            transfer,
-            alpha,
+            interpretation,
         }
     }
 }
@@ -136,7 +148,11 @@ pub(crate) enum ResourceDescriptor {
 impl ResourceDescriptor {
     fn validate(&self, limits: GraphLimits) -> Result<u64, GraphError> {
         match self {
-            Self::Texture { native, range, .. } => {
+            Self::Texture {
+                native,
+                range,
+                meaning,
+            } => {
                 if native.dimension != wgpu::TextureDimension::D2
                     || native.size.width == 0
                     || native.size.height == 0
@@ -152,12 +168,17 @@ impl ResourceDescriptor {
                 {
                     return Err(GraphError::LimitExceeded(LimitKind::TextureDimension));
                 }
-                // Initially admit baseline, uncompressed color formats only. Optional features,
-                // planes and depth/stencil need an explicit scope extension and Host consumer.
-                if !native.format.required_features().is_empty()
-                    || native.format.is_depth_stencil_format()
-                    || native.format.block_dimensions() != (1, 1)
-                {
+                let supported_format = match meaning.interpretation {
+                    TextureInterpretation::Color { .. } => {
+                        native.format.required_features().is_empty()
+                            && !native.format.is_depth_stencil_format()
+                            && native.format.block_dimensions() == (1, 1)
+                    }
+                    TextureInterpretation::Depth => {
+                        native.format == wgpu::TextureFormat::Depth32Float
+                    }
+                };
+                if !supported_format {
                     return Err(GraphError::UnsupportedTextureFormat);
                 }
                 if !range.is_full_resource(native.format, 1, 1) {
@@ -211,7 +232,7 @@ impl ResourceDescriptor {
         }
     }
 
-    /// A copy preserves bytes and color interpretation, but can initialize a different semantic
+    /// A copy preserves bytes and texture interpretation, but can initialize a different semantic
     /// output port. No reinterpretation, resize, resolve or conversion is implicit here.
     fn initialization_copy_compatible(&self, other: &Self) -> bool {
         match (self, other) {
@@ -232,8 +253,7 @@ impl ResourceDescriptor {
                     && left.dimension == right.dimension
                     && left.sample_count == right.sample_count
                     && left.mip_level_count == right.mip_level_count
-                    && left_meaning.transfer == right_meaning.transfer
-                    && left_meaning.alpha == right_meaning.alpha
+                    && left_meaning.interpretation == right_meaning.interpretation
             }
             (Self::Buffer { native: left, .. }, Self::Buffer { native: right, .. }) => {
                 left.size == right.size
@@ -319,8 +339,10 @@ pub(crate) struct ResourceRead {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Initialization {
-    /// A separate whole-attachment clear, outside any operation viewport/scissor, with Store.
+    /// A separate whole-color-attachment clear, outside any operation viewport/scissor, with Store.
     Clear(wgpu::Color),
+    /// A separate whole-depth-attachment clear, finite and within [0, 1], with Store.
+    ClearDepth(f32),
     /// A whole-buffer clear through COPY_DST, independent of allocator contents.
     Zero,
     /// Copy the whole predecessor into distinct storage before the operation runs. The old
@@ -696,10 +718,25 @@ impl GraphBuilder {
             validate_access(&output.desc, &write.version, write.role, true)?;
             match &write.initialization {
                 Initialization::Clear(color) => {
-                    if !matches!(output.desc, ResourceDescriptor::Texture { .. })
-                        || ![color.r, color.g, color.b, color.a]
-                            .into_iter()
-                            .all(f64::is_finite)
+                    if !matches!(
+                        &output.desc,
+                        ResourceDescriptor::Texture { meaning, .. }
+                            if matches!(meaning.interpretation, TextureInterpretation::Color { .. })
+                    ) || ![color.r, color.g, color.b, color.a]
+                        .into_iter()
+                        .all(f64::is_finite)
+                    {
+                        return Err(GraphError::InvalidInitialization(write.version.index));
+                    }
+                    validate_access(&output.desc, &write.version, AccessRole::Attachment, true)?;
+                }
+                Initialization::ClearDepth(depth) => {
+                    if !matches!(
+                        &output.desc,
+                        ResourceDescriptor::Texture { meaning, .. }
+                            if meaning.interpretation == TextureInterpretation::Depth
+                    ) || !depth.is_finite()
+                        || !(0.0..=1.0).contains(depth)
                     {
                         return Err(GraphError::InvalidInitialization(write.version.index));
                     }

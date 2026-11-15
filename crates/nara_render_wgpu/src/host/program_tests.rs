@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
-    WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuProgramTexture,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuProgramTexture,
     WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuRenderFeature, WgpuRenderProgram,
     WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
@@ -282,16 +282,28 @@ fn native_stock_known_metadata_refuses_before_partial_realization() {
         material_extension: None,
         instances: vec![<WgpuQuadInstance as bytemuck::Zeroable>::zeroed()],
     };
+    let metadata_bytes = |batches| {
+        crate::stock_quad::StockPreparationCost::for_batches(std::iter::repeat_n(&batch, batches))
+            .unwrap()
+            .modeled_metadata_bytes
+    };
+    let per_batch = metadata_bytes(3) - metadata_bytes(2);
+    let batch_count = crate::program::MAX_PROGRAM_METADATA_BYTES / per_batch + 1;
     let capture = SpriteCapture::from_lowered(
         target.clone(),
         nara_render::ViewportRect::from_extent(nara_render::Extent2d::new(4, 4).unwrap()).unwrap(),
-        vec![batch; 20_000].into(),
+        vec![batch; batch_count].into(),
     );
     let cost =
         crate::stock_quad::StockPreparationCost::for_batches(capture.batches.iter()).unwrap();
     assert!(
-        cost.modeled_metadata_bytes > 64 * 1024 * 1024,
+        cost.modeled_metadata_bytes > crate::program::MAX_PROGRAM_METADATA_BYTES,
         "the complete stock table exceeds the engine's fixed metadata envelope"
+    );
+    eprintln!(
+        "stock metadata refusal: batches={batch_count}, modeled_bytes={}, fixed_limit={}",
+        cost.modeled_metadata_bytes,
+        crate::program::MAX_PROGRAM_METADATA_BYTES,
     );
     builder
         .operation(
@@ -505,8 +517,10 @@ fn descriptor() -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 

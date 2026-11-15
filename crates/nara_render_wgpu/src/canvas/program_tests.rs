@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureAllocation,
-    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuProgramTexture,
-    WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderHost, WgpuRenderProgramBuilder,
-    WgpuRenderProgramError, WgpuSubmissionPrefix,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureAllocation, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeaturePrepareContext, WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature,
+    WgpuRenderHost, WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuSubmissionPrefix,
 };
 use nara_app::{App, RuntimeCandidateRetirementState, RuntimeInstance};
 use nara_core::Color;
@@ -80,12 +80,14 @@ fn descriptor(
                 | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         },
-        transfer: if format.has_srgb_suffix() {
-            TextureTransfer::Srgb
-        } else {
-            TextureTransfer::Linear
+        interpretation: TextureInterpretation::Color {
+            transfer: if format.has_srgb_suffix() {
+                TextureTransfer::Srgb
+            } else {
+                TextureTransfer::Linear
+            },
+            alpha: TextureAlpha::Premultiplied,
         },
-        alpha: TextureAlpha::Premultiplied,
     }
 }
 

@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use nara::render::RenderFrameSourceGeneration;
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
-    WgpuProgramTextureDescriptor, WgpuRenderHost, WgpuRenderProgramBuilder,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuFeatureDefinition, WgpuProgramTextureDescriptor, WgpuRenderHost, WgpuRenderProgramBuilder,
 };
 use nara_stock_blur_effect::{Blur, BlurCapture};
 use nara_stock_composition_consumer::{oracle, readback};
@@ -75,12 +75,14 @@ fn independently_authored_effects_preserve_actual_format_transfer_and_premultipl
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if format.has_srgb_suffix() {
-                TextureTransfer::Srgb
-            } else {
-                TextureTransfer::Linear
+            interpretation: TextureInterpretation::Color {
+                transfer: if format.has_srgb_suffix() {
+                    TextureTransfer::Srgb
+                } else {
+                    TextureTransfer::Linear
+                },
+                alpha: TextureAlpha::Premultiplied,
             },
-            alpha: TextureAlpha::Premultiplied,
         };
         let mut graph = WgpuRenderProgramBuilder::new(
             RenderFrameSourceGeneration::try_acquire().unwrap(),

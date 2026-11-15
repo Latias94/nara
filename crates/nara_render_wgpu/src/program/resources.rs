@@ -6,7 +6,7 @@ use crate::{
     WgpuRenderProducerId,
     graph::{
         AccessRole, BufferMeaning, Initialization, ResourceDescriptor, ResourceRead,
-        ResourceVersion, ResourceWrite, TextureAlpha, TextureMeaning, TextureTransfer,
+        ResourceVersion, ResourceWrite, TextureInterpretation, TextureMeaning,
     },
     output::OutputReservation,
 };
@@ -17,8 +17,7 @@ use super::WgpuRenderProgramError;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WgpuProgramTextureDescriptor {
     pub native: wgpu::TextureDescriptor<'static>,
-    pub transfer: TextureTransfer,
-    pub alpha: TextureAlpha,
+    pub interpretation: TextureInterpretation,
 }
 
 impl WgpuProgramTextureDescriptor {
@@ -26,7 +25,7 @@ impl WgpuProgramTextureDescriptor {
         ResourceDescriptor::Texture {
             native: self.native.clone(),
             range: wgpu::ImageSubresourceRange::default(),
-            meaning: TextureMeaning::of::<S>(self.transfer, self.alpha),
+            meaning: TextureMeaning::of::<S>(self.interpretation),
         }
     }
 }
@@ -69,13 +68,24 @@ impl<S: 'static> WgpuProgramTexture<S> {
         })
     }
 
-    /// Clear the whole output before the adapter executes, independently of its viewport.
+    /// Clear the whole color output before the adapter executes, independently of its viewport.
     #[must_use]
     pub fn clear(&self, color: wgpu::Color, role: AccessRole) -> WgpuProgramWrite {
         WgpuProgramWrite(ResourceWrite {
             version: self.version.clone(),
             role,
             initialization: Initialization::Clear(color),
+        })
+    }
+
+    /// Clear the whole depth output before the adapter executes, independently of its viewport.
+    /// Graph admission requires a finite value within [0, 1] and depth interpretation.
+    #[must_use]
+    pub fn clear_depth(&self, depth: f32, role: AccessRole) -> WgpuProgramWrite {
+        WgpuProgramWrite(ResourceWrite {
+            version: self.version.clone(),
+            role,
+            initialization: Initialization::ClearDepth(depth),
         })
     }
 
@@ -239,8 +249,7 @@ impl ProgramResourceStorage {
         };
         WgpuProgramTextureDescriptor {
             native: native.clone(),
-            transfer: meaning.transfer,
-            alpha: meaning.alpha,
+            interpretation: meaning.interpretation,
         }
     }
 }

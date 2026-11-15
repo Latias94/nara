@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara::render_wgpu::{TextureTransfer, WgpuImageOutput, WgpuRenderHost};
+use nara::render_wgpu::{TextureInterpretation, TextureTransfer, WgpuImageOutput, WgpuRenderHost};
 
 const WIDTH: u32 = 32;
 const HEIGHT: u32 = 24;
@@ -26,7 +26,10 @@ pub(super) fn read(host: &mut WgpuRenderHost, image: &WgpuImageOutput) -> Vec<[u
     assert_eq!(descriptor.native.size, extent);
     assert_eq!(descriptor.native.format, wgpu::TextureFormat::Rgba8Unorm);
     assert_eq!(image.format(), wgpu::TextureFormat::Rgba8Unorm);
-    assert_eq!(descriptor.transfer, TextureTransfer::Linear);
+    let TextureInterpretation::Color { transfer, .. } = descriptor.interpretation else {
+        panic!("expected a color texture");
+    };
+    assert_eq!(transfer, TextureTransfer::Linear);
     assert!(
         descriptor
             .native

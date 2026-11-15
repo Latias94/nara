@@ -1,7 +1,9 @@
 //! Finite captured drawing data and an independent double-precision pixel oracle.
 
 use nara_render::RenderFrameSourceGeneration;
-use nara_render_wgpu::{GraphLimits, TextureAlpha, TextureTransfer, WgpuProgramTextureDescriptor};
+use nara_render_wgpu::{
+    GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer, WgpuProgramTextureDescriptor,
+};
 
 pub const SCENE_WIDTH: u32 = 8;
 pub const SCENE_HEIGHT: u32 = 6;
@@ -167,8 +169,10 @@ pub fn descriptor(width: u32, height: u32) -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 

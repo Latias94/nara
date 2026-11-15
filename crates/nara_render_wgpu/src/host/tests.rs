@@ -2351,12 +2351,14 @@ fn allocated_test_output(
             usage: texture.usage(),
             view_formats: &[],
         },
-        transfer: if texture.format().has_srgb_suffix() {
-            crate::TextureTransfer::Srgb
-        } else {
-            crate::TextureTransfer::Linear
+        interpretation: crate::TextureInterpretation::Color {
+            transfer: if texture.format().has_srgb_suffix() {
+                crate::TextureTransfer::Srgb
+            } else {
+                crate::TextureTransfer::Linear
+            },
+            alpha: crate::TextureAlpha::Premultiplied,
         },
-        alpha: crate::TextureAlpha::Premultiplied,
     };
     WgpuImageOutput(Arc::new(WgpuImageStorage {
         receipt,

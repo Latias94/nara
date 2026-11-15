@@ -5,6 +5,7 @@
 use super::model::*;
 
 struct SceneColor;
+struct SceneDepth;
 struct FinalComposite;
 struct RawCounts;
 struct Frequencies;
@@ -34,8 +35,26 @@ fn texture<T: 'static>() -> ResourceDescriptor {
             view_formats: &[],
         },
         range: wgpu::ImageSubresourceRange::default(),
-        meaning: TextureMeaning::of::<T>(TextureTransfer::Linear, TextureAlpha::Premultiplied),
+        meaning: TextureMeaning::of::<T>(TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        }),
     }
+}
+
+fn depth_texture<T: 'static>() -> ResourceDescriptor {
+    let mut desc = texture::<T>();
+    let ResourceDescriptor::Texture {
+        native, meaning, ..
+    } = &mut desc
+    else {
+        unreachable!()
+    };
+    native.label = Some("graph-depth");
+    native.format = wgpu::TextureFormat::Depth32Float;
+    native.usage.remove(wgpu::TextureUsages::STORAGE_BINDING);
+    meaning.interpretation = TextureInterpretation::Depth;
+    desc
 }
 
 fn buffer_as<T: 'static>() -> ResourceDescriptor {
@@ -381,12 +400,30 @@ fn imports_are_immutable_for_every_write_role() {
             Err(GraphError::ImportedWrite(input.index()))
         );
     }
-    let mut graph = builder();
-    let input = graph.import_resource(texture::<SceneColor>()).unwrap();
-    assert_eq!(
-        graph.add_operation(1, &[], &[clear(&input)]),
-        Err(GraphError::ImportedWrite(input.index()))
-    );
+    for (descriptor, initialization) in [
+        (
+            texture::<SceneColor>(),
+            Initialization::Clear(wgpu::Color::TRANSPARENT),
+        ),
+        (
+            depth_texture::<SceneDepth>(),
+            Initialization::ClearDepth(1.0),
+        ),
+    ] {
+        for role in [
+            AccessRole::Attachment,
+            AccessRole::StorageWrite,
+            AccessRole::StorageReadWrite,
+            AccessRole::CopyDestination,
+        ] {
+            let mut graph = builder();
+            let input = graph.import_resource(descriptor.clone()).unwrap();
+            assert_eq!(
+                graph.add_operation(1, &[], &[write(&input, role, initialization.clone())]),
+                Err(GraphError::ImportedWrite(input.index()))
+            );
+        }
+    }
 }
 
 #[test]
@@ -617,11 +654,14 @@ fn texture_reads_require_type_identity_transfer_and_alpha_meaning() {
         let ResourceDescriptor::Texture { meaning, .. } = &mut expected else {
             unreachable!()
         };
+        let TextureInterpretation::Color { transfer, alpha } = &mut meaning.interpretation else {
+            unreachable!()
+        };
         match mismatch {
             0 => meaning.semantic = std::any::TypeId::of::<FinalComposite>(),
-            1 => meaning.transfer = TextureTransfer::Srgb,
-            2 => meaning.alpha = TextureAlpha::Straight,
-            _ => meaning.alpha = TextureAlpha::Opaque,
+            1 => *transfer = TextureTransfer::Srgb,
+            2 => *alpha = TextureAlpha::Straight,
+            _ => *alpha = TextureAlpha::Opaque,
         }
         assert_eq!(
             graph.add_operation(1, &[read(&input, AccessRole::Sampled, &expected)], &[]),
@@ -713,11 +753,14 @@ fn preservation_requires_matching_texture_shape_format_transfer_and_alpha() {
         else {
             unreachable!()
         };
+        let TextureInterpretation::Color { transfer, alpha } = &mut meaning.interpretation else {
+            unreachable!()
+        };
         match mismatch {
             0 => native.size.height -= 1,
             1 => native.format = wgpu::TextureFormat::Rgba16Float,
-            2 => meaning.transfer = TextureTransfer::Srgb,
-            _ => meaning.alpha = TextureAlpha::Straight,
+            2 => *transfer = TextureTransfer::Srgb,
+            _ => *alpha = TextureAlpha::Straight,
         }
         let output = graph.reserve_resource(desc).unwrap();
         assert_eq!(
@@ -820,31 +863,88 @@ fn full_range_spellings_labels_and_usage_subsets_preserve_read_compatibility() {
 
 #[test]
 fn unsupported_texture_extents_layers_dimensions_mips_and_samples_reject() {
-    for mismatch in 0..12 {
+    for original in [texture::<SceneColor>(), depth_texture::<SceneDepth>()] {
+        for mismatch in 0..12 {
+            let mut graph = builder();
+            let mut desc = original.clone();
+            let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+                unreachable!()
+            };
+            match mismatch {
+                0 => native.size.width = 0,
+                1 => native.size.height = 0,
+                2 => native.size.depth_or_array_layers = 0,
+                3 => native.size.depth_or_array_layers = 2,
+                4 => native.sample_count = 0,
+                5 => native.sample_count = 4,
+                6 => native.mip_level_count = 0,
+                7 => native.mip_level_count = 2,
+                8 => native.dimension = wgpu::TextureDimension::D1,
+                9 => native.dimension = wgpu::TextureDimension::D3,
+                10 => native.view_formats = &[wgpu::TextureFormat::Rgba32Float],
+                _ => native.view_formats = &[wgpu::TextureFormat::Rgba8UnormSrgb],
+            }
+            assert_eq!(
+                graph.reserve_resource(desc.clone()),
+                Err(GraphError::UnsupportedTextureScope)
+            );
+            assert_eq!(
+                graph.import_resource(desc),
+                Err(GraphError::UnsupportedTextureScope)
+            );
+            assert_eq!(graph.import_resource(buffer()).unwrap().index(), 0);
+        }
+    }
+}
+
+#[test]
+fn depth_ranges_admit_the_whole_depth_aspect_and_refuse_partial_or_foreign_aspects() {
+    for aspect in [wgpu::TextureAspect::All, wgpu::TextureAspect::DepthOnly] {
         let mut graph = builder();
-        let mut desc = texture::<SceneColor>();
-        let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+        let input = graph
+            .import_resource(depth_texture::<SceneDepth>())
+            .unwrap();
+        let mut whole = depth_texture::<SceneDepth>();
+        let ResourceDescriptor::Texture { range, .. } = &mut whole else {
             unreachable!()
         };
-        match mismatch {
-            0 => native.size.width = 0,
-            1 => native.size.height = 0,
-            2 => native.size.depth_or_array_layers = 0,
-            3 => native.size.depth_or_array_layers = 2,
-            4 => native.sample_count = 0,
-            5 => native.sample_count = 4,
-            6 => native.mip_level_count = 0,
-            7 => native.mip_level_count = 2,
-            8 => native.dimension = wgpu::TextureDimension::D1,
-            9 => native.dimension = wgpu::TextureDimension::D3,
-            10 => native.view_formats = &[wgpu::TextureFormat::Rgba32Float],
-            _ => native.view_formats = &[wgpu::TextureFormat::Rgba8UnormSrgb],
+        range.aspect = aspect;
+        range.mip_level_count = Some(1);
+        range.array_layer_count = Some(1);
+        for mismatch in 0..8 {
+            let mut invalid = whole.clone();
+            let ResourceDescriptor::Texture { range, .. } = &mut invalid else {
+                unreachable!()
+            };
+            match mismatch {
+                0 => range.aspect = wgpu::TextureAspect::StencilOnly,
+                1 => range.aspect = wgpu::TextureAspect::Plane0,
+                2 => range.base_mip_level = 1,
+                3 => range.mip_level_count = Some(0),
+                4 => range.mip_level_count = Some(2),
+                5 => range.base_array_layer = 1,
+                6 => range.array_layer_count = Some(0),
+                _ => range.array_layer_count = Some(2),
+            }
+            assert_eq!(
+                graph.reserve_resource(invalid.clone()),
+                Err(GraphError::UnsupportedTextureScope)
+            );
+            assert_eq!(
+                graph.import_resource(invalid.clone()),
+                Err(GraphError::UnsupportedTextureScope)
+            );
+            assert_eq!(
+                graph.add_operation(1, &[read(&input, AccessRole::Sampled, &invalid)], &[]),
+                Err(GraphError::UnsupportedTextureScope)
+            );
         }
-        assert_eq!(
-            graph.reserve_resource(desc),
-            Err(GraphError::UnsupportedTextureScope)
-        );
-        assert_eq!(graph.import_resource(buffer()).unwrap().index(), 0);
+        let imported = graph.import_resource(whole.clone()).unwrap();
+        graph
+            .add_operation(1, &[read(&input, AccessRole::Sampled, &whole)], &[])
+            .unwrap();
+        graph.set_output_group(&[input, imported]).unwrap();
+        graph.compile().unwrap();
     }
 }
 
@@ -887,6 +987,11 @@ fn invalid_ranges_reject_for_reservations_imports_and_expected_reads() {
 fn unsupported_formats_unknown_flags_and_invalid_format_usages_reject() {
     for format in [
         wgpu::TextureFormat::Depth32Float,
+        wgpu::TextureFormat::Depth16Unorm,
+        wgpu::TextureFormat::Depth24Plus,
+        wgpu::TextureFormat::Depth24PlusStencil8,
+        wgpu::TextureFormat::Depth32FloatStencil8,
+        wgpu::TextureFormat::Stencil8,
         wgpu::TextureFormat::Bc1RgbaUnorm,
         wgpu::TextureFormat::NV12,
     ] {
@@ -925,6 +1030,445 @@ fn unsupported_formats_unknown_flags_and_invalid_format_usages_reject() {
         builder().reserve_resource(desc),
         Err(GraphError::UnsupportedUsage)
     );
+}
+
+#[test]
+fn depth_admission_requires_its_exact_format_and_baseline_usages() {
+    let mut graph = builder();
+    let input = graph
+        .import_resource(depth_texture::<SceneDepth>())
+        .unwrap();
+    for format in [
+        wgpu::TextureFormat::R32Float,
+        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Depth16Unorm,
+        wgpu::TextureFormat::Depth24Plus,
+        wgpu::TextureFormat::Depth24PlusStencil8,
+        wgpu::TextureFormat::Depth32FloatStencil8,
+        wgpu::TextureFormat::Stencil8,
+        wgpu::TextureFormat::Bc1RgbaUnorm,
+        wgpu::TextureFormat::NV12,
+    ] {
+        let mut desc = depth_texture::<SceneDepth>();
+        let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+            unreachable!()
+        };
+        native.format = format;
+        assert_eq!(
+            graph.reserve_resource(desc.clone()),
+            Err(GraphError::UnsupportedTextureFormat)
+        );
+        assert_eq!(
+            graph.import_resource(desc.clone()),
+            Err(GraphError::UnsupportedTextureFormat)
+        );
+        assert_eq!(
+            graph.add_operation(1, &[read(&input, AccessRole::Sampled, &desc)], &[]),
+            Err(GraphError::UnsupportedTextureFormat)
+        );
+    }
+    for usage in [
+        wgpu::TextureUsages::empty(),
+        wgpu::TextureUsages::STORAGE_BINDING,
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
+        wgpu::TextureUsages::TRANSIENT_ATTACHMENT,
+        wgpu::TextureUsages::from_bits_retain(1 << 31),
+    ] {
+        let mut desc = depth_texture::<SceneDepth>();
+        let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+            unreachable!()
+        };
+        native.usage = usage;
+        assert_eq!(
+            graph.reserve_resource(desc.clone()),
+            Err(GraphError::UnsupportedUsage)
+        );
+        assert_eq!(
+            graph.import_resource(desc),
+            Err(GraphError::UnsupportedUsage)
+        );
+    }
+    let valid = graph
+        .import_resource(depth_texture::<SceneDepth>())
+        .unwrap();
+    assert_eq!(valid.index(), 1);
+    graph
+        .add_operation(
+            1,
+            &[read(
+                &input,
+                AccessRole::Sampled,
+                &depth_texture::<SceneDepth>(),
+            )],
+            &[],
+        )
+        .unwrap();
+    graph.set_output_group(&[input, valid]).unwrap();
+    assert_eq!(
+        graph.compile().unwrap().modeled_resource_bytes(),
+        2 * 320 * 180 * 4
+    );
+}
+
+#[test]
+fn depth_64_square_byte_budget_accepts_exactly_16384_and_refuses_one_short() {
+    let mut desc = depth_texture::<SceneDepth>();
+    let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+        unreachable!()
+    };
+    native.size.width = 64;
+    native.size.height = 64;
+    let mut short = GraphBuilder::new(GraphLimits {
+        max_modeled_resource_bytes: 16_383,
+        ..GraphLimits::default()
+    })
+    .unwrap();
+    assert_eq!(
+        short.reserve_resource(desc.clone()),
+        Err(GraphError::LimitExceeded(LimitKind::ResourceBytes))
+    );
+    assert_eq!(
+        short.import_resource(desc.clone()),
+        Err(GraphError::LimitExceeded(LimitKind::ResourceBytes))
+    );
+    assert_eq!(short.import_resource(buffer()).unwrap().index(), 0);
+    let mut exact = GraphBuilder::new(GraphLimits {
+        max_modeled_resource_bytes: 16_384,
+        ..GraphLimits::default()
+    })
+    .unwrap();
+    let output = exact.reserve_resource(desc).unwrap();
+    assert_eq!(
+        exact.reserve_resource(buffer()),
+        Err(GraphError::LimitExceeded(LimitKind::ResourceBytes))
+    );
+    exact
+        .add_operation(
+            1,
+            &[],
+            &[write(
+                &output,
+                AccessRole::Attachment,
+                Initialization::ClearDepth(1.0),
+            )],
+        )
+        .unwrap();
+    exact.set_output_group(&[output]).unwrap();
+    assert_eq!(exact.compile().unwrap().modeled_resource_bytes(), 16_384);
+}
+
+#[test]
+fn depth_versions_preserve_exact_interpretation_and_immutable_predecessor_dependencies() {
+    let mut graph = builder();
+    let original = graph
+        .reserve_resource(depth_texture::<SceneDepth>())
+        .unwrap();
+    let successor = graph
+        .reserve_resource(depth_texture::<FinalComposite>())
+        .unwrap();
+    assert_eq!(
+        graph.add_operation(
+            1,
+            &[read(
+                &successor,
+                AccessRole::Sampled,
+                &depth_texture::<SceneDepth>()
+            )],
+            &[],
+        ),
+        Err(GraphError::IncompatibleRead(successor.index()))
+    );
+    graph
+        .add_operation(
+            1,
+            &[read(
+                &successor,
+                AccessRole::Sampled,
+                &depth_texture::<FinalComposite>(),
+            )],
+            &[],
+        )
+        .unwrap();
+    graph
+        .add_operation(
+            2,
+            &[],
+            &[write(
+                &successor,
+                AccessRole::Attachment,
+                Initialization::Preserve(original.clone()),
+            )],
+        )
+        .unwrap();
+    graph
+        .add_operation(
+            9,
+            &[],
+            &[write(
+                &original,
+                AccessRole::Attachment,
+                Initialization::ClearDepth(0.625),
+            )],
+        )
+        .unwrap();
+    graph
+        .set_output_group(&[original.clone(), successor.clone()])
+        .unwrap();
+    let graph = graph.compile().unwrap();
+    assert_eq!(keys(&graph), [9, 2, 1]);
+    assert_ne!(original, successor);
+    assert_eq!(
+        graph.copy_dependencies().collect::<Vec<_>>(),
+        [CopyDependency {
+            source: original,
+            destination: successor,
+            before: 2,
+        }]
+    );
+    for operation in graph.operations() {
+        for write in &operation.writes {
+            assert_eq!(write.store_op(), wgpu::StoreOp::Store);
+        }
+    }
+    assert_eq!(graph.modeled_resource_bytes(), 2 * 320 * 180 * 4);
+}
+
+#[test]
+fn depth_clears_reject_invalid_values_before_claiming_any_writers_or_accesses() {
+    for value in [0.0, -0.0, 0.625, 1.0] {
+        let mut graph = GraphBuilder::new(GraphLimits {
+            max_operations: 1,
+            max_accesses: 2,
+            ..GraphLimits::default()
+        })
+        .unwrap();
+        let color = graph.reserve_resource(texture::<SceneColor>()).unwrap();
+        let depth = graph
+            .reserve_resource(depth_texture::<SceneDepth>())
+            .unwrap();
+        for invalid in [
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -f32::MIN_POSITIVE,
+            1.0 + f32::EPSILON,
+            f32::MIN,
+            f32::MAX,
+        ] {
+            assert_eq!(
+                graph.add_operation(
+                    7,
+                    &[],
+                    &[
+                        clear(&color),
+                        write(
+                            &depth,
+                            AccessRole::Attachment,
+                            Initialization::ClearDepth(invalid),
+                        ),
+                    ],
+                ),
+                Err(GraphError::InvalidInitialization(depth.index()))
+            );
+        }
+        graph
+            .add_operation(
+                7,
+                &[],
+                &[
+                    clear(&color),
+                    write(
+                        &depth,
+                        AccessRole::Attachment,
+                        Initialization::ClearDepth(value),
+                    ),
+                ],
+            )
+            .unwrap();
+        graph.set_output_group(&[color, depth]).unwrap();
+        let graph = graph.compile().unwrap();
+        assert_eq!(keys(&graph), [7]);
+        assert_eq!(
+            graph.operations().next().unwrap().writes[1].initialization,
+            Initialization::ClearDepth(value)
+        );
+    }
+}
+
+#[test]
+fn depth_reads_and_copies_cannot_reinterpret_color_with_equal_texel_size() {
+    for source_is_depth in [false, true] {
+        let mut graph = builder();
+        let mut color = texture::<SceneDepth>();
+        let ResourceDescriptor::Texture { native, .. } = &mut color else {
+            unreachable!()
+        };
+        native.format = wgpu::TextureFormat::R32Float;
+        let depth = depth_texture::<SceneDepth>();
+        let (source_desc, output_desc) = if source_is_depth {
+            (depth, color)
+        } else {
+            (color, depth)
+        };
+        let source = graph.import_resource(source_desc.clone()).unwrap();
+        let output = graph.reserve_resource(output_desc.clone()).unwrap();
+        assert_eq!(
+            graph.add_operation(1, &[read(&source, AccessRole::Sampled, &output_desc)], &[]),
+            Err(GraphError::IncompatibleRead(source.index()))
+        );
+        assert_eq!(
+            graph.add_operation(
+                1,
+                &[],
+                &[write(
+                    &output,
+                    AccessRole::Attachment,
+                    Initialization::Preserve(source.clone()),
+                )],
+            ),
+            Err(GraphError::IncompatiblePreserve(output.index()))
+        );
+        let initialization = if source_is_depth {
+            Initialization::Clear(wgpu::Color::BLACK)
+        } else {
+            Initialization::ClearDepth(1.0)
+        };
+        graph
+            .add_operation(
+                1,
+                &[read(&source, AccessRole::Sampled, &source_desc)],
+                &[write(&output, AccessRole::Attachment, initialization)],
+            )
+            .unwrap();
+        graph.set_output_group(&[source, output]).unwrap();
+        graph.compile().unwrap();
+    }
+}
+
+#[test]
+fn depth_clear_and_preservation_require_original_attachment_and_copy_usages() {
+    let mut graph = builder();
+    let mut desc = depth_texture::<SceneDepth>();
+    let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+        unreachable!()
+    };
+    native.usage = wgpu::TextureUsages::COPY_DST;
+    let output = graph.reserve_resource(desc).unwrap();
+    assert_eq!(
+        graph.add_operation(
+            1,
+            &[],
+            &[write(
+                &output,
+                AccessRole::CopyDestination,
+                Initialization::ClearDepth(1.0),
+            )],
+        ),
+        Err(GraphError::MissingUsage {
+            version: output.index(),
+            role: AccessRole::Attachment,
+        })
+    );
+    for missing_source in [false, true] {
+        let mut graph = builder();
+        let mut source_desc = depth_texture::<SceneDepth>();
+        let mut output_desc = source_desc.clone();
+        let desc = if missing_source {
+            &mut source_desc
+        } else {
+            &mut output_desc
+        };
+        let ResourceDescriptor::Texture { native, .. } = desc else {
+            unreachable!()
+        };
+        native.usage.remove(if missing_source {
+            wgpu::TextureUsages::COPY_SRC
+        } else {
+            wgpu::TextureUsages::COPY_DST
+        });
+        let source = graph.import_resource(source_desc).unwrap();
+        let output = graph.reserve_resource(output_desc).unwrap();
+        assert_eq!(
+            graph.add_operation(
+                1,
+                &[],
+                &[write(
+                    &output,
+                    AccessRole::Attachment,
+                    Initialization::Preserve(source.clone()),
+                )],
+            ),
+            Err(GraphError::MissingUsage {
+                version: if missing_source {
+                    source.index()
+                } else {
+                    output.index()
+                },
+                role: if missing_source {
+                    AccessRole::CopySource
+                } else {
+                    AccessRole::CopyDestination
+                },
+            })
+        );
+    }
+}
+
+#[test]
+fn depth_operation_roles_require_declared_usages_and_refuse_storage_access() {
+    for (role, usage) in [
+        (AccessRole::Sampled, wgpu::TextureUsages::TEXTURE_BINDING),
+        (AccessRole::CopySource, wgpu::TextureUsages::COPY_SRC),
+    ] {
+        let mut graph = builder();
+        let mut desc = depth_texture::<SceneDepth>();
+        let ResourceDescriptor::Texture { native, .. } = &mut desc else {
+            unreachable!()
+        };
+        native.usage.remove(usage);
+        let input = graph.import_resource(desc.clone()).unwrap();
+        assert_eq!(
+            graph.add_operation(1, &[read(&input, role, &desc)], &[]),
+            Err(GraphError::MissingUsage {
+                version: input.index(),
+                role
+            })
+        );
+    }
+    let mut graph = builder();
+    let desc = depth_texture::<SceneDepth>();
+    let input = graph.import_resource(desc.clone()).unwrap();
+    let output = graph.reserve_resource(desc.clone()).unwrap();
+    assert_eq!(
+        graph.add_operation(1, &[read(&input, AccessRole::StorageRead, &desc)], &[]),
+        Err(GraphError::IllegalAccess(AccessRole::StorageRead))
+    );
+    for role in [AccessRole::StorageWrite, AccessRole::StorageReadWrite] {
+        assert_eq!(
+            graph.add_operation(
+                1,
+                &[],
+                &[write(&output, role, Initialization::ClearDepth(1.0))],
+            ),
+            Err(GraphError::IllegalAccess(role))
+        );
+    }
+    graph
+        .add_operation(
+            1,
+            &[
+                read(&input, AccessRole::Sampled, &desc),
+                read(&input, AccessRole::CopySource, &desc),
+            ],
+            &[write(
+                &output,
+                AccessRole::CopyDestination,
+                Initialization::Preserve(input.clone()),
+            )],
+        )
+        .unwrap();
+    graph.set_output_group(&[input, output]).unwrap();
+    graph.compile().unwrap();
 }
 
 #[test]
@@ -1241,6 +1785,9 @@ fn initialization_checks_resource_kind_and_every_clear_component_for_finiteness(
     let mut graph = builder();
     let image = graph.reserve_resource(texture::<SceneColor>()).unwrap();
     let data = graph.reserve_resource(buffer()).unwrap();
+    let depth = graph
+        .reserve_resource(depth_texture::<SceneDepth>())
+        .unwrap();
     assert_eq!(
         graph.add_operation(
             1,
@@ -1261,6 +1808,29 @@ fn initialization_checks_resource_kind_and_every_clear_component_for_finiteness(
         ),
         Err(GraphError::InvalidInitialization(data.index()))
     );
+    for (version, role, initialization) in [
+        (
+            &image,
+            AccessRole::Attachment,
+            Initialization::ClearDepth(1.0),
+        ),
+        (
+            &data,
+            AccessRole::StorageWrite,
+            Initialization::ClearDepth(1.0),
+        ),
+        (
+            &depth,
+            AccessRole::Attachment,
+            Initialization::Clear(wgpu::Color::TRANSPARENT),
+        ),
+        (&depth, AccessRole::Attachment, Initialization::Zero),
+    ] {
+        assert_eq!(
+            graph.add_operation(1, &[], &[write(version, role, initialization)]),
+            Err(GraphError::InvalidInitialization(version.index()))
+        );
+    }
     for channel in 0..4 {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let mut color = wgpu::Color::TRANSPARENT;
@@ -1285,9 +1855,21 @@ fn initialization_checks_resource_kind_and_every_clear_component_for_finiteness(
         }
     }
     graph
-        .add_operation(1, &[], &[clear(&image), zero(&data)])
+        .add_operation(
+            1,
+            &[],
+            &[
+                clear(&image),
+                zero(&data),
+                write(
+                    &depth,
+                    AccessRole::Attachment,
+                    Initialization::ClearDepth(1.0),
+                ),
+            ],
+        )
         .unwrap();
-    graph.set_output_group(&[image, data]).unwrap();
+    graph.set_output_group(&[image, data, depth]).unwrap();
     graph.compile().unwrap();
 }
 

@@ -10,13 +10,13 @@ use nara_render::{
     build_image_render_frame_packet,
 };
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
-    WgpuEmptyHistoryReason, WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition,
-    WgpuFeatureEncodeContext, WgpuFeatureInstance, WgpuFeaturePrepareContext, WgpuHistoryLineage,
-    WgpuHistoryTexture, WgpuHistoryView, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
-    WgpuPolicyProgram, WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature,
-    WgpuRenderPolicy, WgpuRenderProgramError, WgpuStockBindings, WgpuStockCapture, WgpuStockStages,
-    WgpuWorldColor,
+    AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+    WgpuDeviceRequirements, WgpuEmptyHistoryReason, WgpuFeatureAllocation, WgpuFeatureDeclaration,
+    WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
+    WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture, WgpuHistoryView,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyProgram, WgpuProgramTexture,
+    WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramError,
+    WgpuStockBindings, WgpuStockCapture, WgpuStockStages, WgpuWorldColor,
 };
 
 pub const VIEW_WIDTH: u32 = 16;
@@ -520,8 +520,10 @@ pub fn history_descriptor() -> WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: TextureTransfer::Linear,
-        alpha: TextureAlpha::Premultiplied,
+        interpretation: TextureInterpretation::Color {
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        },
     }
 }
 
@@ -530,7 +532,10 @@ fn final_descriptor(format: wgpu::TextureFormat) -> WgpuProgramTextureDescriptor
     descriptor.native.label = Some("independent-history-final");
     descriptor.native.size.width = WIDTH;
     descriptor.native.format = format;
-    descriptor.transfer = if format.has_srgb_suffix() {
+    let TextureInterpretation::Color { transfer, .. } = &mut descriptor.interpretation else {
+        panic!("expected a color texture");
+    };
+    *transfer = if format.has_srgb_suffix() {
         TextureTransfer::Srgb
     } else {
         TextureTransfer::Linear

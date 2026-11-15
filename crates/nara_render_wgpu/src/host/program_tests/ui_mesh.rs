@@ -302,7 +302,10 @@ fn build_mesh_program(
     let mut builder = WgpuRenderProgramBuilder::new(source, frame, GraphLimits::default()).unwrap();
     let mut descriptor = fixture::descriptor();
     descriptor.native.format = format;
-    descriptor.transfer = if format.has_srgb_suffix() {
+    let TextureInterpretation::Color { transfer, .. } = &mut descriptor.interpretation else {
+        panic!("expected a color texture");
+    };
+    *transfer = if format.has_srgb_suffix() {
         TextureTransfer::Srgb
     } else {
         TextureTransfer::Linear

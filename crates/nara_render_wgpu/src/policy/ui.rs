@@ -182,9 +182,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
-        WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderProducerId,
-        WgpuRenderProgramBuilder,
+        AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+        WgpuFeatureDefinition, WgpuProgramTexture, WgpuProgramTextureDescriptor,
+        WgpuRenderProducerId, WgpuRenderProgramBuilder,
     };
 
     // Semantic markers require no Send/Sync bounds even though the capture is retained.
@@ -444,8 +444,10 @@ mod tests {
                         | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 },
-                transfer: TextureTransfer::Linear,
-                alpha: TextureAlpha::Premultiplied,
+                interpretation: TextureInterpretation::Color {
+                    transfer: TextureTransfer::Linear,
+                    alpha: TextureAlpha::Premultiplied,
+                },
             })
             .unwrap();
         let capture = Arc::new(

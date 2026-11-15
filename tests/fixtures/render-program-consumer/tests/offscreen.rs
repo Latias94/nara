@@ -113,14 +113,13 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
         a1.scene.descriptor().native.format,
         wgpu::TextureFormat::Rgba32Float
     );
-    assert_eq!(
-        a1.scene.descriptor().transfer,
-        nara_render_wgpu::TextureTransfer::Linear
-    );
-    assert_eq!(
-        a1.scene.descriptor().alpha,
-        nara_render_wgpu::TextureAlpha::Premultiplied
-    );
+    let nara_render_wgpu::TextureInterpretation::Color { transfer, alpha } =
+        a1.scene.descriptor().interpretation
+    else {
+        panic!("expected a color texture");
+    };
+    assert_eq!(transfer, nara_render_wgpu::TextureTransfer::Linear);
+    assert_eq!(alpha, nara_render_wgpu::TextureAlpha::Premultiplied);
 
     begin(&mut host, 2);
     let a2_input = workload::build(a_source, 2, oracle::scene(1).into(), &a_features);

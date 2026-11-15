@@ -748,8 +748,8 @@ mod tests {
         render_batches_to_rgba,
     };
     use crate::{
-        AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
-        WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
+        AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
+        WgpuFeatureDefinition, WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
     };
 
     #[test]
@@ -988,8 +988,10 @@ mod tests {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             },
-            transfer: TextureTransfer::Linear,
-            alpha: TextureAlpha::Premultiplied,
+            interpretation: TextureInterpretation::Color {
+                transfer: TextureTransfer::Linear,
+                alpha: TextureAlpha::Premultiplied,
+            },
         }
     }
 

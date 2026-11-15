@@ -948,8 +948,10 @@ fn material_program_descriptor() -> crate::WgpuProgramTextureDescriptor {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: crate::TextureTransfer::Linear,
-        alpha: crate::TextureAlpha::Opaque,
+        interpretation: crate::TextureInterpretation::Color {
+            transfer: crate::TextureTransfer::Linear,
+            alpha: crate::TextureAlpha::Opaque,
+        },
     }
 }
 

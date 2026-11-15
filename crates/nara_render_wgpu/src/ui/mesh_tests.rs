@@ -141,8 +141,10 @@ pub(crate) fn descriptor() -> WgpuProgramTextureDescriptor {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
-        transfer: crate::TextureTransfer::Linear,
-        alpha: crate::TextureAlpha::Premultiplied,
+        interpretation: crate::TextureInterpretation::Color {
+            transfer: crate::TextureTransfer::Linear,
+            alpha: crate::TextureAlpha::Premultiplied,
+        },
     }
 }
 

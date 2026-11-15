@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use nara::render::{RenderImage2d, RenderImagePacket};
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureTransfer, WgpuFeatureDefinition, WgpuRenderHost,
-    WgpuRenderProgramBuilder, WgpuWorldColor,
+    AccessRole, GraphLimits, TextureInterpretation, TextureTransfer, WgpuFeatureDefinition,
+    WgpuRenderHost, WgpuRenderProgramBuilder, WgpuWorldColor,
 };
 use nara_stock_blur_effect::{Blur, BlurCapture};
 use nara_stock_composition_consumer::{CompositionPolicy, oracle, readback};
@@ -143,7 +143,10 @@ fn translucent_sprite_scene_blur_and_grade_keep_premultiplied_alpha_and_exact_tr
         let mut descriptor = source.descriptor();
         descriptor.native.label = Some("translucent-Scene-effect-format");
         descriptor.native.format = format;
-        descriptor.transfer = if format.has_srgb_suffix() {
+        let TextureInterpretation::Color { transfer, .. } = &mut descriptor.interpretation else {
+            panic!("expected a color texture");
+        };
+        *transfer = if format.has_srgb_suffix() {
             TextureTransfer::Srgb
         } else {
             TextureTransfer::Linear
