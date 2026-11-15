@@ -1540,6 +1540,20 @@ refusal and managed close. Local/native-I/O and opaque worker-gate exclusions ar
 admission, not static purity analysis. This result does not qualify the separate collision,
 affine-authoring, physical-device or cross-platform requirements.
 
+The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
+replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
+spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;
+unselected worlds retain their previous work. Fixed local boxes consume full captured affine
+geometry, and root/unit-scale dynamic poses write back before the original fixed-result barrier.
+The complete default and Parallel-enabled motion cohorts pass 40/40 and 46/46, including ten
+new transformed workflows under both admitted profiles. Source/history/Reopen, whole-batch
+refusal/repair, real contacts and retained debug output pass. Shared Hierarchy/Transform86,
+Registry15 and public Scene admission4 retain their scoped evidence. Separate DX12 hardware
+history and software joint Material/history trajectories each pass 1/1 through the new input
+role. The owning plan retains final checks, review corrections and the explicit scan/cache
+cost. This does not freeze a local-affine schema, admit parented/scaled dynamic writeback,
+select an official Physics backend or complete R4c/R10/Foundation.
+
 The input sub-unit compares global maps, seat-scoped maps and per-device callbacks. Prefer
 seat/action/context aggregation with explicit map revision and device-connection generation.
 Qualify a keyboard seat and gamepad/axis seat using same-name actions, focus/capture transfer,
