@@ -1554,6 +1554,22 @@ role. The owning plan retains final checks, review corrections and the explicit 
 cost. This does not freeze a local-affine schema, admit parented/scaled dynamic writeback,
 select an official Physics backend or complete R4c/R10/Foundation.
 
+The [visible collision continuation](2026-11-04-authored-collision-derivation-plan.md#authored-collision-and-visible-runtime-successor)
+joins the same authored domain to ordinary Scene/Sprite/stock GPU capture. The independent
+falling-box workflow uses one canonical domain Schema provider, genuine fixed-input admission,
+native writeback and independently reconstructed presentation/pixels. It also corrects a
+custom-timestep defect: native integration now captures and revalidates the original fixed
+tick's actual duration. Final Parallel-enabled motion passes 48/48 after this correction and
+provider reuse. Each full trajectory retains source edit/history/disk Reopen and first realizes
+an old CPU input after original World destruction.
+The final continuous-stream qualification at `1532cdf`/`5197e64` retains nine original-Runtime
+publications on one producer, with separate old-input and fresh-Runtime streams: eleven images
+through exactly three producers. Parallel/software3, Parallel/hardware2 and Serial/hardware2
+pass; default/Parallel ordinary CPU controls each pass 9/9. Final correctness Clippy, format,
+manifest/lock and document checks pass. The owning plan retains source/format corrections and
+offscreen scope. Ordinary games keep their game-owned movement rules; no production Physics
+default, native-window claim, performance budget, broader dynamic-pose support or full R10 follows.
+
 The input sub-unit compares global maps, seat-scoped maps and per-device callbacks. Prefer
 seat/action/context aggregation with explicit map revision and device-connection generation.
 Qualify a keyboard seat and gamepad/axis seat using same-name actions, focus/capture transfer,

@@ -1705,10 +1705,28 @@ numeric performance budgets and full R4c/R10/Foundation remain open.
 Local implementations are `79cd09e` (Registry constructor), `d934b24` (spatial input) and
 `c5b75ba` (concrete collision consumer); the owning plan retains their breaking API/data changes.
 
+The [visible authored-collision continuation](../../plans/2026-11-04-authored-collision-derivation-plan.md#visible-runtime-native-qualification)
+combines that same domain with public Scene editing and ordinary Sprite/stock capture. The domain
+now exports its original canonical Schema provider instead of each consumer claiming another
+owner, and uses the actual admitted fixed duration rather than Rapier's default step. A real
+8ms free-fall RED precedes the correction; changed/zero-clock refusal preserves the whole native
+state and repaired original input. Final default and Parallel-enabled motion pass 42/42 and
+48/48. The continuous-stream qualification at `1532cdf`/`5197e64` retains nine original-Runtime
+publications on one producer, plus independent old-input replay and fresh-Runtime streams.
+Parallel/software3, Parallel/hardware2 and Serial/hardware2 pass; each full trajectory reports
+eleven publications, exactly three producers and zero edge alternatives. Independent source/pose
+pixels distinguish actual interpolation from current-only, preserve edit/Undo/Redo/disk Reopen
+and retain old inputs/outputs after original Runtime/producer retirement. Default/Parallel
+ordinary controls pass 9/9 each, final owning correctness Clippy and formatting pass, and the
+owning plan records the final post-simplification software2/CPU9 repeats. The existing software
+CI job includes the new native controls; no remote CI execution or publication is claimed.
+These offscreen Windows/Rust1.95 results select no official Physics backend, native display
+support, foreign execution or numeric performance budget. Parented/scaled dynamic poses and
+full R4c/R10/Foundation remain open.
+
 The joint discontinuity unit adds semantic discontinuation to the existing CPU history lineage.
-Original clones
-cannot be refreshed through late admission, first preparation, target adaptation or retained
-candidate submission. Ordinary per-slot reset stays distinct. The independent two-View consumer
+Original clones cannot be refreshed through late admission, first preparation, target adaptation
+or retained candidate submission. Ordinary per-slot reset stays distinct. The independent two-View consumer
 joins actual fixed/presented Rapier motion and captured virtual shader time with selective reset,
 old-output reads and original submission custody. Its scope is offscreen Windows/DX12; general
 cross-thread publication atomicity, camera/material compatibility and rollback remain unqualified.

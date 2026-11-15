@@ -288,3 +288,233 @@ collision). `SpatialSnapshotPhase::FixedInput` requires exhaustive readers to ha
 role. The concrete fixture replaces its old component identity with canonical v1
 `fixture.motion.LocalBox` and removes the old `step` entry in favor of `step_and_writeback`;
 it provides no compatibility alias or reinterpretation of previous source bytes.
+
+## Authored Collision And Visible Runtime Successor
+
+Status: implemented at `1532cdf`/`5197e64` and locally qualified. Join the qualified affine
+collision owner and the ordinary Sprite/stock GPU path through one complete editable
+platform and falling-box workflow. At unit entry, authored collision tests observe real solver
+geometry and writeback; the existing GPU
+motion consumer uses another translation-only owner and draws its kinematic actor. Neither
+alone proves the authored collision body's visible result. The ordinary games keep their own
+bounded movement/hit rules; this workflow does not replace them or select an official backend.
+
+Compose the existing `motion-physics::authored::CollisionWorld`, public Schema/Scene, original
+fixed-input helper, Transform and ordinary Sprite capture in the independent render-policy
+consumer. Do not copy collision construction, hierarchy traversal, native solve or writeback.
+The game-owned visual adapter relates local-box center/extents to Sprite anchor/size on the same
+original entity. Include nonzero centers, a sheared parented platform and a dynamic rigid root.
+Native fixed geometry, post-solve local values, fixed/presented cuts and actual output pixels
+must describe the same original workflow. Rendering still consumes Presented; interpolated
+moving pictures are intentionally distinct from the latest solved pose and need their own
+previous/current/alpha oracle. Do not disable interpolation to hide that distinction.
+
+Use public Scene patches to change the platform and reset the drop, reject an invalid source
+edit without effects, exercise Undo/Redo and exact Save/Reopen, and observe a distinguishable
+new native contact and picture. Retain an original unprepared CPU input and published output
+across the source replacement, later ticks, original Runtime/solver close and producer retirement.
+First realize the old input after its original World is destroyed; old output pixels remain
+exact after later work. Pause/exact Step must advance the real body once without fabricating a
+Render capture; the following ordinary Extract supplies the next actual input.
+
+Expected geometry and pixel coverage derive independently from authored local numbers and
+observed native root poses, not uploaded matrices, extracted vertices or screenshot copies.
+Require exact opaque colors and alpha; any edge rounding policy must be explicit, bounded and
+independently challenged. Prove real contact with the intended platform and an independent
+rest-height calculation. Use original Runtime/native/Host retirement on success and assertion
+unwind, explicit hardware/software selection, owning CPU controls and an affected existing
+history control. Qualify only the actual profiles/platforms executed. No new GPU, input,
+Physics provider, spatial or presentation authority, registry shard or performance claim follows.
+
+### Initial Visible-Consumer Integration
+
+The new public consumer compiles on the independently locked workspace with the Parallel feature.
+It keeps original Schema/Scene materialization, the same `CollisionWorld`, genuine fixed-input
+admission, original Transform completion and stock capture. Source synchronization runs in the
+original ordinary `First` stage, including paused maintenance. An explicitly driven exact tick
+still creates no Render capture; a later ordinary Extract does. Pending source edits require that
+explicit maintenance before an exact tick, rather than temporarily resuming the game or adding
+another Runtime mutation port.
+
+The first integration exposes a real time mismatch in the concrete domain. Its native world keeps
+Rapier's default 1/60-second duration even when the App selects another fixed timestep. Red run
+`fc7a1250-b958-4c5d-9f91-819bf3f4b78d` fails 0/1: the actual 8ms free-fall velocity is
+`-0.16350001`, while this tick requires `-0.078480005`. The Runtime and native owner retire before
+the failing numeric assertion. This is a newly exercised custom-timestep defect in the fixture,
+not an upstream Rapier fault or a claim that the earlier default-duration tests failed.
+
+The original admission now captures the actual positive finite `FixedTime::delta` with its input
+stamp and revalidates the exact Duration before native effects. Only then does it set the native
+integration duration and consume the solve. It does not infer duration from frame delta or current
+policy, add a second clock, change the original fixed owner or replay a tick. Focused run
+`225accad-4ee7-4bcf-9b64-95560fa5bd36` passes 1/1, covering 8ms/32ms and paused exact Step under
+both admitted profiles. Complete Parallel-enabled motion run
+`34dc4fe4-deaa-40c3-b29b-b5e7b1cd750b` passes 48/48 with no skips. Its second new control swaps
+in genuine changed-duration and zero-delta clock values after admission while retaining a valid
+original spatial input, proves whole native-state preservation/current-debug revocation, restores
+the original clock/receipts and successfully consumes that original 8ms cut once. Independent time
+review finds no P1/P2; final integrated/native evidence remains separate.
+
+Consumer review strengthens two initial acceptance weaknesses before native execution. A small
+Presented-versus-Fixed matrix difference can cover identical pixel centers, so the real trajectory
+must select a bounded moving sample whose interpolated and current-only allowed palettes have
+a disjoint pixel. The actual readback must match interpolation and reject the current-only oracle.
+Paused source-edit and Undo/Redo maintenance frames must validate their new source pose and
+Presented geometry before exact Step, while native debug still retains the previous unconsumed
+physics cut. Later successful steps cannot substitute for those intermediate assertions.
+
+The first manifest enabled the facade's broad `serde` feature merely to read a Scene file, adding
+unneeded UI/font/layout dependency closure. The consumer instead enables `nara_scene/serde`
+directly and keeps the original facade feature selection. Its first ordinary test build is
+intentionally stopped before execution to apply that dependency correction. This is not passing
+CPU/native evidence. Final lock review and tests must cover the narrower actual composition.
+
+The second genuine consumer also exposes duplicated Schema ownership. Both wrappers register
+the identical `CollisionDefinition` and native callback, but the first render wrapper assigns
+them another owner/provider lineage. That can run in separate Apps yet cannot validate the
+original exact receipts and can conflict in a known-owner composition. The domain now exports
+`COLLISION_SCHEMA_PROVIDER_ID` and `COLLISION_SCHEMA_PROVIDER`, retaining the original
+`fixture.motion.collision-authoring`, `fixture.motion.collision-authoring.schema` and
+`fixture.motion.collision-native` v1 identities. Both consumers register that same original
+definition; their diagnostic Plugin IDs, Scene selection, schedules, drawing and close integration
+remain consumer-owned. The original motion registry validates the shared provider snapshot, and
+the missing-codec/repaired-binding test keeps its deliberately distinct binding and original
+candidate. This is reuse of the concrete domain, not a new common Physics provider or permission
+for two solvers to write the same entities.
+
+The initial narrowed consumer run `00ab4c99-936a-48d3-98bd-ae782a16cb1e` passes 9/9, leaving two
+native cases unselected. It executes eight independent math/negative controls and the actual
+Runtime's paused source-edit/maintenance/exact-Step/Undo/Redo path before any GPU owner exists.
+Its release build takes 10m39s separately from 0.244s test execution. This checkpoint precedes the
+canonical provider move and final restored dependency edges; final qualification must use those
+actual sources. Four incidental resolver-selected Windows dependency edges are restored to their
+previous allowed versions after inspecting their actual declared ranges. Only required Scene
+serialization, temporary-file and domain-authoring dependencies remain; no unrelated package
+version changes are selected.
+
+After the canonical-provider move and restored dependency edges, ordinary consumer run
+`3b831fff-a53a-4c07-ac8d-c70ec2984bbf` again passes 9/9, with two native cases unselected. The
+first explicit DX12 software run `1d4c1397-af13-4046-9849-407bf32f48fd` passes the actual
+acceptance-panic cleanup control and original joint Material/history trajectory, but the full
+new workflow fails at disk Reopen. Its fixture uses direct serde struct serialization instead
+of Scene's actual file envelope; the ordinary candidate parser correctly rejects the naked
+`placements` field. Use `SceneDocument::to_json_string`, retain actual disk bytes and the same
+candidate/Schema publication checks, and remove the unnecessary direct JSON dependency. No
+parser relaxation or format compatibility path is added. The earlier readback mismatch printed
+by that trajectory is the intentional current-only negative oracle, caught before continuing;
+it is distinct from the final Reopen failure. Source edit/contact/pixel progress in a failed
+trajectory is not complete native qualification.
+
+### Visible Runtime Native Qualification
+
+The corrected complete DX12 software run `31a15cf8-a24c-4879-9fb0-7ed3ccfba677` passes 3/3:
+the full authored collision workflow, its actual acceptance-panic cleanup control and the
+unchanged joint Material/history trajectory. It explicitly uses Microsoft Basic Render Driver
+with forced fallback. RTX4090/DX12 hardware run `9c202b2f-30b3-41f8-a9d4-86c47b36ce6a` then
+passes both new native tests 2/2 with forced fallback disabled. The unrelated ordinary CPU case
+is outside each ignored-only selection. These runs use Windows x64, Rust1.95, the Parallel
+profile, locked offline release, the original target, one build job and serial nextest.
+
+Both full trajectories publish eleven original images. Each image compares all 128x80 pixels
+against source-field geometry and actual native-pose endpoints, independently reconstructed in
+f64. Opaque alpha, body/platform/clear colors remain exact. Although the oracle admits at most
+eight tightly bounded geometric-edge candidates, both actual runs report zero candidates and
+zero alternatives. The real moving readback rejects the current-only expectation outside every
+edge allowance while matching the interpolated picture; its caught negative panic is expected
+evidence rather than a native failure.
+
+Real contacts and independent rest heights pass before and after the source platform becomes
+reflected/sheared with a different height. Ordinary patches, invalid-patch preservation,
+Undo/Redo and actual enveloped disk Save/Reopen retain exact source values. The same collider
+entity supplies ordinary Sprite geometry through its local center/anchor mapping. An original
+unprepared CPU input first realizes after its original World and native bodies are destroyed;
+published old outputs remain exact through later work and producer retirement. A fresh Runtime
+from the reopened source reaches the same settled image. Original prefix, World-drop,
+zero-native-body and zero-Host-resource/metadata/fault checks pass. The injected acceptance
+panic occurs only after a real publication, then original Runtime/solver/producers/Host retire
+before its original payload is checked. These are offscreen execution/readback results, not
+native-window display, scanout, a Physics-on-GPU or performance measurement claim.
+
+The final canonical-provider motion cohorts pass 48/48 in Parallel-enabled run
+`01eb6036-4c71-4c71-a292-8c630c34d508` and 42/42 in default run
+`3ad1beec-c495-42e6-9055-c8c0aba108e1`, both without skips. These results follow the export of
+the original provider and preserve missing-codec candidate repair plus all original motion,
+prediction/PCM, source/history, transformed-contact and managed retirement controls. The first
+canonical integration compile had one missing `PersistentComponentProvider` import in the
+consumer's source-record encoder; restoring the required trait import fixes that mechanical
+error without altering codec behavior or test assertions.
+
+Final adapter inspection strengthens the native stream trajectory after that passing checkpoint.
+The original version creates a producer for each image, which proves immutable captures and
+retirement but does not challenge continued target/source updates through one ordinary live
+stream. Retain one original producer across the running Runtime, source edits and Undo/Redo;
+create separate streams only for late old-input replay and the reopened fresh Runtime. Require
+exactly three producers for the eleven publications and retain every original pixel, prefix,
+history and cleanup assertion. The earlier native pass remains its producer-per-image scope;
+the strengthened continuous-stream source needs its own affected native rerun.
+
+Default-feature ordinary visible-consumer run `f97e2d73-0c31-4f66-bfeb-f3bcba3ddaff` passes
+9/9 with two native cases unselected. It executes the same real Runtime paused edit/history/
+exact-Step and independent math controls under Serial, separately from the Parallel 9/9 run.
+The 10m49s release build is recorded separately from 0.322s test execution. No throughput
+conclusion follows from compiler time or these short correctness cohorts.
+
+### Final Continuous-Stream Qualification
+
+The strengthened final source passes the complete same-stream workflow and acceptance-panic
+control in these explicit native selections:
+
+| Profile / adapter | Result | Nextest run |
+| --- | --- | --- |
+| Parallel / DX12 Microsoft Basic Render Driver, including original joint history | 3/3; one ordinary CPU case outside ignored selection | `93537b0a-41d0-4f4e-9cff-d27d73e97ab8` |
+| Parallel / DX12 RTX4090 | 2/2; one ordinary CPU case outside ignored selection | `04a69f79-4228-4204-9614-5f79a448a685` |
+| Serial / DX12 RTX4090 | 2/2; one ordinary CPU case outside ignored selection | `559b07a5-6fda-4ff9-8ac7-b37b118a94fa` |
+
+Every full trajectory records eleven publications through exactly three producers: nine
+successive original-Runtime frames share one producer, late original input replay uses a second,
+and the reopened fresh Runtime uses a third. All pixel, actual contact, source/history, exact
+Step, original-prefix and retirement assertions remain unchanged. All three runs report zero
+edge candidates and alternatives. The independent bounded adapter review finds no P1/P2 in
+continued stream/target routing or its success/panic cleanup. The earlier per-image producer
+results remain historical checkpoints, not substitutes for this stronger execution.
+
+Release/locked/offline correctness Clippy passes for the entire independent motion consumer with
+`production-parallel` and all targets, and for all targets of the independent render-policy
+workspace with that feature. Existing non-correctness warnings remain visible, including
+target-specific unused test helpers. The normal/default, owning and actual GPU controls above
+are separate from compiler checks; no unrelated whole-Editor or unchanged framework matrix is
+rerun. Seven research/implementation/review agents close at the end of the unit. CI adds the
+two ignored authored-collision cases to the existing explicit DX12 software job; ordinary CPU
+cases already run in the independent render consumer job. Local configuration changes do not
+claim remote CI execution or publication.
+
+Run these from the root with Rust1.95, one build job and the original absolute root target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --locked --offline --release -p motion-execution-consumer --features production-parallel --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --offline --release --features production-parallel --test authored_collision_math --test authored_collision --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --offline --release --features production-parallel --test authored_collision --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
+
+The last command requires explicit `WGPU_BACKEND=dx12` and `NARA_WGPU_FORCE_FALLBACK=1` for the
+software cohort; use `0` for the requested hardware and omit `production-parallel` for Serial.
+A missing/wrong adapter fails. These are offscreen Windows execution and retained-output
+correctness results. They do not qualify native window presentation, physical controller ingress,
+foreign execution, bit-exact replay, dynamic parent/scale support, another shape family, official
+backend selection, numerical performance budgets or all R4c/R10/Foundation. Editor/Dialogue
+product work remains paused.
+
+After the final mechanical simplification of direct returns and exact color membership checks,
+Parallel CPU run `4b4d037f-baf1-4a2f-a3e6-6e1cc9341108` passes 9/9 and the affected DX12
+software rerun `2f0ad7ff-5508-4073-8d06-6bef2086a92c` passes both authored native controls 2/2.
+The original same-stream eleven-publication/three-producer facts and zero edge alternatives
+remain. Final render all-target correctness Clippy passes again. Root and both independent
+workspaces pass format checks; added local links/fragments, TOML/locks, CI YAML syntax and Git
+whitespace checks pass. The actual lock retains every original package version/source and all
+previous dependency edges, adding only required authoring/Scene serialization/temporary-file
+closure. There are no UI/font/layout additions.
+
+Local commits `1532cdf` (original domain Schema/time) and `5197e64` (visible consumer/CI) retain
+their coherent ownership and qualification scopes. There is no remote publication, main/branch
+movement or change to paused UI/Dialogue work. The selected visible-runtime successor is closed;
+the full Foundation Goal and remaining R4c/R10/R12 requirements stay active.
