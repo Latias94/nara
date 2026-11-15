@@ -199,3 +199,20 @@ oracle models the imported sRGB Images, linear output and alpha convention; see 
 [Material guide](../../../docs/guides/materials.md#live-source-updates-and-gpu-execution).
 No OS window, scanout, device reconstruction, foreign native execution or numerical
 performance result is implied by this offscreen test.
+
+The `native-source-watch-desktop` feature adds the ordinary main-thread
+`source_watching_window` example. It runs the same eight explicit commits and three refusals
+through one original desktop Runtime/window/GPU owner, pairing sealed copied content facts
+with real present receipts and exact completion telemetry. It retains no old CPU capture audit
+trail and does not take the native consumer's batch. Run it with `WGPU_BACKEND=vulkan` or
+`dx12` and explicit `NARA_WGPU_FORCE_FALLBACK=0` for hardware (`1` for a software control):
+
+```text
+cargo +1.95.0 run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --features native-source-watch-desktop --example source_watching_window
+```
+
+The example edits only its own temporary source project and closes its original owners before
+success. Use a process deadline for automated execution; its internal poll deadlines remain
+cooperative. It verifies present/complete/retirement identity, while the separate offscreen
+workflow owns actual pixel comparisons and retained-input replay. See the
+[windowed control guide](../../../docs/guides/materials.md#windowed-source-update-control).

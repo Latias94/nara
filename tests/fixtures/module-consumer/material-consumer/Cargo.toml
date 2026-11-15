@@ -8,6 +8,7 @@ publish = false
 [features]
 native-source-watch = ["nara/asset-watch"]
 native-source-watch-gpu = ["native-source-watch", "nara/render-wgpu", "dep:wgpu"]
+native-source-watch-desktop = ["native-source-watch-gpu", "nara/desktop-winit"]
 
 [dependencies]
 nara_asset = { path = "../../../../crates/nara_asset" }
@@ -24,3 +25,7 @@ nara = { path = "../../../..", default-features = false, features = ["tooling", 
 [[test]]
 name = "source_watching"
 required-features = ["native-source-watch"]
+
+[[example]]
+name = "source_watching_window"
+required-features = ["native-source-watch-desktop"]

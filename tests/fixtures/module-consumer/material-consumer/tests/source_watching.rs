@@ -29,6 +29,13 @@ use nara_engine::{
 };
 
 #[cfg(feature = "native-source-watch-gpu")]
+#[path = "source_watching/captured.rs"]
+mod captured;
+#[cfg(feature = "native-source-watch-desktop")]
+#[allow(dead_code)]
+#[path = "source_watching/desktop.rs"]
+pub(crate) mod desktop;
+#[cfg(feature = "native-source-watch-gpu")]
 #[path = "source_watching/gpu.rs"]
 mod gpu;
 #[path = "source_updates/observations.rs"]

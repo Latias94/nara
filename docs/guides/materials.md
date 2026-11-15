@@ -375,6 +375,47 @@ Missing adapters and timeouts fail this ignored test. This is live offscreen sou
 evidence, not OS-window presentation, scanout, device reconstruction or a numerical edit-cost
 budget. The CPU-only `native-source-watch` feature remains independently usable.
 
+## Windowed Source Update Control
+
+The ordinary `source_watching_window` example drives the same physical edits through a source
+`DesktopRun` on its native main thread. It creates one normal 320-by-240 window, configures a
+game-owned Camera/Sprite and leaves batch consumption with the original window Publish owner.
+A `WgpuPolicyFrameReader` inspects the sealed stock input before Publish and retains only copied
+frame/content facts. The game waits for a matching actual presentation receipt before advancing
+each representative committed/refused state. No GPU Host or native resource is stored in World.
+
+Select the original target directory, one Cargo job, `WGPU_BACKEND=vulkan` or `dx12`, and explicit
+`NARA_WGPU_FORCE_FALLBACK=0` for a hardware run (`1` is a separately labeled software control):
+
+```text
+cargo +1.95.0 run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --features native-source-watch-desktop --example source_watching_window
+```
+
+The example creates and edits its own temporary source project. It does not edit an existing
+game or require Editor/Dialogue UI. It joins each receipt's Runtime, App frame, original render
+capture, target/surface incarnation and backend/device epoch with the exact captured Material,
+Shader and Image facts. After the final Done state actually presents, the existing owner seals
+bounded completion telemetry before exit. The recorded duration is App-frame-start to original
+GPU completion; it is neither GPU-only duration nor source-edit latency. Final checks require
+watcher join before World destruction, original native target/provider/surface retirement and
+one-time recovery of the original physical event loop.
+
+Deadlines are cooperative and cannot interrupt synchronous source admission or a graphics-driver
+call. Automated execution should also bound and reap the ordinary example process. A deadline,
+missing adapter or incomplete retirement is a failure. These receipts establish original surface
+submission/present calls, not window-pixel equality, human visibility or physical scanout. The
+separate offscreen control above retains the fixed-tolerance pixel and old-input replay evidence.
+Windows native notifications still use the documented conservative full-rescan route.
+
+For fixture failure controls, set `NARA_SOURCE_WINDOW_FAULT` to `update`, `capture` or `observer`.
+Each injects a callback panic after earlier states have actually presented. The fixture retains
+the original panic within its callback boundary, closes the original desktop owners, verifies
+the native target and watcher shutdown, then resumes the panic. Expected exit code 101 is only
+qualified when the `native source fault cleanup` marker also reports successful physical loop,
+native target and join-before-World-drop checks. An abort, timeout or nonzero exit alone is not
+cleanup evidence. This contains the fixture's assertions; production engine panic policy is
+unchanged.
+
 ## Independent Delivery Controls
 
 The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact

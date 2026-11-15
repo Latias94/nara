@@ -113,26 +113,7 @@ fn capture(world: &mut World) {
     assert_eq!((extent.width, extent.height), (WIDTH, HEIGHT));
     let workflow = world.resource::<Workflow>().clone();
     let current = workflow.current.as_ref().unwrap();
-    let stock = input.captured::<WgpuStockPolicy>().unwrap();
-    let batches = stock.sprite_batches().unwrap().as_slice();
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].instances.len(), 1);
-    let material = batches[0].material_extension.as_ref().unwrap();
-    assert_eq!(
-        material.binding.generation().shader().digest(),
-        current.material.shader
-    );
-    assert_eq!(material.binding.uniform_bytes(), current.uniform);
-    assert_eq!(material.textures.len(), 1);
-    assert_eq!(
-        material.textures[0].1.resource().pixels(),
-        current.images[&current.material.texture].pixels,
-    );
-    let indices = &current.images[&indices_product()].pixels;
-    assert_eq!(
-        batches[0].image.as_ref().unwrap().resource().pixels(),
-        indices
-    );
+    let pixels = captured::material(&input, current);
     let gain = [1.0, 0.75, 0.5, 0.25, 0.125]
         .into_iter()
         .find(|gain| {
@@ -144,15 +125,7 @@ fn capture(world: &mut World) {
             current.material.inputs[0].1 == source
         })
         .expect("the original captured source must select one fixture gain");
-    let expected = expected_center(
-        gain,
-        indices.as_slice().try_into().unwrap(),
-        current.images[&current.material.texture]
-            .pixels
-            .as_slice()
-            .try_into()
-            .unwrap(),
-    );
+    let expected = expected_center(gain, pixels.indices, pixels.palette);
     let mut latest = world.resource_mut::<Latest>();
     if let Some(previous) = &latest.sample {
         assert!(previous.input.packet().frame_index() < input.packet().frame_index());
