@@ -18,6 +18,17 @@ Proposed; these workflows do not qualify a platform beyond their recorded eviden
 
 ## Definitions, Instances And Captures
 
+Texture descriptors choose `TextureInterpretation::Color { transfer, alpha }` or
+`TextureInterpretation::Depth`. Color preserves the existing explicit sampling and alpha facts;
+Depth has no RGB transfer or alpha and currently admits only `Depth32Float`. Both use the same
+typed texture handles, candidate versions, outputs and immutable imports. Use `clear_depth`
+with a finite value in `[0, 1]` for whole depth initialization, or `preserve` for an exact
+compatible predecessor copy. A color clear cannot initialize depth, and a depth clear cannot
+initialize color. Original graph usages and single-writer rules still apply. Policy final images,
+Canvas, UI and ordinary Material image inputs require Color interpretation. The
+[depth/unit successor](../plans/2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor)
+records the current implementation and qualification scope.
+
 Implement `WgpuRenderFeature` in the native adapter package. Its immutable definition pairs one
 `Capture` type with its exact adapter. `State` belongs to one instance and device epoch,
 `Prepared` owns one operation's native work, and `Report` returns typed evidence after successful
@@ -171,17 +182,29 @@ Reads and preservation create dependencies; unique operation keys only break rea
 Declare every access even when a capture already contains the port. Foreign-candidate ports,
 missing/duplicate writers, cycles, feedback and incompatible access reject before native work.
 
-Writers select whole-texture clear, whole-buffer zero or an exact predecessor copy into distinct
-storage. Copy initialization may change the destination semantic marker while preserving physical
-shape and texture transfer/alpha. It cannot overwrite or relabel the predecessor. Shared attachment
-passes load initialized contents and Store the result. Scissor does not narrow initialization.
-Initial shared scope is whole single-sample, single-mip 2D baseline uncompressed color textures
-and whole four-byte-aligned unmapped buffers. Unsupported scopes, formats, usages and MSAA refuse.
+Writers select whole-texture color/depth clear, whole-buffer zero or an exact predecessor copy
+into distinct storage. Copy initialization may change the destination semantic marker while
+preserving physical shape and texture interpretation. It cannot overwrite or relabel the
+predecessor. Shared attachment passes load initialized contents and Store the result. Scissor
+does not narrow initialization. Shared scope is whole single-sample, single-mip 2D baseline
+uncompressed color textures, explicitly interpreted `Depth32Float` and whole four-byte-aligned
+unmapped buffers. Unsupported scopes, formats, usages and MSAA refuse.
 
 `finish(&[port.output(), ...])` compiles one complete group. Retrieve exact results with
 `outputs.texture(&port)`, `outputs.buffer(&port)` and `outputs.report(key, &original_instance)`.
 Output order does not retarget resource identity. Typed reports describe encoded work; they grant
 no presentation or UI-completion authority.
+
+Native preparation can fail after an earlier Feature enqueued uploads. Observe
+`host.producer_submission_prefix(&producer)` immediately after the attempt to retain that
+producer's exact original Queue prefix without closing its command route. It also describes
+failed attempts and does not prove output publication. Poll the retained clone for physical
+cleanup before relying on released allocation bytes; another attempt replaces only the Host's
+latest observation. Pure admission or preflight refusal can leave an older observation unchanged;
+this getter reports the latest bound prefix rather than assigning a prefix to every refusal.
+Pure preflight refusal can still issue no native work, while later failure
+keeps actual issued/encoded work statistics and original custody. Producer retirement retains
+its existing separate close behavior.
 
 ## Temporal Candidates And Exact Retry
 

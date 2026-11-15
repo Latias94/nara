@@ -27,12 +27,18 @@ WGPU types directly; a parallel descriptor family or new RHI is unnecessary.
 
 Each candidate owns its resource handles. Texture and buffer versions retain an unforgeable
 candidate identity and a local index, checked before indexing. Native resource descriptions keep
-exact WGPU descriptors plus explicit color/alpha interpretation and a code-owned semantic type.
+exact WGPU descriptors plus explicit Color or Depth interpretation and a code-owned semantic type.
+Color retains its transfer and alpha facts. Depth carries neither and admits only `Depth32Float`
+in the current bounded scope; a depth texture cannot become a policy's final color image.
 The declared usage flags limit graph access; physical storage must contain those usages and may
 support additional Host operations. That superset grants no additional graph access. Extent,
 format, subresources, semantic identity and logical descriptor agreement remain exact.
 The first implementation tracks whole single-sample, single-mip 2D textures and whole aligned,
-unmapped buffers. Other ranges, multisampling and resolves reject at admission.
+unmapped buffers. Depth clear is a distinct finite `[0, 1]` initialization with Store, independent
+of an operation's viewport, or an exact compatible predecessor copy. Color clear and depth clear
+are not interchangeable. Other ranges, other depth formats, stencil, multisampling and resolves reject
+at admission. See the [depth/unit consumer](../plans/2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor)
+for implementation and execution status.
 
 Resource declarations precede or follow operation declarations without changing meaning. Every
 local version has exactly one writer. Reads and preservation copies create dependency edges;

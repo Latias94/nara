@@ -158,8 +158,13 @@ cross-owner composition work; this subsection does not promote that entire propo
   whole-resource initialization and a stored postcondition. Read and preservation edges determine
   execution; stable operation keys only break ready ties. Reject foreign handles, duplicate or
   missing writers, cycles, feedback, invalid usages and incompatible semantic reads before native
-  work. Initial shared scope is whole single-sample, single-mip 2D color textures and aligned
-  unmapped buffers. Unsupported ranges or resolves refuse explicitly.
+  work. Shared scope is whole single-sample, single-mip 2D color textures, explicitly interpreted
+  `Depth32Float` textures and aligned unmapped buffers. Unsupported ranges or resolves refuse
+  explicitly. Depth does not carry RGB transfer or alpha interpretation. Whole depth initialization
+  uses a finite `[0, 1]` clear with Store or an exact compatible predecessor copy; a color clear
+  cannot initialize depth. Stencil, other depth formats and multisampling remain outside this
+  bounded extension. Implementation and qualification are tracked in the
+  [depth/unit successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor).
 - Rust semantic marker types distinguish equal-shaped Scene/composite textures and raw/normalized
   buffers. A compatible explicit initialization copy may create a different semantic destination;
   that copy does not relabel its immutable predecessor or prove a shader conversion.

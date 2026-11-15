@@ -8,10 +8,11 @@ The declaration/Shader/native prerequisite is implemented at `899d64b`. The sele
 source/processed Material product workflow is implemented and qualified below. Native Scene
 watching, live external GPU execution and ordinary windowed source updates are also qualified
 below, the latter at `177684e`. The captured View/time successor below is now implemented and
-qualified for its ordinary Material consumer; broader View/history compatibility and numerical
-production costs remain open. Live Editor Material/Shader hydration remains paused with the Editor work. The
-graph-shared texture workflow is implemented and qualified below; complete R9b and the
-foundation Goal are not finished.
+qualified for its ordinary Material consumer. The joint Material/history and bounded depth/unit
+successors below are also qualified for their named consumers; broader View/history policy,
+3D authoring and numerical production costs remain open. Live Editor Material/Shader hydration
+remains paused with the Editor work. The graph-shared texture workflow is implemented and
+qualified below; complete R9b and the foundation Goal are not finished.
 The persistent implementation/migration is `2535b46`; independent/public and real executable
 delivery consumers are `d091151`. Both are local commits on the original foundation branch.
 
@@ -1101,6 +1102,156 @@ engine Rust, dependency version or lockfile changes are needed for this joint co
 CI configuration is local and has not been run remotely. Foreign native execution, generic
 compatibility classification, TAA/reprojection, cross-device temporal replay, numeric budgets
 and full R9/R12/Foundation remain open; Editor/Dialogue work stays paused.
+
+## Depth And Spatial Unit Successor
+
+Status: implemented at `199a39d`, with the independent consumer at `d7e7c54` and local
+qualification below. Starting source `2c665b3` explicitly refuses all depth formats and only
+admits color clears for whole-texture initialization. This successor extends the original
+finite program, Feature, output, producer and submission owners to complete R9's bounded
+depth/unit consumer. It does not hide depth inside a Feature or describe it as linear
+premultiplied color.
+
+Replace the shared descriptor's unconditional transfer/alpha fields with an explicit
+`TextureInterpretation`: Color retains both original facts; Depth has neither. Migrate existing
+color consumers directly, without aliases or duplicate depth handle/output families. Admit only
+whole single-mip, single-sample `Depth32Float` with exact original interpretation, usages and
+budget accounting. Depth clear must be finite and within `[0, 1]`; color/depth clear mismatches,
+unsupported formats, storage usage, incompatible copies and undeclared access refuse before
+native work. Clear the whole attachment independently of the Feature viewport and Store it.
+Preserve typed immutable imports, distinct predecessor storage and original physical custody.
+Color-only final images, UI, Canvas and Material inputs must refuse depth explicitly.
+
+An independently locked ordinary Feature consumer draws overlapping 3D geometry through the
+actual native depth attachment, then consumes the declared depth version in another operation.
+Its immutable capture states the camera projection and spatial-unit conversion. An independent
+CPU oracle derives expected projection, occlusion and depth from that authored geometry rather
+than copying GPU results or the uploaded matrix. Equivalent meter/centimeter inputs must agree;
+changed camera/geometry must produce a distinguishable successor while old color/depth outputs
+remain exact. Exercise imported depth, compatible preservation, a real refusal, original-prefix
+observations and retained output reads after producer retirement. A 2D packet target does not
+pretend to contain an engine Camera3d or a new spatial owner.
+
+The consumer explicitly selects column-vector projection with WGSL column-major matrix upload,
+Y-up and camera-forward +Z, a finite perspective near/far interval, WGPU clip depth `[0, 1]`,
+clear depth 1 and `Less` comparison. Culling is disabled so draw-order reversal tests depth
+without adding a winding policy. Authored coordinates use a finite positive meters-per-unit
+conversion before the captured meter-space camera projection. These are local tracer facts,
+not the engine's future global 3D handedness, import-unit or reverse-Z contract. The oracle uses
+independent ray/plane equations at physical pixel centers and checks untouched clear regions.
+
+Pinned source comparison keeps attachment ownership separate from projection policy. Bevy
+`03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_core_pipeline/src/core_3d/mod.rs`, selects `Depth32Float` and constructs the View
+depth texture from the Camera's explicit clear/load choice. Its
+`crates/bevy_camera/src/components.rs` defaults that clear to 0 for reverse-Z. Godot
+`7a37606a433c0e7735525037cdf774f043146a21`, `core/math/projection.cpp`, separately builds
+perspective and depth correction, including clip-range remapping and reverse-Z. Nara's shared
+texture declaration and finite clear do not select a comparison function or projection; those
+stay with the concrete captured Feature. This tracer's ordinary finite projection therefore
+does not freeze future engine-wide reverse-Z, import units or Camera3d design.
+
+Set correctness bounds at entry: finite depth/color samples within `1e-6` of the independent
+reference, exact clear/retained-copy bytes where applicable, and unambiguous pixel-center
+coverage. Run CPU graph/refusal controls, the native consumer on explicit DX12 and Vulkan
+hardware plus a separately reported DX12 software adapter, then affected color/program/history
+regressions and appropriate checks serially. Missing requested adapters fail. Report actual
+execution and corrections; these fixture facts do not select production performance budgets.
+No general 3D renderer, Camera3d authoring, stencil, MSAA, reverse-Z policy, universal spatial-unit
+type, second Queue or native owner is introduced. Editor/Dialogue remains paused and full
+R8/R9/R12/Foundation stays open.
+
+### Depth Implementation And Review
+
+The original graph, texture port, immutable output/import and native initialization owners now
+carry explicit Color/Depth interpretation. All existing color descriptors migrate directly;
+there is no legacy field alias, second depth handle family or new GPU owner. The original WGPU
+pin remains `cddb2f5d80dc0009b2ef6767635140cacf90a007`. Its `Depth32Float` uses four bytes
+per texel and permits whole texture-to-texture copies with the default All aspect, including
+`COPY_DST`; buffer upload restrictions do not prohibit that preservation path. Sampling uses
+`TextureSampleType::Depth` and `texture_depth_2d`, without an optional filtering feature.
+The consumer resolves sampled depth to float color for readback, so it does not claim the
+separate downlevel depth-to-buffer capability.
+
+Production all-feature library compilation passes in 12.90 seconds. The owning CPU selection
+passes **131/131**, with 378 outside the selection, run
+`bc031670-6818-4119-8dee-05600d60e1ad` (15.132 seconds after a 1m51s build). It includes
+depth interpretation/format/usage refusal, finite clear admission with error atomicity, exact
+16,384-byte depth budget, typed predecessor/read matching, original allocation rollback and
+existing policy/UI/Canvas controls. Independent production review finds no P1/P2; actual
+native depth execution remains separate from those source and CPU results.
+
+The first standalone consumer compilation exposes the pinned WGPU's optional
+`depth_write_enabled` and `depth_compare` fields; the Feature now supplies `Some(true)` and
+`Some(Less)`. Independent testing review also identifies two meaningful gaps before native
+qualification. The second raster pass originally redraws equal-depth geometry and changes no
+pixels, so omitted encoding could pass. It now writes a closer green plane inside the smaller
+scissor. Separate independent references require precisely 64 changed color/depth pixels,
+unchanged original outputs, exact bytes outside that scissor and matching original/imported
+preserved depth resolves. A further capacity boundary allows the first raster preparation and
+its queued uploads before the second allocation refuses. Review of the actual native owner
+corrects the initial zero-work assumption: `upload_buffer` calls the original Queue immediately,
+and the Host binds even failed preparation to its original submitted prefix. The consumer now
+checks each refusal's exact upload/encoded-copy increments, observes that producer's original
+prefix without closing it, settles physical custody and checks released bytes before retry.
+Successful work is checked as an increment over those retained failure facts. The Host's new
+read-only `producer_submission_prefix` observation grants neither publication success nor a
+new submit/retirement owner. The CPU reference uses the existing fixed tolerance for ordinary
+f64 rounding at the closer plane; it does not widen GPU pixel tolerances.
+The following standalone and native results qualify this selected successor.
+
+The stable standalone CPU selection passes **11/11**, with one native case ignored, run
+`8f2d2054-cce5-4205-bbc0-9196e14aad44` (0.998 seconds after a 29.03-second build).
+It includes all five original candidate controls and six new public depth/independent-reference
+controls. An intermediate compilation reads the library before the new prefix observation was
+added and reports a missing method; the stable rerun recompiles both sides. The earlier owner
+selection and this independently locked selection are separate evidence, not an aggregate.
+Bounded production and testing rereviews close the concrete findings without widening the
+fixed `1e-6` tolerance or changing the original Queue/submission owner.
+
+The complete native trajectory passes on Windows 11 / Rust 1.95.0 with DX12 RTX 4090 in
+`f561260f-fcaf-49c5-b2fc-a9928734e2d2` (1/1, 1.155 seconds after a 9.76-second build)
+and Vulkan RTX 4090 in `fff1d92d-ca36-4711-b4b6-1224f71d0b27` (1/1, 0.926 seconds).
+The explicitly requested DX12 Microsoft Basic Render Driver is observed as a CPU adapter;
+the new depth trajectory and all three original color/buffer native program controls pass
+**4/4** in `a99d8e94-1035-4159-944d-aca26038831b` (3.687 seconds after a 6.86-second build).
+Each depth run completes six draw groups, eight imported readbacks, two post-upload capacity
+refusals and exact 172,032-byte graph payloads. Eighteen prefix observations include retirement
+clones rather than eighteen distinct submissions. Retained bytes and cleanup faults finish at
+zero. Hardware/software logs retain actual adapter facts, and missing requested adapters fail.
+These are full-pixel/depth and lifecycle facts for this bounded tracer, not production costs,
+window scanout, general 3D authoring or qualification of foreign native platforms.
+
+The final all-feature owning default selection passes **442/442**, with 67 ignored cases,
+run `54f12db0-d13f-4bbc-af02-77eb7cc8c9cc` (153.127 seconds after a 13m21s build).
+This selection includes actual existing GPU glyph/image/View controls, so it is not reported
+as pure CPU coverage. The subsequent native program/Material selection initially passes
+20/21 in `30bff8ea-4f29-44d2-a51f-8f3b4d18de47`. Its failure occurs in the fixture's
+premise before drawing: 20,000 batches no longer exceed the fixed 64 MiB modeled metadata
+envelope. The test now derives a crossing input from actual per-batch metadata cost and keeps
+the original engine ceiling and refusal-before-native-budget assertions. The qualified rerun
+passes **21/21** in `146f83e2-5e0d-4720-99b7-dc0a7e9e6e5b` (18.029 seconds after a
+1m28s build). Its 21,789 batches model 67,110,480 bytes against the unchanged 67,108,864-byte
+limit; fallback texture, instance charges and publication watermark remain untouched on refusal.
+No production metadata limit or allocation policy is relaxed. These selections overlap the
+earlier owner checks and are not additive. Independent History/caller/check closure follows.
+
+The affected independently locked History, joint Material/motion and ordinary Material View/time
+selection passes **9/9** on DX12 RTX 4090 in `e08e9fd9-7f7b-495a-92e5-409faf3ebf1c`
+(12.201 seconds after an 8m36s build). It preserves the seven original History cases and both
+ordinary Material trajectories. Final standalone CPU checks, including absent/foreign producer
+prefix observations, pass **11/11** in `dcf3f2bf-d1aa-4140-a423-378840dc8eff`
+(1.007 seconds after a 22.07-second build). Owning all-target/all-feature correctness Clippy
+and standalone all-target correctness Clippy pass. The six direct caller closures also pass
+locked/offline release all-target compilation: render-policy, render-composition, stock-composition,
+Material source watching with its GPU feature, native UI Host upload and the desktop Two-Level
+Game. The independent typed-port compile-fail doctests pass 2/2. Root/standalone final format,
+other caller formatting, TOML/lock and CI YAML parsing, document links/headings and whitespace
+checks pass. No dependency, lockfile, vendor or paused GPUI/Dialogue changes are included.
+Eight bounded research, implementation and review tasks have ended; concrete findings and
+the native fixture premise correction are closed. CI configuration is local only and was not
+run remotely. This closes the bounded depth/unit successor while full R8/R9/R12/Foundation,
+general 3D authoring, foreign native execution and numerical production budgets remain open.
 
 ## Live Native Source Updates Through External GPU Execution
 

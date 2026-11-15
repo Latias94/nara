@@ -1304,6 +1304,22 @@ checks pass. These overlapping selections are not additive. This completes the n
 consumer, without automatic compatibility classification, general TAA/reprojection, foreign
 native execution or numerical production budgets. Full R9/R12/Foundation remains active.
 
+The [bounded depth/unit successor](2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor)
+at `199a39d`, with independent consumer `d7e7c54`, extends the existing program with explicit
+Color/Depth interpretation and whole `Depth32Float` initialization. Depth retains the same
+nominal typed ports, immutable imports, distinct Preserve storage and original submission
+custody; color-only final images, Canvas and Material inputs refuse it. The independent
+consumer verifies meter/centimeter projection, both draw orders, a distinguishable preserved
+subregion, original late capture and post-retirement color/depth reads against an independent
+full-pixel reference. Failed preparation after uploads retains actual work and an observable
+original prefix, cleans it physically and permits same-input retry. DX12/Vulkan RTX 4090 and
+DX12 software execution pass. Owning default 442/442, selected native 21/21, independent CPU
+11/11, affected History/Material 9/9, typed-port doctests 2/2, six caller compilations, correctness
+Clippy and format/document checks pass with their recorded overlapping scopes. Fixed Bevy/Godot
+sources separate depth attachment ownership from projection policy; this tracer does not select
+global 3D handedness, import units or reverse-Z. The named depth/unit acceptance now has actual
+evidence, while the remaining R8/R9/R12/Foundation gates retain their own scope.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

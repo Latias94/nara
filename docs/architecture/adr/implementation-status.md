@@ -2329,6 +2329,24 @@ trajectory. Correctness Clippy, independent formatting and configuration/documen
 These are overlapping scoped results, not full platform, TAA/reprojection, scanout or performance
 qualification. Editor/Dialogue remains paused; full R9/R12/Foundation remains open.
 
+The [depth and spatial-unit successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor)
+implements ADR0094's bounded depth extension at `199a39d`, with an independently locked public
+consumer at `d7e7c54`. `TextureInterpretation` separates Color transfer/alpha from Depth; whole
+`Depth32Float` uses finite `[0, 1]` clear or exact predecessor copy, with existing semantic ports,
+unique writers, initialization, budgets, immutable outputs/imports and original native custody.
+Policy final images and current color-only consumers refuse depth. The consumer draws captured
+meter/centimeter geometry in both orders, samples original/preserved depth, changes a 64-pixel
+preserved region without touching original attachments and reads retained output after producer
+retirement. Upload-after-preparation failure retains actual work and its original producer
+prefix, physically cleans it and retries the same input. Full-pixel/depth oracles pass on DX12
+and Vulkan RTX 4090; explicit DX12 software also passes with the original three native color/
+buffer controls. Owning default 442/442, selected native 21/21, standalone CPU 11/11, affected
+History/Material 9/9, typed-port doctests 2/2, six direct caller compilations, correctness Clippy
+and format/document checks qualify their recorded overlapping scopes. A stale 20,000-batch
+fixture premise is replaced by an actual cost-derived crossing of the unchanged 64 MiB ceiling;
+no production budget is relaxed. This selects no global Camera3d, handedness, reverse-Z, stencil,
+MSAA, foreign platform or performance contract. Full R8/R9/R12/Foundation remains open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
