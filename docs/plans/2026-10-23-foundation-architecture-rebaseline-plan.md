@@ -912,6 +912,18 @@ actual relocated source-free driver-input/Scene travel, Deferred corruption and 
 custody on Windows headless. Foreign artifacts remain build-only; additional native libraries,
 server stripping, desktop presentation and further platforms keep separate qualification.
 
+The [Two-Level cooked Player successor](2026-10-20-persistent-two-level-game-plan.md#cooked-player-native-qualification)
+at `bb02fed` applies those same production owners to the actual game, preserving `ProjectLocation`
+authoring and explicit shipping Scene Products. A fixed recipe admits its finite scenario/save
+path through the original first-tick command queue. Selected ordinary CPU controls pass 135/135;
+the actual Windows release delivery passes 1/1 through generated-Player compilation, original
+three-file publication/relocation and six sealed fresh processes after source/cache removal.
+Complete Travel, Save/Restore, two Runtime Images, actual Scene receipts, Deferred corruption
+preservation and catalog rejection retain normal native cleanup receipts. The linked record
+separates clean-checkout Clippy from generated-branch execution and compilation from performance.
+This extends the concrete game delivery proof, without completing server stripping, desktop
+processed presentation, foreign execution or the remaining R7/R10/R12/Foundation requirements.
+
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
 its adapter. Build a verified immutable base Runtime catalog; directory transport is sufficient.

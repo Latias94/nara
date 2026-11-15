@@ -187,6 +187,166 @@ evidence, not native desktop or cross-platform qualification.
 All-target correctness Clippy and sample formatting checks pass. Existing dependency and
 headless-entry warnings remain; no warning-free or desktop-feature qualification is claimed.
 
+## Source-Free Two-Level Player Successor
+
+Status: implemented at `bb02fed` and locally qualified on Windows x64, continuing from
+`a3ee53e`. Carry the actual
+Two-Level Game through the existing cooked
+content, captured Cargo Player and whole-directory publication owners. The current source
+entry and reconstruction Host remain controls. Do not substitute another toy game, hand-built
+catalog, test-only executable or manually copied pack for the ordinary game-owned cooker and
+Player path.
+
+Preserve the project's `ProjectLocation` Scene identities. Assign explicit complete shipping
+Scene Products in the finite game level catalog; both levels are delivery/travel roots. Source
+travel keeps its declared authoring paths; processed travel selects its complete Products from
+the actual committed Scene representation. Use the existing Image importer, verified groups,
+Schema compiler, reference resolver, Runtime Image codec and deep catalog validation. Do not
+add another cooker, package format, loader, Scene or native-process authority.
+
+The cooker and Player use one fixed game recipe with explicit Runtime Image codec selection.
+The existing configured `RunOptions` values participate in the plugin-plan fingerprint, so a
+Player must not reinterpret a fixed catalog with a different Save/Restore recipe. Admit its
+finite launch intent through the original gameplay queue at the first fixed tick only, before
+ordinary gameplay. Keep the original Storage/SaveSlot and close participant when opening the
+explicit application save path; reject malformed, duplicate, late or incompatible intent.
+Do not weaken configuration fingerprinting or expand the exact reconstruction inventory.
+
+Generate the original independently expected bootstrap before building the Player, declare it
+and the actual game/build inputs in Cargo's existing source inventory, retain content/source
+observations through build and publication, and handle original rejected/orphaned/unresolved
+package custody. A normal build without a generated expectation must refuse to run as a cooked
+Player. No command-line/manifest override may authorize the opened pack. Reuse the original
+root target, locked offline Rust1.95, one build job and serial Cargo.
+
+Qualify the production cooker against both actual levels and Image assets. Publish and relocate
+the exact three-file package. Remove only the test's owned copied source/cache/build-input tree,
+run from an unrelated empty directory with Cargo/rustc unavailable, and execute the existing
+Travel and Save trajectories. A fresh process restores the same checkpoint, independent level
+instances, pickup progress and dynamic marker identities before returning to Meadow. Assert
+actual processed resource content and original Scene receipts, not only decoded save DTOs.
+Corrupt the later Cavern payload after a valid publication: startup must remain possible, the
+actual travel must reject and preserve the original Meadow state, and no source fallback may
+occur. Reject a foreign/corrupt catalog at startup and retain actual native exit/cleanup evidence.
+
+Keep product launch policy, gameplay, checkpoint compatibility and finite packaging inventory
+in this sample. The existing public production owners remain authoritative. Independently review
+the launch/travel adapter, content/code fences and actual-process acceptance; run owning sample
+and affected original processed/package controls. Record exact failures, platform/toolchain and
+dependency scope before local Conventional Commits. This headless native delivery does not
+qualify desktop presentation, server stripping, processed exact-state reconstruction, foreign
+execution or full R7/R10/R12/Foundation. Editor/Dialogue product work remains paused.
+
+### Cooked Player Implementation And Initial Controls
+
+The sample now supplies ordinary `cook` and `player` binaries and one fixed `cooked_recipe`.
+Its Image codec is explicitly selected as `two-level-game.cooked-image` revision one. The
+shipping primary Scene Products are Meadow `624ebd5d-b7b1-4da9-94f8-86d689caeac1` and
+Cavern `0c9fa5da-20ef-4c87-a559-c733bc231350`; original Image metadata and `ProjectLocation`
+Scene ownership remain unchanged. The assembler consumes the actual saved Scene envelopes,
+native Schema and real PNG imports, with exactly two Scene and two Image members. No engine
+source, dependency or lockfile changes are required at this checkpoint.
+
+Configured `RunOptions` do enter the original plugin-plan fingerprint; that comparison is not
+relaxed. A versioned first-tick gameplay submission selects the finite Player scenario and
+explicit application save path after fixed-recipe startup. It uses the original Storage Arc,
+SaveSlot and registered Runtime close participant. Exact-state reconstruction remains source-only
+and rejects this unrepresented processed placement. The source entry and development Host keep
+their existing configurable recipes and command/lifecycle owners.
+
+The first production library check passes. Original library controls, including the new launch
+cases, pass 80/80 in `d5af7dc3-0fd0-4de6-8377-209a7c227c39` (5.380 seconds). Independent
+review then identifies a real mixed-command rejection flaw: a late launch returns before normal
+same-batch releases and saves. RED `9155fbd0-f56f-41e9-bb55-ddca429c2615` fails the new real
+Headless trajectory with held movement still true, a changed second-tick pose and no save. The
+receiver now rejects only launch intent, continues ordinary commands and preserves the launch
+error after the batch. That regression passes in the first full package run.
+
+The first full package run `d9bc2910-4cb0-40ff-af65-8b786e4ca9bd` passes 133/135, with four
+actual-build/private-worker cases outside ordinary selection. Its two new fence tests correctly
+expose comparison of identities from different capability sessions. The correction uses the
+original live-directory `same_object` operation, then opens and compares file identities within
+the retained original session. Code, build script and generated bootstrap identities/digests and
+the exact code inventory remain checked through publication. Rebinding code does not replace
+the earlier content baseline. The complete final selected-source run remains required.
+
+Source review separately corrects publication failure reporting, unreaped Cargo custody and
+Player output. An orphan now reports its exact original staging name/identity and cleanup
+failure for explicit recovery; no guessed recursive cleanup occurs. Pending Cargo cleanup keeps
+the original child and target lease until actual reaping, with a notice rather than a false
+timeout completion. Player diagnostics and result writes use fallible `Write`, so a broken pipe
+cannot replace an already captured original panic. The current resident Image set is observed
+from actual `Assets<ImageAsset>` on every observation, separately from historical pixel proofs.
+Independent review of the game adapter, cooker, Player and actual-process acceptance closes its
+reported P1/P2 findings; source review is not actual generated-Player execution evidence.
+
+The ordinary fallback Player compiles without a generated bootstrap and refuses execution.
+The real generated branch is included only after the cooker writes its original expected bytes;
+using `include!` permits formatting a clean source checkout without inventing placeholder
+constants. `build.rs` is now part of the original development source fence, copied actual-build
+workspace and declared Cargo inventories. Final native delivery, generated-branch compilation,
+remaining checks and actual source/platform limits are still pending at this checkpoint.
+
+### Cooked Player Native Qualification
+
+The final ordinary selected package passes 135/135 in
+`46b86a59-a52c-4fff-b9c8-69b2fdcc1270` (7.617 seconds), with the actual-build and private-worker
+cases outside default selection. It retains all source gameplay, checkpoint, exact resume,
+development Host and command/protocol controls alongside the new launch, source-fence and
+fallback-Player checks. Broken stdout/stderr writes are exercised through the actual output
+writer functions. These CPU results do not compile or execute the conditional generated Player.
+
+The first actual production delivery run `89f5492f-f4e3-464e-bdb0-f3d021b72f13` fails before
+Cargo: the Image importer receives the project root instead of the original assets directory
+capability and correctly refuses absent metadata. The correction opens the admitted assets
+subdirectory for physical import while retaining the unchanged logical `assets` scope and
+original project-root content observations. No importer fallback or relaxed identity is added.
+
+Actual release run `fca444e5-b81b-4847-b4f7-6c1035658d33` then passes 1/1 in 616.083 seconds,
+including the initial explicit-target dependency/Player build. This executes the production
+cooker and genuinely compiles the generated Player branch. It verifies exact captured code,
+bootstrap/catalog/pack digests, the four-member closure and original three-file publication,
+relocates the directory, then deletes only the checked owned source/cache/build-input copy.
+The original engine source and shared target remain. Normal process, containment, output-reader
+and drained-output receipts pass with no forced kill.
+
+Six fresh sealed Player processes cover ordinary startup, complete Travel, Save, fresh Restore,
+postpublication Cavern corruption and independent catalog corruption. Their actual executable
+location supplies the pack, an unrelated working directory stays empty and an invalid PATH
+makes Cargo/rustc unavailable. Actual processed Scene representations preserve the original
+`ProjectLocation` source universe, six live entity receipts and level transitions. Both Image
+Products retain their original 16x16 sRGB RGBA bytes and complete hashes; current residency is
+distinct from the historical Image proofs. Save/Restore checks 30 points, three pickups, marker
+IDs 1/2/3 in distinct logical level instances, next ID four and continued return to Meadow.
+The later corrupted Cavern rejects only its demand: Meadow's original receipt, ten points and
+marker one remain. Catalog corruption refuses before a gameplay snapshot. Neither failure can
+fall back to the removed source.
+
+This is Windows x64, Rust1.95, locked offline release, jobs one and the original target. The
+616-second acceptance duration includes compilation and all scenarios; it is not a gameplay
+frame time, startup distribution or build-performance improvement. Owning all-target
+`cook,cooked-player` correctness Clippy and format checks pass; Clippy's clean-checkout Player
+selection is the fallback branch, while the actual delivery separately compiles and runs the
+generated branch. Existing non-correctness/dependency warnings remain. The original source
+development Host's actual edit/adoption regression also passes 1/1 in
+`135f346f-659f-481a-801d-48898c524a3b` (306.235 seconds, including a cold dev-profile dependency
+build). It retains real body/private-structure edits, probe disposal, canonical restore, source
+drift and compile-failure preservation, route exchange and original physical retirement after
+adding `build.rs` to its copied/frozen inventory. Its intentional compiler rejection remains
+part of that passing control, not a failed acceptance run. Final diff review removes one
+redundant identical launch-skip check; affected launch/level controls pass 11/11 in
+`53cf1c98-dcff-41e7-a5f7-b0c8086ea564` (0.459 seconds). Final selected correctness Clippy,
+formatting, added local links/headings, manifest/lock/YAML parsing and Git whitespace checks
+pass. These overlapping source selections are recorded separately rather than summed into an
+aggregate test count. All ten scoped research/implementation/review agents are closed.
+
+CI's existing ordinary Two-Level headless step now enables `cook,cooked-player` to cover these
+CPU/fallback contracts. The expensive actual-delivery test stays explicitly selected by its
+documented filter; its private ignored worker is not a standalone test. Remote CI has not run.
+No dependency/lock version, engine source, runtime format or accepted owner changes. Desktop
+processed presentation, server stripping, processed exact resume, foreign platforms and full
+R7/R10/R12/Foundation remain open. Paused Editor/Dialogue work is preserved.
+
 ## Follow-Up Triggers
 
 The first required physics/audio domain proves its own native acquisition, teardown and

@@ -2140,6 +2140,18 @@ their original owners. Cargo compilation failures retain bounded structured diag
 not qualify desktop presentation, Linux/macOS, server stripping, general activation or the rest of
 Proposed0086/0088. The full foundation Goal stays active.
 
+The [Two-Level Player integration](../../plans/2026-10-20-persistent-two-level-game-plan.md#cooked-player-native-qualification)
+at `bb02fed` extends the same cooked-content/Cargo/package/Runtime owners to the actual game. The fixed
+recipe keeps launch scenario/save-path data in the original first-tick gameplay queue, not in
+an altered catalog fingerprint. Original `ProjectLocation`, explicit shipping Products, actual
+Schema and two Image imports remain distinct. Ordinary selected CPU controls pass 135/135;
+the actual Windows release delivery passes 1/1 through generated code, relocation/source-cache
+removal and six sealed native processes. Travel, checkpoint Save/fresh Restore, exact resident
+Images and Scene receipts, Deferred corruption preservation, catalog refusal and normal original
+process/containment/readers/output cleanup pass. Correctness Clippy and formatting retain their
+recorded selection. No engine owner or format changes; foreign, desktop processed, server and
+processed exact-reconstruction scope remain open.
+
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
 runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,

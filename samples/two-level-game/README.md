@@ -61,6 +61,77 @@ checks, interruption before publication, and pure bounded format/migration cases
 `--verify-first-present` proves presentation only; it does not prove that a human exercised every
 key or that a particular platform has passed the full interactive trajectory.
 
+## Source-Free Cooked Player
+
+The optional `cook` binary builds and publishes the same game as a finite native headless
+Player. It uses Nara's existing Image importer, Scene compiler, cooked-content assembler,
+captured Cargo executable and whole-directory publisher. Both levels and their two original
+Images are included. Authoring retains `ProjectLocation` identities; shipping Scene Products
+are explicit entries in `LevelId`, separate from logical level instances.
+
+Run with Rust 1.95, one Cargo job, the shared absolute engine target and cached dependencies.
+Create the output parent outside this source package first. Supply the actual native target
+triple and absolute Cargo/rustc executables from the selected toolchain:
+
+```text
+cargo +1.95.0 run --locked --offline --release --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+```
+
+Do not enable `desktop` for this headless delivery. The cooker writes the ignored
+`src/bin/player/generated.rs` before building `player` with only `cooked-player`. These compiled
+constants independently select the exact catalog and pack; the Player accepts no expectation,
+pack path or source-project override. An ordinary `player` build without this generated input
+refuses execution. Do not copy bootstrap constants from another package.
+
+The published directory contains exactly `player` (with the platform's executable suffix),
+`content.pack` and `package.json`. Move the whole directory to its installation path. The Player
+opens the pack beside its actual executable and works from an unrelated current directory with
+no source, metadata, import cache, Cargo or rustc available. The cooker keeps its reusable
+`two-level-cook-cache` separately under the output parent; that cache is not an installation
+member. Publication refuses an existing destination rather than replacing it.
+
+```text
+player --verify-travel
+player --verify-save ABSOLUTE_CHECKPOINT_PATH
+player --verify-restore ABSOLUTE_CHECKPOINT_PATH
+```
+
+The last two commands run in separate processes and retain the ordinary checkpoint semantics
+described above. The fixed cooker/Player recipe does not include a user's save path or test
+scenario. Instead, the original gameplay queue admits the finite launch intent at the first
+fixed tick. The original SaveSlot and Runtime close participant own later file operations and
+cleanup. Malformed, duplicate, late or incompatible launch intent is rejected without replacing
+an existing slot or swallowing ordinary same-batch input.
+
+`TWO_LEVEL_PACKAGE_PUBLISHED` describes actual directory publication. An optional
+`postpublication_error` means the package was published before a later check failed; it cannot
+be interpreted as an absent destination. A `TWO_LEVEL_PACKAGE_ORPHAN` diagnostic identifies the
+original parent, staging name/identity and cleanup error for explicit recovery. It does not
+authorize recursive deletion. A Cargo child whose cleanup remains pending keeps the original
+process/target lease and retries; a notice is not a completed cleanup receipt.
+
+`TWO_LEVEL_PLAYER_RESULT` reports actual gameplay, Scene receipts, processed representation,
+historically observed Image proofs and the current resident Image set before close. A completed
+cleanup result is separate from successful gameplay. These are CPU content/gameplay proofs;
+the headless Player does not qualify desktop drawing, physical input, scanout, server stripping
+or the source-only exact-state reconstruction inventory.
+
+The actual-delivery acceptance uses the production cooker, removes only its owned copied
+source/cache tree, and checks normal process/containment/output retirement. It also corrupts
+the deferred Cavern member after a valid publication, requiring failed travel to preserve the
+original Meadow receipt and progress, then separately checks catalog rejection at startup.
+Run it serially from the engine root after setting the absolute shared `CARGO_TARGET_DIR`,
+`CARGO_BUILD_JOBS=1`, `RUSTUP_TOOLCHAIN=1.95.0` and `CARGO_NET_OFFLINE=true`:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook --test cooked_delivery --run-ignored only -E 'test(production_cooker_delivers_the_source_free_two_level_game)' --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
+
+The separate ignored `cooked_delivery_sealed_player_worker` is an implementation detail of
+this acceptance and requires its original worker request; do not select every ignored case
+without the production test filter. Ordinary CPU/fallback checks run with
+`--features cook,cooked-player` and no `--run-ignored` selection.
+
 ## Exact Game Reconstruction
 
 The separate `resume` format preserves the complete supported game semantics: progress across
