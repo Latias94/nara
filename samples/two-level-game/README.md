@@ -63,7 +63,7 @@ key or that a particular platform has passed the full interactive trajectory.
 
 ## Source-Free Cooked Player
 
-The optional `cook` binary builds and publishes the same game as a finite native headless
+The optional `cook` binary builds and publishes the same game as a native headless or desktop
 Player. It uses Nara's existing Image importer, Scene compiler, cooked-content assembler,
 captured Cargo executable and whole-directory publisher. Both levels and their two original
 Images are included. Authoring retains `ProjectLocation` identities; shipping Scene Products
@@ -77,8 +77,9 @@ triple and absolute Cargo/rustc executables from the selected toolchain:
 cargo +1.95.0 run --locked --offline --release --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
 ```
 
-Do not enable `desktop` for this headless delivery. The cooker writes the ignored
-`src/bin/player/generated.rs` before building `player` with only `cooked-player`. These compiled
+The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
+has the `desktop` feature enabled. The cooker writes the ignored `src/bin/player/generated.rs`
+before building `player` with only `cooked-player`. These compiled
 constants independently select the exact catalog and pack; the Player accepts no expectation,
 pack path or source-project override. An ordinary `player` build without this generated input
 refuses execution. Do not copy bootstrap constants from another package.
@@ -131,6 +132,59 @@ The separate ignored `cooked_delivery_sealed_player_worker` is an implementation
 this acceptance and requires its original worker request; do not select every ignored case
 without the production test filter. Ordinary CPU/fallback checks run with
 `--features cook,cooked-player` and no `--run-ignored` selection.
+
+## Source-Free Desktop Player
+
+Build the cooker with `cook,desktop` and select `--runtime desktop` explicitly. It resolves the
+project's `desktop` profile and builds `player_desktop` with `cooked-player,desktop`. The default
+profile and `player` binary remain the headless placement. Both selections reject an incompatible
+window setting or an authored startup Input selection: this game declares its keyboard bindings
+in the executable and needs no separately cooked Input asset.
+
+```text
+cargo +1.95.0 run --locked --offline --release --features cook,desktop --bin cook -- --runtime desktop --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelDesktop --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+```
+
+The published directory contains exactly `player_desktop` (with the platform's executable
+suffix), `content.pack` and `package.json`. Relocate the complete directory, then run the Player
+from any current directory. No source, importer cache or Rust toolchain is needed at execution.
+Supply an absolute save path to use K/L; ordinary mode stays running until the native window closes.
+
+```text
+player_desktop --save ABSOLUTE_CHECKPOINT_PATH
+player_desktop --observe --save ABSOLUTE_CHECKPOINT_PATH
+player_desktop --verify-first-present
+```
+
+The existing `--verify-travel`, `--verify-save ABSOLUTE_PATH` and `--verify-restore ABSOLUTE_PATH`
+modes are finite scripted controls. The ordinary keyboard path remains WASD movement, E travel,
+Q instance, M marker, K save, L restore and R retry. Startup completes an original paused native
+presentation, submits the first-tick launch intent, and resumes through the original Runtime
+control ticket. It does not construct a second input or window owner.
+Queue admission and application are separate facts. The original gameplay consumer records its
+first launch result, observable through `player_launch_result(&World)`; the desktop entry requires
+that result before Ready. An invalid initial save configuration is refused after original cleanup.
+Later ordinary K/L operation errors remain recoverable in the running game.
+
+`TWO_LEVEL_DESKTOP_READY` reports accepted launch and resumed gameplay after a matching native
+presentation. Optional `TWO_LEVEL_DESKTOP_OBSERVATION` records are bounded semantic-change
+diagnostics; `TWO_LEVEL_DESKTOP_RESULT` follows original Runtime/pump retirement. Their presentation
+facts describe actual submitted/presented work and the associated gameplay state. They do not
+establish screenshot pixels, scanout or GPU duration. The CPU Image proofs retain their own scope.
+When the observation allowance fills, optional records stop and terminal output reports
+`observations_truncated`; play continues. Interactive Scene history preserves startup plus recent
+receipts and reports `scene_receipts_sampled` after eviction. A recoverable K/L failure is reported
+as `gameplay_error` and remains in the game snapshot until an ordinary successful command clears it.
+
+The [desktop successor plan](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#source-free-desktop-player-successor)
+owns qualification and its limits. Physical acceptance runs the relocated package through actual
+keyboard play, checkpoint Save, normal native Close, a fresh process and Restore. It requires an
+idle Windows desktop, all game keys released, an explicit adapter, and serial Cargo because the
+test builds the real Player:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook,desktop --test cooked_desktop --run-ignored only -E 'test(production_cooked_desktop_accepts_physical_play_save_and_fresh_restore)' --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
 
 ## Exact Game Reconstruction
 

@@ -347,6 +347,288 @@ No dependency/lock version, engine source, runtime format or accepted owner chan
 processed presentation, server stripping, processed exact resume, foreign platforms and full
 R7/R10/R12/Foundation remain open. Paused Editor/Dialogue work is preserved.
 
+## Source-Free Desktop Player Successor
+
+Status: implemented at `4267672`, with native-cleanup corrections `1fa730d`/`b92fd2e`, and locally
+qualified on Windows x64/DX12, continuing from `cf68a77`.
+Extend the actual cooker/Player game delivery above to a separately selected native desktop
+placement. Retain the qualified headless path. Select
+headless versus desktop explicitly in the game-owned cooker; Cargo features alone must not
+silently choose a content configuration or change the fixed headless recipe. Desktop content
+uses the project's actual desktop profile and the existing native game input plugin, Scene
+materialization, Winit session and external WGPU Host. Code-first keyboard declarations remain
+game-owned executable configuration unless a consumed authored Input asset requires the
+original immutable Input codec. Do not add a second mutable mapping owner.
+
+Use one fixed desktop cooked recipe in cooker and Player, preserving all fingerprint, source,
+bootstrap, exact Cargo selection and whole-directory publication checks. The Player opens only
+its compiled expected pack. Start the original DesktopRun initially paused, complete genuine
+native presentation/paused maintenance, submit any finite first-tick launch intent through the
+existing port, then resume through the original control ticket. Ordinary mode remains running
+until normal native close. An explicit absolute save slot supports the same K/L actions.
+Scripted Travel/Save/Restore and first-presentation verification are finite optional entry modes;
+they do not replace the ordinary playable path or authorize a source fallback.
+
+An opt-in bounded stdout observation stream may report actual post-Host game state and matching
+Runtime/App/render/window/surface/device presentation facts for external qualification. It is
+not another mutation channel, mandatory per-frame production telemetry, screenshot or GPU
+duration proof. Correlate original facts rather than label an arbitrary current snapshot as an
+older presented frame. Preserve original failure payload and physically retire Runtime, native
+window, presentation resources and pump before terminal success. Incomplete cleanup remains
+explicit; no independent window/GPU/input manager or Editor UI is introduced.
+
+Qualify a package built by the production cooker, relocated with only its three declared files
+and no copied source/cache/Cargo/rustc at execution. On Windows, use matched actual process/
+thread/window authority for native key Down/Up and normal Close. Drive the ordinary running
+game through movement/pickup, marker, travel/instance, checkpoint Save and fresh-process Restore;
+prove restored independent-instance progress and continued play. Restore any injected holds and
+the previously observed foreground window during success/failure cleanup. Do not operate on
+unmatched external windows. Require genuine presentations after distinguishable game changes,
+both exact processed Images and Scene receipts, normal original process containment/readers/
+output retirement, and original native window destruction. Explicit adapter selection must fail
+when unavailable. Separate these facts from any existing offscreen/source replay pixel evidence.
+
+Retain malformed/bootstrap/fingerprint/source-drift refusal and the original headless delivery
+control. Independently review recipe/configuration, startup/control and physical acceptance,
+then run focused serial CPU and affected native controls, correctness Clippy, formatting and
+document checks. Record exact executed backend, adapter, platform and remaining limits before
+local Conventional Commits. This advances native game delivery without completing foreign
+platforms, server stripping, processed exact reconstruction, UI/Dialogue or full Foundation.
+
+### Desktop Implementation And Initial Controls
+
+The game-owned cooker now selects `--runtime headless|desktop` independently of its compiled
+Cargo features. `cooked_recipe()` excludes the native input plugin in either feature closure;
+`cooked_desktop_recipe()` retains the existing compiled keyboard bindings and the same Runtime
+Image codec. The desktop selection uses `player_desktop`, the actual `desktop` project profile,
+`cooked-player,desktop`, and content profile `two-level-desktop-shipping`. Incompatible window
+settings and an authored startup Input selection are refused before cooking. The original
+content/code fence, generated expectation, captured build and directory publication remain
+the owners of package agreement.
+
+The new desktop entry retains the original initially paused DesktopRun, genuine post-Host
+presentation receipts, first-tick launch command and exact Resume ticket. Optional observations
+join original Runtime/App/render/window/surface/backend identities. Ordinary interactive mode
+retains startup and the most recent Scene receipts in a bounded history; explicit finite
+verification keeps its complete bounded trajectory. Diagnostic exhaustion stops optional
+Observation records while reserving Ready/Result output. Recoverable gameplay operation errors
+remain observable without closing ordinary play. Terminal output follows original Runtime and
+event-loop retirement, and an original failure payload survives later cleanup.
+
+Initial no-desktop-feature selection controls pass **2/2**, run
+`6bc1ac89-302c-446d-91db-fa653f8070f5`, with Rust1.95.0 release/locked/offline and jobs1. This is
+recipe/selection evidence only. Desktop feature compilation, generated branch execution and
+the full physical source-free Save/fresh-Restore workflow still require the following native
+qualification; no new desktop success or performance claim is inferred from this result.
+
+The desktop-enabled entry/selection controls pass **17/17**, run
+`891bde44-f97e-4adc-9fc1-5a68d2ec8884`. These include actual clean-checkout refusal for both
+ungenerated Players, explicit feature-independent headless selection, and count/byte observation
+exhaustion with usable Ready/Result output. The initial release build took11m41s in this local
+cache state; this is not an edit-to-result or runtime cost budget. The generated desktop branch
+remains outside that compile scope until the production cooker builds it.
+
+Independent review identified and corrected three ordinary-session defects before native
+qualification: observer-enabled Scene history could end play at the seventeenth activation;
+diagnostic limits could end continued movement; recoverable K/L refusal could close the game.
+The revised physical trajectory includes a missing-save Load followed by normal movement and
+20 additional E travels after fresh Restore, retaining unchanged stored checkpoint bytes.
+The cleanup review also found that an empty process tree plus `force_killed=false` did not prove
+absence of earlier native termination. The original process owner now records all termination
+attempts and skips automatic residual-tree termination when containment is already empty. This
+desktop acceptance requires `termination_requested=false` as well as its game/native-close facts.
+
+The shared process/output/log/wake controls pass **34/34**, with903 unrelated tests filtered,
+run `17d41301-9f3c-4d78-b0dc-62f21357ecd9`. The new actual contained-process cases distinguish a
+naturally exited parent/descendant tree, a successful direct exit leaving a live descendant that
+requires native termination, and explicit termination/retry without force-kill escalation. This
+qualifies the receipt fact on Windows x64/Rust1.95.0; the retained Linux WNOWAIT contract is
+source-reviewed here and is not new Linux execution evidence.
+
+The desktop-enabled sample's complete ordinary all-target cohort passes **153/153**, with13
+native/actual-build cases skipped, run `2ccdc432-6f9b-4a41-9d07-7d22ea9f8b52`. The first attempt
+stopped at four test-helper `json!([false;4])` macro syntax errors before executing tests;
+explicit four-boolean arrays preserve the same held-key assertions. The corrected run retains
+checkpoint, source-change preservation, complete semantic resume and both ungenerated Player
+controls. It compiles all current native wrappers, while their ignored actual workflows require
+separate execution. No generated desktop or physical-play success is inferred from this cohort.
+
+The first production desktop delivery run, `93bef06e-0143-47e4-b846-fffef4bbedfd`, compiled the
+real generated desktop Player and published its three files before stopping at a package-test
+configuration comparison. The catalog canonicalizes the capability set order, while the test
+compared the manifest's original vector order. Comparing complete configurations after the same
+public `resolve()` validator preserves every effective setting and set membership without giving
+declaration order semantic authority. Original plugin/Schema/codec fingerprints and later native
+checks remain unchanged. The failed run does not establish physical play or source-free execution.
+
+The second run, `2bb3668a-b47c-4938-8bf6-49403134538a`, passed package checks and source/cache
+removal, then started the sealed Player through a real native presentation and Ready. It stopped
+when Windows denied the background test thread's direct `SetForegroundWindow` call before input.
+A subsequent temporary foreground input-queue join still failed actual activation. That attempt
+was removed; the helper instead follows the checked-in Winit Windows implementation's matched
+Alt transition before requesting foreground. Physical Alt must start Up and return to Up, and
+the target retains actual matching foreground PID/thread/HWND/title checks before every game key.
+Failure/normal paths release injected holds and restore the originally observed foreground.
+No game-command substitution, production focus-policy change or desktop configuration change
+is used. Failed attempts remain failed acceptance; their cleanup receipts retain any actual
+termination intervention rather than treating absence of force-kill escalation as graceful exit.
+
+Subsequent native iterations preserve all physical assertions. The ordinary retry after an
+expected missing-save Load clears the recoverable error through gameplay before pickup assertions;
+the original error is not erased by the observer. A libtest worker prefix required an explicit
+newline before the machine report. The full hardware Save/fresh-Restore/20-travel trajectory and
+software first-present control then completed, but the final CWD check found the driver-created
+`NVIDIA Corporation` directory. With normal user profile variables deliberately absent, the
+driver had fallen back to the working directory. The Player command now explicitly receives
+test-owned local and roaming application-data directories for native driver caches; its PATH
+remains invalid, source/cache absent, and unrelated CWD must still stay empty. The immutable
+three-file installation is checked separately. This does not add a game filesystem fallback.
+
+The sample build script now watches the existing `src/bin/player` directory and additionally
+watches `generated.rs` only while it exists. Tracking a missing file alone caused Cargo to rerun
+the script and rebuild sample binaries on every invocation. Both clean-checkout refusal and
+real cooker-generated selection remain the acceptance for these cfg branches. The local change
+does not establish a generalized build-speed or edit-latency budget.
+
+### Desktop Player Native Qualification
+
+Final ordinary sample qualification passes **155/155**, with13 actual-build/native cases skipped,
+run `10766283-8c10-4877-97ba-8022ccb548ef`. This reruns the full affected cohort after the original
+launch-result observation was added, including exact resume and both ungenerated-entry refusal
+paths. The independently locked public process consumer passes **3/3**, run
+`5d1d5ad5-25c3-4b14-af4f-c08127105ff6`: delayed protocol bytes survive diagnostic overflow,
+exact handle-based product execution retains its sealed environment/EOF stdin, and original
+exit/containment/readers/output cleanup now also requires no native termination request.
+
+Final startup qualification also distinguishes ingress admission from application. The original
+gameplay consumer retains its first launch result as a read-only diagnostic in the existing
+Session; `player_launch_result(&World)` does not create mutation or resume authority. The desktop
+entry joins this actual result at the first positive fixed tick, while Ready still requires the
+original Resume ticket and initialized running state. It does not infer launch failure from a
+generic snapshot error: an ordinary Save can be refused in the same first-tick batch. CPU controls
+cover no-launch action refusal and preserving the first applied result after a later rejected
+launch. The final native trajectory adds invalid initial save-path rejection and separately runs
+the entry's finite Travel/Save/Restore modes, retaining all ordinary physical assertions below.
+
+The complete production desktop delivery passes **1/1**, with the private worker excluded,
+run `d1213e73-40d4-4f8e-bf10-3dba1b32a75a`, completing on November16 local time. Rust1.95.0,
+release/locked/offline, jobs1 and the original root target are retained. The74.688-second actual
+test includes its inner Cargo work; it is not a runtime or edit-latency measurement.
+
+The actual cooker generates the desktop expectation and builds `player_desktop` with exactly
+`cooked-player,desktop`. Package configuration is compared after full public validation, including
+the desktop Window960×540 and WorldCanvas320×180, no authored startup Input, plugin/Schema/codec
+fingerprints and original Scene/Image Products. The three-file package is relocated; only the
+checked copied source/import-cache trees are removed. All execution uses unrelated CWD and invalid
+PATH with no source or Rust tools; explicit test-owned local/roaming/common data directories keep
+native driver caches out of both CWD and installation. The NVIDIA cache requires the common-data
+projection on this machine. CWD remains empty and package bytes remain unchanged at completion.
+
+Two ordinary Players execute on **NVIDIA GeForce RTX4090 / DX12 / discrete-gpu**. Physical scan-code
+Down/Up events are accepted only while the exact process/thread/HWND/title is foreground. Missing
+Load remains recoverable, Retry clears the error through gameplay, D moves and collects each near
+pickup, release preserves idle position, and M allocates markers1/2/3 across Meadow0/Cavern0/
+Cavern1. Q/E/R retain independently reconstructed progress and K publishes the actual checkpoint:
+score30, three distinct collected facts, three exact recorded marker positions and next ID4.
+The first original native window closes normally. A fresh process begins at Meadow score0; L
+restores Cavern0, M allocates4, Q/E recover the other instance/level markers, then20 extra E travels
+prove bounded history does not cap ordinary play. The stored checkpoint remains byte-for-byte
+unchanged throughout continued play. Current Scene and historical receipts remain live six-entity
+Runtime representations with original ProjectLocation identity; both complete1024-byte sRGB CPU
+Images match their independent source golden hashes, and resident Images follow the actual level.
+
+A third finite `--verify-first-present` process selects **Microsoft Basic Render Driver / DX12 /
+cpu** with explicit fallback. These three processes observe112/148/6 genuine presented
+frames respectively; those counts are fixture facts, not a frame-rate budget. Every original
+Runtime and event pump retires, its HWND is destroyed, and the shared native owner reports exit0,
+empty containment, stopped readers, drained output, no termination request and no force-kill.
+Matched injected holds are released and the original foreground is restored. Optional observations
+retain matching Runtime/App/render/window/surface/device identities and distinguish bounded history
+sampling from complete finite history.
+
+The same final run executes three additional hardware-backed finite Players: `--verify-travel`,
+`--verify-save` and a fresh `--verify-restore` all complete the actual scripted progress at score30,
+both Images, expected current-level markers and initialized/verified running state before normal
+retirement. A seventh actual Player uses an invalid absolute initial save path: its original
+launch is admitted but rejected by gameplay at tick1, `launch_accepted=false` and `ready=false`,
+and exit1 is expected after complete native cleanup. All seven process receipts require empty
+containment, stopped readers, drained output, original window destruction and no termination
+request or force-kill. The earlier three-process native result
+`74487dc3-1a02-49e5-a23c-fa69e23fd785` is superseded by this full final source/entry scope.
+
+This is actual source-free native presentation and keyboard-gameplay evidence. It does not
+establish frontbuffer pixels, physical scanout, GPU duration, numeric performance budgets, Vulkan,
+Linux/macOS, authored Input products, processed exact-resume, server stripping, Editor/Dialogue
+integration or complete R7/R10/R12/Foundation. The existing source/offscreen pixel proofs keep
+their separate scope. Independent recipe, entry and physical/cleanup reviews are closed after
+the corrections above. Final static and headless closure follows below.
+
+The original actual headless delivery also passes **1/1**, run
+`c6448aa2-c4d4-4493-8458-043d18f4fd4f`, through the same **desktop-enabled cooker** and its
+default headless runtime selection. Its original compiled Player, three-file relocation,
+source/cache removal, six sealed processes, Travel/Save/fresh Restore, Deferred corruption
+preservation, catalog refusal and cleanup assertions are retained. The obsolete test-only
+prohibition on a desktop-enabled cooker is removed because placement is now explicit; package
+selection and fingerprint checks remain. This277.267-second test includes the newly compiled
+inner feature closure and establishes no cross-cache compilation performance comparison.
+
+The final headless delivery is repeated after the launch-result observation change and passes
+**1/1**, run `2bfe241b-723f-4b68-b9d1-fee961c7e53c`, retaining all six original isolated Players.
+Root library correctness Clippy with `runtime-2d,serde,project-tooling` and sample all-target
+correctness Clippy with `cook,cooked-player,desktop` pass under Rust1.95.0/release/locked/offline.
+Those lints run in the clean checkout's ungenerated cfg branch; actual generated branches are
+compiled and executed by the production delivery tests. Existing non-correctness warnings remain.
+Root/sample/independent-consumer `cargo fmt --check`, manifest parsing, local documentation links
+and ordinary whitespace checks pass. No dependency/lock versions change. Local implementation
+and qualification commits retain paused UI/Dialogue work separately.
+
+A final full-installation digest check reuses the same physical trajectory and hashes every
+executable/pack/manifest byte before and after all seven Players. Its first run,
+`f12cc30b-111a-4af7-8473-0325f78110a5`, completed the worker and all Player assertions but refused
+the outer cleanup receipt: Windows still reported a nonempty ancestor Job at the worker's exit
+instant, so the supervisor attempted termination. The new receipt correctly exposed that
+intervention instead of reporting graceful cleanup. The original owner at `b92fd2e` allows a fixed250ms
+natural containment-drain observation after direct-child exit before terminating residuals.
+Polling does not renew that deadline; genuine remaining descendants still enter the original
+bounded terminate/escalation path. This race correction is qualified separately below; the
+earlier successful seven-Player run remains evidence for its original source scope.
+
+The corrected root process cohort passes **35/35**, with903 unrelated cases filtered, run
+`b42372f2-dfbe-4acf-997d-6e924b175a8b`. Actual long-lived residuals are explicitly observed before
+the fixed deadline, remain unterminated just before it, then require termination at the deadline;
+the allowance does not renew. A separate short-lived descendant completes naturally with no
+termination. That short-lived case does not synchronize first observation against the child's
+exit and is not alone proof that the waiting branch executes. Independent reliability review
+finds no P1/P2 in the selected correction. Final native/public-consumer closure follows below.
+
+The final strengthened seven-Player desktop acceptance passes **1/1**, run
+`7e93d11f-69e0-42ff-a9f0-14b9111c51e4`, after `b92fd2e`. It retains every physical, scripted,
+startup-refusal and cleanup assertion above, adds full before/after digests for the executable,
+pack and manifest, and preserves the empty unrelated CWD. All seven original native receipts and
+the outer worker complete without termination intervention. The hardware/software adapter scope,
+112/148/6 ordinary/finite presented-frame observations and unchanged stored checkpoint remain.
+The297.665-second actual test includes inner recompilation after the process-owner correction;
+it is not a runtime performance sample. This supersedes the earlier desktop runs for the final
+source and complete installation-immutability scope.
+
+The independently locked process consumer is repeated against `b92fd2e` and passes **3/3**, run
+`8bd9c181-8a30-4c1f-b964-07cfa076f969`, retaining exact launch, sealed environment, complete protocol
+output and no-intervention cleanup assertions. Its feature closure is compiled separately from
+the root and game; the recorded3m51s build is a local cache fact, not runtime cost evidence.
+
+The final headless production delivery also passes **1/1** after `b92fd2e`, run
+`8c169ec6-adcb-4f4d-9573-d8d481ad84d2`. All six original isolated Players, generated headless
+code/content agreement, corruption preservation, catalog refusal and cleanup remain intact under
+the desktop-enabled cooker's default headless selection. Its278.535-second execution includes
+the separate inner feature-closure build and does not establish a performance change.
+
+Final root library and sample all-target correctness Clippy, followed by root/sample/independent
+format checks, pass against `b92fd2e` after these actual delivery runs. Selected document links,
+anchors, manifests/locks and whitespace checks pass. All12 scoped research, implementation and
+review agents are closed. No dependency/lock versions, UI defaults or desktop display settings
+change. Runtime delivery advances while foreign execution, numeric cost budgets, processed exact
+reconstruction, server stripping and the remaining Foundation requirements stay open.
+
 ## Follow-Up Triggers
 
 The first required physics/audio domain proves its own native acquisition, teardown and

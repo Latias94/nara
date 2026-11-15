@@ -2152,6 +2152,23 @@ process/containment/readers/output cleanup pass. Correctness Clippy and formatti
 recorded selection. No engine owner or format changes; foreign, desktop processed, server and
 processed exact-reconstruction scope remain open.
 
+The qualified [desktop game successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#desktop-player-native-qualification)
+reuses those owners with explicit headless/desktop cooker placement and a separate fixed desktop
+recipe at `4267672`, following native cleanup corrections `1fa730d`/`b92fd2e`. The entry uses original paused
+DesktopRun presentation, first-tick launch and Resume;
+bounded optional observations do not cap ordinary play. Current sample ordinary155/155 and
+process35/35 controls pass. The process receipt separately records native termination attempts;
+`b92fd2e` adds a fixed natural-drain allowance before residual-tree termination. Empty containment
+and `force_killed=false` cannot be mistaken for a naturally exited tree.
+Actual source-free package/keyboard/checkpoint/fresh-process/native-Close acceptance passes1/1:
+two RTX4090/DX12 ordinary sessions,20 further travels, software DX12 first-present, three finite
+scripted controls and invalid initial-path refusal. Actual launch application is observed from
+the original gameplay owner rather than inferred from ingress or generic action errors.
+The original Runtime, pump and windows retire with no native termination, while CWD stays empty,
+the three-file installation stays immutable and stored checkpoint bytes stay unchanged. The linked
+record retains exact rendered-receipt/CPU-content scope; pixel output, numeric costs, foreign
+execution and full Foundation remain open.
+
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
 runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,

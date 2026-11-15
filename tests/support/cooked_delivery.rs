@@ -404,10 +404,6 @@ pub mod native {
     }
 
     pub fn accept(cooker: &Path) {
-        assert!(
-            !cfg!(feature = "desktop"),
-            "qualify the cook feature without desktop",
-        );
         let fixture = Fixture::new();
         assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
         assert!(fixture.project.join("build.rs").is_file());

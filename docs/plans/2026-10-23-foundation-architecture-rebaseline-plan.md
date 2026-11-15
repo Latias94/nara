@@ -924,6 +924,24 @@ separates clean-checkout Clippy from generated-branch execution and compilation 
 This extends the concrete game delivery proof, without completing server stripping, desktop
 processed presentation, foreign execution or the remaining R7/R10/R12/Foundation requirements.
 
+The qualified [desktop Two-Level successor](2026-10-20-persistent-two-level-game-plan.md#desktop-player-native-qualification)
+extends that same production cooker and package to an explicit desktop placement. Its
+implementation is `4267672`, with original native-cleanup corrections `1fa730d`/`b92fd2e`. The fixed
+headless recipe no longer depends on whether the cooker compiled native support; the desktop
+recipe uses the actual project profile and existing code-first input. Original DesktopRun paused
+startup, first-tick command admission, Resume and post-Host receipts remain authoritative. Current
+ordinary sample155/155 and shared process35/35 controls pass. Optional observation limits and
+bounded Scene history do not end ordinary play; recoverable checkpoint operations remain game
+errors. Actual source-free native acceptance passes1/1: production package relocation/source-cache
+removal, two RTX4090/DX12 ordinary physical-keyboard Save/fresh-Restore sessions and20 additional
+travels, software DX12 first-present, three finite scripted controls and invalid initial-path
+refusal. The original gameplay owner reports actual launch application separately from ingress
+admission. All seven original windows and pumps retire, native
+receipts show no termination intervention, and explicit driver-data directories preserve empty
+CWD and immutable installation. These facts do not establish rendered pixels, performance, foreign
+execution or complete R7/R10/R12. The linked record owns exact results/limits. UI/Dialogue product
+work remains paused and Foundation stays active.
+
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
 its adapter. Build a verified immutable base Runtime catalog; directory transport is sufficient.

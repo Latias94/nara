@@ -336,6 +336,17 @@ remaining P1/P2 is reported in the selected scope.
 | Original Editor supervised consumers | 77/77, run `6076c58f-fb4d-4596-8deb-b5ba7e518a2c`; 148 unrelated tests filtered. Includes build/generation/handshake, stale and cancelled work, exact source/image custody, actual descendant cleanup, inherited-handle isolation and physical retirement retry. The exact native generation test also observes Windows manifest write denial after launch and release after completed cleanup plus owner drop. |
 | Actual game rebuild/reconstruction through the shared owner | 1/1, run `32c14786-90dc-420f-8e66-d521f48d071b`. The original A/B/C Rust edits, complete state comparison, failure/stale-message controls, incumbent continuation and game Close assertions remain; every native product now consumes exact executable/directory handles and completes the shared physical cleanup. |
 
+The later [source-free desktop Player](2026-10-20-persistent-two-level-game-plan.md#desktop-implementation-and-initial-controls)
+strengthens the cleanup evidence without adding another process owner. A receipt now separately
+records `termination_requested()`, including automatic residual-tree termination after a normal
+direct-child exit. Empty containment plus `force_killed=false` alone did not establish absence of
+an earlier Windows Job termination request. The owner skips termination for already empty
+containment; consumers requiring natural retirement check the new fact and their own game Close.
+Current35/35 root controls distinguish natural trees, residual descendants and explicit requests;
+`b92fd2e` adds a fixed250ms natural-drain observation before residual-tree termination, preserving
+the original deadlines and truthful intervention fact. The linked successor owns the complete
+desktop package qualification and remaining platform scope.
+
 Root `project-tooling` and the no-default-feature Editor production-library checks pass. A whole-
 Editor source scan finds the default frontend's native lifecycle tests also observe wake pending
 state. The shared wake now exposes that same read-only query in production, explicitly without
