@@ -316,6 +316,7 @@ pub struct SupervisedProcessCleanupReceipt {
     stdout_reader_stopped: bool,
     stderr_reader_stopped: bool,
     output_drained: bool,
+    termination_requested: bool,
     force_killed: bool,
 }
 
@@ -332,6 +333,19 @@ impl SupervisedProcessCleanupReceipt {
         self.stdout_reader_stopped && self.stderr_reader_stopped
     }
 
+    /// Whether the owner invoked native termination before issuing this receipt.
+    ///
+    /// Includes explicit requests, automatic residual-tree termination after direct-child exit,
+    /// and force-kill escalation or retries. A request may race with natural exit; this records
+    /// the intervention attempt, not whether it killed a process. A false value does not prove
+    /// that the application completed its own shutdown protocol.
+    pub const fn termination_requested(self) -> bool {
+        self.termination_requested
+    }
+
+    /// Whether cleanup used the force-kill escalation path.
+    ///
+    /// Native termination can occur without escalation; see [`Self::termination_requested`].
     pub const fn force_killed(self) -> bool {
         self.force_killed
     }
@@ -421,6 +435,7 @@ pub struct SupervisedProcessOwner {
     output_observed_drained: bool,
     output_cancel_requested: bool,
     output_loss_observed: bool,
+    termination_requested: bool,
     force_killed: bool,
     cleanup_receipt: Option<SupervisedProcessCleanupReceipt>,
     _launch_record: Option<RestrictiveCapabilityHandleLease>,
@@ -495,6 +510,7 @@ impl SupervisedProcessOwner {
             output_observed_drained: false,
             output_cancel_requested: false,
             output_loss_observed: false,
+            termination_requested: false,
             force_killed: false,
             cleanup_receipt: None,
             _launch_record: launch_record,
@@ -527,6 +543,7 @@ impl SupervisedProcessOwner {
             return Ok(());
         }
         self.bootstrap.take();
+        self.termination_requested = true;
         self.process
             .request_terminate()
             .map_err(SupervisedProcessError::Terminate)?;
@@ -539,6 +556,7 @@ impl SupervisedProcessOwner {
         match self.state {
             SupervisedProcessState::Running => self.request_terminate(now),
             SupervisedProcessState::Terminating => {
+                self.termination_requested = true;
                 self.process
                     .request_terminate()
                     .map_err(SupervisedProcessError::Terminate)?;
@@ -546,6 +564,7 @@ impl SupervisedProcessOwner {
                 Ok(())
             }
             SupervisedProcessState::ForceKilling => {
+                self.termination_requested = true;
                 self.process
                     .force_kill()
                     .map_err(SupervisedProcessError::ForceKill)?;
@@ -557,6 +576,7 @@ impl SupervisedProcessOwner {
                     .cancel_output()
                     .map_err(SupervisedProcessError::CancelOutput)?;
                 self.output_cancel_requested = true;
+                self.termination_requested = true;
                 self.process
                     .force_kill()
                     .map_err(SupervisedProcessError::ForceKill)?;
@@ -614,10 +634,17 @@ impl SupervisedProcessOwner {
 
         if self.exit.is_some() && !matches!(self.state, SupervisedProcessState::Draining) {
             if self.state == SupervisedProcessState::Running {
-                self.process
-                    .request_terminate()
-                    .map_err(SupervisedProcessError::Terminate)?;
-                self.terminate_deadline = Some(now + DEFAULT_TERMINATE_GRACE);
+                self.containment_observed_empty = self
+                    .process
+                    .containment_empty()
+                    .map_err(SupervisedProcessError::Containment)?;
+                if !self.containment_observed_empty {
+                    self.termination_requested = true;
+                    self.process
+                        .request_terminate()
+                        .map_err(SupervisedProcessError::Terminate)?;
+                    self.terminate_deadline = Some(now + DEFAULT_TERMINATE_GRACE);
+                }
             }
             self.state = SupervisedProcessState::Draining;
             self.drain_deadline = Some(now + DEFAULT_OUTPUT_DRAIN_GRACE);
@@ -628,6 +655,7 @@ impl SupervisedProcessOwner {
                 .terminate_deadline
                 .is_some_and(|deadline| now >= deadline)
         {
+            self.termination_requested = true;
             self.process
                 .force_kill()
                 .map_err(SupervisedProcessError::ForceKill)?;
@@ -677,6 +705,7 @@ impl SupervisedProcessOwner {
                     .terminate_deadline
                     .is_some_and(|deadline| now >= deadline)
             {
+                self.termination_requested = true;
                 self.process
                     .force_kill()
                     .map_err(SupervisedProcessError::ForceKill)?;
@@ -703,6 +732,7 @@ impl SupervisedProcessOwner {
                     stdout_reader_stopped: true,
                     stderr_reader_stopped: true,
                     output_drained,
+                    termination_requested: self.termination_requested,
                     force_killed: self.force_killed,
                 };
                 self.cleanup_receipt = Some(receipt);

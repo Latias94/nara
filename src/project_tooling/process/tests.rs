@@ -46,6 +46,30 @@ fn helper_process() {
             eprintln!("helper stderr");
         }
         "wait" => std::thread::sleep(std::time::Duration::from_secs(30)),
+        "spawn-descendant-and-wait" | "spawn-descendant-and-exit" => {
+            let wait_for_descendant = mode == "spawn-descendant-and-wait";
+            let descendant_mode = if wait_for_descendant {
+                "exit-success"
+            } else {
+                "wait"
+            };
+            let mut descendant = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "project_tooling::process::tests::helper_process",
+                    "--nocapture",
+                ])
+                .env("NARA_SHARED_PROCESS_TEST_MODE", descendant_mode)
+                .spawn()
+                .expect("the contained descendant starts");
+            println!("spawned descendant {}", descendant.id());
+            if wait_for_descendant {
+                assert!(descendant.wait().unwrap().success());
+                println!("descendant reaped naturally");
+            } else {
+                drop(descendant);
+            }
+        }
         _ => panic!("unsupported shared process helper mode"),
     }
 }
@@ -64,6 +88,121 @@ fn helper_command(mode: &str) -> SupervisedProcessCommand {
             "--nocapture",
         ])
         .environment("NARA_SHARED_PROCESS_TEST_MODE", mode)
+}
+
+#[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+mod cleanup_evidence_tests {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use super::helper_command;
+    use crate::project_tooling::process::{
+        SupervisedProcessCleanupReceipt, SupervisedProcessOwner, SupervisedProcessState,
+        default_log_limits,
+    };
+
+    fn wait_for_direct_exit(owner: &mut SupervisedProcessOwner) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while owner.process.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the direct child must exit");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(owner.cleanup_receipt().is_none());
+    }
+
+    fn drive_to_complete(owner: &mut SupervisedProcessOwner) -> SupervisedProcessCleanupReceipt {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while owner.state() != SupervisedProcessState::Complete {
+            owner
+                .advance(Instant::now())
+                .expect("the original owner advances");
+            assert!(Instant::now() < deadline, "physical cleanup must complete");
+            thread::sleep(Duration::from_millis(5));
+        }
+        let receipt = owner
+            .cleanup_receipt()
+            .expect("physical cleanup is receipted");
+        assert!(receipt.containment_empty());
+        assert!(receipt.readers_stopped());
+        assert!(receipt.output_drained());
+        receipt
+    }
+
+    #[test]
+    fn naturally_exited_tree_receipt_records_no_native_termination() {
+        let mut owner = SupervisedProcessOwner::spawn(
+            &helper_command("spawn-descendant-and-wait"),
+            default_log_limits(),
+        )
+        .expect("the parent helper spawns");
+        wait_for_direct_exit(&mut owner);
+        assert!(
+            owner.process.containment_empty().unwrap(),
+            "the direct child reaped its descendant before exiting"
+        );
+
+        let receipt = drive_to_complete(&mut owner);
+
+        assert!(receipt.exit().success());
+        assert_eq!(receipt.exit().code(), Some(0));
+        assert!(!receipt.termination_requested());
+        assert!(!receipt.force_killed());
+        let text = owner
+            .logs()
+            .iter()
+            .map(|entry| entry.text().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("descendant reaped naturally"));
+        assert!(text.contains("helper stdout"));
+        assert!(text.contains("helper stderr"));
+        assert!(!owner.output_loss_observed());
+
+        owner.request_terminate(Instant::now()).unwrap();
+        owner.retry_cleanup(Instant::now()).unwrap();
+        assert_eq!(owner.cleanup_receipt(), Some(receipt));
+    }
+
+    #[test]
+    fn successful_direct_exit_with_surviving_descendant_records_native_termination() {
+        let mut owner = SupervisedProcessOwner::spawn(
+            &helper_command("spawn-descendant-and-exit"),
+            default_log_limits(),
+        )
+        .expect("the parent helper spawns");
+        wait_for_direct_exit(&mut owner);
+        assert!(
+            !owner.process.containment_empty().unwrap(),
+            "the containment must still hold the live descendant"
+        );
+
+        let receipt = drive_to_complete(&mut owner);
+
+        assert!(receipt.exit().success(), "the direct child exited normally");
+        assert_eq!(receipt.exit().code(), Some(0));
+        assert!(receipt.termination_requested());
+        assert!(
+            !receipt.force_killed(),
+            "automatic residual-tree termination is recorded without escalation"
+        );
+    }
+
+    #[test]
+    fn explicit_termination_and_retry_are_recorded_without_escalation() {
+        let mut owner =
+            SupervisedProcessOwner::spawn(&helper_command("wait"), default_log_limits())
+                .expect("the waiting helper spawns");
+        owner.request_terminate(Instant::now()).unwrap();
+        owner.retry_cleanup(Instant::now()).unwrap();
+
+        let receipt = drive_to_complete(&mut owner);
+
+        assert!(receipt.termination_requested());
+        assert!(!receipt.force_killed());
+        assert!(!receipt.exit().success());
+    }
 }
 
 #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
@@ -181,5 +320,7 @@ mod loss_observation_tests {
         let receipt = owner.cleanup_receipt().unwrap();
         assert!(receipt.containment_empty() && receipt.readers_stopped());
         assert!(receipt.output_drained());
+        assert!(!receipt.termination_requested());
+        assert!(!receipt.force_killed());
     }
 }

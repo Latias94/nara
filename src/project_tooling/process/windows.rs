@@ -212,7 +212,9 @@ impl PlatformProcess {
 
     pub(super) fn fail_safe_terminate(&mut self) {
         let _ = self.cancel_output();
-        let _ = terminate_job(&self.job, FORCE_KILL_EXIT_CODE);
+        if !matches!(self.containment_empty(), Ok(true)) {
+            let _ = terminate_job(&self.job, FORCE_KILL_EXIT_CODE);
+        }
     }
 }
 

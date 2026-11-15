@@ -175,14 +175,26 @@ exists. The receipt requires the direct child's exit, empty containment, stopped
 readers and drained output. An application-level Close reply alone cannot prove these facts.
 Conversely, killing the process cannot prove that the game completed its own Runtime Close.
 `request_terminate` is fallback/Stop execution; on Windows its first request can terminate the Job,
-so a false `force_killed` escalation flag does not establish a graceful shutdown. Failed cleanup
-keeps the same owner for `retry_cleanup`. Drop is a fail-safe and publishes no clean-close proof.
+so a false `force_killed` escalation flag does not establish a graceful shutdown. The receipt's
+`termination_requested()` records every native termination attempt before receipt issuance:
+explicit requests, automatic residual-tree termination after direct-child exit, and force-kill
+escalation or retries. Attempts remain recorded even if they race with natural exit or fail before
+later cleanup succeeds. After direct-child exit, the owner first inspects containment and skips
+automatic termination if it is already empty. Live residual descendants still require termination
+and cannot be reported as a naturally exited tree. Consumers requiring cleanup without native
+termination must check `!receipt.termination_requested()` alongside their own successful Close
+protocol. Failed cleanup keeps the same owner for `retry_cleanup`. Drop is a fail-safe and
+publishes no clean-close proof.
 A transferred bootstrap channel and its consumer worker retain their separate completion owner.
 
 The Windows implementation installs the non-breakaway kill-on-close Job and inherited-handle
 allowlist at creation, then verifies the suspended mapped image before resuming its primary
 thread. The Linux x86-64 implementation uses descriptor-bound execution and a process group;
-it does not provide the same hard-kill containment guarantee. Other unsupported native targets
+its `WNOWAIT` observation keeps the exited leader's PID reserved until containment inspection
+finds no other group member, then reaps the direct child. Windows inspects the retained Job after
+observing the direct child's exit; drop skips termination for an observed empty Job and retains
+its fail-safe for active Jobs or inspection errors. Linux does not provide the same hard-kill
+containment guarantee. Other unsupported native targets
 refuse execution. Qualification and platform execution evidence belong to the
 [current process successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#shared-native-process-custody-successor).
 This module does not extend the desktop one-shot READY contract or make native services

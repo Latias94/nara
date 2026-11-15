@@ -239,6 +239,8 @@ fn assert_successful_cleanup(owner: &SupervisedProcessOwner) {
     assert!(receipt.containment_empty());
     assert!(receipt.readers_stopped());
     assert!(receipt.output_drained());
+    assert!(!receipt.termination_requested());
+    assert!(!receipt.force_killed());
 }
 
 struct ProcessFixture {
