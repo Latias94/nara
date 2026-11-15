@@ -3035,6 +3035,19 @@ ADRs0039/0076 and the current guides own the explicit policy and workload limits
 observer polling and quantized overlapping CPU values preclude a stable CPU or power claim;
 general task wakes, foreign native execution and full R12 remain open.
 
+The [observer-deadline and submitted-work successor](../../benchmarks/2026-11-14-development-runtime-costs.md#observer-deadlines-and-submitted-work-maintenance)
+at `47490b1`/`bf92633` removes implicit observer polling while retaining pending original GPU-prefix
+maintenance independently of observer/telemetry configuration. Callback-induced final-owner releases receive
+another original cleanup pass before settled submission work is reported. Five finite consumers
+declare their absolute deadlines; original verification, seal/veto and native retirement remain.
+Root CPU 27/27, affected GPU-owner CPU 45/45, actual DX12 17/17 and software DX12 4/4 pass.
+Six complete native v4 runs reduce periodic-Wait callbacks/native polls from 1474/737 to 12/6
+with unchanged canonical state, zero paused App/presentation/simulation work, explicit controls
+and full cleanup; 100 ms requests arrive at 100.0873–100.6636 ms with 1 s caller wait caps.
+Independent consumers compile and bounded reviews report no remaining P1/P2. This is original
+submitted-work/deadline evidence, not arbitrary cache/task wakes, a stable CPU/power budget,
+foreign execution or completion of full Foundation/R12. ADR0078 and the guides own its scope.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

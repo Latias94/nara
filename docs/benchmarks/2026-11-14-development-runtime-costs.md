@@ -953,3 +953,151 @@ formatting, new relative document targets, JSON decoding and the LF-normalized r
 digest pass. Existing lint/style warnings remain; this is not a warning-free release claim.
 All nine scoped threads close with no remaining reported P1/P2. No unrelated Editor/framework
 or source-free Player delivery matrix is repeated for this explicit cadence change.
+
+## Observer Deadlines And Submitted-Work Maintenance
+
+Qualified revisions are `47490b1cf67de2b71b318077fb5a38bb7c670feb` for the original runtime/GPU
+contract and independent-consumer migration, and `bf92633885eeff53cd0632efd7ef8d5b157a5ad9`
+for the ordinary measurement consumer. Execution ran the same source before these local commits.
+
+This successor starts from `6a665ab`, after the explicit cadence measurement above. The original
+desktop driver still arranged a 2 ms wake for any installed observer, even when the observer
+only recorded presentation facts. The previous idle caller independently capped every poll at
+2 ms, so those results did not isolate owner-scheduled maintenance from caller polling.
+
+The revised contract separates these causes. `Continue` requests no observer timer;
+`WakeAt(absolute_deadline)` requests an observation without requesting an App frame. Native
+events and other owner deadlines may deliver it earlier; the next callback supplies the current
+request. Original first-present/READY and telemetry seal retain their deadlines. Original WGPU
+submission-prefix custody arranges maintenance independently of any observer or telemetry
+configuration, including completed prefixes awaiting owner bookkeeping. Telemetry sample and
+resource counters do not replace that custody. Host cache cleanup runs again after completion
+releases retained owners, before that pass can report no remaining submission work.
+
+This query does not promise all caches are empty or arrange arbitrary future cache-lifetime,
+World or Task wakes. The private root Host does not escape to observers and retains its
+original producer through native retirement. Existing cache maintenance remains at original
+admission/maintenance/retirement boundaries, and producer/device-loss interaction revocation
+retains its synchronous owner. Source review found no Accepted requirement for an additional
+idle cache-drop wake or a wall-clock device-loss detection deadline. No generic notifier,
+background GPU polling thread or replacement scheduler is added.
+
+Five finite source consumers now return their original absolute observer deadline while
+waiting: stock Runtime composition, Heatmap, temporal History, source/processed content capture
+and Material source watching. Their actual drawing, source, history, failure, seal and cleanup
+assertions are preserved. Other observers whose callers own polling or which only record
+facts retain Continue. This is a behavior/API migration; the obsolete implicit observer timer
+is removed rather than retained as a second policy.
+
+The ordinary comparison format advances to v4. Each of six runs retains the original running
+plain/witness workload and compares three 300 ms paused conditions after 100 ms excluded
+settling: Poll, Wait with explicit periodic 2 ms observer requests, and Wait with no observer
+deadline. Order reverses on alternating runs. Callers allow each interval's remaining time as
+the native wait cap. The periodic condition reproduces the former observer behavior through
+the explicit interface. Complete canonical bytes, App/fixed/logical counters, actual presentation
+receipts, actual observer callbacks, native poll calls, process CPU and owner telemetry facts
+remain separate observations. Acceptance requires both Wait conditions to retain the prior
+80% App-frame reduction, and deadline-free Wait to reduce callbacks and native polls by at
+least 90% relative to periodic Wait. Rejected gates preserve the full report after cleanup.
+
+An additional control arms an original absolute 100 ms observer request through a zero-wait
+maintenance boundary, then allows a 1 s caller wait. Its first original callback at or after
+the deadline must be observed within 250 ms without changing App/presentation/game state.
+This is a cooperative finite-workload gate, not a guarantee that callbacks or native APIs can
+be interrupted. Existing maintenance, exact Step, Resume/Pause and all original telemetry/native
+retirement checks remain. Final execution observations and qualification follow below.
+
+The production desktop library check passes. The selected root presentation/first-present/
+control cohort passes 27/27 (`db654a36-d228-4515-aff8-6d447b15fce6`), with 955 other tests
+outside the filter. Six new owner tests cover quiet Continue/no observer, absolute deadline
+merging, withdrawal, already-expired requests, final veto and the original non-renewed seal.
+They verify unchanged Runtime/frame/time facts without claiming native GPU execution.
+Independent production and measurement source reviews report no remaining P1/P2; their
+conclusions do not replace the GPU/native execution results below. The release test build
+took 23m54s in this shared checkout and feature closure; that compilation duration is not
+runtime cost evidence or a controlled compiler comparison.
+
+The affected Host/submission/telemetry CPU cohort passes 45/45
+(`89d0b2ea-8aef-4c7e-81d8-990f69bf623d`), with 459 other/native cases outside that selection.
+The real DX12 adapter cohort passes 17/17 (`464b5c78-73f3-4927-bd11-cad554c3baee`), including
+four new maintenance tests plus original submission-abandonment and publication controls.
+Actual program resources settle with telemetry off and on; upload refusal, callback panic
+and native command validation failure retain their error and settle through the original
+prefix, followed by independent byte readback. A prefix retaining the final producer closes
+it in its real completion callback, and the same maintenance pass reclaims the resulting
+closed owner before reporting no submitted work. No extra queue submission proves completion.
+
+The isolated GPU tests manually register telemetry on their actual submissions to inspect
+its exact identity/sample behavior; they do not qualify full Runtime presentation by themselves.
+Their small workloads may already complete before the first observation, so no GPU-busy-duration
+or deterministic pending-state claim follows. The complete ordinary native comparison supplies
+the separate Runtime/presentation/deadline evidence. Independent test source review finds no
+remaining P1/P2. CI now selects the new original maintenance tests on software DX12; that local
+configuration is not a claim of remote CI execution.
+
+### Three-Condition Native Results
+
+All six v4 release runs pass on the same reported Windows 11/RTX4090/DX12 adapter, driver
+`32.0.16.2114`, and 960 × 540 surface as the earlier cadence comparison. Each run retains
+120 successful running samples after thirty excluded warmup frames, then executes all three
+idle conditions, the separate deadline control, maintenance/Step/Resume/Pause and physical
+retirement. Every one of the eighteen idle intervals preserves complete canonical bytes and
+zero simulation/logical ticks; both Wait conditions produce zero App frames/presentations.
+
+| Aggregate across six runs | Poll | Periodic observer Wait | No observer deadline Wait |
+| --- | ---: | ---: | ---: |
+| App frames | 60 | 0 | 0 |
+| Actual presentations | 60 | 0 | 0 |
+| Observer callbacks | 60 | 1474 | 12 |
+| Native poll calls | 30 | 737 | 6 |
+
+Deadline-free Wait reduces both callback and native-poll counts by **99.1859%** versus explicit
+periodic Wait, passing the preselected 90% gates. Each deadline-free 300 ms interval has one
+native poll and two observer calls at the original Windows pump boundaries. Those two calls
+are not evidence of a periodic timer. The absolute deadline controls observe their original
+100 ms request at 100.0954, 100.1769, 100.6636, 100.3464, 100.2153 and 100.0873 ms, all within
+the finite 250 ms gate despite a 1 s caller wait cap. They advance no App/game/presentation
+state and retain unchanged canonical bytes. All original telemetry seals, surface/provider
+retirements, native destructions and physical event-loop recoveries complete.
+
+| Run | Recipe | Poll CPU (ms) | Periodic Wait CPU (ms) | No-deadline Wait CPU (ms) |
+| --- | --- | ---: | ---: | ---: |
+| 1 | Plain | 15.625 | 0 | 0 |
+| 2 | Witness | 46.875 | 0 | 0 |
+| 3 | Witness | 0 | 31.250 | 0 |
+| 4 | Plain | 15.625 | 15.625 | 0 |
+| 5 | Plain | 15.625 | 15.625 | 0 |
+| 6 | Witness | 0 | 0 | 0 |
+
+These whole-process samples remain quantized. Zero observed CPU increments are below the
+counter's resolution and do not prove zero work. Callback/native-poll reduction is established;
+a stable CPU or power budget is not. Poll intervals last about 332–333 ms and Wait intervals
+about 300 ms; cooperative overruns remain in the raw record. This is a matched comparison of
+three conditions in the maintained implementation, not an isolated historical-binary or
+cold-process comparison. The [full v4 record](data/2026-11-14-development-runtime/observer-deadlines.json)
+and [metadata](data/2026-11-14-development-runtime/observer-deadlines-metadata.json) retain
+all conditions, identities, state, deadline timing and cleanup facts with an LF-normalized digest.
+
+Two initial consumer builds hit the default JSON macro expansion limit, first in the deadline
+report and then in the idle report. Both objects are now constructed in smaller literal maps
+and merged without changing fields, limits or runtime behavior; no global recursion-limit
+override is introduced. Neither failed build ran a native experiment. The final v4 execution
+exits zero on its first native attempt. Software DX12 also passes the four new GPU maintenance
+tests, independently from the hardware timing comparison. Final consumer/check qualification
+and remaining scope follow below.
+
+The software cohort passes 4/4 (`d743e53f-829b-4aa8-82a3-c75f36c2ebbc`). Correctness Clippy
+passes affected WGPU all-targets, the root desktop library and the ordinary measurement binary.
+All five migrated finite observers compile through their independent consumers: all policy
+examples, stock Runtime composition, content example/native wrapper, and Material source-watch
+with its desktop feature closure. Their existing continuous native pixel/history workflows
+are not newly executed by those compile checks. Existing style/dead-code warnings remain.
+The seven scoped research, implementation and independent review threads close with no
+remaining reported P1/P2. Source-desktop protocol polling remains a separate 2 ms caller cost.
+General task/World/cache-lifetime wakes, foreign execution, representative CPU/power or latency
+budgets, and full Foundation/R12 remain open.
+
+Root/sample and all four affected independent workspace formatting checks pass, as do new
+relative document links, workflow YAML, JSON and metadata/raw-record integrity. No dependency
+or lockfile change is selected. These final document checks do not repeat unchanged native
+acceptance or expand the scoped result into a framework-wide release claim.

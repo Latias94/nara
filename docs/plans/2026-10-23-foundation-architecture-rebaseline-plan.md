@@ -5253,6 +5253,21 @@ the old structural fixture's first-field assumption. The
 retain actual conditions and failed-attempt disposition. General task wakes, real-time paused
 animation policy, foreign execution and complete Foundation/R12 remain open.
 
+The subsequent [observer deadline and submitted-work successor](2026-11-13-rust-state-reconstruction-plan.md#explicit-observer-deadlines-and-pending-submission-maintenance)
+removes the implicit 2 ms observer timer and exposes original absolute observation requests.
+Actual submission-prefix custody keeps maintenance alive independently of observers or
+telemetry; completed callbacks receive a final owner-cache cleanup pass. First-present/READY,
+seal and physical close keep their original deadlines and outcomes. Six complete v4 native
+runs compare Poll, explicitly periodic Wait and deadline-free Wait: the latter reduces
+callbacks/native polls from 1474/737 to 12/6 while preserving complete state, presentations,
+control and cleanup. The 100 ms observer requests arrive within 100.0873–100.6636 ms with
+a 1 s caller wait cap. Root CPU 27/27, affected GPU-owner CPU 45/45, real DX12 17/17 and
+software DX12 new maintenance 4/4 pass; five migrated independent observers compile.
+The [report](../benchmarks/2026-11-14-development-runtime-costs.md#observer-deadlines-and-submitted-work-maintenance)
+keeps actual conditions, raw data and CPU/cold-state limits. This qualifies explicit original
+maintenance demand, not universal task/cache notifications or the child protocol's separate
+polling cost. Full Foundation/R12 and paused product work remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

@@ -1668,3 +1668,101 @@ Attribute actual pending GPU completion, observer deadlines and child protocol p
 choosing another change; removing App work does not prove a whole-process budget. Retain
 explicit App work for asynchronous result integration and real-time paused consumers rather
 than selecting a universal dirty-state or task-wake policy without a complete consumer.
+
+## Explicit Observer Deadlines And Pending Submission Maintenance
+
+Status: implemented and qualified in the original native game/Host scope; full Foundation/R12
+remains active. Qualified revisions are `47490b1` and `bf92633`, continuing the original-owner
+runtime work from `6a665ab`. The previous presentation observer forced a 2 ms maintenance wake
+even when it had no deadline or new work. Conversely, an original GPU prefix without an
+observer did not itself arrange the next Wait-mode wake.
+Resolve both responsibilities together; merely removing the timer would lose GPU progress.
+
+Keep `DesktopPresentationControl::Continue` as no requested observer wake and add explicit
+`WakeAt(Instant)` for the observer's next required observation. Native/frame demand may deliver
+an earlier callback. Each callback supplies its current request; Continue withdraws only that
+observer's deadline. Merge the requested time with original first-present/READY, unsettled
+submission, telemetry and seal deadlines. No second scheduler, GPU poll thread or App frame is
+introduced for maintenance. Existing finite tools with observer-owned timeouts must declare
+their original absolute deadlines; caller-owned protocol polling remains separate.
+
+The original WgpuRenderHost reports whether its submission-prefix custody still needs
+maintenance, independently of telemetry enablement or sample capacity. Prefixes already
+completed but awaiting owner bookkeeping also keep that responsibility. Preserve callback
+abandonment recovery, samples with a concurrent maintenance error, and mandatory final seal
+delivery/veto. Release-induced cache cleanup belongs after the corresponding original prefix
+completion; avoid declaring a clean maintenance pass before its callback drops are observed.
+Telemetry counters alone are insufficient evidence of a settled native submission.
+
+This is not a claim that every live Host cache is empty or that arbitrary future external
+Drop/World/task changes auto-wake a native loop. Existing producer/policy/history/Feature cache
+cleanup remains at its original owner boundaries, before admission and during retirement;
+interaction revocation remains synchronous. Check Accepted contracts before selecting any new
+final-drop notifier. Do not turn a bounded submitted-work query into a universal quiescence
+service or make retained bytes/merely live references a permanent polling requirement.
+
+Extend the existing ordinary release comparison with three finite idle conditions per run:
+Poll, Wait with an explicitly requested periodic 2 ms observer deadline, and Wait with no
+observer deadline. The periodic condition is a genuine consumer control for the previous
+behavior. Alternate order, retain 100 ms settling and 300 ms idle spans, and let the caller
+use the remaining interval as its native wait cap instead of independently capping every poll
+at 2 ms. Record actual observer callbacks, native poll calls, App/presentation counters,
+canonical bytes, completion and physical cleanup. Acceptance requires unchanged complete
+state, zero paused ticks, at least 80% fewer idle App frames than Poll and at least 90% fewer
+observer callbacks/native poll calls than periodic Wait. Preserve raw rejected-gate reports.
+Whole-process CPU remains a separately observed, quantized metric rather than a substituted
+callback count or power claim.
+
+Also exercise an original explicit 100 ms observer deadline with a 1 s caller wait cap: it must
+be observed by 250 ms in this finite desktop workload without advancing App/simulation state.
+These are measured cooperative acceptance bounds, not interruptible callback/native-API
+guarantees. Qualify no-observer and telemetry-disabled submission progress through the real
+Host, owner deadline merging/withdrawal and final-veto tests, then the complete ordinary
+control/telemetry/native workflow. Keep paused Editor/Dialogue product work and full R12 open.
+
+Implementation keeps submitted-work demand in `WgpuRuntimeMaintenance::needs_poll`, derived
+from original retained prefixes and pending/buffered telemetry responsibilities. It does not
+infer all-cache quiescence from telemetry. A completed-prefix removal triggers another original
+cache cleanup pass so callback-induced final-owner release is handled before reporting settled
+submission work. Continue no longer schedules an observer timer; WakeAt merges with original
+GPU, verification and seal deadlines. Five finite public consumers now declare their existing
+absolute observer timeout. Source audit found no Accepted requirement for an additional idle
+cache-drop notification service in this private root Host, so no such mechanism is added.
+
+Root presentation/verification/control CPU tests pass 27/27
+(`db654a36-d228-4515-aff8-6d447b15fce6`); affected Host/submission/telemetry CPU passes 45/45
+(`89d0b2ea-8aef-4c7e-81d8-990f69bf623d`). Real DX12 GPU tests pass 17/17
+(`464b5c78-73f3-4927-bd11-cad554c3baee`), including failed uploads and callback abandonment;
+the four new maintenance tests also pass software DX12 (`d743e53f-829b-4aa8-82a3-c75f36c2ebbc`).
+Actual telemetry-disabled submissions settle through their original prefixes. The independent
+GPU tests manually register telemetry and do not stand in for Runtime presentation or claim
+a measured GPU busy interval.
+
+All six complete v4 Windows/RTX4090/DX12 native runs pass. Each compares three idle conditions
+with identical complete state and zero simulation/logical ticks, preserving original running
+samples, explicit maintenance/Step/Resume/Pause, telemetry seal and physical cleanup. Aggregate
+Poll App frames/presentations are 60/60 and both Wait conditions are 0/0. Periodic observer Wait
+records 1474 callbacks and 737 native polls; no-deadline Wait records 12 and six, a 99.1859%
+reduction in both. Original 100 ms observer deadlines arrive at 100.0873–100.6636 ms despite
+1 s caller wait caps, passing the finite 250 ms gate without App/game/presentation changes.
+Whole-process CPU values are quantized and this does not establish a stable CPU or power budget.
+The [report and full records](../benchmarks/2026-11-14-development-runtime-costs.md#observer-deadlines-and-submitted-work-maintenance)
+retain all counts, actual wall spans, deadlines, state, cleanup and LF-normalized digests.
+
+Two initial consumer compilations hit JSON macro expansion limits; the report literals are
+split into bounded object construction without removing fields or increasing global compiler
+limits. The first native comparison itself passes. Correctness Clippy passes the affected
+GPU all-target closure, root desktop library and ordinary measurement executable. The five
+migrated finite observers compile in their independent public consumer feature closures;
+their unchanged native drawing workflows are not relabeled as newly executed. Seven scoped
+research/implementation/review threads close with no remaining reported P1/P2. CI selects
+the new software-DX12 maintenance cohort locally; no remote CI execution/publication is claimed.
+Root, sample and all affected independent workspace formatting checks pass. New relative
+document targets, workflow YAML, JSON, exact metadata observations and LF-normalized raw-record
+digests pass. No dependency manifest or lockfile change is part of this successor.
+
+This completes the selected pending-submission/deadline successor. The source-desktop child
+still independently polls its control directory every 2 ms; replacing that protocol polling
+requires attribution and a complete close/rebuild consumer, not an inferred benefit from these
+observer measurements. Arbitrary Task/World/cache-lifetime notification, foreign native
+execution, representative CPU/power budgets and the full Foundation plan remain open.
