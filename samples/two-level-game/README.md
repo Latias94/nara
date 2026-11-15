@@ -76,6 +76,14 @@ Capture refuses pending commands, travel or authoritative tasks, scripted verifi
 plugin services, an open save slot and a non-unit Runtime time scale. The shipped source/headless
 recipe is the first supported inventory. Extend that explicit inventory and compatibility policy
 when adding authoritative gameplay state or services.
+The default Runtime2d Material schema and empty asset storage are part of this inventory.
+Populated Material assets or Material2d components refuse reconstruction because this game's
+resume format does not represent their state. Installing the schema alone does not authorize
+silently omitting later material edits.
+
+App compatibility now includes the explicitly selected execution profile as well as the plugin
+plan. Its digest differs from older plugin-plan-only records even for the default Serial profile;
+recapture those records. The game still owns its complete source/service/state inventory.
 
 Start and pause a fresh candidate with the same ordinary product recipe, then call
 `request_resume(&mut candidate, &state)`. It first validates and initializes the phase through the

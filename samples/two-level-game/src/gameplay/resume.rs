@@ -96,6 +96,7 @@ fn supported_service(id: &str) -> bool {
             | "nara.transform"
             | "nara.input"
             | "nara.gameplay.commands"
+            | "nara.material2d"
             | "nara.render-components"
             | "nara.window"
             | "nara.render"

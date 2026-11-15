@@ -5,8 +5,10 @@ use nara::project_host::DesktopRun;
 use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedTime, RuntimeTimeSettings},
+    asset::Assets,
     ecs::World,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
+    material::{Material2d, Material2dAsset},
     prelude::Transform2d,
     project_host::HeadlessSession,
     tasks::{TaskPoolKind, TaskPools},
@@ -54,6 +56,20 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     if control.rejected {
         return Err(reject("this candidate rejected its reconstruction"));
     }
+    if world
+        .get_resource::<Assets<Material2dAsset>>()
+        .is_some_and(|assets| !assets.is_empty())
+    {
+        return Err(reject("material assets are not represented by ResumeState"));
+    }
+    if world
+        .iter_entities()
+        .any(|entity| entity.contains::<Material2d>())
+    {
+        return Err(reject(
+            "material components are not represented by ResumeState",
+        ));
+    }
     let queue = world.resource::<GameplayCommandQueue>();
     let stats = queue.stats();
     let time = world.resource::<FixedTime>();
@@ -85,7 +101,9 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 ///
 /// The shipped source/headless recipe is supported. Unknown plugin services, processed/direct
 /// sources, pending commands/travel/tasks, scripted verification and unrepresented time policy
-/// refuse capture. This value contains no World identity or native-service authority.
+/// refuse capture, as do material assets or components not represented by `ResumeState`.
+/// Empty material storage and its installed Schema are supported. This value contains no
+/// World identity or native-service authority.
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {

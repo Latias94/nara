@@ -4,8 +4,11 @@
 mod support;
 
 use std::{
+    collections::BTreeMap,
+    convert::Infallible,
     fs,
     path::Path,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -14,7 +17,17 @@ use nara::{
         FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeState,
         RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
     },
+    asset::{
+        AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
+        AssetSourceKind, Assets, SourceAssetImporter, StableAssetId, allocate_anonymous_handle,
+    },
+    core::ByteLimit,
     gameplay::GameplayCommandDraft,
+    material::{
+        AlphaMode2d, Material2d, Material2dAsset, Material2dDeclaration, Material2dDomain,
+        Material2dSource, MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
+        MaterialUniformField,
+    },
     prelude::{App, Plugin, PluginError},
     project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError},
 };
@@ -635,6 +648,150 @@ impl Plugin for UnknownResumeService {
 
     fn build(&self, _: &mut App) -> Result<(), PluginError> {
         Ok(())
+    }
+}
+
+fn resume_test_material() -> Material2dAsset {
+    let declaration = Material2dDeclaration::new(
+        "two-level-game.test-material",
+        1,
+        AlphaMode2d::Blend,
+        MaterialParameterLayout::new(
+            vec![
+                MaterialUniformField::new("tint", "tint", MaterialParameterKind::Vec4, 0).unwrap(),
+            ],
+            16,
+        )
+        .unwrap(),
+        Vec::new(),
+    )
+    .unwrap();
+    let source = Material2dSource::new(
+        declaration,
+        vec![AssetPath::new("resume-test.wgsl").unwrap()],
+        BTreeMap::from([("tint".to_owned(), MaterialParameterValue::Vec4([1.0; 4]))]),
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str("84d00000-0000-4000-8000-000000000001").unwrap(),
+            AssetPath::new("resume-test.material").unwrap(),
+            AssetSourceKind::Other(Material2dDomain::SOURCE_KIND.to_owned()),
+        ),
+        (),
+    )
+    .to_json_string()
+    .unwrap();
+    let metadata = AssetMetaIdentityCandidate::decode_json_bytes(metadata.as_bytes()).unwrap();
+    let shader = r#"
+fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    return sampled * tint * material_parameters.tint;
+}
+"#;
+    let mut reader = |_: &AssetPath, _: ByteLimit| -> Result<Arc<[u8]>, Infallible> {
+        Ok(Arc::from(shader.as_bytes()))
+    };
+    Material2dDomain::prepare(&mut AssetImportSource::new(
+        &metadata,
+        source.encode().unwrap().into(),
+        &mut reader,
+    ))
+    .unwrap()
+}
+
+#[derive(Default)]
+struct MaterialResumeState<const COMPONENT: bool>;
+
+impl<const COMPONENT: bool> Plugin for MaterialResumeState<COMPONENT> {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("two-level-game.test.desktop-capture"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[nara::material::MATERIAL_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let material = resume_test_material();
+        let handle = allocate_anonymous_handle().unwrap();
+        let world = app.world_mut()?;
+        if COMPONENT {
+            world.spawn(
+                Material2d::new(
+                    handle,
+                    material.generation().declaration(),
+                    material.default_parameters().clone(),
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            );
+        } else {
+            world
+                .resource_mut::<Assets<Material2dAsset>>()
+                .insert(handle, material);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn capture_refuses_material_assets_and_components_outside_resume_state() {
+    for (recipe, component, reason) in [
+        (
+            product_recipe()
+                .add_plugin::<MaterialResumeState<false>>()
+                .unwrap(),
+            false,
+            "material assets",
+        ),
+        (
+            product_recipe()
+                .add_plugin::<MaterialResumeState<true>>()
+                .unwrap(),
+            true,
+            "material components",
+        ),
+    ] {
+        let mut game = Game::with_recipe(recipe);
+        let before = game.snapshot();
+        let tick = game.tick();
+        let queue = game.queue();
+        for _ in 0..2 {
+            game.session
+                .observe(|world| {
+                    assert_eq!(
+                        world.resource::<Assets<Material2dAsset>>().is_empty(),
+                        component
+                    );
+                    assert_eq!(
+                        world
+                            .iter_entities()
+                            .any(|entity| entity.contains::<Material2d>()),
+                        component
+                    );
+                })
+                .unwrap();
+            assert!(matches!(
+                capture_resume(&game.session),
+                Err(GameResumeError::Ineligible(actual)) if actual.contains(reason)
+            ));
+            assert_eq!(game.tick(), tick);
+            assert_eq!(game.queue(), queue);
+            assert_eq!(game.snapshot().player, before.player);
+            assert_eq!(game.snapshot().logical_tick, before.logical_tick);
+            game.maintenance();
+        }
+        let continued = game.command(movement(1, true));
+        assert!(continued.player.x > before.player.x);
+        assert_eq!(continued.phase, GamePhase::Running);
+        assert!(continued.error.is_none());
+        assert!(matches!(
+            capture_resume(&game.session),
+            Err(GameResumeError::Ineligible(actual)) if actual.contains(reason)
+        ));
+        game.close();
     }
 }
 
