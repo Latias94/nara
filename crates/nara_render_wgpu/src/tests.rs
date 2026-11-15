@@ -1056,6 +1056,9 @@ fn legacy_empty_draw_input_has_no_quad_work() {
                 RenderTarget::PrimaryWindow,
                 ViewportRect::new(0, 0, 1, 1).unwrap(),
                 None,
+                crate::view_uniform::WgpuViewUniform::manual(
+                    ViewportRect::new(0, 0, 1, 1).unwrap(),
+                ),
             )
             .unwrap()
             .batches

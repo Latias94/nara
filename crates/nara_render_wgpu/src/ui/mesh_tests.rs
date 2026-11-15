@@ -315,7 +315,12 @@ fn viewport_clipping_keeps_source_facts_and_both_quad_oracles_refuse_mesh() {
         ..Default::default()
     };
     assert!(matches!(
-        payload.lower_draw(RenderTarget::PrimaryWindow, viewport, None),
+        payload.lower_draw(
+            RenderTarget::PrimaryWindow,
+            viewport,
+            None,
+            crate::view_uniform::WgpuViewUniform::manual(viewport),
+        ),
         Err(WgpuRenderError::UiPacketInvariant { .. })
     ));
 }

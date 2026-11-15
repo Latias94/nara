@@ -31,6 +31,208 @@ fn mixed_batch() -> WgpuQuadBatch {
     )
 }
 
+#[test]
+fn native_immutable_view_bytes_have_distinct_bindings_and_stable_pipeline_cache() {
+    let gpu = ReadbackGpu::new();
+    let declaration = Material2dDeclaration::from_parameters::<TestMaterialParameters>(
+        "test.immutable-view",
+        1,
+        AlphaMode2d::Opaque,
+        Vec::new(),
+    )
+    .unwrap();
+    let generation = Material2dGeneration::from_shader_source(
+        declaration,
+        "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(nara_view.viewport.x / 32.0, nara_view.real_elapsed, nara_view.virtual_elapsed, 1.0); }",
+    )
+    .unwrap();
+    let binding = generation
+        .bind(
+            &TestMaterialParameters {
+                value: nara_material::Vec4::ONE,
+            },
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+    let mut original = material_batch(binding, Vec::new());
+    original
+        .material_extension
+        .as_mut()
+        .unwrap()
+        .view
+        .virtual_elapsed = 1.0;
+    let mut later = original.clone();
+    let later_view = &mut later.material_extension.as_mut().unwrap().view;
+    later_view.viewport[0] = 32.0;
+    later_view.real_elapsed = 1.0;
+    later_view.virtual_elapsed = 0.0;
+    let mut negative_zero = original.clone();
+    negative_zero
+        .material_extension
+        .as_mut()
+        .unwrap()
+        .view
+        .time_scale = -0.0;
+    let mut paired = [
+        original.clone(),
+        later.clone(),
+        original.clone(),
+        negative_zero,
+    ];
+    paired[0].instances[0].center[0] = -0.5;
+    paired[0].instances[0].x_axis[0] = 0.5;
+    paired[1].instances[0].center[0] = 0.5;
+    paired[1].instances[0].x_axis[0] = 0.5;
+    paired[2].instances = paired[0].instances.clone();
+    paired[3].instances = paired[0].instances.clone();
+    let mut resources = StockQuadResources::default();
+    for (frame, batches, left, right) in [
+        (
+            1,
+            std::slice::from_ref(&later),
+            [255, 255, 0, 255],
+            [255, 255, 0, 255],
+        ),
+        (2, paired.as_slice(), [0, 0, 255, 255], [255, 255, 0, 255]),
+        (
+            3,
+            std::slice::from_ref(&original),
+            [0, 0, 255, 255],
+            [0, 0, 255, 255],
+        ),
+        (4, paired.as_slice(), [0, 0, 255, 255], [255, 255, 0, 255]),
+    ] {
+        let (pixels, ()) = gpu
+            .render_to_rgba(|_, _, format, output, encoder, preparation| {
+                let draw = resources.prepare_batches(
+                    preparation,
+                    || Ok(()),
+                    format,
+                    batches,
+                    frame,
+                    None,
+                )?;
+                if draw.buffers.len() == 4 {
+                    assert!(draw.buffers[0].captured_view_bind_group().is_some());
+                    assert_ne!(
+                        draw.buffers[0].captured_view_bind_group(),
+                        draw.buffers[1].captured_view_bind_group(),
+                    );
+                    assert_eq!(
+                        draw.buffers[0].captured_view_bind_group(),
+                        draw.buffers[2].captured_view_bind_group(),
+                    );
+                    assert_ne!(
+                        draw.buffers[0].captured_view_bind_group(),
+                        draw.buffers[3].captured_view_bind_group(),
+                    );
+                    assert_eq!(preparation.work_stats().initialized_buffer_calls, 4 * 2 + 3);
+                }
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("immutable-view-packing"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: output,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                crate::quad::draw_quad_batch_buffers(
+                    &mut pass,
+                    &draw.pipelines,
+                    &draw.buffers,
+                    crate::readback_tests::readback_viewport(),
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            crate::readback_tests::readback_pixel(&pixels, 16, 32),
+            &left
+        );
+        assert_eq!(
+            crate::readback_tests::readback_pixel(&pixels, 48, 32),
+            &right
+        );
+        assert_eq!(resources.pipeline_stats(), (1, 1, 1));
+    }
+    resources.clear();
+    assert_eq!(gpu.budget.retained(), 0);
+}
+
+#[test]
+fn native_view_sharing_table_is_bounded_and_original_prefix_owns_every_unique_allocation() {
+    let gpu = ReadbackGpu::new();
+    let base = mixed_batch();
+    let limit = crate::quad::MAX_SHARED_VIEW_BINDINGS;
+    let mut batches = (0..limit + 2)
+        .map(|index| {
+            let mut batch = base.clone();
+            batch.material_extension.as_mut().unwrap().view.frame = [index as u32, 0];
+            batch
+        })
+        .collect::<Vec<_>>();
+    batches.push(batches[0].clone());
+    batches.push(batches[limit + 1].clone());
+    let unique_allocations = limit + 3;
+    let uniform_bytes = base
+        .material_extension
+        .as_ref()
+        .unwrap()
+        .binding
+        .uniform_bytes()
+        .len() as u64;
+    let buffer_bytes = batches.len() as u64
+        * (size_of::<WgpuQuadInstance>() as u64 + uniform_bytes)
+        + unique_allocations as u64 * VIEW_UNIFORM_BYTES;
+    let mut resources = StockQuadResources::default();
+    let conservative = resources.pending_allocation_bytes(batches.iter()).unwrap();
+    let actual = conservative - VIEW_UNIFORM_BYTES;
+    let cost = StockPreparationCost::for_batches(batches.iter()).unwrap();
+    let (result, prefix) = gpu.with_preparation(|preparation| {
+        preparation.reserve_entries(cost.custody_entries)?;
+        let draw = resources.prepare_batches(
+            preparation,
+            || Ok(()),
+            wgpu::TextureFormat::Rgba8Unorm,
+            &batches,
+            1,
+            None,
+        )?;
+        assert_eq!(draw.buffers.len(), batches.len());
+        assert_eq!(
+            draw.buffers[0].captured_view_bind_group(),
+            draw.buffers[limit + 2].captured_view_bind_group(),
+        );
+        assert_ne!(
+            draw.buffers[limit + 1].captured_view_bind_group(),
+            draw.buffers[limit + 3].captured_view_bind_group(),
+        );
+        let work = preparation.work_stats();
+        assert_eq!(
+            work.initialized_buffer_calls as usize,
+            2 * batches.len() + unique_allocations
+        );
+        assert_eq!(work.initialized_buffer_payload_bytes, buffer_bytes);
+        assert_eq!(work.initialized_buffer_storage_bytes, buffer_bytes);
+        assert_eq!(work.issued_texture_write_calls, 3);
+        assert_eq!(work.issued_texture_write_bytes, 12);
+        assert_eq!(gpu.budget.retained(), actual);
+        resources.clear();
+        drop(draw);
+        assert_eq!(gpu.budget.retained(), actual);
+        Ok(((), gpu.queue.submit([])))
+    });
+    result.unwrap();
+    assert_eq!(gpu.budget.retained(), actual);
+    gpu.wait_for_prefix(&prefix);
+    assert_eq!(gpu.budget.retained(), 0);
+}
+
 fn source_retained_generation(
     source_generations: &Arc<OutputBudget>,
     fragment: &str,
@@ -357,14 +559,15 @@ fn material_device_limits_admit_equality_and_reject_each_actual_upper_bound() {
         .declaration();
     let size = u64::from(declaration.parameters().byte_size());
     assert!(size > 16);
+    let size = size.max(VIEW_UNIFORM_BYTES);
     let limits = wgpu::Limits {
         max_uniform_buffer_binding_size: size,
         max_buffer_size: size,
         max_sampled_textures_per_shader_stage: 3,
         max_bindings_per_bind_group: 8,
-        max_bind_groups: 2,
-        max_bind_groups_plus_vertex_buffers: 3,
-        max_uniform_buffers_per_shader_stage: 1,
+        max_bind_groups: 3,
+        max_bind_groups_plus_vertex_buffers: 4,
+        max_uniform_buffers_per_shader_stage: 2,
         max_samplers_per_shader_stage: 1,
         ..Default::default()
     };
@@ -401,21 +604,21 @@ fn material_device_limits_admit_equality_and_reject_each_actual_upper_bound() {
         (
             "max_bind_groups",
             wgpu::Limits {
-                max_bind_groups: 1,
+                max_bind_groups: 2,
                 ..limits.clone()
             },
         ),
         (
             "max_bind_groups_plus_vertex_buffers",
             wgpu::Limits {
-                max_bind_groups_plus_vertex_buffers: 2,
+                max_bind_groups_plus_vertex_buffers: 3,
                 ..limits.clone()
             },
         ),
         (
             "max_uniform_buffers_per_shader_stage",
             wgpu::Limits {
-                max_uniform_buffers_per_shader_stage: 0,
+                max_uniform_buffers_per_shader_stage: 1,
                 ..limits.clone()
             },
         ),
@@ -494,13 +697,13 @@ fn material_limits_include_the_primary_texture_and_zero_texture_uniforms_keep_cu
         StockPreparationCost::for_batches(std::iter::once(&batch))
             .unwrap()
             .custody_entries,
-        7
+        10
     );
     assert_eq!(
         resources
             .pending_allocation_bytes(std::iter::once(&batch))
             .unwrap(),
-        size_of::<WgpuQuadInstance>() as u64 + 16 + 4
+        size_of::<WgpuQuadInstance>() as u64 + 16 + VIEW_UNIFORM_BYTES + 4
     );
 }
 
@@ -509,11 +712,12 @@ fn variable_material_cost_counts_each_texture_and_uniform_before_native_work() {
     let batch = mixed_batch();
     let material = batch.material_extension.as_ref().unwrap();
     let cost = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
-    assert_eq!(cost.custody_entries, 3 * 3 + 2 * 2);
+    assert_eq!(cost.custody_entries, 3 * 3 + 3 * 2 + 1);
     assert!(cost.modeled_metadata_bytes >= material.binding.uniform_bytes().len());
     let resources = StockQuadResources::default();
     let expected = size_of::<WgpuQuadInstance>() as u64
         + material.binding.uniform_bytes().len() as u64
+        + VIEW_UNIFORM_BYTES
         + 4
         + 4
         + 4;
@@ -584,8 +788,9 @@ fn shared_snapshot_preflight_deduplicates_textures_but_keeps_every_capture_occur
     preflight.collect(&shared).unwrap();
     preflight.collect(&shared).unwrap();
     let cost = preflight.cost().unwrap();
-    assert_eq!(cost.custody_entries, 4 * (3 * 3 + 2 * 2));
-    let expected = 4 * (size_of::<WgpuQuadInstance>() as u64 + uniform_bytes) + 4 + 4;
+    assert_eq!(cost.custody_entries, 4 * (3 * 3 + 3 * 2 + 1));
+    let expected =
+        4 * (size_of::<WgpuQuadInstance>() as u64 + uniform_bytes + VIEW_UNIFORM_BYTES) + 4 + 4;
     assert_eq!(preflight.allocation_bytes(&resources).unwrap(), expected);
     let mut different_version = shared.to_vec();
     different_version[1]
@@ -703,6 +908,7 @@ fn native_variable_material_budget_refuses_before_partial_upload_and_original_pr
         assert_eq!(
             preparation.work_stats().initialized_buffer_payload_bytes,
             size_of::<WgpuQuadInstance>() as u64
+                + VIEW_UNIFORM_BYTES
                 + MixedMaterialParameters::parameter_layout()
                     .unwrap()
                     .byte_size() as u64
@@ -833,7 +1039,7 @@ fn program_material_textures_replace_only_image_demand_and_preserve_capture_vali
         .preflight_image_residency(std::iter::once(&batch))
         .unwrap();
     let cost = StockPreparationCost::for_batches(std::iter::once(&batch)).unwrap();
-    assert_eq!(cost.custody_entries, 7);
+    assert_eq!(cost.custody_entries, 10);
     assert!(cost.modeled_metadata_bytes < original_cost.modeled_metadata_bytes);
     assert_eq!(
         resources

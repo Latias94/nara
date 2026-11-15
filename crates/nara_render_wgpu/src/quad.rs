@@ -7,6 +7,7 @@ use crate::{
     material_textures::WgpuMaterialTextureSource,
     preparation::{NativePreparation, WgpuFeatureAllocation},
     program::WgpuOperationResources,
+    view_uniform::{VIEW_UNIFORM_BYTES, WgpuViewUniform},
 };
 use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
@@ -16,7 +17,7 @@ use nara_material::{
 use nara_render::{RenderResourceKey, ViewportRect};
 #[cfg(feature = "stock-ui")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use thiserror::Error;
 
 const VERTICES_PER_QUAD: u32 = 6;
@@ -103,6 +104,7 @@ pub(crate) struct WgpuQuadBatch {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WgpuMaterial2d {
     pub(crate) binding: Material2dBinding,
+    pub(crate) view: WgpuViewUniform,
     pub(crate) textures: Vec<(u32, WgpuMaterialTexture)>,
 }
 
@@ -216,12 +218,43 @@ pub(crate) struct WgpuQuadBatchBuffer {
     _material_textures: Vec<WgpuMaterialTextureView>,
     _material_buffer: Option<wgpu::Buffer>,
     _material_allocation: Option<WgpuFeatureAllocation>,
+    view: Option<Arc<WgpuViewBinding>>,
     material: Option<WgpuMaterial2dPipelineKey>,
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instance_count: u32,
     #[cfg(test)]
     logical_bytes: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct WgpuViewBinding {
+    uniform: WgpuViewUniform,
+    bind_group: wgpu::BindGroup,
+    _buffer: wgpu::Buffer,
+    _allocation: WgpuFeatureAllocation,
+}
+
+pub(crate) const MAX_SHARED_VIEW_BINDINGS: usize = nara_render::MAX_VIEWS_PER_TARGET;
+
+pub(crate) fn create_view_bind_group_layout(
+    device: &wgpu::Device,
+) -> Result<wgpu::BindGroupLayout, WgpuTextureError> {
+    checked_allocation(device, "nara_view_bind_group_layout", || {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("nara_view_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(VIEW_UNIFORM_BYTES),
+                },
+                count: None,
+            }],
+        })
+    })
 }
 
 pub(crate) fn create_material_bind_group_layout(
@@ -268,6 +301,10 @@ pub(crate) fn create_material_bind_group_layout(
 impl WgpuQuadBatchBuffer {
     pub(crate) const fn logical_bytes(&self) -> u64 {
         self.logical_bytes
+    }
+
+    pub(crate) fn captured_view_bind_group(&self) -> Option<&wgpu::BindGroup> {
+        self.view.as_ref().map(|view| &view.bind_group)
     }
 }
 
@@ -393,6 +430,7 @@ pub(crate) fn create_quad_pipeline(
     key: WgpuQuadPipelineKey,
     texture_bind_group_layout: &wgpu::BindGroupLayout,
     material_bind_group_layout: Option<&wgpu::BindGroupLayout>,
+    view_bind_group_layout: Option<&wgpu::BindGroupLayout>,
 ) -> Result<WgpuQuadPipeline, crate::WgpuRenderError> {
     if let Some(material) = &key.material {
         validate_material_device_limits(material.declaration(), &device.limits())?;
@@ -434,6 +472,11 @@ pub(crate) fn create_quad_pipeline(
     let mut layouts = vec![Some(texture_bind_group_layout)];
     if let Some(material_bind_group_layout) = material_bind_group_layout {
         layouts.push(Some(material_bind_group_layout));
+        layouts.push(Some(view_bind_group_layout.ok_or_else(|| {
+            crate::WgpuRenderError::ContentRejected {
+                message: "2D material requires the captured View bind group layout".to_owned(),
+            }
+        })?));
     }
     let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -478,11 +521,18 @@ pub(crate) fn create_quad_pipeline(
     Ok(WgpuQuadPipeline { key, pipeline })
 }
 
+/// Shares byte-identical immutable View bindings within this preparation call.
+///
+/// The temporary linear lookup retains at most `MAX_SHARED_VIEW_BINDINGS` entries. Additional
+/// distinct values allocate independent bindings under the admitted per-batch envelope; they
+/// neither extend this table nor become persistent cache entries. Prepared buffers and original
+/// submission custody retain each actual binding and its allocation independently of the table.
 pub(crate) fn create_quad_batch_buffers(
     preparation: &mut NativePreparation<'_>,
     batches: &[WgpuQuadBatch],
     texture_layout: &wgpu::BindGroupLayout,
     material_layouts: &WgpuMaterial2dLayouts,
+    view_layout: Option<&wgpu::BindGroupLayout>,
     texture_cache: &mut WgpuSpriteTextureCache,
     frame_index: u64,
     resources: Option<&WgpuOperationResources<'_>>,
@@ -498,12 +548,21 @@ pub(crate) fn create_quad_batch_buffers(
     {
         let declaration = material.binding.generation().declaration();
         validate_material_device_limits(declaration, &preparation.device().limits())?;
-        if !material_layouts.contains_key(&declaration.binding_digest()) {
+        if !material_layouts.contains_key(&declaration.binding_digest()) || view_layout.is_none() {
             return Err(missing_material_layout());
         }
         validate_material_capture(material)?;
         validate_material_texture_resources(material, resources)?;
     }
+    let mut view_bindings = Vec::<Arc<WgpuViewBinding>>::new();
+    let maximum_view_bindings = batches
+        .iter()
+        .filter(|batch| !batch.instances.is_empty() && batch.material_extension.is_some())
+        .take(MAX_SHARED_VIEW_BINDINGS)
+        .count();
+    view_bindings
+        .try_reserve_exact(maximum_view_bindings)
+        .map_err(|_| WgpuTextureError::NativeResourceCapacity)?;
     batches
         .iter()
         .filter(|batch| !batch.instances.is_empty())
@@ -562,6 +621,46 @@ pub(crate) fn create_quad_batch_buffers(
                 } else {
                     (None, Vec::new(), None, None)
                 };
+            let view = if let Some(material) = &batch.material_extension {
+                if let Some(view) = view_bindings.iter().find(|view| {
+                    bytemuck::bytes_of(&view.uniform) == bytemuck::bytes_of(&material.view)
+                }) {
+                    Some(Arc::clone(view))
+                } else {
+                    let layout = view_layout.ok_or_else(missing_material_layout)?;
+                    let (buffer, allocation) = preparation.create_buffer_with_data(
+                        "nara_view_uniform",
+                        bytemuck::bytes_of(&material.view),
+                        wgpu::BufferUsages::UNIFORM,
+                    )?;
+                    let bind_group =
+                        checked_allocation(preparation.device(), "nara_view_bind_group", || {
+                            preparation
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("nara_view_bind_group"),
+                                    layout,
+                                    entries: &[wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: buffer.as_entire_binding(),
+                                    }],
+                                })
+                        })?;
+                    let view = Arc::new(WgpuViewBinding {
+                        uniform: material.view,
+                        bind_group,
+                        _buffer: buffer,
+                        _allocation: allocation,
+                    });
+                    preparation.retain(Arc::clone(&view))?;
+                    if view_bindings.len() < maximum_view_bindings {
+                        view_bindings.push(Arc::clone(&view));
+                    }
+                    Some(view)
+                }
+            } else {
+                None
+            };
             let instance_count = saturating_u32(batch.instances.len());
             #[cfg(test)]
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
@@ -579,6 +678,7 @@ pub(crate) fn create_quad_batch_buffers(
                 _material_textures: material_textures,
                 _material_buffer: material_buffer,
                 _material_allocation: material_allocation,
+                view,
                 material: batch
                     .material_extension
                     .as_ref()
@@ -661,7 +761,7 @@ pub(crate) fn validate_material_device_limits(
     declaration: &Material2dDeclaration,
     limits: &wgpu::Limits,
 ) -> Result<(), WgpuTextureError> {
-    let uniform_size = u64::from(declaration.parameters().byte_size());
+    let uniform_size = u64::from(declaration.parameters().byte_size()).max(VIEW_UNIFORM_BYTES);
     let texture_count = declaration.textures().len() as u64 + 1;
     let binding_index = declaration
         .textures()
@@ -687,15 +787,15 @@ pub(crate) fn validate_material_device_limits(
             binding_index + 1,
             u64::from(limits.max_bindings_per_bind_group),
         ),
-        ("max_bind_groups", 2, u64::from(limits.max_bind_groups)),
+        ("max_bind_groups", 3, u64::from(limits.max_bind_groups)),
         (
             "max_bind_groups_plus_vertex_buffers",
-            3,
+            4,
             u64::from(limits.max_bind_groups_plus_vertex_buffers),
         ),
         (
             "max_uniform_buffers_per_shader_stage",
-            1,
+            2,
             u64::from(limits.max_uniform_buffers_per_shader_stage),
         ),
         (
@@ -748,6 +848,9 @@ pub(crate) fn draw_quad_batch_buffers<'pass>(
         render_pass.set_bind_group(0, &buffer.bind_group.bind_group, &[]);
         if let Some(material) = &buffer.material_bind_group {
             render_pass.set_bind_group(1, material, &[]);
+        }
+        if let Some(view) = &buffer.view {
+            render_pass.set_bind_group(2, &view.bind_group, &[]);
         }
         render_pass.set_vertex_buffer(0, buffer.buffer.slice(..));
         render_pass.draw(0..VERTICES_PER_QUAD, 0..buffer.instance_count);
@@ -893,6 +996,7 @@ mod tests {
                 instances: vec![WgpuQuadInstance::zeroed(); 2],
                 counts_as_sprites: true,
                 material_extension: Some(WgpuMaterial2d {
+                    view: WgpuViewUniform::manual(crate::readback_tests::readback_viewport()),
                     binding: crate::readback_tests::material_binding(
                         &crate::readback_tests::material_generation(
                             "test.native-material-custody",
@@ -907,7 +1011,8 @@ mod tests {
             };
             let layouts =
                 crate::readback_tests::material_layouts(device, std::slice::from_ref(&batch))?;
-            let expected = quad_instance_byte_len(2) + 16 + 4 + 4;
+            let view_layout = create_view_bind_group_layout(device)?;
+            let expected = quad_instance_byte_len(2) + 16 + VIEW_UNIFORM_BYTES + 4 + 4;
             let budget = Arc::new(OutputBudget::new(expected));
             let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
             let buffers = create_quad_batch_buffers(
@@ -921,6 +1026,7 @@ mod tests {
                 &[batch],
                 &texture_layout,
                 &layouts,
+                Some(&view_layout),
                 &mut cache,
                 1,
                 None,

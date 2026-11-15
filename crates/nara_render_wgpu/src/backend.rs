@@ -1664,7 +1664,14 @@ impl WgpuRenderBackend {
             .views()
             .iter()
             .enumerate()
-            .map(|(index, view)| payload.lower_draw(view.target, view.viewport, Some(index)))
+            .map(|(index, view)| {
+                payload.lower_draw(
+                    view.target,
+                    view.viewport,
+                    Some(index),
+                    crate::view_uniform::WgpuViewUniform::capture(view, packet.captured_time()),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         #[cfg(feature = "stock-ui")]
         let (ui_viewport, lowered_ui) = {
@@ -1672,7 +1679,12 @@ impl WgpuRenderBackend {
                 .expect("admitted target extent");
             (
                 viewport,
-                payload.lower_draw(packet.views()[0].target, viewport, None)?,
+                payload.lower_draw(
+                    packet.views()[0].target,
+                    viewport,
+                    None,
+                    crate::view_uniform::WgpuViewUniform::manual(viewport),
+                )?,
             )
         };
         #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
@@ -1813,7 +1825,12 @@ impl WgpuRenderBackend {
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
-            let lowered = payload.lower_draw(target, viewport, view_index)?;
+            let lowered = payload.lower_draw(
+                target,
+                viewport,
+                view_index,
+                crate::view_uniform::WgpuViewUniform::manual(viewport),
+            )?;
             self.prepare_submitter_draw_lowered(view_format, lowered, frame_index, preparation)
         }
         #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]

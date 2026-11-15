@@ -4,7 +4,8 @@ use crate::{
     quad::{
         WgpuMaterial2dLayouts, WgpuQuadBatch, WgpuQuadPipelineDrawRef,
         create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
-        create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
+        create_quad_texture_bind_group_layout, create_view_bind_group_layout,
+        draw_quad_batch_buffers,
     },
     submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
     texture::WgpuSpriteTextureCache,
@@ -156,6 +157,7 @@ pub(crate) fn material_batch(
         counts_as_sprites: true,
         material_extension: Some(crate::quad::WgpuMaterial2d {
             binding,
+            view: crate::view_uniform::WgpuViewUniform::manual(readback_viewport()),
             textures: textures
                 .into_iter()
                 .map(|(binding, snapshot)| (binding, snapshot.into()))
@@ -282,6 +284,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
     let (pixels, ()) = render_to_rgba(|device, _, format, output_view, encoder, preparation| {
         assert_eq!(device.limits().max_texture_dimension_2d, 8_192);
         let texture_layout = create_quad_texture_bind_group_layout(device)?;
+        let view_layout = create_view_bind_group_layout(device)?;
         let mut cache = WgpuSpriteTextureCache::default();
         cache.begin_frame(1);
         for width in [8_192, 8_193, 16_384] {
@@ -295,6 +298,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
                 &[batch],
                 &texture_layout,
                 &layouts,
+                Some(&view_layout),
                 &mut cache,
                 1,
                 None,
@@ -334,6 +338,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
                     key.clone(),
                     &texture_layout,
                     pipeline_material_layout(&layouts, &key),
+                    Some(&view_layout),
                 )?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
@@ -347,6 +352,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
             &[batch],
             &texture_layout,
             &layouts,
+            Some(&view_layout),
             &mut cache,
             1,
             None,
@@ -411,6 +417,7 @@ fn image_extent_admission_batch(
         }],
         counts_as_sprites: true,
         material_extension: auxiliary.then_some(WgpuMaterial2d {
+            view: crate::view_uniform::WgpuViewUniform::manual(readback_viewport()),
             binding: material_binding(
                 &material_generation(
                     "readback.extent-admission",
@@ -483,7 +490,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 .into_iter()
                 .map(|key| {
                     let pipeline =
-                        create_quad_pipeline(device, key.clone(), &texture_layout, None)?;
+                        create_quad_pipeline(device, key.clone(), &texture_layout, None, None)?;
                     Ok(WgpuQuadPipelineDrawRef {
                         alpha_mode: key.alpha_mode,
                         material: key.material.clone(),
@@ -498,6 +505,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 &batches,
                 &texture_layout,
                 &material_layouts,
+                None,
                 &mut cache,
                 1,
                 None,
@@ -510,6 +518,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
                 &batches,
                 &texture_layout,
                 &material_layouts,
+                None,
                 &mut cache,
                 2,
                 None,
@@ -733,6 +742,7 @@ pub(crate) fn render_batches_to_rgba(
     render_to_rgba(|device, _, format, output_view, encoder, preparation| {
         let texture_layout = create_quad_texture_bind_group_layout(device)?;
         let layouts = material_layouts(device, batches)?;
+        let view_layout = create_view_bind_group_layout(device)?;
         let pipelines = crate::required_quad_pipeline_keys(batches, format)
             .into_iter()
             .map(|key| {
@@ -741,6 +751,7 @@ pub(crate) fn render_batches_to_rgba(
                     key.clone(),
                     &texture_layout,
                     pipeline_material_layout(&layouts, &key),
+                    Some(&view_layout),
                 )?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
@@ -756,6 +767,7 @@ pub(crate) fn render_batches_to_rgba(
             batches,
             &texture_layout,
             &layouts,
+            Some(&view_layout),
             &mut texture_cache,
             1,
             None,

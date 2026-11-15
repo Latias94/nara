@@ -207,6 +207,7 @@ fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears(
         let capture = SpriteCapture::for_views(
             (frame < 3).then_some(captured.payload.sprite_batches.as_ref().unwrap()),
             &views,
+            captured.topology.captured_time(),
             target.clone(),
         )
         .unwrap();

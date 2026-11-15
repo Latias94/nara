@@ -413,6 +413,7 @@ impl WgpuStockProgramBuilder<'_> {
                     crate::LimitKind::MetadataBytes,
                 ))?;
             let metadata = crate::sprite::material_texture_metadata_bytes(
+                batches.as_slice().len(),
                 source_slots,
                 material_count,
                 bindings.len(),
@@ -421,6 +422,7 @@ impl WgpuStockProgramBuilder<'_> {
             let mut sprite_capture = crate::sprite::SpriteCapture::for_views(
                 Some(batches),
                 packet.views(),
+                packet.captured_time(),
                 scene.clone(),
             )?;
             let reads = sprite_capture.bind_material_textures(bindings)?;

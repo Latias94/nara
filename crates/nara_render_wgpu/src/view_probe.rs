@@ -25,6 +25,12 @@ use crate::{
 };
 
 pub(crate) fn captured_split_frame() -> LegacyWgpuCapturedFrame {
+    captured_split_frame_with_material(None)
+}
+
+pub(crate) fn captured_split_frame_with_material(
+    material: Option<nara_material::Material2dBinding>,
+) -> LegacyWgpuCapturedFrame {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
@@ -79,14 +85,14 @@ pub(crate) fn captured_split_frame() -> LegacyWgpuCapturedFrame {
         (0.0, Color::rgb(1.0, 0.0, 0.0)),
         (100.0, Color::rgb(0.0, 1.0, 0.0)),
     ] {
-        entities.push(
-            world
-                .spawn((
-                    Sprite::from_color(Vec2::new(24.0, 8.0), color),
-                    Transform2d::from_translation(Vec2::new(x, 0.0)),
-                ))
-                .id(),
-        );
+        let mut entity = world.spawn((
+            Sprite::from_color(Vec2::new(24.0, 8.0), color),
+            Transform2d::from_translation(Vec2::new(x, 0.0)),
+        ));
+        if let Some(material) = &material {
+            entity.insert(material.clone());
+        }
+        entities.push(entity.id());
     }
     HierarchyWriter::new(world)
         .apply_batch(

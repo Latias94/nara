@@ -11,8 +11,9 @@ use crate::{
         WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
     },
     stock_quad::StockQuadPrepared,
+    view_uniform::WgpuViewUniform,
 };
-use nara_render::{ExtractedView, ViewLoadOp, ViewportRect};
+use nara_render::{CapturedRenderTime, ExtractedView, ViewLoadOp, ViewportRect};
 use nara_sprite_render::__private::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 /// Stock Sprite drawing against the policy's exact semantic texture port.
@@ -29,6 +30,7 @@ pub(crate) struct SpriteCapture<S: 'static> {
     pub(crate) target: WgpuProgramTexture<S>,
     pub(crate) batches: Arc<[WgpuQuadBatch]>,
     views: Arc<[SpriteViewDraw]>,
+    _captured_time: Option<CapturedRenderTime>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,12 +48,18 @@ pub(crate) const fn ordered_view_metadata_bytes() -> usize {
 }
 
 pub(crate) fn material_texture_metadata_bytes(
+    batches: usize,
     slots: usize,
     materials: usize,
     selections: usize,
 ) -> Result<usize, WgpuRenderProgramError> {
     let metadata = materials
         .checked_mul(std::mem::size_of::<Vec<(u32, WgpuMaterialTexture)>>())
+        .and_then(|bytes| {
+            batches
+                .checked_mul(std::mem::size_of::<WgpuQuadBatch>())
+                .and_then(|batches| bytes.checked_add(batches))
+        })
         .and_then(|bytes| {
             slots
                 .checked_mul(std::mem::size_of::<(u32, WgpuMaterialTexture)>())
@@ -190,7 +198,8 @@ impl<S: 'static> SpriteCapture<S> {
         Self::from_lowered(
             target,
             viewport,
-            collect_sprite_quad_batches(batches, view_index).into(),
+            collect_sprite_quad_batches(batches, view_index, WgpuViewUniform::manual(viewport))
+                .into(),
         )
     }
 
@@ -212,6 +221,7 @@ impl<S: 'static> SpriteCapture<S> {
                 load: ViewLoadOp::Load,
                 buffers: 0..buffers,
             }]),
+            _captured_time: None,
         }
     }
 
@@ -220,6 +230,7 @@ impl<S: 'static> SpriteCapture<S> {
     pub(crate) fn for_views(
         batches: Option<&SpriteBatches>,
         views: &[ExtractedView],
+        captured_time: Option<CapturedRenderTime>,
         target: WgpuProgramTexture<S>,
     ) -> Result<Self, WgpuRenderProgramError> {
         if views.is_empty() || views.len() > nara_render::MAX_VIEWS_PER_TARGET {
@@ -256,12 +267,13 @@ impl<S: 'static> SpriteCapture<S> {
         let mut next_buffer = 0;
         for (index, view) in views.iter().enumerate() {
             let first_buffer = next_buffer;
+            let uniform = WgpuViewUniform::capture(view, captured_time);
             if let Some(batches) = batches {
                 for batch in batches.for_view(index) {
                     if !batch.instances.is_empty() {
                         next_buffer += 1;
                     }
-                    lowered.push(sprite_quad_batch(batch));
+                    lowered.push(sprite_quad_batch(batch, uniform));
                 }
             }
             draws.push(SpriteViewDraw {
@@ -274,6 +286,7 @@ impl<S: 'static> SpriteCapture<S> {
             target,
             batches: lowered.into(),
             views: draws.into(),
+            _captured_time: captured_time,
         })
     }
 }
@@ -353,14 +366,15 @@ impl<S: 'static> WgpuRenderFeature for SpriteFeature<S> {
 pub(crate) fn collect_sprite_quad_batches(
     batches: &SpriteBatches,
     view_index: usize,
+    view: WgpuViewUniform,
 ) -> Vec<WgpuQuadBatch> {
     batches
         .for_view(view_index)
-        .map(sprite_quad_batch)
+        .map(|batch| sprite_quad_batch(batch, view))
         .collect()
 }
 
-fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
+fn sprite_quad_batch(batch: &SpriteBatch, view: WgpuViewUniform) -> WgpuQuadBatch {
     let texture = batch
         .image
         .clone()
@@ -380,6 +394,7 @@ fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
             .as_ref()
             .map(|material| WgpuMaterial2d {
                 binding: material.binding.clone(),
+                view,
                 textures: material
                     .textures
                     .iter()
@@ -494,10 +509,113 @@ mod tests {
             }],
         };
 
-        let converted = sprite_quad_batch(&batch);
+        let converted = sprite_quad_batch(
+            &batch,
+            WgpuViewUniform::manual(ViewportRect::new(0, 0, 64, 64).unwrap()),
+        );
         assert_eq!(converted.material.alpha_mode, AlphaMode2d::Blend);
         assert_eq!(converted.instances[0].center, [0.25, -0.5]);
         assert_eq!(converted.instances[0].uv_size, [0.5, 0.25]);
         assert!(converted.counts_as_sprites);
+    }
+
+    #[test]
+    fn ordered_lowering_freezes_each_original_view_and_retains_exact_cpu_time() {
+        let declaration = nara_material::Material2dDeclaration::from_parameters::<
+            crate::readback_tests::TestMaterialParameters,
+        >("test.view-capture", 1, AlphaMode2d::Opaque, Vec::new())
+        .unwrap();
+        let generation = nara_material::Material2dGeneration::from_shader_source(
+            declaration,
+            "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(nara_view.viewport.x / 32.0, f32(nara_view.clock_available), nara_view.real_elapsed, 1.0); }",
+        )
+        .unwrap();
+        let binding = generation
+            .bind(
+                &crate::readback_tests::TestMaterialParameters {
+                    value: nara_material::Vec4::ONE,
+                },
+                std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+        let captured = crate::view_probe::captured_split_frame_with_material(Some(binding));
+        let packet = &captured.topology;
+        let mut builder = WgpuRenderProgramBuilder::new(
+            packet.source_generation(),
+            packet.frame_index(),
+            GraphLimits::default(),
+        )
+        .unwrap();
+        let target = builder
+            .texture::<()>(WgpuProgramTextureDescriptor {
+                native: wgpu::TextureDescriptor {
+                    label: Some("captured-views"),
+                    size: wgpu::Extent3d {
+                        width: 64,
+                        height: 64,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                },
+                transfer: TextureTransfer::Linear,
+                alpha: TextureAlpha::Premultiplied,
+            })
+            .unwrap();
+        let lower = |views: &[ExtractedView], time: Option<CapturedRenderTime>| {
+            SpriteCapture::for_views(
+                captured.payload.sprite_batches.as_ref(),
+                views,
+                time,
+                target.clone(),
+            )
+            .unwrap()
+        };
+        let original = lower(packet.views(), packet.captured_time());
+        assert_eq!(original.batches.len(), 2);
+        assert_eq!(original._captured_time, packet.captured_time());
+        for (batch, view) in original.batches.iter().zip(packet.views()) {
+            let uniform = batch.material_extension.as_ref().unwrap().view;
+            assert_eq!(
+                uniform,
+                WgpuViewUniform::capture(view, packet.captured_time())
+            );
+            assert_eq!(uniform.clock_available, 1);
+            assert_eq!(uniform.frame, [1, 0]);
+        }
+        assert_ne!(
+            original.batches[0]
+                .material_extension
+                .as_ref()
+                .unwrap()
+                .view,
+            original.batches[1]
+                .material_extension
+                .as_ref()
+                .unwrap()
+                .view,
+        );
+        let mut later_views = packet.views().to_vec();
+        later_views[0].viewport.physical_width -= 1;
+        let later = lower(&later_views, None);
+        assert_eq!(later._captured_time, None);
+        let original_uniform = original.batches[0]
+            .material_extension
+            .as_ref()
+            .unwrap()
+            .view;
+        let later_uniform = later.batches[0].material_extension.as_ref().unwrap().view;
+        assert_ne!(original_uniform, later_uniform);
+        assert_eq!(later_uniform.clock_available, 0);
+        assert_eq!(original_uniform.clock_available, 1);
+        assert_eq!(original_uniform.viewport, [0.0, 0.0, 32.0, 64.0]);
+        assert_eq!(
+            crate::required_quad_pipeline_keys(&original.batches, wgpu::TextureFormat::Rgba8Unorm),
+            crate::required_quad_pipeline_keys(&later.batches, wgpu::TextureFormat::Rgba8Unorm),
+        );
     }
 }

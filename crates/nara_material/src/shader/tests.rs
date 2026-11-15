@@ -160,7 +160,7 @@ fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4
         assert_eq!(module.entry_points.len(), STOCK_ENTRY_POINTS.len());
         assert_eq!(
             module.global_variables.len(),
-            declaration.textures().len() + 3
+            declaration.textures().len() + 4
         );
         assert_eq!(
             shader.digest(),
@@ -171,6 +171,317 @@ fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4
         tint_shader.interface_digest(),
         mixed_shader.interface_digest()
     );
+}
+
+#[test]
+fn stock_view_has_the_exact_naga_uniform_layout_and_period_constant() {
+    use naga::{Scalar, VectorSize};
+
+    let declaration = tint_declaration();
+    let artifact = MaterialShaderArtifact::compile(&declaration, PASS_THROUGH).unwrap();
+    let module = validated_module(artifact.source());
+    let view = module
+        .global_variables
+        .iter()
+        .find_map(|(_, variable)| {
+            (variable.name.as_deref() == Some("nara_view")).then_some(variable)
+        })
+        .unwrap();
+    assert_eq!(view.space, AddressSpace::Uniform);
+    assert_eq!(
+        view.binding,
+        Some(naga::ResourceBinding {
+            group: 2,
+            binding: 0,
+        })
+    );
+    assert_eq!(module.types[view.ty].name.as_deref(), Some("NaraView"));
+    let TypeInner::Struct { members, span } = &module.types[view.ty].inner else {
+        panic!("NaraView must be a struct");
+    };
+    assert_eq!(*span, 224);
+    assert_eq!(*span, __STOCK_VIEW_UNIFORM_BYTES);
+    let observed: Vec<_> = members
+        .iter()
+        .map(|member| {
+            assert!(member.binding.is_none());
+            (member.name.as_deref().unwrap(), member.offset)
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            ("world_to_clip", 0),
+            ("clip_to_world", 48),
+            ("viewport", 96),
+            ("real_elapsed", 112),
+            ("real_delta", 116),
+            ("virtual_elapsed", 120),
+            ("virtual_delta", 124),
+            ("fixed_elapsed", 128),
+            ("fixed_delta", 132),
+            ("fixed_timestep", 136),
+            ("interpolation_alpha", 140),
+            ("time_scale", 144),
+            ("clock_available", 148),
+            ("paused", 152),
+            ("spatial_interpolated", 156),
+            ("frame", 160),
+            ("fixed_tick", 168),
+            ("real_period", 176),
+            ("virtual_period", 184),
+            ("fixed_period", 192),
+            ("_reserved0", 200),
+            ("virtual_frame", 208),
+            ("fixed_steps", 216),
+            ("_reserved1", 220),
+        ]
+    );
+    let mut layouter = naga::proc::Layouter::default();
+    layouter.update(module.to_ctx()).unwrap();
+    assert_eq!(layouter[view.ty].size, 224);
+    assert_eq!(layouter[view.ty].alignment, naga::proc::Alignment::SIXTEEN);
+    for member in &members[..2] {
+        assert_eq!(
+            module.types[member.ty].inner,
+            TypeInner::Matrix {
+                columns: VectorSize::Tri,
+                rows: VectorSize::Tri,
+                scalar: Scalar::F32,
+            }
+        );
+        assert_eq!(layouter[member.ty].size, 48);
+        assert_eq!(
+            layouter[member.ty].alignment,
+            naga::proc::Alignment::SIXTEEN
+        );
+    }
+    assert_eq!(
+        module.types[members[2].ty].inner,
+        TypeInner::Vector {
+            size: VectorSize::Quad,
+            scalar: Scalar::F32,
+        }
+    );
+    for member in &members[3..12] {
+        assert_eq!(
+            module.types[member.ty].inner,
+            TypeInner::Scalar(Scalar::F32)
+        );
+    }
+    for member in members[12..15].iter().chain(&members[22..]) {
+        assert_eq!(
+            module.types[member.ty].inner,
+            TypeInner::Scalar(Scalar::U32)
+        );
+    }
+    for member in &members[15..22] {
+        assert_eq!(
+            module.types[member.ty].inner,
+            TypeInner::Vector {
+                size: VectorSize::Bi,
+                scalar: Scalar::U32,
+            }
+        );
+    }
+    let period = module
+        .constants
+        .iter()
+        .find_map(|(_, constant)| {
+            (constant.name.as_deref() == Some("NARA_TIME_PERIOD_SECONDS")).then_some(constant)
+        })
+        .unwrap();
+    assert_eq!(
+        module.types[period.ty].inner,
+        TypeInner::Scalar(Scalar::F32)
+    );
+    assert!(matches!(
+        module.global_expressions[period.init],
+        naga::Expression::Literal(naga::Literal::F32(value)) if value == 3600.0
+    ));
+}
+
+#[test]
+fn compiles_both_clocks_and_the_original_projection_and_frame_facts() {
+    let source = r#"
+fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let world = nara_view.clip_to_world * vec3<f32>(uv * 2.0 - vec2<f32>(1.0), 1.0);
+    let clip = nara_view.world_to_clip * world;
+    let pixel = nara_view.viewport.xy + uv * nara_view.viewport.zw;
+    let available = nara_view.clock_available != 0u;
+    let real_time = select(0.0, nara_view.real_elapsed, available);
+    let virtual_time = select(0.0, nara_view.virtual_elapsed, available);
+    let elapsed = vec4<f32>(real_time, virtual_time, nara_view.fixed_elapsed, clip.x);
+    let deltas = vec4<f32>(
+        nara_view.real_delta, nara_view.virtual_delta,
+        nara_view.fixed_delta, nara_view.fixed_timestep,
+    );
+    let state = vec4<f32>(
+        nara_view.interpolation_alpha, nara_view.time_scale,
+        f32(nara_view.paused), f32(nara_view.spatial_interpolated),
+    );
+    let words = nara_view.frame + nara_view.virtual_frame + nara_view.fixed_tick
+        + nara_view.real_period + nara_view.virtual_period + nara_view.fixed_period;
+    let counts = vec4<f32>(vec2<f32>(words), f32(nara_view.fixed_steps), 0.0);
+    return sampled * tint * material_parameters.tint
+        + elapsed / NARA_TIME_PERIOD_SECONDS + deltas + state + counts
+        + vec4<f32>(pixel, world.xy);
+}
+"#;
+    MaterialShaderArtifact::compile(&tint_declaration(), source).unwrap();
+}
+
+#[test]
+fn real_or_virtual_clock_selection_preserves_the_material_and_interface_abi() {
+    let declaration = tint_declaration();
+    let source = r#"
+fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let elapsed = select(0.0, nara_view.real_elapsed, nara_view.clock_available != 0u);
+    return sampled * tint * material_parameters.tint * (elapsed / NARA_TIME_PERIOD_SECONDS);
+}
+"#;
+    let real = MaterialShaderArtifact::compile(&declaration, source).unwrap();
+    let virtual_source = source.replace("nara_view.real_elapsed", "nara_view.virtual_elapsed");
+    let virtual_time = MaterialShaderArtifact::compile(&declaration, &virtual_source).unwrap();
+    assert_ne!(real.digest(), virtual_time.digest());
+    assert_eq!(real.interface_digest(), virtual_time.interface_digest());
+    assert_eq!(declaration.parameters().byte_size(), 16);
+}
+
+#[test]
+fn rejects_compiler_observed_view_name_type_and_layout_mismatches() {
+    let declaration = tint_declaration();
+    let artifact = MaterialShaderArtifact::compile(&declaration, PASS_THROUGH).unwrap();
+    let source = artifact.source().replace("\r\n", "\n");
+    for (original, replacement) in [
+        ("NaraView", "ForeignView"),
+        ("@group(2) @binding(0)", "@group(2) @binding(2)"),
+        (
+            "@group(2) @binding(0)\nvar<uniform> nara_view: NaraView;",
+            "",
+        ),
+        ("var<uniform> nara_view:", "var<uniform> foreign_view:"),
+        ("var<uniform> nara_view:", "var<storage, read> nara_view:"),
+        ("nara_view: NaraView;", "nara_view: vec4<f32>;"),
+        ("world_to_clip: mat3x3<f32>", "world_to_clip: mat3x4<f32>"),
+        ("clip_to_world: mat3x3<f32>", "clip_to_world: mat4x3<f32>"),
+        ("viewport: vec4<f32>", "viewport: vec4<u32>"),
+        ("real_elapsed: f32", "real_elapsed: i32"),
+        ("fixed_delta: f32", "fixed_delta: u32"),
+        ("clock_available: u32", "clock_available: f32"),
+        ("    frame: vec2<u32>", "    frame: vec2<f32>"),
+        ("_reserved0: vec2<u32>", "_reserved0: vec2<f32>"),
+        ("fixed_steps: u32", "fixed_steps: f32"),
+        ("_reserved1: u32", "@size(32) _reserved1: u32"),
+        ("    _reserved0: vec2<u32>,\n", ""),
+        (
+            "    real_elapsed: f32,\n    real_delta: f32,",
+            "    real_delta: f32,\n    real_elapsed: f32,",
+        ),
+    ] {
+        let altered = source.replace(original, replacement);
+        assert_ne!(altered, source, "{original}");
+        let module = validated_module(&altered);
+        assert!(
+            matches!(
+                validate_interface(&declaration, &module),
+                Err(MaterialShaderError::Interface(_))
+            ),
+            "{replacement}"
+        );
+    }
+}
+
+#[test]
+fn view_types_and_layout_contribute_to_the_canonical_interface_digest() {
+    let declaration = tint_declaration();
+    let artifact = MaterialShaderArtifact::compile(&declaration, PASS_THROUGH).unwrap();
+    for (original, replacement) in [
+        ("world_to_clip: mat3x3<f32>", "world_to_clip: mat3x4<f32>"),
+        ("clip_to_world: mat3x3<f32>", "clip_to_world: mat4x3<f32>"),
+        ("    frame: vec2<u32>", "    frame: vec2<f32>"),
+        ("viewport: vec4<f32>", "viewport: vec4<u32>"),
+        ("_reserved1: u32", "@size(32) _reserved1: u32"),
+        ("real_elapsed: f32", "renamed_elapsed: f32"),
+    ] {
+        let altered = artifact.source().replace(original, replacement);
+        let module = validated_module(&altered);
+        assert_ne!(
+            artifact.interface_digest(),
+            interface_digest(&declaration, &module).unwrap(),
+            "{replacement}"
+        );
+    }
+}
+
+#[test]
+fn rejects_redeclarations_of_engine_view_symbols() {
+    let material = tint_declaration();
+    for extra in [
+        "var<private> nara_view: vec4<f32>;",
+        "@group(2) @binding(0) var<uniform> nara_view: vec4<f32>;",
+        "struct NaraView { impostor: vec4<f32>, };",
+        "alias NaraView = vec4<f32>;",
+        "const NARA_TIME_PERIOD_SECONDS: f32 = 1.0;",
+    ] {
+        let source = format!("{PASS_THROUGH}\n{extra}\n");
+        assert!(
+            MaterialShaderArtifact::compile(&material, &source).is_err(),
+            "{extra}"
+        );
+    }
+    let texture_shadow = declaration(
+        tint_layout(),
+        vec![MaterialTextureDeclaration::new("image.shadow", "nara_view", 1).unwrap()],
+    );
+    assert!(MaterialShaderArtifact::compile(&texture_shadow, PASS_THROUGH).is_err());
+}
+
+#[test]
+fn local_view_names_follow_wgsl_scope_and_keep_the_engine_interface() {
+    let declaration = tint_declaration();
+    let original = MaterialShaderArtifact::compile(&declaration, PASS_THROUGH).unwrap();
+    for function in [
+        "fn shadow(nara_view: f32) -> f32 { return nara_view; }",
+        "fn shadow() -> f32 { var nara_view: f32 = 1.0; return nara_view; }",
+        "fn shadow() -> f32 { let nara_view = 1.0; return nara_view; }",
+        "fn shadow(NaraView: f32) -> f32 { return NaraView; }",
+        "fn shadow() -> f32 { let NARA_TIME_PERIOD_SECONDS = 1.0; return NARA_TIME_PERIOD_SECONDS; }",
+        "fn shadow() -> f32 { const NARA_TIME_PERIOD_SECONDS: f32 = 1.0; return NARA_TIME_PERIOD_SECONDS; }",
+        "fn shadow() -> f32 { let NARA_TIME_PERIOD_SECONDS = 1.0; let copy = NARA_TIME_PERIOD_SECONDS; return copy; }",
+    ] {
+        let source = format!("{PASS_THROUGH}\n{function}\n");
+        let local = MaterialShaderArtifact::compile(&declaration, &source).unwrap();
+        assert_eq!(
+            original.interface_digest(),
+            local.interface_digest(),
+            "local scope cannot alter the engine resource ABI: {function}"
+        );
+    }
+}
+
+#[test]
+fn engine_view_symbols_do_not_reserve_authored_material_member_names() {
+    let layout = MaterialParameterLayout::new(
+        vec![field(
+            "color.tint",
+            "nara_view",
+            MaterialParameterKind::Vec4,
+            0,
+        )],
+        16,
+    )
+    .unwrap();
+    let declaration = declaration(layout, vec![]);
+    MaterialShaderArtifact::compile(
+        &declaration,
+        r#"
+fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    return sampled * tint * material_parameters.nara_view * nara_view.real_delta;
+}
+"#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -210,6 +521,12 @@ fn rejects_undeclared_resources_even_when_unused() {
     let declaration = tint_declaration();
     for resource in [
         "@group(2) @binding(0) var hidden: texture_2d<f32>;",
+        "@group(2) @binding(0) var<uniform> hidden: NaraView;",
+        "@group(2) @binding(1) var hidden: texture_2d<f32>;",
+        "@group(2) @binding(1) var hidden: sampler;",
+        "@group(2) @binding(1) var<uniform> hidden: NaraView;",
+        "@group(2) @binding(1) var<storage, read> hidden: array<u32>;",
+        "@group(3) @binding(0) var hidden: texture_2d<f32>;",
         "@group(0) @binding(2) var hidden: sampler;",
         "@group(1) @binding(7) var hidden: texture_2d<f32>;",
         "@group(1) @binding(7) var<storage, read_write> hidden: array<u32>;",

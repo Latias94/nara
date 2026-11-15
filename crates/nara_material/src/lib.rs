@@ -44,7 +44,10 @@ pub use parameters::{
     MaterialParameterValues, MaterialParameters,
 };
 #[cfg(feature = "material")]
-pub use shader::{__STOCK_QUAD_SHADER_SOURCE, MaterialShaderArtifact, MaterialShaderError};
+pub use shader::{
+    __STOCK_QUAD_SHADER_SOURCE, __STOCK_VIEW_UNIFORM_BYTES, MaterialShaderArtifact,
+    MaterialShaderError,
+};
 
 #[doc(hidden)]
 #[cfg(feature = "material")]

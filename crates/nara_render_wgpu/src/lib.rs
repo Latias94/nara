@@ -45,6 +45,8 @@ mod texture;
 mod ui;
 #[cfg(all(test, feature = "stock-sprite"))]
 mod view_probe;
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+mod view_uniform;
 mod work;
 
 use crate::backend::{WgpuRenderBackend, render_backend_state};

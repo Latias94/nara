@@ -654,6 +654,7 @@ impl LegacyWgpuFramePayload {
         target: RenderTarget,
         viewport: ViewportRect,
         view_index: Option<usize>,
+        view_uniform: crate::view_uniform::WgpuViewUniform,
     ) -> Result<WgpuLoweredFrameDraw, WgpuRenderError> {
         #[cfg(feature = "stock-sprite")]
         let content = self
@@ -661,11 +662,14 @@ impl LegacyWgpuFramePayload {
             .as_ref()
             .map_or_else(Vec::new, |batches| {
                 view_index.map_or_else(Vec::new, |index| {
-                    crate::sprite::collect_sprite_quad_batches(batches, index)
+                    crate::sprite::collect_sprite_quad_batches(batches, index, view_uniform)
                 })
             });
         #[cfg(not(feature = "stock-sprite"))]
-        let content = Vec::new();
+        let content = {
+            let _ = view_uniform;
+            Vec::new()
+        };
         #[cfg(feature = "stock-ui")]
         let ui_packet_target = self.ui_packet_target(target);
         #[cfg(feature = "stock-ui")]

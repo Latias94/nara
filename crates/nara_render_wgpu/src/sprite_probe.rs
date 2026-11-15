@@ -196,9 +196,12 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let batches = runtime.world().resource::<SpriteBatches>().clone();
+    let views = runtime.world().resource::<nara_render::ExtractedViews>();
+    let view =
+        crate::view_uniform::WgpuViewUniform::capture(&views.as_slice()[0], views.captured_time());
     runtime.finish().unwrap();
     // The real Runtime and asset stores are gone; both images must come from captured snapshots.
-    collect_sprite_quad_batches(&batches, 0)
+    collect_sprite_quad_batches(&batches, 0, view)
 }
 
 fn publish_image(

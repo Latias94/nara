@@ -66,6 +66,7 @@ impl MaterialTextureDeclaration {
 /// Construction checks bounded declaration data. Admission must additionally join
 /// this complete layout with the actual Naga shader interface before GPU use.
 /// The same constructor accepts layouts from Rust parameters or a shader author.
+/// The engine-owned group 2 View uniform is outside this authored declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Material2dDeclaration {
     id: String,
@@ -187,7 +188,9 @@ impl Material2dDeclaration {
     /// The material group and uniform binding are included. Semantic IDs, version,
     /// alpha and shader source are excluded. A pipeline key must separately include
     /// alpha behavior and the compiled shader fingerprint. The digest is computed
-    /// once during construction.
+    /// once during construction. The engine-owned View layout belongs to the
+    /// compiled Shader interface digest; captured View/time values are excluded
+    /// from both digests and do not create pipeline variants.
     #[must_use]
     pub const fn binding_digest(&self) -> [u8; 32] {
         self.binding_digest

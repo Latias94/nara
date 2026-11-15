@@ -704,12 +704,16 @@ fn native_shared_material_image_deduplicates_across_captures_without_deduplicati
     preflight.collect(&shared).unwrap();
     assert_eq!(
         preflight.cost().unwrap().custody_entries,
-        4 * (3 * 3 + 2 * 2)
+        4 * (3 * 3 + 3 * 2 + 1)
     );
     let stock_bytes = preflight
         .allocation_bytes(host.backend.stock_quad_resources())
         .unwrap();
-    assert_eq!(stock_bytes, 4 * (uniform_bytes + instance_bytes) + 4 + 4);
+    let view_bytes = crate::view_uniform::VIEW_UNIFORM_BYTES;
+    assert_eq!(
+        stock_bytes,
+        4 * (uniform_bytes + instance_bytes + view_bytes) + 4 + 4
+    );
     let mut builder = WgpuRenderProgramBuilder::new(source(), 1, GraphLimits::default()).unwrap();
     let first = builder.texture::<Color>(descriptor()).unwrap();
     let second = builder.texture::<Color>(descriptor()).unwrap();
@@ -758,7 +762,8 @@ fn native_shared_material_image_deduplicates_across_captures_without_deduplicati
     drop(premature_allocation);
     host = host.with_resource_byte_limit(total_bytes);
     let outputs = host.submit_program(&producer, &program).unwrap();
-    assert_eq!(host.retained_resource_bytes(), total_bytes);
+    let actual_bytes = total_bytes - 2 * view_bytes;
+    assert_eq!(host.retained_resource_bytes(), actual_bytes);
     assert_eq!(
         host.backend.stock_quad_resources().pipeline_stats(),
         (1, 1, 1)
@@ -770,14 +775,14 @@ fn native_shared_material_image_deduplicates_across_captures_without_deduplicati
     let work = host.frame_transaction_stats().native_work();
     assert_eq!(work.issued_texture_write_calls, 2);
     assert_eq!(work.issued_texture_write_bytes, 8);
-    assert_eq!(work.initialized_buffer_calls, 4 * 2);
+    assert_eq!(work.initialized_buffer_calls, 4 * 2 + 2);
     assert_eq!(
         work.initialized_buffer_payload_bytes,
-        4 * (uniform_bytes + instance_bytes)
+        4 * (uniform_bytes + instance_bytes) + 2 * view_bytes
     );
     assert_eq!(
         work.initialized_buffer_storage_bytes,
-        4 * (uniform_bytes + instance_bytes)
+        4 * (uniform_bytes + instance_bytes) + 2 * view_bytes
     );
     assert_eq!(outputs.report(1, &first_feature).unwrap().sprites, 2);
     assert_eq!(outputs.report(2, &second_feature).unwrap().sprites, 2);
@@ -786,7 +791,7 @@ fn native_shared_material_image_deduplicates_across_captures_without_deduplicati
         Some(1)
     );
     host.backend.stock_quad_resources().clear();
-    assert_eq!(host.retained_resource_bytes(), total_bytes);
+    assert_eq!(host.retained_resource_bytes(), actual_bytes);
     drain(outputs.submitted_prefix());
     assert_eq!(host.retained_resource_bytes(), output_bytes);
     for target in [&first, &second] {
@@ -930,7 +935,7 @@ fn native_partial_material_texture_oom_keeps_original_prefix_and_retries_the_sam
     let work = host.frame_transaction_stats().native_work();
     assert_eq!(work.issued_texture_write_calls, 4);
     assert_eq!(work.issued_texture_write_bytes, 16);
-    assert_eq!(work.initialized_buffer_calls, 2);
+    assert_eq!(work.initialized_buffer_calls, 3);
     assert_eq!(
         work.initialized_buffer_payload_bytes,
         batch
@@ -941,6 +946,7 @@ fn native_partial_material_texture_oom_keeps_original_prefix_and_retries_the_sam
             .uniform_bytes()
             .len() as u64
             + std::mem::size_of::<crate::quad::WgpuQuadInstance>() as u64
+            + crate::view_uniform::VIEW_UNIFORM_BYTES
     );
     host.backend.stock_quad_resources().clear();
     assert_eq!(host.retained_resource_bytes(), retry_bytes);

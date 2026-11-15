@@ -18,6 +18,8 @@ use crate::parameters::{
 
 #[doc(hidden)]
 pub const __STOCK_QUAD_SHADER_SOURCE: &str = include_str!("fragment.wgsl");
+#[doc(hidden)]
+pub const __STOCK_VIEW_UNIFORM_BYTES: u32 = 224;
 const STOCK_FRAGMENT: &str = __STOCK_QUAD_SHADER_SOURCE;
 const MAX_SOURCE_BYTES: usize = 1_048_576;
 const MAX_DIAGNOSTIC_BYTES: usize = 8_192;
@@ -85,8 +87,34 @@ impl MaterialShaderArtifact {
     /// The stock entry points are retained verbatim. The declaration generates
     /// `MaterialParameters`, `material_parameters` at group 1 binding 0, and the
     /// declared float-sampled, non-arrayed, non-multisampled 2D textures at group
-    /// 1 bindings 1 through 8. Additional bound resources and entry points reject.
-    /// Resource-free private globals are permitted.
+    /// 1 bindings 1 through 8. Group 0 retains the stock sprite texture/sampler.
+    /// The engine supplies `nara_view: NaraView` at group 2 binding 0 with an exact
+    /// 224-byte uniform layout. Additional bound resources and entry points reject.
+    /// Resource-free private globals are permitted. Naga owns ordinary WGSL name
+    /// scope, including local shadowing. Duplicate stock global declarations reject.
+    ///
+    /// `nara_view.world_to_clip` and `clip_to_world` are the original view's 2D
+    /// homogeneous projection matrices. `viewport` is physical `[x, y, width,
+    /// height]` in the original world raster (WorldCanvas pixels when configured).
+    /// The engine captures view and clock facts together; delayed
+    /// execution uses that original sample. Manually authored views without a
+    /// CPU clock sample set `clock_available` to zero. Authors must check it and
+    /// explicitly choose `real_elapsed`/`real_delta` or
+    /// `virtual_elapsed`/`virtual_delta` for real or scaled, pausable time.
+    ///
+    /// Real, virtual and fixed elapsed seconds are wrapped into
+    /// `[0, NARA_TIME_PERIOD_SECONDS)`, where the stock `f32` constant is `3600.0`.
+    /// Each corresponding `*_period` and the `frame`, `virtual_frame` and
+    /// `fixed_tick` counters are 64-bit unsigned values stored as `[low, high]`
+    /// `u32` words. Periods count complete 3,600-second intervals.
+    /// `fixed_delta` is the original `FixedTime.delta` of the latest tick;
+    /// `fixed_steps` is its original `steps_this_frame`, including zero.
+    /// `fixed_timestep`, `time_scale` and `paused` retain the original settings.
+    /// `interpolation_alpha` is the original `RenderTime` value, while
+    /// `spatial_interpolated` reports whether spatial interpolation actually ran.
+    /// Availability, pause and spatial flags use `0u`/`1u`; `_reserved0` and
+    /// `_reserved1` are engine-owned padding. These View values are independent
+    /// of authored material parameters and do not create pipeline variants.
     ///
     /// Both the supplied source and the complete assembled source are limited
     /// to 1 MiB. Assembly is counted before allocating its source buffer. Layouts
@@ -170,6 +198,9 @@ impl MaterialShaderArtifact {
     /// This includes resource names, groups, bindings, complete resource types,
     /// uniform member names/types/offsets/span, explicit stable field/texture IDs,
     /// the material fragment signature and the stock entry-point signatures.
+    /// The engine-owned View layout, including matrix and counter types, is part
+    /// of this interface; current View/time values and authored parameter values
+    /// are not. The declaration's binding digest remains material-only.
     /// Function bodies, unrelated helper types and Naga arena handles are excluded.
     #[must_use]
     pub const fn interface_digest(&self) -> [u8; 32] {
@@ -375,9 +406,9 @@ fn validate_interface(
                 .to_owned(),
         ));
     }
-    let mut expected_bindings = 0b111_u16;
+    let mut expected_bindings = 0b1111_u16;
     for texture in declaration.textures() {
-        expected_bindings |= 1_u16 << (texture.binding() + 2);
+        expected_bindings |= 1_u16 << (texture.binding() + 3);
     }
     let mut seen_bindings = 0_u16;
     for (_, variable) in module.global_variables.iter() {
@@ -420,6 +451,10 @@ fn validate_interface(
                 validate_uniform(declaration.parameters(), module, variable.ty)?;
                 2
             }
+            (2, 0) => {
+                validate_view_uniform(module, variable)?;
+                3
+            }
             (MATERIAL_BIND_GROUP, texture_binding) => {
                 let texture = declaration
                     .textures()
@@ -427,7 +462,7 @@ fn validate_interface(
                     .find(|texture| texture.binding() == texture_binding)
                     .ok_or_else(|| unauthorized_binding(binding))?;
                 validate_texture(module, variable, texture.name())?;
-                texture_binding + 2
+                texture_binding + 3
             }
             _ => return Err(unauthorized_binding(binding)),
         };
@@ -443,6 +478,94 @@ fn validate_interface(
         return Err(MaterialShaderError::Interface(
             "compiled shader must contain every stock and declared resource binding".to_owned(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_view_uniform(
+    module: &naga::Module,
+    variable: &naga::GlobalVariable,
+) -> Result<(), MaterialShaderError> {
+    use naga::{Scalar, VectorSize};
+
+    if variable.name.as_deref() != Some("nara_view") || variable.space != AddressSpace::Uniform {
+        return Err(MaterialShaderError::Interface(
+            "group 2 binding 0 must be the engine-owned nara_view uniform".to_owned(),
+        ));
+    }
+    let uniform = &module.types[variable.ty];
+    let TypeInner::Struct { members, span } = &uniform.inner else {
+        return Err(MaterialShaderError::Interface(
+            "nara_view must have struct type NaraView".to_owned(),
+        ));
+    };
+    let float = Scalar {
+        kind: ScalarKind::Float,
+        width: 4,
+    };
+    let uint = Scalar {
+        kind: ScalarKind::Uint,
+        width: 4,
+    };
+    let matrix = TypeInner::Matrix {
+        columns: VectorSize::Tri,
+        rows: VectorSize::Tri,
+        scalar: float,
+    };
+    let viewport = TypeInner::Vector {
+        size: VectorSize::Quad,
+        scalar: float,
+    };
+    let seconds = TypeInner::Scalar(float);
+    let flag = TypeInner::Scalar(uint);
+    let words = TypeInner::Vector {
+        size: VectorSize::Bi,
+        scalar: uint,
+    };
+    let expected = [
+        ("world_to_clip", 0, &matrix),
+        ("clip_to_world", 48, &matrix),
+        ("viewport", 96, &viewport),
+        ("real_elapsed", 112, &seconds),
+        ("real_delta", 116, &seconds),
+        ("virtual_elapsed", 120, &seconds),
+        ("virtual_delta", 124, &seconds),
+        ("fixed_elapsed", 128, &seconds),
+        ("fixed_delta", 132, &seconds),
+        ("fixed_timestep", 136, &seconds),
+        ("interpolation_alpha", 140, &seconds),
+        ("time_scale", 144, &seconds),
+        ("clock_available", 148, &flag),
+        ("paused", 152, &flag),
+        ("spatial_interpolated", 156, &flag),
+        ("frame", 160, &words),
+        ("fixed_tick", 168, &words),
+        ("real_period", 176, &words),
+        ("virtual_period", 184, &words),
+        ("fixed_period", 192, &words),
+        ("_reserved0", 200, &words),
+        ("virtual_frame", 208, &words),
+        ("fixed_steps", 216, &flag),
+        ("_reserved1", 220, &flag),
+    ];
+    if uniform.name.as_deref() != Some("NaraView")
+        || *span != __STOCK_VIEW_UNIFORM_BYTES
+        || members.len() != expected.len()
+    {
+        return Err(MaterialShaderError::Interface(
+            "NaraView must match the engine-owned name, member count and 224-byte span".to_owned(),
+        ));
+    }
+    for (member, (name, offset, inner)) in members.iter().zip(expected) {
+        if member.name.as_deref() != Some(name)
+            || member.binding.is_some()
+            || member.offset != offset
+            || &module.types[member.ty].inner != inner
+        {
+            return Err(MaterialShaderError::Interface(format!(
+                "NaraView member {name} must match the engine-owned name, type and offset {offset}"
+            )));
+        }
     }
     Ok(())
 }
@@ -657,6 +780,29 @@ fn hash_type(
         TypeInner::Sampler { comparison: false } => {
             hasher.update(&[3]);
             hash_string(hasher, "sampler");
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar:
+                naga::Scalar {
+                    kind: ScalarKind::Float,
+                    width: 4,
+                },
+        } => {
+            hasher.update(&[4, u8::from(*columns), u8::from(*rows)]);
+            hash_string(hasher, "f32");
+        }
+        TypeInner::Vector {
+            size,
+            scalar:
+                naga::Scalar {
+                    kind: ScalarKind::Uint,
+                    width: 4,
+                },
+        } => {
+            hasher.update(&[5, u8::from(*size)]);
+            hash_string(hasher, "u32");
         }
         _ => {
             return Err(MaterialShaderError::Interface(

@@ -112,7 +112,11 @@ fn per_view_culling_matches_unclipped_runtime_geometry_pixels() {
         .iter()
         .enumerate()
         .map(|(index, view)| {
-            let clipped = collect_sprite_quad_batches(&batches, index);
+            let clipped = collect_sprite_quad_batches(
+                &batches,
+                index,
+                crate::view_uniform::WgpuViewUniform::capture(view, views.captured_time()),
+            );
             // This oracle projects every extracted quad without the queue visibility predicate.
             let reference = extracted
                 .iter()

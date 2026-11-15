@@ -70,6 +70,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
         }],
         counts_as_sprites: true,
         material_extension: Some(WgpuMaterial2d {
+            view: crate::view_uniform::WgpuViewUniform::manual(readback_viewport()),
             binding: material_binding(
                 &material_generation(
                     "test.checked-allocation",
@@ -85,6 +86,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
     let labels = [
         "nara_wgpu_quad_texture_bind_group_layout",
         "nara_material_2d_bind_group_layout",
+        "nara_view_bind_group_layout",
         "nara_wgpu_image_texture",
         "nara_wgpu_texture_upload",
         "nara_wgpu_texture_view",
@@ -92,6 +94,8 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
         "nara_wgpu_quad_texture_binding",
         "nara_material_2d_parameters",
         "nara_material_2d_bind_group",
+        "nara_view_uniform",
+        "nara_view_bind_group",
         "nara_wgpu_quad_instances",
     ];
     let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
@@ -126,18 +130,24 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
             assert_eq!(stats.queue_submissions(), 0, "{label}");
             assert_eq!(stats.surface_acquire_attempts(), 0, "{label}");
             assert_eq!(stats.presents(), 0, "{label}");
-            if !matches!(
+            let binding_was_cached = matches!(
                 label,
                 "nara_material_2d_parameters"
                     | "nara_material_2d_bind_group"
+                    | "nara_view_uniform"
+                    | "nara_view_bind_group"
                     | "nara_wgpu_quad_instances"
-            ) {
-                assert_eq!(backend.texture_stats().image_bindings, 0, "{label}");
-            }
+            );
+            assert_eq!(
+                backend.texture_stats().image_bindings,
+                usize::from(binding_was_cached),
+                "{label}"
+            );
             if matches!(
                 label,
                 "nara_wgpu_quad_texture_bind_group_layout"
                     | "nara_material_2d_bind_group_layout"
+                    | "nara_view_bind_group_layout"
                     | "nara_wgpu_image_texture"
                     | "nara_wgpu_texture_upload"
                     | "nara_wgpu_texture_view"

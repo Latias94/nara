@@ -1422,7 +1422,7 @@ mod tests {
                     .into_iter()
                     .map(|key| {
                         let pipeline =
-                            create_quad_pipeline(device, key.clone(), &texture_layout, None)?;
+                            create_quad_pipeline(device, key.clone(), &texture_layout, None, None)?;
                         Ok(WgpuQuadPipelineDrawRef {
                             alpha_mode: key.alpha_mode,
                             material: key.material.clone(),
@@ -1435,6 +1435,7 @@ mod tests {
                     &batches,
                     &texture_layout,
                     &material_layouts,
+                    None,
                     &mut texture_cache,
                     frame_index,
                     None,
