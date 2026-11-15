@@ -1255,7 +1255,8 @@ general 3D authoring, foreign native execution and numerical production budgets 
 
 ## Presented Drawing And Picking Successor
 
-Status: active, starting from `6304a7e`. Complete the remaining R9 drawing/picking inverse,
+Status: implemented at `cf22a5b`, with the independent native consumer at `a7a5fc8` and local
+qualification below. Starting from `6304a7e`, complete the named R9 drawing/picking inverse,
 mirrored-camera and DPI consumer through the ordinary Runtime and original DesktopRun. Source
 inspection identifies an owning-contract gap: arbitrary custom policies currently receive the
 original camera picking mapping after presentation even when their output changes coordinates.
@@ -1311,7 +1312,152 @@ Godot `7a37606a433c0e7735525037cdf774f043146a21`, `scene/main/viewport.cpp`, loc
 input through the final viewport transform, while `core/math/rect2.h` excludes maximum edges.
 Its Camera2D rebuilds position/rotation/zoom and does not prove full inherited shear. Neither
 engine automatically provides a unique inverse for arbitrary post-processing Shader sampling.
-Keep these source constraints distinct from Nara's still-pending executable qualification.
+Keep these source constraints distinct from Nara's executable qualification recorded below.
+
+### Presented Mapping Implementation And Initial Qualification
+
+The original policy admission now freezes the optional mapping once alongside its original
+history lineage. Public observation, cloning, equal-extent target adaptation and repeated
+construction read that frozen value. The stock policy explicitly chooses identity. The original
+WorldPointer path validates a finite invertible affine, converts logical coordinates to final
+physical pixels, applies the captured inverse and then checks original target, Canvas bars and
+View bounds before the captured camera inverse. Runtime and embedded Game presentation use the
+same input fact; a displayed unmapped successor drops the old guard, while pending work grants
+no authority. No new input registry, Shader parser or native window owner is introduced.
+
+The initial locked root check exposes the new standalone consumer's Windows automation dependency
+edge in the root development closure. Offline resolution adds only that package's existing
+`windows-sys 0.61.2` edge, with no version/source changes. The production all-feature library
+check then passes. After independent source review, the embedded Game ownership test explicitly
+declares identity rather than inheriting the new custom-policy default, and the mapped recovery
+test is correctly selected as native because device-loss registration needs an initialized
+original namespace. It initializes that real namespace rather than fabricating a CPU device.
+The existing Game test additionally keeps old picking while an unmapped candidate waits, revokes
+it on actual completion and restores it only after a later mapped completion.
+
+The focused owner selection passes **77/77**, with 506 outside the selection, run
+`c7cfaca1-1263-45b9-9757-53586c34d21c` (5.446 seconds after a 4m36s release build).
+It includes the full render owner CPU suite, twelve new affine/DPI/guard controls, four frozen
+policy mapping tests and the existing CPU Host retirement/isolation controls. This is not
+evidence of actual window presentation, physical DPI events or GPU pixels; the independently
+locked native consumer and the new original-device recovery control retain those gates below.
+
+### Independent Native Drawing And Picking Qualification
+
+The independently locked stock-composition consumer now provides `picking_window`, its ordinary
+main-thread `DesktopRun`, and separate pure-math/native test targets. The original App's public
+`WorldPointer` is queried before the Host and in the genuine post-presentation observer. The
+observer joins the exact retained input to the original presentation receipt. Nine stages cover
+identity, tint, mapped/unmapped horizontal effects, changed camera pose, all camera mirror-axis
+combinations and source/destination/source movement. An unpresented changed capture retains the
+preceding displayed inverse; an actually displayed unmapped result refuses picking.
+
+The original HWND moves between the active 3840x2160 display at `[0, 0, 3840, 2160]`, DPI 144
+(150%), and the 2560x1440 display at `[-2560, 533, 0, 1973]`, DPI 120 (125%). Genuine captures
+settle at `384x256 -> 320x213 -> 384x256` physical client pixels, with matching native DPI,
+Window resolution and independent numeric world positions. The software control stays on the
+150% display. These geometry changes preserve the original logical window size within native
+integer rounding; no desktop configuration or second native window owner is introduced.
+
+After the original Runtime, World, HWND and physical pump retire, all nine retained CPU inputs
+are realized through a separate original offscreen Host. An independent f64 camera/coverage
+oracle checks complete pixels, exact alpha and known clear/bar colors, with at most one byte
+for covered RGB. Later captures cannot mutate retained typed outputs. Every original prefix
+settles, and final retained resource/candidate bytes and cleanup faults are zero. These are
+captured-input pixel replays and genuine native presentation facts, not screen/front-buffer
+readback, physical scanout or GPU-duration measurements.
+
+| Selection | Actual result | Run |
+|---|---|---|
+| Independent camera reference and deliberate one-byte alpha/clear corruption controls | 2/2, 0.121 s; three native cases remain explicitly ignored | `a98d3e4f-5c57-464c-b351-0534490d5c1d` |
+| First single-display DX12 hardware trajectory | 1/1, 5.063 s | `4df017f8-ab15-4259-8fdb-ef56592c7366` |
+| DX12 RTX 4090: complete native target, mixed DPI, single display and observer failure | 3/3, zero skips, 12.439 s | `fe16d9e7-c244-4a60-b801-e7024cf4a4e7` |
+| Vulkan RTX 4090: actual mixed-DPI trajectory | 1/1, 4.630 s; two cases outside selection | `f156bace-6979-4914-9419-a4d57f0610f4` |
+| DX12 Microsoft Basic Render Driver: explicit software, single display | 1/1, 4.784 s; two cases outside selection | `ad8f7be4-fff9-418f-b477-7728345a5827` |
+| Original Winit geometry and OS title-bar mixed-DPI controls | 2/2, 10.397 s; 81 cases outside selection | `7fb92328-c2e3-4c16-9c23-0c178993cf98` |
+| Full all-feature render/WGPU library owners | 515/515, 182.505 s; 68 explicitly ignored cases | `6f90db80-432d-4cc1-a8f3-55842fa77da4` |
+| Original native Runtime guard registration/revocation/recovery | 4/4, 4.387 s; 510 cases outside selection | `6d233bd4-bf46-48e2-8d84-bf540178779a` |
+| Original Game capture/input/completion/Stop bridge, with desktop feature closure | 20/20, 2.257 s; 1,642 cases outside selection | `5ffbb723-0d6e-4b17-938d-e63a9e6fe8b7` |
+| DX12 software: injected original observer failure and native retirement | 1/1, 0.845 s; two cases outside selection | `0850b217-1145-4ca7-ba32-3c54ccd9b0a8` |
+
+The first ordinary release build passes in 15m40s; after formatting the final example rebuild
+passes in 17.36 s. These are local build observations, not latency distributions or speedups.
+The only root/independent lock changes add the existing `windows-sys 0.61.2` dependency edge
+for this consumer's target-Windows automation. No package version or source changes.
+
+The all-feature owner run includes existing native allocation/pixel controls as well as CPU
+graph/capture/budget tests; it is not labeled a pure CPU run. The four separately selected
+original-device controls check presentation-permission registration, own/other-window revocation,
+unmapped success, mapped recovery and injected loss. Their private owner calls do not substitute
+for the ordinary window's genuine presentations. Counts overlap the focused 77-case prerequisite
+and other selections and must not be added into a framework-wide total.
+
+The first root Game-bridge release test build is interrupted by the user before a final result;
+its original handle is subsequently absent and no owned compiler remains. It contributes no
+passing test evidence. Inspection also confirms that the complete `game_view_outcomes` module
+requires `desktop-winit`; the successor command explicitly enables it alongside tooling,
+project workflow, 2D/UI presentation and WGPU. This is a qualification-command correction,
+not a production feature-gate change or a reason to repeat the completed physical GPU runs.
+The corrected command completes its release build in 16m08s and passes all twenty selected
+bridge controls. It includes the new mapped/pending/unmapped/recovered sequence, original
+capture selection, logical input routing, exact completion, fault and Stop retirement. This
+remains a bounded bridge/owner run, separate from native window-presentation qualification.
+
+Independent review corrects the fixture's initial stage name to the actual Render stage with
+Seal/Publish ordering, and rejects a callback panic that could bypass original native custody.
+The observer now retains the first panic, requests ordinary exit, verifies original World/HWND/
+pump retirement, drops `DesktopRun`, then resumes that same payload. The deliberate-failure
+child exits 101 with its original panic and exact cleanup marker; the wrapper accepts no success
+marker for that path. Review also strengthens alpha/clear comparison, requires the pre-Host fact
+and distinguishable mapping transitions, and moves native negative probes clearly outside the
+View/window. Exact f64 boundary construction followed by f32 quantization could otherwise fall
+inside at 150% DPI. Exact half-open maximum-edge controls remain in the owning CPU tests.
+
+The unchanged original OS title-bar controls also pass on the same live display pair, after a
+3m25s owning release build. Both directions preserve the default `360x240` logical client size;
+explicit `InnerSizeWriter` legs settle at `424x272` on DISPLAY1 and `360x240` on DISPLAY2.
+Native/Winit/Runtime geometry, original HWND destruction and mouse-button/cursor restoration
+remain asserted. No additional Winit repair or display setting is needed. This is OS-injected
+drag evidence, separate from the programmatic GPU/picking trajectory above; GPU presentation
+during that injected gesture and human-hand feel are not inferred. The
+[native qualification guide](../verification/native-editor-qualification.md#mixed-dpi-window-controls)
+retains earlier failures and patch provenance.
+
+The Windows CI definition prebuilds the ordinary example, then selects the single-display and
+observer-failure cases with explicit DX12 software rendering. Actual mixed-DPI hardware remains
+a separately invoked local gate. YAML parsing passes; this is local CI configuration and does
+not claim a hosted run or remote publication.
+
+The independent source review has no remaining P1/P2; all eight research, implementation and
+review tasks are closed. General nonlinear inverses, UI hit retargeting, foreign native execution,
+physical device loss, maximized/snap/keyboard movement, human-hand observation and numerical
+performance budgets remain outside this bounded consumer. Editor/Dialogue product work stays
+paused, and full R8/R9/R12/Foundation remains active.
+
+### Final Static And Delivery Checks
+
+Release correctness Clippy passes for both render owners with all features/targets (15.69 s),
+the root production library with the same Game bridge feature closure (49.38 s), and the
+independently locked stock consumer's default-feature all-target selection (30.64 s). This last
+selection compiles the ordinary examples and tests; the optional native Editor consumer is
+outside it. These gates deny `clippy::correctness`, not every existing warning. Root and
+independent `cargo fmt --all -- --check` pass. Added relative Markdown links/heading fragments,
+both manifests/locks, CI YAML and ordinary whitespace checks pass. No unrelated native Editor
+matrix, foreign execution or remote CI is inferred or repeated.
+
+With Rust 1.95.0, jobs one, offline resolution and the absolute root `target`, the exact corrected
+bridge and affected owner selections are:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara --no-default-features --features tooling,project-workflow,presentation-2d,presentation-ui,desktop-winit,render-wgpu --lib -E 'test(game_view::) | test(game_view_outcomes::)' --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release -p nara_render -p nara_render_wgpu --all-features --lib --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release -p nara_render_wgpu --all-features --lib --run-ignored only -E 'test(host::runtime::tests::)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Native commands additionally select `WGPU_BACKEND` and `NARA_WGPU_FORCE_FALLBACK` explicitly;
+the independent consumer's README records prebuilding and the separate physical/software
+selections. Implementation `cf22a5b` and consumer/CI `a7a5fc8` are precise local commits. This
+closes the named drawing/picking successor while the complete Foundation Goal stays active.
 
 ## Live Native Source Updates Through External GPU Execution
 

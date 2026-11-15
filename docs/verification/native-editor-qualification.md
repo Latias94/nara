@@ -326,6 +326,26 @@ owned probes exit. This restores fresh crossing evidence after the earlier singl
 prerequisite refusals; destination GPU presentation, maximized/snap/keyboard movement and human
 manual feel retain their separate scope. Editor/component and Dialogue work remain paused.
 
+The November 15 repeat completed at 13:37 +08:00 passes the unchanged geometry and OS title-bar
+controls in `7fb92328-c2e3-4c16-9c23-0c178993cf98`: 2/2 in 10.397 seconds after a 3m25s release
+build, with 81 cases outside the selection. The same active DISPLAY1/DISPLAY2 pair reports DPI
+120/144. Default title-bar crossings preserve `360x240` logical client pixels; explicit-size
+legs settle at `424x272` on DISPLAY1 and `360x240` on DISPLAY2. Original native/Winit/Runtime
+geometry, requested destination, HWND destruction and mouse-button/cursor restoration pass.
+This repeat requires no additional Winit behavior change or display-configuration change.
+
+The separate [ordinary Runtime drawing/picking consumer](../plans/2026-11-14-durable-material-and-shader-plan.md#independent-native-drawing-and-picking-qualification)
+now qualifies actual native presentations and public World picking during programmatic
+source/destination/source movement on DX12 and Vulkan RTX 4090. It joins native/captured geometry
+at `384x256 -> 320x213 -> 384x256`, covers all camera mirror axes and mapped/unmapped effects,
+and replays nine original retained inputs against complete independent pixel references after
+the original World/window retire. DX12's complete native target passes 3/3 including observer
+panic cleanup; Vulkan mixed DPI passes 1/1, and explicit DX12 software passes its separate
+single-display trajectory. These provide destination GPU-presentation/captured-input evidence,
+not screen readback, scanout, presentation during the injected title-bar gesture, human-hand
+feel, maximized/snap/keyboard behavior or a performance budget. The two workflows retain their
+distinct authorities and limits. Editor/component and Dialogue product work remain paused.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

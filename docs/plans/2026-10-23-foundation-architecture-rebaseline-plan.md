@@ -1320,6 +1320,29 @@ sources separate depth attachment ownership from projection policy; this tracer 
 global 3D handedness, import units or reverse-Z. The named depth/unit acceptance now has actual
 evidence, while the remaining R8/R9/R12/Foundation gates retain their own scope.
 
+The [presented drawing/picking successor](2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor)
+at `cf22a5b`, with independent consumer `a7a5fc8`, freezes an optional validated affine inverse
+with the original policy capture. Stock output explicitly preserves coordinates; a custom policy
+without a declared inverse can draw but cannot grant World picking. The original Runtime and
+embedded Game guards apply that fact only
+after genuine presentation/completion. Pending captures retain the preceding displayed mapping,
+and a displayed unmapped successor revokes it. No Shader parser or second input/native owner is
+introduced. The independently locked ordinary Runtime consumer joins original presentation
+receipts, native Window facts, parented/mirrored cameras and public `WorldPointer`, then replays
+nine retained original inputs after native/World retirement against a full-pixel f64 reference.
+DX12 RTX 4090 passes the complete three-case native target, Vulkan RTX 4090 passes mixed DPI,
+and explicit DX12 software passes the single-display trajectory. Actual 150%/125%/150% movement
+settles at `384x256 -> 320x213 -> 384x256` client pixels with consistent native/captured facts.
+An injected observer panic proves original World/HWND/pump cleanup before the same panic is
+resumed. The linked unit records exact run IDs, independent alpha/clear corruption controls,
+float-boundary fixture corrections, separate physical title-bar evidence and final owner checks.
+The render/WGPU library cohort passes 515/515, native guard controls 4/4 and affected Game bridge
+controls 20/20. Correctness Clippy for owners/root/independent targets and formatting/doc checks
+pass, with overlapping selections retained separately.
+Captured-input pixel replay is distinct from screen readback/scanout. General nonlinear inverses,
+UI hit retargeting, maximized/snap/keyboard movements, foreign execution and numerical budgets
+remain separate; Editor/Dialogue product work stays paused and full R8/R9/R12/Foundation active.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
