@@ -3048,6 +3048,26 @@ Independent consumers compile and bounded reviews report no remaining P1/P2. Thi
 submitted-work/deadline evidence, not arbitrary cache/task wakes, a stable CPU/power budget,
 foreign execution or completion of full Foundation/R12. ADR0078 and the guides own its scope.
 
+The [private request-notification successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#native-request-hints-for-the-development-child)
+retains original file-packet/native process custody and introduces only bounded request hints,
+joinable game-private watching and original maintenance-only session wakes. Protocol-v5
+observations commit after envelope/reply/operation validation and remain outside canonical
+state and cleanup authority. Winit CPU 95/95, actual native wake/cadence 4/4, original handoff/
+maintenance 8/8 and sample ordinary 170/170 pass. Twelve fresh original children pass matched
+500 ms comparisons: headless inbox checks 103-to-nine (91.2621%), desktop 594-to-twelve
+(97.9798%); all 150 selected requests stay within 100 ms and original canonical state,
+App-frame progression, exact Step, presentation and physical cleanup remain valid. The first
+headless gate failure is retained in the [cost report](../../benchmarks/2026-11-14-development-runtime-costs.md#native-request-notifications-and-reconciliation).
+ADRs0039/0076 and current guides own the wake/observation contract. Original 250 ms
+reconciliation, vendor internal wakes, 10 ms parent response polling, foreign execution and
+full R12 remain separate limits; this is not an engine-wide message bus or CPU/power guarantee.
+Actual continuous-desktop, paused-desktop and headless production Host regressions pass 3/3,
+including real body/private-structure builds, fresh-adopter semantics, separate predecessor
+retirement and continued gameplay through original native owners.
+Implementation `686a5d9`/`021814c` also passes independent headless 166/166, final affected
+child 16/16, locked all-feature checking, correctness Clippy and formatting. The linked report
+and metadata retain exact source scope/digests; ten scoped threads close without reported P1/P2.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

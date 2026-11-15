@@ -5268,6 +5268,26 @@ keeps actual conditions, raw data and CPU/cold-state limits. This qualifies expl
 maintenance demand, not universal task/cache notifications or the child protocol's separate
 polling cost. Full Foundation/R12 and paused product work remain open.
 
+The following [native request-hints unit](2026-11-13-rust-state-reconstruction-plan.md#native-request-hints-for-the-development-child)
+addresses that separate source-game child cost without replacing its transport or native
+process owner, at `686a5d9`/`021814c`. A private joinable watcher supplies bounded hints to the
+original Winit maintenance boundary or headless condition variable, with 250 ms reconciliation and unchanged
+packet/deadline validation. Required protocol-v5 diagnostics commit only after semantic reply
+validation; active and retired children keep separate observations. Closed requires original
+game cleanup and watcher join, with the independent native process receipt still authoritative.
+Winit CPU 95/95, native wake/cadence 4/4, original handoff/maintenance 8/8 and sample ordinary
+170/170 pass. The actual twelve-child comparison preserves its rejected first result, then
+passes the same 90% gate after removing consumed-request self-wakes: headless checks 103-to-nine
+(91.2621%), desktop 594-to-twelve (97.9798%), all 150 selected requests within 100 ms and all
+original state/Frame/Step/presentation/cleanup checks pass. Actual games use dev profile and
+desktop Vulkan/discrete-gpu; no CPU/power budget or universal reliable notification claim follows.
+The [existing report](../benchmarks/2026-11-14-development-runtime-costs.md#native-request-notifications-and-reconciliation)
+retains raw passing/rejected results, original App sequence evidence and platform limitations.
+Actual continuous-desktop, paused-desktop and headless body/structure rebuild/adoption passes
+3/3 with original cleanup and continued gameplay. Independent headless 166/166, final affected
+child 16/16, all-feature checking, correctness Clippy and formatting also pass. All ten scoped
+threads close; full Foundation/R12 remains active and Editor/UI/Dialogue product work stays paused.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

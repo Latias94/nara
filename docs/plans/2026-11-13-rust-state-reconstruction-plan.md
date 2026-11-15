@@ -1766,3 +1766,140 @@ still independently polls its control directory every 2 ms; replacing that proto
 requires attribution and a complete close/rebuild consumer, not an inferred benefit from these
 observer measurements. Arbitrary Task/World/cache-lifetime notification, foreign native
 execution, representative CPU/power budgets and the full Foundation plan remain open.
+
+## Native Request Hints For The Development Child
+
+Status: implemented and qualified for the finite Windows workflows below; full Foundation/R12
+remains active and Editor/UI/Dialogue product work stays paused. Continue runtime work from
+`66e5643`; qualified implementation is `686a5d9`/`021814c`. Before this unit, the source-game
+child probed its private request file at a 2 ms cadence even
+when its original paused native session has no work. Preserve the capability-relative packet
+transport, exact session/generation/request validation, finite budgets and original native
+process custody; change only the child's waiting and required lifecycle evidence.
+
+Use one game-private, nonrecursive `notify::RecommendedWatcher` for the existing private
+control directory. Retain that original watcher before setup can fail and explicitly poll
+its existing vendor `try_close`/join API through partial startup, Close and outer failure
+cleanup. Do not route control packets through asset-domain Source roots or extract a universal
+watch framework. A final Closed reply requires both original game/native cleanup and watcher
+join; unfinished close keeps the same owners for retry. Parent response polling remains a
+separate measured responsibility.
+
+Expose a cloneable maintenance-only wake handle from the original WinitSession/DesktopRun.
+Use the physical event loop's original non-reused session identity, coalesce notifications,
+revoke at retirement and reject stale handles across sequential sessions. The handle carries
+no payload, Runtime/Window/GPU access or operation result. It requests no App frame and does
+not reset elapsed time or paused capture eligibility. Actual native/input/control/frame work
+and original maintenance deadlines remain authoritative.
+
+Watcher callbacks retain only a bounded dirty/failure hint and wake the original consumer.
+Cover atomic request publication's create/rename/modify events, uncertain/rescan events and
+backend errors. Paths from notifications grant no file authority. Definite consumed-request
+removal cannot publish a new command and
+does not wake the consumer; uncertain/root removal and rescan retain reconciliation hints.
+Arm native watching before the first packet check; acknowledge hints before checking the
+original fixed inbox, then recheck before sleeping so publication during entry or event
+coalescing cannot strand a request. Headless placement uses the same hint with a bounded
+condition-variable wait.
+
+Native watcher delivery is not a durable message queue. Keep an explicit 250 ms reconciliation
+ceiling within existing total/inactivity/operation deadlines, including when notifications are
+lost or the watcher has stopped. Observed backend failures remain failures rather than silent
+success. Windows vendor notify still performs a 100 ms internal wait and has legacy error
+reporting limitations; this work does not claim zero periodic wakeups or universal reliable
+filesystem notification. Do not increase ordinary operation deadlines to conceal those limits.
+
+Add game-owned diagnostic control-service counters to the response envelope, outside canonical
+state and permissions, with a new exact protocol version. Read them only as observations from
+the original selected child, not cross-process authority or proof of native cleanup. Expose
+the last active child's observation through the concrete development Host so an independent
+consumer can attribute request checks, waits/hints and watcher join without private hooks.
+
+Qualify the same actual source/headless and source/desktop Host with periodic 2 ms and
+notification-driven 250 ms reconciliation variants, changing only that concrete child constant
+in the owned fixture. Use the original public Cargo capture, fresh processes, three alternating
+pairs per placement and 500 ms idle intervals. Retain exact complete game state, process CPU
+observations, real request latency and original cleanup. Acceptance requires at least 90%
+fewer aggregate idle request-file checks, every measured ordinary request within 100 ms on
+the available idle Windows desktop, successful explicit Frame/Step/capture and complete
+original game/watcher/process retirement. These are finite cooperative criteria, not hard
+real-time guarantees or stable CPU/power budgets. Rejected comparisons preserve raw facts.
+
+Read the original `FrameExecutionStart` sequence into the game-owned observation, outside
+canonical state. Two consecutive explicit public Frame calls must advance the original App
+sequence, exactly once for the quiescent headless case, while preserving simulation/logical
+ticks and complete canonical bytes. State equality alone cannot distinguish Frame from Observe.
+If comparison cleanup fails, write the completed and current partial run, original error,
+cleanup duration and retained owner directories before propagating failure. Preserve the same
+Host/Fixture custody until process exit; an absent JSON file must not erase obtained evidence.
+
+Also test atomic rename and already-published request hints, duplicate/uncertain events,
+partial watch setup, errors, repeated Close and stale native wake handles. Run the actual
+body/private-structure desktop adoption workflow after integration; a notification alone
+does not prove reconstruction, presentation, exact adoption or continued gameplay. Full
+Foundation/R12 remains active.
+
+### Request Notification Qualification
+
+Winit all-feature CPU passes 95/95 (`66b3743a-54b3-4c24-be75-ef0608c81ebd`); the actual
+native cadence/wake cohort passes 4/4 (`73eeb0cb-5b06-4048-94b7-4d24b4c1234a`). The original
+App/time/capture boundary, current-session handoff, stale-route rejection and retirement remain
+covered. The final sample ordinary desktop/cost closure passes 170/170
+(`81663bbb-9279-4644-9ead-0ecc9d68a85f`), including actual rename watching, partial setup,
+join panic, repeated Close, condition-variable races and protocol diagnostic validation.
+Ten native/build cases are skipped by that default run; selected actual execution is recorded below.
+Original retained-pump/maintenance native controls also pass 8/8
+(`2171b9e7-1e83-431a-9d34-e61cb6ff09fe`), including sequential handoff, late/queued old wakes,
+keyboard continuation, hidden windows and startup recovery.
+
+The first all-target check selected the old continuity tests through an implicit child-module
+path; the watcher now explicitly selects its own tests. Independent protocol review also found
+that invalid READY/reply semantics could overwrite the last valid diagnostic observation.
+Validation now precedes the commit, with invalid startup kind/state, wrong Pause/Resume and
+invalid Capture counterexamples; recoverable domain refusals retain their original semantics.
+An earlier sample run passes 170/170 (`1a6e1752-ee79-4b0d-8b2e-5685f1f808df`) before the
+separate measurement-review corrections. The final run above includes the original App-frame
+observation and partial rejected-report preservation, not just that earlier source scope.
+
+Independent source reviews close the native wake, game watcher/lifecycle, diagnostic protocol
+and measurement findings. Their read-only conclusions do not replace the actual
+twelve-process comparison or complete body/private-structure adoption workflow. Results and
+limits are recorded in the [existing cost report](../benchmarks/2026-11-14-development-runtime-costs.md#native-request-notifications-and-reconciliation).
+
+The first complete twelve-child comparison rejects headless 105-to-eleven checks (89.5238%)
+while desktop passes 601-to-twelve (98.0033%); all original state, controls, latency and cleanup
+checks pass. Its full rejected report is retained. Definite removal of the consumed request
+was an unnecessary hint; filtering it preserves uncertain/root/rescan cases and the original
+publication/250 ms fallback. The updated ordinary suite passes 170/170
+(`dfcfd649-b328-4478-b18e-e014c24fc2ae`). The identical-gate rerun passes
+(`077d5e17-a1ed-41f0-93b4-81a9de297c26`): headless checks 103-to-nine (91.2621%), desktop
+594-to-twelve (97.9798%), all 150 selected requests within 100 ms, maximum 74.629 ms. All
+twelve original game/watcher/process owners and four Fixture roots retire normally. Original
+App sequences verify real Frame work without changing simulation/logical ticks or canonical
+bytes. The child reports Vulkan/discrete-gpu; captured games use dev profile, no defaults,
+headless no features and desktop only desktop. These are not release-game or DX12 measurements.
+
+Actual production Host rebuild/adoption regressions pass 3/3
+(`9fecaca5-bdff-4720-a4ef-dd3a5908cbbb`): continuous desktop, paused desktop and headless.
+Each retains real Rust body/private-structure edits, semantic probes/fresh adopter state,
+original pending predecessor cleanup and continued gameplay. Intentional compile-error controls
+remain recoverable domain failures; all original game/watcher/native owners close. The continuous
+child reports Vulkan and ends Running before normal Close; measured total test time is 244.838 s,
+including actual nested builds, not a new edit-latency or runtime-tail budget.
+
+The independently configured no-default-feature sample suite passes 166/166
+(`65bd2042-31d2-4fc4-a235-5bca651487e6`). A final headless-only unused-reference warning
+cleanup changes no operation; its child watcher/lifecycle suite passes 16/16
+(`e7ade70b-f888-48b5-af7d-5db7f1934f17`). Locked/offline all-feature/all-target game checking,
+Winit/game all-target/all-feature correctness Clippy and root/sample formatting pass. Existing
+unrelated style/dead-code warnings remain. All ten scoped research/implementation/review
+threads close. No new general watch service, vendor changes, dependency upgrades, registry
+snapshots, remote CI run or publication are part of this unit. The sample lock adds the existing
+vendor notify package's platform closure and necessary version disambiguation only.
+
+The [raw metadata](../benchmarks/data/2026-11-14-development-runtime/request-notifications-metadata.json)
+binds qualified revisions, passing/rejected reports, exact LF-normalized digests, profiles,
+request selection and unexecuted scopes. Final document/link/data/whitespace checks close the
+unit without rerunning unchanged product acceptance. Original parent response polling, vendor
+internal wakes, cooperative operation limits, foreign native execution, representative
+CPU/power/tail budgets and complete Foundation/R12 remain open.
