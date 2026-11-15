@@ -6,15 +6,19 @@ mod geometry;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+    time::Duration,
 };
 
+use nara_app::{FixedTime, PluginSchemaProviderId};
 use nara_core::{Mat3, Vec2};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Component, Entity, World, bevy_ecs::world::WorldId};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentRegistryBuilder, ComponentRegistryError,
-    ComponentTypeId, PersistentComponent,
+    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentTypeId,
+    PersistentComponent, PersistentComponentProvider,
 };
 use nara_scene::{
     SceneAuthoringRevision, SceneEntityProvenance, SceneEntitySource, SceneOccurrenceKey,
@@ -30,6 +34,26 @@ const PROPERTY_IDS: [&str; 4] = ["center", "half_width", "half_height", "dynamic
 const MIN_HALF_EXTENT: f32 = 0.001;
 const MAX_HALF_EXTENT: f32 = 64.0;
 const MAX_CENTER_COORDINATE: f32 = 4096.0;
+
+pub const COLLISION_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
+    PluginSchemaProviderId::new("fixture.motion.collision-authoring.schema");
+
+/// The original local-box Schema owner and native binding shared by consuming compositions.
+pub const COLLISION_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
+    ComponentSchemaProviderDefinition::new(
+        ComponentSchemaOwnerId::new("fixture.motion.collision-authoring"),
+        COLLISION_SCHEMA_PROVIDER_ID,
+        ComponentSchemaProviderBindingId::new("fixture.motion.collision-native", 1),
+        collision_catalog,
+        register_collision,
+    );
+
+fn collision_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Ok(ComponentSchemaCatalog {
+        components: vec![CollisionDefinition::persistent_component_schema()],
+        ..Default::default()
+    })
+}
 
 /// An entity-local box. Both half extents are finite and within `[0.001, 64]`.
 ///
@@ -152,6 +176,12 @@ struct Candidate {
     pair: geometry::PreparedPair,
 }
 
+#[derive(Clone, Copy)]
+struct CollisionAdmission {
+    stamp: SpatialSnapshotStamp,
+    delta: Duration,
+}
+
 impl Candidate {
     fn preserves(&self, record: &GeneratedCollision, solved_same_input: bool) -> bool {
         self.definition == record.definition
@@ -174,7 +204,7 @@ pub struct CollisionWorld {
     world: Option<WorldId>,
     records: BTreeMap<Entity, GeneratedCollision>,
     snapshot: Arc<DebugSnapshot>,
-    admission: Option<SpatialSnapshotStamp>,
+    admission: Option<CollisionAdmission>,
     last_solve: Option<SpatialSnapshotStamp>,
 }
 
@@ -186,6 +216,9 @@ impl Default for CollisionWorld {
 
 impl CollisionWorld {
     /// Uses Rapier's default integration parameters and gravity `(0, -9.81)`.
+    ///
+    /// Each admitted solve uses that original fixed tick's duration instead of Rapier's
+    /// default timestep. Reconciliation captures the duration and solving revalidates it.
     pub fn new() -> Self {
         Self {
             native: Some(PhysicsWorld::default()),
@@ -227,6 +260,7 @@ impl CollisionWorld {
         let stamp = spatial
             .stamp()
             .map_err(|error| diagnostics::single(diagnostics::spatial_input(error)))?;
+        let delta = fixed_delta(world)?;
         let candidates = validate_inputs(world, inputs, &spatial)?;
         let solved_same_input = self.last_solve == Some(stamp);
         let retired: Vec<_> = self
@@ -269,7 +303,7 @@ impl CollisionWorld {
         }
         self.snapshot = Arc::new(capture(native, &self.records, stamp, false)?);
         self.world = Some(world.id());
-        self.admission = Some(stamp);
+        self.admission = Some(CollisionAdmission { stamp, delta });
         Ok(())
     }
 
@@ -293,16 +327,25 @@ impl CollisionWorld {
                 "Collision input has already been consumed by a native solve",
             )));
         }
-        if self.world != Some(world.id()) || admission != Some(stamp) {
+        let Some(admission) = admission
+            .filter(|admission| self.world == Some(world.id()) && admission.stamp == stamp)
+        else {
             return Err(diagnostics::single(diagnostics::error(
                 "fixture.motion.collision.step-admission",
                 "Collision stepping requires successful admission of this exact current input",
+            )));
+        };
+        if fixed_delta(world)? != admission.delta {
+            return Err(diagnostics::single(diagnostics::error(
+                "fixture.motion.collision.fixed-duration-changed",
+                "Collision stepping requires the original admitted fixed duration",
             )));
         }
         validate_writeback_targets(world, &self.records)?;
         let native = self.native.as_mut().ok_or_else(diagnostics::closed)?;
         let _ = capture(native, &self.records, stamp, false)?;
         self.last_solve = Some(stamp);
+        native.integration_parameters.dt = admission.delta.as_secs_f32();
         native.step();
         let mut writebacks = Vec::new();
         for (entity, record) in &self.records {
@@ -396,6 +439,20 @@ impl CollisionWorld {
         self.records.clear();
         self.snapshot = Arc::new(DebugSnapshot::default());
         self.admission = None;
+    }
+}
+
+fn fixed_delta(world: &World) -> Result<Duration, Box<DiagnosticReport>> {
+    let delta = world.get_resource::<FixedTime>().map(FixedTime::delta);
+    if let Some(delta) = delta.filter(|delta| {
+        !delta.is_zero() && delta.as_secs_f32().is_finite() && delta.as_secs_f32() > 0.0
+    }) {
+        Ok(delta)
+    } else {
+        Err(diagnostics::single(diagnostics::error(
+            "fixture.motion.collision.invalid-fixed-duration",
+            "Collision stepping requires a finite positive duration from the original fixed tick",
+        )))
     }
 }
 

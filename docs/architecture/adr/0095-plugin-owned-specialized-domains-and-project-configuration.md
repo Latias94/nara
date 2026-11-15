@@ -152,6 +152,12 @@ plugin. It consumes Transform-owned completed input and result cuts rather than 
 hierarchy or installing another spatial authority. Fixed affine geometry and dynamic rigid-pose
 acceptance have distinct validation; a successful visual transform does not imply physical
 admission. This workflow supplies no portable Physics provider or official backend selection.
+The domain retains its original Schema provider identity when another game/render composition
+reuses the same persistent type and codec; consumer diagnostic Plugin IDs do not create another
+owner lineage. A native solve captures and validates the original fixed tick's actual duration
+before setting its integration step. Native library defaults cannot silently replace the
+game's configured time. Visual adapters consume original solved or Presented results without
+reimplementing collision or assigning another writeback owner.
 
 ### Official Defaults and Ecosystem Freedom
 

@@ -2,7 +2,11 @@ use std::{collections::BTreeSet, io::Write, sync::mpsc};
 
 use motion_physics::authored::{DebugSnapshot, GeneratedCollision};
 use nara_app::{ExecutionProfile, FixedTime};
-use nara_reflect::{ComponentRegistryBuilder, ComponentRegistryError};
+use nara_reflect::{
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
+    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
+    ComponentSchemaProviderSourceError, PersistentComponentProvider,
+};
 use nara_scene::{SceneDocumentCandidate, SceneEntityPlacement, SceneEntitySource};
 use nara_transform::{Transform2d, fixed_input_spatial_snapshot};
 
@@ -170,8 +174,18 @@ impl NativeCase {
         + Send
         + 'static,
     ) -> R {
+        self.admit_delta(FixedTime::DEFAULT_TIMESTEP, action)
+    }
+
+    pub(super) fn admit_delta<R: Send + 'static>(
+        &mut self,
+        delta: std::time::Duration,
+        action: impl FnOnce(&mut World, &mut CollisionWorld, &mut Vec<SourceScene>) -> R
+        + Send
+        + 'static,
+    ) -> R {
         let result = self.enqueue(action);
-        self.runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        self.runtime.drive(delta).unwrap();
         result
             .try_recv()
             .expect("the synchronous fixed input callback must have completed")
@@ -216,7 +230,9 @@ pub(super) fn native_registry() -> ComponentRegistrySnapshot {
         .register_into(&mut builder)
         .unwrap();
     COLLISION_SCHEMA.register_into(&mut builder).unwrap();
-    builder.freeze().unwrap()
+    let registry = builder.freeze().unwrap();
+    COLLISION_SCHEMA.validate_snapshot(&registry).unwrap();
+    registry
 }
 
 pub(super) fn collision_inputs(scenes: &[SourceScene]) -> Vec<CollisionInput<'_>> {
@@ -755,6 +771,12 @@ fn invalid_authored_dimensions_refuse_without_advancing_source_or_changing_nativ
 #[test]
 fn schema_refuses_admission_without_its_exact_native_codec_and_the_original_candidate_can_be_repaired()
  {
+    fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+        Ok(ComponentSchemaCatalog {
+            components: vec![CollisionDefinition::persistent_component_schema()],
+            ..Default::default()
+        })
+    }
     fn repair_binding(
         candidate: &mut ComponentRegistryBuilder,
     ) -> Result<(), ComponentRegistryError> {

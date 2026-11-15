@@ -4,13 +4,14 @@ use std::sync::{
 };
 
 use motion_physics::authored::{
-    CollisionDefinition, CollisionInput, CollisionWorld, register_collision,
+    COLLISION_SCHEMA_PROVIDER as COLLISION_SCHEMA, COLLISION_SCHEMA_PROVIDER_ID as PROVIDER,
+    CollisionDefinition, CollisionInput, CollisionWorld,
 };
 use nara_app::{
     App, CoreStage, ExecutionProfile, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
-    PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId, PluginShutdownObligationId,
-    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeInstance, RuntimeState,
+    PluginDeclaration, PluginError, PluginId, PluginShutdownObligationId, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeCloseProgress, RuntimeInstance, RuntimeState,
 };
 use nara_asset::AssetRef;
 use nara_core::Vec2;
@@ -22,10 +23,8 @@ use nara_ecs::{
 use nara_identity::{EntityLookup, SpawnedSceneInstance};
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentRegistryPlugin, ComponentRegistrySnapshot,
-    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
-    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, PersistentComponentProvider, component_registry,
-    register_schema_provider_for_plugin,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentProvider,
+    component_registry, register_schema_provider_for_plugin,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
@@ -42,24 +41,8 @@ mod transformed;
 const COMPONENT: &str = "fixture.motion.LocalBox";
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const PLUGIN: PluginId = PluginId::new("fixture.motion.collision-authoring");
-const PROVIDER: PluginSchemaProviderId =
-    PluginSchemaProviderId::new("fixture.motion.collision-authoring.schema");
 const SHUTDOWN: PluginShutdownObligationId =
     PluginShutdownObligationId::new("fixture.motion.collision-authoring.shutdown");
-const COLLISION_SCHEMA: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
-    ComponentSchemaOwnerId::new("fixture.motion.collision-authoring"),
-    PROVIDER,
-    ComponentSchemaProviderBindingId::new("fixture.motion.collision-native", 1),
-    catalog,
-    register_collision,
-);
-
-fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
-    Ok(ComponentSchemaCatalog {
-        components: vec![CollisionDefinition::persistent_component_schema()],
-        ..Default::default()
-    })
-}
 
 #[derive(Clone, Resource)]
 struct CollisionOwner(Arc<Mutex<CollisionWorld>>);

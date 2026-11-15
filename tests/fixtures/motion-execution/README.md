@@ -165,3 +165,16 @@ source/history/Reopen, late live writeback refusal and original native cleanup. 
 DX12 hardware history and software joint Material/history trajectories use the same fixed-input
 role. These correctness results do not measure throughput or memory, qualify other platforms or
 admit parented/scaled dynamic bodies.
+
+The domain owns `COLLISION_SCHEMA_PROVIDER_ID` and `COLLISION_SCHEMA_PROVIDER`, so independent
+compositions install the same original owner/provider/native-binding receipts. Game plugins
+retain their own Scene selection, scheduling and retirement integration. The original domain
+also captures each admitted tick's actual positive fixed duration and revalidates it before
+setting the native solver timestep; a custom App step must not silently run Rapier's default
+1/60-second integration. Changed or zero duration refuses before native effects and permits
+explicit readmission after the original clock is restored.
+
+The [ordinary visible consumer](../render-policy-consumer/README.md#authored-collision-and-ordinary-sprite)
+joins the same owner to Sprite/stock capture, source editing and complete GPU pixel/lifetime
+checks. It is separate from this workspace's CPU/native-solver qualification; use the owning
+plan for actually executed source/profile/platform results.

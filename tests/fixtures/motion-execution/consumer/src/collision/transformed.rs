@@ -1713,6 +1713,140 @@ fn actual_contact_targets_the_sheared_parented_platform_and_writes_the_dynamic_r
 }
 
 #[test]
+fn native_free_fall_and_paused_exact_step_use_the_admitted_nondefault_fixed_duration() {
+    for profile in profiles() {
+        for milliseconds in [8, 32] {
+            let timestep = Duration::from_millis(milliseconds);
+            let mut case = NativeCase::new(
+                vec![SourceScene::new(document(), "fixed-duration")],
+                &native_registry(),
+                profile,
+                move |app| {
+                    app.insert_resource(FixedTime::new(timestep).unwrap())
+                        .unwrap();
+                },
+            );
+            let (entity, original, first_velocity) =
+                case.admit_delta(timestep, move |world, owner, scenes| {
+                    let inputs = collision_inputs(scenes);
+                    owner.reconcile(world, &inputs).unwrap();
+                    let entity = resolve(world, inputs[0].instance, "box");
+                    let original = generated(owner, entity);
+                    assert_eq!(owner.body(original.body).unwrap().linvel(), Vec2::ZERO);
+                    assert_eq!(world.resource::<FixedTime>().delta(), timestep);
+                    owner.step_and_writeback(world).unwrap();
+                    let velocity = owner.body(original.body).unwrap().linvel();
+                    assert_eq!(velocity.x, 0.0);
+                    (entity, original, velocity.y)
+                });
+            let before = *case.runtime.world().get::<Transform2d>(entity).unwrap();
+            assert!(before.translation.y < 0.0);
+            assert!(matches!(
+                case.runtime.request_control(RuntimeControl::Pause),
+                RuntimeControlRequestResult::Accepted(_)
+            ));
+            case.runtime.drive(Duration::ZERO).unwrap();
+            assert_eq!(case.runtime.world().resource::<FixedTime>().tick(), 1);
+            assert!(matches!(
+                case.runtime.request_control(RuntimeControl::StepFixedTick),
+                RuntimeControlRequestResult::Accepted(_)
+            ));
+            let stepped_velocity = case.admit_delta(Duration::ZERO, move |world, owner, scenes| {
+                owner.reconcile(world, &collision_inputs(scenes)).unwrap();
+                assert_same_pair(&generated(owner, entity), &original);
+                assert_eq!(world.resource::<FixedTime>().delta(), timestep);
+                owner.step_and_writeback(world).unwrap();
+                let actual = owner.body(original.body).unwrap().linvel().y;
+                assert!(
+                    world.get::<Transform2d>(entity).unwrap().translation.y < before.translation.y
+                );
+                actual
+            });
+            assert_eq!(case.runtime.world().resource::<FixedTime>().tick(), 2);
+            case.finish();
+            let expected = -9.81 * timestep.as_secs_f32();
+            assert!(
+                (first_velocity - expected).abs() < 0.000_01,
+                "native velocity {first_velocity} must use this fixed duration: {expected}"
+            );
+            assert!(
+                (stepped_velocity - 2.0 * expected).abs() < 0.000_02,
+                "exact step native velocity {stepped_velocity} must retain this fixed duration: {}",
+                2.0 * expected
+            );
+        }
+    }
+}
+
+#[test]
+fn changed_or_zero_fixed_duration_refuses_before_native_step_and_original_input_can_recover() {
+    for profile in profiles() {
+        let longer = Duration::from_millis(32);
+        let mut other = NativeCase::new(vec![], &native_registry(), profile, move |app| {
+            app.insert_resource(FixedTime::new(longer).unwrap())
+                .unwrap();
+        });
+        let different_delta =
+            other.admit_delta(longer, |world, _, _| *world.resource::<FixedTime>());
+        other.runtime.drive(Duration::ZERO).unwrap();
+        let zero_delta = *other.runtime.world().resource::<FixedTime>();
+        assert_eq!(different_delta.tick(), 1);
+        assert_eq!(zero_delta.tick(), 1);
+        assert!(zero_delta.delta().is_zero());
+        other.finish();
+
+        let timestep = Duration::from_millis(8);
+        let mut case = NativeCase::new(
+            vec![SourceScene::new(document(), "fixed-duration-refusal")],
+            &native_registry(),
+            profile,
+            move |app| {
+                app.insert_resource(FixedTime::new(timestep).unwrap())
+                    .unwrap();
+            },
+        );
+        let velocity = case.admit_delta(timestep, move |world, owner, scenes| {
+            let inputs = collision_inputs(scenes);
+            owner.reconcile(world, &inputs).unwrap();
+            let before = native_state(owner);
+            let original_time = *world.resource::<FixedTime>();
+            let body = resolve(world, inputs[0].instance, "box");
+            for (replacement, expected) in [
+                (
+                    different_delta,
+                    "fixture.motion.collision.fixed-duration-changed",
+                ),
+                (
+                    zero_delta,
+                    "fixture.motion.collision.invalid-fixed-duration",
+                ),
+            ] {
+                world.insert_resource(replacement);
+                assert!(fixed_input_spatial_snapshot(world).is_ok());
+                let failure = owner.step_and_writeback(world).unwrap_err();
+                assert!(
+                    failure
+                        .iter()
+                        .any(|diagnostic| diagnostic.code().as_str() == expected)
+                );
+                assert_native_unchanged(owner, &before, None);
+                assert_withheld_capture(owner);
+                world.insert_resource(original_time);
+                owner.reconcile(world, &inputs).unwrap();
+                assert_native_unchanged(owner, &before, None);
+            }
+            owner.step_and_writeback(world).unwrap();
+            let current = generated(owner, body);
+            let velocity = owner.body(current.body).unwrap().linvel().y;
+            assert!(owner.debug_snapshot().solved);
+            velocity
+        });
+        case.finish();
+        assert!((velocity + 9.81 * timestep.as_secs_f32()).abs() < 0.000_01);
+    }
+}
+
+#[test]
 fn affine_fixed_boxes_retain_native_corners_for_shear_four_mirrors_and_non_spatial_parents() {
     for profile in profiles() {
         for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
