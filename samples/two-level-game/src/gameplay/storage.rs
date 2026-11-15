@@ -27,6 +27,22 @@ impl Storage {
         self.0.try_lock().is_ok_and(|slot| slot.is_none())
     }
 
+    pub(super) fn open_slot(&self, path: Option<&Path>) -> Result<(), String> {
+        let mut slot = self
+            .0
+            .try_lock()
+            .map_err(|_| "the application save slot is unavailable")?;
+        if slot.is_some() {
+            return Err("the application save slot is already configured".into());
+        }
+        let opened = path
+            .map(SaveSlot::open)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        *slot = opened;
+        Ok(())
+    }
+
     pub fn save(&self, checkpoint: &Checkpoint) -> Result<(), String> {
         self.0
             .lock()

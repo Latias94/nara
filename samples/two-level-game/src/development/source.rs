@@ -12,7 +12,7 @@ use nara::{
     project_tooling::{cargo_build::CapturedCargoExecutable, host_fs},
 };
 
-const ROOT_FILES: [&str; 3] = ["Cargo.toml", "Cargo.lock", "nara.toml"];
+const ROOT_FILES: [&str; 4] = ["Cargo.toml", "Cargo.lock", "nara.toml", "build.rs"];
 const SOURCE_DIRECTORIES: [&str; 5] = ["src", "assets", "scenes", "prefabs", "schema"];
 const MAX_FILES: usize = 1024;
 const MAX_DEPTH: usize = 16;

@@ -125,7 +125,7 @@ impl Fixture {
         for directory in ["src", "assets", "scenes", "prefabs", "schema"] {
             copy_tree(&sample.join(directory), &fixture.project.join(directory));
         }
-        for name in ["Cargo.toml", "Cargo.lock", "nara.toml"] {
+        for name in ["Cargo.toml", "Cargo.lock", "nara.toml", "build.rs"] {
             fs::copy(sample.join(name), fixture.project.join(name)).unwrap();
         }
         let manifest = fixture.read("Cargo.toml");

@@ -14,7 +14,9 @@ use nara::{
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     identity::SceneEntityId,
     prelude::Resource,
-    project_host::{ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes},
+    project_host::{
+        ProjectSceneRequestId, ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    },
     scene::advanced::SceneProductTransactionLimits,
 };
 
@@ -45,6 +47,11 @@ struct Pending {
 }
 
 pub(super) fn consume(world: &mut World) {
+    let launch_error = super::player_launch::consume(world).err();
+    if let Some(error) = &launch_error {
+        eprintln!("two_level_game: Player launch rejected: {error}");
+        world.resource_mut::<Session>().error = Some(error.clone());
+    }
     let commands = world
         .resource::<GameplayCommandBatch>()
         .commands()
@@ -57,6 +64,9 @@ pub(super) fn consume(world: &mut World) {
         })
         .collect::<Vec<_>>();
     for (kind, payload) in commands {
+        if kind == PLAYER_LAUNCH {
+            continue;
+        }
         if kind == MOVE {
             if let (
                 Some(GameplayCommandValue::I64(direction)),
@@ -139,6 +149,9 @@ pub(super) fn consume(world: &mut World) {
         } else if world.resource::<Session>().phase == GamePhase::Running {
             world.resource_mut::<Session>().error = None;
         }
+    }
+    if let Some(error) = launch_error {
+        world.resource_mut::<Session>().error = Some(error);
     }
 }
 
@@ -230,7 +243,16 @@ pub(super) fn advance(world: &mut World) {
         .copied()
         .unwrap_or(pending.target.level());
     if pending.request.is_none() {
-        let result = ProjectScenes::scope(world, |scenes| scenes.request(level.scene_path()));
+        let Some(current) = CurrentScene::get(world) else {
+            reject(world, "current Scene is unavailable".into());
+            return;
+        };
+        let selection = if current.source_view().with_runtime_scene(|_| ()).is_some() {
+            ProjectSceneSelection::Product(level.scene_product())
+        } else {
+            ProjectSceneSelection::Source(level.scene_path())
+        };
+        let result = ProjectScenes::scope(world, |scenes| scenes.request(selection));
         match result {
             Ok(request) => pending.request = Some(request),
             Err(error) => {

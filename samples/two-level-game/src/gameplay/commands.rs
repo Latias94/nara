@@ -9,6 +9,7 @@ pub(super) const MARKER: &str = "two-level-game.marker";
 pub(super) const SAVE: &str = "two-level-game.save";
 pub(super) const RESTORE: &str = "two-level-game.restore";
 pub(super) const RETRY: &str = "two-level-game.retry";
+pub(super) const PLAYER_LAUNCH: &str = "two-level-game.player-launch";
 
 pub(super) fn action(id: &str) -> GameplayCommandDraft {
     GameplayCommandDraft::new(GameplayCommandTypeId::new(id).expect("static game command"))

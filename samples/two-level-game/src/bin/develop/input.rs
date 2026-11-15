@@ -113,7 +113,7 @@ impl Arguments {
 
     pub fn build_request(&self, tools: &CargoBuildTools) -> Result<CargoBuildRequest, String> {
         let mut inputs = Vec::new();
-        for name in ["Cargo.toml", "Cargo.lock", "nara.toml"] {
+        for name in ["Cargo.toml", "Cargo.lock", "nara.toml", "build.rs"] {
             let path = self.project_root.join(name);
             let metadata =
                 fs::symlink_metadata(&path).map_err(|error| format!("inspect {name}: {error}"))?;

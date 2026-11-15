@@ -4,6 +4,7 @@ mod content;
 mod input;
 #[cfg(feature = "desktop")]
 pub use input::movement_keyboard_bindings;
+mod player_launch;
 pub(crate) mod resume;
 mod storage;
 mod travel;
@@ -36,6 +37,7 @@ use crate::{
     },
 };
 use content::Content;
+pub use player_launch::player_launch;
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("two-level-game.exploration");
 const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-level-game.objects");
@@ -309,6 +311,24 @@ impl Plugin for ExplorationPlugin {
 #[must_use]
 pub fn product_recipe() -> ProductRecipe {
     configured_recipe(RunOptions::default())
+}
+
+/// The fixed headless recipe shared by the cooker and the source-free Player.
+///
+/// # Panics
+///
+/// Desktop-enabled builds require separate qualification and are refused explicitly.
+#[must_use]
+pub fn cooked_recipe() -> ProductRecipe {
+    assert!(
+        !cfg!(feature = "desktop"),
+        "the cooked two-level Player requires a build without the desktop feature"
+    );
+    product_recipe()
+        .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.cooked-image", 1),
+        )
+        .expect("the game's fixed Runtime Image codec is valid")
 }
 
 #[must_use]

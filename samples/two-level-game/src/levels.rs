@@ -1,4 +1,7 @@
-use nara::project::ProjectPath;
+use nara::{
+    asset::{AssetProductRef, ImportedProductId, StableAssetId},
+    project::ProjectPath,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// The game's finite content catalog, independent of a running Scene instance.
@@ -22,6 +25,32 @@ impl LevelId {
         })
         .expect("the game's static Scene paths are valid")
     }
+
+    /// Complete shipping Scene identity, independent of authoring `ProjectLocation` identities.
+    #[must_use]
+    pub fn scene_product(self) -> AssetProductRef {
+        primary_product(match self {
+            Self::Meadow => "624ebd5d-b7b1-4da9-94f8-86d689caeac1",
+            Self::Cavern => "0c9fa5da-20ef-4c87-a559-c733bc231350",
+        })
+    }
+
+    /// The existing Image primary identity declared by this level's source metadata.
+    #[must_use]
+    pub fn image_product(self) -> AssetProductRef {
+        primary_product(match self {
+            Self::Meadow => "969e2daa-9f60-463a-97fa-03b3d295ea5f",
+            Self::Cavern => "2ba63e2c-41ef-4d3e-918e-82fdf417523d",
+        })
+    }
+}
+
+fn primary_product(source: &str) -> AssetProductRef {
+    AssetProductRef::new(
+        StableAssetId::parse_str(source).expect("the game's static Product UUIDs are valid"),
+        ImportedProductId::PRIMARY,
+    )
+    .expect("the game's static Product UUIDs are non-nil")
 }
 
 /// Number of independently persistent game instances supported per level source.
@@ -78,5 +107,32 @@ impl<'de> Deserialize<'de> for LevelKey {
 
         let wire = Wire::deserialize(deserializer)?;
         Self::new(wire.level, wire.instance).map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipping_products_are_complete_and_image_identities_match_the_existing_metadata() {
+        let metadata = [
+            include_str!("../assets/textures/meadow.png.meta"),
+            include_str!("../assets/textures/cavern.png.meta"),
+        ];
+        let mut products = std::collections::BTreeSet::new();
+        for (level, metadata) in LevelId::ALL.into_iter().zip(metadata) {
+            let metadata: serde_json::Value = serde_json::from_str(metadata).unwrap();
+            let image = level.image_product();
+            assert_eq!(
+                image.source().to_string(),
+                metadata["payload"]["asset"]["stable_id"].as_str().unwrap()
+            );
+            for product in [level.scene_product(), image] {
+                assert_eq!(product.product(), ImportedProductId::PRIMARY);
+                assert!(!product.source().as_uuid().is_nil());
+                assert!(products.insert(product));
+            }
+        }
     }
 }

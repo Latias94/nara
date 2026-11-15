@@ -36,6 +36,8 @@ windows-sys = { version = "0.61.2", optional = true, features = [
 default = []
 desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]
 cost-measurement = ["dep:windows-sys"]
+cook = []
+cooked-player = []
 
 [lib]
 name = "two_level_game"
@@ -80,6 +82,20 @@ bench = false
 name = "runtime_cost"
 path = "src/bin/runtime_cost.rs"
 required-features = ["desktop", "cost-measurement"]
+test = false
+bench = false
+
+[[bin]]
+name = "cook"
+path = "src/bin/cook.rs"
+required-features = ["cook"]
+test = false
+bench = false
+
+[[bin]]
+name = "player"
+path = "src/bin/player.rs"
+required-features = ["cooked-player"]
 test = false
 bench = false
 

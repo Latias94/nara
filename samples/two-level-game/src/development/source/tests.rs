@@ -8,10 +8,11 @@ use std::{
 use super::*;
 
 const TEMP_PREFIX: &str = "nara-game-source-fence-";
-const FIXTURE_FILES: [(&str, &[u8]); 10] = [
+const FIXTURE_FILES: [(&str, &[u8]); 11] = [
     ("Cargo.toml", b"[package]\nname = 'fixture'\n"),
     ("Cargo.lock", b"version = 4\n"),
     ("nara.toml", b"game = 'two-level'\n"),
+    ("build.rs", b"fn main() {}\n"),
     ("src/lib.rs", b"pub fn speed() -> u32 { 80 }\n"),
     ("assets/textures/cavern.png", b"cavern pixels"),
     ("assets/textures/cavern.png.meta", b"cavern metadata"),
@@ -158,6 +159,7 @@ fn detects_changes_in_manifests_unvisited_levels_rust_and_all_content_trees() {
         "Cargo.toml",
         "Cargo.lock",
         "nara.toml",
+        "build.rs",
         "src/lib.rs",
         "assets/textures/cavern.png",
         "assets/textures/cavern.png.meta",
