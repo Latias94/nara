@@ -5,24 +5,25 @@ use std::{num::NonZeroU64, sync::Arc};
 use nara::core::{Color, Mat3};
 use nara_ecs::Entity;
 use nara_render::{
-    Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderFramePacket, RenderImagePacket,
-    RenderTarget, RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect,
+    CapturedRenderTime, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket,
+    RenderImagePacket, RenderTarget, RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect,
     build_image_render_frame_packet,
 };
 use nara_render_wgpu::{
-    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuEmptyHistoryReason,
-    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
-    WgpuFeatureInstance, WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture,
-    WgpuHistoryView, WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyFrameFacts,
+    AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
+    WgpuEmptyHistoryReason, WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition,
+    WgpuFeatureEncodeContext, WgpuFeatureInstance, WgpuFeaturePrepareContext, WgpuHistoryLineage,
+    WgpuHistoryTexture, WgpuHistoryView, WgpuPolicyBindingContext, WgpuPolicyBuildContext,
     WgpuPolicyProgram, WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature,
-    WgpuRenderPolicy, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    WgpuRenderPolicy, WgpuRenderProgramError, WgpuStockBindings, WgpuStockCapture, WgpuStockStages,
+    WgpuWorldColor,
 };
 
 pub const VIEW_WIDTH: u32 = 16;
 pub const WIDTH: u32 = 2 * VIEW_WIDTH;
 pub const HEIGHT: u32 = 16;
 pub const HISTORY_SLOT: u64 = 0;
-const PARAMETER_BYTES: u64 = 16;
+const PARAMETER_BYTES: u64 = 32;
 
 pub struct HistoryColor;
 pub struct FinalColor;
@@ -99,6 +100,50 @@ impl Topology {
         reverse: bool,
         predecessors: [Predecessor; 4],
     ) -> Arc<HistoryCapture> {
+        self.capture_with_time(lineage, phase, reverse, predecessors, None)
+    }
+
+    /// Captures an optional original packet clock without selecting stock drawing inputs.
+    pub fn capture_with_time(
+        &self,
+        lineage: &WgpuHistoryLineage,
+        phase: u32,
+        reverse: bool,
+        predecessors: [Predecessor; 4],
+        captured_time: Option<CapturedRenderTime>,
+    ) -> Arc<HistoryCapture> {
+        self.capture_inputs(lineage, None, captured_time, phase, reverse, predecessors)
+    }
+
+    /// Retains the exact stock drawing inputs and clock selected by the original packet.
+    pub fn capture_stock(
+        &self,
+        lineage: &WgpuHistoryLineage,
+        stock: Arc<WgpuStockCapture>,
+        captured_time: CapturedRenderTime,
+        phase: u32,
+        reverse: bool,
+        predecessors: [Predecessor; 4],
+    ) -> Arc<HistoryCapture> {
+        self.capture_inputs(
+            lineage,
+            Some(stock),
+            Some(captured_time),
+            phase,
+            reverse,
+            predecessors,
+        )
+    }
+
+    fn capture_inputs(
+        &self,
+        lineage: &WgpuHistoryLineage,
+        stock: Option<Arc<WgpuStockCapture>>,
+        captured_time: Option<CapturedRenderTime>,
+        phase: u32,
+        reverse: bool,
+        predecessors: [Predecessor; 4],
+    ) -> Arc<HistoryCapture> {
         assert!(phase < 64);
         let mut views = self.views.clone().map(|view| {
             let mut effects = view.effects.clone().map(|effect| CapturedEffect {
@@ -122,6 +167,8 @@ impl Topology {
         Arc::new(HistoryCapture {
             lineage: lineage.clone(),
             phase,
+            captured_time,
+            stock,
             views,
             reverse_outputs: reverse,
         })
@@ -147,6 +194,8 @@ struct CapturedView {
 pub struct HistoryCapture {
     pub lineage: WgpuHistoryLineage,
     pub phase: u32,
+    pub captured_time: Option<CapturedRenderTime>,
+    pub stock: Option<Arc<WgpuStockCapture>>,
     views: [CapturedView; 2],
     reverse_outputs: bool,
 }
@@ -177,18 +226,21 @@ impl HistoryCapture {
 }
 
 pub struct HistoryPolicy {
+    stock: WgpuStockStages,
     composite: WgpuFeatureDeclaration<Composite>,
 }
 
 impl HistoryPolicy {
     pub fn new() -> Self {
         Self {
+            stock: WgpuStockStages::new(),
             composite: WgpuFeatureDefinition::new(Composite).declare(),
         }
     }
 }
 
 pub struct HistoryBindings {
+    stock: WgpuStockBindings,
     composite: Arc<WgpuFeatureInstance<Composite>>,
     views: Vec<BoundView>,
 }
@@ -205,6 +257,10 @@ struct BoundEffect {
 impl WgpuRenderPolicy for HistoryPolicy {
     type Capture = HistoryCapture;
     type Bindings = HistoryBindings;
+
+    fn device_requirements(&self) -> WgpuDeviceRequirements {
+        self.stock.device_requirements()
+    }
 
     fn history_lineage(&self, capture: &HistoryCapture) -> Option<WgpuHistoryLineage> {
         Some(capture.lineage.clone())
@@ -233,6 +289,7 @@ impl WgpuRenderPolicy for HistoryPolicy {
             views.push(BoundView { effects });
         }
         Ok(HistoryBindings {
+            stock: self.stock.bind(context)?,
             composite: context.feature(&self.composite)?,
             views,
         })
@@ -243,6 +300,14 @@ impl WgpuRenderPolicy for HistoryPolicy {
         packet: &RenderFramePacket,
         capture: &HistoryCapture,
     ) -> Result<(), WgpuRenderProgramError> {
+        if capture
+            .captured_time
+            .is_some_and(|time| packet.captured_time() != Some(time))
+        {
+            return Err(WgpuRenderProgramError::feature(
+                "history capture must retain its original packet clock and spatial presentation",
+            ));
+        }
         if packet.source_generation() != capture.lineage.source_generation()
             || packet.world_canvas().is_some()
             || packet.target().extent() != Extent2d::new(WIDTH, HEIGHT).unwrap()
@@ -251,18 +316,25 @@ impl WgpuRenderPolicy for HistoryPolicy {
                 |(index, (actual, captured))| {
                     actual.id != captured.id
                         || actual.viewport != captured.region
-                        || actual.load
-                            != if index == 0 {
-                                ViewLoadOp::Clear(Color::BLACK)
-                            } else {
-                                ViewLoadOp::Load
-                            }
+                        || if index == 0 && capture.stock.is_some() {
+                            !matches!(actual.load, ViewLoadOp::Clear(_))
+                        } else {
+                            actual.load
+                                != if index == 0 {
+                                    ViewLoadOp::Clear(Color::BLACK)
+                                } else {
+                                    ViewLoadOp::Load
+                                }
+                        }
                 },
             )
         {
             return Err(WgpuRenderProgramError::feature(
                 "accumulation requires two original View regions on one equal-sized image target",
             ));
+        }
+        if let Some(stock) = &capture.stock {
+            WgpuStockStages::validate_capture(packet, stock)?;
         }
         Ok(())
     }
@@ -286,11 +358,27 @@ impl WgpuRenderPolicy for HistoryPolicy {
             ));
         }
         let packet = context.packet();
-        let mut builder = WgpuRenderProgramBuilder::new(
-            packet.source_generation(),
-            packet.frame_index(),
+        let empty_stock = WgpuStockCapture::new();
+        let mut stock = self.stock.begin(
+            &bindings.stock,
+            capture.stock.as_deref().unwrap_or(&empty_stock),
+            context,
             limits(),
         )?;
+        let source = if capture.stock.is_some() {
+            Some(stock.world(10)?)
+        } else {
+            None
+        };
+        let [virtual_frame_low, spatial_interpolated, paused] =
+            capture.captured_time.map_or([0; 3], |time| {
+                [
+                    time.virtual_time().frame as u32,
+                    u32::from(time.spatial_interpolated()),
+                    u32::from(time.settings().paused()),
+                ]
+            });
+        let builder = stock.graph();
         let mut outputs = Vec::with_capacity(5);
         let mut histories = Vec::with_capacity(4);
         let mut final_image: Option<WgpuProgramTexture<FinalColor>> = None;
@@ -328,15 +416,24 @@ impl WgpuRenderPolicy for HistoryPolicy {
                     seed
                 };
                 let color = builder.texture::<HistoryColor>(history_descriptor())?;
+                let mut reads = vec![previous.read(AccessRole::Sampled)];
+                if let Some(source) = &source {
+                    reads.push(source.read(AccessRole::Sampled));
+                }
                 builder.operation(
                     key + 1,
                     &effect.instance,
                     Arc::new(AccumulationCapture {
                         previous: previous.clone(),
                         destination: color.clone(),
+                        source: source.clone(),
+                        source_region: view.region,
                         phase: capture.phase,
+                        virtual_frame_low,
+                        spatial_interpolated,
+                        paused,
                     }),
-                    &[previous.read(AccessRole::Sampled)],
+                    &reads,
                     &[color.clear(wgpu::Color::TRANSPARENT, AccessRole::Attachment)],
                 )?;
                 histories.push(effect.history.bind(&color));
@@ -385,18 +482,11 @@ impl WgpuRenderPolicy for HistoryPolicy {
         }
         // Binding order is deliberately independent of publication and operation order.
         histories.reverse();
-        Ok(WgpuPolicyProgram::new(
-            builder.finish(&outputs)?,
-            &final_image,
-            WgpuPolicyFrameFacts {
-                frame: FrameStats {
-                    draw_calls: 6,
-                    sprites: 0,
-                },
-                ..WgpuPolicyFrameFacts::default()
-            },
-        )?
-        .with_history(histories))
+        let facts = stock.facts_mut();
+        facts.frame.draw_calls = facts.frame.draw_calls.saturating_add(6);
+        Ok(stock
+            .finish(900, &final_image, &outputs)?
+            .with_history(histories))
     }
 }
 
@@ -446,7 +536,6 @@ fn final_descriptor(format: wgpu::TextureFormat) -> WgpuProgramTextureDescriptor
         TextureTransfer::Linear
     };
     descriptor.native.usage |= wgpu::TextureUsages::COPY_DST;
-    descriptor.alpha = TextureAlpha::Opaque;
     descriptor
 }
 
@@ -457,7 +546,12 @@ pub struct Accumulation {
 pub struct AccumulationCapture {
     previous: WgpuProgramTexture<HistoryColor>,
     destination: WgpuProgramTexture<HistoryColor>,
+    source: Option<WgpuProgramTexture<WgpuWorldColor>>,
+    source_region: ViewportRect,
     phase: u32,
+    virtual_frame_low: u32,
+    spatial_interpolated: u32,
+    paused: u32,
 }
 
 pub struct Pipeline {
@@ -499,6 +593,7 @@ impl WgpuRenderFeature for Accumulation {
                     },
                     count: None,
                 },
+                texture_binding(2),
             ],
         ))
     }
@@ -516,11 +611,22 @@ impl WgpuRenderFeature for Accumulation {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bytes: Vec<u8> = [capture.phase, self.tag, 0, 0]
-            .into_iter()
-            .flat_map(u32::to_le_bytes)
-            .collect();
-        context.upload_buffer(&uniform, 0, &bytes)?;
+        let bytes = [
+            capture.phase,
+            self.tag,
+            u32::from(capture.source.is_some()),
+            capture.source_region.physical_x,
+            capture.source_region.physical_y,
+            capture.virtual_frame_low,
+            capture.spatial_interpolated,
+            capture.paused,
+        ]
+        .map(u32::to_le_bytes);
+        context.upload_buffer(&uniform, 0, bytes.as_flattened())?;
+        let source = match &capture.source {
+            Some(source) => context.resources().texture(source)?,
+            None => context.resources().texture(&capture.previous)?,
+        };
         let group = context
             .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -536,6 +642,10 @@ impl WgpuRenderFeature for Accumulation {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(source),
                     },
                 ],
             });

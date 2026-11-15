@@ -14,17 +14,22 @@ use nara::{
     MinimalPlugins,
     core::Color,
     project_host::{DesktopPresentationControl, DesktopRun, DesktopRunOptions, DesktopRunOutcome},
-    transform::Transform2d,
+    transform::{
+        PresentedSpatialSnapshot2d, SpatialSnapshotPhase, Transform2d, presented_spatial_snapshot,
+    },
     window::{PrimaryWindowId, Window, WindowId, WindowPlugin, WindowResolution},
 };
-use nara_app::{App, AppExit, CoreStage, RuntimeGeneration, RuntimeInstance, StartupStage};
+use nara_app::{
+    App, AppExit, CoreStage, FixedTime, RealTime, RenderTime, RuntimeGeneration, RuntimeInstance,
+    RuntimeTimeSettings, StartupStage, VirtualTime,
+};
 use nara_ecs::{
     Commands, Query, Res, ResMut, Resource, SystemParam, schedule::IntoScheduleConfigs,
 };
 use nara_render::{
-    Camera2d, Extent2d, ExtractedViews, FrameStats, RenderBackendStatus, RenderComponentsPlugin,
-    RenderFrame, RenderFrameState, RenderFrameTarget, RenderPlugin, ViewportRect,
-    build_render_frame_packet,
+    Camera2d, CapturedRenderTime, Extent2d, ExtractedViews, FrameStats, RenderBackendStatus,
+    RenderComponentsPlugin, RenderFrame, RenderFramePacket, RenderFrameState, RenderFrameTarget,
+    RenderPlugin, ViewportRect, build_render_frame_packet,
 };
 use nara_render_wgpu::{
     WgpuCapturePlugin, WgpuEmptyHistoryReason, WgpuHistoryLineage, WgpuHistoryView,
@@ -74,6 +79,28 @@ struct RuntimeSource<'w, 's> {
     primary: Res<'w, PrimaryWindowId>,
     windows: Query<'w, 's, &'static Window>,
     views: Res<'w, ExtractedViews>,
+    real_time: Res<'w, RealTime>,
+    virtual_time: Res<'w, VirtualTime>,
+    fixed_time: Res<'w, FixedTime>,
+    render_time: Res<'w, RenderTime>,
+    time_settings: Res<'w, RuntimeTimeSettings>,
+    spatial: PresentedSpatialSnapshot2d<'w>,
+}
+
+fn assert_packet_time(packet: &RenderFramePacket) -> CapturedRenderTime {
+    let time = packet
+        .captured_time()
+        .expect("an actual Runtime packet retains its extracted clocks");
+    let generation = packet
+        .source_generation()
+        .runtime_generation()
+        .expect("the original packet belongs to a managed Runtime");
+    let stamp = time.spatial_stamp();
+    assert_eq!(stamp.phase, SpatialSnapshotPhase::Presented);
+    assert_eq!(stamp.runtime_generation, Some(generation));
+    assert_eq!(stamp.frame, time.real().frame);
+    assert_eq!(stamp.tick, time.fixed().tick());
+    time
 }
 
 fn capture_history(
@@ -112,6 +139,27 @@ fn capture_history(
         Some(*source.generation),
     );
     assert!(matches!(packet.target(), RenderFrameTarget::Window(_)));
+    let captured_time = assert_packet_time(&packet);
+    assert_eq!(source.views.captured_time(), Some(captured_time));
+    assert_eq!(captured_time.real(), *source.real_time);
+    assert_eq!(captured_time.virtual_time(), *source.virtual_time);
+    assert_eq!(captured_time.fixed(), *source.fixed_time);
+    assert_eq!(captured_time.render(), *source.render_time);
+    assert_eq!(captured_time.settings(), *source.time_settings);
+    assert_eq!(
+        captured_time.spatial_stamp(),
+        source
+            .spatial
+            .stamp()
+            .expect("the presented spatial cut is available"),
+    );
+    assert_eq!(
+        captured_time.spatial_interpolated(),
+        source
+            .spatial
+            .spatial_interpolated()
+            .expect("the actual Transform presentation selection is available"),
+    );
 
     if original.0.is_none() {
         // Use the camera owners' actual IDs; Topology::new's independent View IDs are not used.
@@ -151,9 +199,14 @@ fn capture_history(
         )
     };
     // HistoryPolicy::build checks all four selected predecessors before encoding each frame.
-    let capture = original
-        .topology
-        .capture(&original.lineage, phase, false, [predecessor; 4]);
+    let capture = original.topology.capture_with_time(
+        &original.lineage,
+        phase,
+        false,
+        [predecessor; 4],
+        packet.captured_time(),
+    );
+    assert_eq!(capture.captured_time, Some(captured_time));
     // Retain a sibling input for inspection, using the same Arc and actual window packet.
     // Only the normal writer/seal/Runtime/window producer path executes this policy.
     let input = installation.capture(packet, Arc::clone(&capture))?;
@@ -252,6 +305,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .as_ref()
                 .expect("the normal ECS collector retained this frame's exact capture");
             let packet = captured.input.packet();
+            let captured_time = assert_packet_time(packet);
+            assert_eq!(captured.capture.captured_time, Some(captured_time));
+            assert_eq!(
+                world.resource::<ExtractedViews>().captured_time(),
+                Some(captured_time),
+            );
+            assert_eq!(captured_time.real(), *world.resource::<RealTime>());
+            assert_eq!(captured_time.virtual_time(), *world.resource::<VirtualTime>());
+            assert_eq!(captured_time.fixed(), *world.resource::<FixedTime>());
+            assert_eq!(captured_time.render(), *world.resource::<RenderTime>());
+            assert_eq!(captured_time.settings(), *world.resource::<RuntimeTimeSettings>());
+            assert_eq!(
+                captured_time.spatial_stamp(),
+                presented_spatial_snapshot(world)
+                    .expect("the exact presented Transform payload remains available")
+                    .stamp()
+                    .expect("the original spatial publication remains valid"),
+            );
             assert_eq!(captured.input.installation(), installation_id);
             assert!(std::ptr::eq(
                 captured.input.captured::<HistoryPolicy>().unwrap(),
@@ -374,6 +445,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("retained presentation evidence is available");
     assert_eq!(frames.len(), PRESENTATIONS);
     for (phase, captured) in frames.iter().enumerate() {
+        let captured_time = assert_packet_time(captured.input.packet());
+        assert_eq!(captured.capture.captured_time, Some(captured_time));
         assert_eq!(captured.input.installation(), installation_id);
         assert_eq!(captured.capture.phase, phase as u32);
         assert!(std::ptr::eq(
