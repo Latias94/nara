@@ -94,6 +94,13 @@ pub mod __private {
         ValidateAndComplete,
     }
 
+    /// Runs the original hierarchy validator at the transform owner's fixed-input boundary.
+    pub fn complete_fixed_input_hierarchy(
+        world: &mut World,
+    ) -> Result<(), nara_ecs::bevy_ecs::error::BevyError> {
+        super::validate_dirty_hierarchy(world)
+    }
+
     /// Returns the completed topology generation for the current World.
     ///
     /// This is a provisional cross-domain completion fact for first-party projection modules. It

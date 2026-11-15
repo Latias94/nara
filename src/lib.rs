@@ -249,11 +249,12 @@ pub mod prelude {
         prepare_scene, prepare_scene_replacement, spawn_scene,
     };
     pub use nara_transform::{
-        FixedSpatialSnapshot2d, GlobalTransform2d, HistoricalSpatialSnapshot2d,
-        PresentedSpatialSnapshot2d, SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase,
-        SpatialSnapshotStamp, Transform2d, TransformPlugin, add_fixed_transform_projection_systems,
-        add_presented_transform_projection_systems, fixed_spatial_snapshot,
-        historical_spatial_snapshot, presented_spatial_snapshot,
+        FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, GlobalTransform2d,
+        HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshot2d,
+        SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
+        TransformPlugin, add_fixed_transform_input_systems, add_fixed_transform_projection_systems,
+        add_presented_transform_projection_systems, fixed_input_spatial_snapshot,
+        fixed_spatial_snapshot, historical_spatial_snapshot, presented_spatial_snapshot,
     };
 
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]

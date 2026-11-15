@@ -14,16 +14,245 @@ use nara_hierarchy::{
 };
 
 use crate::{
-    FixedSpatialSnapshot2d, FixedTransformInterpolation, HistoricalSpatialSnapshot2d,
-    PresentedSpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase, Transform2d,
-    TransformPlugin, add_fixed_transform_projection_systems,
-    add_presented_transform_projection_systems, fixed_spatial_snapshot,
-    historical_spatial_snapshot, presented_spatial_snapshot,
-    propagation::{TransformCompletionError, complete_at},
-    snapshot::SimulationSnapshot,
+    FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, FixedTransformInterpolation,
+    HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshotError,
+    SpatialSnapshotPhase, Transform2d, TransformPlugin, add_fixed_transform_input_systems,
+    add_fixed_transform_projection_systems, add_presented_transform_projection_systems,
+    fixed_input_spatial_snapshot, fixed_spatial_snapshot, historical_spatial_snapshot,
+    presented_spatial_snapshot,
+    propagation::{
+        TransformCompletionError, complete_at, fixed_input_propagation_stats, propagation_stats,
+        publish_fixed_input,
+    },
+    snapshot::{FixedInputSnapshot, SimulationSnapshot},
 };
 
 type WorldCheck = Box<dyn FnOnce(&mut World)>;
+
+mod fixed_input {
+    use super::*;
+    use nara_ecs::bevy_ecs::system::{ReadOnlySystemParam, SystemState};
+    use nara_hierarchy::HierarchyRoots;
+
+    fn assert_unreadable(world: &mut World, entity: Entity, error: SpatialSnapshotError) {
+        assert_eq!(fixed_input_spatial_snapshot(world).err(), Some(error));
+        let mut state = SystemState::<FixedInputSpatialSnapshot2d>::new(world);
+        let input = state.get(world).unwrap();
+        assert_eq!(input.stamp(), Err(error));
+        assert_eq!(input.local(entity), Err(error));
+        assert_eq!(input.parent(entity), Err(error));
+        assert_eq!(input.global(entity), Err(error));
+        assert_eq!(input.effective_parent(entity), Err(error));
+        assert_eq!(input.order(), Err(error));
+        assert_eq!(input.structural_index(entity), Err(error));
+    }
+
+    #[test]
+    fn readers_validate_world_runtime_role_tick_frame_and_both_clocks() {
+        fn assert_read_only<T: ReadOnlySystemParam>() {}
+        assert_read_only::<FixedInputSpatialSnapshot2d>();
+        let mut missing = World::new();
+        let entity = missing.spawn(Transform2d::IDENTITY).id();
+        assert_unreadable(&mut missing, entity, SpatialSnapshotError::Unavailable);
+
+        let mut app = spatial_app().unwrap();
+        let entity = app.world_mut().unwrap().spawn(Transform2d::IDENTITY).id();
+        add_fixed_transform_input_systems(&mut app, |_: FixedInputSpatialSnapshot2d| {}).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        check_world(&mut runtime, move |world| {
+            let original = fixed_input_spatial_snapshot(world)
+                .unwrap()
+                .stamp()
+                .unwrap();
+            let slot = world.remove_resource::<FixedInputSnapshot>().unwrap();
+            let mut foreign = World::new();
+            foreign.insert_resource(slot);
+            assert_unreadable(&mut foreign, entity, SpatialSnapshotError::WrongWorld);
+            world.insert_resource(foreign.remove_resource::<FixedInputSnapshot>().unwrap());
+
+            let generation = world.remove_resource::<RuntimeGeneration>().unwrap();
+            assert_unreadable(world, entity, SpatialSnapshotError::WrongRuntimeGeneration);
+            world.insert_resource(generation);
+
+            let simulation = world.resource::<SimulationSnapshot>().stamp.unwrap();
+            world.resource_mut::<FixedInputSnapshot>().stamp = Some(simulation);
+            assert_unreadable(
+                world,
+                entity,
+                SpatialSnapshotError::WrongPhase {
+                    expected: SpatialSnapshotPhase::FixedInput,
+                    actual: simulation.phase,
+                },
+            );
+            world.resource_mut::<FixedInputSnapshot>().stamp = Some(original);
+            world
+                .resource_mut::<FixedInputSnapshot>()
+                .stamp
+                .as_mut()
+                .unwrap()
+                .tick += 1;
+            assert_unreadable(world, entity, SpatialSnapshotError::WrongTime);
+            world.resource_mut::<FixedInputSnapshot>().stamp = Some(original);
+            world.resource_mut::<RealTime>().frame += 1;
+            assert_unreadable(world, entity, SpatialSnapshotError::WrongTime);
+            world.resource_mut::<RealTime>().frame -= 1;
+
+            let fixed = world.remove_resource::<FixedTime>().unwrap();
+            assert_unreadable(world, entity, SpatialSnapshotError::MissingClock);
+            world.insert_resource(fixed);
+            let real = world.remove_resource::<RealTime>().unwrap();
+            assert_unreadable(world, entity, SpatialSnapshotError::MissingClock);
+            world.insert_resource(real);
+            assert_eq!(
+                fixed_input_spatial_snapshot(world)
+                    .unwrap()
+                    .stamp()
+                    .unwrap(),
+                original
+            );
+        });
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn first_consumer_installs_one_cached_publisher_without_changing_simulation_work() {
+        let mut app = spatial_app().unwrap();
+        let entity = app.world_mut().unwrap().spawn(Transform2d::IDENTITY).id();
+        assert_eq!(fixed_input_propagation_stats(app.world()), None);
+        assert!(!app.world().contains_resource::<FixedInputSnapshot>());
+        add_fixed_transform_input_systems(&mut app, |_: FixedInputSpatialSnapshot2d| {}).unwrap();
+        add_fixed_transform_input_systems(&mut app, |_: FixedInputSpatialSnapshot2d| {}).unwrap();
+        assert_eq!(
+            fixed_input_propagation_stats(app.world()),
+            Some((0, 0, 0, 0, 0))
+        );
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        assert_eq!(
+            fixed_input_propagation_stats(runtime.world()),
+            Some((0, 0, 0, 0, 0))
+        );
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
+        assert_eq!(
+            fixed_input_propagation_stats(runtime.world()),
+            Some((2, 2, 1, 1, 0))
+        );
+        assert_eq!(propagation_stats(runtime.world()), (5, 5, 1, 1, 0));
+        check_world(&mut runtime, move |world| {
+            let simulation_stats = propagation_stats(world);
+            let tick = world.change_tick();
+            publish_fixed_input(world).unwrap();
+            assert_eq!(fixed_input_propagation_stats(world).unwrap().2, 1);
+            world.get_mut::<Transform2d>(entity).unwrap().translation = Vec2::X;
+            publish_fixed_input(world).unwrap();
+            assert_eq!(fixed_input_propagation_stats(world).unwrap().2, 2);
+            let old_slot = world.remove_resource::<FixedInputSnapshot>().unwrap();
+            let old_stamp = old_slot.stamp.unwrap();
+            world.insert_resource(FixedInputSnapshot::default());
+            world.get_mut::<Transform2d>(entity).unwrap().translation = Vec2::Y;
+            publish_fixed_input(world).unwrap();
+            let latest = fixed_input_spatial_snapshot(world)
+                .unwrap()
+                .stamp()
+                .unwrap();
+            world.insert_resource(old_slot);
+            publish_fixed_input(world).unwrap();
+            let restored = fixed_input_spatial_snapshot(world).unwrap();
+            assert_ne!(restored.stamp().unwrap().publication, old_stamp.publication);
+            assert_ne!(restored.stamp().unwrap().publication, latest.publication);
+            assert_eq!(restored.global(entity).unwrap().translation(), Vec2::Y);
+            assert_eq!(fixed_input_propagation_stats(world).unwrap().2, 4);
+            world
+                .resource_mut::<FixedInputSnapshot>()
+                .hierarchy_publication = None;
+            publish_fixed_input(world).unwrap();
+            assert_eq!(fixed_input_propagation_stats(world).unwrap().2, 5);
+            assert_eq!(propagation_stats(world), simulation_stats);
+            assert_eq!(world.change_tick(), tick);
+        });
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn failed_input_preparation_withholds_only_input_and_recovers_in_the_same_tick() {
+        let mut app = spatial_app().unwrap();
+        let world = app.world_mut().unwrap();
+        let root = world.spawn(Transform2d::IDENTITY).id();
+        let child = world.spawn(Transform2d::from_translation(Vec2::X)).id();
+        HierarchyWriter::new(world)
+            .apply_batch(&[
+                HierarchyOperation::Place {
+                    entity: root,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                },
+                HierarchyOperation::Place {
+                    entity: child,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                        parent: root,
+                    }),
+                },
+            ])
+            .unwrap();
+        add_fixed_transform_input_systems(&mut app, |_: FixedInputSpatialSnapshot2d| {}).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        check_world(&mut runtime, move |world| {
+            let input = fixed_input_spatial_snapshot(world)
+                .unwrap()
+                .stamp()
+                .unwrap();
+            let old_global = fixed_input_spatial_snapshot(world)
+                .unwrap()
+                .global(child)
+                .unwrap();
+            let historical = historical_spatial_snapshot(world).unwrap().stamp().unwrap();
+            let presented = presented_spatial_snapshot(world).unwrap().stamp().unwrap();
+            let simulation_stats = propagation_stats(world);
+            world.get_mut::<Transform2d>(root).unwrap().rotation = f32::NAN;
+            assert!(publish_fixed_input(world).is_err());
+            assert_unreadable(world, child, SpatialSnapshotError::Unavailable);
+            assert_eq!(
+                world.resource::<FixedInputSnapshot>().payload.globals[&child],
+                old_global
+            );
+            world.get_mut::<Transform2d>(root).unwrap().rotation = 0.0;
+            publish_fixed_input(world).unwrap();
+            world.get_mut::<Transform2d>(root).unwrap().scale = Vec2::splat(f32::MAX);
+            world.get_mut::<Transform2d>(child).unwrap().scale = Vec2::splat(2.0);
+            assert!(publish_fixed_input(world).is_err());
+            assert_unreadable(world, child, SpatialSnapshotError::Unavailable);
+            world.get_mut::<Transform2d>(root).unwrap().scale = Vec2::ONE;
+            publish_fixed_input(world).unwrap();
+
+            let roots = world.remove_resource::<HierarchyRoots>().unwrap();
+            assert!(publish_fixed_input(world).is_err());
+            assert_unreadable(world, child, SpatialSnapshotError::Unavailable);
+            world.insert_resource(roots);
+            publish_fixed_input(world).unwrap();
+            let fixed_clock = world.remove_resource::<FixedTime>().unwrap();
+            assert!(publish_fixed_input(world).is_err());
+            assert_unreadable(world, child, SpatialSnapshotError::Unavailable);
+            world.insert_resource(fixed_clock);
+            publish_fixed_input(world).unwrap();
+            let recovered = fixed_input_spatial_snapshot(world).unwrap();
+            let stamp = recovered.stamp().unwrap();
+            assert_eq!((stamp.tick, stamp.frame), (input.tick, input.frame));
+            assert_ne!(stamp.publication, input.publication);
+            assert_eq!(recovered.local(child).unwrap().scale, Vec2::splat(2.0));
+            assert_eq!(recovered.parent(child).unwrap(), Some(root));
+            assert_eq!(
+                historical_spatial_snapshot(world).unwrap().stamp().unwrap(),
+                historical
+            );
+            assert_eq!(
+                presented_spatial_snapshot(world).unwrap().stamp().unwrap(),
+                presented
+            );
+            assert_eq!(propagation_stats(world), simulation_stats);
+        });
+        runtime.finish().unwrap();
+    }
+}
 
 #[derive(Default, Resource)]
 struct TestPort;

@@ -23,6 +23,8 @@ pub(crate) fn next_publication() -> Option<u64> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpatialSnapshotPhase {
     Startup,
+    /// Captured after Prepare's deferred commands and hierarchy completion, before Simulate.
+    FixedInput,
     Fixed,
     PostUpdate,
     Extract,
@@ -88,6 +90,13 @@ pub(crate) struct SimulationSnapshot {
 }
 
 #[derive(Default, Resource)]
+pub(crate) struct FixedInputSnapshot {
+    pub stamp: Option<SpatialSnapshotStamp>,
+    pub payload: SpatialPayload,
+    pub hierarchy_publication: Option<nara_hierarchy::__private::HierarchyPublication>,
+}
+
+#[derive(Default, Resource)]
 pub(crate) struct PresentationSnapshot {
     pub stamp: Option<SpatialSnapshotStamp>,
     pub source_publication: u64,
@@ -104,6 +113,24 @@ pub struct SpatialSnapshot2d<'w> {
 }
 
 impl SpatialSnapshot2d<'_> {
+    /// Returns the captured local transform without consulting live components.
+    pub fn local(&self, entity: Entity) -> Result<Transform2d, SpatialSnapshotError> {
+        self.payload
+            .sources
+            .get(&entity)
+            .map(|source| source.local)
+            .ok_or(SpatialSnapshotError::MissingEntity { entity })
+    }
+
+    /// Returns the captured structural parent, including a non-spatial direct parent.
+    pub fn parent(&self, entity: Entity) -> Result<Option<Entity>, SpatialSnapshotError> {
+        self.payload
+            .sources
+            .get(&entity)
+            .map(|source| source.parent)
+            .ok_or(SpatialSnapshotError::MissingEntity { entity })
+    }
+
     pub fn global(&self, entity: Entity) -> Result<GlobalTransform2d, SpatialSnapshotError> {
         self.globals
             .get(&entity)
@@ -214,6 +241,20 @@ fn simulation_read(
     })
 }
 
+fn fixed_input_read(
+    context: ReadContext,
+    slot: Option<&FixedInputSnapshot>,
+) -> Result<SpatialSnapshot2d<'_>, SpatialSnapshotError> {
+    let slot = slot.ok_or(SpatialSnapshotError::Unavailable)?;
+    let stamp = slot.stamp.ok_or(SpatialSnapshotError::Unavailable)?;
+    context.validate_current(stamp, SpatialSnapshotPhase::FixedInput)?;
+    Ok(SpatialSnapshot2d {
+        stamp,
+        payload: &slot.payload,
+        globals: &slot.payload.globals,
+    })
+}
+
 fn presentation_read<'w>(
     context: ReadContext,
     simulation: Option<&'w SimulationSnapshot>,
@@ -259,6 +300,17 @@ pub fn fixed_spatial_snapshot(
     world: &World,
 ) -> Result<SpatialSnapshot2d<'_>, SpatialSnapshotError> {
     simulation_read(ReadContext::from_world(world), world.get_resource(), true)
+}
+
+/// Reads this tick's immutable input cut captured after Prepare and before Simulate.
+///
+/// Install consumers through [`crate::add_fixed_transform_input_systems`]. This role is separate
+/// from Historical, completed Fixed and Presented publications. Later local or hierarchy edits
+/// do not change its captured values. Missing, failed, foreign or stale inputs return an error.
+pub fn fixed_input_spatial_snapshot(
+    world: &World,
+) -> Result<SpatialSnapshot2d<'_>, SpatialSnapshotError> {
+    fixed_input_read(ReadContext::from_world(world), world.get_resource())
 }
 
 /// Reads the presentation completed for this frame.
@@ -341,6 +393,16 @@ macro_rules! simulation_param {
                 simulation_read(self.context.read(), self.slot.as_deref(), $fixed)
             }
 
+            /// Returns the local transform captured in this publication.
+            pub fn local(&self, entity: Entity) -> Result<Transform2d, SpatialSnapshotError> {
+                self.read()?.local(entity)
+            }
+
+            /// Returns the structural parent captured in this publication.
+            pub fn parent(&self, entity: Entity) -> Result<Option<Entity>, SpatialSnapshotError> {
+                self.read()?.parent(entity)
+            }
+
             pub fn global(
                 &self,
                 entity: Entity,
@@ -381,6 +443,55 @@ simulation_param!(
     "Read-only access to this tick's completed fixed publication."
 );
 
+/// Read-only access to this tick's input publication, captured after Prepare and before Simulate.
+///
+/// Register consumers with [`crate::add_fixed_transform_input_systems`]. Reads validate the exact
+/// World, runtime generation, fixed-input role, tick and frame without consulting live sources.
+#[derive(SystemParam)]
+pub struct FixedInputSpatialSnapshot2d<'w> {
+    context: SnapshotContext<'w>,
+    slot: Option<Res<'w, FixedInputSnapshot>>,
+}
+
+impl FixedInputSpatialSnapshot2d<'_> {
+    fn read(&self) -> Result<SpatialSnapshot2d<'_>, SpatialSnapshotError> {
+        fixed_input_read(self.context.read(), self.slot.as_deref())
+    }
+
+    /// Returns the local transform captured before Simulate.
+    pub fn local(&self, entity: Entity) -> Result<Transform2d, SpatialSnapshotError> {
+        self.read()?.local(entity)
+    }
+
+    /// Returns the structural parent captured before Simulate.
+    pub fn parent(&self, entity: Entity) -> Result<Option<Entity>, SpatialSnapshotError> {
+        self.read()?.parent(entity)
+    }
+
+    pub fn global(&self, entity: Entity) -> Result<GlobalTransform2d, SpatialSnapshotError> {
+        self.read()?.global(entity)
+    }
+
+    pub fn effective_parent(
+        &self,
+        entity: Entity,
+    ) -> Result<Option<GlobalTransform2d>, SpatialSnapshotError> {
+        self.read()?.effective_parent(entity)
+    }
+
+    pub fn order(&self) -> Result<&[Entity], SpatialSnapshotError> {
+        Ok(&self.read()?.payload.order)
+    }
+
+    pub fn structural_index(&self, entity: Entity) -> Result<usize, SpatialSnapshotError> {
+        self.read()?.structural_index(entity)
+    }
+
+    pub fn stamp(&self) -> Result<SpatialSnapshotStamp, SpatialSnapshotError> {
+        self.read()?.stamp()
+    }
+}
+
 /// Read-only access to this frame's completed presentation publication.
 #[derive(SystemParam)]
 pub struct PresentedSpatialSnapshot2d<'w> {
@@ -396,6 +507,16 @@ impl PresentedSpatialSnapshot2d<'_> {
             self.simulation.as_deref(),
             self.presentation.as_deref(),
         )
+    }
+
+    /// Returns the source local transform captured for this presentation.
+    pub fn local(&self, entity: Entity) -> Result<Transform2d, SpatialSnapshotError> {
+        self.read()?.local(entity)
+    }
+
+    /// Returns the structural parent captured for this presentation.
+    pub fn parent(&self, entity: Entity) -> Result<Option<Entity>, SpatialSnapshotError> {
+        self.read()?.parent(entity)
     }
 
     pub fn global(&self, entity: Entity) -> Result<GlobalTransform2d, SpatialSnapshotError> {

@@ -14,10 +14,11 @@ use nara::{
     },
     reflect::ComponentRegistryPlugin,
     transform::{
-        FixedSpatialSnapshot2d, FixedTransformInterpolation, HistoricalSpatialSnapshot2d,
+        FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, FixedTransformInterpolation,
         PresentedSpatialSnapshot2d, SpatialSnapshotStamp, Transform2d, TransformPlugin,
-        add_fixed_transform_projection_systems, add_presented_transform_projection_systems,
-        fixed_spatial_snapshot, historical_spatial_snapshot,
+        add_fixed_transform_input_systems, add_fixed_transform_projection_systems,
+        add_presented_transform_projection_systems, fixed_spatial_snapshot,
+        historical_spatial_snapshot,
     },
 };
 use nara_app::{
@@ -165,13 +166,7 @@ impl MotionRuntime {
             apply_correction.in_set(FixedUpdateSet::Prepare),
         )
         .unwrap();
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            sync_input
-                .before(MotionIntent)
-                .in_set(FixedUpdateSet::Simulate),
-        )
-        .unwrap();
+        add_fixed_transform_input_systems(&mut app, sync_input.before(MotionIntent)).unwrap();
         add_fixed_transform_projection_systems(&mut app, observe_fixed).unwrap();
         add_presented_transform_projection_systems(&mut app, observe_presented).unwrap();
         app.add_systems(ApplyTimeScale, apply_time_scale).unwrap();
@@ -307,10 +302,15 @@ fn apply_correction(world: &mut World) {
 fn sync_input(
     fixed: Res<FixedTime>,
     actors: Res<Actors>,
-    spatial: HistoricalSpatialSnapshot2d,
+    spatial: FixedInputSpatialSnapshot2d,
     mut input: ResMut<MotionInput>,
 ) {
     input.tick = fixed.tick();
+    assert_eq!(spatial.stamp().unwrap().tick, fixed.tick());
+    assert_eq!(
+        spatial.stamp().unwrap().phase,
+        nara::transform::SpatialSnapshotPhase::FixedInput
+    );
     input.parent_translation = spatial.global(actors.parent).unwrap().translation();
 }
 

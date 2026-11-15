@@ -6,6 +6,7 @@
 **Amended**: 2026-10-23 by U4 private phase spatial snapshots
 **Amended**: 2026-10-25 by complete guarded resource-effect admission
 **Amended**: 2026-11-12 by indexed sequential batches and final ordered projection
+**Amended**: 2026-11-15 by opt-in fixed-input spatial completion
 **Owner**: Runtime hierarchy, 2D transform projection, and consuming product hosts
 **Related**: ADR 0005, ADR 0006, and ADR 0018
 **Refines**: The current 2D completion slice of
@@ -86,6 +87,18 @@ flowchart LR
   deferred commands, completed hierarchy and Transform propagation, and before Finalize. Finalize
   Capture reads that same tick cut directly; it does not join the before-Finalize helper. PostUpdate
   and Extract publish explicitly named later cuts. Extract completes presentation before consumers.
+- A domain needing Prepare's current transforms before Simulate registers through
+  `add_fixed_transform_input_systems`. Its opt-in `FixedInputSpatialSnapshot2d` and shared-World
+  reader expose the captured local/global/direct-parent/order surface, validated for the current
+  World, Runtime, tick, frame and `FixedInput` phase. The original Hierarchy validates after
+  Prepare's deferred commands, then Transform publishes this separate input role before Simulate.
+  Registration does not replace the historical simulation cut, the completed fixed result or
+  presentation, and repeated registration does not duplicate publication. Worlds without input
+  consumers acquire no extra preparation pass. Source changes after input publication belong
+  to a later cut. Failure makes the input role unavailable instead of relabeling previous bytes.
+  A captured input grants read semantics, not permission to overwrite a subsequently changed
+  live target. Native domains revalidate the required live writeback facts before irreversible
+  solve/effects; a captured root cannot authorize root-pose writeback after live reparenting.
 - A source edit, spawn or retirement made after consuming a cut does not rewrite it. The next
   publication observes full Entity identity, finite local values, membership and direct-parent
   relation, including edits sharing one ECS change tick. Retained contiguous observation rows

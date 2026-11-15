@@ -97,6 +97,32 @@ Product preparation reports an unavailable framework profile as
 invocation's plugin/hook and lifecycle diagnostic context. A policy refusal does not attribute
 the framework's admission check to an unrelated plugin.
 
+## Fixed Spatial Input
+
+For a domain that needs same-tick spatial input before simulation, register readers through
+`nara::transform::add_fixed_transform_input_systems`. The opt-in
+`FixedInputSpatialSnapshot2d` SystemParam and `fixed_input_spatial_snapshot(&World)` expose
+the original Transform owner's completed Prepare input. They include captured local values,
+structural parent identity, effective parent frame, global affine values and the original stamp.
+Declare the domain's additional ordering against its own target/solve sets. Do not walk parents
+or substitute a live local/identity when input is unavailable.
+Opt-in worlds retain a separate input payload/cache and perform the original validated source
+scan at this extra boundary. Unchanged matrix payloads can be reused, but registration is not
+a zero-cost promise; numeric frame/memory budgets need separate measurement.
+
+This role has its own World/Runtime/tick/frame validation. It does not replace
+`HistoricalSpatialSnapshot2d`, the after-simulation `FixedSpatialSnapshot2d`, or presentation.
+An input is a frozen cut; mutations after it belong to later completion. A native solver must
+validate its supported pose/shape domain and publish its own writeback before the ordinary
+fixed-result barrier. It must also revalidate its live mutation targets; an earlier captured
+root cannot authorize writing a root pose after live reparenting. Presented `local()` describes
+the captured source local, while presented `global()` may contain the owner's interpolated
+affine result; do not infer an interpolated local pose by treating them as the same value.
+A visual affine is not automatic permission for dynamic-body scale or
+parented writeback. The
+[transformed collision workflow](../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
+records the concrete consumer and qualification limits.
+
 ## Control And Shutdown
 
 Use `request_control` and `drive` for pause, resume, exact fixed-tick stepping, Stop, and retryable

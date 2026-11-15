@@ -12,7 +12,8 @@ use crate::{
     __private::TransformSet,
     GlobalTransform2d, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
     snapshot::{
-        PresentationSnapshot, SimulationSnapshot, SpatialPayload, SpatialSource, next_publication,
+        FixedInputSnapshot, PresentationSnapshot, SimulationSnapshot, SpatialPayload,
+        SpatialSource, next_publication,
     },
 };
 
@@ -31,6 +32,8 @@ pub(crate) enum TransformCompletionError {
     IncompleteTraversal { expected: usize, visited: usize },
     #[error("the spatial publication sequence is exhausted")]
     PublicationExhausted,
+    #[error("the spatial publication clocks are unavailable")]
+    MissingClock,
 }
 
 #[derive(Resource)]
@@ -54,6 +57,60 @@ impl FromWorld for TransformPropagation {
             stats: (0, 0, 0, 0, 0),
         }
     }
+}
+
+#[derive(Resource)]
+struct FixedInputPropagation(TransformPropagation);
+
+impl FromWorld for FixedInputPropagation {
+    fn from_world(world: &mut World) -> Self {
+        Self(TransformPropagation::from_world(world))
+    }
+}
+
+pub(crate) fn install_fixed_input(app: &mut App) -> Result<(), PluginError> {
+    if app.world().contains_resource::<FixedInputPropagation>() {
+        return Ok(());
+    }
+    app.init_resource::<FixedInputSnapshot>()?;
+    app.init_resource::<FixedInputPropagation>()?;
+    app.configure_sets(
+        CoreStage::FixedUpdate,
+        TransformSet::PrepareInput
+            .after(FixedUpdateSet::Prepare)
+            .before(FixedUpdateSet::Simulate),
+    )?;
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        (ApplyDeferred, publish_fixed_input)
+            .chain()
+            .in_set(TransformSet::PrepareInput),
+    )?;
+    Ok(())
+}
+
+pub(crate) fn publish_fixed_input(world: &mut World) -> Result<(), BevyError> {
+    let previous = world.resource_mut::<FixedInputSnapshot>().stamp.take();
+    nara_hierarchy::__private::complete_fixed_input_hierarchy(world)?;
+    world.resource_mut::<FixedInputSnapshot>().stamp = previous;
+    world
+        .resource_scope(|world, mut propagation: Mut<FixedInputPropagation>| {
+            world.resource_scope(|world, mut slot: Mut<FixedInputSnapshot>| {
+                let FixedInputSnapshot {
+                    stamp,
+                    payload,
+                    hierarchy_publication,
+                } = &mut *slot;
+                propagation.0.complete(
+                    world,
+                    SpatialSnapshotPhase::FixedInput,
+                    stamp,
+                    payload,
+                    hierarchy_publication,
+                )
+            })
+        })
+        .map_err(BevyError::error)
 }
 
 pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
@@ -124,90 +181,108 @@ pub(crate) fn complete_at(
 ) -> Result<(), TransformCompletionError> {
     // Invalidate the publication before every attempt, even when hierarchy validation failed.
     world.resource_mut::<PresentationSnapshot>().stamp = None;
-    let previous = world.resource_mut::<SimulationSnapshot>().stamp.take();
-    let hierarchy_generation = nara_hierarchy::__private::completed_topology_generation(world)
-        .ok_or(TransformCompletionError::HierarchyIncomplete)?;
-    let hierarchy_publication = nara_hierarchy::__private::completed_topology_publication(world)
-        .ok_or(TransformCompletionError::HierarchyIncomplete)?;
-    let world_id = world.id();
-    let generation = world.get_resource::<RuntimeGeneration>().copied();
-    let tick = world.resource::<FixedTime>().tick();
-    let frame = world.resource::<RealTime>().frame;
     world.resource_scope(|world, mut propagation: Mut<TransformPropagation>| {
         world.resource_scope(|world, mut slot: Mut<SimulationSnapshot>| {
-            let mut count = 0usize;
-            let mut changed = previous.is_none_or(|stamp| {
-                stamp.world != world_id
-                    || stamp.runtime_generation != generation
-                    || stamp.hierarchy_generation != hierarchy_generation
-            });
-            changed |= slot.hierarchy_publication != Some(hierarchy_publication);
-            changed |= propagation.observed_publication != previous;
-            let TransformPropagation {
-                locals, observed, ..
-            } = &mut *propagation;
-            for (entity, local, parent) in locals.iter(world) {
-                count += 1;
-                // Finite-value validation precedes the equality shortcut. Source equality does
-                // not depend on Bevy change ticks, which direct callers may share.
-                if !local.translation.is_finite()
-                    || !local.rotation.is_finite()
-                    || !local.scale.is_finite()
-                {
-                    return Err(TransformCompletionError::NonFiniteLocal { entity });
-                }
-                let source = SpatialSource {
-                    local: *local,
-                    parent: parent.map(Parent::parent),
-                };
-                let row = (entity, source);
-                if let Some(previous) = observed.get_mut(count - 1) {
-                    changed |= *previous != row;
-                    *previous = row;
-                } else {
-                    observed.push(row);
-                    changed = true;
-                }
-            }
-            changed |= count != observed.len();
-            observed.truncate(count);
-            changed |= count != slot.payload.sources.len();
-            #[cfg(test)]
-            {
-                propagation.stats.0 += 1;
-                propagation.stats.1 += count as u64;
-            }
-            let publication =
-                next_publication().ok_or(TransformCompletionError::PublicationExhausted)?;
-            if changed {
-                let edges = propagation.build(world)?;
-                std::mem::swap(&mut slot.payload, &mut propagation.candidate);
-                #[cfg(test)]
-                {
-                    propagation.stats.2 += 1;
-                    propagation.stats.3 += count as u64;
-                    propagation.stats.4 += edges as u64;
-                }
-                #[cfg(not(test))]
-                let _ = edges;
-            }
-            slot.hierarchy_publication = Some(hierarchy_publication);
-            slot.stamp = Some(SpatialSnapshotStamp {
-                world: world_id,
-                runtime_generation: generation,
-                phase,
-                tick,
-                frame,
-                publication,
-                hierarchy_generation,
-            });
-            propagation.observed_publication = slot.stamp;
-            Ok(())
+            let SimulationSnapshot {
+                stamp,
+                payload,
+                hierarchy_publication,
+            } = &mut *slot;
+            propagation.complete(world, phase, stamp, payload, hierarchy_publication)
         })
     })
 }
 
 impl TransformPropagation {
+    fn complete(
+        &mut self,
+        world: &World,
+        phase: SpatialSnapshotPhase,
+        stamp: &mut Option<SpatialSnapshotStamp>,
+        payload: &mut SpatialPayload,
+        previous_hierarchy: &mut Option<nara_hierarchy::__private::HierarchyPublication>,
+    ) -> Result<(), TransformCompletionError> {
+        let previous = stamp.take();
+        let hierarchy_generation = nara_hierarchy::__private::completed_topology_generation(world)
+            .ok_or(TransformCompletionError::HierarchyIncomplete)?;
+        let hierarchy_publication =
+            nara_hierarchy::__private::completed_topology_publication(world)
+                .ok_or(TransformCompletionError::HierarchyIncomplete)?;
+        let world_id = world.id();
+        let generation = world.get_resource::<RuntimeGeneration>().copied();
+        let tick = world
+            .get_resource::<FixedTime>()
+            .ok_or(TransformCompletionError::MissingClock)?
+            .tick();
+        let frame = world
+            .get_resource::<RealTime>()
+            .ok_or(TransformCompletionError::MissingClock)?
+            .frame;
+        let mut count = 0usize;
+        let mut changed = previous.is_none_or(|stamp| {
+            stamp.world != world_id
+                || stamp.runtime_generation != generation
+                || stamp.hierarchy_generation != hierarchy_generation
+        });
+        changed |= *previous_hierarchy != Some(hierarchy_publication);
+        changed |= self.observed_publication != previous;
+        for (entity, local, parent) in self.locals.iter(world) {
+            count += 1;
+            if !local.translation.is_finite()
+                || !local.rotation.is_finite()
+                || !local.scale.is_finite()
+            {
+                return Err(TransformCompletionError::NonFiniteLocal { entity });
+            }
+            let source = SpatialSource {
+                local: *local,
+                parent: parent.map(Parent::parent),
+            };
+            let row = (entity, source);
+            if let Some(previous) = self.observed.get_mut(count - 1) {
+                changed |= *previous != row;
+                *previous = row;
+            } else {
+                self.observed.push(row);
+                changed = true;
+            }
+        }
+        changed |= count != self.observed.len();
+        self.observed.truncate(count);
+        changed |= count != payload.sources.len();
+        #[cfg(test)]
+        {
+            self.stats.0 += 1;
+            self.stats.1 += count as u64;
+        }
+        let publication =
+            next_publication().ok_or(TransformCompletionError::PublicationExhausted)?;
+        if changed {
+            let edges = self.build(world)?;
+            std::mem::swap(payload, &mut self.candidate);
+            #[cfg(test)]
+            {
+                self.stats.2 += 1;
+                self.stats.3 += count as u64;
+                self.stats.4 += edges as u64;
+            }
+            #[cfg(not(test))]
+            let _ = edges;
+        }
+        *previous_hierarchy = Some(hierarchy_publication);
+        *stamp = Some(SpatialSnapshotStamp {
+            world: world_id,
+            runtime_generation: generation,
+            phase,
+            tick,
+            frame,
+            publication,
+            hierarchy_generation,
+        });
+        self.observed_publication = *stamp;
+        Ok(())
+    }
+
     fn build(&mut self, world: &World) -> Result<usize, TransformCompletionError> {
         let count = self.observed.len();
         self.candidate.sources.clear();
@@ -302,4 +377,11 @@ impl TransformPropagation {
 #[cfg(test)]
 pub(crate) fn propagation_stats(world: &World) -> (u64, u64, u64, u64, u64) {
     world.resource::<TransformPropagation>().stats
+}
+
+#[cfg(test)]
+pub(crate) fn fixed_input_propagation_stats(world: &World) -> Option<(u64, u64, u64, u64, u64)> {
+    world
+        .get_resource::<FixedInputPropagation>()
+        .map(|input| input.0.stats)
 }

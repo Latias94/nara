@@ -8,9 +8,10 @@ mod snapshot_tests;
 
 pub use presentation::FixedTransformInterpolation;
 pub use snapshot::{
-    FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d,
-    SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp,
-    fixed_spatial_snapshot, historical_spatial_snapshot, presented_spatial_snapshot,
+    FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d,
+    PresentedSpatialSnapshot2d, SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase,
+    SpatialSnapshotStamp, fixed_input_spatial_snapshot, fixed_spatial_snapshot,
+    historical_spatial_snapshot, presented_spatial_snapshot,
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
@@ -82,6 +83,31 @@ impl GlobalTransform2d {
     }
 }
 
+/// Registers systems that consume this tick's completed spatial input before Simulate.
+///
+/// Include [`TransformPlugin`] and its required plugins in the App composition.
+/// The first registration installs one input publisher after Prepare's deferred commands and
+/// the original hierarchy validator, before Simulate. Subsequent registrations share that
+/// publisher. Applications without input consumers retain their existing schedule work.
+///
+/// [`FixedInputSpatialSnapshot2d`] and [`fixed_input_spatial_snapshot`] expose immutable captured
+/// inputs independently of Historical, completed Fixed and Presented publications. Simulation
+/// writeback is observed by the later completed Fixed publication. Consumers run after input
+/// completion and before [`nara_app::FixedUpdateSet::Simulate`], including its deferred boundary.
+/// Consumers declare any ordering they need among peers.
+pub fn add_fixed_transform_input_systems<M>(
+    app: &mut App,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+) -> Result<&mut App, PluginError> {
+    propagation::install_fixed_input(app)?;
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        systems
+            .after(__private::TransformSet::PrepareInput)
+            .before(nara_app::FixedUpdateSet::Simulate),
+    )
+}
+
 /// Registers fixed-tick systems that consume completed runtime 2D global transforms.
 ///
 /// The transform module owns the concrete propagation set and its placement between simulation
@@ -120,9 +146,10 @@ pub mod __private {
         crate::presentation::install(app)
     }
 
-    /// Provisional first-party boundary after the runtime 2D projection is complete.
+    /// Provisional first-party boundaries owned by the runtime 2D projection.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
     pub enum TransformSet {
+        PrepareInput,
         Propagate,
         Present,
     }
@@ -329,12 +356,13 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
 
 pub mod prelude {
     pub use crate::{
-        FixedSpatialSnapshot2d, FixedTransformInterpolation, GlobalTransform2d,
-        HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshot2d,
-        SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
-        TransformPlugin, add_fixed_transform_projection_systems,
-        add_presented_transform_projection_systems, fixed_spatial_snapshot,
-        historical_spatial_snapshot, presented_spatial_snapshot,
+        FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, FixedTransformInterpolation,
+        GlobalTransform2d, HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d,
+        SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp,
+        Transform2d, TransformPlugin, add_fixed_transform_input_systems,
+        add_fixed_transform_projection_systems, add_presented_transform_projection_systems,
+        fixed_input_spatial_snapshot, fixed_spatial_snapshot, historical_spatial_snapshot,
+        presented_spatial_snapshot,
     };
 }
 
