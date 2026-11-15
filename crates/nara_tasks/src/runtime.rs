@@ -1686,6 +1686,54 @@ impl TaskPools {
         stats
     }
 
+    /// Observes physical return of admitted executor-owned work without driving shutdown.
+    ///
+    /// Root facades include all work on their original physical facilities, including cancelled
+    /// queued captures and in-progress disposal, observed together under the original queue locks.
+    /// Activity facades include only their own admitted work; sibling work and sibling task cleanup
+    /// failures are excluded. Shared worker cleanup failure remains included through
+    /// [`Self::has_cleanup_failure`]. Pending work takes precedence over cleanup failure until all
+    /// observed work returns.
+    ///
+    /// This is a snapshot: it neither closes nor authorizes admission, and new work may arrive
+    /// afterward. It does not join workers or prove native resource disposal. Published or
+    /// transferred outputs, escaped clones and independently owned work retain their own owners.
+    #[must_use]
+    pub fn return_state(&self) -> TaskReturnState {
+        if let Some(scope) = &self.scope {
+            return if scope.pending.load(Ordering::Acquire) != 0 {
+                TaskReturnState::Pending
+            } else if self.has_cleanup_failure() {
+                TaskReturnState::CleanupFailed
+            } else {
+                TaskReturnState::Returned
+            };
+        }
+        let state = {
+            let io = lock_unpoisoned(&self.io.shared.queue);
+            let compute = lock_unpoisoned(&self.compute.shared.queue);
+            let async_compute = lock_unpoisoned(&self.async_compute.shared.queue);
+            let pending = [&*io, &*compute, &*async_compute].into_iter().any(|queue| {
+                !queue.pending.is_empty() || !queue.running.is_empty() || queue.disposing != 0
+            });
+            if pending {
+                TaskReturnState::Pending
+            } else if self.has_cleanup_failure() {
+                TaskReturnState::CleanupFailed
+            } else {
+                TaskReturnState::Returned
+            }
+        };
+        #[cfg(test)]
+        {
+            let hook = lock_unpoisoned(&self.io.shared.after_io_return_observation_hook).take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        state
+    }
+
     /// Observes sticky executor-owned cleanup failure without locking or driving shutdown.
     ///
     /// Standalone and managed root facades include all work on their physical facilities.
@@ -1928,6 +1976,14 @@ impl TaskPools {
         self.executor(kind)
             .shared
             .set_before_coalesce_cancel_hook(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_after_io_return_observation_hook_for_tests(
+        &self,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        *lock_unpoisoned(&self.io.shared.after_io_return_observation_hook) = Some(Box::new(hook));
     }
 
     #[cfg(test)]
@@ -2242,6 +2298,8 @@ struct ExecutorShared {
     #[cfg(test)]
     after_running_snapshot_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
+    after_io_return_observation_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
     after_task_return_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
@@ -2260,6 +2318,8 @@ impl ExecutorShared {
             before_coalesce_cancel_hook: Mutex::new(None),
             #[cfg(test)]
             after_running_snapshot_hook: Mutex::new(None),
+            #[cfg(test)]
+            after_io_return_observation_hook: Mutex::new(None),
             #[cfg(test)]
             after_task_return_hook: Mutex::new(None),
         }

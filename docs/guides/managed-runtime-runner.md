@@ -190,6 +190,19 @@ An ordinary rejection changes no time. `RuntimeTimeContinuationError::Faulted` r
 initialization already applied and any refused output separately from its original sticky fault.
 The game still owns full state eligibility, service classification and its logical clock.
 
+For a domain that must wait for admitted background work, use `TaskPools::return_state()`.
+`Pending` includes cancelled queued captures and executor-owned disposal after the terminal
+has been consumed or the handle dropped. Once those original returns complete, `CleanupFailed`
+still distinguishes caught cleanup failure from `Returned`. Diagnostic zero queued/running
+counts cannot supply this evidence. A root facade observes its whole physical facility;
+an activity facade observes its own admitted work and excludes sibling task failure.
+
+This snapshot drives no work or close and freezes no future admission. It does not join
+workers, retire published outputs or classify a game checkpoint. Preserve existing domain
+eligibility checks and native/service owners. The reference game's capture refuses pending
+returns and cleanup failure; its finite child waits within the original operation deadline,
+and original Close still records failure separately from physical completion.
+
 For a finite headless or one-shot loop, `finish` consumes the runtime and performs one finite close
 attempt. Success returns `RuntimeCloseEvidence`. An incomplete attempt or terminal shutdown failure
 returns `RuntimeRetirement`; retain it and poll `drive_retirement`, inspecting both its state and

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-11-16
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -93,6 +93,15 @@ flowchart TD
   Rejected spawn disposes captures synchronously before returning and carries its final return
   state even when task-ID exhaustion prevented a handle. Queue/coalescing disposal may still block
   the submitter; this observation does not add a nonblocking disposal executor.
+- `TaskPools::return_state` observes that facade's original admitted physical work without
+  driving or closing it. Root facades include cancelled queued captures, running work and
+  in-progress admitted disposal across their original facilities through a coherent queue cut.
+  Activity facades reuse their original pending-return accounting, excluding sibling work and
+  sibling task cleanup failure while preserving shared worker failure. Pending takes precedence;
+  after all observed work returns, sticky cleanup failure remains distinct from Returned.
+  Diagnostic zero queued/running counts are not equivalent evidence. This snapshot does not
+  freeze future admission, join workers, classify authoritative game state, or acquire cleanup
+  of published/escaped outputs or domain-native resources.
 - Physical running count and age remain present while a worker disposes its pending task and
   control references, including an untaken completed output when its handle has already gone.
   The queue keeps only observation metadata during that disposal; destructors run outside its mutex.

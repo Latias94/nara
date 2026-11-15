@@ -151,6 +151,12 @@ Core rules:
 - Each domain polls typed handles and applies terminals at its declared main-thread stage. Domains
   that require completion-order independence use an ordered-prefix stream; domains that accept
   asynchronous availability may sort a ready snapshot. No type-erased global result bus exists.
+- A domain needing admitted-work return uses `TaskPools::return_state` rather than interpreting
+  diagnostic queued/running counters as physical custody. It observes the original root facility
+  or activity scope, preserves sticky cleanup failure and drives no close/admission operation.
+  The game still owns checkpoint eligibility and unsupported state/effect classification;
+  [ADR0052](0052-task-backpressure-cancellation-and-long-running-diagnostics.md) distinguishes
+  this snapshot from worker joins, future admission and transferred-output lifetime.
 - `nara_app::CoreStage::TaskUpdate` is the first scheduled integration point for background work.
   The app crate owns only that stage. Business domains define and configure their own integration
   sets, while `nara_tasks` provides execution mechanics without installing domain schedule phases.

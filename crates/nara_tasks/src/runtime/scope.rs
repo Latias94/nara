@@ -169,7 +169,7 @@ impl TaskScopeCloseReport {
 #[derive(Debug, Default)]
 pub(super) struct TaskScopeShared {
     admission: Mutex<TaskScopeAdmission>,
-    pending: AtomicUsize,
+    pub(super) pending: AtomicUsize,
     cleanup_failed: AtomicBool,
 }
 
