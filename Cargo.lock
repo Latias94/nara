@@ -2244,6 +2244,7 @@ dependencies = [
  "nara-stock-grade-effect",
  "nara_render_wgpu",
  "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

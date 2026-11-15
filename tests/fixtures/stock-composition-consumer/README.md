@@ -183,6 +183,46 @@ records failed fixtures, review corrections and remaining engine/platform/cost s
 
 ## Serial verification commands
 
+### Presented drawing and world picking
+
+`examples/picking_window.rs` runs the ordinary `DesktopRun` with a fixed WorldCanvas,
+an offset camera Viewport, a parented nonuniform camera, all mirror-axis combinations and
+an asymmetric Sprite scene. It switches between identity, tint, a declared horizontal
+inverse and the same horizontal effect without an input mapping. The latter must draw
+successfully while public `WorldPointer` refuses conversion. A pre-Host observation keeps
+the preceding displayed mapping until the next genuine presentation.
+
+The optional mixed-DPI trajectory moves only its original process/thread/title-validated
+HWND between two actually active displays with different scale factors. It compares native
+geometry and the captured Window resolution, then queries picking through the original
+World. Retained inputs are replayed after the original Runtime/window retire and compared
+with independent full-pixel camera/effect oracles. Old typed outputs must retain their exact
+bytes after later replays. An injected observer panic separately checks original World,
+HWND and event-pump retirement before rethrow. These checks do not measure physical scanout,
+human mouse delivery or production performance.
+
+Prebuild the example before invoking the ignored tests; the test wrapper never runs Cargo.
+`NARA_STOCK_PICKING_WINDOW_EXE` can select another absolute prebuilt executable. Select
+`NARA_WGPU_FORCE_FALLBACK=0` for hardware or `1` for an explicit software control. Mixed-DPI
+acceptance requires hardware and two distinct actual scale factors; an unavailable display
+is a failed prerequisite. Run the single-display path separately on CI or one display.
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 build --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --example picking_window
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test picking_math --test picking_window --test-threads=1 --no-tests fail
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test picking_window --run-ignored only --test-threads=1 --no-tests fail --success-output immediate
+```
+
+The final command includes physical mixed-DPI acceptance and the injected-failure control.
+To select only the ordinary single-display trajectory, add
+`-E 'test(ordinary_runtime_picking_matches_pixels_on_one_native_display)'`.
+
+### Owning and source consumers
+
 Run from the repository root after the parent has aligned this workspace's lock. Reuse the normal
 repository target directory and never overlap Cargo invocations in this checkout.
 
