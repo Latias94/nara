@@ -5,7 +5,8 @@ correctness review and three independent candidate measurement processes. The ba
 `10cd1094900fb56639e2b3afe5cde197d4882ca6`; the measured candidate is
 `94fc2190272a752721f7b5c3764165154c7795c0`. The
 [owning plan](../plans/2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
-keeps the remaining R9c geometry decisions separate.
+keeps the remaining R9c geometry decisions separate. The subsequent visible-queue candidate
+at `6c88c87` is rejected under its independent 10% gate; the original queue is retained.
 
 ## Workload And Source
 
@@ -136,6 +137,93 @@ The [historical Tile/HUD report](2026-10-20-tile-visibility.md) retains its orig
 revision-specific reproduction. Its retired private-executor collector excludes different work
 and includes changing HUD, so it cannot establish a direct speedup against this geometry-only
 substrate. Deliberately retained private numerical oracles remain separate from current costs.
+
+## Visible Queue Material Capture Follow-Up
+
+This separate comparison starts at `814899e3e9e2d075aa27b49cf0db91d91621876e`, after the
+selected value-sharing correction and subsequent runtime work. Its three fresh baseline
+processes precede any queue implementation edits. The earlier deep-copy measurements above
+are historical evidence, not this follow-up's baseline.
+
+The private candidate borrows each extracted Material binding during resolution and clones it
+only for visible queue entries. It still resolves and captures every declared texture before
+visibility, including when there are no Views. This removes one temporary binding clone per
+material-bearing extracted item; it does not remove texture resolution, extraction, per-View
+projection, sorting or native work. Public capture types, value equality, batching and resource
+ownership stay unchanged.
+
+The preselected gate requires every one of the six 65,536-cell bound groups in each of three
+candidate processes to reduce managed-drive/capture P50 by at least 10% against the fastest
+matching fresh baseline. All thirteen count fields must match corresponding samples. A
+64-cell P50 regression greater than 0.1 ms requires investigation. An unsuccessful comparison
+removes only this candidate and keeps the new independent semantic controls. The
+[owning plan](../plans/2026-11-14-durable-material-and-shader-plan.md#visible-queue-material-capture-comparison)
+records the scope and stop condition before candidate measurement.
+
+All six new processes use the same independently locked release workload, Rust 1.95.0,
+Vulkan RTX 4090 and driver 621.14. Each passes all 36 groups, 2,304 recorded rows, complete
+independent pixels, original-input first realization after World retirement, retained outputs
+and final zero Host resources/candidate metadata/cleanup faults. The
+[queue summary](data/2026-11-15-public-geometry/queue-capture-summary.json) and six
+`queue-*.jsonl.gz` artifacts preserve all 13,824 rows, exact source/environment identities,
+raw/compressed digests and every group's seven separate interval distributions.
+
+| Variant / run | Nextest ID | Test seconds |
+| --- | --- | ---: |
+| Current baseline 1 | `89fea249-0e0e-4c2a-9d92-84cc4c09d439` | 16.467 |
+| Current baseline 2 | `7800e15a-3a71-4fd7-a5e1-6aa0085881c4` | 17.174 |
+| Current baseline 3 | `b9d5404b-411d-450a-8923-316ca81bfee0` | 16.346 |
+| Borrowed queue 1 | `00cf89ee-9019-4574-b521-1354c03ceac2` | 15.532 |
+| Borrowed queue 2 | `2f5cfaa9-a1bd-4f28-ac94-7ba21369453b` | 15.615 |
+| Borrowed queue 3 | `f5c44516-2df2-4e41-91ed-d01fa398f611` | 15.578 |
+
+For 65,536 bound cells, managed-drive/capture P50 / P95 milliseconds are:
+
+| Views / scenario | Baseline 1 | Baseline 2 | Baseline 3 | Borrowed 1 | Borrowed 2 | Borrowed 3 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 / static | 10.115 / 21.268 | 11.056 / 17.425 | 9.727 / 11.077 | 8.688 / 12.323 | 8.270 / 10.025 | 8.306 / 9.020 |
+| 1 / one-cell | 9.569 / 11.253 | 10.495 / 13.337 | 9.500 / 14.121 | 8.558 / 11.871 | 8.444 / 15.679 | 8.124 / 14.340 |
+| 1 / moving-camera | 9.883 / 11.834 | 10.669 / 13.819 | 11.130 / 22.550 | 8.207 / 9.736 | 8.512 / 9.408 | 8.537 / 11.072 |
+| 2 / static | 10.707 / 15.509 | 11.450 / 12.944 | 10.458 / 16.404 | 9.363 / 12.346 | 9.454 / 12.189 | 9.081 / 14.165 |
+| 2 / one-cell | 10.669 / 16.332 | 11.933 / 17.754 | 11.080 / 15.316 | 9.239 / 10.310 | 9.744 / 12.359 | 9.524 / 12.705 |
+| 2 / moving-camera | 9.829 / 15.164 | 11.802 / 17.653 | 10.870 / 12.247 | 9.050 / 11.822 | 9.508 / 11.071 | 8.825 / 15.520 |
+
+Only 13 of 18 large bound comparisons pass the 10% gate. The five failures improve P50 by
+9.919%, 7.922%, 3.262%, 8.665% and 9.601%, respectively. Across all eighteen comparisons,
+the measured reduction is 3.262--16.959%. The largest small-scene P50 increase is 0.0102 ms,
+and all thirteen sampled count fields match corresponding samples across all six processes.
+Neither correctness nor small-scene regression causes rejection: the candidate does not satisfy
+the required repeatability across View counts and scenarios. No extra run or variant is added
+to change the outcome. The original queue is restored; the multi-View, offscreen and exact
+resource-generation tests added with the candidate are retained.
+
+These measurements cover the complete managed drive and capture, rather than queue cost alone.
+The bound workload has four white parameters and no extension textures or Shader edits;
+separate semantic tests cover multiple texture captures and generation changes. Visible-item
+counts and native work are unchanged. The observed timing difference does not isolate the
+reference-count operation from generated code, structure layout or uncontrolled machine-wide
+variation. All baselines precede all candidates, and several P95 values remain noisy. This
+negative selection does not prove that the borrowed representation is always slower or cannot
+help another workload. The earlier immutable-value correction remains selected.
+
+On the final selected source, Material/Sprite tests pass 138/138 in
+`9b7bce53-7bf3-4cfb-8966-1ed8d8b2d6e4` (6.534 seconds), including both newly retained
+semantic controls. The independent public CPU consumer passes 2/2 in
+`d1fbb9cd-3366-4df7-adf1-364dff88455a` (0.286 seconds). Its complete pixel/retirement
+control passes on asserted DX12 Microsoft Basic Render Driver in
+`90470d41-d14c-4d1e-b308-1940dd2c38f1` (1.608 seconds). The six Vulkan hardware processes
+above retain their separate measurement and correctness scope. These are overlapping
+selections, not an aggregate test count.
+
+Independent data review recomputes all six compressed/raw digests, 4,536 interval percentiles,
+149,760 corresponding count-field comparisons, the 13/18 gate result and observation limits
+without a P1/P2 discrepancy. Queue correctness review separately finds no P1/P2; it does not
+establish a performance gain. The source collector, scene and independently locked dependency
+graph are unchanged between baseline and candidate.
+Owning all-target/all-feature correctness Clippy, root format and local document/data checks
+pass on the final selected source. The production queue matches the pre-experiment baseline;
+the retained tests are additional correctness coverage. Existing software CI already selects
+the ordinary public pixel control; no CI configuration or remote run is added for this outcome.
 
 ## Reproduction And Limits
 

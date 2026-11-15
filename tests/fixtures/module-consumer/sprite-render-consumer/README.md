@@ -39,6 +39,9 @@ The [qualified comparison](../../../../docs/benchmarks/2026-11-15-public-geometr
 baseline and private immutable Material-value correction to six independent process captures,
 full pixels and original retirement. It keeps per-process cost distributions and native work
 separate from full-game frame budgets.
+The same report records the subsequent borrowed-queue candidate's rejection under its separate
+10% gate. All six follow-up processes preserve complete pixels and original retirement; the
+current production queue retains owned Material resolution and the added semantic controls.
 
 Run serially from the repository root, reusing its target:
 

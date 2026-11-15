@@ -2437,6 +2437,17 @@ collector is removed with historical reproduction kept separate. This qualifies 
 immutable-value correction under ADR0096; a retained geometry cache, total memory budget,
 stable production tail, foreign execution and full R9c/R8/R9/R12 remain open.
 
+The following private borrowed-queue experiment at `6c88c87` is rejected against three fresh
+`814899e` baseline processes. Only 13/18 large bound comparisons meet its 10% P50 gate, despite
+unchanged thirteen sampled count fields and passing full pixels, late original-input replay,
+retained outputs and final cleanup in all six processes. The
+[same cost report](../../benchmarks/2026-11-15-public-geometry.md#visible-queue-material-capture-follow-up)
+preserves all raw samples, distributions and digests. The original owned queue and earlier
+immutable-value correction are retained; new offscreen/zero-View diagnostic and exact multi-View
+Shader/Image capture controls remain. This negative outcome adds no new render owner or cache.
+Final selected Material/Sprite 138, independent CPU 2 and actual DX12 software full-pixel control
+pass in their separate scopes; correctness Clippy, format and document/data checks pass.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

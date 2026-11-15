@@ -1627,10 +1627,12 @@ geometry cache. Full R9c, 0121, R8/R9/R12/Foundation and paused Editor/Dialogue 
 
 ### Visible Queue Material Capture Comparison
 
-Status: active from `814899e`. Continue the same current-public geometry workflow after the
-qualified value-sharing correction. Source inspection identifies a narrower hypothesis than
-retained geometry: queue resolution clones a complete immutable Material binding for every
-extracted cell before per-View visibility, then clones it again for visible queue entries.
+Status: candidate `6c88c87` rejected after the bounded comparison against `814899e`; the
+original queue and new semantic controls are retained. This follows the same current-public
+geometry workflow after the qualified value-sharing correction. Source inspection identifies
+a narrower hypothesis than retained geometry: queue resolution clones an immutable Material
+binding for every extracted cell before per-View visibility, then clones it again for visible
+queue entries.
 Full resource/UV validation before culling is required, but temporary ownership of those values
 may not be. Compare the current path with a private borrowed resolved-material view followed by
 exact owned capture only for visible items. Do not change public APIs, value equality, resource
@@ -1659,6 +1661,45 @@ changed queue owner independently, run appropriate Sprite/Material and public mo
 then relevant actual hardware/software pixel/lifetime qualification and correctness Clippy.
 Cargo remains serial, jobs one, Rust1.95, offline locked dependencies and the original target;
 no clean or branch/main movement. Full Foundation and paused Editor/Dialogue retain their scope.
+
+#### Queue Capture Decision And Qualification
+
+The production candidate replaces only private temporary ownership with a borrowed resolved
+binding. It still captures all declared textures before per-View visibility, including zero
+Views; each visible queue entry owns its original generation, values and ordered snapshots.
+Independent correctness review finds no P1/P2. The candidate's Material/Sprite suite passes
+138/138 in `fa5fd4bf-659e-4c34-9fa7-f8a31c19ff64` (6.614 seconds), and the independently
+locked ordinary CPU consumer passes 2/2 in `60205d9b-99bc-4897-920e-95a9335fedd9`
+(0.288 seconds). The new tests cover UV/base/material failure priority, offscreen and zero-View
+diagnostics, a first invisible View followed by two visible Views, and A/B captures retaining
+exact Shader generations, uniform bytes and same-handle Image versions after live owners retire.
+
+Three original baseline processes and three candidate processes each pass all 36 groups,
+2,304 recorded samples, full independent pixels, late original-input realization and final
+resource/cleanup checks. The [cost report](../benchmarks/2026-11-15-public-geometry.md#visible-queue-material-capture-follow-up)
+retains every process identity, separate P50/P95/P99, raw/compressed digest and scope limitation.
+The 18 large bound comparisons improve P50 by 3.262--16.959%, but only 13 meet the required
+10%. Maximum small-scene P50 regression is 0.0102 ms and all thirteen sampled count fields
+match corresponding samples. Reject the candidate under the recorded criterion; do not pool
+processes, repeat the search or attribute the full managed-drive difference to queue cost alone.
+
+Only the candidate queue changes are removed through an ordinary patch. Its new semantic tests
+and the earlier selected immutable-value correction are retained. The bound measurement has
+four white parameters and no extension textures or Shader edits, so the dedicated semantic tests
+retain their separate scope. This outcome admits no retained geometry cache or product performance budget; full
+R9c/R8/R9/R12/Foundation remains active.
+
+The final selected owned queue passes Material/Sprite 138/138 in
+`9b7bce53-7bf3-4cfb-8966-1ed8d8b2d6e4` (6.534 seconds), independent public CPU 2/2 in
+`d1fbb9cd-3366-4df7-adf1-364dff88455a` (0.286 seconds), and the complete actual DX12
+software pixel/retirement control in `90470d41-d14c-4d1e-b308-1940dd2c38f1`
+(1.608 seconds). The six full Vulkan hardware measurement trajectories remain separate.
+Independent arithmetic review checks all six artifact digests, all 4,536 percentiles and
+149,760 corresponding count comparisons without P1/P2; it confirms the rejected decision.
+Owning all-target/all-feature correctness Clippy, root formatting and local document/data checks
+pass. Existing software CI already selects the ordinary public pixel control. No dependency,
+workload, build profile, public capture API or new cache remains from this experiment; the final
+production queue matches `814899e`.
 
 ## Live Native Source Updates Through External GPU Execution
 

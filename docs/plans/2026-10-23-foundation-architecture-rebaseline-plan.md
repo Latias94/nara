@@ -1375,6 +1375,16 @@ The correction does not admit cross-frame geometry retention or establish a stab
 GPU duration, total memory or supported-population budget. Remaining R9c and the complete
 R8/R9/R12/Foundation gates stay active; Editor/Dialogue product work remains paused.
 
+The subsequent [visible-queue comparison](2026-11-14-durable-material-and-shader-plan.md#visible-queue-material-capture-comparison)
+tests a private borrowed Material resolution at `6c88c87` against three fresh baseline processes
+at `814899e`. All six processes retain full pixels, late original captures and zero final cleanup;
+their thirteen sampled count fields match corresponding samples. Only 13 of 18 large bound
+comparisons meet the preselected 10% P50 improvement criterion, so the candidate is removed and
+the original owned queue retained. Its new multi-View, offscreen/zero-View and exact Shader/Image
+generation controls remain. The [cost report](../benchmarks/2026-11-15-public-geometry.md#visible-queue-material-capture-follow-up)
+preserves the negative result and process variation. This does not reverse the earlier selected
+immutable-value correction or admit cross-frame geometry retention.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
