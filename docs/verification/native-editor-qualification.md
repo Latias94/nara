@@ -314,6 +314,18 @@ attached to the desktop and this is not a Remote Desktop session. The Windows Fo
 uses virtualized coordinates; its 2560x1440 report is not an additional display. No source or
 display-configuration change is made, and no owned probe remains.
 
+A November 15 retry with both displays active completes at 09:18 +08:00 on `8a3a681`.
+The DPI-aware native inventory sees DISPLAY1 at `[-2560,533,0,1973]`, DPI 120 (125%), and
+DISPLAY2 at `[0,0,3840,2160]`, DPI 144 (150%); both are attached to the desktop. The unchanged
+geometry and actual OS title-bar probes pass 2/2 in 10.517 seconds, run
+`89fd0428-9ae3-4137-942b-6fac425df155`, after a 2.93-second release build; 81 cases are outside
+the selection. Both movement directions, default and explicit logical sizes, synchronized
+native/Winit/Runtime geometry, original HWND destruction and mouse-button/cursor restoration
+remain asserted. No additional Rust repair or display-configuration change is needed, and all
+owned probes exit. This restores fresh crossing evidence after the earlier single-display
+prerequisite refusals; destination GPU presentation, maximized/snap/keyboard movement and human
+manual feel retain their separate scope. Editor/component and Dialogue work remain paused.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

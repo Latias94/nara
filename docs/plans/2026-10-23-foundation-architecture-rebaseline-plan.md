@@ -3774,6 +3774,16 @@ retains actual bounds and the separate destination-GPU, maximized/snap/keyboard 
 gaps. This bounded resumed hardware check leaves Editor/component and Dialogue work paused;
 Runtime development and the full foundation Goal remain active.
 
+**November 15 resumed physical-display check:** at the user's request, the unchanged repair
+is requalified on `8a3a681` after both the 125% and 150% displays become active again. The
+original geometry and actual OS title-bar probes pass 2/2 in 10.517 seconds, run
+`89fd0428-9ae3-4137-942b-6fac425df155`. Original native retirement, input restoration, both drag
+directions and explicit-size behavior remain asserted. No further native source repair is
+required by this observation. The [native qualification record](../verification/native-editor-qualification.md#mixed-dpi-window-controls)
+retains exact hardware and the unqualified GPU/manual-movement scope. This bounded check does
+not resume Editor/component or Dialogue development; Runtime and the full foundation Goal
+remain active.
+
 The [component responsibility and quality sequence](2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development)
 builds on existing `open-gpui-ui-core`/`open-gpui-ui-components`, then Nara theme and Editor
 composites. Those generic components are fork-owned implementations and need focused acceptance
