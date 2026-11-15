@@ -464,6 +464,16 @@ keys it does not own. Its bounded native input guard releases
 an injected hold during failure cleanup. Actual results and limits belong to the
 [continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
 
+## Physical Task Return Before Capture
+
+Canonical capture also requires original admitted tasks to have physically returned.
+Cancelled terminals and zero queued/running statistics are insufficient while a capture's
+Drop is still owned by an executor. The game uses `TaskPools::return_state()` and refuses
+pending return or cleanup failure without changing game state. Child startup/capture/restore
+waits preserve their original deadlines. A failed task's eventual physical Close remains a
+failure; it does not become a successful capture or clean shutdown. Resume format v2 and
+the game-owned protocol v5 retain their existing field definitions.
+
 ## Native Request Notifications
 
 The development child watches only its existing private control directory. Create/rename/modify
@@ -471,6 +481,9 @@ hints wake its original native maintenance boundary, or a condition variable in 
 Notifications grant no file or command authority: the original capability-relative inbox and exact
 version, placement, session, generation and request validation still admit every packet. A 250 ms
 reconciliation ceiling handles lost notifications within the existing operation and idle limits.
+The child checks immediately at startup, then waits before another inbox probe unless a hint is
+already pending. Notification and reconciliation both return through the original lifetime and
+request-budget checks before the next receive; responding does not require an extra empty probe.
 Parent response polling remains 10 ms. This is not a zero-wakeup or hard real-time contract;
 the Windows vendor watcher retains its 100 ms internal wait and backend reporting limitations.
 

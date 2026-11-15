@@ -26,6 +26,7 @@ use nara::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
         DesktopRunOptions, DesktopRunProgress, WinitInputActivation,
     },
+    tasks::{TaskPools, TaskReturnState},
     winit::WinitControlFlow,
 };
 use two_level_game::{
@@ -312,23 +313,31 @@ impl DesktopGame {
         loop {
             check_deadline(deadline)?;
             self.require_paused()?;
-            match self
-                .run
-                .capture(|world| world.resource::<GameSnapshot>().clone())
-            {
-                Ok(snapshot) => {
+            match self.run.capture(|world| {
+                (
+                    world.resource::<GameSnapshot>().clone(),
+                    world.resource::<TaskPools>().return_state(),
+                )
+            }) {
+                Ok((snapshot, returned)) => {
                     if let Some(error) = snapshot.error {
                         return Err(format!("original desktop game failed: {error}"));
+                    }
+                    if returned == TaskReturnState::CleanupFailed {
+                        return Err("original desktop task cleanup failed".into());
                     }
                     if snapshot.initialized
                         && snapshot.phase == GamePhase::Running
                         && !snapshot.restoring
                     {
-                        return Ok(());
+                        if returned == TaskReturnState::Returned {
+                            return Ok(());
+                        }
+                    } else {
+                        self.run
+                            .request_paused_maintenance()
+                            .map_err(|error| error.to_string())?;
                     }
-                    self.run
-                        .request_paused_maintenance()
-                        .map_err(|error| error.to_string())?;
                 }
                 Err(DesktopControlError::NotPaused) => {}
                 Err(error) => return Err(format!("desktop paused boundary unavailable: {error}")),

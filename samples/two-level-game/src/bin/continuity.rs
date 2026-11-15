@@ -33,6 +33,7 @@ use nara::{
         GameplayCommandTypeId, GameplayCommandValue,
     },
     project_host::{HeadlessSession, HeadlessSessionClose},
+    tasks::{TaskPools, TaskReturnState},
 };
 use two_level_game::{GamePhase, GameSnapshot, capture_resume, request_resume};
 
@@ -201,6 +202,7 @@ fn serve(
     let mut previous_request = 0;
     let mut activity = Instant::now();
     let mut consumed = 0;
+    let mut probe_due = true;
     loop {
         if Instant::now() >= total_deadline || activity.elapsed() >= IDLE_TIMEOUT {
             return Err(
@@ -211,18 +213,21 @@ fn serve(
             return Err("finite continuity process exhausted its 512 request budget".into());
         }
         game.poll_idle(Duration::ZERO)?;
+        if !probe_due && !watch.pending() {
+            let now = Instant::now();
+            let wait = IDLE_RECONCILE_INTERVAL
+                .min(total_deadline.saturating_duration_since(now))
+                .min((activity + IDLE_TIMEOUT).saturating_duration_since(now));
+            let started = Instant::now();
+            game.wait_request(watch, wait)?;
+            service.waited(started.elapsed());
+            probe_due = true;
+            continue;
+        }
+        probe_due = false;
         watch.acknowledge()?;
         service.checked_inbox();
         let Some(bytes) = control.receive()? else {
-            if !watch.pending() {
-                let now = Instant::now();
-                let wait = IDLE_RECONCILE_INTERVAL
-                    .min(total_deadline.saturating_duration_since(now))
-                    .min((activity + IDLE_TIMEOUT).saturating_duration_since(now));
-                let started = Instant::now();
-                game.wait_request(watch, wait)?;
-                service.waited(started.elapsed());
-            }
             continue;
         };
         activity = Instant::now();
@@ -457,7 +462,7 @@ impl Game {
                         "source startup did not reach a fresh initialized paused game".into(),
                     );
                 }
-                return Ok(());
+                return self.wait_task_returns(deadline);
             }
             self.frame()?;
             thread::sleep(POLL_INTERVAL);
@@ -468,6 +473,23 @@ impl Game {
         self.session
             .capture(|world| world.resource::<GameSnapshot>().clone())
             .map_err(|error| format!("paused observation failed: {error:?}"))
+    }
+
+    fn wait_task_returns(&self, deadline: Instant) -> Result<(), String> {
+        loop {
+            check_deadline(deadline)?;
+            match self
+                .session
+                .capture(|world| world.resource::<TaskPools>().return_state())
+                .map_err(|error| format!("paused task observation failed: {error:?}"))?
+            {
+                TaskReturnState::Returned => return Ok(()),
+                TaskReturnState::CleanupFailed => return Err("original task cleanup failed".into()),
+                TaskReturnState::Pending => thread::sleep(
+                    POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+                ),
+            }
+        }
     }
 
     fn observed(&self) -> Result<Reply, String> {
@@ -537,9 +559,12 @@ impl Game {
                 self.step(commands, deadline)?;
                 self.observed()
             }
-            Command::Capture => capture_resume(&self.session)
-                .map(|state| Reply::Captured { state })
-                .map_err(|error| format!("game capture was refused: {error}")),
+            Command::Capture => {
+                self.wait_task_returns(deadline)?;
+                capture_resume(&self.session)
+                    .map(|state| Reply::Captured { state })
+                    .map_err(|error| format!("game capture was refused: {error}"))
+            }
             Command::Restore { state } => {
                 let snapshot = self.snapshot()?;
                 if !snapshot.initialized || snapshot.tick != 0 || snapshot.restoring {
@@ -556,6 +581,7 @@ impl Game {
                         return Err(format!("game reconstruction failed: {error}"));
                     }
                     if !snapshot.restoring {
+                        self.wait_task_returns(deadline)?;
                         break self.observed();
                     }
                     self.frame()?;

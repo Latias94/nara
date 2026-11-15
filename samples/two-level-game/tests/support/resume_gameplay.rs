@@ -16,7 +16,7 @@ use nara::{
     },
     identity::{SceneInstanceId, WorldIdentityDomain, WorldIdentityDomainId},
     project_host::{HeadlessSession, HeadlessSessionClose},
-    tasks::{TaskPoolKind, TaskPools},
+    tasks::{TaskPools, TaskReturnState},
 };
 use two_level_game::{
     GamePhase, GameSnapshot, capture_resume, open_explicit_project_root, open_project_root,
@@ -34,6 +34,7 @@ pub const MARKER: &str = "two-level-game.marker";
 pub struct Game {
     pub session: HeadlessSession,
     sequence: u64,
+    expected_close: HeadlessSessionClose,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -70,6 +71,7 @@ impl Game {
         let mut game = Self {
             session,
             sequence: 0,
+            expected_close: HeadlessSessionClose::Complete,
         };
         game.session.start().expect("ordinary product startup");
         assert_eq!(game.session.pause().unwrap(), None);
@@ -154,21 +156,25 @@ impl Game {
             let snapshot = self.snapshot();
             assert!(snapshot.error.is_none(), "{snapshot:?}");
             assert_eq!(self.session.state(), Some(RuntimeState::Paused));
-            let idle = self
+            let (idle, returned) = self
                 .session
                 .observe(|world| {
-                    let tasks = world.resource::<TaskPools>().stats();
-                    world.resource::<GameplayCommandQueue>().is_idle()
-                        && TaskPoolKind::ALL.into_iter().all(|kind| {
-                            let stats = tasks.for_kind(kind);
-                            stats.queued == 0 && stats.running == 0
-                        })
+                    (
+                        world.resource::<GameplayCommandQueue>().is_idle(),
+                        world.resource::<TaskPools>().return_state(),
+                    )
                 })
                 .unwrap();
+            assert_ne!(
+                returned,
+                TaskReturnState::CleanupFailed,
+                "original task cleanup failed"
+            );
             if snapshot.initialized
                 && snapshot.phase == GamePhase::Running
                 && !snapshot.restoring
                 && idle
+                && returned == TaskReturnState::Returned
             {
                 return snapshot;
             }
@@ -227,12 +233,20 @@ impl Game {
     pub fn close(&mut self) {
         assert_eq!(
             self.close_terminal(),
-            Some(HeadlessSessionClose::Complete),
+            Some(self.expected_close),
             "original Close did not finish cleanly: {:?}",
             self.session.diagnostics()
         );
         assert!(self.session.is_closed());
-        assert_eq!(self.session.close(), HeadlessSessionClose::Complete);
+        assert_eq!(self.session.close(), self.expected_close);
+    }
+
+    #[allow(
+        dead_code,
+        reason = "shared helper is also compiled by success-only consumers"
+    )]
+    pub fn expect_failed_close(&mut self) {
+        self.expected_close = HeadlessSessionClose::Failed;
     }
 }
 
@@ -240,14 +254,14 @@ impl Drop for Game {
     fn drop(&mut self) {
         let terminal = self.close_terminal();
         if std::thread::panicking() {
-            if terminal != Some(HeadlessSessionClose::Complete) {
+            if terminal != Some(self.expected_close) {
                 eprintln!(
                     "resume test cleanup: {terminal:?}; {:?}",
                     self.session.diagnostics()
                 );
             }
         } else {
-            assert_eq!(terminal, Some(HeadlessSessionClose::Complete));
+            assert_eq!(terminal, Some(self.expected_close));
             assert!(self.session.is_closed());
         }
     }

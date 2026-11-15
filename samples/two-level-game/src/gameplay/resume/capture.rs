@@ -11,7 +11,7 @@ use nara::{
     material::{Material2d, Material2dAsset},
     prelude::Transform2d,
     project_host::HeadlessSession,
-    tasks::{TaskPoolKind, TaskPools},
+    tasks::{TaskPools, TaskReturnState},
 };
 
 use super::{GameResumeError, ResumeControl};
@@ -87,12 +87,14 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             "this game does not support continuation at a non-unit time scale",
         ));
     }
-    let tasks = world.resource::<TaskPools>().stats();
-    if TaskPoolKind::ALL.into_iter().any(|kind| {
-        let stats = tasks.for_kind(kind);
-        stats.queued != 0 || stats.running != 0
-    }) {
-        return Err(reject("an authoritative task has not returned"));
+    match world.resource::<TaskPools>().return_state() {
+        TaskReturnState::Returned => {}
+        TaskReturnState::Pending => {
+            return Err(reject("an authoritative task has not physically returned"));
+        }
+        TaskReturnState::CleanupFailed => {
+            return Err(reject("authoritative task cleanup failed"));
+        }
     }
     Ok(())
 }

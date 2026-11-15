@@ -6,6 +6,7 @@ use nara::{
     app::{RuntimeControl, RuntimeControlStatus, RuntimeState},
     input::KeyboardHold,
     project_host::{DesktopControlError, DesktopRun, DesktopRunProgress, WinitInputActivation},
+    tasks::{TaskPools, TaskReturnState},
 };
 
 use super::{
@@ -114,8 +115,12 @@ fn paused_maintenance(run: &mut DesktopRun, deadline: Instant) -> Result<(), Gam
     run.request_paused_maintenance()?;
     loop {
         poll(run, deadline)?;
-        match run.capture(|_| ()) {
-            Ok(()) => return Ok(()),
+        match run.capture(|world| world.resource::<TaskPools>().return_state()) {
+            Ok(TaskReturnState::Returned) => return Ok(()),
+            Ok(TaskReturnState::Pending) => {}
+            Ok(TaskReturnState::CleanupFailed) => {
+                return Err(refuse("original desktop task cleanup failed"));
+            }
             Err(DesktopControlError::NotPaused) => {}
             Err(error) => return Err(error.into()),
         }
