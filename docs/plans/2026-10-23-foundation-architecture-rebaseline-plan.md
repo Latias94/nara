@@ -1282,6 +1282,28 @@ cross-compilation passes, without foreign native execution. These are exact pres
 and lifecycle facts; window-pixel equality, scanout, edit latency and production performance
 budgets retain separate scope. Editor/Dialogue stays paused and full R9b/R12/Foundation active.
 
+The [captured View/time successor](2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor)
+at `ac6828a`, `26af57b` and `9212074` freezes the existing App clocks, settings and validated
+spatial sample in the original Extract. Stock Materials read the engine-owned 224-byte
+`NaraView`; target adaptation and delayed Host execution preserve its original View/time
+without adding pipeline variants. Owning controls pass 179/179 and the all-feature cohort
+558/558; the independent ordinary consumer passes on Vulkan/DX12 hardware and DX12 software.
+
+The [joint Material/history successor](2026-11-14-durable-material-and-shader-plan.md#joint-material-and-history-discontinuity-successor)
+at `693149b` now feeds actual Material/Camera/Animation/Rapier pixels into the existing finite
+temporal policy. Its concrete compatibility choices cover Camera cut, solver correction,
+parameter adoption and same-ABI Shader body adoption. Old raw, unprepared and prepared temporal
+A refuse after the lineage cut; only View 0 slots reset, while View 1 continues and retained
+published outputs stay readable. Invalid Shader edits keep last-good and continuous history.
+The affected DX12 cohort passes 9/9; the strengthened joint trajectory passes independently
+on DX12 and Vulkan RTX 4090, and the combined Material/time plus history selection passes
+2/2 on DX12 software rendering. The ordinary main-thread history window separately presents
+three outputs and retires its original native owners. Post-World and post-producer readbacks,
+exact Step/correction facts, pipeline count `7 -> 8`, correctness Clippy and format/document
+checks pass. These overlapping selections are not additive. This completes the named joint
+consumer, without automatic compatibility classification, general TAA/reprojection, foreign
+native execution or numerical production budgets. Full R9/R12/Foundation remains active.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

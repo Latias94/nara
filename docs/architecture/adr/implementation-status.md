@@ -2294,10 +2294,11 @@ No new renderer, GPU/World owner, batch publisher or native loop is introduced. 
 Foundation remains open and paused Editor/Dialogue changes are preserved.
 
 The [captured View and Shader time successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor)
-is implemented from `ac6828a` through the current WGPU realization. The Extract owner freezes
-the existing App real/virtual/fixed/render clocks, settings, validated spatial stamp and actual
-interpolation decision with each ordinary View; target adaptation and delayed preparation retain
-that sample, while manually supplied views advertise unavailable clock data. The stock Material
+is implemented at `ac6828a` and `26af57b`, with the independent consumer at `9212074`.
+The Extract owner freezes the existing App real/virtual/fixed/render clocks, settings, validated
+spatial stamp and actual interpolation decision with each ordinary View; target adaptation and
+delayed preparation retain that sample, while manually supplied views advertise unavailable clock
+data. The stock Material
 interface admits the engine-owned 224-byte `NaraView` at group 2 binding 0, outside authored
 parameters; WGPU uses bounded per-preparation byte-sharing and the original allocation/submission
 custody, with time excluded from pipeline variants. Owning Material/Render/Transform controls pass
@@ -2309,6 +2310,24 @@ consumer passes 1/1 on Vulkan RTX 4090 (`05d558a5-e4d3-485c-a0ce-44cf0c0a5cb3`),
 retains one pipeline, replays old View/time data after a real Camera change and releases its
 original World. These results do not qualify arbitrary View effects, full temporal compatibility,
 scanout or numerical production budgets; full R9b/R12/Foundation remains open.
+
+The [joint Material and history successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#joint-material-and-history-discontinuity-successor)
+at `693149b` combines ordinary Material View/time, real Animation/Rapier motion and the existing
+temporal graph in one independently locked public consumer. ADR0094's original lineage cut
+rejects late raw A, first preparation of admitted A and submission of prepared A as
+`StaleHistory`; only the affected View's predecessor slots reset. The concrete effect selects
+Camera cuts, solver corrections, parameter adoption and same-ABI Shader edits as incompatible;
+invalid Shader edits retain last-good and continuous history. No new public taxonomy or History
+owner is introduced. An independent full-pixel and float-history oracle checks four cuts,
+fourteen temporal publications, four late non-temporal stock outputs, exact fixed tick 4 at
+`(1.25, 2)` and native pipeline count `7 -> 8`. Outputs remain readable after original World
+destruction and both drawing-producer retirements; final retained bytes, candidate metadata
+and cleanup faults are zero. The affected DX12 selection passes 9/9; final joint runs pass
+on DX12/Vulkan RTX 4090 and the combined Material/history selection passes 2/2 on DX12 software.
+The updated ordinary history window separately passes its three-presentation/retirement
+trajectory. Correctness Clippy, independent formatting and configuration/document checks pass.
+These are overlapping scoped results, not full platform, TAA/reprojection, scanout or performance
+qualification. Editor/Dialogue remains paused; full R9/R12/Foundation remains open.
 
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the

@@ -211,8 +211,11 @@ bytes and cleanup faults. Assertion failures also run that explicit cleanup befo
 This correctness test accepts either explicit `NARA_WGPU_FORCE_FALLBACK=0` for local hardware
 or `1` for a requested software adapter in CI. It reports the actual adapter and checks the
 requested backend. A missing requested adapter fails rather than skips. Existing history and
-window qualification retain their own hardware prerequisites. This source adds no executed
-native result or performance claim, and does not test the 3,600-second wrap boundary.
+window qualification retain their own hardware prerequisites. The
+[owning qualification](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#captured-view-and-shader-time-successor)
+records actual Windows Vulkan/DX12 hardware and DX12 software results. These are correctness
+and lifecycle observations; the consumer does not establish a performance budget or test the
+3,600-second wrap boundary.
 
 The manifest enables the facade's `presentation-2d` API and WGPU `counters`. Run serially
 against the checked-in standalone lock:
@@ -227,3 +230,53 @@ cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-
 
 The exact test is
 `ordinary_material_captures_view_time_motion_and_replays_original_frames`.
+
+## Joint Material And Temporal History
+
+`tests/joint_history.rs` drives the original Animation/Rapier Runtime and two real Cameras.
+View 0 draws its kinematic actor through an ordinary Material reading captured real/virtual
+time and pause/interpolation facts; View 1 sees a separate constant-blue control Sprite.
+The existing `HistoryPolicy` builds one stock world operation, then explicitly samples its
+exact graph texture into four float history slots. The original manual procedural path and
+its independent history oracle remain unchanged.
+
+The selected effect treats Camera cuts, solver correction, parameter adoption and same-ABI
+Shader body adoption as incompatible with View 0 history. Each transition preserves original
+lineage, View and Feature identities, discontinues the old semantic revision and resets only
+the two affected slots. An old raw capture, an admitted input first prepared after the cut
+and an already prepared candidate all refuse through their original History checks. The new
+B uses Reset for View 0 and actual preceding outputs for View 1. Invalid Shader C retains
+last-good and continuous predecessors; it cannot add a native pipeline.
+
+An independent CPU oracle derives full source images from known Camera geometry, exact
+Duration arithmetic and verified motion poses. Source colors select integer UNORM byte
+centers, avoiding ambiguous half-byte conversion ties. Double-precision recurrence checks
+all four Rgba32Float histories within `3e-6`; every final image pixel is checked separately.
+Each cut also executes old non-temporal stock A on another producer, compares exact original
+pixels and verifies reversed-frame refusal on the current producer's original target.
+
+The trajectory covers advancing zero-tick frames, multiple fixed ticks, scaled time, Pause
+and exact Step without Extract. Solver correction independently requires tick 4 at `(1.25, 2)`
+before comparing the next presentation. Live native pipeline counts remain constant through
+time, scale, Pause, camera and value changes; only the adopted Shader body adds one. The
+Runtime physically closes and both drawing producers retire before retained histories and
+images are read again. Reader retirement, output release and Host drain then require zero
+retained bytes, candidate metadata and cleanup faults, including assertion-unwind cleanup.
+
+Run on an explicitly selected backend, with `NARA_WGPU_FORCE_FALLBACK=0` for hardware or
+`1` for the separately reported software path. Missing requested adapters fail. Existing
+`history` and `history_window` tests retain their own hardware prerequisite.
+
+```powershell
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --release --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+This is a concrete accumulator's compatibility policy, not automatic camera/material edit
+classification, general TAA/reprojection, cross-device history restoration or a performance
+budget. Exact run results and correction history belong to the
+[owning unit](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#joint-material-and-history-discontinuity-successor).
+
+The exact test is
+`real_material_motion_and_camera_cuts_preserve_history_ownership_and_last_good`.

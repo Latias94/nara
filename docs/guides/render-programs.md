@@ -229,6 +229,27 @@ every unprepared capture or reset another View's history. Choose those meanings 
 the effect. Coordinate cuts with complete Host operations if strict ordering is needed across
 threads; the revision checks cannot undo native work or retract already published output.
 
+History compatibility belongs to the concrete effect. A stable View ID, unchanged material
+binding ABI or matching fixed tick does not prove that predecessor pixels remain useful.
+The joint Material accumulator consumer makes the following explicit choices:
+
+| Change | Selected history behavior | Material pipeline behavior |
+| --- | --- | --- |
+| Explicit Camera cut or solver correction | Discontinue the original lineage; reset only the affected View's slots | Reuse existing variants |
+| Adopted material parameter edit | Same selected reset for this effect | Reuse the same Shader/ABI variant |
+| Adopted same-ABI Shader body edit | Same selected reset for this effect | Create the required new Shader variant |
+| Invalid Shader edit retaining last-good | Continue existing predecessors | Keep the original variant |
+| Ordinary captured time, Pause and exact Step | Preserve the App/Extract rules and normal history continuity | Time values do not specialize pipelines |
+
+Those are this consumer's decisions, not automatic change classification in the Host. Its raw
+temporal A and prepared A are refused after a cut; an independent non-temporal producer may
+still render A's original stock capture. The latter uses A's exact Material, projection and
+captured clock, without advancing or replacing current history. Every producer retains its
+ordinary monotonic capture admission. Use the packet's `captured_time()` to validate a temporal
+capture's spatial stamp, domain and actual interpolation, rather than looking up current World
+clocks during preparation. See the [joint consumer unit](../plans/2026-11-14-durable-material-and-shader-plan.md#joint-material-and-history-discontinuity-successor)
+and [independent workspace](../../tests/fixtures/render-policy-consumer/README.md).
+
 A successful publication cannot be accumulated again after later surface/display failure. UI,
 READY, picking and physical completion remain separate outcomes. Retained display retries use
 `submit_candidate_for_display`, which returns both candidate and original UI sidecar on refusal.

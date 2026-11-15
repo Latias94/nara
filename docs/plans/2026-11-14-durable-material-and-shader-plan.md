@@ -922,7 +922,8 @@ completion remain open.
 
 ## Captured View And Shader Time Successor
 
-Status: active. R9a now extends the existing immutable frame packet through an ordinary
+Status: implemented at `ac6828a`/`26af57b`, with the independent consumer at `9212074`.
+R9a extends the existing immutable frame packet through an ordinary
 independent Material consumer. At the original Extract boundary, capture the existing App
 real, virtual, fixed and render clocks, time settings and validated presented-spatial stamp
 together with the actual spatial interpolation decision. Publish these facts atomically with
@@ -995,6 +996,111 @@ offsets and span, legal local-scope controls, stock/UI/native Host regressions a
 Source-generation controls. The 179-case prerequisite and this aggregate overlap in Material
 coverage; their counts are not additive. The initial two-case red run builds in 6m47s and
 fails both intended controls before the correction. Build times are not runtime cost evidence.
+
+The ordinary Material consumer passes on Vulkan/RTX 4090 in
+`05d558a5-e4d3-485c-a0ce-44cf0c0a5cb3` (1/1, 0.959 seconds), DX12/RTX 4090 in
+`6ff5a302-73b7-435c-9c28-b85ed6ba2e99` (1/1, 1.292 seconds), and explicitly requested
+DX12 Microsoft Basic Render Driver in `bb70dc1d-8ac6-425b-86a6-11584d4fe038` (1/1,
+1.072 seconds). Each run captures and publishes seven frames, observes one material pipeline
+and physically releases the original World. Owning all-target correctness Clippy, neutral
+feature checks, independently locked all-target compilation, formatting and document/config
+checks pass. The first independent compile refuses its stale lock, then exposes an unsupported
+nine-plugin tuple; the fixture selects the ordinary dependency closure and splits installation
+using the existing public API. Lock resolution adds 20 packages and retains all existing package
+versions/sources. These are Windows/Rust 1.95.0 offscreen facts, not native-window scanout,
+foreign execution or numerical production performance. The previous material/history scopes
+remain independently qualified; counts from overlapping owning selections are not additive.
+
+## Joint Material And History Discontinuity Successor
+
+Status: implemented and locally qualified at `693149b`. The independent motion/history consumer
+uses ordinary stock Material pixels as the current input of its finite accumulation effects.
+It uses real Camera extraction, actual captured View/time and the existing Animation/Rapier
+Runtime, preserving the manual procedural history oracle as a separate control. No production
+clock, scheduler, history registry, public discontinuity taxonomy or GPU owner is introduced.
+
+The concrete accumulator selects camera cut, solver correction/teleport, adopted material
+parameter changes and same-ABI Shader body edits as incompatible with View 0 history. The
+domain serializes each change with its original lineage `discontinue` and exact selected-slot
+reset. Keep View/effect/lineage identities and the successful watermark; View 1 observes a
+separate control Sprite and continues its actual predecessors. Failed Shader edits retain
+last-good Material and continuous history. Normal time progression, Pause and exact Step
+retain their existing owners and captured-sample rules. Material pipeline compatibility remains
+separate: value/camera/time changes do not add variants, while an adopted Shader body may.
+
+For each selected cut, hold a raw and admitted A plus an already prepared A, adapt its execution
+target before the cut, then capture post-cut B. Late raw admission and first preparation of A
+must refuse `StaleHistory`; submitting the prepared A must return the exact nonretryable original
+candidate. B starts affected slots from Reset and preserves the other View's predecessor.
+Verify four float histories and final pixels against an independent recurrence over actual
+Material/Camera/motion pixels, retain old output reads and original submission prefixes, and
+check ordinary duplicate/reversed-frame refusal. An independent non-temporal producer may still
+first render old stock A with its exact original time, mapping and Material; it cannot replace B.
+Include zero/multiple fixed ticks, scaled time, Pause and Step without Extract followed by the
+next Extract. Close the original Runtime and GPU owners on success and assertion unwind.
+
+This selects a concrete effect's compatibility policy, not automatic renderer classification,
+general TAA/reprojection or cross-device temporal replay. The same-lineage cut rejects the whole
+old group; selected reset limits predecessor invalidation only. Cross-thread cuts still require
+domain synchronization around the complete Host transaction. The qualification below records
+actual execution, corrections and limits for this consumer.
+
+### Joint Qualification And Corrections
+
+The first actual DX12 attempt, `a5dc436b-76c3-4c0d-a514-e4a78ca0941f`, refuses the first
+capture before drawing: the old procedural consumer requires black clear while the ordinary
+stock source explicitly selects transparent clear. Stock captures now accept their original
+explicit Clear operation through shared stock validation; the manual path keeps its strict
+black-clear oracle. The second attempt, `843f6903-6083-4de1-98a4-feb4239c6d93`, reaches float
+history readback and exposes a one-byte source UNORM half-grid conversion difference. The
+fixture now chooses integer UNORM byte centers before dividing by 255; it does not widen the
+`3e-6` history tolerance or derive expected pixels from GPU results. The subsequent trajectory
+passes 1/1 in `6c78fb04-3c2c-4411-aff8-363da57e2602`.
+
+The affected DX12 cohort then passes **9/9** in
+`6f2bdc3e-d534-476d-a165-8a05d6e93054` (15.033 seconds after a 48.51-second build).
+It preserves all seven original history controls, including numeric reorder, effect replacement,
+motion discontinuity, exact stale candidate/refusal, 512-plus View reclamation, independent
+producer progress and Host reconstruction. The existing ordinary Material time consumer also
+passes. No old test or pixel assertion is removed. Shared stock construction retains the final
+image's premultiplied interpretation; its compositor still writes opaque alpha, preserving
+all original numeric image results. Graph limits remain unchanged.
+
+Independent source review finds no P1/P2 in graph/resource custody, exact capture pairing or
+retirement. Testing review identifies two coverage gaps: ordinary Step could change pixels
+even if correction were lost, and a failed Shader edit's pipeline increase could be hidden by
+the next local baseline. The final consumer independently requires fixed tick 4 at `(1.25, 2)`
+and exact next-Extract poses, records the native pipeline baseline after the first publication,
+compares ordinary time/scale/Pause and invalid edits directly, and permits only the adopted
+Shader body's single increase. Bounded rereview closes both findings. All six research,
+implementation and review agents are closed.
+
+The strengthened final trajectory passes on DX12 RTX 4090 in
+`0c2ff457-c8f4-4415-8d55-157cd1032bc5` (1/1, 1.645 seconds) and Vulkan RTX 4090 in
+`af0eb0fc-8e4b-4a4d-96ab-c44180bd64ee` (1/1, 0.875 seconds). After explicit software
+selection is added for CI, the combined Material/time and joint-history selection passes
+**2/2** on DX12 Microsoft Basic Render Driver in
+`ca16c955-82f3-410c-94e1-1d9323c39fde` (6.060 seconds); the final hardware control also passes
+1/1 in `fe49a674-6c10-4251-92c0-ec3b43ccc6a2` (2.684 seconds). Every joint run reports four
+cuts, fourteen temporal publications, four retained old stock outputs and live native pipeline
+count `7 -> 8`. This live count is observed before producer retirement; later cache/state
+reclamation is a separate observation. Outputs are reread after original World destruction and
+both drawing-producer retirements; final Host bytes, candidate metadata and cleanup faults
+are zero. Counts from overlapping selections are not additive and timings are fixture facts,
+not a production frame budget.
+
+The updated ordinary main-thread `history_window` example separately passes 1/1 on DX12 RTX
+4090 in `712a1854-d814-43be-945e-4551ccc7f35b` (4.670 seconds). It presents three actual
+temporal outputs with predecessors `Uninitialized`, frame 1 and frame 2, validates original
+captured clocks/spatial publication and retires the original Runtime/window/GPU owners.
+This adds window execution evidence, not window-pixel readback or scanout. Both final native
+paths use Windows 11 and Rust 1.95.0 with locked offline dependencies and one Cargo/build owner.
+All-target correctness Clippy and independent-workspace formatting pass. Manifest, lock and CI
+configuration parse checks and changed-document link/whitespace checks also pass. No production
+engine Rust, dependency version or lockfile changes are needed for this joint consumer.
+CI configuration is local and has not been run remotely. Foreign native execution, generic
+compatibility classification, TAA/reprojection, cross-device temporal replay, numeric budgets
+and full R9/R12/Foundation remain open; Editor/Dialogue work stays paused.
 
 ## Live Native Source Updates Through External GPU Execution
 
