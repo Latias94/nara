@@ -1459,6 +1459,101 @@ the independent consumer's README records prebuilding and the separate physical/
 selections. Implementation `cf22a5b` and consumer/CI `a7a5fc8` are precise local commits. This
 closes the named drawing/picking successor while the complete Foundation Goal stays active.
 
+## Measured Sprite And Tile Geometry Successor
+
+Status: active from `c4e0770`. Continue R9c through actual public module consumers before
+selecting retained geometry. The October 20 bounds-only baseline remains historical: its
+collector now calls a private legacy executor, names removed Cargo features and excludes some
+packet/capture work. It cannot establish costs of the current typed stock policy and Host.
+Preserve its raw observations and use a separate current substrate label rather than inventing
+a directly comparable speedup.
+
+The independent module consumer builds an ordinary App/Runtime from domain crates and the
+stock capture/policy plugins, without the integrated product facade, a platform window or a
+dummy GPU owner. Collect the original sealed input, adapt its target explicitly and execute it
+through one actual offscreen `WgpuRenderHost`. Time the complete managed drive/capture,
+adaptation, preparation, encode/submission and original-prefix completion separately. Record
+actual issued native work, queue/extraction facts, retained bytes and final cleanup. A read-only
+summary of this Host's original acquired adapter is observational data, not another acquisition.
+Do not use a separate probe device to label the selected execution adapter.
+
+Keep populations 64, 4,096 and 65,536 with a fixed 320x180 world Canvas and 960x540 destination.
+Separate static, single-cell edits and camera movement, each with one and two actual Views,
+both with ordinary color and a bound Material whose values preserve identical pixels.
+Use finite warmup and repeated ordinary release samples, per-process distributions and raw
+JSONL with explicit environment/revision and timing scope. This geometry-focused baseline
+does not include the historical changing HUD and must not inherit its full-game or frame-budget
+claim. Correctness observations and readback stay outside ordinary timed intervals. Temporary
+system-body attribution, if needed, is explicitly exploratory and removed before ordinary runs;
+no permanent profiler, scheduler, benchmark framework or source-analysis verifier is selected.
+
+An independent camera/map pixel oracle must cover the actual selected View and original input.
+Retain old CPU captures and actual typed outputs across edits and Runtime/producer retirement,
+then replay/read them without current source lookup. Before any retained implementation can be
+selected, exercise direct public tile fields, cleared dirty hints, TileSet/Image/material revision,
+map/entity replacement, camera/parent changes, stable sort/adjacent batching and bounded memory.
+Keep extraction's complete world-space meaning and existing offscreen diagnostics. Dirty hints
+alone cannot authorize reuse, mutable buffers cannot reinterpret a retained capture, and a
+cache cannot become another resource publication or native-use owner.
+
+Attribute current lowering/queue/upload before choosing a candidate. Compare the existing
+bounds-only implementation with domain-local immutable blocks where measured pressure warrants
+that change; a favorable asymptotic description is not a measured decision. The historical 8 ms
+stress-fixture investigation trigger is not a product SLO or automatic supported population.
+Measure an accepted implementation against the same current public workflow and preserve
+strong numerical/refusal/lifetime controls. Keep Proposed 0121, full R8/R9/R12/Foundation and
+paused Editor/Dialogue product work distinct from this successor's actual evidence.
+
+### Current Source Attribution And Comparison
+
+The initial read-only source audit finds a simpler candidate than cross-frame map retention:
+`Material2dBinding` owns its parameter/texture maps, and its derived Clone copies those maps
+for each extracted cell, each queue resolution and visible-View/native lowering. Uniform bytes
+and generation already share immutable storage. The public plain/bound workload holds geometry,
+visibility and expected pixels constant so population scaling can distinguish this repeated
+value work from native preparation. Batch rebuilding, instance conversion and initialized
+80-byte instance payloads remain separate hypotheses; native work must include initial mapped
+copies rather than looking only at Queue write calls. No measured winner is selected yet.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f` separates retained Mesh2d instance/phase
+state from per-View visibility, ordering, batching and uploads. Its
+`crates/bevy_sprite_render/src/tilemap_chunk/mod.rs` rewrites a dirty chunk's data texture, a
+different rendering representation from reusable CPU geometry. Godot
+`7a37606a433c0e7735525037cdf774f043146a21`, `modules/tilemap/tile_map_layer.cpp`, rebuilds dirty
+quadrant Canvas commands under its own mutation/update owner, while renderer culling and RD
+batching still execute separately. Neither path supplies Nara's delayed old-input content
+guarantee or a ready-made total retained-geometry budget. These are scoped local source
+comparisons, not new upstream execution evidence or a requirement to copy their topology.
+
+Independent review corrects three initial fixture/measurement premises before native baseline:
+two explicit Camera clears would clear the complete attachment twice, so the ordinary global
+clear now selects only the first View and later Views load. Every created Runtime remains
+outside assertion-unwind scopes and retires before the original panic resumes. Retained-output
+and final states must be distinguishable despite periodic edits/motion, while oracle snapshots
+stay outside ordinary intervals. Previous-frame release and Host setup have their own interval;
+target adaptation does not silently absorb them. Actual native results and selection remain
+pending below.
+
+### Current Public Collector Qualification
+
+The independently locked `nara-sprite-render-module-consumer` consumes the domain crates directly
+and takes the original stock policy transport exactly once in Publish. Its final ordinary CPU
+controls pass 2/2 in `fe1812ab-bb75-43c3-a113-dfab2c3f974c` (0.286 seconds after a 16.56-second
+release rebuild). The complete public Vulkan/hardware control passes 1/1 in
+`e77f89a3-43bf-4872-aa52-c90c4edfded2` (1.179 seconds), covering all twelve small-scene combinations
+of plain/bound values, one/two Views and static/cell/camera scenarios. It checks full independent
+pixels, first realization of an old CPU input after original World destruction, distinct retained
+outputs after later publication and producer retirement, and zero final Host retained bytes and
+cleanup faults. The ignored measurement remains separate from these correctness controls.
+
+Independent review is closed after correcting clear ownership, original Runtime retirement on
+assertion unwind, periodic old/new-state collisions and interval attribution. The collector records
+the actual original Host adapter, includes initialized buffer copies in native work, and writes
+fresh per-process JSONL without replacing previous evidence. Independent all-target release
+correctness Clippy passes. No statistical baseline, supported population, frame-time guarantee,
+retained geometry design or performance improvement is established by these tests. The next
+step is three independent matched measurement processes against the committed collector revision.
+
 ## Live Native Source Updates Through External GPU Execution
 
 Status: implemented and locally qualified at `0602b5d`. Extend the independently

@@ -2449,6 +2449,12 @@ impl WgpuRenderHost {
         self.backend.device_epoch()
     }
 
+    /// Observes this Host's original acquired adapter without initializing a device or window.
+    #[must_use]
+    pub fn adapter_summary(&self) -> Option<crate::WgpuAdapterSummary> {
+        self.backend.adapter_summary()
+    }
+
     #[must_use]
     pub fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.backend.frame_transaction_stats()

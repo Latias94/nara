@@ -2213,6 +2213,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara-sprite-render-module-consumer"
+version = "0.0.0"
+dependencies = [
+ "nara_app",
+ "nara_asset",
+ "nara_core",
+ "nara_ecs",
+ "nara_hierarchy",
+ "nara_image",
+ "nara_material",
+ "nara_reflect",
+ "nara_render",
+ "nara_render_wgpu",
+ "nara_sprite",
+ "nara_sprite_render",
+ "nara_tilemap",
+ "nara_transform",
+ "nara_window",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "nara_app"
 version = "0.1.0"
 dependencies = [

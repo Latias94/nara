@@ -1,0 +1,28 @@
+[package]
+name = "nara-sprite-render-module-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+nara_app = { path = "../../../../crates/nara_app" }
+nara_asset = { path = "../../../../crates/nara_asset" }
+nara_core = { path = "../../../../crates/nara_core" }
+nara_ecs = { path = "../../../../crates/nara_ecs" }
+nara_hierarchy = { path = "../../../../crates/nara_hierarchy" }
+nara_image = { path = "../../../../crates/nara_image", default-features = false, features = ["runtime", "render-prepare"] }
+nara_material = { path = "../../../../crates/nara_material", features = ["material"] }
+nara_reflect = { path = "../../../../crates/nara_reflect" }
+nara_render = { path = "../../../../crates/nara_render", features = ["runtime"] }
+nara_render_wgpu = { path = "../../../../crates/nara_render_wgpu", default-features = false, features = ["stock-sprite"] }
+nara_sprite = { path = "../../../../crates/nara_sprite" }
+nara_sprite_render = { path = "../../../../crates/nara_sprite_render" }
+nara_tilemap = { path = "../../../../crates/nara_tilemap" }
+nara_transform = { path = "../../../../crates/nara_transform" }
+nara_window = { path = "../../../../crates/nara_window" }
+
+[dev-dependencies]
+serde_json = "1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

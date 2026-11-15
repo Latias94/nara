@@ -389,6 +389,11 @@ allocation is admitted by one complete GPU-memory budget.
 
 ## Admission, Outputs And Close
 
+`host.adapter_summary()` observes the bounded identity of this Host's already acquired adapter.
+It returns `None` before acquisition and does not initialize a device or platform window.
+Offscreen evidence writers can record their actual execution adapter alongside `device_epoch()`
+without creating another probe device. The returned value carries no native authority.
+
 `host.frame_transaction_stats().native_work()` returns detached `WgpuNativeWorkStats` for the
 current Host transaction. It counts completed calls through Nara's preparation Queue helpers,
 initial mapped buffer copies and whole-resource graph Preserve copy commands. Separate payload
