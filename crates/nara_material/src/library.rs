@@ -327,7 +327,7 @@ impl Material2dGeneration {
             return Err(MaterialUpdateError::ParameterLayout);
         }
         let binding = self.bind_values(parameters.parameter_values()?, textures)?;
-        if parameters.encode_uniform()? != binding.uniform.as_ref() {
+        if parameters.encode_uniform()? != binding.uniform_bytes() {
             return Err(MaterialUpdateError::ParameterEncoding);
         }
         Ok(binding)
@@ -351,9 +351,11 @@ impl Material2dGeneration {
         let uniform = declaration.parameters().encode(&parameters)?;
         Ok(Material2dBinding {
             generation: self.clone(),
-            parameters,
-            uniform: uniform.into(),
-            textures,
+            values: Arc::new(BindingValues {
+                parameters,
+                uniform: uniform.into_boxed_slice(),
+                textures,
+            }),
         })
     }
 }
@@ -365,8 +367,13 @@ impl Material2dGeneration {
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct Material2dBinding {
     generation: Material2dGeneration,
+    values: Arc<BindingValues>,
+}
+
+#[derive(Debug, PartialEq)]
+struct BindingValues {
     parameters: MaterialParameterValues,
-    uniform: Arc<[u8]>,
+    uniform: Box<[u8]>,
     textures: BTreeMap<String, Handle<ImageAsset>>,
 }
 
@@ -378,17 +385,17 @@ impl Material2dBinding {
 
     #[must_use]
     pub fn parameters(&self) -> &MaterialParameterValues {
-        &self.parameters
+        &self.values.parameters
     }
 
     #[must_use]
     pub fn uniform_bytes(&self) -> &[u8] {
-        &self.uniform
+        &self.values.uniform
     }
 
     #[must_use]
     pub fn textures(&self) -> &BTreeMap<String, Handle<ImageAsset>> {
-        &self.textures
+        &self.values.textures
     }
 }
 
