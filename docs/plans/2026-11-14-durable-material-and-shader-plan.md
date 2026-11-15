@@ -1554,6 +1554,47 @@ correctness Clippy passes. No statistical baseline, supported population, frame-
 retained geometry design or performance improvement is established by these tests. The next
 step is three independent matched measurement processes against the committed collector revision.
 
+### Immutable Material Value Candidate
+
+The collector is committed at `10cd109`. Three separate Vulkan/RTX 4090 release processes each
+pass all 36 groups and 2,304 recorded samples. For 65,536 cells, one View and static bound values,
+managed-drive/capture P50 is 70.8--75.5 ms, versus 7.7--8.7 ms for plain values with the same
+visible geometry and expected pixels. Native submission P50 is about 0.5 ms in both paths.
+This attributes the immediate investigation to CPU binding/lowering work rather than requiring
+a retained Tile geometry cache. Exact distributions and provenance will accompany the final
+comparison; these are serialized offscreen costs, not GPU duration or a product frame-time SLO.
+
+Trial one private immutable `BindingValues` allocation at the original Material owner. Each
+binding keeps its exact generation and shares validated parameters, encoded bytes and texture
+handles across clones. No interning, current-library lookup, cross-frame geometry cache,
+pointer-based equality or publication owner is introduced. Original value equality, signed-zero
+encoding, resource capture and final-generation retention stay authoritative. All public getters
+and binding construction contracts remain unchanged.
+
+Before selection, require at least a 25% reduction in large bound-scene managed-drive/capture
+P50 for both View counts in all three independent candidate processes. Investigate any small
+scene median regression exceeding 0.1 ms, and retain plain-scene controls and separate native
+work/memory facts. These are private experiment decision criteria, not supported-population or
+performance promises. Existing generation/publication/last-good, parameter/texture, Sprite
+ordering, public pixel and old-input/output retirement workflows must continue to pass. A
+successful simple-value correction does not qualify retained geometry or complete R9c.
+
+The candidate's existing owning Material/Sprite cohort passes 136/136 in
+`0d92a4b4-1f6a-40a5-8673-f6937b373855` (4.385 seconds after a 5m29s release rebuild).
+Selected original Host/stock Material controls pass 21/21 in
+`beb0aa23-c7c0-403c-8813-3020ed341c91` (12.446 seconds), including both layouts, last-good
+Shader state, late original captures, declared graph textures and original-prefix failure/cleanup.
+Final independent CPU controls pass 2/2 in `944968d1-4901-4433-a44f-1912958a921c` (0.231 seconds).
+The public full-pixel/retirement trajectory passes on actual Vulkan RTX 4090 in
+`ef829583-2932-4d9d-8347-5a011513a851` (1.070 seconds) and actual DX12 Microsoft Basic Render
+Driver in `5c39fb56-a1de-466e-bddc-e0b407139952` (1.574 seconds). It asserts the original Host's
+backend and CPU/hardware class, in addition to the complete existing pixel/lifetime assertions.
+These overlapping controls are separate from statistical measurement. Independent review finds
+no P1/P2 regression; owning correctness Clippy and independent all-target strict Clippy pass.
+The obsolete private-executor performance collector is removed, with historical reports pinned
+to their original reproduction context. Local CI now selects the ordinary module CPU controls
+and explicit DX12 software pixel control; remote CI has not been executed.
+
 ## Live Native Source Updates Through External GPU Execution
 
 Status: implemented and locally qualified at `0602b5d`. Extend the independently

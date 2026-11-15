@@ -247,6 +247,12 @@ The [qualification record](../knowledge/engineering/verification/2026-10/2026-10
 records the actual checks, corrected fixture failures and source bindings. The locked workspace
 all-feature/all-target check and formatting pass; no fresh native UI release claim is added.
 
+The runtime collector below is historical and requires an isolated checkout of the recorded
+October source; its old submitter feature names and private execution path are no longer current.
+The independently locked [Sprite/Tile module consumer](../../tests/fixtures/module-consumer/sprite-render-consumer/README.md)
+now measures the public stock policy and Host. It excludes this report's changing HUD, so the
+two workloads cannot establish an apples-to-apples speedup. Historical raw evidence is retained.
+
 ```powershell
 $env:CARGO_BUILD_JOBS='1'
 cargo +1.95.0 nextest run --cargo-profile release --no-default-features --features project-workflow,tooling,runtime-ui,presentation-2d --test editor_persistence --locked --offline --run-ignored only -E 'test(measure_editor_interaction_costs)' --no-capture

@@ -86,6 +86,14 @@ has zero pending/lost retirements; explicit backend cleanup returns tracked curr
 
 ## Reproduction And Remaining Limits
 
+This is historical evidence at `fce2e70`. Reproduce the commands below in an isolated checkout
+of that revision, whose manifest still contains `sprite-submitter` and `ui-submitter`. The
+legacy private-executor performance collector has been retired from the current tree. The
+current public replacement is the independently locked
+[Sprite/Tile module consumer](../../tests/fixtures/module-consumer/sprite-render-consumer/README.md).
+Its geometry-only workload excludes this report's changing HUD and is not a directly comparable
+speedup measurement. The original raw observations and summary remain unchanged.
+
 Use the same populations 64/4,096/65,536, fixed 320x180 world canvas, 960x540 destination,
 static/one-cell-and-HUD-change scenarios, two warmups and sixteen retained samples per group.
 The collector now reports actual queue counts rather than asserting authored population equals

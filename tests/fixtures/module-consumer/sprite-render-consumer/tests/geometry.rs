@@ -115,6 +115,22 @@ fn original_tile_captures_and_pixels_survive_edits_views_and_runtime_retirement(
                 }
             }
         }
+        let adapter = host
+            .adapter_summary()
+            .expect("the actual original Host adapter");
+        assert_eq!(adapter.backend(), std::env::var("WGPU_BACKEND")?);
+        let fallback = std::env::var("NARA_WGPU_FORCE_FALLBACK")?;
+        if fallback == "1" {
+            assert_eq!(adapter.device_type(), "cpu");
+        } else {
+            assert_ne!(adapter.device_type(), "cpu");
+        }
+        println!(
+            "GEOMETRY_NATIVE_ADAPTER name={:?} backend={} device_type={} fallback={fallback}",
+            adapter.name(),
+            adapter.backend(),
+            adapter.device_type(),
+        );
         Ok(())
     }));
     readback::finish(&mut host);

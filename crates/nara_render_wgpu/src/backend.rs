@@ -1906,9 +1906,6 @@ pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendStat
 
 #[cfg(all(test, feature = "stock-sprite", feature = "stock-ui"))]
 mod image_working_set;
-#[cfg(all(test, feature = "stock-sprite", feature = "stock-ui"))]
-mod runtime_measurement;
-
 #[cfg(test)]
 mod tests {
     use std::{num::NonZeroU64, sync::Arc};
