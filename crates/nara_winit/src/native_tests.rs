@@ -24,6 +24,9 @@ pub(super) enum NativeTestEvent {
         wake_id: SessionWakeId,
         accepted: Sender<bool>,
     },
+    ObserveMaintenancePending {
+        pending: Sender<bool>,
+    },
 }
 
 pub(super) fn handle_event(
@@ -51,6 +54,13 @@ pub(super) fn handle_event(
                 assert_eq!(app.frame_requested, before);
             }
             let _ = accepted.send(result);
+        }
+        NativeTestEvent::ObserveMaintenancePending { pending } => {
+            let _ = pending.send(
+                app.maintenance_wake
+                    .as_ref()
+                    .is_some_and(|state| state.is_pending()),
+            );
         }
     }
 }

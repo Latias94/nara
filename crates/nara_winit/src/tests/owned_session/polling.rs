@@ -6,6 +6,7 @@ use nara_app::{
 use nara_ecs::{Res, ResMut, Resource};
 
 mod cadence;
+mod maintenance_wake;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct FrameCounts {

@@ -13,17 +13,19 @@
 //!
 //! Window callbacks require the current session's native-window mapping. Draining before new
 //! native creation also prevents buffered events from acquiring meaning through reused native
-//! window identifiers. Accessibility wake tickets are allocated by this physical pump and never
-//! reused: even a late old proxy wake cannot drain another session's mailbox or request a frame.
+//! window identifiers. Session wake tickets are allocated by this physical pump and never reused:
+//! even a late old proxy wake cannot drain another session's mailbox or request a frame.
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
 mod keyboard_continuation;
+mod maintenance_wake;
 #[cfg(all(test, target_os = "windows"))]
 mod native_tests;
 mod window_mode;
 
 pub use keyboard_continuation::{WinitInputActivation, WinitKeyboardContinuationError};
+pub use maintenance_wake::WinitMaintenanceWake;
 
 #[cfg(feature = "accessibility")]
 pub use accessibility::{
@@ -70,6 +72,7 @@ pub mod __private {
 }
 
 use __private::{__WinitPresentationDriver, __WinitPresentationProgress};
+use maintenance_wake::MaintenanceWakeState;
 
 #[cfg(feature = "platform-accessibility")]
 use accessibility::WinitPlatformAccessibilitySession;
@@ -145,13 +148,13 @@ enum WinitShutdownState {
 
 #[derive(Debug)]
 enum WinitUserEvent {
+    MaintenanceWake(SessionWakeId),
     #[cfg(feature = "platform-accessibility")]
     AccessibilityWake(SessionWakeId),
     #[cfg(all(test, target_os = "windows"))]
     NativeTest(native_tests::NativeTestEvent),
 }
 
-#[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SessionWakeId(u64);
 
@@ -175,7 +178,6 @@ pub struct WinitEventLoop {
     resumed: bool,
     needs_drain: bool,
     handoff_deadline: Option<Instant>,
-    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
     next_wake_id: u64,
 }
 
@@ -200,22 +202,19 @@ impl WinitEventLoop {
             resumed: false,
             needs_drain: false,
             handoff_deadline: None,
-            #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
             next_wake_id: 1,
         }
     }
 
     fn bind(&mut self, app: &mut WinitApp) -> Result<(), AppRunError> {
-        #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
-        {
-            let next = self
-                .next_wake_id
-                .checked_add(1)
-                .ok_or_else(|| AppRunError::runner("winit session wake identity exhausted"))?;
-            app.session_wake_id = Some(SessionWakeId(self.next_wake_id));
-            self.next_wake_id = next;
-        }
+        let next = self
+            .next_wake_id
+            .checked_add(1)
+            .ok_or_else(|| AppRunError::runner("winit session wake identity exhausted"))?;
+        app.session_wake_id = Some(SessionWakeId(self.next_wake_id));
+        self.next_wake_id = next;
         app.event_proxy = Some(self.event_loop.create_proxy());
+        app.maintenance_wake = Some(Arc::new(MaintenanceWakeState::default()));
         self.event_loop
             .set_control_flow(app.control_flow.into_winit());
         Ok(())
@@ -231,7 +230,11 @@ impl WinitEventLoop {
         target_os = "netbsd",
         target_os = "openbsd"
     ))]
-    fn prepare_handoff(&mut self, budget: Duration) -> Result<bool, AppRunError> {
+    fn prepare_handoff(
+        &mut self,
+        budget: Duration,
+        session_wake_id: Option<SessionWakeId>,
+    ) -> Result<bool, AppRunError> {
         if !self.needs_drain {
             return Ok(true);
         }
@@ -242,16 +245,25 @@ impl WinitEventLoop {
         let mut drain = WinitHandoffDrain {
             resumed: &mut self.resumed,
             received_event: false,
+            session_wake_id,
+            maintenance_wake: None,
         };
         let status = self
             .event_loop
             .pump_app_events(Some(Duration::ZERO), &mut drain);
         let received_event = drain.received_event;
+        let maintenance_wake = drain.maintenance_wake;
         if let PumpStatus::Exit(code) = status {
             self.resumed = false;
             return Err(AppRunError::runner(format!(
                 "winit event pump exited during session handoff (code {code})"
             )));
+        }
+        if let Some(wake_id) = maintenance_wake {
+            self.event_loop
+                .create_proxy()
+                .send_event(WinitUserEvent::MaintenanceWake(wake_id))
+                .map_err(|_| AppRunError::runner("winit maintenance wake delivery refused"))?;
         }
         if !received_event {
             self.needs_drain = false;
@@ -293,6 +305,8 @@ impl std::fmt::Debug for WinitEventLoop {
 struct WinitHandoffDrain<'a> {
     resumed: &'a mut bool,
     received_event: bool,
+    session_wake_id: Option<SessionWakeId>,
+    maintenance_wake: Option<SessionWakeId>,
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitHandoffDrain<'_> {
@@ -313,8 +327,13 @@ impl ApplicationHandler<WinitUserEvent> for WinitHandoffDrain<'_> {
         self.received_event = true;
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: WinitUserEvent) {
-        self.received_event = true;
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: WinitUserEvent) {
+        match event {
+            WinitUserEvent::MaintenanceWake(wake_id) if self.session_wake_id == Some(wake_id) => {
+                self.maintenance_wake = Some(wake_id);
+            }
+            _ => self.received_event = true,
+        }
     }
 }
 
@@ -520,6 +539,25 @@ impl WinitSession {
             .as_ref()
             .expect("live session owns its Runtime")
             .control_flow
+    }
+
+    /// Returns a maintenance-only hint for this healthy, bound native session.
+    ///
+    /// Clones wake the original physical pump without requesting an App frame or changing
+    /// elapsed time or paused capture eligibility. Shutdown revokes every clone, and a later
+    /// session on the same pump cannot acquire an old hint. No operation result is conveyed.
+    #[must_use]
+    pub fn maintenance_wake(&self) -> Option<WinitMaintenanceWake> {
+        let app = self.app.as_ref().filter(|app| app.is_healthy_live())?;
+        let state = app
+            .maintenance_wake
+            .as_ref()
+            .filter(|state| state.is_live())?;
+        Some(WinitMaintenanceWake::new(
+            app.event_proxy.as_ref()?.clone(),
+            app.session_wake_id?,
+            state.clone(),
+        ))
     }
 
     /// Changes native frame cadence without changing Runtime pause or elapsed time.
@@ -773,7 +811,9 @@ impl WinitSession {
             ))]
             {
                 if !app.shutdown.is_started() && event_loop.needs_drain {
-                    if let Err(error) = event_loop.prepare_handoff(app.native_retirement_budget) {
+                    if let Err(error) = event_loop
+                        .prepare_handoff(app.native_retirement_budget, app.session_wake_id)
+                    {
                         app.record_primary_failure(error);
                         app.begin_shutdown_transition(Instant::now());
                     }
@@ -873,6 +913,9 @@ impl WinitSession {
 
 impl Drop for WinitSession {
     fn drop(&mut self) {
+        if let Some(app) = self.app.as_ref() {
+            app.revoke_maintenance_wake();
+        }
         if self.is_retired() {
             return;
         }
@@ -972,8 +1015,8 @@ struct WinitApp {
     keyboard_continuation: keyboard_continuation::WinitKeyboardContinuation,
     input_window_id: WindowId,
     event_proxy: Option<EventLoopProxy<WinitUserEvent>>,
-    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
     session_wake_id: Option<SessionWakeId>,
+    maintenance_wake: Option<Arc<MaintenanceWakeState>>,
     #[cfg(feature = "platform-accessibility")]
     accessibility_activation: accessibility::__private::WinitAccessibilityActivation,
     #[cfg(feature = "platform-accessibility")]
@@ -1127,8 +1170,8 @@ impl WinitApp {
             keyboard_continuation: keyboard_continuation::WinitKeyboardContinuation::default(),
             input_window_id: WindowId::PRIMARY,
             event_proxy: None,
-            #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
             session_wake_id: None,
+            maintenance_wake: None,
             #[cfg(feature = "platform-accessibility")]
             accessibility_activation,
             #[cfg(feature = "platform-accessibility")]
@@ -1472,6 +1515,21 @@ impl WinitApp {
         self.with_driver_scope(|scope| {
             accessibility::__private::queue_winit_accessibility_inputs(scope, batch)
         })
+    }
+
+    fn handle_maintenance_wake(&mut self, wake_id: SessionWakeId) -> bool {
+        if !self.is_healthy_live() || self.session_wake_id != Some(wake_id) {
+            return false;
+        }
+        self.maintenance_wake
+            .as_ref()
+            .is_some_and(|state| state.acknowledge())
+    }
+
+    fn revoke_maintenance_wake(&self) {
+        if let Some(state) = self.maintenance_wake.as_ref() {
+            state.revoke();
+        }
     }
 
     #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
@@ -1888,6 +1946,7 @@ impl WinitApp {
     }
 
     fn record_primary_failure(&mut self, error: AppRunError) {
+        self.revoke_maintenance_wake();
         self.paused_frame_complete = false;
         self.primary_failure.get_or_insert(error);
     }
@@ -1923,6 +1982,7 @@ impl WinitApp {
     }
 
     fn begin_shutdown_transition(&mut self, now: Instant) -> EventLoopDirective {
+        self.revoke_maintenance_wake();
         self.paused_frame_complete = false;
         if let Some(fault) = self.runtime.fault() {
             self.record_primary_failure(runtime_fault_error(fault));
@@ -2242,6 +2302,9 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: WinitUserEvent) {
         match event {
+            WinitUserEvent::MaintenanceWake(wake_id) => {
+                self.handle_maintenance_wake(wake_id);
+            }
             #[cfg(feature = "platform-accessibility")]
             WinitUserEvent::AccessibilityWake(wake_id) => {
                 if let Err(error) = self.handle_session_wake(wake_id) {

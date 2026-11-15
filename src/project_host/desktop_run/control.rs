@@ -45,6 +45,15 @@ pub enum DesktopControlError {
 }
 
 impl DesktopRun {
+    /// Obtains a payload-free wake for this original live native maintenance boundary.
+    ///
+    /// The cloneable handle requests no App frame and grants no Runtime/input authority.
+    /// It is revoked during original retirement and cannot wake a successor session.
+    #[must_use]
+    pub fn maintenance_wake(&self) -> Option<nara_winit::WinitMaintenanceWake> {
+        self.live_native().ok()?.session.maintenance_wake()
+    }
+
     /// Returns the cadence of the retained original native session, when constructed.
     #[must_use]
     pub fn control_flow(&self) -> Option<nara_winit::WinitControlFlow> {

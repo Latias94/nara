@@ -8,6 +8,8 @@ use std::{
     sync::Weak,
 };
 
+mod maintenance_wake;
+
 const POLL_WAIT: Duration = Duration::from_millis(10);
 const MAINTENANCE_INTERVAL: Duration = Duration::from_millis(20);
 const QUIET_INTERVAL: Duration = Duration::from_millis(120);

@@ -134,6 +134,11 @@ is explicit runtime settings:
   input/window demand and presentation maintenance keep their existing owners. Wait does not
   infer ECS dirtiness, supply arbitrary task-completion wakes, or promise real-time animation;
   the caller selects it only when its workload can tolerate those limits.
+- An explicitly obtained native-session maintenance wake is a coalesced CPU notification bound
+  to the original physical-loop session identity. It may make the original caller/maintenance
+  boundary observable without requesting an App frame, changing time or authorizing input.
+  Retiring that session revokes its handle; queued or late wakes cannot operate on a successor.
+  The caller still validates and drains its actual work before waiting again.
 - background/blurred windows may throttle real-time frames, pause virtual time, or keep running,
   depending on runtime settings.
 - redraw requests should be driven by configured frame policy, dirty render state, visible windows,
