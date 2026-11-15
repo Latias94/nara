@@ -4,6 +4,7 @@
 **Date**: 2026-07-22
 **Amended**: 2026-10-23 for private phase spatial snapshots, direct-parent domain boundaries, and
 separation of accepted spatial invariants from candidate representations
+**Amended**: 2026-11-15 for fixed affine collision and bounded dynamic-root writeback
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0018](0018-coordinate-units-and-time.md), and
 [ADR 0022](0022-3d-coordinate-system.md)
@@ -153,6 +154,12 @@ authored base fields and eliminating redundant residuals.
   body type accepts. Dynamic bodies initially remain supported roots with identity effective
   scale; non-uniform scale, shear and parented solver writeback require a concrete fixed-tick
   contract rather than an automatic transform sync.
+  The [transformed collision successor](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
+  tests fixed boxes as full affine convex geometry and root/unit-scale dynamic poses through
+  Transform's opt-in completed fixed-input role. This concrete domain contract does not admit
+  arbitrary physics shapes, parented dynamic bodies or a selected persistent affine
+  representation. Shape degeneracy and unavailable spatial
+  input refuse before native mutation; rendering an affine alone does not admit a dynamic pose.
 - Future animation writes authored transform fields through its plugin-owned target/evaluation
   model. Animation of any new affine representation requires its own track/interpolation
   contract; generic reflection-based field animation is not admitted by this ADR.

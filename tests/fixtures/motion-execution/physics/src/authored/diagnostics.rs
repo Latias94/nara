@@ -6,6 +6,7 @@ use nara_diagnostic::{
 use nara_ecs::Entity;
 use nara_identity::{SceneEntityId, SourceDocumentKind, SourceDocumentOrigin};
 use nara_scene::{SceneEntityProvenance, SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey};
+use nara_transform::SpatialSnapshotError;
 
 use super::{COMPONENT_ID, CollisionInput, CollisionOrigin};
 
@@ -26,6 +27,39 @@ pub(super) fn closed() -> Box<DiagnosticReport> {
     single(error(
         "fixture.motion.collision.closed",
         "Collision ownership has been closed",
+    ))
+}
+
+pub(super) fn spatial_input(reason: SpatialSnapshotError) -> Diagnostic {
+    let summary = match reason {
+        SpatialSnapshotError::WrongWorld => {
+            "Collision input spatial publication belongs to another World"
+        }
+        SpatialSnapshotError::WrongRuntimeGeneration => {
+            "Collision input spatial publication belongs to another runtime generation"
+        }
+        SpatialSnapshotError::WrongPhase { .. } => {
+            "Collision requires the fixed-input spatial role"
+        }
+        SpatialSnapshotError::WrongTime => {
+            "Collision input spatial publication is stale for this tick or frame"
+        }
+        SpatialSnapshotError::MissingClock => {
+            "Collision input spatial publication requires the current fixed and frame clocks"
+        }
+        _ => "Collision requires an available current fixed-input spatial publication",
+    };
+    error("fixture.motion.collision.spatial-input", summary)
+}
+
+pub(super) fn native_state(entity: Entity, origin: &CollisionOrigin) -> Box<DiagnosticReport> {
+    single(with_origin(
+        error(
+            "fixture.motion.collision.native-state",
+            "An owned native pair or its finite four-corner native shape is unavailable",
+        ),
+        entity,
+        origin,
     ))
 }
 

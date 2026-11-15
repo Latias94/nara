@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-20
-**Last Revised**: 2026-11-04
+**Last Revised**: 2026-11-15
 **Supersedes**: [ADR 0019](0019-physics-strategy.md) and
 [ADR 0030](0030-audio-strategy.md)
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
@@ -145,6 +145,13 @@ Concrete dependencies should prefer plugin-specific service IDs or explicit plug
 Installing two physics plugins does not make simultaneous writes to the same entities coherent. The
 game must separate entity membership, choose one writer, or install an explicit bridge and ordering
 policy. Automatic dual-write arbitration would be another unproven common Interface.
+
+The independent transformed-collision workflow keeps local shape data, native convex geometry,
+root-body pose writeback, source attribution and native retirement with its concrete Rapier
+plugin. It consumes Transform-owned completed input and result cuts rather than walking the
+hierarchy or installing another spatial authority. Fixed affine geometry and dynamic rigid-pose
+acceptance have distinct validation; a successful visual transform does not imply physical
+admission. This workflow supplies no portable Physics provider or official backend selection.
 
 ### Official Defaults and Ecosystem Freedom
 

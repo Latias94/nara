@@ -883,6 +883,7 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_identity",
  "nara_reflect",
  "nara_scene",

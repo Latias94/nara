@@ -1,18 +1,23 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use motion_physics::authored::{
     CollisionDefinition, CollisionInput, CollisionWorld, register_collision,
 };
 use nara_app::{
-    App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginSchemaProviderId, PluginShutdownObligationId, RuntimeCloseContext,
-    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-    RuntimeCloseProgress, RuntimeInstance,
+    App, CoreStage, ExecutionProfile, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
+    PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId, PluginShutdownObligationId,
+    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeInstance, RuntimeState,
 };
 use nara_asset::AssetRef;
 use nara_core::Vec2;
 use nara_ecs::{
-    Entity, Resource, World, bevy_ecs::schedule::SingleThreadedExecutor, schedule::ScheduleLabel,
+    Entity, Resource, World,
+    bevy_ecs::{error::BevyError, schedule::SingleThreadedExecutor},
+    schedule::{IntoScheduleConfigs, ScheduleLabel},
 };
 use nara_identity::{EntityLookup, SpawnedSceneInstance};
 use nara_reflect::{
@@ -29,15 +34,25 @@ use nara_scene::{
     SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation,
     SourceDocumentKey, SourceDocumentKind,
 };
+use nara_transform::{Transform2d, TransformPlugin, add_fixed_transform_input_systems};
 
 mod tests;
+mod transformed;
 
-const COMPONENT: &str = "fixture.motion.CollisionDefinition";
+const COMPONENT: &str = "fixture.motion.LocalBox";
+const TRANSFORM: &str = "nara.transform.Transform2d";
 const PLUGIN: PluginId = PluginId::new("fixture.motion.collision-authoring");
 const PROVIDER: PluginSchemaProviderId =
     PluginSchemaProviderId::new("fixture.motion.collision-authoring.schema");
 const SHUTDOWN: PluginShutdownObligationId =
     PluginShutdownObligationId::new("fixture.motion.collision-authoring.shutdown");
+const COLLISION_SCHEMA: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
+    ComponentSchemaOwnerId::new("fixture.motion.collision-authoring"),
+    PROVIDER,
+    ComponentSchemaProviderBindingId::new("fixture.motion.collision-native", 1),
+    catalog,
+    register_collision,
+);
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
     Ok(ComponentSchemaCatalog {
@@ -51,6 +66,24 @@ struct CollisionOwner(Arc<Mutex<CollisionWorld>>);
 
 #[derive(Clone, Resource)]
 struct Sources(Arc<Mutex<Vec<SourceScene>>>);
+
+#[derive(Clone, Resource)]
+struct SolveEnabled(Arc<AtomicBool>);
+
+#[derive(Debug)]
+struct CollisionExecutionFailure(Box<nara_diagnostic::DiagnosticReport>);
+
+impl std::fmt::Display for CollisionExecutionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "collision execution refused with {} diagnostics",
+            self.0.iter().count()
+        )
+    }
+}
+
+impl std::error::Error for CollisionExecutionFailure {}
 
 struct SourceScene {
     session: SceneAuthoringSession,
@@ -75,33 +108,34 @@ impl SourceScene {
 struct CollisionPlugin {
     owner: CollisionOwner,
     sources: Sources,
+    solve: SolveEnabled,
 }
 
 impl Plugin for CollisionPlugin {
     fn declaration() -> &'static PluginDeclaration {
         const DECLARATION: PluginDeclaration =
             PluginDeclaration::new(PLUGIN, PluginCategory::Runtime)
-                .requires_plugins(&[nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+                .requires_plugins(&[
+                    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+                    nara_transform::TRANSFORM_PLUGIN_ID,
+                ])
                 .provides_schema(&[PROVIDER])
                 .shutdown_obligations(&[SHUTDOWN]);
         &DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        const DEFINITION: ComponentSchemaProviderDefinition =
-            ComponentSchemaProviderDefinition::new(
-                ComponentSchemaOwnerId::new("fixture.motion.collision-authoring"),
-                PROVIDER,
-                ComponentSchemaProviderBindingId::new("fixture.motion.collision-native", 1),
-                catalog,
-                register_collision,
-            );
-        register_schema_provider_for_plugin(app, PLUGIN, "CollisionDefinition", &DEFINITION)?;
+        register_schema_provider_for_plugin(app, PLUGIN, "CollisionDefinition", &COLLISION_SCHEMA)?;
         app.insert_resource(self.owner.clone())?
             .insert_resource(self.sources.clone())?
-            .add_systems(Reconcile, synchronize)?
-            .add_systems(CoreStage::FixedUpdate, step)?;
-        app.get_schedule_mut(Reconcile)?
+            .insert_resource(self.solve.clone())?
+            .add_systems(SynchronizeSources, synchronize)?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                step.in_set(FixedUpdateSet::Simulate),
+            )?;
+        add_fixed_transform_input_systems(app, reconcile_inputs.before(step))?;
+        app.get_schedule_mut(SynchronizeSources)?
             .unwrap()
             .set_executor(SingleThreadedExecutor::new());
         app.register_plugin_runtime_close_participant(
@@ -114,12 +148,11 @@ impl Plugin for CollisionPlugin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-struct Reconcile;
+struct SynchronizeSources;
 
 fn synchronize(world: &mut World) {
     let registry = component_registry(world).unwrap().clone();
     let sources = Arc::clone(&world.resource::<Sources>().0);
-    let owner = Arc::clone(&world.resource::<CollisionOwner>().0);
     let mut sources = sources.lock().unwrap();
     for scene in &mut *sources {
         if scene.active
@@ -141,6 +174,12 @@ fn synchronize(world: &mut World) {
             assert!(report.cleared, "{:?}", report.diagnostics);
         }
     }
+}
+
+fn reconcile_inputs(world: &mut World) -> Result<(), BevyError> {
+    let sources = Arc::clone(&world.resource::<Sources>().0);
+    let owner = Arc::clone(&world.resource::<CollisionOwner>().0);
+    let sources = sources.lock().unwrap();
     let inputs = sources
         .iter()
         .filter(|scene| scene.active)
@@ -149,11 +188,23 @@ fn synchronize(world: &mut World) {
             revision: scene.session.revision(),
         })
         .collect::<Vec<_>>();
-    owner.lock().unwrap().reconcile(world, &inputs).unwrap();
+    owner
+        .lock()
+        .unwrap()
+        .reconcile(world, &inputs)
+        .map_err(|report| BevyError::error(CollisionExecutionFailure(report)))
 }
 
-fn step(owner: nara_ecs::Res<CollisionOwner>) {
-    owner.0.lock().unwrap().step().unwrap();
+fn step(world: &mut World) -> Result<(), BevyError> {
+    if !world.resource::<SolveEnabled>().0.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let owner = Arc::clone(&world.resource::<CollisionOwner>().0);
+    owner
+        .lock()
+        .unwrap()
+        .step_and_writeback(world)
+        .map_err(|report| BevyError::error(CollisionExecutionFailure(report)))
 }
 
 struct CollisionClose(Arc<Mutex<CollisionWorld>>);
@@ -179,25 +230,40 @@ struct Harness {
     runtime: RuntimeInstance,
     owner: Arc<Mutex<CollisionWorld>>,
     sources: Arc<Mutex<Vec<SourceScene>>>,
+    solve: Arc<AtomicBool>,
 }
 
 impl Harness {
     fn new(scenes: Vec<SourceScene>) -> Self {
+        Self::with_profile(scenes, ExecutionProfile::Serial)
+    }
+
+    fn with_profile(scenes: Vec<SourceScene>, profile: ExecutionProfile) -> Self {
         let owner = Arc::new(Mutex::new(CollisionWorld::new()));
         let sources = Arc::new(Mutex::new(scenes));
+        let solve = Arc::new(AtomicBool::new(true));
         let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
+        app.set_execution_profile(profile).unwrap();
+        app.add_plugins((
+            ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            TransformPlugin,
+        ))
+        .unwrap();
         app.add_plugin(CollisionPlugin {
             owner: CollisionOwner(Arc::clone(&owner)),
             sources: Sources(Arc::clone(&sources)),
+            solve: SolveEnabled(Arc::clone(&solve)),
         })
         .unwrap();
         let mut harness = Self {
             runtime: RuntimeInstance::start(app).unwrap(),
             owner,
             sources,
+            solve,
         };
         harness.sync();
+        harness.admit();
         harness
     }
 
@@ -206,7 +272,21 @@ impl Harness {
     }
 
     fn sync(&mut self) {
-        self.runtime.run_schedule(Reconcile).unwrap();
+        self.runtime.run_schedule(SynchronizeSources).unwrap();
+    }
+
+    /// Completes one explicit fixed input/admission tick without advancing the native solver.
+    fn admit(&mut self) {
+        self.solve.store(false, Ordering::Release);
+        let result = if self.runtime.state() == RuntimeState::Paused {
+            self.runtime
+                .request_control(nara_app::RuntimeControl::StepFixedTick);
+            self.runtime.drive(std::time::Duration::ZERO)
+        } else {
+            self.runtime.drive(FixedTime::DEFAULT_TIMESTEP)
+        };
+        self.solve.store(true, Ordering::Release);
+        result.unwrap();
     }
 
     fn entity(&self, scene: usize, name: &str) -> Entity {
@@ -225,6 +305,7 @@ impl Harness {
             .apply_patch(patch, &registry);
         assert!(report.applied, "{:?}", report.diagnostics);
         self.sync();
+        self.admit();
     }
 
     fn finish(self) {
@@ -267,12 +348,37 @@ fn definition(
 }
 
 fn record(name: &str, definition: CollisionDefinition) -> SceneEntityRecord {
-    SceneEntityRecord::new(id(name)).with_component(
-        ComponentTypeId::new(COMPONENT),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            definition.__encode_persistent_component().unwrap(),
-        ),
+    SceneEntityRecord::new(id(name))
+        .with_component(
+            ComponentTypeId::new(COMPONENT),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                definition.__encode_persistent_component().unwrap(),
+            ),
+        )
+        .with_component(
+            ComponentTypeId::new(TRANSFORM),
+            transform_record(Transform2d::IDENTITY),
+        )
+}
+
+fn transform_record(transform: Transform2d) -> SceneComponentRecord {
+    let vector = |value: Vec2| {
+        ComponentValue::map([
+            ("x", ComponentValue::f64(f64::from(value.x)).unwrap()),
+            ("y", ComponentValue::f64(f64::from(value.y)).unwrap()),
+        ])
+    };
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            ("translation", vector(transform.translation)),
+            (
+                "rotation",
+                ComponentValue::f64(f64::from(transform.rotation)).unwrap(),
+            ),
+            ("scale", vector(transform.scale)),
+        ]),
     )
 }
 

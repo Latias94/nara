@@ -115,14 +115,18 @@ policy cases above retain these tests without changing their original Serial/cus
 
 ## Authored collision derivation
 
-The optional `physics/authoring` feature supplies one plugin-specific persistent box definition
-and a concrete Rapier owner. The definition stores world-space center, bounded half width/height
-and fixed/dynamic intent. It contains no native handles or solver state. The consumer installs
+The optional `physics/authoring` feature supplies one plugin-specific persistent local-box definition
+and a concrete Rapier owner. The canonical v1 component is `fixture.motion.LocalBox`; its center
+and bounded half extents describe geometry in the entity's Transform frame, alongside fixed/dynamic
+intent. It replaces the unreleased world-center fixture without an alias or old-format reader.
+It contains no native handles or solver state. The consumer installs
 the exact native Schema provider through ordinary App composition, then materializes Scene and
 Prefab documents through public Scene interfaces before deriving native bodies and colliders.
 
-Reconciliation receives the complete selected set of current Scene receipts. It validates every
-receipt, source association and geometry before changing native membership. Generated body,
+Reconciliation receives the complete selected set of current Scene receipts and reads the actual
+current `FixedInputSpatialSnapshot2d` published by the original Transform owner. There is no
+identity/local fallback. It validates every receipt, source association and native shape before
+changing native membership. Generated body,
 collider and numeric debug output retain typed source, occurrence, structured Prefab ancestry,
 component/property selectors and the caller-accepted input revision. Debug vertices come from
 actual collider shapes and poses; a debug capture alone does not certify a contact. The fixed
@@ -138,7 +142,26 @@ readable across edit, removal and managed close without keeping the old solver o
 Tests additionally cover duplicate definitions, two occurrences of one source, two structured
 Prefab projections, component/entity removal, occurrence unload, invalid source/native values,
 foreign/stale/duplicate receipts and missing-binding refusal at registry freeze with repair of
-the original candidate. This is a translation-only public authoring/derivation workflow. It does
-not qualify Editor widgets, a physics device, affine hierarchy integration, an official production
-backend or a domain cook. The [owning unit](../../../docs/plans/2026-11-04-authored-collision-derivation-plan.md)
-retains the comparison, evidence and limits.
+the original candidate. The transformed successor exercises fixed affine convex shapes and root,
+unit-scale dynamic writeback, while the separate joint Solver retains its translation-only motion
+contract. It does not qualify parented dynamic poses, local-affine authoring, Editor widgets,
+an official production backend or a domain cook. The
+[owning unit](../../../docs/plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
+records implementation status, executed results and limits; source changes alone are not
+qualification.
+
+Source synchronization materializes or unloads Scene data without stepping physics. The next
+explicit fixed tick admits geometry through the original spatial input, solves, then writes root
+poses back before the completed Fixed result. The test harness can run a named admission-only tick
+to inspect native pair/velocity preservation before solving; its Runtime clock still advances.
+Snapshots retain the original input stamp and whether a solve completed. Failed admission revokes
+solve permission and current debug availability; retained old captures keep their original values.
+
+The November 15 Windows/Rust1.95 release qualification passes the complete default cohort 40/40
+and `production-parallel` cohort 46/46. Ten transformed-collision tests run each workflow under
+Serial and Parallel when that feature is enabled. They retain actual Rapier contacts and
+independent affine-corner oracles, same-tick deferred edits, zero/multiple/paused exact ticks,
+source/history/Reopen, late live writeback refusal and original native cleanup. Separate actual
+DX12 hardware history and software joint Material/history trajectories use the same fixed-input
+role. These correctness results do not measure throughput or memory, qualify other platforms or
+admit parented/scaled dynamic bodies.

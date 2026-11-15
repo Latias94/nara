@@ -1,4 +1,4 @@
-//! Translation-only solver fixture; no production backend selection or execution policy.
+//! Independent motion and authored collision fixtures, without a production backend selection.
 
 #![forbid(unsafe_code)]
 
