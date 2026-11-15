@@ -151,13 +151,13 @@ jobs:
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
         run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-sprite-render-module-consumer --test geometry --run-ignored only -E 'test(original_tile_captures_and_pixels_survive_edits_views_and_runtime_retirement)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test explicit parallel Material motion and retained history through DX12 software
+      - name: Test authored collision, parallel Material motion and history through DX12 software
         if: runner.os == 'Windows'
         env:
           CARGO_TARGET_DIR: "${{ github.workspace }}/target"
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --features production-parallel --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+        run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --features production-parallel --test authored_collision --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test captured Material View time and temporal cuts through an external DX12 Host
         if: runner.os == 'Windows'
         env:

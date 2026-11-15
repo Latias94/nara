@@ -308,3 +308,40 @@ fails. Profile selection alone establishes neither solver-internal parallelism, 
 repeatability nor a throughput improvement. The
 [joint motion plan](../../../docs/plans/2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
 owns the executed results and remaining scope.
+
+## Authored Collision And Ordinary Sprite
+
+`tests/authored_collision.rs` combines the existing authored local-box Rapier owner with ordinary
+Scene materialization, fixed-input completion, Transform writeback and stock Sprite rendering.
+The same original entity owns each local box and its generated Sprite. A nonzero local center
+maps to the Sprite anchor; the fixed platform retains parent shear and reflection while the
+falling dynamic root keeps its supported rigid/unit-scale pose. This is an independent concrete
+integration, not an official Physics backend or a collision-specific renderer.
+
+The workflow edits the actual Scene, rejects invalid source, runs Undo/Redo and disk Save/Reopen,
+observes intended native contact and independent rest height, and compares full offscreen images.
+An independent f64 oracle reconstructs source geometry and previous/current presentation poses.
+One actual moving image must reject a current-only oracle outside the bounded raster-edge
+allowance. Colors and alpha remain exact; at most eight pixels within 0.001 pixel of a geometric
+edge may choose only the exact competing colors. The consumer reports those observations.
+
+Paused edits synchronize in an ordinary maintenance frame before exact Step. Step itself creates
+no Render capture. A retained original CPU input is first realized after its original World is
+destroyed, and original outputs stay readable across later work and producer retirement. A
+separate acceptance-panic control exercises physical Runtime/solver/native cleanup. No native
+window or hardware controller is created by these tests. The Scene module's serialization feature
+is selected directly rather than enabling the facade's complete authoring/serde composition.
+
+```powershell
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --features production-parallel --test authored_collision_math --test authored_collision --test-threads=1 --no-fail-fast --no-tests fail
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '1'
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --features production-parallel --test authored_collision --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
+
+Use `NARA_WGPU_FORCE_FALLBACK=0` for explicit hardware qualification; a missing or wrong adapter
+fails. Omit `production-parallel` to retain Serial. Reuse the root target and one Cargo build job,
+and run commands serially. The
+[owning plan](../../../docs/plans/2026-11-04-authored-collision-derivation-plan.md#authored-collision-and-visible-runtime-successor)
+records actual execution and scope; the commands alone do not qualify the workflow or a
+performance budget.

@@ -1396,7 +1396,12 @@ dependencies = [
  "motion-contract",
  "nara_app",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
+ "nara_hierarchy",
+ "nara_identity",
+ "nara_reflect",
+ "nara_scene",
  "nara_transform",
  "rapier2d",
 ]
@@ -1534,6 +1539,8 @@ dependencies = [
  "nara_ecs",
  "nara_render",
  "nara_render_wgpu",
+ "nara_scene",
+ "tempfile",
  "wgpu",
 ]
 
@@ -1581,6 +1588,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "serde",
  "thiserror 2.0.21",
  "tracing",
 ]
@@ -1591,6 +1599,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_ecs_derive",
+ "serde",
 ]
 
 [[package]]
@@ -1738,6 +1747,9 @@ dependencies = [
  "nara_ecs",
  "nara_identity",
  "nara_reflect_derive",
+ "ron",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1798,6 +1810,9 @@ dependencies = [
  "nara_hierarchy",
  "nara_identity",
  "nara_reflect",
+ "ron",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2643,6 +2658,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
+name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64",
+ "bitflags 2.13.2",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2963,6 +2990,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix 1.1.6",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
