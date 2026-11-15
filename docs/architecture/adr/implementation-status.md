@@ -2366,6 +2366,22 @@ format and document checks pass with their recorded overlapping scope. Replay pi
 front-buffer/scanout readback. Nonlinear effects, UI hit retargeting, foreign native execution and numerical budgets
 retain separate scope. Editor/Dialogue remains paused; full R8/R9/R12/Foundation stays active.
 
+The [measured geometry successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
+at `10cd109` supplies an independently locked domain-module Runtime/stock-policy/Host consumer.
+The private Material value-sharing correction `c796594`, measured at `94fc219`, preserves
+original generation, value equality and resource lifetime while reducing per-cell clone work.
+Six Vulkan/RTX 4090 release processes retain 13,824 sample rows, full pixels, old-input first
+realization after World retirement, retained outputs and zero final Host cleanup. The
+[report](../../benchmarks/2026-11-15-public-geometry.md) records 84.740--91.960% lower large bound
+managed-drive/capture P50 against the fastest matching baseline, at most 0.0124 ms small-scene
+P50 regression and identical thirteen sampled native/resource/count fields. Existing
+Material/Sprite 136, selected Host/stock Material 21, independent CPU 2 and asserted
+Vulkan-hardware/DX12-software pixel controls pass in separate overlapping scopes. Independent
+review, owning correctness Clippy and strict consumer Clippy pass. The private legacy cost
+collector is removed with historical reproduction kept separate. This qualifies the simpler
+immutable-value correction under ADR0096; a retained geometry cache, total memory budget,
+stable production tail, foreign execution and full R9c/R8/R9/R12 remain open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

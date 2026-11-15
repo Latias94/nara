@@ -35,6 +35,11 @@ using the same current public substrate. The owning
 records selection criteria, actual results and remaining scope. No retained geometry cache or
 supported population/frame-time SLO follows from the existence of this collector.
 
+The [qualified comparison](../../../../docs/benchmarks/2026-11-15-public-geometry.md) binds the
+baseline and private immutable Material-value correction to six independent process captures,
+full pixels and original retirement. It keeps per-process cost distributions and native work
+separate from full-game frame budgets.
+
 Run serially from the repository root, reusing its target:
 
 ```powershell

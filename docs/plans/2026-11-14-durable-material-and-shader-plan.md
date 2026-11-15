@@ -1506,14 +1506,15 @@ paused Editor/Dialogue product work distinct from this successor's actual eviden
 
 ### Current Source Attribution And Comparison
 
-The initial read-only source audit finds a simpler candidate than cross-frame map retention:
-`Material2dBinding` owns its parameter/texture maps, and its derived Clone copies those maps
+The initial read-only source audit at `10cd109` finds a simpler candidate than cross-frame map
+retention: at that baseline `Material2dBinding` owns its parameter/texture maps, and its Clone copies those maps
 for each extracted cell, each queue resolution and visible-View/native lowering. Uniform bytes
 and generation already share immutable storage. The public plain/bound workload holds geometry,
 visibility and expected pixels constant so population scaling can distinguish this repeated
 value work from native preparation. Batch rebuilding, instance conversion and initialized
 80-byte instance payloads remain separate hypotheses; native work must include initial mapped
-copies rather than looking only at Queue write calls. No measured winner is selected yet.
+copies rather than looking only at Queue write calls. Source attribution alone does not select
+an optimization; the qualified comparison below supplies the measurements.
 
 Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f` separates retained Mesh2d instance/phase
 state from per-View visibility, ordering, batching and uploads. Its
@@ -1531,8 +1532,8 @@ clear now selects only the first View and later Views load. Every created Runtim
 outside assertion-unwind scopes and retires before the original panic resumes. Retained-output
 and final states must be distinguishable despite periodic edits/motion, while oracle snapshots
 stay outside ordinary intervals. Previous-frame release and Host setup have their own interval;
-target adaptation does not silently absorb them. Actual native results and selection remain
-pending below.
+target adaptation does not silently absorb them. The following qualification records native
+results and the final comparison.
 
 ### Current Public Collector Qualification
 
@@ -1550,19 +1551,19 @@ Independent review is closed after correcting clear ownership, original Runtime 
 assertion unwind, periodic old/new-state collisions and interval attribution. The collector records
 the actual original Host adapter, includes initialized buffer copies in native work, and writes
 fresh per-process JSONL without replacing previous evidence. Independent all-target release
-correctness Clippy passes. No statistical baseline, supported population, frame-time guarantee,
-retained geometry design or performance improvement is established by these tests. The next
-step is three independent matched measurement processes against the committed collector revision.
+correctness Clippy passes. These correctness controls alone establish no statistical baseline,
+supported population, frame-time guarantee or retained geometry design. The subsequent
+comparison uses three independent measurement processes per variant against committed revisions.
 
 ### Immutable Material Value Candidate
 
 The collector is committed at `10cd109`. Three separate Vulkan/RTX 4090 release processes each
 pass all 36 groups and 2,304 recorded samples. For 65,536 cells, one View and static bound values,
-managed-drive/capture P50 is 70.8--75.5 ms, versus 7.7--8.7 ms for plain values with the same
+managed-drive/capture P50 is 70.8--75.3 ms, versus 7.7--8.7 ms for plain values with the same
 visible geometry and expected pixels. Native submission P50 is about 0.5 ms in both paths.
 This attributes the immediate investigation to CPU binding/lowering work rather than requiring
-a retained Tile geometry cache. Exact distributions and provenance will accompany the final
-comparison; these are serialized offscreen costs, not GPU duration or a product frame-time SLO.
+a retained Tile geometry cache. The final comparison below retains exact distributions and
+provenance. These are serialized offscreen costs, not GPU duration or a product frame-time SLO.
 
 Trial one private immutable `BindingValues` allocation at the original Material owner. Each
 binding keeps its exact generation and shares validated parameters, encoded bytes and texture
@@ -1594,6 +1595,35 @@ no P1/P2 regression; owning correctness Clippy and independent all-target strict
 The obsolete private-executor performance collector is removed, with historical reports pinned
 to their original reproduction context. Local CI now selects the ordinary module CPU controls
 and explicit DX12 software pixel control; remote CI has not been executed.
+
+### Qualified Material Value Sharing
+
+Select the private value-sharing correction `c796594`, measured at `94fc219` against baseline
+`10cd109`. The [public geometry report](../benchmarks/2026-11-15-public-geometry.md) binds six
+separate release processes, 13,824 numeric rows, original adapter identities, exact locked
+dependencies and uncompressed raw digests. Each process passes all 36 groups and complete
+pixel/old-input/output-retirement controls. The three baseline runs are
+`9dffb501-6091-45df-8c39-b5b43ad5b437`, `507538f3-aec1-4985-a87d-dd3f920080bd` and
+`680c76ef-a1ec-43f8-ac8b-66df9faf2a8e`; candidate runs are
+`b25b88ab-4aac-45d2-b777-2ab00557ee38`, `3af31c5e-3dc2-4c9a-af3f-7b3884511f29` and
+`d4dfa981-1787-4109-934d-bb7c9ef946f4`.
+
+For 65,536 static bound cells, managed-drive/capture P50 falls from 70.811--75.248 ms to
+5.693--6.279 ms with one View, and from 68.683--72.461 ms to 6.078--10.429 ms with two Views.
+Across all eighteen large bound candidate groups, the reduction is 84.740--91.960% against
+the fastest matching baseline, exceeding the 25% criterion. Maximum small-scene P50 regression
+against the fastest baseline is 0.0124 ms. All thirteen sampled resource/count fields match
+corresponding samples, including queued items, initialized/issued native work and retained
+resources. The observed retained native maximum is 4,147,204 bytes in both variants; total
+CPU/RSS, driver residency and a preparation peak were not measured.
+
+Keep process distributions separate. The slower third candidate process remains in the evidence;
+its variation is unattributed. The private representation changes both clone allocation and
+binding size, so this experiment does not isolate those contributions. Sixty-four-sample P99
+is the maximum, polling completion serializes frames, and all baseline runs precede candidate
+runs. These limits prevent a stable production-tail, GPU-duration or full-game budget claim.
+The simpler Material correction meets the selected pressure without admitting a retained
+geometry cache. Full R9c, 0121, R8/R9/R12/Foundation and paused Editor/Dialogue retain their scope.
 
 ## Live Native Source Updates Through External GPU Execution
 

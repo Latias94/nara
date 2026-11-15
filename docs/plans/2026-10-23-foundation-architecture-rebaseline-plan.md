@@ -1343,6 +1343,23 @@ Captured-input pixel replay is distinct from screen readback/scanout. General no
 UI hit retargeting, maximized/snap/keyboard movements, foreign execution and numerical budgets
 remain separate; Editor/Dialogue product work stays paused and full R8/R9/R12/Foundation active.
 
+The [measured geometry successor](2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
+starts from the independent public domain-module consumer at `10cd109`. Its six optimized
+Vulkan/RTX 4090 processes compare plain/bound values, three populations, one/two Views and
+static/cell/camera changes through the actual stock policy and Host. The simpler private
+Material correction `c796594`, measured at `94fc219`, shares immutable validated values while
+each binding keeps its exact original generation. Large bound managed-drive/capture P50 falls
+84.740--91.960% against the fastest matching baseline, with maximum small-scene P50 regression
+0.0124 ms and all thirteen sampled native/resource/count fields unchanged. The
+[report](../benchmarks/2026-11-15-public-geometry.md) preserves separate distributions, raw
+digests, full pixels, old input/output lifetime and zero final cleanup. Existing Material/Sprite
+136, selected Host/stock Material 21, independent CPU 2 and actual Vulkan/DX12-software controls
+pass in their separate scopes; correctness/strict Clippy and format checks pass. The obsolete
+private-executor performance collector is removed while historical observations remain pinned.
+The correction does not admit cross-frame geometry retention or establish a stable P99,
+GPU duration, total memory or supported-population budget. Remaining R9c and the complete
+R8/R9/R12/Foundation gates stay active; Editor/Dialogue product work remains paused.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
