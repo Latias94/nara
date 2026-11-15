@@ -340,6 +340,41 @@ semantics stay with Runtime. The maintained [notify source note](../../vendor/no
 records the bounded Windows/Linux join patch and its OS cleanup/platform limits. Managed watcher
 registration on other platforms currently refuses before native acquisition.
 
+## Live Source Updates And GPU Execution
+
+The independent Material consumer also provides an opt-in offscreen GPU trajectory. It uses
+the same physical file edits, original Scene requests and eight explicit commits as the
+CPU-content control. Its caller drives `HeadlessSession::frame`, observes the immutable CPU
+input taken by a `WgpuPolicyCaptureSet::Publish` system, then submits and reads that frame
+through one external `WgpuRenderHost`. The native owner stays outside the gameplay World.
+The project's requested `render-wgpu` and `presentation-2d` capabilities do not imply
+`desktop-winit` or a native-window presentation consumer. Its Window component is logical
+32-by-24 target data, with no OS window or native handle provider.
+
+The pixel oracle independently decodes the fixture's sRGB Images into linear RGB, applies the
+selected Shader gain and straight-alpha source-over blending, and compares the linear RGBA8
+output. Every committed state and every refusal has a fresh captured, submitted and read-back
+frame; a retained old output alone cannot qualify last-good rendering. The original startup
+input is first submitted after a Shader successor, through a separate producer in the same
+Host. Another unsubmitted input is retained across an Image successor. Release each old CPU
+input after its original pixels are verified: Source snapshots retain their original content
+budget, whose two-generation limit deliberately refuses a third retained generation. GPU
+outputs have their own retained-byte custody and can remain across all later publication.
+Each producer retains its original monotonic frame sequence. Retained outputs are read
+again after Runtime Stop and producer retirement. Final cleanup requires the original native
+watchers joined and the GPU Host's retained logical bytes and cleanup faults at zero.
+
+Run serially with the original absolute `CARGO_TARGET_DIR`, `CARGO_BUILD_JOBS=1`, an actual
+adapter, and `WGPU_BACKEND=vulkan` or `WGPU_BACKEND=dx12`:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Missing adapters and timeouts fail this ignored test. This is live offscreen source/Runtime/GPU
+evidence, not OS-window presentation, scanout, device reconstruction or a numerical edit-cost
+budget. The CPU-only `native-source-watch` feature remains independently usable.
+
 ## Independent Delivery Controls
 
 The independently locked Palette consumer exercises prepared source edits, Undo/Redo, exact

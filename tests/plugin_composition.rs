@@ -2564,6 +2564,15 @@ requested = ["runtime-2d", "presentation-2d", "render-wgpu"]
             .iter()
             .all(|entry| entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
     );
+    for plugin in [
+        nara::render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
+    ] {
+        assert!(entries.iter().any(|entry| entry.plugin_id() == plugin));
+    }
+    assert!(entries.iter().all(|entry| {
+        entry.plugin_id() != nara::render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID
+    }));
 }
 
 #[cfg(feature = "presentation-ui")]
@@ -2750,7 +2759,7 @@ requested = ["runtime-2d", "runtime-ui", "presentation-2d", "presentation-ui", "
 
     for plugin in [
         nara::render_wgpu::WGPU_CAPTURE_PLUGIN_ID,
-        nara::render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
         nara::render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
         nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
         nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
@@ -2763,6 +2772,9 @@ requested = ["runtime-2d", "runtime-ui", "presentation-2d", "presentation-ui", "
             1
         );
     }
+    assert!(entries.iter().all(|entry| {
+        entry.plugin_id() != nara::render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID
+    }));
 }
 
 #[cfg(all(
@@ -2890,6 +2902,9 @@ requested = ["render-wgpu"]
             entry.plugin_id(),
             WGPU_STOCK_SPRITE_PLUGIN_ID | WGPU_STOCK_UI_PLUGIN_ID
         )
+    }));
+    assert!(entries.iter().all(|entry| {
+        entry.plugin_id() != nara::render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID
     }));
 }
 

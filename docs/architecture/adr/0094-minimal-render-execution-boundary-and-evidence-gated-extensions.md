@@ -198,6 +198,13 @@ cross-owner composition work; this subsection does not promote that entire propo
   guard. Pure preflight/capacity refusal preserves the initial reservation; native preparation
   transfers that attempt to original-prefix custody even when later work fails. Successor output
   allocation follows complete preflight through the same program realization path.
+- File-backed product composition installs native-window publication only when the project
+  requests `desktop-winit` together with `render-wgpu`. Backend capture alone does not select
+  that consumer. A caller-driven headless product can supply logical target data, take the
+  original sealed CPU batch in Publish and execute it between live Runtime frames through
+  an external Host. The World retains CPU capture and game state; native GPU custody stays
+  with that original external Host. Compiled-but-unrequested desktop support cannot consume
+  another selected consumer's batch. Direct `App` composition remains explicit.
 - Ordinary Runtime windows use that same staged program transaction. The Host acquires the
   surface once and encodes its final physical-resolution image consumer into the program's
   original command encoder and submission. Known final-consumer metadata and retention admit

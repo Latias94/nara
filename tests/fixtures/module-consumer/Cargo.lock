@@ -2171,6 +2171,7 @@ dependencies = [
  "nara_material",
  "nara_sprite",
  "nara_tilemap",
+ "wgpu",
 ]
 
 [[package]]

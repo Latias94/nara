@@ -177,3 +177,25 @@ contains its lifetime marker; a held read-only observer verifies the same counte
 cleanup and World destruction. This is a native filesystem/CPU-content test, with no window,
 renderer or GPU qualification. Retaining and directly inspecting an already stopped World is
 separate Runtime-owner coverage because the public Headless Host releases it during close.
+
+The additional `native-source-watch-gpu` feature compiles three independent pixel-oracle
+controls and one ignored actual GPU trajectory in that same test target. It preserves the
+CPU-only feature and reuses the complete physical-file workflow. Select an actual Vulkan or
+DX12 adapter and run it serially:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The game uses a logical target and ordinary caller-driven `HeadlessSession`. A selected
+Publish system takes the original stock batch once; the caller executes and reads it between
+live Runtime frames using one external `WgpuRenderHost`. Fresh frames cover each committed
+Shader/Image/Material state and each refusal's last-good. A second producer on that same Host
+first-submits the retained startup input after a Shader successor, then another original input
+after an Image successor. Each retained CPU input is released before a third Source generation
+is prepared; the original two-generation budget remains enforced. Published pixels survive
+Runtime Stop and producer retirement, followed by explicit prefix/Host cleanup. The fixed
+oracle models the imported sRGB Images, linear output and alpha convention; see the
+[Material guide](../../../docs/guides/materials.md#live-source-updates-and-gpu-execution).
+No OS window, scanout, device reconstruction, foreign native execution or numerical
+performance result is implied by this offscreen test.

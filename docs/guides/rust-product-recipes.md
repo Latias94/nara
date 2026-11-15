@@ -414,6 +414,19 @@ same owner for explicit retirement retry. A terminal plugin shutdown failure is 
 after physical retirement completes. Embedded UI hosts request Stop and advance close progress
 without waiting for completion on their UI thread.
 
+### Caller-driven GPU captures
+
+Requesting `render-wgpu` without `desktop-winit` installs CPU capture and the selected render
+policy, but does not install the native-window Publish consumer. A caller-driven
+`HeadlessSession` can use game-owned logical target data and take the original sealed batch
+in `WgpuPolicyCaptureSet::Publish`. Execute that input through an external `WgpuRenderHost`
+between completed frames. Taking the batch transfers CPU transport only; the original Host
+still owns native preparation, submission and retirement. Compiling desktop support elsewhere
+does not opt this project into native presentation. See the
+[live Material consumer](materials.md#live-source-updates-and-gpu-execution) for a complete
+source-edit workflow. Direct `App` composition retains explicit control of the optional
+`WgpuWindowPresentationPlugin` in `WgpuBackendPlugins`.
+
 ### Native desktop execution
 
 With `desktop-winit` and `render-wgpu`, transfer the started Runtime into the ordinary desktop

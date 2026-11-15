@@ -209,11 +209,14 @@ impl PluginGroup for ProjectProfilePlugins {
             let backend = super::WgpuBackendPlugins
                 .edit()
                 .configure_slot(super::SLOT_RENDER, self.render_definition.clone());
-            let backend = match self.placement {
-                ProjectProfilePlacement::Shipping => backend,
-                ProjectProfilePlacement::EditorPlay => {
-                    backend.disable_slot(super::SLOT_WGPU_WINDOW_PRESENTATION)
-                }
+            let backend = if self.placement == ProjectProfilePlacement::Shipping
+                && self
+                    .capabilities
+                    .contains(nara_project::ProductCapability::DesktopWinit)
+            {
+                backend
+            } else {
+                backend.disable_slot(super::SLOT_WGPU_WINDOW_PRESENTATION)
             };
             builder.add_edited_group(backend)
         } else {

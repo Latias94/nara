@@ -28,6 +28,9 @@ use nara_engine::{
     },
 };
 
+#[cfg(feature = "native-source-watch-gpu")]
+#[path = "source_watching/gpu.rs"]
+mod gpu;
 #[path = "source_updates/observations.rs"]
 mod observations;
 #[allow(dead_code)]
