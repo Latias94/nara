@@ -1,10 +1,14 @@
 //! Bounded known-paused cadence comparison through the retained original desktop owner.
 //!
 //! Canonical capture is game-owned state, not evidence of a new native presentation. Presentation
-//! counts come only from the Collector's independently validated unique original receipts. Settle,
-//! maintenance, exact Step and resumed gameplay stay outside the paired idle intervals. The
-//! observer may still wake every 2 ms under Wait; process CPU counters are quantized observations,
-//! not a stable CPU, GPU, power or background-task scheduling claim.
+//! counts come only from the Collector's independently validated unique original receipts; actual
+//! observer callbacks are counted separately. Settle, deadline validation, maintenance, exact Step
+//! and resumed gameplay stay outside the three idle intervals. Periodic Wait requests explicit
+//! observer deadlines; deadline-free Wait retains independent original GPU/first-present/seal
+//! maintenance. Process CPU counters are quantized observations, not a stable CPU or power claim.
+
+#[path = "observer_deadline.rs"]
+mod observer_deadline;
 
 use std::time::{Duration, Instant};
 
@@ -16,34 +20,67 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{GameSnapshot, capture_desktop_resume, resume::encode_resume};
 
-use super::{Experiment, IDLE, POLL, TIMEOUT, ns, process_cost};
+use super::{Experiment, IDLE, POLL, TIMEOUT, ns, process_cost, runtime_cost::ObserverSchedule};
 
 const SETTLE: Duration = Duration::from_millis(100);
 
+#[derive(Clone, Copy)]
+enum IdleCondition {
+    Poll,
+    PeriodicWait,
+    DeadlineFreeWait,
+}
+
+impl IdleCondition {
+    const ALL: [Self; 3] = [Self::Poll, Self::PeriodicWait, Self::DeadlineFreeWait];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Poll => "poll",
+            Self::PeriodicWait => "wait_periodic_observer",
+            Self::DeadlineFreeWait => "wait_no_observer_deadline",
+        }
+    }
+
+    fn policy(self) -> WinitControlFlow {
+        match self {
+            Self::Poll => WinitControlFlow::Poll,
+            Self::PeriodicWait | Self::DeadlineFreeWait => WinitControlFlow::Wait,
+        }
+    }
+
+    fn observer_period(self) -> Option<Duration> {
+        match self {
+            Self::PeriodicWait => Some(POLL),
+            Self::Poll | Self::DeadlineFreeWait => None,
+        }
+    }
+}
+
+struct PollSpan {
+    wall: Duration,
+    native_poll_wall: Duration,
+    calls: u64,
+    min_wait_cap: Option<Duration>,
+    max_wait_cap: Duration,
+}
+
 impl Experiment {
     pub(super) fn measure_paused_cadence(&mut self, run_index: usize) -> Result<Value, String> {
-        let order = if run_index % 2 == 0 {
-            [WinitControlFlow::Poll, WinitControlFlow::Wait]
-        } else {
-            [WinitControlFlow::Wait, WinitControlFlow::Poll]
-        };
-        let mut poll = None;
-        let mut wait = None;
-        for policy in order {
-            let interval = self.paused_interval(policy)?;
-            match policy {
-                WinitControlFlow::Poll => poll = Some(interval),
-                WinitControlFlow::Wait => wait = Some(interval),
-            }
+        let mut order = IdleCondition::ALL;
+        if run_index % 2 != 0 {
+            order.reverse();
         }
-        let controls = self.validate_paused_controls()?;
-        Ok(json!({
-            "order": order.map(|policy| format!("{policy:?}")),
-            "order_definition": "Poll/Wait on odd numbered runs, Wait/Poll on even numbered runs, independently of plain/witness order",
-            "poll": poll.ok_or("missing paused Poll interval")?,
-            "wait": wait.ok_or("missing paused Wait interval")?,
-            "controls": controls,
-        }))
+        let mut report = json!({
+            "order": order.map(IdleCondition::name),
+            "order_definition": "Poll, periodic-observer Wait, deadline-free Wait on odd numbered runs; reverse on even numbered runs, independently of plain/witness order",
+        });
+        for condition in order {
+            report[condition.name()] = self.paused_interval(condition)?;
+        }
+        report["observer_deadline"] = self.validate_observer_deadline()?;
+        report["controls"] = self.validate_paused_controls()?;
+        Ok(report)
     }
 
     fn require_paused_cadence(&mut self, policy: WinitControlFlow) -> Result<(), String> {
@@ -60,32 +97,56 @@ impl Experiment {
         &mut self,
         duration: Duration,
         policy: WinitControlFlow,
-    ) -> Result<(Duration, u64), String> {
+    ) -> Result<PollSpan, String> {
         self.require_paused_cadence(policy)?;
         let started = Instant::now();
         let end = started + duration;
-        let mut polls = 0_u64;
-        while Instant::now() < end {
-            self.poll(end + POLL)?;
-            polls += 1;
+        let phase_deadline = started + TIMEOUT;
+        let mut span = PollSpan {
+            wall: Duration::ZERO,
+            native_poll_wall: Duration::ZERO,
+            calls: 0,
+            min_wait_cap: None,
+            max_wait_cap: Duration::ZERO,
+        };
+        loop {
+            let remaining = end.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            span.native_poll_wall += self.poll_with_wait_cap(phase_deadline, remaining)?;
+            span.calls += 1;
+            span.min_wait_cap = Some(
+                span.min_wait_cap
+                    .map_or(remaining, |cap| cap.min(remaining)),
+            );
+            span.max_wait_cap = span.max_wait_cap.max(remaining);
             self.require_paused_cadence(policy)?;
         }
-        Ok((started.elapsed(), polls))
+        span.wall = started.elapsed();
+        Ok(span)
     }
 
-    fn paused_interval(&mut self, policy: WinitControlFlow) -> Result<Value, String> {
+    fn paused_interval(&mut self, condition: IdleCondition) -> Result<Value, String> {
+        let policy = condition.policy();
         let switch_state = capture_desktop_resume(self.run()).map_err(|error| error.to_string())?;
         let switch_bytes = encode_resume(&switch_state).map_err(|error| error.to_string())?;
         let switch_counters = self.counters()?;
         let switch_presentations = self.observed.borrow().presentation_count();
+        let switch_callbacks = self.observed.borrow().observer_callback_count();
+        self.observed.borrow_mut().observer_schedule = condition
+            .observer_period()
+            .map_or(ObserverSchedule::None, ObserverSchedule::Periodic);
         self.run()
             .set_control_flow(policy)
             .map_err(|error| error.to_string())?;
-        let (settle_wall, settle_polls) = self.poll_paused_for(SETTLE, policy)?;
+        let settle = self.poll_paused_for(SETTLE, policy)?;
         let before_state = capture_desktop_resume(self.run()).map_err(|error| error.to_string())?;
         let before_bytes = encode_resume(&before_state).map_err(|error| error.to_string())?;
         let before = self.counters()?;
         let before_presentations = self.observed.borrow().presentation_count();
+        let before_callbacks = self.observed.borrow().observer_callback_count();
+        let telemetry_before = self.observed.borrow().maintenance_observation();
         if before_bytes != switch_bytes
             || before.1 != switch_counters.1
             || before.2 != switch_counters.2
@@ -94,10 +155,12 @@ impl Experiment {
         }
 
         let cpu_before = process_cost::capture()?;
-        let (wall, polls) = self.poll_paused_for(IDLE, policy)?;
+        let idle = self.poll_paused_for(IDLE, policy)?;
         let cpu_after = process_cost::capture()?;
         let after = self.counters()?;
         let after_presentations = self.observed.borrow().presentation_count();
+        let after_callbacks = self.observed.borrow().observer_callback_count();
+        let telemetry_after = self.observed.borrow().maintenance_observation();
         let after_state = capture_desktop_resume(self.run()).map_err(|error| error.to_string())?;
         let after_bytes = encode_resume(&after_state).map_err(|error| error.to_string())?;
         if before_bytes != after_bytes || before.1 != after.1 || before.2 != after.2 {
@@ -114,14 +177,29 @@ impl Experiment {
             .kernel_ns
             .checked_sub(cpu_before.kernel_ns)
             .ok_or("idle process kernel CPU counter regressed")?;
-        Ok(json!({
+        let Value::Object(mut report) = json!({
+            "condition": condition.name(),
             "policy": format!("{policy:?}"),
+            "explicit_observer_period_ns": condition.observer_period().map(ns).transpose()?,
+            "caller_native_wait_cap_definition": "remaining requested interval on each original poll; no independent 2 ms caller cap",
+            "caller_native_wait_cap_min_ns": idle.min_wait_cap.map(ns).transpose()?,
+            "caller_native_wait_cap_max_ns": ns(idle.max_wait_cap)?,
+            "cooperative_phase_timeout_ns": ns(TIMEOUT)?,
             "requested_ns": ns(IDLE)?,
-            "wall_ns": ns(wall)?,
-            "poll_calls": polls,
+            "wall_ns": ns(idle.wall)?,
+            "native_poll_wall_ns": ns(idle.native_poll_wall)?,
+            "poll_calls": idle.calls,
+            "observer_callbacks": after_callbacks.checked_sub(before_callbacks).ok_or("idle observer callback counter regressed")?,
+            "start_observer_callback_count": before_callbacks,
+            "end_observer_callback_count": after_callbacks,
+            "observer_callback_definition": "every invocation of the original presentation observer, including maintenance and repeated/no presentation receipts; independent of unique presentations and native poll calls",
             "app_frames": after.0.checked_sub(before.0).ok_or("idle App frame counter regressed")?,
             "simulation_ticks": after.1 - before.1,
             "logical_ticks": after.2 - before.2,
+        }) else {
+            unreachable!("the idle report literal is an object")
+        };
+        let Value::Object(state) = json!({
             "start_app_frame": before.0,
             "end_app_frame": after.0,
             "start_simulation_tick": before.1,
@@ -137,14 +215,20 @@ impl Experiment {
             "canonical_byte_count": before_bytes.len(),
             "canonical_before": before_state,
             "canonical_after": after_state,
+            "telemetry_before": telemetry_before,
+            "telemetry_after": telemetry_after,
             "settle": {
                 "requested_ns": ns(SETTLE)?,
-                "wall_ns": ns(settle_wall)?,
-                "poll_calls": settle_polls,
+                "wall_ns": ns(settle.wall)?,
+                "native_poll_wall_ns": ns(settle.native_poll_wall)?,
+                "poll_calls": settle.calls,
+                "caller_native_wait_cap_min_ns": settle.min_wait_cap.map(ns).transpose()?,
+                "caller_native_wait_cap_max_ns": ns(settle.max_wait_cap)?,
+                "observer_callbacks": before_callbacks.checked_sub(switch_callbacks).ok_or("settle observer callback counter regressed")?,
                 "app_frames": before.0.checked_sub(switch_counters.0).ok_or("settle App frame counter regressed")?,
                 "presentations": before_presentations.checked_sub(switch_presentations).ok_or("settle presentation counter regressed")?,
                 "exact_encode_resume_unchanged": true,
-                "scope": "cooperative original polling after policy selection, excluded from idle and CPU samples; not a guarantee that all future native demand is absent",
+                "scope": "cooperative original polling after policy and observer selection, using the remaining settle interval as native wait cap; excluded from idle and CPU samples; not a guarantee that all future native demand is absent",
             },
             "process_cost": {
                 "scope": "whole-process counters around idle polling, including observer/caller/background/driver CPU and counter sampling overhead; excludes policy settling, canonical captures and subsequent controls; wall_ns covers the polling loop, not the counter calls",
@@ -153,10 +237,15 @@ impl Experiment {
                 "total_cpu_ns": user_ns.checked_add(kernel_ns).ok_or("idle process CPU total overflowed")?,
                 "limitation": "quantized Windows process counters; 15.625 ms increments were observed in the prior report; no stable CPU reduction claim or GPU execution/power measurement",
             },
-        }))
+        }) else {
+            unreachable!("the idle state literal is an object")
+        };
+        report.extend(state);
+        Ok(Value::Object(report))
     }
 
     fn validate_paused_controls(&mut self) -> Result<Value, String> {
+        self.observed.borrow_mut().observer_schedule = ObserverSchedule::None;
         self.run()
             .set_control_flow(WinitControlFlow::Wait)
             .map_err(|error| error.to_string())?;
@@ -274,7 +363,7 @@ impl Experiment {
             );
         }
         Ok(json!({
-            "scope": "after both idle intervals; original Wait maintenance, one original StepFixedTick then full paused maintenance, followed by Poll Resume/Pause; excluded from running samples and cadence totals",
+            "scope": "after all three idle intervals and separate observer deadline validation; original Wait maintenance, one original StepFixedTick then full paused maintenance, followed by Poll Resume/Pause; excluded from running samples and cadence totals",
             "maintenance": {
                 "policy": "Wait",
                 "app_frames": maintained.0 - before.0,
@@ -309,30 +398,83 @@ impl Experiment {
     }
 }
 
-/// Applies the frame-reduction gate to all completed pairs, independently of CPU quantization.
+/// Applies frame, callback, native-poll and deadline gates independently of CPU quantization.
 pub(super) fn summarize(reports: &[Value]) -> Result<Value, String> {
-    let mut poll_frames = 0_u64;
-    let mut wait_frames = 0_u64;
+    let mut frames = [0_u64; 3];
+    let mut callbacks = [0_u64; 3];
+    let mut polls = [0_u64; 3];
+    let mut deadline_controls_accepted = !reports.is_empty();
     for report in reports {
-        for (policy, total) in [("poll", &mut poll_frames), ("wait", &mut wait_frames)] {
-            let frames = report["paused_cadence"][policy]["app_frames"]
-                .as_u64()
-                .ok_or("missing original paused App frame observation")?;
-            *total = total
-                .checked_add(frames)
-                .ok_or("aggregate paused App frames overflowed")?;
+        for (index, condition) in IdleCondition::ALL.into_iter().enumerate() {
+            let interval = &report["paused_cadence"][condition.name()];
+            for (metric, total) in [
+                ("app_frames", &mut frames[index]),
+                ("observer_callbacks", &mut callbacks[index]),
+                ("poll_calls", &mut polls[index]),
+            ] {
+                *total = total
+                    .checked_add(interval[metric].as_u64().ok_or_else(|| {
+                        format!(
+                            "missing original paused {} {metric} observation",
+                            condition.name()
+                        )
+                    })?)
+                    .ok_or_else(|| format!("aggregate paused {metric} overflowed"))?;
+            }
         }
+        deadline_controls_accepted &= report["paused_cadence"]["observer_deadline"]["accepted"]
+            .as_bool()
+            .ok_or("missing original observer deadline control result")?;
     }
-    let accepted = poll_frames > 0 && u128::from(wait_frames) * 100 <= u128::from(poll_frames) * 20;
+    let reduced_by = |baseline: u64, candidate: u64, percent: u64| {
+        baseline > 0
+            && u128::from(candidate) * 100 <= u128::from(baseline) * u128::from(100 - percent)
+    };
+    let reduction_percent = |baseline: u64, candidate: u64| {
+        (baseline > 0).then(|| 100.0 * (1.0 - candidate as f64 / baseline as f64))
+    };
+    let periodic_app_frames_accepted = reduced_by(frames[0], frames[1], 80);
+    let deadline_free_app_frames_accepted = reduced_by(frames[0], frames[2], 80);
+    let observer_callbacks_accepted = reduced_by(callbacks[1], callbacks[2], 90);
+    let native_polls_accepted = reduced_by(polls[1], polls[2], 90);
+    let mut conditions = json!({});
+    for (index, condition) in IdleCondition::ALL.into_iter().enumerate() {
+        conditions[condition.name()] = json!({
+            "app_frames": frames[index],
+            "observer_callbacks": callbacks[index],
+            "poll_calls": polls[index],
+        });
+    }
     Ok(json!({
-        "completed_pairs": reports.len(),
-        "poll_app_frames": poll_frames,
-        "wait_app_frames": wait_frames,
-        "app_frame_reduction_percent": (poll_frames > 0).then(|| 100.0 * (1.0 - wait_frames as f64 / poll_frames as f64)),
+        "completed_runs": reports.len(),
+        "completed_pairs": reports.len() / 2,
+        "conditions": conditions,
+        "periodic_wait_app_frame_reduction_percent": reduction_percent(frames[0], frames[1]),
+        "deadline_free_wait_app_frame_reduction_percent": reduction_percent(frames[0], frames[2]),
         "minimum_app_frame_reduction_percent": 80,
-        "accepted": accepted,
-        "scope": "sum of App-frame deltas across all paired 300 ms intervals after excluded settles, both recipes; actual cooperative wall spans remain in each interval",
-        "observer_maintenance_poll_interval_ns": ns(POLL)?,
+        "periodic_wait_app_frames_accepted": periodic_app_frames_accepted,
+        "deadline_free_wait_app_frames_accepted": deadline_free_app_frames_accepted,
+        "observer_callback_reduction_percent": reduction_percent(callbacks[1], callbacks[2]),
+        "native_poll_call_reduction_percent": reduction_percent(polls[1], polls[2]),
+        "minimum_observer_callback_reduction_percent": 90,
+        "minimum_native_poll_call_reduction_percent": 90,
+        "observer_callbacks_accepted": observer_callbacks_accepted,
+        "native_poll_calls_accepted": native_polls_accepted,
+        "observer_deadline_controls_accepted": deadline_controls_accepted,
+        "accepted": periodic_app_frames_accepted && deadline_free_app_frames_accepted
+            && observer_callbacks_accepted && native_polls_accepted && deadline_controls_accepted,
+        "scope": "aggregate original App frames, actual observer callbacks and native poll calls across all three 300 ms conditions per original run, both recipes; excludes settles, separate observer deadline validation and gameplay controls; actual cooperative wall spans remain in each condition",
+        "explicit_periodic_observer_period_ns": ns(POLL)?,
+        "deadline_free_observer_period_ns": null,
+        "caller_idle_wait_cap": "remaining requested 300 ms interval on each native poll; 100 ms settles use their remaining interval; no independent 2 ms caller polling",
+        "cooperative_phase_timeout_ns": ns(TIMEOUT)?,
+        "pending_gpu_maintenance": {
+            "owner": "original desktop presentation and WGPU Host",
+            "poll_interval_ns": ns(POLL)?,
+            "trigger": "unsettled original submission-prefix custody, pending render result or active telemetry seal; independent of observer deadlines",
+            "observed_facts": "each interval retains latest original pending completion/resource telemetry counters and cumulative received completion sample counts before/after; telemetry counters alone do not prove native submission custody is settled",
+        },
+        "other_original_deadlines": "first-present/READY and telemetry seal remain independent owner requests; Continue withdraws only the observer deadline",
         "cpu_claim": "raw quantized process counters only; no stable CPU or power reduction claim",
     }))
 }

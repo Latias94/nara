@@ -542,17 +542,24 @@ One frame contains zero between-frame CPU intervals and is unsuitable for sustai
 comparison. Set `WGPU_BACKEND=dx12` and `NARA_WGPU_FORCE_FALLBACK=0` for the recorded Windows
 hardware scope. Optional `NARA_RUNTIME_COST_OUTPUT` writes the structured report to an explicit
 absolute new file; ordinary game startup text still goes to stdout. Without it, stdout ends
-with one `two-level-runtime-cost/v3` JSON record after those startup messages.
+with one `two-level-runtime-cost/v4` JSON record after those startup messages.
 
-Each run compares 300 ms Poll and Wait paused intervals in alternating order, with 100 ms
-settling excluded. Complete canonical bytes and simulation/logical ticks must remain unchanged;
-App frames, actual unique presentation receipts, poll calls and quantized whole-process CPU
-are observed separately. The complete comparison requires at least an 80% aggregate App-frame
-reduction under Wait. Separate controls exercise explicit Wait maintenance, one exact Step
-followed by full paused maintenance, resumed gameplay and original telemetry/native retirement.
-`paused_cadence` replaces the historical v2 `paused_idle` field with both intervals and controls.
-Wait may still poll presentation maintenance every 2 ms, so this comparison does not establish
-CPU-free idle, stable CPU savings or a general background-task wake mechanism.
+Each run compares three 300 ms paused conditions in alternating order, with 100 ms settling
+excluded: Poll, Wait with an explicitly requested 2 ms observer deadline, and Wait without an
+observer deadline. Native waits may use the remaining interval instead of an independent
+2 ms caller cap. Complete canonical bytes and simulation/logical ticks must remain unchanged;
+App frames, actual presentation receipts, observer callbacks, native poll calls and quantized
+whole-process CPU are observed separately. Acceptance requires at least an 80% App-frame
+reduction under Wait and at least 90% fewer callbacks/poll calls without the periodic observer.
+
+A separate control arms one absolute 100 ms observer deadline through original maintenance,
+then allows a 1 s caller wait. Its original callback must observe the deadline by 250 ms in
+this finite workload without advancing App/game state. The cooperative bound does not interrupt
+native calls or callbacks. Existing Wait maintenance, exact Step/full maintenance, resumed
+gameplay and telemetry/native retirement checks remain. A rejected reduction gate preserves
+the complete report and exits unsuccessfully. Version four distinguishes caller wait caps,
+explicit observer requests and original pending-GPU maintenance; counts do not establish
+CPU-free idle, stable CPU savings, power or a general background-task wake mechanism.
 
 Both comparison recipes also select the original `DesktopRunOptions::with_startup_timings()`.
 Their additive `startup` diagnostics retain content preparation, Runtime startup, native session

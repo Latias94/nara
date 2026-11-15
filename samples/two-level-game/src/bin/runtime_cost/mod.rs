@@ -36,6 +36,17 @@ struct Frame {
 
 type CompletionKey = (u64, u64, u64);
 
+#[derive(Clone, Copy)]
+pub(super) enum ObserverSchedule {
+    None,
+    Periodic(Duration),
+    Deadline {
+        at: Instant,
+        first_requested_at: Option<Instant>,
+        observed_at: Option<Instant>,
+    },
+}
+
 pub(super) struct Collector {
     witness: bool,
     warmup: usize,
@@ -43,6 +54,10 @@ pub(super) struct Collector {
     accepted: usize,
     last_presented: Option<(u64, u64, u64)>,
     presentations: u64,
+    observer_callbacks: u64,
+    pending_completion_samples: Option<u32>,
+    pending_resource_retirements: Option<u32>,
+    pub(super) observer_schedule: ObserverSchedule,
     first_presentation: Option<Value>,
     pub(super) baseline: Option<GameSnapshot>,
     pub(super) collect_running: bool,
@@ -69,6 +84,10 @@ impl Collector {
             accepted: 0,
             last_presented: None,
             presentations: 0,
+            observer_callbacks: 0,
+            pending_completion_samples: None,
+            pending_resource_retirements: None,
+            observer_schedule: ObserverSchedule::None,
             first_presentation: None,
             baseline: None,
             collect_running: false,
@@ -96,12 +115,33 @@ impl Collector {
         self.presentations
     }
 
+    pub(super) fn observer_callback_count(&self) -> u64 {
+        self.observer_callbacks
+    }
+
+    pub(super) fn maintenance_observation(&self) -> Value {
+        json!({
+            "received_completion_samples": self.completions.len(),
+            "pending_completion_samples": self.pending_completion_samples,
+            "pending_resource_retirements": self.pending_resource_retirements,
+            "scope": "latest original observer telemetry counters and cumulative uniquely received completion samples; these counters do not prove submission-prefix custody is settled",
+        })
+    }
+
     pub(super) fn observe(
         &mut self,
         observation: DesktopPresentationObservation<'_>,
     ) -> DesktopPresentationControl {
+        let now = observation.now();
         let prior_frames = self.frames.len();
-        let result = self.record(&observation);
+        let result = self
+            .observer_callbacks
+            .checked_add(1)
+            .ok_or_else(|| "original observer callback counter overflowed".to_owned())
+            .and_then(|callbacks| {
+                self.observer_callbacks = callbacks;
+                self.record(&observation)
+            });
         let result = if self.witness {
             result.and_then(|()| {
                 let witness = join_presented(observation)?;
@@ -139,11 +179,33 @@ impl Collector {
                 deadline: Instant::now() + TIMEOUT,
             }
         } else {
-            DesktopPresentationControl::Continue
+            match &mut self.observer_schedule {
+                ObserverSchedule::None => DesktopPresentationControl::Continue,
+                ObserverSchedule::Periodic(period) => {
+                    DesktopPresentationControl::WakeAt(now + *period)
+                }
+                ObserverSchedule::Deadline {
+                    at,
+                    first_requested_at,
+                    observed_at,
+                } => {
+                    if now < *at {
+                        first_requested_at.get_or_insert(now);
+                        DesktopPresentationControl::WakeAt(*at)
+                    } else {
+                        observed_at.get_or_insert(now);
+                        DesktopPresentationControl::Continue
+                    }
+                }
+            }
         }
     }
 
     fn record(&mut self, observation: &DesktopPresentationObservation<'_>) -> Result<(), String> {
+        self.pending_completion_samples =
+            Some(observation.frame_completion_stats().pending_samples());
+        self.pending_resource_retirements =
+            Some(observation.gpu_resource_stats().pending_retirements());
         if let Some(seal) = observation.telemetry_seal() {
             self.seal_outcome = Some(seal.outcome());
             let completion = seal.frame_completion_stats();
@@ -395,6 +457,8 @@ impl Collector {
             .collect::<Vec<_>>();
         report["frame_start_to_gpu_completion_ns"] = json!(spans);
         report["frame_start_to_gpu_completion_distribution_ns"] = distribution(&spans)?;
+        report["observer_callbacks_through_cleanup"] = json!(self.observer_callbacks);
+        report["unique_presentations_through_cleanup"] = json!(self.presentations);
         Ok(())
     }
 }

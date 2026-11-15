@@ -8,15 +8,18 @@
 //! Startup diagnostics observe original elapsed operations before running-frame warmup. Sequential
 //! runs share this process and recover the same physical event loop; they are not cold processes.
 //!
-//! Format v3 retains the v2 running/startup evidence and adds paired 300 ms paused Poll/Wait
-//! intervals after 100 ms cooperative settling, alternating order by run. Each interval compares
-//! complete original `encode_resume` bytes and observes unique original presentation receipts,
-//! App/fixed/logical counters and whole-process CPU. `paused_cadence` replaces v2's `paused_idle`.
-//! Scoped manual-step fields replace v2's global field: intervals and running samples never Step
-//! or supply a delta; separate paused validation requests one original StepFixedTick, full paused
-//! maintenance and subsequent Resume/Pause. Acceptance requires at least 80% fewer aggregate Wait
-//! App frames. Quantized CPU counters and the observer's 2 ms maintenance polling remain visible;
-//! this known paused workload does not establish CPU-free idle or a universal presentation policy.
+//! Format v4 retains running/startup evidence and compares three 300 ms paused intervals after
+//! 100 ms cooperative settling: Poll, Wait with explicit periodic 2 ms observer deadlines, and
+//! Wait without an observer deadline. Order alternates by run. Complete original `encode_resume`
+//! bytes, unique original presentation receipts, actual observer callbacks, native polls,
+//! App/fixed/logical counters and quantized whole-process CPU remain separate observations.
+//! Idle callers allow the remaining interval as native wait; other controls retain short polling.
+//! A separate absolute 100 ms observer deadline allows a 1 s caller wait and must be observed by
+//! 250 ms without changing original App, presentation or canonical state. Separate controls retain
+//! exact Step, full Wait maintenance, Resume/Pause and final telemetry/native retirement.
+//! Acceptance requires at least 80% fewer aggregate Wait App frames than Poll and 90% fewer
+//! callbacks and native polls without a deadline than with periodic observer deadlines. These
+//! observations do not establish stable CPU savings, power use or a universal presentation policy.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -117,7 +120,7 @@ fn main() -> ExitCode {
             Ok(()) if report["paused_cadence"]["accepted"] == true => ExitCode::SUCCESS,
             Ok(()) => {
                 eprintln!(
-                    "runtime_cost: paused App-frame reduction gate failed; observations retained in the report"
+                    "runtime_cost: paused cadence or observer deadline gate failed; observations retained in the report"
                 );
                 ExitCode::FAILURE
             }
@@ -196,7 +199,7 @@ fn compare(options: Options) -> Result<Value, String> {
     drop(event_loop);
     let paused_cadence = idle::summarize(&reports)?;
     Ok(json!({
-        "format": "two-level-runtime-cost/v3",
+        "format": "two-level-runtime-cost/v4",
         "pairs": options.pairs,
         "warmup_accepted_frames": options.warmup,
         "sample_accepted_frames": options.frames,
@@ -229,21 +232,31 @@ impl Experiment {
     }
 
     fn poll(&mut self, deadline: Instant) -> Result<(), String> {
+        self.poll_with_wait_cap(deadline, POLL).map(|_| ())
+    }
+
+    fn poll_with_wait_cap(
+        &mut self,
+        deadline: Instant,
+        max_wait: Duration,
+    ) -> Result<Duration, String> {
         if Instant::now() >= deadline {
             return Err("original desktop phase exceeded its cooperative deadline".into());
         }
         if let Some(error) = &self.observed.borrow().failure {
             return Err(error.clone());
         }
+        let started = Instant::now();
         let progress = self
             .run()
-            .poll(POLL.min(deadline.saturating_duration_since(Instant::now())));
+            .poll(max_wait.min(deadline.saturating_duration_since(started)));
+        let wall = started.elapsed();
         if progress != DesktopRunProgress::Running {
             return Err(format!(
                 "original desktop stopped outside retirement: {progress:?}"
             ));
         }
-        Ok(())
+        Ok(wall)
     }
 
     fn settle(&mut self, deadline: Instant) -> Result<GameSnapshot, String> {
