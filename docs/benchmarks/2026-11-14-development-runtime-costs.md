@@ -843,3 +843,113 @@ new local targets, JSON and raw-record hashes pass. Existing warnings remain.
 This unit does not establish foreign native execution, game-scale performance budgets,
 per-pass GPU timings, Editor frontend integration or completion of full R12. Editor/UI,
 Dialogue UI and physical mixed-DPI work remain paused.
+
+## Explicit Paused Native Cadence
+
+Qualified implementation revisions are `ef67473ed71786cf98e405b489f0ef1dbc808ec0` for the
+original runtime interface and `8b8954cd93417caed64cf645a7206b7fedec3dc5` for the game/consumer
+integration. Measurements ran the same production code before those local commits; the
+structural fixture correction has its separate failed-attempt and final-rerun record below.
+
+The successor starts from `27ea617` and compares the existing continuous Poll policy with
+explicit Wait in the same release executable. This is a matched current-policy comparison,
+not a CPU comparison against the historical v2 record. The original WinitSession and DesktopRun
+now accept live policy changes. Wait retains pending frame demand, presentation maintenance
+and the original elapsed-time baseline; selecting Poll from Wait requests original frame work.
+Runtime Pause itself remains independent of cadence, and the default stays Poll.
+
+The ordinary `runtime_cost` consumer retains its three alternating plain/witness pairs, thirty
+excluded running frames and 120 sampled successful frames per run. Format v3 adds paired
+300 ms paused Poll/Wait intervals in alternating order, each following 100 ms excluded settling.
+Each interval compares complete `encode_resume` bytes, original App/fixed/logical counters,
+unique actual presentation receipts, poll calls and whole-process CPU counters. The preselected
+acceptance criterion is at least an 80% aggregate paused App-frame reduction with unchanged
+canonical bytes and zero simulation/logical ticks. A rejected reduction gate retains the
+complete report after original cleanup and exits unsuccessfully; it does not discard a result
+that disagrees with the hypothesis. Cooperative overruns remain visible in actual wall spans.
+
+Separate controls request original Wait maintenance, exactly one fixed Step plus a complete
+paused frame, then Poll Resume/Pause and continued gameplay. They remain outside the idle
+intervals and running-frame samples. Every original run must still complete telemetry sealing,
+native target destruction, Runtime retirement and physical event-loop recovery.
+
+The source-desktop continuity child selects Wait for its known paused inventory and Poll for
+continuous play. Review identified that the game's internal reconstruction loop previously
+only polled: under Wait, completed asynchronous Scene work could remain unintegrated. Its
+original `restore_desktop_resume` helper now explicitly requests each required full paused
+maintenance frame until reconstruction finishes. No new task wake, clock, scheduler or process
+owner is added. The recipe does not install a source watcher or require animated paused
+real-time shaders. Arbitrary added services still need explicit App work or Poll.
+
+The original owner CPU cohort passes 87/87 (`d0bf3498-ff4b-4392-aee8-ae4b4f1ad125`), including
+six new switch/refusal/deadline/demand/elapsed controls. Actual native cadence and existing
+maintenance trajectories pass 2/2 (`4f19ba71-294e-49c2-a013-8d22d1326f11`). They prove original
+window/pump demand and retirement, independently of GPU presentation. The native cadence test
+uses a 10 ms caller polling cap and a 20 ms maintenance deadline; its deadline counter alone
+does not prove native timer causation or a power saving.
+
+### Matched GPU Observations
+
+All six release runs complete on Windows 11, RTX 4090, driver `32.0.16.2114`, DX12 and a
+960 × 540 surface. They share the original physical event loop and process/driver caches.
+All twelve idle intervals retain identical complete canonical bytes and zero simulation/logical
+ticks. Every Poll interval produces ten App frames and ten actual presentations; every Wait
+interval produces zero of each. Aggregate App-frame and presentation counts change from 60
+to zero, passing the preselected frame-reduction gate.
+
+| Run | Recipe | Idle order | Poll wall / Wait wall (ms) | Poll / Wait poll calls | Poll / Wait process CPU (ms) |
+| --- | --- | --- | ---: | ---: | ---: |
+| 1 | Plain | Poll, Wait | 332.931 / 300.594 | 5 / 123 | 0 / 15.625 |
+| 2 | Witness | Wait, Poll | 333.044 / 301.900 | 5 / 123 | 15.625 / 0 |
+| 3 | Witness | Poll, Wait | 332.810 / 300.985 | 5 / 123 | 15.625 / 31.250 |
+| 4 | Plain | Wait, Poll | 333.972 / 300.331 | 5 / 123 | 15.625 / 15.625 |
+| 5 | Plain | Poll, Wait | 333.060 / 300.491 | 5 / 120 | 15.625 / 0 |
+| 6 | Witness | Wait, Poll | 333.322 / 302.461 | 5 / 124 | 0 / 0 |
+
+Each run separately presents after explicit Wait maintenance, advances exactly one canonical
+fixed/logical tick through Step and complete maintenance, then resumes ordinary gameplay for
+two additional simulation/logical ticks before Pause. All original telemetry seals, surface
+retirements, provider releases, target destructions and physical event-loop recoveries complete.
+The running workload still samples 120 actual presentations after thirty excluded warmup frames.
+
+These observations select explicit Wait for this known paused child inventory. They demonstrate
+suppressed demand-free App/presentation work, not a stable CPU or power improvement: CPU samples
+overlap and are quantized; the observer still services 120–124 polls under Wait. Poll's cooperative
+FIFO waits also extend its nominal 300 ms intervals to about 333 ms. No claim compares equal
+whole-process CPU durations, GPU execution time, scanout or representative game tails.
+The [raw record](data/2026-11-14-development-runtime/paused-cadence.json) and
+[measurement metadata](data/2026-11-14-development-runtime/paused-cadence-metadata.json)
+retain all current observations, conditions and the LF-normalized data digest.
+
+The first complete desktop attempt (`4a8088d7-100d-4990-85e1-8f18b6b869e6`) reaches the
+private-structure edit and fails both tests in their source fixture, before the C candidate
+build. The previous shipping-Player work added `player_launch` before `held` in private Session;
+the fixture incorrectly required `held` to be the first field. It now bounds the existing
+private Session declaration, replaces only its exact `held` field and preserves every other
+field, attribute and public DTO check. The finite textual edit remains a known fixture, not
+a Rust parser. That failed attempt is excluded from final adoption acceptance and does not
+invalidate the separate matched GPU observations.
+
+The corrected full desktop rerun passes 2/2 (`565c699b-d665-4e25-8ebd-ece4df9dd413`): original
+paused adoption and continuous native-input gameplay both complete real body and private-
+structure rebuilds, fresh reconstruction/probes, exact adoption and original physical cleanup.
+The continuous child reports Vulkan; the parent's DX12 environment hint is not inherited as
+child GPU authority. The separate six-run in-process measurement above reports DX12 itself.
+The known fixture correction is independently reviewed without a remaining P1/P2. These actual
+builds use their existing dev-profile children inside the release nextest harness; neither
+the recorded build wall times nor that setup qualify compiler, runtime or memory performance.
+
+The final sample CPU selection is 149/149 (`65619666-42d7-4a01-b2f7-403ac6f29065`) under
+`desktop,cost-measurement`, with nine actual-build/native cases kept separate. Runtime tests,
+native tests and the ordinary GPU comparison cover different and partially overlapping paths;
+their counts are not summed into an independent product total. The sole production compile
+correction was an import from `nara::prelude` to the existing `nara::winit` re-export.
+Arbitrary delayed-worker/focus-theft/driver-fault injections, foreign native execution,
+uninstrumented CPU or power budgets, shipping Player pause policy and full R12 remain open.
+
+Final release correctness Clippy passes Winit's all-feature/all-target owner, the root desktop
+Runtime library closure and all sample desktop/cost targets. Root and independent sample
+formatting, new relative document targets, JSON decoding and the LF-normalized raw-record
+digest pass. Existing lint/style warnings remain; this is not a warning-free release claim.
+All nine scoped threads close with no remaining reported P1/P2. No unrelated Editor/framework
+or source-free Player delivery matrix is repeated for this explicit cadence change.

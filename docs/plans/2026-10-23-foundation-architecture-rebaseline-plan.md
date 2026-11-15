@@ -5237,6 +5237,22 @@ and the reconstruction plan. This closes the concrete capture successor while fu
 diagnostic infrastructure, per-pass GPU timing, foreign execution and paused product work remain
 open.
 
+The [explicit paused native cadence successor](2026-11-13-rust-state-reconstruction-plan.md#explicit-paused-desktop-cadence)
+adds live Poll/Wait selection through the original WinitSession and DesktopRun without changing
+Runtime pause, elapsed-time settlement, pending demand or presentation maintenance ownership.
+The known paused source-desktop child uses Wait and explicitly requests reconstruction frames;
+continuous gameplay keeps Poll. Six paired Windows/RTX4090/DX12 runs reduce idle App frames and
+actual presentations from sixty to zero, retaining complete state and every original cleanup.
+Whole-process CPU ranges overlap and observer polling continues, so this selects suppressed
+demand-free App/presentation work rather than a power or CPU budget. Owner CPU 87/87, sample
+desktop/cost CPU 149/149, native window/maintenance 2/2 and complete real body/structure desktop
+adoption/gameplay 2/2 qualify that scope. The latter continuous child reports Vulkan separately
+from the measured DX12 consumer. Review closes an asynchronous reconstruction-demand gap and
+the old structural fixture's first-field assumption. The
+[report and raw observations](../benchmarks/2026-11-14-development-runtime-costs.md#explicit-paused-native-cadence)
+retain actual conditions and failed-attempt disposition. General task wakes, real-time paused
+animation policy, foreign execution and complete Foundation/R12 remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

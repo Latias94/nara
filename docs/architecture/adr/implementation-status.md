@@ -3020,6 +3020,21 @@ retry, texture/parameter pixels, mixed reuse, clear and device replacement pass 
 independent review finds no P1/P2. No dominant-latency improvement, global cache or complete
 R12 is claimed.
 
+The November 16 [explicit paused native cadence](../../benchmarks/2026-11-14-development-runtime-costs.md#explicit-paused-native-cadence)
+at `ef67473`/`8b8954c` adds original-session Poll/Wait changes independently of Runtime pause.
+Pending demand, presentation maintenance, exact stepping and long-wait elapsed-time settlement
+retain their owners. The concrete source-desktop child selects Wait only for its known paused inventory,
+explicitly drives asynchronous Scene reconstruction, and resumes ordinary Poll gameplay.
+Six paired Windows/RTX4090/DX12 runs reduce aggregate idle App frames and actual presentations
+from sixty to zero with unchanged complete canonical bytes and zero simulation/logical ticks.
+Owner CPU 87/87, sample desktop/cost CPU 149/149, actual native window/maintenance 2/2 and
+complete real desktop body/structure rebuild/adoption/gameplay 2/2 pass. The continuous child
+reports Vulkan independently of the DX12 cost consumer. Reviews close the reconstruction
+demand omission and outdated structural-edit fixture; the report preserves the failed attempt.
+ADRs0039/0076 and the current guides own the explicit policy and workload limits. Continued
+observer polling and quantized overlapping CPU values preclude a stable CPU or power claim;
+general task wakes, foreign native execution and full R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

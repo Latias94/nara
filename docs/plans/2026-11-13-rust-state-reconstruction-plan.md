@@ -1586,3 +1586,85 @@ the preceding narrower invocation selected zero tests and proves compilation onl
 root checking, feature-on root and selected independent-consumer correctness Clippy, root and
 independent formatting, new document targets, JSON and canonical raw-record digests pass.
 This closes the capture unit's verification record without repeating unchanged product work.
+
+## Explicit Paused Desktop Cadence
+
+Status: implemented and qualified for the known source-desktop inventory; full Foundation/R12
+remains active. Implementation revisions are `ef67473` and `8b8954c`. The existing
+[runtime cost report](../benchmarks/2026-11-14-development-runtime-costs.md)
+observes ten App frames in every 300 ms paused interval despite zero simulation ticks. Compare
+the existing continuous and demand-driven policies at the original Winit session, rather than
+adding automatic Runtime pause scheduling or another wake owner.
+
+Expose caller-controlled changes between the existing `Poll` and `Wait` policies through the
+live original Winit session and DesktopRun. Switching to Wait preserves pending frame demand,
+paused capture eligibility, the elapsed-time baseline and presentation maintenance deadlines.
+Switching back to Poll requests original frame work. Refuse changes after fault or retirement.
+The game-owned source-desktop continuity child selects Wait for its known paused inventory and
+Poll for continuous gameplay; exact Step, semantic admission, native input, geometry changes,
+presentation maintenance, telemetry seal and Close retain their original owners.
+
+This is an explicit consumer policy. Wait does not discover ECS changes, wake on arbitrary task
+completion, or keep real-time shader effects animated. Games needing those behaviors retain Poll
+or explicitly arrange original frame demand. Runtime pause itself does not select a cadence.
+Resume must still settle all paused wall time without simulation catch-up, including across
+cadence changes; no clock baseline is reset to hide elapsed time.
+
+Before selecting the change, extend the existing release runtime-cost consumer with paired
+300 ms Poll/Wait paused intervals in alternating order, following a bounded native settle.
+Retain complete canonical state, original frame/tick counters, actual presentation counts,
+process CPU observations, poll counts, actual maintenance and resumed gameplay. Acceptance
+requires unchanged canonical state and zero simulation/logical ticks in both intervals, at
+least an 80% reduction in aggregate paused App frames, and complete original telemetry/native
+cleanup. CPU counter quantization and the presentation observer's maintenance polling remain
+explicit; frame suppression alone is not a CPU-free or universal power-saving claim.
+
+Qualify switch/refusal/demand/deadline/elapsed semantics at the original session, actual native
+window demand, and the production continuous game/rebuild consumer. Keep source-free shipping
+Player defaults and paused Editor/UI/Dialogue work unchanged. Full Foundation/R12 stays active.
+
+The original live cadence interface is implemented without another scheduler or clock owner.
+The six new CPU controls preserve pending controls and explicit maintenance, original deadlines,
+fault/incomplete-retirement refusal and long-wait time settlement, including the existing 13 ms
+phase followed by a 7 ms interval. The complete Winit all-feature CPU cohort passes 87/87
+(`d0bf3498-ff4b-4392-aee8-ae4b4f1ad125`), and actual native cadence/maintenance passes 2/2
+(`4f19ba71-294e-49c2-a013-8d22d1326f11`). The sample's release all-target desktop/cost-feature
+cohort passes 149/149 (`65619666-42d7-4a01-b2f7-403ac6f29065`), with nine actual native/build
+cases kept separate.
+
+The six matched Windows/RTX4090/DX12 runs pass the preselected gate: Poll produces sixty App
+frames and sixty actual presentations across the paired idle intervals; Wait produces zero.
+All canonical bytes and simulation/logical ticks remain unchanged. Every run separately
+completes Wait maintenance, one exact Step with full maintenance, resumed gameplay, telemetry
+seal and physical retirement. Quantized process CPU ranges overlap, and Wait still performs
+120–124 observer/caller polls per interval. This selects suppressed demand-free App/presentation
+work for the concrete child; it does not establish stable CPU or power savings. The
+[cost report](../benchmarks/2026-11-14-development-runtime-costs.md#explicit-paused-native-cadence)
+retains conditions, raw data and original outcomes.
+
+Independent review found an integration gap before native game acceptance: the original
+desktop reconstruction helper only polled, so an asynchronous Scene result could complete
+without another App frame under Wait. Each required paused maintenance pass now explicitly
+requests a full original frame until restoration finishes. The bounded rereview closes that
+finding. The first actual desktop attempt fails at the preexisting structural-edit fixture's
+assumption that `held` is Session's first field; the prior Player unit added `player_launch`
+before it. The corrected bounded edit replaces the exact field inside the complete private
+declaration, preserving every other field, attribute and public DTO check. Its independent
+review closes without a P1/P2. Both complete actual desktop workflows then pass 2/2
+(`565c699b-d665-4e25-8ebd-ece4df9dd413`), preserving body/structure rebuild, fresh restoration,
+adoption, continuous native input and original cleanup. The continuous child reports Vulkan,
+separately from the measured consumer's DX12; a parent hint cannot stand in for the child's
+actual backend. No new public task wake or universal paused policy is selected.
+
+Final release correctness Clippy passes the Winit all-feature/all-target owner, the root
+desktop Runtime library feature closure, and all desktop/cost sample targets. Root/sample
+formatting, new document targets, JSON and LF-normalized raw-record integrity checks pass.
+Existing lint/style warnings remain outside that correctness gate. All nine scoped research,
+implementation and review threads close. No unrelated Editor, Open-GPUI or shipping Player
+acceptance matrix is repeated, and no remote publication is performed.
+
+The remaining measured pressure is the observer/caller maintenance polling under Wait.
+Attribute actual pending GPU completion, observer deadlines and child protocol polling before
+choosing another change; removing App work does not prove a whole-process budget. Retain
+explicit App work for asynchronous result integration and real-time paused consumers rather
+than selecting a universal dirty-state or task-wake policy without a complete consumer.
