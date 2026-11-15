@@ -513,6 +513,37 @@ impl WinitSession {
             .is_none_or(|app| app.shutdown == WinitShutdownState::Complete)
     }
 
+    /// Returns the cadence selected for the original native session.
+    #[must_use]
+    pub fn control_flow(&self) -> WinitControlFlow {
+        self.app
+            .as_ref()
+            .expect("live session owns its Runtime")
+            .control_flow
+    }
+
+    /// Changes native frame cadence without changing Runtime pause or elapsed time.
+    ///
+    /// Wait preserves pending demand and presentation maintenance, but does not wake for
+    /// arbitrary task completion or infer changes in the World. The caller must retain Poll
+    /// when its workload needs continuous App stages or real-time rendering. Returning to Poll
+    /// requests original frame work. A repeated selection leaves current demand unchanged.
+    ///
+    /// Returns an error after fault or once original retirement has started.
+    pub fn set_control_flow(&mut self, control_flow: WinitControlFlow) -> Result<(), AppRunError> {
+        let app = self.app.as_mut().expect("live session owns its Runtime");
+        if !app.is_healthy_live() {
+            return Err(AppRunError::runner("native frame cadence is unavailable"));
+        }
+        if app.control_flow != control_flow {
+            app.control_flow = control_flow;
+            if control_flow == WinitControlFlow::Poll {
+                app.request_frame();
+            }
+        }
+        Ok(())
+    }
+
     /// Requests managed control while the original session is healthy and accepting input.
     pub fn request_control(&mut self, control: RuntimeControl) -> RuntimeControlRequestResult {
         let app = self.app.as_mut().expect("live session owns its Runtime");

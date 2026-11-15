@@ -146,6 +146,20 @@ interval runs normally. No extra App frame or sampling reset is introduced; Stop
 no frame, and an exact step retains its original one-tick policy. A control's Applied result
 does not erase a fault in the ensuing App transaction.
 
+Native cadence is separate from Runtime pause. A live `WinitSession` or `DesktopRun` can select
+`set_control_flow(WinitControlFlow::Wait)` for a known workload that needs frames only for
+native window/input demand or explicit operations. Existing pending demand and presentation
+maintenance deadlines remain active. Select `Poll` for continuous App stages and rendering;
+returning from Wait requests original frame work without resetting the elapsed-time baseline.
+Repeated selections leave demand unchanged, and faulted or retiring sessions refuse changes.
+
+Wait does not discover arbitrary World mutations, wake for background task completion, or
+animate shaders using real time. Task results still need a later complete App frame for
+integration. The caller must keep Poll, explicitly request paused maintenance while its work
+is pending, or accept deferring that work until a native event or explicit operation. Pause
+does not automatically choose Wait, and Wait while Running still uses the original elapsed
+time caps and fixed catch-up policy on the next frame.
+
 `capture_time_continuation()` requires a healthy full paused frame and no pending control.
 Its portable value records actual timestep, caps, catch-up policy, scale, maximum delta and
 pending virtual time. It contains no prior Runtime/frame/tick identity. Construct a value from

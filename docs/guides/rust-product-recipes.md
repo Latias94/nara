@@ -695,6 +695,12 @@ admits a finite `GameplayCommandSubmission` through the original command queue. 
 rejection preserves the game. A `CommandFault` retains both the actual admission outcome and the
 fault discovered afterward, so a consumer must reconcile that output before following fault policy.
 
+`set_control_flow` changes the original live session's explicit `WinitControlFlow::Poll` or
+`Wait` cadence independently of Pause. Wait retains native event demand, explicit operations
+and presentation maintenance; returning to Poll requests frame work. The original elapsed-time
+baseline is preserved. Callers with background integration or real-time animation requirements
+must retain Poll or explicitly request frames; see the [runner guide](managed-runtime-runner.md#control-and-shutdown).
+
 `observe` reads the original healthy World. `capture` additionally requires the original healthy
 completed paused App frame. An exact fixed tick alone leaves later App stages unexecuted. New
 controls, semantic submission or native driver input invalidate capture until paused maintenance

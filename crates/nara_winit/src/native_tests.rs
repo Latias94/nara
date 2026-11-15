@@ -6,6 +6,7 @@ use nara_window::{WindowPlugin, backend::WindowTargetPhase};
 use std::sync::mpsc::{self, Sender};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+mod cadence;
 mod geometry;
 mod maintenance;
 mod reusable;

@@ -5,6 +5,8 @@ use nara_app::{
 };
 use nara_ecs::{Res, ResMut, Resource};
 
+mod cadence;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct FrameCounts {
     tasks: u64,

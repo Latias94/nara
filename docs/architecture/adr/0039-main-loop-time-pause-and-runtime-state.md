@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-15
+**Last Revised**: 2026-11-16
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -128,6 +128,12 @@ is explicit runtime settings:
 
 - `Poll` favors low-latency continuous rendering.
 - `Wait` favors idle efficiency and redraw-on-demand.
+- A live native session may explicitly change between these policies through its original
+  runner. Cadence is independent of Runtime pause: changing to Wait preserves pending frame
+  demand and the elapsed-time baseline; changing to Poll requests original frame work. Native
+  input/window demand and presentation maintenance keep their existing owners. Wait does not
+  infer ECS dirtiness, supply arbitrary task-completion wakes, or promise real-time animation;
+  the caller selects it only when its workload can tolerate those limits.
 - background/blurred windows may throttle real-time frames, pause virtual time, or keep running,
   depending on runtime settings.
 - redraw requests should be driven by configured frame policy, dirty render state, visible windows,

@@ -45,6 +45,31 @@ pub enum DesktopControlError {
 }
 
 impl DesktopRun {
+    /// Returns the cadence of the retained original native session, when constructed.
+    #[must_use]
+    pub fn control_flow(&self) -> Option<nara_winit::WinitControlFlow> {
+        match &self.state {
+            DesktopRunState::Native(native) => Some(native.session.control_flow()),
+            _ => None,
+        }
+    }
+
+    /// Changes cadence on the original healthy native session without changing Runtime pause.
+    ///
+    /// Wait preserves native frame demand and presentation maintenance. It does not discover
+    /// ECS changes, wake arbitrary task completion, or animate real-time shaders. The caller
+    /// selects it only for workloads that can tolerate these limits. Poll requests original
+    /// frame work when selected from Wait; neither transition resets elapsed time.
+    pub fn set_control_flow(
+        &mut self,
+        control_flow: nara_winit::WinitControlFlow,
+    ) -> Result<(), DesktopControlError> {
+        self.live_native_mut()?
+            .session
+            .set_control_flow(control_flow)
+            .map_err(DesktopControlError::Native)
+    }
+
     /// Returns the original managed state while the desktop aggregate still retains its Runtime.
     #[must_use]
     pub fn state(&self) -> Option<RuntimeState> {
