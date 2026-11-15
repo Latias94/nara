@@ -150,6 +150,13 @@ jobs:
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
         run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --test material_view_time --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test explicit depth and spatial units through DX12 software rendering
+        if: runner.os == 'Windows'
+        env:
+          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
+          WGPU_BACKEND: dx12
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test depth_units --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
       - name: Run ordinary windowed Scene updates through DX12 software rendering
         if: runner.os == 'Windows'
         timeout-minutes: 15

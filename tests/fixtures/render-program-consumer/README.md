@@ -167,9 +167,55 @@ or device acquisition failure, validation failure, mapping failure and timeout a
 native prerequisite or test. They never return a passing skip. A default test run leaves
 all native cases ignored and is not GPU qualification.
 
+## Depth And Spatial Units
+
+`tests/depth_units.rs` uses ordinary public Features to rasterize captured 3D geometry into
+distinct Color and `Depth32Float` versions. A second raster operation preserves both attachments
+into new storage and draws a closer green plane only inside a smaller scissor. An explicit compute operation samples the
+declared `texture_depth_2d` into a float color result; readback stays on the original encoder,
+Device and submission. Depth carries `TextureInterpretation::Depth`, with no RGB transfer or
+alpha facts. Published depth is a typed read-only output, never a policy's final color image.
+
+The tracer selects Y-up, camera-forward +Z, column-vector perspective with WGSL column-major
+upload, clip depth `[0, 1]`, clear 1, `Less` and disabled culling. Authored coordinates specify
+meters per unit before the meter-space camera projection. Independent double-precision
+ray/plane equations derive full-pixel coverage, color and depth without reading the uploaded
+matrix. The chosen edges avoid ambiguous pixel centers. Meter and centimeter captures and
+both geometry draw orders must agree; a changed captured camera must produce different pixels.
+All finite sample comparisons use the fixed `1e-6` tolerance; retained output replay and untouched
+preserved regions are byte exact. The second raster must change exactly 64 color/depth pixels
+while leaving the original attachments unchanged.
+
+The complete trajectory holds A before B, refuses invalid unit/camera captures and insufficient
+graph/private budgets, then executes the original A without changing its capture. Another
+producer imports and samples original and preserved depth after A retires, while B continues.
+The later capacity refusal happens after the first raster's uploads; it observes the actual
+work increments and settles that producer's original failed-attempt prefix before retrying.
+Untouched regions verify whole depth clear and preserved far geometry outside the second
+scissor. Exact prefixes and retained-byte cleanup remain observable on success and assertion
+unwind. CPU controls separately check interpretation/usage/clear admission and color-only final
+image selection. The existing color/buffer program controls remain independent.
+
+Run serially against the standalone lock with explicit adapter policy:
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = (Join-Path (Get-Location) 'target')
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --offline --release --test depth_units --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Use `WGPU_BACKEND=vulkan` for that backend or explicitly request `NARA_WGPU_FORCE_FALLBACK=1`
+for separately reported software evidence. A missing requested adapter fails. This consumer
+does not create an engine Camera3d, select global handedness/import units/reverse-Z, or qualify
+stencil, MSAA, window presentation, raw depth-to-buffer support or performance budgets. Exact
+execution and correction records belong to the
+[owning successor](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#depth-and-spatial-unit-successor).
+
 ## Evidence Limits
 
-Source presence is not execution evidence. The
+Source presence is not execution evidence. The original color/buffer program
 [qualification record](../../../docs/knowledge/engineering/verification/2026-10/2026-10-31T133536Z-finite-typed-render-programs-through-the-original-host-production-qualification-a32bacec9d8b4572801df1f79fc31c01.md)
 records actual owner/CPU/doctest/Windows-DX12 results and their final source coverage. Further
 changes need evidence matching their behavior and native scope.
