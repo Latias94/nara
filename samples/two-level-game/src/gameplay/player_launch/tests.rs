@@ -47,6 +47,7 @@ impl Drop for Directory {
 #[derive(Clone)]
 struct Frame {
     snapshot: GameSnapshot,
+    launch: Option<Result<(), String>>,
     interactive: bool,
     empty_slot: bool,
 }
@@ -88,6 +89,7 @@ impl<const SAVE_VIA_ORIGINAL: bool> Plugin for LaunchProbe<SAVE_VIA_ORIGINAL> {
 fn observe<const SAVE_VIA_ORIGINAL: bool>(world: &mut World) {
     let frame = Frame {
         snapshot: world.resource::<GameSnapshot>().clone(),
+        launch: player_launch_result(world).map(|result| result.map_err(str::to_owned)),
         interactive: world.resource::<Verification>().is_interactive(),
         empty_slot: world.resource::<Storage>().permits_resume(),
     };
@@ -154,6 +156,7 @@ fn submit(
 }
 
 fn assert_refused(frame: &Frame) {
+    assert!(matches!(frame.launch.as_ref(), Some(Err(_))));
     assert!(frame.snapshot.error.is_some(), "{:?}", frame.snapshot);
     assert!(frame.interactive);
     assert!(frame.empty_slot);
@@ -244,6 +247,7 @@ fn first_tick_launch_installs_the_original_script_before_the_next_driver_call() 
     assert_eq!(first.snapshot.tick, 1);
     assert_eq!(first.snapshot.logical_tick, 1);
     assert!(first.snapshot.initialized);
+    assert_eq!(first.launch, Some(Ok(())));
     assert!(!first.interactive);
     assert!(first.empty_slot);
     assert!(first.snapshot.error.is_none());
@@ -252,6 +256,35 @@ fn first_tick_launch_installs_the_original_script_before_the_next_driver_call() 
     assert!(second.snapshot.held[1]);
     assert!(second.snapshot.player.x > first.snapshot.player.x);
     assert!(second.snapshot.error.is_none());
+}
+
+#[test]
+fn ordinary_action_error_without_a_launch_does_not_fabricate_a_launch_result() {
+    let observed = run::<false>(
+        RunOptions::default(),
+        vec![submit(action(SAVE), 1, "two-level-game.test-save", 1)],
+        1,
+    );
+    let frame = &observed.frames[0];
+    assert!(
+        frame
+            .snapshot
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("no application save path"))
+    );
+    assert!(frame.launch.is_none());
+    assert_eq!(frame.snapshot.phase, GamePhase::Running);
+}
+
+#[test]
+fn a_later_refused_launch_does_not_replace_the_first_applied_result() {
+    let launch = travel_launch();
+    let late = submit(launch.command().clone(), 2, SOURCE, 2);
+    let observed = run::<false>(RunOptions::default(), vec![launch, late], 2);
+    assert_eq!(observed.frames[0].launch, Some(Ok(())));
+    assert_eq!(observed.frames[1].launch, Some(Ok(())));
+    assert!(observed.frames[1].snapshot.error.is_some());
 }
 
 #[test]

@@ -8,13 +8,15 @@ pub mod resume;
 pub mod save;
 
 #[cfg(feature = "desktop")]
+pub use gameplay::cooked_desktop_recipe;
+#[cfg(feature = "desktop")]
 pub use gameplay::movement_keyboard_bindings;
 pub use gameplay::resume::{GameResumeError, capture_resume, request_resume};
 #[cfg(feature = "desktop")]
 pub use gameplay::resume::{capture_desktop_resume, restore_desktop_resume};
 pub use gameplay::{
     GamePhase, GameSnapshot, RunOptions, Scenario, configured_recipe, cooked_recipe, player_launch,
-    product_recipe,
+    player_launch_result, product_recipe,
 };
 pub use host::{open_explicit_project_root, open_project_root};
 #[doc(hidden)]

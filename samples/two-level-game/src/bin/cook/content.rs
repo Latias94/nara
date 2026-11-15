@@ -1,3 +1,4 @@
+use super::input::RuntimeKind;
 use nara::{
     asset::{
         AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetSourceKind, AssetSourcePath,
@@ -23,7 +24,7 @@ use nara::{
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
-use two_level_game::{cooked_recipe, levels::LevelId};
+use two_level_game::levels::LevelId;
 
 const DOCUMENT_BYTES: u64 = 1024 * 1024;
 const METADATA_BYTES: u64 = 64 * 1024;
@@ -33,17 +34,18 @@ pub(super) fn prepare(
     root: &DirectoryCapability,
     cache: &DirectoryCapability,
     triple: &str,
+    runtime: RuntimeKind,
 ) -> Result<PreparedRuntimeContent, String> {
-    let settings = project_settings(root)?;
+    let settings = project_settings(root, runtime)?;
     let configuration = settings
         .runtime_configuration()
         .map_err(|error| format!("nara.toml runtime configuration: {error}"))?;
-    let recipe = cooked_recipe();
+    let recipe = runtime.recipe()?;
     let plan = resolve_runtime_configuration(&configuration, recipe.clone())
         .map_err(|error| format!("cooked game composition: {error}"))?;
     let mut builder = CookedContentBuilder::new(
         CookedContentRequest {
-            target: RuntimeContentTarget::new(triple, "two-level-shipping")
+            target: RuntimeContentTarget::new(triple, runtime.content_profile())
                 .map_err(|error| format!("cooked content target: {error}"))?,
             configuration: configuration.to_configuration(),
             startup_scene: LevelId::STARTUP.scene_product(),
@@ -192,7 +194,10 @@ pub(super) fn prepare(
     Ok(prepared)
 }
 
-fn project_settings(root: &DirectoryCapability) -> Result<EffectiveProjectSettings, String> {
+fn project_settings(
+    root: &DirectoryCapability,
+    runtime: RuntimeKind,
+) -> Result<EffectiveProjectSettings, String> {
     let bytes = read(root, "nara.toml", DOCUMENT_BYTES)?;
     let loaded = ProjectManifest::parse_toml_bytes(&bytes);
     if loaded.has_errors() {
@@ -201,8 +206,21 @@ fn project_settings(root: &DirectoryCapability) -> Result<EffectiveProjectSettin
     let settings = loaded
         .manifest
         .ok_or_else(|| "nara.toml: project manifest is absent".to_owned())?
-        .resolve_profile(None)
+        .resolve_profile(match runtime {
+            RuntimeKind::Headless => None,
+            RuntimeKind::Desktop => Some("desktop"),
+        })
         .map_err(|error| format!("nara.toml: {error}"))?;
+    if settings.window.enabled != (runtime == RuntimeKind::Desktop) {
+        return Err(format!(
+            "nara.toml: the {} Player requires window.enabled={}",
+            runtime.name(),
+            runtime == RuntimeKind::Desktop
+        ));
+    }
+    if settings.input.action_map.is_some() {
+        return Err("nara.toml: this game's Player uses compiled keyboard bindings and requires no authored startup Input selection".into());
+    }
     if settings.paths.assets.as_str() != "assets"
         || settings.paths.scenes.as_str() != "scenes"
         || settings.startup.default_scene.as_ref() != Some(&LevelId::STARTUP.scene_path())

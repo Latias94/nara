@@ -37,7 +37,7 @@ use crate::{
     },
 };
 use content::Content;
-pub use player_launch::player_launch;
+pub use player_launch::{player_launch, player_launch_result};
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("two-level-game.exploration");
 const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-level-game.objects");
@@ -247,6 +247,7 @@ impl SceneProductResource for ActiveLevel {
 
 #[derive(Resource, Default)]
 pub(super) struct Session {
+    player_launch: Option<Result<(), String>>,
     held: [bool; 4],
     markers: Vec<WorldEntityToken>,
     phase: GamePhase,
@@ -314,17 +315,20 @@ pub fn product_recipe() -> ProductRecipe {
 }
 
 /// The fixed headless recipe shared by the cooker and the source-free Player.
-///
-/// # Panics
-///
-/// Desktop-enabled builds require separate qualification and are refused explicitly.
 #[must_use]
 pub fn cooked_recipe() -> ProductRecipe {
-    assert!(
-        !cfg!(feature = "desktop"),
-        "the cooked two-level Player requires a build without the desktop feature"
-    );
-    product_recipe()
+    with_cooked_image_codec(exploration_recipe(RunOptions::default()))
+}
+
+/// The fixed desktop recipe with the game's compiled native keyboard bindings.
+#[cfg(feature = "desktop")]
+#[must_use]
+pub fn cooked_desktop_recipe() -> ProductRecipe {
+    with_cooked_image_codec(product_recipe())
+}
+
+fn with_cooked_image_codec(recipe: ProductRecipe) -> ProductRecipe {
+    recipe
         .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.cooked-image", 1),
         )
@@ -333,6 +337,15 @@ pub fn cooked_recipe() -> ProductRecipe {
 
 #[must_use]
 pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
+    let recipe = exploration_recipe(options);
+    #[cfg(feature = "desktop")]
+    let recipe = recipe
+        .add_plugin::<input::DesktopInputPlugin>()
+        .expect("static input plugin");
+    recipe
+}
+
+fn exploration_recipe(options: RunOptions) -> ProductRecipe {
     let contribution = SchemaContribution::configured(
         options,
         |options| ExplorationPlugin {
@@ -341,14 +354,9 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
         [PROVIDER],
     )
     .expect("static game schema and composition");
-    let recipe = ProductRecipe::new()
+    ProductRecipe::new()
         .add_contribution(contribution)
-        .expect("static game recipe");
-    #[cfg(feature = "desktop")]
-    let recipe = recipe
-        .add_plugin::<input::DesktopInputPlugin>()
-        .expect("static input plugin");
-    recipe
+        .expect("static game recipe")
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {

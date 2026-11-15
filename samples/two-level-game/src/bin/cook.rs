@@ -40,9 +40,6 @@ fn main() -> ExitCode {
 }
 
 fn run(options: input::Options) -> Result<(), String> {
-    if cfg!(feature = "desktop") {
-        return Err("the cooked Player recipe requires the headless feature selection".into());
-    }
     let project = options
         .project
         .canonicalize()
@@ -71,7 +68,7 @@ fn run(options: input::Options) -> Result<(), String> {
             .create_child_directory(&cache_name)
             .map_err(|error| error.to_string())?,
     };
-    let content = content::prepare(fence.root(), &cache, &options.target)?;
+    let content = content::prepare(fence.root(), &cache, &options.target, options.runtime)?;
     fence.verify()?;
     let limits = PlayerPackageLimits::default();
     let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits)
@@ -105,10 +102,10 @@ fn run(options: input::Options) -> Result<(), String> {
     fence.bind_code(&inputs)?;
     let selection = CargoBuildSelection::new(
         "two-level-game",
-        "player",
+        options.runtime.binary(),
         &options.profile,
         &options.target,
-        vec!["cooked-player".to_owned()],
+        options.runtime.features(),
         false,
     )
     .map_err(|error| error.to_string())?;
@@ -141,6 +138,7 @@ fn run(options: input::Options) -> Result<(), String> {
                     "directory": output.join(&options.name),
                     "executable": receipt.files.executable_name,
                     "postpublication_error": error.as_ref().map(ToString::to_string),
+                    "runtime": options.runtime.name(),
                 })
             );
             error.map_or(Ok(()), |error| {

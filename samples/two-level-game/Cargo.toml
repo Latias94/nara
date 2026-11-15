@@ -99,5 +99,12 @@ required-features = ["cooked-player"]
 test = false
 bench = false
 
+[[bin]]
+name = "player_desktop"
+path = "src/bin/player_desktop.rs"
+required-features = ["cooked-player", "desktop"]
+test = false
+bench = false
+
 [patch.crates-io]
 winit = { path = "../../vendor/winit" }

@@ -34,6 +34,17 @@ pub(super) struct Evidence {
 }
 
 impl Evidence {
+    pub(super) fn observe_world_sampled(&mut self, world: &World) -> Result<bool, String> {
+        let changed = CurrentScene::get(world)
+            .is_some_and(|current| self.current.as_ref() != Some(current.receipt()));
+        let sampled = changed && self.receipts.len() >= 16;
+        if sampled {
+            self.receipts.remove(1);
+        }
+        self.observe_world(world)?;
+        Ok(sampled)
+    }
+
     pub fn observe(&mut self, session: &HeadlessSession) -> Result<(), String> {
         if session.startup_content_closure().is_some() {
             return Err("processed Player unexpectedly retained a source startup closure".into());
@@ -43,7 +54,7 @@ impl Evidence {
             .map_err(|error| error.to_string())?
     }
 
-    fn observe_world(&mut self, world: &World) -> Result<(), String> {
+    pub(super) fn observe_world(&mut self, world: &World) -> Result<(), String> {
         self.resident = world
             .get_resource::<Assets<ImageAsset>>()
             .into_iter()

@@ -23,8 +23,8 @@ const MAX_SAVE_PATH_BYTES: usize = 4096;
 
 /// Encodes finite Player launch intent for the original gameplay ingress at tick one.
 ///
-/// The executable and cooker always use [`super::cooked_recipe`]. Save paths must be explicit,
-/// absolute UTF-8 paths; launch intent never changes the canonical recipe configuration.
+/// The executable and cooker use the same fixed placement-specific cooked recipe. Save paths
+/// must be explicit, absolute UTF-8 paths; launch intent never changes canonical configuration.
 pub fn player_launch(options: RunOptions) -> Result<Option<GameplayCommandSubmission>, String> {
     validate(&options)?;
     if options.scenario == Scenario::Interactive && options.save_path.is_none() {
@@ -112,6 +112,36 @@ fn decode(payload: &GameplayCommandPayload) -> Result<RunOptions, String> {
 }
 
 pub(super) fn consume(world: &mut World) -> Result<(), String> {
+    if !world
+        .resource::<GameplayCommandBatch>()
+        .commands()
+        .iter()
+        .any(|command| command.command_type().as_str() == PLAYER_LAUNCH)
+    {
+        return Ok(());
+    }
+    let result = apply(world);
+    let mut session = world.resource_mut::<Session>();
+    if session.player_launch.is_none() {
+        session.player_launch = Some(result.clone());
+    }
+    result
+}
+
+/// Observes the first Player launch consumed by the original gameplay owner.
+///
+/// This diagnostic survives later ordinary action errors and is not mutation authority or
+/// authoritative game state for exact-state reconstruction. `None` means no launch was consumed.
+#[must_use]
+pub fn player_launch_result(world: &World) -> Option<Result<(), &str>> {
+    world
+        .get_resource::<Session>()?
+        .player_launch
+        .as_ref()
+        .map(|result| result.as_ref().copied().map_err(String::as_str))
+}
+
+fn apply(world: &mut World) -> Result<(), String> {
     let batch = world.resource::<GameplayCommandBatch>();
     let mut launches = batch
         .commands()
