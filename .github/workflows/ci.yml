@@ -36,6 +36,7 @@ jobs:
         run: |
           cargo check -p nara_fs --locked --lib --target wasm32-unknown-unknown
           cargo check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown
+          cargo check -p nara_app --locked --features parallel-executor --lib --target wasm32-unknown-unknown
           cargo check -p nara --locked --no-default-features --features runtime-2d,presentation-2d,presentation-ui,tooling,serde --lib --target wasm32-unknown-unknown
 
   root:
@@ -150,6 +151,13 @@ jobs:
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
         run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-sprite-render-module-consumer --test geometry --run-ignored only -E 'test(original_tile_captures_and_pixels_survive_edits_views_and_runtime_retirement)' --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test explicit parallel Material motion and retained history through DX12 software
+        if: runner.os == 'Windows'
+        env:
+          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
+          WGPU_BACKEND: dx12
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --features production-parallel --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test captured Material View time and temporal cuts through an external DX12 Host
         if: runner.os == 'Windows'
         env:
@@ -316,6 +324,8 @@ jobs:
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer -p nara-sprite-render-module-consumer --test-threads=1
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
           fi
+      - name: Test explicit parallel managed motion and original serial controls
+        run: cargo nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --locked -p motion-execution-consumer --features production-parallel --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test physical Scene source watching and native retirement
         run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --test-threads=1 --no-fail-fast --no-tests fail
       - name: Check the ordinary windowed Scene source consumer

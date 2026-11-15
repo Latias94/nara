@@ -280,3 +280,31 @@ budget. Exact run results and correction history belong to the
 
 The exact test is
 `real_material_motion_and_camera_cuts_preserve_history_ownership_and_last_good`.
+
+## Explicit Parallel Motion And History
+
+The default fixture retains the managed Runtime's serial execution profile. The optional
+`production-parallel` feature initializes the consumer's existing process-global Bevy
+`ComputeTaskPool` with two workers and explicitly selects `ExecutionProfile::Parallel` before
+Startup. The engine uses Bevy's original executor; it does not create another pool or move
+the WGPU Host into the World. Runtime retirement does not destroy this process-global pool.
+
+Run the original real Animation/Rapier history trajectory with each profile. Its assertions
+remain the same: captured clocks and poses, zero/multiple fixed ticks, Pause/exact Step,
+correction and KeepLocal reparent, stale captures and prepared candidates, selective View
+reset, unaffected histories, numeric pixels, retained outputs and original submission cleanup.
+
+```powershell
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --test history --run-ignored only -E 'test(motion_capture_discontinuity_fences_late_preparation_and_preserves_other_view_and_submission)' --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --features production-parallel --test history --run-ignored only -E 'test(motion_capture_discontinuity_fences_late_preparation_and_preserves_other_view_and_submission)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The `history` target retains its original strict hardware prerequisite. CI instead runs
+the existing `joint_history` Material/motion trajectory with `production-parallel` and
+`NARA_WGPU_FORCE_FALLBACK=1` as a separate DX12 software control. A missing requested adapter
+fails. Profile selection alone establishes neither solver-internal parallelism, bit-exact
+repeatability nor a throughput improvement. The
+[joint motion plan](../../../docs/plans/2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
+owns the executed results and remaining scope.

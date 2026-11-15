@@ -946,6 +946,7 @@ dependencies = [
 name = "nara_app"
 version = "0.1.0"
 dependencies = [
+ "bevy_tasks",
  "blake3",
  "nara_ecs",
  "thiserror",

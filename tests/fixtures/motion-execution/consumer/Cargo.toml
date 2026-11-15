@@ -10,6 +10,7 @@ publish.workspace = true
 [features]
 default = []
 unified-multi-threaded = ["bevy_ecs/multi_threaded", "dep:bevy_tasks"]
+production-parallel = ["unified-multi-threaded", "nara_app/parallel-executor"]
 
 [dependencies]
 bevy_app = { version = "=0.20.0", default-features = false, features = ["std"] }

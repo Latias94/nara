@@ -22,11 +22,14 @@ Run serially from the repository root, reusing `target`:
 ```text
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --target-dir target -p motion-execution-consumer --test-threads 1
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --target-dir target -p motion-execution-consumer --features unified-multi-threaded --test-threads 1
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --target-dir target -p motion-execution-consumer --features production-parallel --test-threads 1
 ```
 
 Set `CARGO_BUILD_JOBS=1` and do not run these concurrently. The second command deliberately enables
 Bevy's transitive `multi_threaded` feature. Raw parallel comparisons use at most two ECS workers;
-NonSend observations remain on the driver. This does not qualify production parallel support.
+NonSend observations remain on the driver. The third command additionally enables Nara's explicit
+`parallel-executor` feature and the managed production-policy cases below. Each invocation retains
+the original raw comparisons, managed Serial tests, prediction/PCM and authored collision tests.
 
 The [owning unit](../../../docs/plans/2026-11-03-joint-motion-execution-plan.md) retains the shared
 captured-history and bounded prediction/effect evidence before any production phase-interface
@@ -45,6 +48,47 @@ authors with actual captured two-View history execution on Windows/DX12.
 
 These are independent test consumers, not production Physics, Animation or Audio modules. No
 production dependency imports them, and this fixture does not choose a production backend.
+
+## Explicit managed execution policy
+
+`configured()` continues to select `ExecutionProfile::Serial`, including when Bevy features unify.
+The `production-parallel` feature adds public `App::set_execution_profile(Parallel)` compositions
+and checks the selection through both App and the original managed Runtime. The Host initializes
+or reuses Bevy's process-global `ComputeTaskPool` through `TaskPoolBuilder` with two workers before
+sealing. Nara admits the selected executor against that existing pool before Startup; it does not
+create, resize or take ownership of the pool. Pool/build refusal cases belong to the separate
+public App policy tests, so their process-global initialization order cannot affect this fixture.
+
+The new managed cases exercise the following finite workflows:
+
+- Compare eight real Animation/Rapier ticks across Serial/Parallel and Direct/Borrowed solver
+  combinations, including dynamic-floor contact, actual deferred root-motion intent and pose
+  components, fixed spatial cuts and presented interpolation. Pose comparisons use a tolerance;
+  they are not a bit-exact replay guarantee.
+- Drive zero and multiple fixed ticks, Pause, exact Step and Resume. The exact third tick moves
+  both actors to a different parent through `HierarchyWriter`, checks KeepLocal before the next
+  motion commit, and verifies the new parent and actual spatial samples.
+- Rendezvous two independent ECS systems on distinct Compute workers, with bounded waits, while
+  the real Direct solver runs through the same managed composition and NonSend stays on the
+  driver. These are ECS peers; they are separate from the nested scoped Borrowed solver thread.
+- Hold a real Borrowed solver job with the existing finite worker gate. The managed drive, pose
+  commit, callback and fixed publication cannot pass its explicit join. After release, committed
+  components and actual fixed spatial samples must match the completed solver result.
+- Consume and acknowledge a command, then fail a later fallible system after fixed publication.
+  The original Runtime retains its sticky fault, narrow consumption Ack and partial deferred
+  effect. A second Runtime on the same pool remains healthy. Each original owner retires once on
+  its driver and closes only its own offline PCM owner, retaining its own final solver sample.
+- Preserve an explicitly driven custom Serial schedule inside a Parallel managed Runtime,
+  complementing the existing Serial-managed/custom-Parallel control. Automatic drives do not run
+  either custom schedule.
+
+These cases qualify only the existing Bevy scheduler integration for this translation-only
+independent consumer. The owning plan records the executed Windows results. They do not parallelize
+Rapier internally, qualify every plugin or opaque effect under parallel execution, extend the
+closed prediction model to Parallel, or claim performance, cross-platform determinism or affine
+hierarchy support. Runtime retirement
+does not join or destroy the Host's process-global Compute pool. The captured two-View native
+history consumer remains a separate qualification and is not rerun by the commands above.
 
 ## Bounded prediction and effects
 
@@ -66,7 +110,8 @@ nonzero scheduled output, duplicate suppression across attempts, atomic batch re
 chunking and managed shutdown. Uncovered Local, native I/O and configured worker-gate state refuse
 before their execution. This closed authored inventory cannot detect arbitrary hidden effects in
 trusted Rust systems. The fixture establishes no general rollback, physical audio-device support,
-cross-platform determinism or production automatic parallel profile.
+cross-platform determinism or prediction under a production Parallel profile. The explicit managed
+policy cases above retain these tests without changing their original Serial/custom schedules.
 
 ## Authored collision derivation
 

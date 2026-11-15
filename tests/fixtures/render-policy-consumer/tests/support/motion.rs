@@ -80,6 +80,14 @@ impl MotionRuntime {
 
     pub fn with_app(configure: impl FnOnce(&mut App)) -> Result<Self, RuntimeStartFailure> {
         let mut app = App::new();
+        #[cfg(feature = "production-parallel")]
+        {
+            bevy_tasks::ComputeTaskPool::get_or_init(|| {
+                bevy_tasks::TaskPoolBuilder::new().num_threads(2).build()
+            });
+            app.set_execution_profile(nara_app::ExecutionProfile::Parallel)
+                .unwrap();
+        }
         app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
             .unwrap();
         app.add_plugins((
@@ -168,8 +176,16 @@ impl MotionRuntime {
         add_presented_transform_projection_systems(&mut app, observe_presented).unwrap();
         app.add_systems(ApplyTimeScale, apply_time_scale).unwrap();
         configure(&mut app);
+        let profile = if cfg!(feature = "production-parallel") {
+            nara_app::ExecutionProfile::Parallel
+        } else {
+            nara_app::ExecutionProfile::Serial
+        };
+        assert_eq!(app.execution_profile(), profile);
+        let runtime = RuntimeInstance::start(app)?;
+        assert_eq!(runtime.execution_profile(), profile);
         Ok(Self {
-            runtime: RuntimeInstance::start(app)?,
+            runtime,
             correction,
             scale,
         })

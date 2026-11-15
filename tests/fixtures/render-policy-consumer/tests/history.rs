@@ -223,11 +223,15 @@ fn begin(host: &mut WgpuRenderHost, frame: u64) {
         .runtime_facts()
         .adapter
         .expect("actual native adapter facts must exist");
+    assert_eq!(adapter.backend(), std::env::var("WGPU_BACKEND").unwrap());
     assert_ne!(
         adapter.device_type(),
         "cpu",
         "native hardware qualification excludes a CPU adapter"
     );
+    if frame == 1 {
+        eprintln!("motion-history: adapter={adapter:?}");
+    }
     assert_eq!(host.frame_transaction_stats().surface_acquire_attempts(), 0);
     assert_eq!(host.frame_transaction_stats().presents(), 0);
 }

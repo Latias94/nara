@@ -9,7 +9,12 @@ publish = false
 [workspace]
 resolver = "3"
 
+[features]
+default = []
+production-parallel = ["nara_app/parallel-executor", "dep:bevy_tasks"]
+
 [dependencies]
+bevy_tasks = { version = "=0.20.0", default-features = false, features = ["multi_threaded"], optional = true }
 nara = { path = "../../..", default-features = false, features = ["desktop-winit", "presentation-2d", "render-wgpu"] }
 nara_app = { path = "../../../crates/nara_app", default-features = false }
 nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }

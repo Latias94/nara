@@ -11,9 +11,9 @@ use motion_animation::{ANIMATION_PLUGIN_ID, AnimationPlugin, MotionIntent};
 use motion_contract::{Actors, MotionInput, Phase, Trace};
 use motion_physics::{PHYSICS_PLUGIN_ID, PhysicsPlugin, PhysicsSet, Solver, SolverMode};
 use nara_app::{
-    App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration,
-    PluginError, PluginId, RuntimeControl, RuntimeControlRequestResult, RuntimeFaultKind,
-    RuntimeInstance, StartupStage,
+    App, CoreStage, ExecutionProfile, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
+    PluginDeclaration, PluginError, PluginId, RuntimeControl, RuntimeControlRequestResult,
+    RuntimeFaultKind, RuntimeInstance, StartupStage,
 };
 use nara_core::Vec2;
 use nara_ecs::{
@@ -35,6 +35,9 @@ use nara_transform::{
     TransformPlugin, add_fixed_transform_projection_systems,
     add_presented_transform_projection_systems,
 };
+
+#[cfg(feature = "production-parallel")]
+mod parallel;
 
 struct Composition;
 
@@ -124,7 +127,14 @@ fn capture(fixed: Res<FixedTime>, batch: Res<GameplayCommandBatch>, trace: Res<T
 }
 
 fn configured(mode: SolverMode) -> App {
+    configured_with_profile(mode, ExecutionProfile::Serial)
+}
+
+fn configured_with_profile(mode: SolverMode, profile: ExecutionProfile) -> App {
     let mut app = App::new();
+    assert_eq!(app.execution_profile(), ExecutionProfile::Serial);
+    app.set_execution_profile(profile).unwrap();
+    assert_eq!(app.execution_profile(), profile);
     app.add_plugins((
         ComponentRegistryPlugin,
         HierarchyPlugin,
