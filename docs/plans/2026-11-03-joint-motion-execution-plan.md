@@ -71,6 +71,120 @@ same schedule. The drive fails and remains sticky; the Ack and deferred effects 
 Ack does not certify whole-tick success or authoritative confirmation. The stronger D07 rule is
 not selected. New borrowed solver work must finish before its pose commit, independently of Ack.
 
+## Explicit Production Executor Successor
+
+Status: active from `3152f5e`. Runtime work continues while Editor/Dialogue product work remains
+paused. The existing serial and raw-parallel comparison is the baseline; this successor admits
+an explicitly selected production policy through the original managed owner.
+
+Keep `App::new()` serial. Add a configuration-time `ExecutionProfile` selection for all engine
+automatic Startup, Core and private frame-cleanup schedules. Parallel uses Bevy's existing
+executor and requires an explicit Nara build feature plus an already initialized, nonempty
+Host-initialized process-global Bevy `ComputeTaskPool`. Refuse unavailable policy before Startup. Nara neither creates
+another scheduler/pool nor treats dependency feature unification as a policy request. A selected
+policy cannot change during Finish or after seal; custom schedules keep their explicit owner
+policy. Pool workers, borrowed solver jobs and cross-frame Tasks remain separate resource facts.
+
+Separate App configuration identity from plugin-plan identity. The former includes the selected
+execution policy with the exact plugin plan, while the latter remains the original plugin
+declaration/definition composition. This closes the game reconstruction compatibility gap
+without treating worker count, arbitrary Rust systems or binary identity as plugin-plan data.
+
+Qualify the actual public managed Runtime with default, unified and explicit parallel consumers.
+Reuse the independently authored Animation/Rapier motion, actual borrowed job join, deferred
+pose/Transform projection, NonSend owner placement, zero/multiple ticks, Pause/exact Step and
+command consumption followed by a later fault. Prove original error routing, two independent
+Runtime owners and physical cleanup. Exercise missing-feature/missing-pool refusal before any
+Startup effect, real independent peer overlap and custom schedule policy preservation. Keep
+all existing default serial, raw comparison, collision and prediction/audio assertions. Profile
+selection alone does not qualify bit-exact results, solver-internal parallelism, arbitrary game
+repeatability or a throughput improvement. Run Cargo serially with the current locked toolchain
+and original target, review independently and update ADR0003 and current implementation evidence.
+
+Also run the original real-GPU motion/history trajectory through an explicitly selected parallel
+fixture composition. Preserve its original numeric accumulation, captured clocks, zero/multiple
+ticks, Pause/exact Step, solver correction/KeepLocal reparent, stale-capture/prepared refusal,
+selective View reset and retained-output/submission assertions. The fixture build feature selects
+the consumer's profile; the production default stays serial. Native execution remains outside
+the World. A successful parallel CPU trace alone is not the captured-history qualification.
+
+### Production Executor Implementation And Qualification
+
+The original App installs the selected executor after plugin Finish and before graph admission
+and Startup. Runtime observation reads the selection from its existing retained owner. The
+implementation uses Bevy ECS/tasks 0.20.0; the pinned Bevy source
+`03ed5a27c92715c8fa2188f31f04e454ec39942f` supplies the corresponding executor, schedule and
+task-facility reference. It is a development checkout, not an assertion of exact tag equivalence.
+The render consumer's independent lock replaces its previous Bevy tasks 0.20.1 with the selected
+exact 0.20.0 dependency so its Host and the App use the same facility. The required async-channel
+and event-listener closure is added. Unrelated Windows dependency-edge rewrites from resolution
+are removed, and locked metadata accepts the retained choices. This is not a general dependency
+upgrade or a claim that every independent patch version matches the root workspace.
+
+Replacing a Bevy executor resets its final-deferred setting. The App therefore retains requests
+made through its controlled configuration API, restores them when installing either executor,
+then reasserts the original public-anchor policy before graph initialization. A public regression
+observes Update commands in the first and next frame under both settings and profiles. The
+private frame-cleanup schedule also has actual overlapping peers. Custom schedules keep their
+original executor and explicit driving rule.
+
+Production review caught an invalid ordered-map choice for `InternedScheduleLabel`; the retained
+configuration uses a HashMap solely for insertion and lookup, without introducing iteration
+order. The first motion test build caught a stale World API spelling in a new shutdown probe;
+it was corrected to the installed `non_send` accessor without removing assertions. Independent
+production and consumer/test reviews find no remaining confirmed P1/P2. Those reviews are
+read-only and do not substitute for execution.
+
+Initial release-mode execution on Windows with Rust 1.95.0 passes the explicit parallel motion
+consumer 36/36 (`430f4da4-c81d-4c9b-aa46-c83a7f5a11b5`), the complete App default cohort
+182/182 (`abbd5eb3-19cf-4e44-ad07-0b42cf703973`) and feature-enabled cohort 183/183
+(`a0f0a43b-2c08-44b2-ba83-b1aa8c7ad194`). Each App run leaves the existing disposable-child
+close-custody test unselected. Independent default motion passes 30/30
+(`2ec3261e-96d0-4c47-92ff-8d1d525f7b67`), and dependency-unified motion passes 31/31
+(`1f99c588-1544-4ca1-9d04-7e6fc6009425`), retaining the original collision and closed
+prediction/offline-PCM assertions. Captured history is qualified below. Product compatibility
+and final build/lint checks remain in progress; this is not final qualification.
+
+The original `history` target retains its strict native hardware gate. The CI software control
+instead selects the existing complete `joint_history` Material/motion trajectory with
+`production-parallel`; no hardware assertion is weakened to admit a software result.
+
+The first native consumer build exposed two missing exhaustive matches for the new PluginError
+in the root product diagnostic adapter. Product preparation now reports a framework refusal as
+`project.run.execution-profile-unavailable`, preserving the selected profile and static refusal
+reason. A real plugin invocation returning that same typed error retains its actual plugin/hook
+and lifecycle context. Actual source-Host refusal/cleanup and managed build/shutdown attribution
+regressions cover that distinction. Root run `936518a3-97a6-4497-8398-8dd744c983ff` passes
+93/93: 54 selected Runtime Host controls plus all 39 public plugin-composition tests. The other
+880 library tests are outside this filter. Both new diagnostic regressions pass, including
+static reason fields, absence of fake plugin/hook attribution, retained actual invocation
+identity, original no-publication/start-claim release and exactly-once acquired-owner cleanup.
+It uses the root's `runtime-2d,serde,project-tooling` feature selection without defaults.
+
+The final native trajectories pass on Windows/DX12 with explicit adapter selection:
+
+| Consumer | Selection | Actual result | Nextest run |
+| --- | --- | --- | --- |
+| Original motion/history | Parallel, RTX 4090 hardware | 1/1; six unrelated tests outside the filter | `f1d0f695-f4b0-4c51-bb3f-05445637deac` |
+| Original motion/history | Serial, RTX 4090 hardware | 1/1; six unrelated tests outside the filter | `43dd7d22-d6b0-4587-ba24-c682819c7eb3` |
+| Joint Material/motion/history | Parallel, Microsoft Basic Render Driver software | 1/1; no skips | `cb26cec1-3eba-407c-86a5-5248bba8bd76` |
+
+The joint software run observes four cuts, 14 temporal publications, four late original stock
+outputs and the expected native pipeline change from seven to eight. The original World is
+dropped, retained producer outputs remain exact and explicit cleanup reports no failures. These
+are executed correctness and ownership checks, not a timing or performance qualification.
+
+The actual independently locked Two-Level Game default run
+`d48e08c4-dc4f-4a4a-b738-f9b074e8427c` executes 110 tests: 99 pass and 11 fail, with two
+native/build tests unselected. Every failure reaches the same stale game-owned eligibility
+inventory: the default Runtime2d recipe now installs `nara.material2d`, but the game has not
+classified that service. Ten resume tests reject healthy capture; the continuity-bin control
+panics on the same refusal and aborts during its unwind. This is an executed product gate,
+not a green compile-only compatibility claim. Correct the sample's explicit inventory after
+inspecting the Material plugin; schema plus empty storage does not authorize omission of
+actual material assets/components from a claimed complete state. Preserve unknown-service
+refusal and rerun the original full default tests.
+
 ## Shared temporal selection
 
 Retain the existing `WgpuHistoryLineage` as the CPU temporal owner. Ordinary Host slot reset

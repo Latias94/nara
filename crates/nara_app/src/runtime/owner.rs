@@ -139,6 +139,7 @@ pub(crate) struct RuntimeOwner {
 pub(crate) struct RuntimeOwnerState {
     _thread_affinity: PhantomData<Rc<()>>,
     pub(crate) world: World,
+    pub(crate) execution_profile: crate::ExecutionProfile,
     pub(crate) schedules: Schedules,
     pub(crate) plugins: Vec<InstalledPlugin>,
     pub(crate) runtime_fault_reporter: RuntimeFaultReporter,
@@ -262,6 +263,7 @@ impl RuntimeOwnerState {
         Self {
             _thread_affinity: PhantomData,
             world,
+            execution_profile: crate::ExecutionProfile::Serial,
             schedules,
             plugins: Vec::new(),
             obligations: RuntimeObligationLedger::new(),

@@ -6,7 +6,7 @@
 //! Staged admission and publication remain public only for first-party cross-crate Host composition.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fmt::{self, Display, Formatter},
     num::NonZeroU32,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -24,11 +24,13 @@ use nara_ecs::{
 };
 use thiserror::Error;
 
+mod execution;
 mod failure_metadata;
 mod plugin;
 mod runtime;
 mod time_continuation;
 
+pub use execution::{AppConfigurationFingerprint, ExecutionProfile, ExecutionProfileError};
 pub use plugin::{
     AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCategory,
     PluginCommitError, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,
@@ -1162,6 +1164,7 @@ pub struct App {
     plugin_groups: Vec<ResolvedPluginGroup>,
     disabled_plugin_slots: BTreeSet<PluginSlotId>,
     plugin_plan_fingerprint: PluginPlanFingerprint,
+    automatic_final_deferred: HashMap<InternedScheduleLabel, bool>,
     registered_shutdown_obligations: BTreeSet<(PluginId, PluginShutdownObligationId)>,
 }
 
@@ -1175,8 +1178,9 @@ impl App {
     #[must_use]
     /// Creates configuration with explicitly serial automatically driven schedules.
     ///
-    /// Bevy dependency features cannot change this policy. Explicit custom schedules retain their
-    /// owner's executor policy; domain-owned borrowed work must join before publishing its result.
+    /// Bevy dependency features cannot change this default. Select another automatic policy with
+    /// [`App::set_execution_profile`]. Explicit custom schedules retain their owner's executor;
+    /// domain-owned borrowed work must join before publishing its result.
     pub fn new() -> Self {
         Self {
             owner: runtime::RuntimeOwner::new(),
@@ -1185,6 +1189,7 @@ impl App {
             plugin_groups: Vec::new(),
             disabled_plugin_slots: BTreeSet::new(),
             plugin_plan_fingerprint: plugin::empty_plan_fingerprint(),
+            automatic_final_deferred: HashMap::new(),
             registered_shutdown_obligations: BTreeSet::new(),
         }
     }
@@ -1361,6 +1366,11 @@ impl App {
         apply_final_deferred: bool,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
+        let schedule = schedule.intern();
+        if is_built_in_schedule(schedule) {
+            self.automatic_final_deferred
+                .insert(schedule, apply_final_deferred);
+        }
         self.owner
             .schedules
             .entry(schedule)
@@ -1423,8 +1433,34 @@ impl App {
     }
 
     #[must_use]
-    pub const fn configuration_fingerprint(&self) -> PluginPlanFingerprint {
+    pub fn configuration_fingerprint(&self) -> AppConfigurationFingerprint {
+        AppConfigurationFingerprint::new(self.plugin_plan_fingerprint, self.execution_profile())
+    }
+
+    /// Returns the exact plugin declaration/definition composition, independent of executor policy.
+    #[must_use]
+    pub const fn plugin_plan_fingerprint(&self) -> PluginPlanFingerprint {
         self.plugin_plan_fingerprint
+    }
+
+    #[must_use]
+    pub fn execution_profile(&self) -> ExecutionProfile {
+        self.owner.execution_profile
+    }
+
+    /// Selects automatic execution during configuration, before Finish and Startup.
+    ///
+    /// Availability and the Host-owned ComputeTaskPool are checked when the App is sealed.
+    pub fn set_execution_profile(
+        &mut self,
+        profile: ExecutionProfile,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        if self.owner.plugin_lifecycle != PluginLifecycleState::Configuring {
+            return Err(PluginError::AppSealed);
+        }
+        self.owner.execution_profile = profile;
+        Ok(self)
     }
 
     pub fn register_plugin_shutdown_obligation(
@@ -1590,9 +1626,15 @@ impl App {
         }
 
         if self.owner.plugin_lifecycle == PluginLifecycleState::Finishing {
-            if let Err(error) = self
-                .validate_public_schedule_compatibility()
-                .and_then(|()| self.initialize_installed_schedules())
+            if let Err(error) = (|| {
+                let owner = &mut *self.owner;
+                owner
+                    .execution_profile
+                    .install(&mut owner.schedules, &self.automatic_final_deferred)
+                    .map_err(Into::into)
+            })()
+            .and_then(|()| self.validate_public_schedule_compatibility())
+            .and_then(|()| self.initialize_installed_schedules())
             {
                 self.owner.shutdown_plugins_internal();
                 return Err(error);

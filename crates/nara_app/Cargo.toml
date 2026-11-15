@@ -7,8 +7,13 @@ license.workspace = true
 
 [dependencies]
 blake3.workspace = true
+bevy_tasks = { workspace = true, optional = true }
 nara_ecs.workspace = true
 thiserror.workspace = true
+
+[features]
+default = []
+parallel-executor = ["dep:bevy_tasks", "bevy_tasks/multi_threaded", "nara_ecs/parallel-executor"]
 
 [dev-dependencies]
 bevy_ecs.workspace = true

@@ -102,6 +102,7 @@ nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
 bevy_ecs = "=0.20.0"
+bevy_tasks = { version = "=0.20.0", default-features = false }
 base64 = "0.21.7"
 bevy_ecs_macro_logic = "=0.20.0"
 bevy_macro_utils = "=0.20.0"
@@ -223,6 +224,7 @@ yaml-rust2.workspace = true
 [features]
 editor-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 default = ["runtime-core"]
+parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-core = [
     "dep:blake3",
     "dep:rustix",

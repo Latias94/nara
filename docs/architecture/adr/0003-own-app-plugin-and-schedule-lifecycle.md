@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-03 (explicit serial automatic execution)
+**Last Revised**: 2026-11-15 (explicit automatic executor selection)
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
 Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness;
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
@@ -116,16 +116,30 @@ advanced custom-schedule freedom without making a built-in semantic anchor repla
 seal validation.
 
 Every automatically driven schedule, including Startup and private frame cleanup, explicitly uses
-Bevy's `SingleThreadedExecutor`. Dependency feature unification must not change this policy.
-NonSend systems therefore remain on the managed driver, while domain-owned borrowed solver work
-may run elsewhere and must join before pose publication. Serial ECS execution is not rollback,
-bitwise determinism, or a shared worker budget. Custom schedules remain explicitly driven and
+the App's selected `ExecutionProfile`. `App::new()` selects Bevy's `SingleThreadedExecutor`.
+Dependency feature unification must not change that default. A caller may explicitly select
+`Parallel` during configuration, before Finish and seal. Admission requires the Nara
+`parallel-executor` feature, a supported native target and an already initialized nonempty
+process-global Bevy `ComputeTaskPool`; refusal occurs before Startup. The Host selects and
+initializes that existing facility. Nara installs Bevy's `MultiThreadedExecutor` without creating
+or resizing another pool. Runtime retirement joins its schedule execution and owned work, not
+the process-global pool's worker lifetime. ECS worker count, borrowed solver work and cross-frame
+Tasks remain separate facts.
+
+NonSend systems remain on the managed driver under both profiles; domain-owned borrowed solver
+work must join before pose publication. Execution selection alone qualifies no rollback,
+bitwise determinism or throughput guarantee. Custom schedules remain explicitly driven and
 retain their owner's raw executor policy; Nara does not overwrite that policy during seal.
 
-The [joint motion comparison](../../plans/2026-11-03-joint-motion-execution-plan.md) also exercises
-raw explicit parallel execution, but does not admit a production automatic-parallel profile or
-freeze a new phase-plan interface. Those require their joint temporal/effect and fault gates.
-An unrelated Bevy feature is not an opt-in mechanism for production parallel execution.
+`AppConfigurationFingerprint` includes the selected automatic executor and the exact original
+plugin-plan fingerprint. `PluginPlanFingerprint` continues to identify declaration/definition
+composition only. Configuration observations must not silently substitute one identity for the
+other. Arbitrary Rust systems, resource values, binary provenance and physical worker counts
+retain their separate compatibility contracts. The
+[joint motion successor](../../plans/2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
+qualifies the actual managed Animation/Rapier, temporal/effect, fault and retirement controls
+before claiming production parallel support. Its work-in-progress state is not qualification or
+a new automatic phase-plan interface.
 
 For the first-playable schedule-label anchors, seal validation specifically requires automatic
 deferred insertion to remain enabled and reasserts each schedule's final deferred application

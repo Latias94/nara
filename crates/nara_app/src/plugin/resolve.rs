@@ -750,6 +750,7 @@ impl Debug for SealedApp {
         formatter
             .debug_struct("SealedApp")
             .field("plugin_plan_fingerprint", &self.plugin_plan_fingerprint())
+            .field("execution_profile", &self.execution_profile())
             .finish_non_exhaustive()
     }
 }
@@ -762,7 +763,17 @@ impl SealedApp {
 
     #[must_use]
     pub const fn plugin_plan_fingerprint(&self) -> PluginPlanFingerprint {
+        self.app.plugin_plan_fingerprint()
+    }
+
+    #[must_use]
+    pub fn configuration_fingerprint(&self) -> crate::AppConfigurationFingerprint {
         self.app.configuration_fingerprint()
+    }
+
+    #[must_use]
+    pub fn execution_profile(&self) -> crate::ExecutionProfile {
+        self.app.execution_profile()
     }
 }
 

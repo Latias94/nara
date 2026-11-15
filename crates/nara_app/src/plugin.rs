@@ -328,6 +328,8 @@ pub trait Plugin: Send + Sync + 'static {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PluginError {
     #[error(transparent)]
+    ExecutionProfile(#[from] crate::ExecutionProfileError),
+    #[error(transparent)]
     Domain(#[from] PluginDomainError),
     #[error("plugin hook {plugin} attempted forbidden {mutation} mutation during {hook}")]
     HookMutationForbidden {

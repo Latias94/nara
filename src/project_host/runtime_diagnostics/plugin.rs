@@ -79,6 +79,15 @@ fn plugin_hook_failure_diagnostic(
     context_code: &'static str,
     summary: &'static str,
 ) -> Diagnostic {
+    let (context_code, summary) =
+        if failure.is_none() && matches!(error, PluginError::ExecutionProfile(_)) {
+            (
+                "project.run.execution-profile-unavailable",
+                "Selected automatic execution profile is unavailable",
+            )
+        } else {
+            (context_code, summary)
+        };
     let mut diagnostic = domain_diagnostic(
         error.domain_error().copied(),
         context_code,
@@ -91,6 +100,18 @@ fn plugin_hook_failure_diagnostic(
         diagnostic = attach_identifier(diagnostic, "hook", plugin_hook_id(failure.hook()));
     }
     match error {
+        PluginError::ExecutionProfile(error) => {
+            let reason = match error {
+                nara_app::ExecutionProfileError::ParallelNotBuilt => "parallel-not-built",
+                nara_app::ExecutionProfileError::UnsupportedTarget => "unsupported-target",
+                nara_app::ExecutionProfileError::ComputePoolUnavailable => {
+                    "compute-pool-unavailable"
+                }
+                nara_app::ExecutionProfileError::EmptyComputePool => "empty-compute-pool",
+            };
+            diagnostic = attach_identifier(diagnostic, "execution-profile", "parallel");
+            diagnostic = attach_identifier(diagnostic, "execution-profile-reason", reason);
+        }
         PluginError::Domain(_) => {}
         PluginError::HookMutationForbidden {
             plugin,
@@ -174,6 +195,7 @@ pub(in crate::project_host) fn append_plugin_shutdown_diagnostics(
 
 fn plugin_error_reason(error: &PluginError) -> &'static str {
     match error {
+        PluginError::ExecutionProfile(_) => "execution-profile",
         PluginError::Domain(_) => "domain",
         PluginError::HookMutationForbidden { .. } => "hook-mutation-forbidden",
         PluginError::AppSealed => "app-sealed",

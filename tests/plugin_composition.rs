@@ -1131,7 +1131,7 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
     let mut direct_app = nara::app::App::new();
     direct_app.add_plugins(MinimalPlugins).unwrap();
     assert_ne!(
-        direct_app.configuration_fingerprint(),
+        direct_app.plugin_plan_fingerprint(),
         first.plugin_plan().fingerprint(),
         "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );

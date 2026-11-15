@@ -2122,6 +2122,7 @@ impl Debug for RuntimeInstance {
         formatter
             .debug_struct("RuntimeInstance")
             .field("generation", &self.generation)
+            .field("execution_profile", &self.execution_profile())
             .field("state", &self.state())
             .field("fault", &self.fault())
             .finish_non_exhaustive()
@@ -2129,6 +2130,12 @@ impl Debug for RuntimeInstance {
 }
 
 impl RuntimeInstance {
+    /// Returns this original Runtime's sealed automatic execution policy.
+    #[must_use]
+    pub fn execution_profile(&self) -> crate::ExecutionProfile {
+        self.owner.execution_profile
+    }
+
     /// Borrows the existing lifecycle report, including terminal shutdown failures.
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {

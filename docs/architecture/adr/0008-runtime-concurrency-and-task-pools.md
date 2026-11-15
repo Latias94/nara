@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-11-15
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
 Cancellation, and Long-Running Diagnostics; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -56,6 +56,11 @@ flowchart TD
 Core rules:
 
 - ECS world mutation happens on the main app schedule unless a system is explicitly scheduled by `bevy_ecs` for safe parallel execution.
+- Automatic ECS execution follows [ADR 0003](0003-own-app-plugin-and-schedule-lifecycle.md).
+  Its optional native Parallel profile uses a Host-initialized process-global Bevy ComputeTaskPool.
+  That synchronous schedule facility is distinct from the bounded Tasks facilities below;
+  Runtime retirement does not destroy its process-global workers. Borrowed solver joins retain
+  their domain-owned lifetime rather than becoming cross-frame Tasks.
 - Background tasks do not hold direct mutable references into the main `World`.
 - Task terminal publication and executor-owned physical return are separate observations.
   Domains use the Tasks-owned return observer for closure/capture disposal and rejected late

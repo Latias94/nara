@@ -55,6 +55,48 @@ construct a fresh App there. Control values and fault reporters remain transport
 transfer executable ownership. Dropping an incomplete owner transfers its retained obligations
 to quarantine rather than proving a clean stop. Drain quarantine on the constructing thread.
 
+## Automatic Execution Policy
+
+`App::new()` explicitly selects serial execution for every engine-driven Startup, Core and
+private cleanup schedule, even when dependencies enable Bevy multithreading. Custom schedules
+keep their author's explicit executor. NonSend systems and physical Runtime retirement remain
+on the managed driver under either automatic profile.
+
+Native code-first Hosts may enable Nara's `parallel-executor` feature and call
+`app.set_execution_profile(ExecutionProfile::Parallel)` during configuration. Before starting
+or sealing, initialize the existing process-global `bevy_tasks::ComputeTaskPool` with the Host's
+selected positive worker count. Use the matching Bevy 0.20 dependency; Nara neither creates nor
+resizes that pool. An existing pool keeps the initialization selected by its original Host.
+Unavailable build/target/pool requests return `ExecutionProfileError` through the ordinary
+pre-Startup failure owner. Feature availability alone never changes a Runtime's selected policy.
+
+The selection freezes before Finish/Startup. All automatic schedules use the original Bevy
+executor under Nara's managed error, deferred-command, fixed-time and physical-close contracts.
+Parallel peer execution does not order unrelated systems; declare real domain dependencies and
+join borrowed solver work before publishing its poses. Runtime close does not destroy the
+process-global compute facility. Cross-frame Tasks and solver worker budgets remain separate.
+
+`app.execution_profile()` and `runtime.execution_profile()` observe the same retained selection.
+`app.configuration_fingerprint()` now returns `AppConfigurationFingerprint`, which includes
+that profile and the exact plugin plan. Use `app.plugin_plan_fingerprint()` when comparing the
+original `PluginPlanFingerprint`; the two identity types have separate meaning. Arbitrary Rust
+systems, resources, binary provenance and physical worker counts are not attested by either
+digest. Schedule policies configured outside a plugin's encoded definition also need their own
+compatibility inventory. The new App digest intentionally differs from the former plugin-plan-only
+digest even for Serial; persisted compatibility records must be recaptured. A reconstruction workflow must
+retain its own complete compatibility inventory.
+
+The [joint motion unit](../plans/2026-11-03-joint-motion-execution-plan.md#explicit-production-executor-successor)
+owns actual profile qualification. Building the feature does not establish repeatability,
+solver-internal parallelism, foreign-platform support or a performance improvement. This is a
+code-first App selection; it adds no persisted project setting or product-recipe default change.
+
+Product preparation reports an unavailable framework profile as
+`project.run.execution-profile-unavailable`, with static `execution-profile` and
+`execution-profile-reason` fields. A plugin that returns this typed error retains its actual
+invocation's plugin/hook and lifecycle diagnostic context. A policy refusal does not attribute
+the framework's admission check to an unrelated plugin.
+
 ## Control And Shutdown
 
 Use `request_control` and `drive` for pause, resume, exact fixed-tick stepping, Stop, and retryable

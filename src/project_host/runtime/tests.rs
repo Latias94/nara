@@ -7414,6 +7414,133 @@ fn startup_panic_releases_the_host_claim_and_quarantines_the_runtime_owner() {
 }
 
 #[test]
+fn unavailable_execution_profile_refuses_project_publication_and_retires_original_owners() {
+    struct ParallelSelection;
+
+    impl Plugin for ParallelSelection {
+        fn declaration() -> &'static PluginDeclaration {
+            const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("nara.test.project-parallel-selection"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.set_execution_profile(nara_app::ExecutionProfile::Parallel)?;
+            Ok(())
+        }
+    }
+
+    let project = TestProject::new("unavailable-execution-profile");
+    let report = assert_start_phase_failure(
+        &project,
+        PluginDefinition::infallible::<ParallelSelection, _>(
+            PluginDefinitionId::new("nara.test.project-parallel-selection", 1),
+            b"project-parallel-selection-v1",
+            || ParallelSelection,
+        ),
+        "project.run.execution-profile-unavailable",
+        1,
+    );
+    let code = "project.run.execution-profile-unavailable";
+    assert_eq!(
+        identifier_field(&report, code, "reason"),
+        Some("execution-profile")
+    );
+    assert_eq!(
+        identifier_field(&report, code, "execution-profile"),
+        Some("parallel")
+    );
+    assert!(matches!(
+        identifier_field(&report, code, "execution-profile-reason"),
+        Some("parallel-not-built" | "compute-pool-unavailable")
+    ));
+    assert_eq!(identifier_field(&report, code, "plugin"), None);
+    assert_eq!(identifier_field(&report, code, "hook"), None);
+}
+
+#[test]
+fn plugin_reported_execution_failure_retains_its_build_and_shutdown_invocation_identity() {
+    struct ReportedFailure {
+        fail_build: bool,
+    }
+
+    const PLUGIN: PluginId = PluginId::new("nara.test.reported-execution-failure");
+    impl Plugin for ReportedFailure {
+        fn declaration() -> &'static PluginDeclaration {
+            const DECLARATION: PluginDeclaration =
+                PluginDeclaration::new(PLUGIN, PluginCategory::Runtime);
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            if self.fail_build {
+                Err(nara_app::ExecutionProfileError::ComputePoolUnavailable.into())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+            if self.fail_build {
+                Ok(())
+            } else {
+                Err(nara_app::ExecutionProfileError::ComputePoolUnavailable.into())
+            }
+        }
+    }
+
+    let project = TestProject::new("reported-execution-failure");
+    let build = assert_start_phase_failure(
+        &project,
+        PluginDefinition::infallible::<ReportedFailure, _>(
+            PluginDefinitionId::new("nara.test.reported-execution-failure", 1),
+            b"reported-execution-failure-v1",
+            || ReportedFailure { fail_build: true },
+        ),
+        "project.run.plugin-hook-failed",
+        1,
+    );
+    let mut app = App::new();
+    app.add_plugins(ReportedFailure { fail_build: false })
+        .unwrap();
+    let retired = nara_app::RuntimeInstance::start(app)
+        .unwrap()
+        .finish()
+        .unwrap_err();
+    assert_eq!(
+        retired.retirement_state(),
+        nara_app::RuntimeCandidateRetirementState::Retired
+    );
+    let mut shutdown = DiagnosticReport::default();
+    append_plugin_shutdown_diagnostics(&mut shutdown, retired.plugin_failure_report());
+
+    for (report, code, hook) in [
+        (&build, "project.run.plugin-hook-failed", "build"),
+        (&shutdown, "project.run.cleanup-plugin-shutdown", "shutdown"),
+    ] {
+        assert_eq!(
+            identifier_field(report, code, "plugin"),
+            Some(PLUGIN.as_str())
+        );
+        assert_eq!(identifier_field(report, code, "hook"), Some(hook));
+        assert_eq!(
+            identifier_field(report, code, "execution-profile"),
+            Some("parallel")
+        );
+        assert_eq!(
+            identifier_field(report, code, "execution-profile-reason"),
+            Some("compute-pool-unavailable")
+        );
+        assert!(
+            !report.iter().any(|diagnostic| diagnostic.code().as_str()
+                == "project.run.execution-profile-unavailable")
+        );
+    }
+}
+
+#[test]
 fn every_start_phase_failure_keeps_runtime_invisible_and_closes_acquired_owners_once() {
     let project = TestProject::new("start-phase-failures");
     assert_start_phase_failure(
@@ -7738,7 +7865,7 @@ fn assert_start_phase_failure(
     failure: PluginDefinition,
     expected_code: &str,
     expected_probe_builds: usize,
-) {
+) -> DiagnosticReport {
     let retained_before = runtime_quarantine_status().process_retained();
     let builds = Arc::new(AtomicUsize::new(0));
     let closes = Arc::new(AtomicUsize::new(0));
@@ -7772,6 +7899,7 @@ fn assert_start_phase_failure(
         retained_after, retained_before,
         "a start-phase failure retained a runtime owner after Host cleanup"
     );
+    error.diagnostics.clone()
 }
 
 fn close_probe_definition(
