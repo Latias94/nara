@@ -122,13 +122,19 @@ impl Arguments {
         Ok(())
     }
 
-    pub fn response(&self, request: u64, result: Result<Reply, String>) -> Response {
+    pub fn response(
+        &self,
+        request: u64,
+        result: Result<Reply, String>,
+        control_service: super::protocol::ControlServiceObservation,
+    ) -> Response {
         Response {
             version: PROTOCOL_VERSION,
             placement: self.placement,
             session: self.session.clone(),
             generation: self.generation.clone(),
             request,
+            control_service,
             result,
         }
     }

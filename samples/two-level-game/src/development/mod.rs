@@ -30,7 +30,8 @@ use nara::{
 use crate::resume::{ResumeState, encode_resume};
 use process::{Executable, Process, Store};
 pub use protocol::{
-    DesktopPresentation, DevelopmentPlacement, ExecutionState, ExecutionStatus, InputActivation,
+    ControlServiceObservation, DesktopPresentation, DevelopmentPlacement, ExecutionState,
+    ExecutionStatus, InputActivation,
 };
 use protocol::{MAX_STEP_COMMANDS, Observation, SemanticCommand};
 use source::SourceFence;
@@ -116,6 +117,8 @@ pub struct RetirementReport {
     pub native: SupervisedProcessCleanupReceipt,
     pub game_closed: bool,
     pub terminated: bool,
+    /// Last validated child response's diagnostics, independent of native cleanup completion.
+    pub control_service: Option<ControlServiceObservation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +296,17 @@ impl DevelopmentHost {
         self.active.as_ref().map(|live| live.generation)
     }
 
+    /// Copies the last validated response's diagnostics from the current active child.
+    ///
+    /// Candidate and retiring-child responses never replace this active-child observation.
+    /// No active child means `None`; the observation grants no control or cleanup authority.
+    #[must_use]
+    pub fn control_service(&self) -> Option<ControlServiceObservation> {
+        self.active
+            .as_ref()
+            .and_then(|live| live.process.control_service())
+    }
+
     #[must_use]
     pub const fn placement(&self) -> DevelopmentPlacement {
         self.placement
@@ -412,6 +426,14 @@ impl DevelopmentHost {
                 .capture()
                 .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error))
         })
+    }
+
+    /// Completes original paused App maintenance without advancing a fixed simulation tick.
+    pub fn frame(&mut self) -> Result<Observation, DevelopmentError> {
+        self.active_mut()?
+            .process
+            .frame()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
     }
 
     /// Drives only the adopted incumbent. A prepared candidate is never an ordinary input target.
@@ -686,6 +708,7 @@ impl DevelopmentHost {
                     native: retired.native,
                     game_closed: retired.game_closed,
                     terminated: retired.terminated,
+                    control_service: retired.control_service,
                 }),
                 Err(error) => {
                     self.cleanup_error = Some(error);

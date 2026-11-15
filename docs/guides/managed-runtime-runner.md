@@ -153,7 +153,20 @@ maintenance deadlines remain active. Select `Poll` for continuous App stages and
 returning from Wait requests original frame work without resetting the elapsed-time baseline.
 Repeated selections leave demand unchanged, and faulted or retiring sessions refuse changes.
 
-Wait does not discover arbitrary World mutations, wake for background task completion, or
+`WinitSession::maintenance_wake()` and `DesktopRun::maintenance_wake()` return a cloneable,
+thread-safe hint for that original live native session. Call `notify()` after recording work
+in the consumer's own bounded state. It wakes native maintenance without requesting an App
+frame, resetting elapsed time or changing paused capture eligibility. A successful return
+means queued or coalesced, not completed work. Read and validate the original work at the
+consumer boundary; the handle carries no payload or Runtime/window authority.
+
+Shutdown, faults, Drop or native delivery refusal revoke every clone. The physical event loop
+does not reuse session wake identities, so a stale handle cannot notify a successor session.
+Keep a reconciliation policy where the external source can lose notifications. The reference
+game's private control-directory watcher uses a 250 ms ceiling and joins before Closed;
+see its [development Host guide](../../samples/two-level-game/README.md#native-request-notifications).
+
+Wait does not discover arbitrary World mutations, automatically wake for background task completion, or
 animate shaders using real time. Task results still need a later complete App frame for
 integration. The caller must keep Poll, explicitly request paused maintenance while its work
 is pending, or accept deferring that work until a native event or explicit operation. Pause

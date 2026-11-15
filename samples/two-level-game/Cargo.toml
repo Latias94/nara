@@ -13,6 +13,7 @@ resolver = "3"
 
 [dependencies]
 nara = { path = "../..", default-features = false, features = ["runtime-2d", "serde", "project-tooling"] }
+notify = "=8.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -107,4 +108,5 @@ test = false
 bench = false
 
 [patch.crates-io]
+notify = { path = "../../vendor/notify" }
 winit = { path = "../../vendor/winit" }

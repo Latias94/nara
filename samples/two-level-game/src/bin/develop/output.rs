@@ -4,8 +4,8 @@ use nara::project_tooling::cargo_build::CargoBuildFailure;
 use serde_json::{Value, json};
 use two_level_game::{
     development::{
-        ActiveGeneration, DevelopmentError, RetirementReport, RetirementRole, RetirementStatus,
-        protocol::Observation,
+        ActiveGeneration, ControlServiceObservation, DevelopmentError, RetirementReport,
+        RetirementRole, RetirementStatus, protocol::Observation,
     },
     resume::{MAX_RESUME_BYTES, ResumeState, encode_resume},
 };
@@ -55,6 +55,10 @@ pub(super) fn generation(generation: Option<ActiveGeneration>) -> Value {
     })
 }
 
+pub(super) fn control_service(observation: Option<ControlServiceObservation>) -> Value {
+    json!(observation)
+}
+
 pub(super) fn retirement(status: RetirementStatus) -> &'static str {
     match status {
         RetirementStatus::Complete => "complete",
@@ -78,6 +82,7 @@ pub(super) fn retirements(reports: &[RetirementReport]) -> Value {
                     "role": role,
                     "game_closed": report.game_closed,
                     "terminated": report.terminated,
+                    "control_service": control_service(report.control_service),
                     "native": {
                         "exit_code": report.native.exit().code(),
                         "exit_success": report.native.exit().success(),

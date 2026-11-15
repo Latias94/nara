@@ -222,6 +222,7 @@ fn serve(
             output::generation(prepared.as_ref().map(PreparedRebuild::generation));
         response["cleanup_error"] = host.cleanup_error().map_or(Value::Null, output::text);
         response["retirements"] = output::retirements(host.retirements());
+        response["control_service"] = output::control_service(host.control_service());
         if let Err(error) = output::emit(stdout, &response) {
             return Stop::failed(
                 "output",

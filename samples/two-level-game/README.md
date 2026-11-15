@@ -423,8 +423,8 @@ Run the production desktop Host's actual body/private-structure edit qualificati
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-This game-owned development protocol is version four and requires explicit placement in every
-reply. It refuses old children at the existing version gate. The resume format remains version
+This game-owned development protocol is version five and requires explicit placement in every
+reply. Original bounded envelope decoding and version checks refuse old children. The resume format remains version
 two; progress saves and the supervised Editor Play protocol retain their separate formats.
 
 For continuous desktop play, call `activate_input`, then `resume`. Query `execution_status` while
@@ -440,7 +440,7 @@ The source-desktop child explicitly uses original Wait cadence for its known pau
 and Poll for continuous play. Pause itself does not change the engine-wide default. Frame,
 Step, reconstruction, native events and presentation confirmation still request original work;
 reconstruction requests full paused frames while asynchronous Scene preparation is pending.
-This recipe does not install a source watcher or require continuously animated paused shaders.
+This recipe does not install an asset/source watcher or require continuously animated paused shaders.
 Consumers adding such work must retain Poll or explicitly drive the required App stages.
 
 Successful execution controls return `result.execution_status`. Complete capture remains a
@@ -463,6 +463,43 @@ invalidates its neutral movement oracle. The guard rejects existing holds instea
 keys it does not own. Its bounded native input guard releases
 an injected hold during failure cleanup. Actual results and limits belong to the
 [continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
+
+## Native Request Notifications
+
+The development child watches only its existing private control directory. Create/rename/modify
+hints wake its original native maintenance boundary, or a condition variable in headless placement.
+Notifications grant no file or command authority: the original capability-relative inbox and exact
+version, placement, session, generation and request validation still admit every packet. A 250 ms
+reconciliation ceiling handles lost notifications within the existing operation and idle limits.
+Parent response polling remains 10 ms. This is not a zero-wakeup or hard real-time contract;
+the Windows vendor watcher retains its 100 ms internal wait and backend reporting limitations.
+
+Protocol v5 requires `control_service` diagnostics in every response. The public Host exposes the
+last validated response from the active child through `control_service()`, and the CLI includes
+the same field. Candidate/predecessor observations do not replace active observations. Counters
+are outside canonical state and never prove authority, successful commands or native cleanup.
+`frame()` requests original paused App maintenance without a fixed simulation tick.
+Observations include the original process-local `app_frame` sequence independently of
+`engine_tick` and logical ticks. It records original execution, not cross-process authority
+or canonical state.
+
+Close freezes notification delivery, closes the original game and joins the original watcher
+before replying Closed. Pending/failure retains those owners; the native process cleanup receipt
+remains independently required. Retirement reports preserve the last validated diagnostics after
+the active route is gone. These changes do not extend the Editor's supervised Play protocol.
+
+The finite Windows hardware comparison builds two variants differing only in the child's 2 ms
+versus 250 ms reconciliation constant. It uses three alternating pairs per placement, twelve
+fresh children, complete game-state checks, request latency, actual desktop presentation and
+physical cleanup. Supply a new absolute output path before running serially:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test development_notifications --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Set `CARGO_BUILD_JOBS=1`, the absolute shared `CARGO_TARGET_DIR`, and
+`NARA_DEVELOPMENT_NOTIFICATIONS_OUTPUT` to the new JSON path. Actual results and scope belong
+to the [runtime cost report](../../docs/benchmarks/2026-11-14-development-runtime-costs.md).
 
 ## Development Cost Observations
 

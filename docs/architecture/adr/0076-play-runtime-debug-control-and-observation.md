@@ -479,6 +479,20 @@ exact stepping and presentation confirmation still request original work. This i
 policy, not a Runtime Pause side effect or a promise that arbitrary asynchronous services and
 real-time shaders update without frames; ADR0039 owns that distinction and elapsed-time rules.
 
+The game's private control-directory notifications are hints to that same consumer, not packet
+admission or a second transport. Original bounded file packets and exact process/request validation
+remain authoritative, with finite reconciliation for notification loss. Watch setup and shutdown
+retain the original joinable watcher; Closed requires its join and original game cleanup. The
+independent native process receipt still proves containment/output retirement. A maintenance-only
+native wake carries no command or Runtime permission and is revoked with its original session.
+
+Diagnostic control-service counters may travel in the game's exact-version response envelope.
+Commit the observation only after envelope, expected reply kind and operation-specific semantics
+are valid. A recoverable domain refusal remains a valid observed response; a malformed or stale
+reply cannot replace the last valid observation. The current active child owns the public Host
+view, while retirement reports retain their own child's last validated observation. Neither
+counter values nor watcher flags substitute for canonical state or cleanup results.
+
 Concrete development cost observations remain Host-local and explicitly enabled. Fixed elapsed
 phase aggregates describe original calls, including their existing waits and failures; they do
 not create an event stream, callback, Runtime permission or cross-process identity. Disabled

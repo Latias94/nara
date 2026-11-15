@@ -9,7 +9,7 @@
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
@@ -115,6 +115,25 @@ pub enum SemanticCommand {
     Retry,
 }
 
+/// Diagnostic control-service observations from one original child response.
+///
+/// These are not canonical game state, control authority, proof of native cleanup or a
+/// performance guarantee. Counters may saturate, and flags do not replace owner results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlServiceObservation {
+    pub inbox_checks: u64,
+    pub idle_wait_calls: u64,
+    pub idle_wait_nanos: u64,
+    pub hints: u64,
+    pub callbacks: u64,
+    pub coalesced_hints: u64,
+    pub native_wake_delivery_failures: u64,
+    pub watcher_started: bool,
+    pub watcher_joined: bool,
+    pub counters_saturated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Response {
@@ -123,6 +142,7 @@ pub struct Response {
     pub session: String,
     pub generation: String,
     pub request: u64,
+    pub control_service: ControlServiceObservation,
     pub result: Result<Reply, String>,
 }
 
@@ -155,6 +175,8 @@ pub enum Reply {
 #[serde(deny_unknown_fields)]
 pub struct Observation {
     pub runtime_generation: u64,
+    /// Original process-local App sequence, independent of simulation and canonical state.
+    pub app_frame: u64,
     pub engine_tick: u64,
     pub logical_tick: u64,
     pub logical_elapsed_nanos: u64,

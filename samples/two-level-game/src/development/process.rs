@@ -33,9 +33,10 @@ use nara::{
 use crate::resume::ResumeState;
 
 use super::protocol::{
-    Command, DesktopPresentation, DevelopmentPlacement, ExecutionState, ExecutionStatus,
-    InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation,
-    PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response, SemanticCommand,
+    Command, ControlServiceObservation, DesktopPresentation, DevelopmentPlacement, ExecutionState,
+    ExecutionStatus, InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS,
+    Observation, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response,
+    SemanticCommand,
 };
 use super::timing::{self, DevelopmentTimingPhase, DevelopmentTimingSnapshot};
 
@@ -465,6 +466,7 @@ pub(super) struct Retirement {
     pub native: SupervisedProcessCleanupReceipt,
     pub game_closed: bool,
     pub terminated: bool,
+    pub control_service: Option<ControlServiceObservation>,
 }
 
 pub(super) struct Process {
@@ -478,6 +480,7 @@ pub(super) struct Process {
     session: String,
     generation: String,
     next_request: u64,
+    control_service: Option<ControlServiceObservation>,
     fault: Option<String>,
     closing: bool,
     close_request: Option<u64>,
@@ -609,6 +612,7 @@ impl Process {
             session: prepared.session,
             generation: prepared.generation,
             next_request: 1,
+            control_service: None,
             fault: None,
             closing: false,
             close_request: None,
@@ -620,22 +624,7 @@ impl Process {
         let startup = timing::measure(timings, DevelopmentTimingPhase::ChildReadyWait, |_| {
             process
                 .wait_response(READY_FILE, 0, Instant::now() + START_TIMEOUT)
-                .and_then(|response| match response.result {
-                    Ok(Reply::Observed { observation })
-                        if observation.phase == "running"
-                            && !observation.restoring
-                            && observation.error.is_none()
-                            && observation.engine_tick == 0
-                            && observation.logical_tick == 0
-                            && observation.logical_elapsed_nanos == 0
-                            && observation.runtime_generation != 0 =>
-                    {
-                        Ok(())
-                    }
-                    other => Err(format!(
-                        "bootstrap did not observe a fresh initialized paused game: {other:?}"
-                    )),
-                })
+                .and_then(|response| commit_ready_response(&mut process.control_service, response))
         });
         if let Err(message) = startup {
             process.fence(&message);
@@ -655,42 +644,38 @@ impl Process {
         self.fault.is_some()
     }
 
+    pub(super) fn control_service(&self) -> Option<ControlServiceObservation> {
+        self.control_service
+    }
+
     pub(super) fn observation(&mut self) -> Result<Observation, String> {
         self.observed(Command::Observe, Instant::now() + REQUEST_TIMEOUT)
     }
 
+    pub(super) fn frame(&mut self) -> Result<Observation, String> {
+        self.observed(Command::Frame, Instant::now() + REQUEST_TIMEOUT)
+    }
+
     pub(super) fn execution_status(&mut self) -> Result<ExecutionStatus, String> {
-        self.execution(Command::ExecutionStatus, None)
+        self.execution(Command::ExecutionStatus)
     }
 
     pub(super) fn pause(&mut self) -> Result<ExecutionStatus, String> {
-        self.execution(Command::Pause, Some(ExecutionState::Paused))
+        self.execution(Command::Pause)
     }
 
     pub(super) fn resume(&mut self) -> Result<ExecutionStatus, String> {
-        self.execution(Command::Resume, Some(ExecutionState::Running))
+        self.execution(Command::Resume)
     }
 
-    fn execution(
-        &mut self,
-        command: Command,
-        expected_state: Option<ExecutionState>,
-    ) -> Result<ExecutionStatus, String> {
+    fn execution(&mut self, command: Command) -> Result<ExecutionStatus, String> {
         if self.placement != DevelopmentPlacement::SourceDesktop {
             return Err(
                 "continuous execution controls require the explicit desktop placement".into(),
             );
         }
         match self.request(command, Instant::now() + REQUEST_TIMEOUT)? {
-            Reply::Execution { status } => {
-                if expected_state.is_some_and(|expected| status.state != expected) {
-                    return Err(self.protocol_fault(format!(
-                        "execution control returned {:?}, expected {expected_state:?}",
-                        status.state
-                    )));
-                }
-                Ok(status)
-            }
+            Reply::Execution { status } => Ok(status),
             reply => Err(self.protocol_fault(format!(
                 "execution control returned an unexpected reply: {reply:?}"
             ))),
@@ -699,12 +684,7 @@ impl Process {
 
     pub(super) fn capture(&mut self) -> Result<ResumeState, String> {
         match self.request(Command::Capture, Instant::now() + REQUEST_TIMEOUT)? {
-            Reply::Captured { state } => {
-                crate::resume::encode_resume(&state).map_err(|error| {
-                    self.protocol_fault(format!("the game returned invalid resume state: {error}"))
-                })?;
-                Ok(state)
-            }
+            Reply::Captured { state } => Ok(state),
             reply => {
                 Err(self.protocol_fault(format!("capture returned an unexpected reply: {reply:?}")))
             }
@@ -869,28 +849,7 @@ impl Process {
             packet.request,
             deadline,
         )?;
-        if let Ok(reply) = &response.result {
-            let expected = match &packet.command {
-                Command::Observe
-                | Command::Step { .. }
-                | Command::Frame
-                | Command::Restore { .. }
-                | Command::IsolateInput => matches!(reply, Reply::Observed { .. }),
-                Command::ExecutionStatus | Command::Pause | Command::Resume => {
-                    matches!(reply, Reply::Execution { .. })
-                }
-                Command::Capture => matches!(reply, Reply::Captured { .. }),
-                Command::ConfirmPresentation => matches!(reply, Reply::Presented { .. }),
-                Command::ActivateInput => matches!(reply, Reply::Activated { .. }),
-                Command::Close => matches!(reply, Reply::Closing | Reply::Closed { .. }),
-            };
-            if !expected {
-                return Err(format!(
-                    "unexpected game reply for {:?}: {reply:?}",
-                    packet.command
-                ));
-            }
-        }
+        commit_exchange_response(&mut self.control_service, &packet.command, &response)?;
         Ok(response)
     }
 
@@ -1116,6 +1075,7 @@ impl Process {
                 native,
                 game_closed: matches!(self.close_result, Some(Ok(false))),
                 terminated: self.terminated || native.force_killed(),
+                control_service: self.control_service,
             });
         }
     }
@@ -1144,6 +1104,76 @@ impl Process {
             ));
         }
         text
+    }
+}
+
+fn commit_ready_response(
+    cached: &mut Option<ControlServiceObservation>,
+    response: Response,
+) -> Result<(), String> {
+    match response.result {
+        Ok(Reply::Observed { observation })
+            if observation.phase == "running"
+                && !observation.restoring
+                && observation.error.is_none()
+                && observation.engine_tick == 0
+                && observation.logical_tick == 0
+                && observation.logical_elapsed_nanos == 0
+                && observation.runtime_generation != 0 =>
+        {
+            *cached = Some(response.control_service);
+            Ok(())
+        }
+        other => Err(format!(
+            "bootstrap did not observe a fresh initialized paused game: {other:?}"
+        )),
+    }
+}
+
+fn commit_exchange_response(
+    cached: &mut Option<ControlServiceObservation>,
+    command: &Command,
+    response: &Response,
+) -> Result<(), String> {
+    if let Ok(reply) = &response.result {
+        validate_exchange_reply(command, reply)?;
+    }
+    *cached = Some(response.control_service);
+    Ok(())
+}
+
+fn validate_exchange_reply(command: &Command, reply: &Reply) -> Result<(), String> {
+    match (command, reply) {
+        (Command::Pause | Command::Resume, Reply::Execution { status }) => {
+            let expected = if matches!(command, Command::Pause) {
+                ExecutionState::Paused
+            } else {
+                ExecutionState::Running
+            };
+            if status.state != expected {
+                return Err(format!(
+                    "execution control returned {:?}, expected {expected:?}",
+                    status.state
+                ));
+            }
+            Ok(())
+        }
+        (Command::Capture, Reply::Captured { state }) => crate::resume::encode_resume(state)
+            .map(|_| ())
+            .map_err(|error| format!("the game returned invalid resume state: {error}")),
+        (
+            Command::Observe
+            | Command::Step { .. }
+            | Command::Frame
+            | Command::Restore { .. }
+            | Command::IsolateInput,
+            Reply::Observed { .. },
+        )
+        | (Command::ExecutionStatus, Reply::Execution { .. })
+        | (Command::ConfirmPresentation, Reply::Presented { .. })
+        | (Command::ActivateInput, Reply::Activated { .. })
+        | (Command::Close, Reply::Closing | Reply::Closed { .. }) => Ok(()),
+        _ => Err(format!("unexpected game reply for {command:?}: {reply:?}")),
     }
 }
 
@@ -1218,3 +1248,6 @@ fn preflight(bytes: &[u8], maximum_string: usize) -> Result<(), String> {
         .end()
         .map_err(|error| format!("invalid complete game packet JSON: {error}"))
 }
+
+#[cfg(test)]
+mod tests;

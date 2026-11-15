@@ -10,6 +10,8 @@ mod control;
 #[cfg(feature = "desktop")]
 #[path = "continuity/desktop.rs"]
 mod desktop;
+#[path = "continuity/request_watch.rs"]
+mod request_watch;
 use two_level_game::development::protocol;
 
 #[cfg(test)]
@@ -36,15 +38,70 @@ use two_level_game::{GamePhase, GameSnapshot, capture_resume, request_resume};
 
 use control::{Arguments, ControlDirectory};
 use protocol::{
-    Command, DevelopmentPlacement, MAX_STEP_COMMANDS, Observation, READY_FILE, Reply,
-    SemanticCommand,
+    Command, ControlServiceObservation, DevelopmentPlacement, MAX_STEP_COMMANDS, Observation,
+    READY_FILE, Reply, SemanticCommand,
 };
+use request_watch::RequestWatch;
 
 const MAX_REQUESTS: usize = 512;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
+const IDLE_RECONCILE_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Default)]
+struct ControlService {
+    inbox_checks: u64,
+    idle_wait_calls: u64,
+    idle_wait_nanos: u64,
+    counters_saturated: bool,
+}
+
+impl ControlService {
+    fn checked_inbox(&mut self) {
+        add_counter(&mut self.inbox_checks, 1, &mut self.counters_saturated);
+    }
+
+    fn waited(&mut self, elapsed: Duration) {
+        add_counter(&mut self.idle_wait_calls, 1, &mut self.counters_saturated);
+        let nanos = u64::try_from(elapsed.as_nanos()).unwrap_or_else(|_| {
+            self.counters_saturated = true;
+            u64::MAX
+        });
+        add_counter(
+            &mut self.idle_wait_nanos,
+            nanos,
+            &mut self.counters_saturated,
+        );
+    }
+
+    fn observation(&self, watch: &RequestWatch) -> ControlServiceObservation {
+        let watch = watch.snapshot();
+        ControlServiceObservation {
+            inbox_checks: self.inbox_checks,
+            idle_wait_calls: self.idle_wait_calls,
+            idle_wait_nanos: self.idle_wait_nanos,
+            hints: watch.hints,
+            callbacks: watch.callbacks,
+            coalesced_hints: watch.coalesced_hints,
+            native_wake_delivery_failures: watch.native_wake_delivery_failures,
+            watcher_started: watch.watcher_started,
+            watcher_joined: watch.watcher_joined,
+            counters_saturated: self.counters_saturated || watch.counters_saturated,
+        }
+    }
+}
+
+fn add_counter(counter: &mut u64, amount: u64, saturated: &mut bool) {
+    match counter.checked_add(amount) {
+        Some(value) => *counter = value,
+        None => {
+            *counter = u64::MAX;
+            *saturated = true;
+        }
+    }
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -74,21 +131,40 @@ fn run() -> Result<(), String> {
             return Err("source-desktop continuity requires the desktop feature".into());
         }
     };
+    let mut watch = RequestWatch::new();
+    let mut service = ControlService::default();
     let result = catch_unwind(AssertUnwindSafe(|| {
-        serve(&arguments, &mut control, &mut game)
+        serve(
+            &arguments,
+            &mut control,
+            &mut game,
+            &mut watch,
+            &mut service,
+        )
     }))
     .unwrap_or_else(|_| Err("continuity panicked; retaining original physical cleanup".into()));
-    if game.is_closed() {
-        return result;
-    }
-    let cleanup = catch_unwind(AssertUnwindSafe(|| {
-        game.close(Instant::now() + OPERATION_TIMEOUT)
+    let _ = catch_unwind(AssertUnwindSafe(|| watch.poll_close()));
+    let cleanup = if game.is_closed() {
+        Ok(Reply::Closed { failed: false })
+    } else {
+        catch_unwind(AssertUnwindSafe(|| {
+            game.close(Instant::now() + OPERATION_TIMEOUT)
+        }))
+        .unwrap_or_else(|_| Err("original physical close panicked".into()))
+    };
+    let watch_cleanup = catch_unwind(AssertUnwindSafe(|| {
+        close_watch(&mut watch, Instant::now() + OPERATION_TIMEOUT)
     }))
-    .unwrap_or_else(|_| Err("original physical close panicked".into()));
-    if !game.is_closed() {
-        std::mem::forget(game);
+    .unwrap_or_else(|_| Err("original request watcher close panicked".into()));
+    if !game.is_closed() || !watch.snapshot().watcher_joined {
+        std::mem::forget((game, watch));
         return Err(format!(
-            "{result:?}; original physical cleanup remains retained until process exit: {cleanup:?}"
+            "{result:?}; original physical cleanup remains retained until process exit: game={cleanup:?}; watcher={watch_cleanup:?}"
+        ));
+    }
+    if !matches!(watch_cleanup, Ok(true)) {
+        return Err(format!(
+            "{result:?}; original request watcher close failed: {watch_cleanup:?}"
         ));
     }
     match cleanup {
@@ -106,15 +182,22 @@ fn serve(
     arguments: &Arguments,
     control: &mut ControlDirectory,
     game: &mut ChildGame,
+    watch: &mut RequestWatch,
+    service: &mut ControlService,
 ) -> Result<(), String> {
     let total_deadline = Instant::now() + TOTAL_TIMEOUT;
+    watch.start(&arguments.control_dir)?;
     let startup_budget = match arguments.placement {
         DevelopmentPlacement::SourceHeadless => OPERATION_TIMEOUT,
         DevelopmentPlacement::SourceDesktop => Duration::from_secs(60),
     };
     game.initialize(Instant::now() + startup_budget)?;
+    game.bind_request_watch(watch)?;
     let ready = game.observed()?;
-    control.publish(READY_FILE, &arguments.response(0, Ok(ready)))?;
+    control.publish(
+        READY_FILE,
+        &arguments.response(0, Ok(ready), service.observation(watch)),
+    )?;
     let mut previous_request = 0;
     let mut activity = Instant::now();
     let mut consumed = 0;
@@ -128,8 +211,18 @@ fn serve(
             return Err("finite continuity process exhausted its 512 request budget".into());
         }
         game.poll_idle(Duration::ZERO)?;
+        watch.acknowledge()?;
+        service.checked_inbox();
         let Some(bytes) = control.receive()? else {
-            game.poll_idle(POLL_INTERVAL)?;
+            if !watch.pending() {
+                let now = Instant::now();
+                let wait = IDLE_RECONCILE_INTERVAL
+                    .min(total_deadline.saturating_duration_since(now))
+                    .min((activity + IDLE_TIMEOUT).saturating_duration_since(now));
+                let started = Instant::now();
+                game.wait_request(watch, wait)?;
+                service.waited(started.elapsed());
+            }
             continue;
         };
         activity = Instant::now();
@@ -146,7 +239,26 @@ fn serve(
             previous_request = request.request;
             validate_command(&request.command)?;
             closing = matches!(&request.command, Command::Close);
-            game.execute(request.command, deadline)
+            if closing {
+                let _ = watch.poll_close();
+            }
+            let result = game.execute(request.command, deadline);
+            if closing {
+                let joined = close_watch(watch, deadline);
+                match (result, joined) {
+                    (Ok(Reply::Closed { failed }), Ok(true)) => Ok(Reply::Closed { failed }),
+                    (Ok(Reply::Closed { .. } | Reply::Closing), Ok(false)) => Ok(Reply::Closing),
+                    (result, Ok(true)) => result,
+                    (result, Err(error)) => {
+                        Err(format!("{result:?}; request watcher close failed: {error}"))
+                    }
+                    (result, Ok(false)) => Err(format!(
+                        "{result:?}; request watcher cleanup remains pending"
+                    )),
+                }
+            } else {
+                result
+            }
         });
         let close_result = if closing {
             match &result {
@@ -161,7 +273,7 @@ fn serve(
         };
         control.publish(
             &format!("response-{number}.json"),
-            &arguments.response(number, result),
+            &arguments.response(number, result, service.observation(watch)),
         )?;
         if game.execution_failed() && !closing {
             return Err(
@@ -175,6 +287,26 @@ fn serve(
     }
 }
 
+fn close_watch(watch: &mut RequestWatch, deadline: Instant) -> Result<bool, String> {
+    let mut failure = None;
+    loop {
+        match watch.poll_close() {
+            Ok(true) => return failure.map_or(Ok(true), Err),
+            Ok(false) => {}
+            Err(error) => {
+                failure.get_or_insert(error);
+                if watch.snapshot().watcher_joined {
+                    return Err(failure.expect("the original watcher failure was retained"));
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return failure.map_or(Ok(false), Err);
+        }
+        thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
+    }
+}
+
 enum ChildGame {
     Headless(Game),
     #[cfg(feature = "desktop")]
@@ -182,6 +314,33 @@ enum ChildGame {
 }
 
 impl ChildGame {
+    fn bind_request_watch(&self, watch: &RequestWatch) -> Result<(), String> {
+        match self {
+            Self::Headless(_) => {
+                let _ = watch;
+                Ok(())
+            }
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => {
+                let wake = game
+                    .maintenance_wake()
+                    .ok_or("original desktop request wake is unavailable")?;
+                watch.bind_native_wake(wake);
+                Ok(())
+            }
+        }
+    }
+
+    fn wait_request(&mut self, watch: &RequestWatch, max_wait: Duration) -> Result<(), String> {
+        match self {
+            Self::Headless(_) => watch.wait(max_wait),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) if !game.is_closed() => game.poll_idle(max_wait),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(_) => watch.wait(max_wait),
+        }
+    }
+
     fn initialize(&mut self, deadline: Instant) -> Result<(), String> {
         match self {
             Self::Headless(game) => game.initialize(deadline),
@@ -316,7 +475,16 @@ impl Game {
             .session
             .runtime_generation()
             .ok_or("the original Runtime generation is unavailable")?;
-        Ok(observed_snapshot(runtime_generation, self.snapshot()?))
+        let (app_frame, snapshot) = self
+            .session
+            .capture(|world| {
+                (
+                    world.resource::<nara::app::FrameExecutionStart>().frame(),
+                    world.resource::<GameSnapshot>().clone(),
+                )
+            })
+            .map_err(|error| format!("paused observation failed: {error:?}"))?;
+        Ok(observed_snapshot(runtime_generation, app_frame, snapshot))
     }
 
     fn execute(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
@@ -497,15 +665,16 @@ impl Game {
     }
 }
 
-fn observed_snapshot(runtime_generation: u64, snapshot: GameSnapshot) -> Reply {
+fn observed_snapshot(runtime_generation: u64, app_frame: u64, snapshot: GameSnapshot) -> Reply {
     Reply::Observed {
-        observation: observation(runtime_generation, snapshot),
+        observation: observation(runtime_generation, app_frame, snapshot),
     }
 }
 
-fn observation(runtime_generation: u64, snapshot: GameSnapshot) -> Observation {
+fn observation(runtime_generation: u64, app_frame: u64, snapshot: GameSnapshot) -> Observation {
     Observation {
         runtime_generation,
+        app_frame,
         engine_tick: snapshot.tick,
         logical_tick: snapshot.logical_tick,
         logical_elapsed_nanos: snapshot.logical_elapsed_nanos,

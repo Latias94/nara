@@ -136,20 +136,20 @@ impl Fixture {
             "the one nara path dependency"
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
-        let manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
-        let original = "path = \"../../vendor/winit\"";
-        assert_eq!(
-            manifest.matches(original).count(),
-            1,
-            "the one repaired Winit source selection"
-        );
-        let repaired_winit = fixture.repository.join("vendor/winit");
-        assert!(repaired_winit.join("Cargo.toml").is_file());
-        let absolute = serde_json::to_string(repaired_winit.to_str().unwrap()).unwrap();
-        fixture.write(
-            "Cargo.toml",
-            &manifest.replacen(original, &format!("path = {absolute}"), 1),
-        );
+        let mut manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
+        for dependency in ["winit", "notify"] {
+            let original = format!("path = \"../../vendor/{dependency}\"");
+            assert_eq!(
+                manifest.matches(&original).count(),
+                1,
+                "the selected {dependency} source"
+            );
+            let path = fixture.repository.join("vendor").join(dependency);
+            assert!(path.join("Cargo.toml").is_file());
+            let absolute = serde_json::to_string(path.to_str().unwrap()).unwrap();
+            manifest = manifest.replacen(&original, &format!("path = {absolute}"), 1);
+        }
+        fixture.write("Cargo.toml", &manifest);
         assert_eq!(
             fs::read(fixture.project.join("Cargo.lock")).unwrap(),
             fs::read(sample.join("Cargo.lock")).unwrap(),

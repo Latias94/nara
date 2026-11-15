@@ -136,6 +136,10 @@ impl DesktopGame {
         )
     }
 
+    pub(super) fn maintenance_wake(&self) -> Option<nara::winit::WinitMaintenanceWake> {
+        self.run.maintenance_wake()
+    }
+
     pub(super) fn poll_idle(&mut self, max_wait: Duration) -> Result<(), String> {
         let progress = self.run.poll(max_wait);
         if progress == DesktopRunProgress::Running || self.closing {
@@ -187,14 +191,19 @@ impl DesktopGame {
             .run
             .runtime_generation()
             .ok_or("the original desktop Runtime generation is unavailable")?;
-        let snapshot = self
+        let (app_frame, snapshot) = self
             .run
-            .observe(|world| world.resource::<GameSnapshot>().clone())
+            .observe(|world| {
+                (
+                    world.resource::<FrameExecutionStart>().frame(),
+                    world.resource::<GameSnapshot>().clone(),
+                )
+            })
             .map_err(|error| format!("desktop execution observation was refused: {error}"))?;
         Ok(ExecutionStatus {
             state,
             input_activation: activation(self.run.input_activation()),
-            observation: observation(runtime.get(), snapshot),
+            observation: observation(runtime.get(), app_frame, snapshot),
         })
     }
 
@@ -284,7 +293,16 @@ impl DesktopGame {
             .run
             .runtime_generation()
             .ok_or("the original desktop Runtime generation is unavailable")?;
-        Ok(observed_snapshot(runtime.get(), self.snapshot()?))
+        let (app_frame, snapshot) = self
+            .run
+            .capture(|world| {
+                (
+                    world.resource::<FrameExecutionStart>().frame(),
+                    world.resource::<GameSnapshot>().clone(),
+                )
+            })
+            .map_err(|error| format!("paused desktop observation failed: {error}"))?;
+        Ok(observed_snapshot(runtime.get(), app_frame, snapshot))
     }
 
     fn wait_quiescent(&mut self, deadline: Instant) -> Result<(), String> {
