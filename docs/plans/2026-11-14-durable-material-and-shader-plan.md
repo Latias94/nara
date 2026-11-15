@@ -1625,6 +1625,41 @@ runs. These limits prevent a stable production-tail, GPU-duration or full-game b
 The simpler Material correction meets the selected pressure without admitting a retained
 geometry cache. Full R9c, 0121, R8/R9/R12/Foundation and paused Editor/Dialogue retain their scope.
 
+### Visible Queue Material Capture Comparison
+
+Status: active from `814899e`. Continue the same current-public geometry workflow after the
+qualified value-sharing correction. Source inspection identifies a narrower hypothesis than
+retained geometry: queue resolution clones a complete immutable Material binding for every
+extracted cell before per-View visibility, then clones it again for visible queue entries.
+Full resource/UV validation before culling is required, but temporary ownership of those values
+may not be. Compare the current path with a private borrowed resolved-material view followed by
+exact owned capture only for visible items. Do not change public APIs, value equality, resource
+validation/counters, source extraction, queue order, adjacent batching or captured lifetimes.
+
+Use the existing independent collector unchanged: 36 population/View/material/scenario groups,
+eight warmups and 64 samples per group, complete independent pixels, old CPU input first realized
+after World retirement, original output retention and zero final Host resources. Take three
+fresh baseline processes at the committed starting revision before source edits, then at most
+three candidate processes on the same locked release/compiler/hardware closure. Keep per-process
+distributions and all observations, including unattributed variation, separate. CPU timing is
+not GPU duration or full-game frame latency. Any temporary locating probes must be removed
+before ordinary recorded runs; do not add a profiler or benchmark framework.
+
+Select the candidate only if every 65,536-cell bound group improves managed-drive/capture P50
+by at least 10% against the fastest matching current baseline process in all three candidate
+processes. Investigate a small-scene P50 regression greater than 0.1ms, require unchanged
+resource/native-work counts and preserve exact invalid/offscreen texture diagnostics. These
+are bounded experiment criteria for one private correction, not a product SLO or supported
+population. If that stricter comparison fails, remove the candidate's edits while preserving
+all unrelated work and record the negative result. Do not expand into a cross-frame geometry
+cache, new ownership layer, dependency upgrade or unbounded optimization search to force a win.
+
+The existing current-public cost report owns the new evidence and final decision. Review the
+changed queue owner independently, run appropriate Sprite/Material and public module controls,
+then relevant actual hardware/software pixel/lifetime qualification and correctness Clippy.
+Cargo remains serial, jobs one, Rust1.95, offline locked dependencies and the original target;
+no clean or branch/main movement. Full Foundation and paused Editor/Dialogue retain their scope.
+
 ## Live Native Source Updates Through External GPU Execution
 
 Status: implemented and locally qualified at `0602b5d`. Extend the independently

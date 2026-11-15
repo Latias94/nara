@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
 use nara_image::{PreparedImageSnapshot, PreparedImages, image_resource_key};
+use nara_material::Material2dBinding;
 use nara_render::{ExtractedView, ExtractedViews};
 
 use crate::{
@@ -48,7 +49,12 @@ pub fn queue_sprites(
                 world_sort_y: queueable.sprite.world_sort_y,
                 material: queueable.material,
                 image: queueable.image.clone(),
-                material_extension: queueable.material_extension.clone(),
+                material_extension: queueable.material_extension.as_ref().map(|resolved| {
+                    PreparedMaterial2d {
+                        binding: resolved.binding.clone(),
+                        textures: resolved.textures.clone(),
+                    }
+                }),
                 source_order: queueable.sprite.source_order,
                 instance,
             });
@@ -212,8 +218,13 @@ struct QueueableSprite<'a> {
     sprite: &'a ExtractedSprite,
     material: SpriteMaterialKey,
     image: Option<PreparedImageSnapshot>,
-    material_extension: Option<PreparedMaterial2d>,
+    material_extension: Option<ResolvedMaterial2d<'a>>,
     uv: TextureUvRect,
+}
+
+struct ResolvedMaterial2d<'a> {
+    binding: &'a Material2dBinding,
+    textures: Vec<(u32, PreparedImageSnapshot)>,
 }
 
 fn resolve_queueable_sprites<'a>(
@@ -234,14 +245,14 @@ fn resolve_queueable_sprites<'a>(
     })
 }
 
-fn resolve_sprite_material(
-    sprite: &ExtractedSprite,
+fn resolve_sprite_material<'a>(
+    sprite: &'a ExtractedSprite,
     prepared_images: Option<&PreparedImages>,
     stats: &mut SpriteRenderStats,
 ) -> Option<(
     SpriteMaterialKey,
     Option<PreparedImageSnapshot>,
-    Option<PreparedMaterial2d>,
+    Option<ResolvedMaterial2d<'a>>,
     TextureUvRect,
 )> {
     if !sprite.texture_region.is_valid() {
@@ -269,10 +280,7 @@ fn resolve_sprite_material(
                 ));
             }
             textures.sort_unstable_by_key(|(binding, _)| *binding);
-            Some(PreparedMaterial2d {
-                binding: binding.clone(),
-                textures,
-            })
+            Some(ResolvedMaterial2d { binding, textures })
         }
         None => None,
     };
