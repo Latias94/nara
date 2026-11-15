@@ -5,8 +5,10 @@ Status: active. This is the complete R9b successor of the
 starting from `4bd02b9`. Editor/component and Dialogue UI development remain paused. Native
 qualification shares the original serial Cargo owner with Runtime work.
 The declaration/Shader/native prerequisite is implemented at `899d64b`. The selected persistent
-source/processed Material product workflow is implemented and qualified below. Live Editor
-Material/Shader hydration and representative production costs remain active successors. The
+source/processed Material product workflow is implemented and qualified below. Native Scene
+watching, live external GPU execution and ordinary windowed source updates are also qualified
+below, the latter at `177684e`. Representative production costs and remaining View/time work
+stay open. Live Editor Material/Shader hydration remains paused with the Editor work. The
 graph-shared texture workflow is implemented and qualified below; complete R9b and the
 foundation Goal are not finished.
 The persistent implementation/migration is `2535b46`; independent/public and real executable
@@ -1027,6 +1029,125 @@ Windows `Any` notifications still recover through full rescan. This unit selects
 filtering optimization, numerical latency/memory budget, OS-window/scanout proof, device
 reconstruction, Linux/macOS execution or full R9b/R12/Foundation completion. Editor/component
 and Dialogue work remain paused. No remote publication or branch/main movement is performed.
+
+## Live Source Updates Through Ordinary Desktop Presentation
+
+Status: implemented and locally qualified at `177684e`. Reuse the
+independently locked physical-file workflow from `0602b5d`
+through an ordinary main-thread `DesktopRun` source product requesting desktop, 2D presentation
+and WGPU. Keep the same eight explicit Scene commits, three content refusals, frozen Ready
+interleaving, gameplay overlay, exact acknowledgement and original native watcher shutdown.
+Use the original stock capture, window Publish consumer, runner-local GPU Host and native loop;
+do not add a second renderer, surface lease, GPU owner or Editor integration.
+
+Inspect the original sealed input through `WgpuPolicyFrameReader` after Seal and before Publish,
+without taking its batch or retaining Source generations for a detached audit trail. Retain
+bounded copied frame/content facts only. A CPU-only game gate waits until the preceding content
+state has actually presented before advancing the next scripted edit/commit. The presentation
+observer must join the original runtime, App frame, render capture, window, surface incarnation,
+backend and device epoch with the original stock Material/Shader/Image facts. New frames after
+rejection must keep last-good bindings and still have genuine submission/present receipts.
+Compiled desktop support alone remains separate from a requested desktop product.
+
+After the final Done state actually presents, stop new submissions and seal the original bounded
+completion telemetry before exit. Correlate representative successful states with their exact
+completion samples; do not relabel callback latency as edit-to-result or GPU-only duration.
+Retain the original target registry and read-only watcher observer through close, require actual
+native target/provider/surface retirement, worker joins before World destruction, and recovery
+of the same physical event loop only after complete retirement. Cleanup must still drive the
+original owner on an assertion, observer or execution failure. Bound startup/live/cleanup waits,
+report cooperative deadlines honestly, and fail missing adapters instead of silently skipping.
+
+Run the ordinary native example serially on local Vulkan and DX12, then retain the affected
+ordinary Source/Material controls and prior offscreen GPU control. The new evidence establishes
+actual surface submission/present calls joined to content; the previous fixed-tolerance
+offscreen oracle owns pixel comparisons. No screen capture, physical scanout, mixed-DPI movement,
+device reconstruction, numerical production budget, foreign native execution or paused Editor/
+Dialogue development is implied. Full R9b/R12/Foundation remains active.
+
+### Ordinary Desktop Presentation Qualification
+
+The independent main-thread example's first locked release check passes on Windows/Rust 1.95.0
+in 27.11 seconds. The original public reader and presentation observer suffice: no new native
+report API or render owner is needed. `captured.rs` shares inspection of the original stock
+Shader digest, exact uniform bytes, semantic Image binding, one Sprite instance and original
+decoded Image pixels between offscreen and windowed consumers. The desktop collector copies
+only frame/content facts, retaining neither the transport batch nor a detached Source-generation
+audit trail. The original native Publish consumer still takes and executes each batch.
+
+Independent review finds one P1 and one P2 before native execution. A scripted `Wait` consumer
+can stop advancing App frames once external events drain; maintenance wakeups deliberately do
+not run gameplay. The fixture now uses the original `Poll` mode and keeps its actual-presentation
+gate. The existing engine policy is unchanged. A panic leaving a callback can unwind a local
+native session before an outer handler runs, invoking its intentional fail-stop Drop. Fixture
+Update, configuration, capture and observer callbacks now retain the first panic inside their
+own callback boundary, stop subsequent fixture work and request normal original-owner close.
+Only after physical retirement is checked does the example resume that original panic. This is
+fixture assertion containment, not a new production panic policy or arbitrary rollback promise.
+The corrected check passes in 5.47 seconds; the first actual executable builds in 5m14s.
+
+The initial three complete native runs pass on Vulkan/RTX 4090, DX12/RTX 4090 and DX12/Microsoft
+Basic Render Driver. They present/complete 44/44, 44/44 and 40/40 frames respectively. Three
+injected callback controls also return the expected original panic only after explicit physical
+cleanup. Final source cleanup removes two new Clippy style warnings without changing those
+contracts. The final executable rebuild takes 34.95 seconds. Its independently bounded process
+sequence completes on November 15, 09:00:28--09:00:53 +08:00:
+
+| Native mode | Observed adapter | Presented/completed frames | Represented states | Final result |
+|---|---|---:|---:|---|
+| Vulkan, fallback disabled | NVIDIA GeForce RTX 4090 | 60/60 | 12 | Complete seal and clean retirement |
+| DX12, fallback disabled | NVIDIA GeForce RTX 4090 | 96/96 | 12 | Complete seal and clean retirement |
+| DX12, fallback requested | Microsoft Basic Render Driver, CPU | 64/64 | 12 | Complete seal and clean retirement |
+
+Every run performs eight explicit commits and three refusals through actual files and the
+original Scene owner. Each representative has an unforgeable surface submission/present receipt
+joined to its exact Runtime, App frame, original render capture, window, surface generation,
+Host and epoch, followed by its matching completion sample. Rejected source retains the original
+Scene incarnation and last-good Material/Shader/Image facts in a newly presented frame. The final
+Done capture replaces the earlier same-count `(8,3)` representative before its completion is
+matched. One-time observer sample batches are consumed once; the overlapping seal report is not
+recounted. All runs finish with tracking enabled, zero pending/buffered/lost samples, zero pending/
+lost resource retirements, the original target `NativeDestroyed`, no provider/active surface,
+all 11 original watcher workers joined, and the physical event loop transferred exactly once.
+
+Presentation and native-notification counts are fixture observations, not fixed event counts or
+production budgets. The logged durations are original App-frame-start to GPU-completion facts,
+including queueing and other work. The differing cold/warm runs do not establish GPU-only time,
+source-edit latency, frame-rate performance or a comparative speedup. Pixel comparison and late
+first submission of old CPU inputs remain the separate qualified offscreen workflow; this
+CPU-only native observer does not inspect window pixels or establish scanout/user visibility.
+
+The final Update, capture and observer failure processes each run with explicit DX12 software
+selection, reach an earlier actual native presentation and exit 101 after verifying the original
+physical pump recovered, native target destroyed and watcher joins before World destruction.
+Their `native source fault cleanup` marker is required alongside that exit; abort/nonzero/timeout
+alone cannot qualify retirement. Each parent invocation bounds and reaps only its original
+example process at 180 seconds. No timeout, abort, abandoned process or replacement owner is used
+as a passing result. Unfinished cleanup retains the original owner/project until process exit
+and remains a failure.
+
+The full independent Material package passes 14/14 with Desktop support compiled in
+`e14cdab1-0ae8-49d2-b49c-bcf856f942a0` (2.271 seconds after a 1m34s release build). This also
+preserves headless capture when Desktop is compiled but not requested. The affected original
+offscreen trajectory passes Vulkan 1/1 in `a85df528-3e79-4baa-8e87-5e18135c94c0` (1.249 seconds)
+and DX12 1/1 in `76718376-3230-4bf3-b7e9-bdcd57ec39c1` (1.777 seconds), keeping its fixed
+pixel tolerance, old capture replays, two-generation Source limit and retained-output cleanup.
+Final independent all-target correctness Clippy passes in 6.19 seconds with only existing root
+warnings. The locked Linux `x86_64-unknown-linux-gnu` ordinary-example cross-check passes in
+2m43s; it does not execute Linux native watching, surface presentation or failure cleanup.
+
+Four scoped API/implementation/review agents are closed. Bounded rereviews close the P1/P2
+corrections and find no remaining P1/P2 in exact frame/Scene/surface joins, representative/Done
+handling, completion/seal accounting or failure retirement. The existing Windows CI lane adds
+the ordinary DX12 software example and three original callback failure controls; the module lane
+type-checks the example independently. Workflow/Python syntax and local execution are separate
+from remote CI, which is not run or published in this unit. Editor/Dialogue work stays paused;
+full R9b/R12/Foundation and numerical production costs remain open.
+Root and independent format checks, affected TOML/lock/workflow and embedded Python syntax,
+added local document links/fragments and staged/working whitespace checks pass. The independent
+lock and dependency versions/sources are unchanged. Native runs, cross-checks and Cargo use the
+original target serially with one build job; no clean, remote publication or branch/main movement
+is performed.
 
 The first implementation replaces static definition/instance APIs with `Material2dBinding`,
 exact immutable generations and two-layout parameter/Shader admission. The library's current

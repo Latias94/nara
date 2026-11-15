@@ -2278,6 +2278,21 @@ Affected root composition/configuration passes 73/73, with final independent con
 owning/independent correctness Clippy, format and document checks pass. The linked unit owns
 the failed attempts, corrections and exact final scope.
 
+The [ordinary desktop Source successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#live-source-updates-through-ordinary-desktop-presentation)
+at `177684e` qualifies the physical-file workflow through public main-thread DesktopRun,
+preserving the original window Publish consumer and runner-local GPU owner. Sealed copied
+stock/Scene facts join 12 representative states to exact present and completion receipts.
+Vulkan/RTX 4090, DX12/RTX 4090 and DX12 software rendering each complete eight commits and
+three refusals, with clean original telemetry, native target/provider/surface retirement,
+all 11 watcher joins before World destruction and one physical-pump recovery. Three actual
+fixture callback failure controls verify that same retirement before resuming the first panic;
+production panic policy is unchanged. Ordinary independent controls pass 14/14, the original
+offscreen Vulkan/DX12 trajectories each 1/1, all-target correctness Clippy and format/document
+checks pass. Linux cross-compilation covers the ordinary example only; native Linux execution,
+window pixels/scanout, source-edit latency and numerical production budgets remain unqualified.
+No new renderer, GPU/World owner, batch publisher or native loop is introduced. Full R9b/R12/
+Foundation remains open and paused Editor/Dialogue changes are preserved.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

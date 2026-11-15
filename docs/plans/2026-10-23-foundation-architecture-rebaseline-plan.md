@@ -1267,6 +1267,21 @@ The affected root composition/configuration targets pass 73/73, final independen
 14/14, owning/independent correctness Clippy and format/document checks pass. Detailed failures,
 corrections, exact run IDs and pixel/retention limits remain in the linked unit.
 
+The [ordinary desktop Source successor](2026-11-14-durable-material-and-shader-plan.md#live-source-updates-through-ordinary-desktop-presentation)
+at `177684e` now takes the same actual files, eight commits and three refusals through one
+original main-thread DesktopRun/window/GPU owner. Read-only sealed input facts join to genuine
+present receipts and exact completions for all 12 representative states, including final Done
+and newly presented last-good frames. Vulkan and DX12 on RTX 4090 plus DX12 software rendering
+pass; the final three runs present/complete 60/60, 96/96 and 64/64 frames respectively. All seal
+without pending/lost evidence, destroy the original target/provider/surface, join the original
+11 watcher workers before World destruction and transfer the original physical pump once.
+Three deliberate callback panic controls also prove retirement before resuming the original
+panic. Independent Material controls pass 14/14, original Vulkan/DX12 offscreen controls each
+1/1, all-target correctness Clippy and format/document checks pass. Linux ordinary-example
+cross-compilation passes, without foreign native execution. These are exact present/completion
+and lifecycle facts; window-pixel equality, scanout, edit latency and production performance
+budgets retain separate scope. Editor/Dialogue stays paused and full R9b/R12/Foundation active.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
