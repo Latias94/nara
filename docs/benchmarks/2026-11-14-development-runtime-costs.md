@@ -1249,3 +1249,61 @@ No remote CI run/publication or foreign native execution is claimed. The sample 
 change reuses existing vendor notify and its required platform closure without upgrading
 existing packages or editing the vendor. Metadata/raw integrity and local document checks
 complete evidence closure; unchanged native acceptance is not repeated for documentation.
+
+## Physical Task Return And Request Check Ordering
+
+The November 16 [physical-return unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#physical-task-return-and-game-capture)
+replaces diagnostic task counts in game capture with original admitted physical-return
+observation. A cancelled capture may still be undergoing executor-owned Drop after its
+terminal is consumed and all queued/running diagnostics reach zero. The game now refuses
+that capture and returned cleanup failure; its existing child waits settle original returns
+without requesting an extra App frame solely for disposal. Task query and game correctness
+are qualified separately from the notification measurements below.
+
+### Rejected Return-State Regression Comparison
+
+The first twelve-child comparison after that migration fails the unchanged headless 90%
+check-count gate (`4a6b4e70-f2ed-4eb3-bf36-10ffcc941e1d`, part of the 506.983 s four-test
+native cohort). Headless records 107 periodic checks and eleven notification checks,
+**89.7196%** fewer. Desktop records 580 and twelve, **97.9310%** fewer. All 150 selected
+requests stay within 100 ms; the maximum is 89.6024 ms. Every original canonical-state,
+Frame/Step, presentation and normal game/watcher/native cleanup check passes, and the four
+original Fixture roots are removed. The [full rejected report](data/2026-11-14-development-runtime/task-return-request-checks-rejected.json)
+remains rejected.
+
+The original loop performs an unnecessary immediate empty-inbox probe after each response
+even when no new hint is pending. The correction checks immediately at startup, then waits
+before the next probe unless a hint already requires one. A notification or the original
+bounded reconciliation wait makes that probe due. The loop acknowledges hints before the
+original receive and rechecks lifetime/request limits after waiting. It retains native
+maintenance pumping, 250 ms reconciliation, the original transport and counter definitions;
+no request limit, timing limit or numerical gate changes.
+
+### Qualified Wait-First Comparison
+
+The affected child suite passes 16/16 (`f81d441f-803e-4e0e-83c4-03acb43fb9f5`). The same
+twelve-child comparison then passes (`9482c865-13d3-48c1-a091-d1957cbb7302`, 135.308 s
+including four actual builds). Both variants use the corrected loop and actual native
+watchers; their sole difference remains the 2 versus 250 ms reconciliation constant.
+Each placement retains three alternating pairs and 500 ms requested idle intervals.
+
+| Aggregate across three pairs | Periodic checks | Notification checks | Reduction |
+| --- | ---: | ---: | ---: |
+| Source/headless | 105 | 9 | 91.4286% |
+| Source/desktop | 595 | 10 | 98.3193% |
+
+All 150 selected requests return within 100 ms; the maximum is **80.7093 ms** for desktop
+presentation confirmation. Original canonical bytes, explicit App-frame progression and
+one-tick Step remain valid. All twelve original game/watcher/native process owners close
+normally with joined diagnostics and exact native cleanup receipts, and all four Fixture
+roots are removed. The [accepted full report](data/2026-11-14-development-runtime/task-return-request-checks.json)
+retains individual requests, state bytes, CPU observations and build/source provenance.
+
+Outer tests are release-optimized on Windows x86_64 under Rust 1.95.0. Captured children use
+the public adapter's dev profile, with no default features: headless requests none and desktop
+requests only `desktop`. Actual desktop receipts report Vulkan/discrete-gpu. These are matched
+checks within the maintained implementation, not a controlled comparison against historical
+binaries or proof of a CPU, power or tail-latency improvement. Parent response polling remains
+10 ms, Windows waits remain quantized, vendor internal wakes and notification-loss fallback
+remain, and synchronous/native callbacks retain cooperative deadlines. Foreign execution,
+universal quiescence and full Foundation/R12 remain open.

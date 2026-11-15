@@ -5288,6 +5288,22 @@ Actual continuous-desktop, paused-desktop and headless body/structure rebuild/ad
 child 16/16, all-feature checking, correctness Clippy and formatting also pass. All ten scoped
 threads close; full Foundation/R12 remains active and Editor/UI/Dialogue product work stays paused.
 
+The November 16 [physical Task-return successor](2026-11-13-rust-state-reconstruction-plan.md#physical-task-return-and-game-capture)
+corrects the reference game's inference from zero queued/running diagnostics to safe capture.
+`TaskPools::return_state()` observes original admitted queue/running/disposal custody through
+one coherent root cut or the existing activity pending-return count. It drives no work, freezes
+no admission and joins no workers. Two actual RED controls reproduce cancelled capture disposal
+outliving zero diagnostics and a sequential root scan missing a Compute-to-Io handoff. Owning
+Tasks pass 109/109; ordinary desktop/cost game passes 172/172, including exact state refusal,
+release/reconstruction/continued play and failed-but-physically-complete Close. Existing child
+settling waits use the same return fact without extra App frames solely for disposal.
+The [notification regression report](../benchmarks/2026-11-14-development-runtime-costs.md#physical-task-return-and-request-check-ordering)
+preserves a rejected headless 90% gate, then qualifies the original loop's wait-before-probe
+correction without changing counters or gates: headless 105-to-nine checks (91.4286%), desktop
+595-to-ten (98.3193%), all 150 selected requests within 100 ms and original state/control/native
+cleanup intact. Arbitrary native checkpointing, admission isolation, foreign execution and full
+Foundation/R12 remain open; Editor/UI/Dialogue product work stays paused.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

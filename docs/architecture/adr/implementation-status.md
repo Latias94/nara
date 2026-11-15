@@ -3068,6 +3068,21 @@ Implementation `686a5d9`/`021814c` also passes independent headless 166/166, fin
 child 16/16, locked all-feature checking, correctness Clippy and formatting. The linked report
 and metadata retain exact source scope/digests; ten scoped threads close without reported P1/P2.
 
+The November 16 [physical Task-return successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#physical-task-return-and-game-capture)
+adds the original non-driving `TaskPools::return_state()` snapshot and replaces the reference
+game's diagnostic-count capture gate. Root observation holds its three original queue guards
+through one cut; activities reuse original pending-return accounting and preserve sibling
+isolation. Cancelled queued capture disposal and sticky cleanup failure remain ineligible even
+after terminal/handle loss and zero diagnostics. Two actual RED regressions precede the owning
+Task 109/109 and desktop/cost game 172/172 GREEN results, including exact release/reconstruction,
+continued play and failed-but-physically-complete Close. Child settling uses this fact within
+existing deadlines without extra App frames solely for disposal. A rejected notification-count
+regression and the corrected wait-before-probe comparison remain in the [existing report](../../benchmarks/2026-11-14-development-runtime-costs.md#physical-task-return-and-request-check-ordering):
+105-to-nine headless checks and 595-to-ten desktop checks, with all 150 selected requests within
+100 ms and original canonical/control/cleanup facts intact. This refines ADRs0008/0052 and the
+concrete ADR0076 game workflow; it grants no admission freeze, worker-join proof, arbitrary game
+checkpoint or native rollback. Full Foundation/R12 and foreign execution remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

@@ -1,10 +1,11 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Updated: 2026-11-14. Status: qualified for the shipped Windows source/headless
+Date: 2026-11-13. Updated: 2026-11-16. Status: qualified for the shipped Windows source/headless
 workflow and explicit source/desktop reconstruction/adoption through the finite development Host.
 Continuous Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline
 R12 runtime lane.
-Editor UI and physical mixed-DPI work remain paused.
+Editor/UI/Dialogue product work remains paused. Physical mixed-DPI testing is separately
+authorized and has bounded [Runtime drawing/picking qualification](2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor).
 
 ## Complete Outcome
 
@@ -1903,3 +1904,111 @@ request selection and unexecuted scopes. Final document/link/data/whitespace che
 unit without rerunning unchanged product acceptance. Original parent response polling, vendor
 internal wakes, cooperative operation limits, foreign native execution, representative
 CPU/power/tail budgets and complete Foundation/R12 remain open.
+
+## Physical Task Return And Game Capture
+
+Status: active, continuing from `b18735b`. Runtime control/time and Scene request/residency
+source review finds no new demonstrated P1/P2 in its bounded scope. The concrete game capture
+instead uses diagnostic `TaskStats.queued/running` to infer authoritative task return. Queued
+terminal work is excluded from queued statistics, and cancelled capture disposal has its own
+original executor custody. A held cancelled capture can therefore outlive zero diagnostic
+counts. Reproduce this through real original workers and a public paused game before claiming
+the correction qualified.
+
+Expose one non-driving `TaskPools::return_state()` snapshot through the existing
+`TaskReturnState`. Reuse original root queues, running/disposal custody and activity pending
+returns; do not create another counter, close authority, admission freeze or quiescence
+service. A scope excludes sibling work and task cleanup failures while retaining shared worker
+failure. Root facades describe their whole original facility. Pending work remains Pending
+even if a terminal is already consumed or its handle is gone. Once that work returns, sticky
+cleanup failure remains distinct from successful return. Published outputs, future admission,
+worker joins and domain-native cleanup retain their own contracts.
+
+Migrate the concrete game eligibility and its existing settling boundaries to this physical
+return observation. Refuse pending work and returned cleanup failure without changing its
+canonical state, Runtime/frame/tick identity, Scene receipt or gameplay queue. A successful
+release must restore capture eligibility and permit fresh-runtime reconstruction and continued
+ordinary gameplay. Test both cancelled-capture custody with zero diagnostic counts and sticky
+failed disposal. Keep the original failed Close result separate from physical completion.
+
+Qualify original scoped/root task execution, cancellation, captured Drop, completed output
+ownership and original close paths; then the ordinary game default/desktop combinations and
+actual headless/paused/continuous Rust rebuild/adoption workflows. Reuse root target and serial
+Rust 1.95 nextest, independent review, correctness Clippy and formatting. Preserve paused
+UI/Dialogue work and leave full Foundation/R12 active. A source-reviewed branch or snapshot
+alone does not prove an isolated World checkpoint or arbitrary native rollback.
+
+### Physical Return Implementation And Qualification
+
+The ordinary public game regression first fails as intended, 0/1
+(`f8fb5d14-60d2-4630-b16c-8396724963ee`). Original threaded workers are occupied, a queued
+capture is cancelled and its terminal consumed, then its original Drop is held after all
+diagnostic queued/running counts reach zero. The original game incorrectly admits capture.
+The test releases its gates and closes the same original game even on that assertion unwind;
+it does not mistake handle/terminal disposal for physical return. The release build takes
+7m41s; that is verification compilation, not runtime-cost evidence.
+
+Independent review identifies a separate P1 in the first root query: sequential per-kind
+empty reads can miss continuously owned Compute-to-Io child work. A deterministic real-worker
+handoff fails 0/1 (`04647778-85d9-4315-af9f-a42c15f1ceb8`), observing Returned instead of
+Pending. Its child is released and original shutdown completes before the final RED assertion.
+The correction holds the original Io, Compute and AsyncCompute queue guards in one fixed
+order, evaluates work and failure under that common cut, then releases all guards. Scope
+pending-return accounting is unchanged. A single `cfg(test)` callback coordinates this
+interleaving only after guards are gone; shipping query state has no callback/counter addition.
+
+The complete owning Task library then passes 109/109, no skips
+(`56fb7364-bfb3-4dd0-861d-762d69238141`). Its twelve new controls include the deterministic
+handoff, 128 real cross-kind child links, cancelled queued/raw entries, held capture Drop with
+zero diagnostic work counts, terminal/observer loss, sticky disposal failure, original close,
+root running bookkeeping, activity/sibling isolation and separately owned published outputs.
+This does not qualify arbitrary escaped work, future admission or native service cleanup.
+Game and actual native rebuild/adoption qualification follows the consumer migration below.
+
+After migration, the complete ordinary desktop/cost game closure passes 172/172
+(`ad65354d-338e-4a5f-88f6-c1f8a02c33cc`), including both new public game cases and all
+existing ordinary controls. Held cancelled-capture disposal refuses state without changing
+Runtime/tick/Scene facts; releasing it recovers byte-identical capture, fresh-runtime restore
+and continued ordinary gameplay. Returned cleanup failure still refuses capture after an
+ordinary tick, and original Close completes physically with its failed result preserved.
+The full rebuild takes 10m13s; no runtime or compiler-speed claim follows from that duration.
+
+The concrete child waits for physical return before READY, capture and restored observation
+within its existing deadlines. Native paused maintenance still requests complete App work
+when reconstruction needs it; waiting only for completed capture disposal does not request
+extra App frames. The actual canonical capture revalidates the original query rather than
+treating the preceding observation as a permission token. Resume format v2 and protocol v5
+field definitions remain unchanged. Independent Task and game reviews close the findings;
+the first five scoped research/implementation/review threads close.
+
+The first actual native cohort passes the continuous-desktop, paused-desktop and headless
+rebuild/adoption workflows but rejects the separate notification check-count gate
+(`4a6b4e70-f2ed-4eb3-bf36-10ffcc941e1d`, 3 passed/1 failed). Headless periodic/notification
+checks are 107/11, 89.7196% fewer, below the unchanged 90% requirement; desktop is 580/12,
+97.9310% fewer. All canonical/control/presentation/cleanup checks and 150 selected requests
+within 100 ms pass. The [existing report](../benchmarks/2026-11-14-development-runtime-costs.md#physical-task-return-and-request-check-ordering)
+retains this rejection and its raw source/build provenance.
+
+The child loop now waits before another inbox probe after a response unless a hint is already
+pending. Startup still probes immediately; hints and original reconciliation waits make the
+next probe due. Acknowledgement remains before receive, and the loop rechecks original lifetime
+and request-budget limits after waiting. Native maintenance and the 250 ms ceiling are unchanged.
+The correction changes no counter definition, transport, numerical gate or operation deadline.
+The sixth independent review closes with no P1/P2; all six scoped agents are closed.
+
+Final affected child tests pass 16/16 (`f81d441f-803e-4e0e-83c4-03acb43fb9f5`). The same
+twelve-child comparison passes (`9482c865-13d3-48c1-a091-d1957cbb7302`, 135.308 s including
+four actual builds): headless checks 105-to-nine, 91.4286% fewer, desktop 595-to-ten, 98.3193%
+fewer. All 150 selected requests return within 100 ms, maximum 80.7093 ms. Original canonical
+state, explicit App-frame progression, one-tick Step, joined watcher/native cleanup and four
+Fixture removals remain valid. Both variants use the same corrected loop and native watchers;
+their sole difference is the original 2 versus 250 ms reconciliation constant.
+
+All three complete real rebuild/adoption workflows then pass again on the final loop
+(`691442f5-2255-40d7-94ed-e005750fae11`, 246.749 s): continuous desktop, paused desktop and
+headless. Real function-body and private-structure builds, expected compile failures, stale/
+foreign candidate refusal, fresh-adopter state, continued play and separate predecessor/native
+retirement retain their original owners. The continuous child reports Vulkan and ends Running
+before Close. These are correctness workflows, not controlled iteration-speed measurements.
+Outer tests use release; actual captured game children use dev with explicit no-default feature
+selection. Headless/default and final static checks follow separately.
