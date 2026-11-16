@@ -12,6 +12,8 @@ use crate::{
 };
 
 #[cfg(test)]
+mod reference_free_tests;
+#[cfg(test)]
 mod rewrite_admission_tests;
 
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_NODES: usize = 16_384;
@@ -360,6 +362,8 @@ impl<R, E> From<ReferenceTraversalError<R, E>> for EntityReferencePlanError<R, E
 ///
 /// A denied callback returns its exact error without allocating an error path. Neither an empty
 /// plan nor a value without EntityRef leaves bypasses structural scanning and its work admission.
+/// The final payload scan is unnecessary when the initial complete scan found no EntityRef and
+/// its complete counts plus Schema reference results remain within the receiving limits.
 pub fn plan_declared_entity_references_with_admission<R, E>(
     schema: &ComponentSchema,
     value: &ComponentValue,
@@ -662,7 +666,7 @@ pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R
         callback,
         maximum_bytes: limits.bytes().get(),
     };
-    let _ = find_undeclared_reference_path(
+    let reference_free_usage = find_undeclared_reference_path(
         value,
         limits,
         &BTreeSet::new(),
@@ -670,7 +674,8 @@ pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R
         0,
         &ComponentFieldPath::empty(),
         &mut admission,
-    )?;
+    )?
+    .reference_free_usage();
     if schema.fields.len() > limits.nodes().get() {
         return Err(ComponentEntityReferenceRewriteError::NodeLimit {
             maximum: limits.nodes().get(),
@@ -711,18 +716,11 @@ pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R
         };
         traversal.visit_field(field, field_value)?;
     }
-    let undeclared = find_undeclared_reference_path(
+    traversal.validate_undeclared_references(
         value,
-        limits,
-        &traversal.entity_paths,
-        traversal.result_nodes,
-        traversal.result_bytes,
         &ComponentFieldPath::empty(),
-        &mut traversal.admission,
+        reference_free_usage,
     )?;
-    if let Some(path) = undeclared {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
-    }
     Ok(traversal.references)
 }
 
@@ -754,7 +752,7 @@ pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'va
         callback,
         maximum_bytes: limits.bytes().get(),
     };
-    let _ = find_undeclared_reference_path(
+    let reference_free_usage = find_undeclared_reference_path(
         value,
         limits,
         &BTreeSet::new(),
@@ -762,21 +760,12 @@ pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'va
         0,
         field.path(),
         &mut admission,
-    )?;
+    )?
+    .reference_free_usage();
     let mut traversal =
         PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
     traversal.visit_field(field, value)?;
-    if let Some(path) = find_undeclared_reference_path(
-        value,
-        limits,
-        &traversal.entity_paths,
-        traversal.result_nodes,
-        traversal.result_bytes,
-        field.path(),
-        &mut traversal.admission,
-    )? {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
-    }
+    traversal.validate_undeclared_references(value, field.path(), reference_free_usage)?;
     Ok(traversal.references)
 }
 
@@ -814,7 +803,7 @@ pub(crate) fn collect_present_value_reference_leaves_with_admission<'schema, 'va
         maximum_bytes: limits.bytes().get(),
     };
     let root = ComponentFieldPath::empty();
-    let _ = find_undeclared_reference_path(
+    let reference_free_usage = find_undeclared_reference_path(
         value,
         limits,
         &BTreeSet::new(),
@@ -822,21 +811,12 @@ pub(crate) fn collect_present_value_reference_leaves_with_admission<'schema, 'va
         0,
         &root,
         &mut admission,
-    )?;
+    )?
+    .reference_free_usage();
     let mut traversal =
         PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
     traversal.visit_field_shape(field, shape, value, &root)?;
-    if let Some(path) = find_undeclared_reference_path(
-        value,
-        limits,
-        &traversal.entity_paths,
-        traversal.result_nodes,
-        traversal.result_bytes,
-        &root,
-        &mut traversal.admission,
-    )? {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
-    }
+    traversal.validate_undeclared_references(value, &root, reference_free_usage)?;
     Ok(traversal.references)
 }
 
@@ -874,6 +854,38 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             admitted_schema,
             admission,
         }
+    }
+
+    fn validate_undeclared_references<R>(
+        &mut self,
+        value: &ComponentValue,
+        root: &ComponentFieldPath,
+        reference_free_usage: Option<(usize, usize)>,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        if let Some((nodes, bytes)) = reference_free_usage
+            && nodes
+                .checked_add(self.result_nodes)
+                .is_some_and(|nodes| nodes <= self.limits.nodes().get())
+            && bytes
+                .checked_add(self.result_bytes)
+                .is_some_and(|bytes| bytes <= self.limits.bytes().get())
+        {
+            return Ok(());
+        }
+        if let Some(path) = find_undeclared_reference_path(
+            value,
+            self.limits,
+            &self.entity_paths,
+            self.result_nodes,
+            self.result_bytes,
+            root,
+            &mut self.admission,
+        )?
+        .first_undeclared_path
+        {
+            return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
+        }
+        Ok(())
     }
 
     fn field_value<R>(
@@ -1270,6 +1282,20 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     }
 }
 
+struct ReferencePathScan {
+    first_undeclared_path: Option<ComponentFieldPath>,
+    observed_nodes: usize,
+    observed_bytes: usize,
+}
+
+impl ReferencePathScan {
+    fn reference_free_usage(self) -> Option<(usize, usize)> {
+        self.first_undeclared_path
+            .is_none()
+            .then_some((self.observed_nodes, self.observed_bytes))
+    }
+}
+
 fn find_undeclared_reference_path<R, E>(
     value: &ComponentValue,
     limits: EntityReferenceTraversalLimits,
@@ -1278,7 +1304,7 @@ fn find_undeclared_reference_path<R, E>(
     result_bytes: usize,
     root_path: &ComponentFieldPath,
     admission: &mut ReferenceAdmission<'_, E>,
-) -> Result<Option<ComponentFieldPath>, ReferenceTraversalError<R, E>> {
+) -> Result<ReferencePathScan, ReferenceTraversalError<R, E>> {
     let mut path = Vec::new();
     admission.reserve(&mut path, root_path.segments().len())?;
     path.extend(root_path.segments().iter().map(|segment| match segment {
@@ -1294,7 +1320,11 @@ fn find_undeclared_reference_path<R, E>(
         first_undeclared_path: None,
     };
     traversal.visit(value, path_depth(root_path), admission)?;
-    Ok(traversal.first_undeclared_path)
+    Ok(ReferencePathScan {
+        first_undeclared_path: traversal.first_undeclared_path,
+        observed_nodes: traversal.observed_nodes,
+        observed_bytes: traversal.observed_bytes,
+    })
 }
 
 enum TraversalPathSegment<'a> {
