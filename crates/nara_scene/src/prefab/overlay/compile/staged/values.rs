@@ -37,6 +37,10 @@ where
         &mut self,
         document: &mut SceneDraft,
     ) -> Result<ReferencePrograms, SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_component_materialization")
+                .entered();
         let mut references = BTreeMap::new();
 
         for entity in &mut document.entities {

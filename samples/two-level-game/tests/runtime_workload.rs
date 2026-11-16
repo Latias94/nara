@@ -199,8 +199,13 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                 assert_eq!(work["phases"]["scene_prepare_unbound"]["calls"], 6);
                 assert_eq!(work["phases"]["scene_publish"]["calls"], 6);
                 for phase in [
+                    "project_content_read",
+                    "scene_source_decode",
                     "scene_decode",
                     "scene_expand",
+                    "scene_program_composition",
+                    "scene_component_materialization",
+                    "scene_reference_closure",
                     "scene_flat_admission",
                     "scene_prepare_unbound",
                     "scene_bind",
@@ -209,6 +214,23 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                     assert!(
                         work["phases"][phase]["calls"].as_u64().unwrap() > 0,
                         "missing Scene work span {phase}: {work}"
+                    );
+                }
+                for phase in ["project_content_read", "scene_source_decode"] {
+                    for thread in ["owner_thread_calls", "worker_thread_calls"] {
+                        assert!(
+                            work["phases"][phase][thread].as_u64().unwrap() > 0,
+                            "missing source work {phase}/{thread}: {work}"
+                        );
+                    }
+                }
+                if population == Some(16_384) {
+                    assert!(
+                        work["phases"]["prefab_source_decode"]["worker_thread_calls"]
+                            .as_u64()
+                            .unwrap()
+                            > 0,
+                        "missing source Prefab worker decode: {work}"
                     );
                 }
             }

@@ -1,0 +1,40 @@
+{
+  "format": "nara-scene-source-split-before/v1",
+  "observed_at": "2026-11-16T21:45:00.769821+08:00",
+  "repository_base": "67b202d0be410d750834d538899a108934573fc5",
+  "source_state": "Uncommitted observation hooks; no cost reuse implemented. Complete16K ordinary3-run CLI consumer, not final wrapper/containment qualification.",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "e02f62b69801eb00f5000bcaa167ded51bdfbb2fea1f377147797cc642d39dc9",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "ed65c9f56f4a3ce3d2738074f264c9d23f36dec58be4b205f8e006ece4b3e965",
+    "samples/two-level-game/tests/runtime_workload.rs": "e3dda05e219535c3c776e2c7119d57171f380b83c4111b4fe5c103b1ec6eb182",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "2371e902f0049dda95a0f5a49b74b14e832089ddf6a7c3d1bf07dba97fd94c27",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5f48a48ae27e3166c776d04c248874921bb013e6466dc793b58006a1ef8f300a",
+    "crates/nara_scene/src/prefab/overlay/compile/staged.rs": "ed471ca2b0489b2077095e4753300dc6392e7eac85be32165c0af32348e69c0b",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/extraction.rs": "72a33b671604cbe87a07097f905bd6c201360c002cdbe54d72b91fda9d068532",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/inputs.rs": "19f882a6b6add54a470b9ce7082e19a4ccdba7e238f56898b8655b20efd65f50",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/output.rs": "f6cdc826b37c5c905419f9eed339a0917ebc9fa7b34607c55b33e56f50a64dac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f3c2f8655a08e9e706de59d08cfec690c7b80cf249641b9ba548ef0d62c87ed5",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "02b43919eb23ee4f31d878b4cb467ff7d895e53d8c06739cc91980842aa19b58",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values/contextual_admission_tests.rs": "d99472555681396756689ef7cb4be0cce8514de0ac30b9ded85eefdf3f610b4c"
+  },
+  "binary_sha256": "53b3cb32aff1cef17a7b5334d753d4c1b38a5704d25b8e08aa88c614f688fbf6",
+  "report": "authored-tiles-source-before-16384.json",
+  "report_sha256": "0099fb80e94a75adce4ed1601090b82b486ecdba957a8e3f9d322b2971bb260d",
+  "command": "cargo +1.95.0 build --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --bin runtime_workload; runtime_workload.exe --tiles 16384",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "Original Runtime construction through physical retirement; source-copy generation and independent replay excluded. Content read is only LoadContext::read_file_inner including metadata bytes read through it; excludes separate SourceReadiness reads and catalogue discovery. Candidate source decode excludes later composition-source admission and retained-size bookkeeping. Nested wall envelopes are not CPU or scanout.",
+  "frozen_binary_retention": "Original pre-reuse executable retained locally outside repository for repeat comparison; not a shipped artifact.",
+  "raw_report_text_disposition": "The raw method.scene_work_scope retained its previous no-source-timing sentence. Named phase data comes from the new source hooks; the exact envelopes are specified by this metadata. The source/output-description text is corrected after observation without rewriting the raw report.",
+  "source_text_correction_after_observation": {
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600"
+  }
+}

@@ -199,7 +199,7 @@ fn execute(options: Options) -> Value {
             "recovered_original_physical_event_loop": true,
             "shared_process_code_driver_filesystem_caches": true,
             "frame_wall_scope": "exact original App frame start to matching post-Host observation; includes native, driver and submission waits, excludes the observer work after that timestamp",
-            "scene_work_scope": "existing nara::scene::work spans for compiled-component preflight/native decoding, expansion and original Scene preparation/publication; source file reads/JSON/RON parsing are not separately timed; feature-off reports retain a disabled record",
+            "scene_work_scope": "existing nara::scene::work spans for compiled-component preflight/native decoding, staged expansion, content-read and Scene/Prefab candidate-decode envelopes, and original Scene preparation/publication; content-read excludes SourceReadiness reads and catalogue discovery; candidate decode excludes later composition-source admission and retained-size bookkeeping; nested wall spans overlap; feature-off reports retain a disabled record",
             "completion_scope": "original App frame start to queue completion callback observation; not GPU execution or scanout",
             "statistics_scope": "per-run finite correlated samples; descriptive nearest-rank quantiles, not a production P99, cold-start comparison or speedup",
             "cpu_memory_scope": "whole process with observer and telemetry enabled; CPU delta and point memory include all threads and driver work; not per-frame CPU, retained-owner bytes or a leak bound",

@@ -20,10 +20,16 @@ mod observed {
         registry::LookupSpan,
     };
 
-    const PHASES: [&str; 19] = [
+    const PHASES: [&str; 25] = [
+        "project_content_read",
+        "scene_source_decode",
+        "prefab_source_decode",
         "scene_decode",
         "scene_expand",
         "scene_structure",
+        "scene_program_composition",
+        "scene_component_materialization",
+        "scene_reference_closure",
         "scene_compile_output",
         "scene_authoring_finish",
         "scene_native_preview",

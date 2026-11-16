@@ -2364,3 +2364,53 @@ The observation correction is `a91e68c`, and per-map extraction is `f25312c`. Sc
 correctness Clippy, root/sample formatting, workflow YAML, added document links and exact selected
 source/report hashes pass; warnings remain. All four scoped agents are closed. No Cargo commands
 overlap, no cache is cleaned and no remote publication or remote CI execution occurs.
+
+### Source Decode And Expansion Attribution Successor
+
+Continue the same complete ordinary Travel consumer with default admission and original native/
+GPU/source retirement. Attribute the existing content read envelope, source Scene and Prefab
+decoding separately from compiled-component preflight. The read envelope includes capability
+opening, bounded byte reads, digesting and receiving-budget bookkeeping; it is not pure disk I/O.
+Source decoding includes the existing JSON/RON wire checks, not only a parser call. Extend existing
+opt-in span collection rather than introducing a timing service or a new source/cache owner.
+
+Separate existing staged-compiler structure, program composition, component materialization and
+reference closure only where those original boundaries explain the measured expansion envelope.
+Keep full errors, cumulative work/retained limits, source freshness, Schema and authorization
+checks. Obtain actual worker/owner counts from the complete game rather than assuming one source
+preparation per committed Scene instance. Nested measurements overlap and include instrumentation.
+
+Use the measured source and compiler split to select one concrete owner-local reduction. A
+candidate must preserve complete source interpretation and current source observations, pass its
+original boundary tests, and retain the complete native gameplay/pixel/failure cleanup acceptance.
+Do not turn an immutable source snapshot into permission to reuse an unvalidated later source.
+Record source/toolchain/executable/report provenance and distinguish intermediate observation
+from any subsequently qualified optimization. Numeric budgets and full Foundation/R9/R12 remain
+open; Editor/UI/Dialogue work stays paused.
+
+Source review explains the existing nine-versus-six counts without redundant Scene publication.
+The four scripted Travel operations each prepare another checkpoint level to validate its saved
+pickups/markers, acknowledge cancellation, then prepare and commit the destination. Expansion
+is one startup owner call plus eight worker preparations. Publication is startup plus four Travel
+commits plus one Retry; Retry uses the resident compiled source and does not expand again.
+Retain these checkpoint validation preparations and original cancellation custody. Preparation
+count alone is not evidence that those checks can be skipped or cached across source changes.
+
+The intermediate 16K CLI consumer passes all three original Travel lifetimes, physical retirement
+and nine retained-input GPU replays. The selected source and binary are frozen before value-cost
+reuse; the [raw report](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-source-before-16384.json)
+and [exact source/binary metadata](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-source-before-metadata.json)
+retain that intermediate scope. Its old raw scope sentence is corrected by the metadata and
+subsequent output text, without rewriting measured data. Source Scene candidate decoding ranges
+over 1,181.626–1,206.328 ms and Prefab candidate
+decoding over 1,148.630–1,160.499 ms per complete lifetime; content-read envelopes are
+75.700–82.034 ms. Expansion is 1,725.355–1,778.274 ms, including structure at
+1,188.633–1,201.951 ms and component materialization at 506.802–542.232 ms. Program composition
+and reference closure are below 0.1 ms each. These nested ranges overlap and are not CPU time.
+
+This selects reuse of already validated value-cost facts inside the existing compiler candidate.
+Repeated full-tree cost scans are source-confirmed in materialization/reference/output handling;
+they cannot explain or fix the larger nested Prefab source-decoding envelope. Preserve migration,
+default materialization, Properties mutation and recomposition invalidation; retain full reference
+planning/visit admission and charge added metadata to the original working allowance. Final
+qualification still requires the original boundary tests and complete native wrapper cohort.

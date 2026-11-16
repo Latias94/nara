@@ -676,6 +676,17 @@ an extraction/queue measurement. The feature is opt-in and leaves the default ru
 tracing instrumentation. A failed run retains its Scene and physical cleanup facts in the report;
 stderr carries the short failure rather than duplicating that report.
 
+The source split also records `project_content_read`, `scene_source_decode` and
+`prefab_source_decode`. The read envelope includes `LoadContext::read_file_inner` capability
+opening, bounded reads, digesting and budget bookkeeping, including catalogue metadata bytes
+read through that method. It excludes separate SourceReadiness reads and catalogue discovery.
+Candidate decoding includes wire checks, header/payload parsing, domain limits and canonicalization;
+later composition-source admission and retained-size bookkeeping remain outside those spans.
+`scene_program_composition`, `scene_component_materialization` and `scene_reference_closure`
+separate existing staged expansion operations. Nested Prefab source loading is part of
+`scene_structure`; that label does not mean pure layout time. `status: complete` describes the
+registered spans' lifetime, not measurement of every source-loading operation.
+
 `entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
 ends at the original first actual presented observation. It includes caller/native waits and
 excludes process loading; it is not cold-start, GPU duration or scanout. The first presentation and

@@ -225,9 +225,15 @@ where
     loop {
         compiler.compose_programs()?;
         let mut references = compiler.materialize_components(&mut layout)?;
-        if compiler.close_reference_demands(&mut references)?
-            && compiler.close_source_reference_demands()?
-        {
+        let references_closed = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_reference_closure")
+                    .entered();
+            compiler.close_reference_demands(&mut references)?
+                && compiler.close_source_reference_demands()?
+        };
+        if references_closed {
             return compiler.materialize(layout, references);
         }
 
@@ -1479,6 +1485,9 @@ where
     }
 
     fn compose_programs(&mut self) -> Result<(), SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_program_composition").entered();
         let bytes = self
             .nodes
             .iter()

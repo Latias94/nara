@@ -2259,6 +2259,9 @@ impl<'a> LoadContext<'a> {
         selected_scene: Option<bool>,
         exact_spelling: bool,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
+        #[cfg(feature = "scene-work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "project_content_read").entered();
         let open_handle_peak = if exact_spelling {
             EXACT_RELATIVE_OPEN_HANDLE_PEAK
         } else {
@@ -3330,6 +3333,9 @@ fn decode_scene_candidate(
     bytes: &[u8],
     limits: nara_scene::SceneFileLimits,
 ) -> Result<SceneDocumentCandidate, ProjectContentError> {
+    #[cfg(feature = "scene-work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_source_decode").entered();
     if path.ends_with(".ron") {
         SceneDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
     } else if path.ends_with(".json") {
@@ -3351,6 +3357,9 @@ fn decode_prefab_candidate(
     bytes: &[u8],
     limits: nara_scene::SceneFileLimits,
 ) -> Result<PrefabDocumentCandidate, ProjectContentError> {
+    #[cfg(feature = "scene-work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "prefab_source_decode").entered();
     if path.ends_with(".ron") {
         PrefabDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
     } else if path.ends_with(".json") {
