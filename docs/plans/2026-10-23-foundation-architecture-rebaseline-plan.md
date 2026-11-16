@@ -383,8 +383,15 @@ panel consumer proves entity -> component -> root -> direct member -> bounded re
 retain -> commit, Undo/Redo and Save/Reopen through its
 [independent successor](../knowledge/engineering/verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md).
 The [retained construction qualification](../knowledge/engineering/verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md)
-separately covers transaction-local allocation and references. Recursive or collection nested
-discovery, Prefab overlay, full field query, shared-owner preparation locality and the remaining
+separately covers transaction-local allocation and references. The selected
+[recursive child successor](../architecture/authoring-read-projection-design.md#source-owned-recursive-child-discovery-successor)
+now qualifies borrowed source-owned Record/Map/KeyedList child facts, aggregate selector/cursor
+metadata admission before copies, explicit read presence and refusal of scans that cannot
+advance. Shared owners pass 1839/1839, the independent semantic Host passes 8/8 through the
+complete non-active nested-leaf edit/history/Save/Reopen workflow, and the retained independent
+prepared-authoring target passes 10/10. The linked qualification records exact runs, review
+corrections and limits. Prefab-overlay field queries, full field query,
+shared-owner preparation locality and the remaining
 preparation-cost comparison obligations stay open. Do not turn process-local incarnation counters
 into durable allocated identities merely to complete the first consumer.
 

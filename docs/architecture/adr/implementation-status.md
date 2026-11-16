@@ -3378,6 +3378,20 @@ described an internal headless panel test as independent; the successor and the
 correct that claim without rewriting historical evidence. This is not recursive/collection
 discovery, Prefab-overlay, native-window or full R2 qualification.
 
+The November 16
+[source-owned recursive child successor](../authoring-read-projection-design.md#source-owned-recursive-child-discovery-successor)
+qualifies the bounded direct-source operation. Scene/Prefab borrows Record declarations,
+root-relative tombstones, Map keys and KeyedList identities through the existing Reflect
+property walker. Tooling admits
+complete target/row/cursor metadata before output copies and retains exact basis/owner fencing.
+Available declaration/identity rows do not replace Present/Defaulted/Missing reads. The new
+independent semantic Host workflow is separate from the retained direct-member regression;
+neither requires a native window. Shared owners pass 1839/1839, the independent semantic Host
+passes 8/8 and the retained independent prepared-authoring target passes 10/10. The linked
+qualification retains run IDs, actual review corrections and final focused/static checks.
+Production and independent consumer revisions are `7f45d87` and `0737909`.
+Full R2, Prefab-overlay discovery and locality/performance comparisons remain open.
+
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query
 bases, including construction preparation. Panel adapters delegate that check to the common

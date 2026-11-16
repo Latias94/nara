@@ -91,6 +91,27 @@ are refused. Each visible instance gets a separate `P` on its first preparation.
 one concrete panel type; its registered kinds use factories returning that type. Neither factories
 nor panel objects require `Send` or `Sync`.
 
+Panels can discover a nested target without changing active tabs or selection. Start with
+`query_document_entities`, query actual `Components` and `Roots`, then use
+`EditorAuthoringProjection::Properties { component, property }` for each selected child level.
+Record rows carry durable member IDs; Map rows carry literal keys; KeyedList rows carry the
+declared key field and its exact String/I64/U64 identity. Ordinary unkeyed lists return a typed
+refusal. `Members` remains the direct Record-root operation.
+
+`EditorAuthoringPropertyStatus::Available` describes a declaration or collection identity.
+Read its selected value separately with `read_document_property`; explicit Null, a declared
+default and missing source remain distinct. Discovery never copies whole collections. Set scan
+entries, rows, aggregate metadata and `with_scan_logical_bytes` explicitly for your workload.
+An allowance that cannot advance rejects; a continuation may produce no rows after advancing
+through anonymous declarations or irrelevant tombstones. Replay the opaque cursor through the
+same Host/workspace and retain its exact source/revision/Schema basis. A stale observation is
+historical data, not permission to edit the current source.
+
+Exhaustive matches must handle the new `Properties` projection and `Property` row. Page producers
+also supply `scanned_logical_bytes`; it is zero for the existing Components/Roots/Members
+projections and reports the shared source scan for Properties. Prepared edits continue through
+the same source-owned commit and history APIs.
+
 The following example registers one Workspace-target instance and performs one explicitly
 requested property replacement. The caller supplies a bounded `EditorPropertyRead` for an open
 Scene/Prefab, the component's admitted version and the intended replacement. Keep the returned

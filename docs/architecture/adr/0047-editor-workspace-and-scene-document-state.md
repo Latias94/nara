@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-03
+**Last Revised**: 2026-11-16
+**Amended**: 2026-11-16 for source-owned recursive property discovery with borrowed child pages
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
@@ -115,7 +116,17 @@ Rules:
   document basis: durable `root + Member(id)` paths, current member kind/edit capability and
   retained direct tombstones. Schema members without durable IDs are not silently addressed by
   wire name. Member discovery is declaration-order, scan/row bounded and does not read values;
-  recursive members, collection items and Prefab expansion remain separate contracts.
+  recursive members and collection items use the separate source-owned child projection;
+  Prefab expansion remains a separate contract.
+- Recursive property discovery delegates Record declarations, root-relative tombstones, Map keys
+  and KeyedList identities to the same Scene/Prefab and Reflect owners as selected reads.
+  Returned `Available` rows assert declaration/identity availability, not source value presence.
+  Optional absent/Null Records can expose declarations; collection entries require actual
+  explicit/defaulted identities. Unkeyed list positions refuse instead of inventing stable IDs.
+  Borrow child facts and continuation anchors until complete target/row/cursor metadata passes
+  admission. Lookup and child scans share finite entry/logical-byte limits; an exhausted page
+  may retain a successor only after child-stream progress. Exact basis and workspace fencing
+  remain unchanged. This adds no source, selection, mutation or history authority.
 - Actual component inventory is distinct from catalog creation capabilities and from semantic
   readability. Scene/Prefab own classification, root declaration/default interpretation and
   source-relative lookup. Available/current records may expose borrowed roots; unavailable records

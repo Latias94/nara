@@ -1,7 +1,7 @@
 ---
 title: Selection-Independent Authoring Read Projections
 date: 2026-10-25
-status: Bounded selector-directed and direct-member owner workflows qualified; panel query facade qualified; full R2 remains open
+status: Bounded direct-source recursive child discovery and independent panel workflow qualified; full R2 remains open
 ---
 
 # Selection-Independent Authoring Read Projections
@@ -77,6 +77,96 @@ including compared key bytes, before the corresponding work. Normal root/storage
 their admitted bounded-path/index responsibilities. A small scalar output is not an O(depth),
 elapsed-time or allocator bound; keyed lookup can scan its list and must refuse exhausted work.
 The full selector contributes to metadata accounting before any owned observation is constructed.
+
+### Source-owned recursive child discovery successor
+
+The selected successor adds `Properties { component, property }` for one direct child page below
+an existing durable selector. Scene/Prefab owns interpretation of Record declarations,
+root-relative member tombstones, Map keys and KeyedList identities. Tooling routes exact source
+bases and accounts for output; it must not reconstruct these rules from a copied Schema or value.
+Ordinary unkeyed lists refuse with the existing typed selector error rather than invent positional
+identity. Prefab expansion and overlays remain outside this direct-source operation.
+
+Record declarations may be discovered below an absent optional parent. `Available` describes a
+declaration or collection identity, not value presence. The separate selected read retains
+Present/Defaulted/Missing and explicit Null, including OptionalAbsent refusal when descending into
+Null. Map and KeyedList enumeration requires the actual selected explicit/defaulted collection;
+absent or Null collections create no identities. Available source admission already validates
+key uniqueness and declaration compatibility; enumeration must not revalidate all siblings per
+page.
+
+The source view borrows child IDs and continuation anchors. Root lookup uses admitted sorted
+declarations; nested lookup, optional wrappers, examined declarations/tombstones and collection
+keys share one finite scan allowance. Report actual scan entries and logical bytes. Exhaustion
+can return a continuation only after advancing the child stream, even when anonymous declarations
+or nonmatching tombstones produce no row. Refuse an allowance that cannot make progress. A parent
+at the selector-depth limit must never emit an over-depth child.
+
+Preflight caller selector metadata before Source work. Admit the aggregate target, full child
+paths, repeated parent IDs and successor target/anchor before cloning any returned identity.
+Use saturating length accounting so oversized untrusted selectors refuse rather than overflow.
+Keep the existing direct-member consumer as a regression. Qualify the successor through a
+separate independently compiled panel workflow: discover a non-active nested Record/Map/KeyedList
+leaf, read its bounded scalar, prepare/cancel/retain competing edits, dispatch exact results,
+Undo/Redo, Save/Reopen and physically close the application. The bounded operation now has the
+qualification below; full R2, locality/cost comparisons and value pagination remain open.
+
+### November 16 implementation and qualification
+
+Production source and owning regressions are committed at `7f45d879c49cd2fbaf00d27d68fad23f31d2b0b0`.
+The independent public Host workflow, CI targets and necessary lock closure are committed at
+`0737909f8dda08df2873ea46b81130943e6d1a13`.
+
+The implementation keeps one borrowed Source child page, the original Reflect selector walker
+and the existing Tooling cursor/basis. A new schema-in-indexed-root operation avoids scanning
+unrelated root declarations. The shared walker now compares borrowed selector prefixes to
+tombstones instead of constructing an owned declaration trace on every successful lookup.
+Retired-path diagnostics still admit their owned storage before copying; writes retain the
+original storage-path and candidate admission.
+
+Review corrected source interpretation in Tooling, child identities copied before aggregate
+page admission, temporary successful-lookup declaration copies, unchecked metadata addition,
+unbudgeted tombstone filtering and a possible nonprogress continuation after parent lookup.
+The first complete child-query run `9547b59b-d570-457d-bedf-0049f80eef00` passed 27/28, with one
+fixture assuming construction order rather than the admitted Schema's normalized wire-name
+order. The expectation now follows the existing Schema owner. That run predates the final shared
+walker correction and is intermediate evidence. The first shared run
+`4a787fb1-a5ec-4a60-b6d9-2b408204edb0` passed 1838/1839; its sole failure was a storage-path
+test still charging the removed temporary declaration. The corrected test keeps exact root,
+growth, wire-copy and one-byte-short refusal assertions. Shared Reflect/Scene/Tooling
+all-target release run `c7d70d50-e322-451b-8dc4-7791f21782d6` passes **1839/1839**, with four
+existing skips. Independently locked public semantic Host run
+`87c45405-c46d-41ea-925f-08ccbbefd87c` passes **8/8**. Its new recursive workflow discovers
+Record/Map/KeyedList selectors, reads the one-node/eight-byte leaf beside 48 KiB untouched data,
+computes `+2`, cancels one candidate and retains competing edits. It checks exact accepted/stale
+submission IDs, Undo/Redo, Save, a different in-memory edit before Reopen, complete restored bytes,
+unknown records, unchanged navigation, stale observations and original Application close.
+These are semantic CPU tests; UI compilation is not GPU presentation. The original direct-member
+consumer remains unchanged except for the exhaustive enum migration in its surrounding test target.
+Its independently locked prepared-authoring target passes **10/10**, with one existing skip,
+in run `e39e814e-d0eb-44a5-811c-bd4e13e0d0f6`. This retains the actual direct-member panel,
+selected/defaulted reads, complete basis refusal, source retirement and persistence regressions.
+Final query controls additionally check that anonymous declarations can produce an empty page
+while advancing an exact cursor, and that the finite stream still terminates. Parent lookup
+exhaustion remains a refusal rather than a nonprogress cursor. After this positive control and a
+local `ok_or` cleanup for the unchanged keyed-item error, final query run
+`d478653e-3bff-4adf-b556-38ad923b62a8` passes **29/29**, with one existing skip. This final
+source run covers the two query targets, including all 18 recursive-child cases. The broader
+shared and public workflows above precede only that error-construction style cleanup and the
+additional test; their implementation scope is retained rather than rerun for documentation.
+
+Owning all-target/all-feature correctness Clippy and both independently locked selected consumer
+Clippy checks pass. Root and both independent workspace format checks pass; the owning check and
+root format check pass again after the style cleanup. Local Markdown links/fragments, workflow
+YAML, the necessary independent lockfile update and whitespace checks pass. The lock update adds
+only the existing Two-Level Game notify dependency closure; it upgrades no dependency version.
+CI now includes the public semantic Host targets, but no remote CI execution or publication is
+claimed. Scoped implementation and independent review used two agents, both closed.
+
+This is Windows 11/Rust 1.95 source-semantic qualification. It does not measure allocations,
+elapsed-time bounds, populated-index maintenance or preparation locality. Schema/value lookup
+can revisit the selected path, but every visit shares the actual scan allowance. Expanded/overlay
+property discovery, value pagination, unopened-source discovery and full R2 remain open.
 
 ### Bounded direct-member discovery
 
