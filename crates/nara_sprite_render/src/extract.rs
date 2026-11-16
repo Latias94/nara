@@ -1,7 +1,7 @@
 use nara_asset::{AssetRef, AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
-use nara_image::ImageAsset;
+use nara_image::{ImageAsset, ImageContentSnapshot};
 use nara_material::{Material2d, Material2dAsset, Material2dBinding};
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
@@ -113,18 +113,12 @@ pub(crate) fn extract_sprites(
             scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
             continue;
         }
+        let mut context = TilemapExtractionContext::new(entity, tilemap, tileset, matrix);
         for (coord, cell) in tilemap.cells() {
             let source_order = scratch.sprites.len() as u64;
-            let Some(mut extracted_cell) = extract_tile_cell(
-                entity,
-                tilemap,
-                tileset,
-                matrix,
-                coord,
-                cell.tile,
-                cell.color,
-                source_order,
-            ) else {
+            let Some(mut extracted_cell) =
+                context.extract_cell(coord, cell.tile, cell.color, source_order)
+            else {
                 scratch.stats.invalid_tile_regions =
                     scratch.stats.invalid_tile_regions.saturating_add(1);
                 continue;
@@ -246,68 +240,100 @@ pub fn extract_sprite(
     }
 }
 
-#[must_use]
-pub fn extract_tile_cell(
+struct TilemapExtractionContext<'a> {
     entity: Entity,
-    tilemap: &Tilemap,
-    tileset: Option<&TileSet>,
+    tilemap: &'a Tilemap,
+    tileset: Option<&'a TileSet>,
     matrix: Mat3,
-    coord: TileCoord,
-    tile: TileIndex,
-    color: Color,
-    source_order: u64,
-) -> Option<ExtractedSprite> {
-    let tile_size = tilemap.tile_size;
-    let local_center = Vec2::new(
-        (coord.x as f32 + 0.5) * tile_size.x,
-        (coord.y as f32 + 0.5) * tile_size.y,
-    );
-    let local_x_axis = Vec2::new(tile_size.x * 0.5, 0.0);
-    let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
-    let tile_texture = tileset.and_then(|tileset| {
-        Some((
-            tileset.material().image?,
-            tileset
-                .normalized_region(tile)
-                .map(|region| TextureUvRect::new(region.min, region.size))?,
-        ))
-    });
-    if tileset
-        .and_then(|tileset| tileset.material().image)
-        .is_some()
-        && tile_texture.is_none()
-    {
-        return None;
-    }
-    let material = tileset
-        .map(|tileset| ExtractedSpriteMaterial {
-            image: tileset.material().image,
-            sampler: tileset.material().sampler,
-            alpha_mode: tileset.material().alpha_mode,
-            tint: tileset.material().tint,
-        })
-        .unwrap_or_else(|| ExtractedSpriteMaterial::from_color(Color::WHITE));
+    material: ExtractedSpriteMaterial,
+    image_content: Option<&'a ImageContentSnapshot>,
+    world_x_axis: Vec2,
+    world_y_axis: Vec2,
+    cached_region: Option<(TileIndex, Option<TextureUvRect>)>,
+}
 
-    Some(ExtractedSprite {
-        entity,
-        source_order,
-        kind: ExtractedSpriteKind::TilemapCell { coord, tile },
-        material,
-        image_content: tileset.and_then(TileSet::image_content).cloned(),
-        material_extension: None,
-        texture_region: tile_texture
-            .map(|(_, texture_region)| texture_region)
-            .unwrap_or(TextureUvRect::FULL),
-        world_center: matrix.transform_point2(local_center),
-        world_x_axis: matrix.transform_vector2(local_x_axis),
-        world_y_axis: matrix.transform_vector2(local_y_axis),
-        color: multiply_color(material.tint, color),
-        layer: tilemap.layer.index,
-        sort_key: tilemap.sort_key,
-        world_sort_y: tilemap.y_sort_anchor.map_or(0.0, |anchor| {
-            matrix.transform_point2(local_center + anchor).y
-        }),
-    })
+impl<'a> TilemapExtractionContext<'a> {
+    fn new(
+        entity: Entity,
+        tilemap: &'a Tilemap,
+        tileset: Option<&'a TileSet>,
+        matrix: Mat3,
+    ) -> Self {
+        let material = tileset
+            .map(|tileset| {
+                let material = tileset.material();
+                ExtractedSpriteMaterial {
+                    image: material.image,
+                    sampler: material.sampler,
+                    alpha_mode: material.alpha_mode,
+                    tint: material.tint,
+                }
+            })
+            .unwrap_or_else(|| ExtractedSpriteMaterial::from_color(Color::WHITE));
+        let tile_size = tilemap.tile_size;
+        let local_x_axis = Vec2::new(tile_size.x * 0.5, 0.0);
+        let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
+
+        Self {
+            entity,
+            tilemap,
+            tileset,
+            matrix,
+            material,
+            image_content: tileset.and_then(TileSet::image_content),
+            world_x_axis: matrix.transform_vector2(local_x_axis),
+            world_y_axis: matrix.transform_vector2(local_y_axis),
+            cached_region: None,
+        }
+    }
+
+    fn extract_cell(
+        &mut self,
+        coord: TileCoord,
+        tile: TileIndex,
+        color: Color,
+        source_order: u64,
+    ) -> Option<ExtractedSprite> {
+        let texture_region = match self.cached_region {
+            Some((cached_tile, region)) if cached_tile == tile => region,
+            _ => {
+                let region = self.tileset.and_then(|tileset| {
+                    tileset
+                        .normalized_region(tile)
+                        .map(|region| TextureUvRect::new(region.min, region.size))
+                });
+                self.cached_region = Some((tile, region));
+                region
+            }
+        };
+        if self.material.image.is_some() && texture_region.is_none() {
+            return None;
+        }
+        let tile_size = self.tilemap.tile_size;
+        let local_center = Vec2::new(
+            (coord.x as f32 + 0.5) * tile_size.x,
+            (coord.y as f32 + 0.5) * tile_size.y,
+        );
+
+        Some(ExtractedSprite {
+            entity: self.entity,
+            source_order,
+            kind: ExtractedSpriteKind::TilemapCell { coord, tile },
+            material: self.material,
+            image_content: self.image_content.cloned(),
+            material_extension: None,
+            texture_region: texture_region.unwrap_or(TextureUvRect::FULL),
+            world_center: self.matrix.transform_point2(local_center),
+            world_x_axis: self.world_x_axis,
+            world_y_axis: self.world_y_axis,
+            color: multiply_color(self.material.tint, color),
+            layer: self.tilemap.layer.index,
+            sort_key: self.tilemap.sort_key,
+            world_sort_y: self.tilemap.y_sort_anchor.map_or(0.0, |anchor| {
+                self.matrix.transform_point2(local_center + anchor).y
+            }),
+        })
+    }
 }
 
 fn multiply_color(left: Color, right: Color) -> Color {

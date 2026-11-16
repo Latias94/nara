@@ -1463,6 +1463,206 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 }
 
 #[test]
+fn tilemap_extraction_context_is_scoped_to_each_map_and_frame() {
+    let indices = [0, 0, 2, 2, 1, 0, 3, 3, 2, 4, 4, 0];
+    let images = [
+        nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap(),
+        nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap(),
+    ];
+    let handles = [
+        nara_asset::allocate_anonymous_handle::<TileSet>().unwrap(),
+        nara_asset::allocate_anonymous_handle::<TileSet>().unwrap(),
+    ];
+    let untextured = nara_asset::allocate_anonymous_handle::<TileSet>().unwrap();
+    let layouts = [[(2, 1), (2, 2)], [(1, 4), (1, 1)]];
+    let samplers = [
+        [
+            SamplerDescriptor::LINEAR_CLAMP,
+            SamplerDescriptor::NEAREST_CLAMP,
+        ],
+        [
+            SamplerDescriptor::NEAREST_CLAMP,
+            SamplerDescriptor::LINEAR_CLAMP,
+        ],
+    ];
+    let tints = [
+        Color::rgba(0.5, 0.25, 1.0, 0.5),
+        Color::rgba(0.25, 1.0, 0.5, 1.0),
+    ];
+    let tile_sizes = [
+        Vec2::new(3.25, 5.5),
+        Vec2::new(6.25, 3.5),
+        Vec2::new(4.5, 7.25),
+    ];
+    let changed_tile_size = Vec2::new(7.5, 2.25);
+    let transforms = [
+        Transform2d {
+            translation: Vec2::new(10.0, -6.0),
+            rotation: 0.41,
+            scale: Vec2::new(-1.5, 0.75),
+        },
+        Transform2d {
+            translation: Vec2::new(-2.0, 3.0),
+            rotation: -0.23,
+            scale: Vec2::new(0.5, 2.5),
+        },
+        Transform2d::default(),
+    ];
+    let mut tilesets = Assets::<TileSet>::default();
+    for index in 0..2 {
+        let (columns, rows) = layouts[0][index];
+        tilesets.insert(
+            handles[index],
+            TileSet::from_image(
+                images[index],
+                TileAtlasLayout::grid(Vec2::splat(2.0), columns, rows),
+            )
+            .with_sampler(samplers[0][index])
+            .with_tint(tints[index])
+            .with_alpha_mode(AlphaMode2d::Opaque),
+        );
+    }
+    tilesets.insert(untextured, TileSet::new(Vec2::ONE));
+    let mut app = sprite_app();
+    let world = app.world_mut().unwrap();
+    world.insert_resource(tilesets);
+    let entities = std::array::from_fn::<_, 3, _>(|map_index| {
+        let mut map = Tilemap::new(tile_sizes[map_index])
+            .with_layer(map_index as i32 + 3)
+            .with_sort_key(map_index as i32 - 2)
+            .with_y_sort_anchor(Vec2::new(1.0, -2.0));
+        map.tileset = handles.get(map_index).copied();
+        for index in (0..indices.len()).rev() {
+            let color = if index % 2 == 0 {
+                Color::rgba(0.5, 0.25, 1.0, 0.5)
+            } else {
+                Color::WHITE
+            };
+            map.set_cell(
+                TileCoord::new(index as i32 - 6, (index % 3) as i32 - 1),
+                TileCell::new(TileIndex::new(indices[index])).with_color(color),
+            );
+        }
+        map.clear_dirty_chunks();
+        world.spawn((map, transforms[map_index])).id()
+    });
+    place_roots(world, &[entities[1], entities[0], entities[2]]);
+    app.add_systems(CoreStage::Update, move |world: &mut World| {
+        if world.resource::<nara_app::RealTime>().frame != 2 {
+            return;
+        }
+        {
+            let mut tilesets = world.resource_mut::<Assets<TileSet>>();
+            for index in 0..2 {
+                let (columns, rows) = layouts[1][index];
+                let tileset = tilesets.get_mut(handles[index]).unwrap();
+                *tileset = tileset
+                    .clone()
+                    .with_image(
+                        images[index],
+                        TileAtlasLayout::grid(Vec2::splat(2.0), columns, rows),
+                    )
+                    .with_sampler(samplers[1][index]);
+            }
+        }
+        world.get_mut::<Tilemap>(entities[0]).unwrap().tile_size = changed_tile_size;
+        world.get_mut::<Tilemap>(entities[2]).unwrap().tileset = Some(untextured);
+    })
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let frames = (0..3)
+        .map(|_| {
+            runtime.drive(Duration::ZERO).unwrap();
+            (
+                runtime.world().resource::<ExtractedSprites>().clone(),
+                *runtime.world().resource::<SpriteRenderStats>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    runtime.finish().unwrap();
+
+    for (frame, (extracted, stats)) in frames.iter().enumerate() {
+        let stage = usize::from(frame > 0);
+        let mut expected = Vec::new();
+        for map_index in [1, 0, 2] {
+            let matrix = transforms[map_index].matrix();
+            let tile_size = if map_index == 0 && stage == 1 {
+                changed_tile_size
+            } else {
+                tile_sizes[map_index]
+            };
+            let material = if map_index == 2 {
+                ExtractedSpriteMaterial::from_color(Color::WHITE)
+            } else {
+                ExtractedSpriteMaterial {
+                    image: Some(images[map_index]),
+                    sampler: samplers[stage][map_index],
+                    alpha_mode: AlphaMode2d::Opaque,
+                    tint: tints[map_index],
+                }
+            };
+            for (index, tile) in indices.into_iter().enumerate() {
+                let texture_region = if map_index == 2 {
+                    TextureUvRect::FULL
+                } else {
+                    let (columns, rows) = layouts[stage][map_index];
+                    if tile >= columns * rows {
+                        continue;
+                    }
+                    TextureUvRect::new(
+                        Vec2::new(
+                            (tile % columns) as f32 / columns as f32,
+                            (tile / columns) as f32 / rows as f32,
+                        ),
+                        Vec2::new(1.0 / columns as f32, 1.0 / rows as f32),
+                    )
+                };
+                let coord = TileCoord::new(index as i32 - 6, (index % 3) as i32 - 1);
+                let center = Vec2::new(
+                    (coord.x as f32 + 0.5) * tile_size.x,
+                    (coord.y as f32 + 0.5) * tile_size.y,
+                );
+                let color = if index % 2 == 0 {
+                    Color::rgba(
+                        material.tint.r * 0.5,
+                        material.tint.g * 0.25,
+                        material.tint.b,
+                        material.tint.a * 0.5,
+                    )
+                } else {
+                    material.tint
+                };
+                expected.push(ExtractedSprite {
+                    entity: entities[map_index],
+                    source_order: expected.len() as u64,
+                    kind: ExtractedSpriteKind::TilemapCell {
+                        coord,
+                        tile: TileIndex::new(tile),
+                    },
+                    material,
+                    image_content: None,
+                    material_extension: None,
+                    texture_region,
+                    world_center: matrix.transform_point2(center),
+                    world_x_axis: matrix.transform_vector2(Vec2::new(tile_size.x * 0.5, 0.0)),
+                    world_y_axis: matrix.transform_vector2(Vec2::new(0.0, tile_size.y * 0.5)),
+                    color,
+                    layer: map_index as i32 + 3,
+                    sort_key: map_index as i32 - 2,
+                    world_sort_y: matrix.transform_point2(center + Vec2::new(1.0, -2.0)).y,
+                });
+            }
+        }
+        assert_eq!(extracted.as_slice(), expected);
+        assert_eq!(stats.extracted_tile_cells, [27, 26, 26][frame]);
+        assert_eq!(stats.invalid_tile_regions, [9, 10, 10][frame]);
+        assert_eq!(stats.missing_tilesets, 0);
+    }
+    assert_eq!(frames[1], frames[2]);
+}
+
+#[test]
 fn a_missing_tileset_handle_does_not_render_its_cells_as_white_quads() {
     let mut app = sprite_app();
     app.world_mut().unwrap().spawn((
