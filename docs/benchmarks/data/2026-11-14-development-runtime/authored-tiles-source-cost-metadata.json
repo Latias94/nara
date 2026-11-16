@@ -1,0 +1,56 @@
+{
+  "format": "two-level-source-and-value-cost-evidence/v1",
+  "observed_at": "2026-11-16T22:27:01.750874+08:00",
+  "repository_base": "a7c7a27fb54e3a590e93031d2b2b760c18940fea",
+  "source_state": "Qualified uncommitted private value-cost reuse and explicit source/candidate-decode spans on a7c7a27; paused UI/Dialogue work excluded. Exact selected source/executable/report hashes retained.",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "src/project_content/scenes.rs": "36232d11c3db726353db673ceb6430dfa586fa65503a5aa06cfc224859b305c5",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "f5b20652c15c13fbd4383f35f2295c1ee653b1a268abf2e13f1e55215336ceac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged.rs": "ed471ca2b0489b2077095e4753300dc6392e7eac85be32165c0af32348e69c0b",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/tests/runtime_workload.rs": "7071a98cdf063ec151c767e3ecd73e97acbea662613d8a27b4ce7fb6ef93167e",
+    "samples/two-level-game/tests/runtime_workload_spans.rs": "3e8f9f1b7242d74f45300ba4380f91375fde4d4b7987b597cfde8d3ef8be9096",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/extraction.rs": "72a33b671604cbe87a07097f905bd6c201360c002cdbe54d72b91fda9d068532",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/inputs.rs": "19f882a6b6add54a470b9ce7082e19a4ccdba7e238f56898b8655b20efd65f50",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/output.rs": "4fe34089260f59a5ce943922b5c3142476b492d1e29a01d228cb50eeb8e4ea0c",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "bacbcc96224f91fc8ef0ce54aea2bf2f66b9a21bbf50408d439da76b08c481e5",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b0d7f64e3165e5099a3c7a6dd7dbfdb7f963f003d4e0ec011605098b7e503266",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values/contextual_admission_tests.rs": "414c649d9ba78d67c3b99be83d2c03cdada681ddf1fe35bf23d44cca1b884614",
+    "samples/two-level-game/src/bin/runtime_workload/observe.rs": "64a354248ff48300f711764b2c2e03915bec59edf76fb9c8e8293c8fca639987",
+    "samples/two-level-game/src/bin/runtime_workload/project.rs": "c7b88aa3db1ff3094348c29490628f2ed57f858e530bfd576aa68816001d95f9",
+    "samples/two-level-game/src/bin/runtime_workload/project/tests.rs": "88a973ba2d60030652db03b1e4e46c6654851dbd58a14e416ff27b9db8163731",
+    "samples/two-level-game/src/bin/runtime_workload/tiles.rs": "1acef835f0b3e39cb54baa64a3b2d836e6e949090334ec57731a39b995f5f9f9",
+    "samples/two-level-game/src/bin/runtime_workload/tiles/oracle.rs": "3ecb44c8441c781d5bb569116dde57cdec08a1b179f4cbea5f4bc7c87c4f8296",
+    "samples/two-level-game/src/bin/runtime_workload/tiles/replay.rs": "4e568837c66edb14f05bfa1491f1eaec4880c9774f583635d3ce039799db0adf",
+    "samples/two-level-game/src/bin/runtime_workload/timing.rs": "774c38c9ed473ec3431cef65cbff421935e8342a3bad3c89dc0dc2a4b9cd1c24",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "ed65c9f56f4a3ce3d2738074f264c9d23f36dec58be4b205f8e006ece4b3e965"
+  },
+  "binary_sha256": "c7b83505c7dd4cd22b381c514f7d10d82e4b1c779193e1c08bcdf5255cab5549",
+  "reports_sha256": {
+    "authored-tiles-source-cost-64.json": "043790596d10279782418fa1e118f87d1ebc20f2a8d3c2a9d3480b8eb8d53ade",
+    "authored-tiles-source-cost-4096.json": "d2cdc5fd7f0e8a572f54300be1a9cb3db9a110da87dd7ac697b33327f269514d",
+    "authored-tiles-source-cost-16384.json": "5bbb447e801cb7441b14c7ef054efff51fb56071d73ca7535a77c864c5bff712",
+    "authored-tiles-source-cost-baseline.json": "7221ce2728e91ed8a24c31bc10a0fab0bdee0d1565783c509535509fb984f74b"
+  },
+  "nextest_run_id": "5b9cc68a-ac8f-4742-8865-cf9a622e65de",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --lib --test runtime_workload_metrics --test runtime_workload_spans --test runtime_workload --run-ignored all --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "143 game/metric/span/native cases, including9 Tile and3baseline original lifetimes plus2panic controls and27 original-input GPU replays. Nested source/read/expansion/preflight/materialization spans overlap over one original Runtime construction through physical retirement; source-copy generation and independent replay excluded. read_file_inner excludes separate SourceReadiness reads and discovery, source-decode excludes later composition-source admission and retained-size bookkeeping. No CPU/scanout duration, statistical speedup, production tail or full heap/VRAM bound, or foreign execution claim.",
+  "qualification_test_sha256": {
+    "crates\\nara_scene\\tests\\selected_reference_entry.rs": "216f3df1100676d84ec379bd45db850531eeb48482f0fd37597ef288ddac81c6",
+    "crates\\nara_scene\\src\\prefab\\overlay\\compile\\component_program_tests\\property_limits.rs": "e8b6dbba4822778297a917bd673cb9538ef34b0616e06e4931af061da526094c"
+  },
+  "paired_metadata": "authored-tiles-source-cost-paired-metadata.json"
+}

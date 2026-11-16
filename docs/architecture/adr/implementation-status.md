@@ -3220,6 +3220,21 @@ authorization, cleared-dirty refresh and retained inputs. Nested ranges are not 
 speedup; source I/O/parsing, extraction timing, reliable runtime budgets, foreign execution and
 full Foundation/R9/R12 remain open. UI/Dialogue work stays paused.
 
+The [source-work split and validated value-cost reuse](../../plans/2026-11-13-rust-state-reconstruction-plan.md#validated-value-cost-reuse)
+at `a7c7a27`/`4aaa3d8` separates actual content-read and Scene/Prefab candidate-decode envelopes
+from compiled preflight and compiler subphases. Nine expansions retain the game's checkpoint
+validation preparations; six publications include resident-source Retry. Private costs are
+refreshed after every semantic value mutation and discarded with recomposed candidates, while
+complete reference scans/visits and explicit metadata accounting remain. Root/public content
+controls pass 81/81, full Scene/Reflect libraries 981/981, public value-bearing conversion with
+reference-triggered recomposition 5/5 and game/metric/span/native controls 143/143. Nine Tile
+lifetimes retain 27 GPU replays, and the balanced old/new comparison adds twelve 16K lifetimes
+and 36 replays. Exact source/executable/report hashes and finite timing limits are in the
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#validated-value-cost-qualification).
+The local output envelope drops from a 38.455 ms wall median to 0.145 ms, but whole expansion/
+process do not show consistent improvement. Source/candidate decoding, numeric budgets, foreign
+execution and full Foundation/R9/R12 remain open; paused UI/Dialogue work stays excluded.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

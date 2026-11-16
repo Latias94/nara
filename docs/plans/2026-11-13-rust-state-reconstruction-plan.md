@@ -2414,3 +2414,70 @@ they cannot explain or fix the larger nested Prefab source-decoding envelope. Pr
 default materialization, Properties mutation and recomposition invalidation; retain full reference
 planning/visit admission and charge added metadata to the original working allowance. Final
 qualification still requires the original boundary tests and complete native wrapper cohort.
+
+### Validated Value Cost Reuse
+
+The selected implementation retains `ComponentValueCost` in the existing private reference
+program. Component validation returns the cost it already measured; normalized values acquire
+that fact after migration and default expansion. Opaque records retain the original admitted raw
+cost. Each contextual default owns a separate cost; hidden defaults do not enter effective-value
+output totals. Every Properties layer replaces value and cost together from its final validated
+candidate, including Absent default restoration, and invalidates the previous reference plan.
+Reference closure does not mutate the value. Output uses the same cost plus the existing exact
+old/new reference replacement delta, then stops using that pre-rewrite fact.
+
+Recomposition drops both the materialized document and reference programs, so no cost survives
+into the next attempt or another compilation. Complete source-depth checks, Schema/version/owner
+validation, reference planning and every original plan-visit admission remain. The added inline
+cost metadata is charged at the main component-program scratch entry; contextual-default entries
+already admit `size_of::<ReferenceProgram>()`. No public record, cache, compiler owner or ceiling
+changes. Newly increased working metadata is included in exact current allowance checks rather
+than promising identical old boundary bytes.
+
+Original content/residency and public content-limit controls pass 81/81 at
+`5f7edfe7-3856-4320-bf0e-0ddcfc230414`, with 867 cases outside the selected filter; full
+Scene/Reflect all-feature library controls pass 981/981 at
+`919378ba-391d-4097-8fad-507cba2ace0a`. Four added tests independently check effective value
+nodes/bytes after layered growth, shrink, Absent, migration and default expansion, plus opaque raw
+value and hidden-default admission. Existing exact/reference/depth/failure controls remain.
+Independent correctness and admission reviews report no P1/P2. Observed/exact/one-short tests
+alone do not prove that each modeled metadata debit is present; that debit and unchanged complete
+reference visits are additionally source-reviewed.
+
+The value-bearing public conversion cohort passes 5/5 at
+`9ca1d716-a883-4906-8d98-89ffbb30aba3`. The new case removes the unrelated watcher query and
+requires the selected Link to load S/1, P/1 and P/2, witnessing two reference-driven candidate
+recompositions. It checks exact one-component/two-node/fourteen-byte output, independent one-short
+node/byte diagnostics, complete source/provenance, original data and prepare-time history, then
+commit/Undo/Redo. Existing query-only and full-activation cycle controls remain. A first 5/5 run
+is repeated after removing an irrefutable-pattern warning; no behavioral assertion is weakened.
+
+The release game/library/metric/span/native cohort passes 143/143 at
+`5b9cc68a-ac8f-4742-8865-cf9a622e65de`, without skips. This includes the original four native
+wrappers: nine authored Tile lifetimes with 2,379 initialized presentations, three baseline
+lifetimes with 257, both observer-panic cleanup controls and 27 original-input GPU replays.
+Source decode/read positive guards require actual owner and worker entries; 16K also requires
+worker Prefab candidate decoding. Every positive record has zero live/unfinished spans. Existing
+gameplay, source freshness/retirement, copied-source removal, pixel rereads and original
+Host/prefix/physical cleanup assertions remain. The [raw reports and exact metadata](../benchmarks/2026-11-14-development-runtime-costs.md#validated-value-cost-qualification)
+bind the changed source/executable and compiler rather than reusing earlier results.
+
+Four additional sequential processes run the frozen pre-reuse executable and new executable in
+before/after/after/before order. All twelve original 16K lifetimes and 36 GPU replays pass. Across
+six lifetimes per version, compile-output wall medians are 38.455 ms before and 0.145 ms after;
+component materialization is 591.236/592.519 ms and complete expansion 1,891.559/1,969.560 ms.
+Read/decode phases and whole-process walls vary too. The [paired raw evidence](../benchmarks/2026-11-14-development-runtime-costs.md#validated-value-cost-qualification)
+supports the local output-stage reduction and preserved behavior, not a consistent end-to-end
+speedup, CPU-duration or production-tail claim. Source parsing remains the larger separate target.
+
+Remaining checks and evidence closure do not broaden this unit into a cache or parser rewrite.
+Carry original limits, source observations and physical retirement into subsequent owner-local
+source-decoding work. Full Foundation/R9/R12, numeric budgets and foreign execution remain open;
+paused Editor/UI/Dialogue changes remain excluded.
+
+Source attribution is committed at `a7c7a27`; validated compiler costs and their owner/public
+regressions are `4aaa3d8`. No-default-feature Scene and feature-off workload target checks pass.
+Root content, Scene all-target/all-feature and game workload/metric/span release correctness
+Clippy, root/sample formatting and evidence checks pass. Existing warnings remain. All four
+scoped agents are closed. Cargo/native workloads run serially against the original target,
+without cache clean, remote CI execution or remote publication.

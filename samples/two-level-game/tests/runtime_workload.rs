@@ -174,6 +174,7 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                 assert!(work["total_calls"].as_u64().unwrap() > 0);
                 assert!(work["nested_span_wall_sum_ns"].as_u64().unwrap() > 0);
                 assert_eq!(work["unfinished_entries"], 0);
+                assert_eq!(work["retained_spans"], 0);
                 assert!(
                     work["phases"]["scene_expand"]["worker_thread_calls"]
                         .as_u64()
@@ -233,6 +234,12 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                         "missing source Prefab worker decode: {work}"
                     );
                 }
+            }
+            #[cfg(not(feature = "scene-work-observation"))]
+            {
+                assert_eq!(run["scene_work"]["enabled"], false);
+                assert_eq!(run["scene_work"]["status"], "disabled");
+                assert!(run["scene_work"].get("phases").is_none());
             }
             let startup = &run["startup"]["operation_wall_ns"];
             assert_eq!(startup.as_object().unwrap().len(), 5);

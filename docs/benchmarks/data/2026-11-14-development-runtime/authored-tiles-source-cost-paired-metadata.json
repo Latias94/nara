@@ -1,0 +1,105 @@
+{
+  "format": "nara-scene-value-cost-paired-observation/v1",
+  "observed_at": "2026-11-16T22:29:14.637988+08:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "command": "runtime_workload.exe --tiles 16384",
+  "order": [
+    "before",
+    "after",
+    "after",
+    "before"
+  ],
+  "binary_sha256": {
+    "before": "53b3cb32aff1cef17a7b5334d753d4c1b38a5704d25b8e08aa88c614f688fbf6",
+    "after": "c7b83505c7dd4cd22b381c514f7d10d82e4b1c779193e1c08bcdf5255cab5549"
+  },
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "source_sha256_before": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "e02f62b69801eb00f5000bcaa167ded51bdfbb2fea1f377147797cc642d39dc9",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "ed65c9f56f4a3ce3d2738074f264c9d23f36dec58be4b205f8e006ece4b3e965",
+    "samples/two-level-game/tests/runtime_workload.rs": "e3dda05e219535c3c776e2c7119d57171f380b83c4111b4fe5c103b1ec6eb182",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "2371e902f0049dda95a0f5a49b74b14e832089ddf6a7c3d1bf07dba97fd94c27",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5f48a48ae27e3166c776d04c248874921bb013e6466dc793b58006a1ef8f300a",
+    "crates/nara_scene/src/prefab/overlay/compile/staged.rs": "ed471ca2b0489b2077095e4753300dc6392e7eac85be32165c0af32348e69c0b",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/extraction.rs": "72a33b671604cbe87a07097f905bd6c201360c002cdbe54d72b91fda9d068532",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/inputs.rs": "19f882a6b6add54a470b9ce7082e19a4ccdba7e238f56898b8655b20efd65f50",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/output.rs": "f6cdc826b37c5c905419f9eed339a0917ebc9fa7b34607c55b33e56f50a64dac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f3c2f8655a08e9e706de59d08cfec690c7b80cf249641b9ba548ef0d62c87ed5",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "02b43919eb23ee4f31d878b4cb467ff7d895e53d8c06739cc91980842aa19b58",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values/contextual_admission_tests.rs": "d99472555681396756689ef7cb4be0cce8514de0ac30b9ded85eefdf3f610b4c"
+  },
+  "source_sha256_after": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "ed65c9f56f4a3ce3d2738074f264c9d23f36dec58be4b205f8e006ece4b3e965",
+    "samples/two-level-game/tests/runtime_workload.rs": "7071a98cdf063ec151c767e3ecd73e97acbea662613d8a27b4ce7fb6ef93167e",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "f5b20652c15c13fbd4383f35f2295c1ee653b1a268abf2e13f1e55215336ceac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged.rs": "ed471ca2b0489b2077095e4753300dc6392e7eac85be32165c0af32348e69c0b",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/extraction.rs": "72a33b671604cbe87a07097f905bd6c201360c002cdbe54d72b91fda9d068532",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/inputs.rs": "19f882a6b6add54a470b9ce7082e19a4ccdba7e238f56898b8655b20efd65f50",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/output.rs": "4fe34089260f59a5ce943922b5c3142476b492d1e29a01d228cb50eeb8e4ea0c",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "bacbcc96224f91fc8ef0ce54aea2bf2f66b9a21bbf50408d439da76b08c481e5",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b0d7f64e3165e5099a3c7a6dd7dbfdb7f963f003d4e0ec011605098b7e503266",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values/contextual_admission_tests.rs": "414c649d9ba78d67c3b99be83d2c03cdada681ddf1fe35bf23d44cca1b884614"
+  },
+  "observations": [
+    {
+      "sequence": 1,
+      "version": "before",
+      "report": "authored-tiles-source-cost-paired-1-before.json",
+      "report_sha256": "a507792fc3101195f17ffc98f69abca8fe1cd2e5aa08af3ed2304b64b24e1d74",
+      "complete_process_wall_seconds": 24.81356880000385
+    },
+    {
+      "sequence": 2,
+      "version": "after",
+      "report": "authored-tiles-source-cost-paired-2-after.json",
+      "report_sha256": "d9a72f5b83be3ee8ae021db0f4de879fedb063e75364d67211b3b6618e68acdf",
+      "complete_process_wall_seconds": 27.878464800000074
+    },
+    {
+      "sequence": 3,
+      "version": "after",
+      "report": "authored-tiles-source-cost-paired-3-after.json",
+      "report_sha256": "eadad41b44218b2b4464df3d98b3be8792471f8f0bf53b957185209920da2dfa",
+      "complete_process_wall_seconds": 25.873213200000464
+    },
+    {
+      "sequence": 4,
+      "version": "before",
+      "report": "authored-tiles-source-cost-paired-4-before.json",
+      "report_sha256": "59605c5a9fc8dcbdb901e3a0b95ab085fc13821a79fe9e705b32d2cd926a91d7",
+      "complete_process_wall_seconds": 26.834035000007134
+    }
+  ],
+  "environment": {
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "Four sequential processes in balanced before/after/after/before order; each completes three original 16K Travel lifetimes and nine original-input GPU replays. Source copy generation and GPU replay are outside named Scene spans. Timing is finite observed nested wall time, not CPU or scanout, not a statistical or production performance guarantee. Process/driver/filesystem/clock state and unrelated host load are not controlled. Before/after differ by private cost reuse and output description, with identical opt-in phase hooks and compiler/profile selection.",
+  "qualified_native_reports": "authored-tiles-source-cost-metadata.json",
+  "comparison_disposition": "Local compile-output wall decreased; component-materialization medians are nearly equal and whole expansion/process did not demonstrate a consistent speedup. Read/decode envelopes varied with host conditions. No causal end-to-end performance or statistical reliability claim.",
+  "before_source_description_disposition": "Before reports retain the older no-source-timing method sentence. New named phase values are bounded by source hooks; exact scope is supplied by authored-tiles-source-before-metadata.json. Raw measured reports are not rewritten.",
+  "adapter": {
+    "backend": "dx12",
+    "device": 9860,
+    "device_type": "discrete-gpu",
+    "driver": "32.0.16.2114",
+    "driver_info": "",
+    "name": "NVIDIA GeForce RTX 4090",
+    "vendor": 4318
+  },
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900KF",
+  "logical_processors": 32,
+  "hardware_identity_note": "Same host as the authored Tile baseline; all12 paired original Runtime records agree on actual adapter. CPU name retained from the previously inspected host inventory; CPU load/clock are not controlled."
+}

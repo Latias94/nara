@@ -666,7 +666,8 @@ snapshot must remain unchanged through gameplay and original retirement.
 Add `scene-work-observation` to the desktop/cost-measurement features to record the existing
 `nara::scene::work` spans for compiled-component preflight/native decoding, Prefab expansion,
 flat admission and Scene preparation/publication. `scene_decode` is nested in preparation and
-other receiving validation; source reads and JSON/RON parsing are not separately timed. These
+other receiving validation; it excludes source reads and JSON/RON parsing. The separate source
+envelopes below attribute those operations at their own existing boundaries. These
 are nested wall spans across worker and owner threads. The explicit measurement binary installs
 its subscriber once, binds each span to the original run and seals after original physical
 retirement, before independent GPU replay. `owner_thread_calls` and `worker_thread_calls` expose

@@ -1805,6 +1805,132 @@ consumer, retaining default admission, current authorization and original result
 contracts. Numeric runtime budgets, extraction timing, foreign execution and full Foundation/
 R9/R12 remain open; Editor/UI/Dialogue product work remains paused.
 
+#### Source Read And Candidate Decode Split
+
+The `a7c7a27` successor separates original content reads and source decoding from compiled native
+preflight, and divides staged expansion into program composition, component materialization and
+reference closure. Its [intermediate 16K report](data/2026-11-14-development-runtime/authored-tiles-source-before-16384.json)
+and [source/executable metadata](data/2026-11-14-development-runtime/authored-tiles-source-before-metadata.json)
+retain three complete ordinary CLI Travel lifetimes, original physical retirement and nine
+original-input GPU replays before value-cost reuse. This is an attribution baseline; final
+wrapper/containment and changed compiler boundary qualification remain required below.
+
+| Original envelope | Wall range across three complete 16K lifetimes | Owner / worker calls per lifetime |
+| --- | ---: | ---: |
+| `project_content_read` | 75.700–82.034 ms | 15 / 120 |
+| `scene_source_decode` | 1,181.626–1,206.328 ms | 1 / 8 |
+| `prefab_source_decode` | 1,148.630–1,160.499 ms | 1 / 8 |
+| `scene_expand` | 1,725.355–1,778.274 ms | 1 / 8 |
+| `scene_structure` | 1,188.633–1,201.951 ms | 1 / 8 |
+| `scene_program_composition` | 0.063–0.083 ms | 1 / 8 |
+| `scene_component_materialization` | 506.802–542.232 ms | 1 / 8 |
+| `scene_reference_closure` | 0.017–0.027 ms | 1 / 8 |
+| `scene_compile_output` | 29.428–33.639 ms | 1 / 8 |
+
+The read envelope is `LoadContext::read_file_inner`: capability open, bounded reads, digesting
+and budget bookkeeping, including catalogue metadata bytes read through it. Separate
+SourceReadiness reads and catalogue discovery remain outside it. Candidate decode includes wire
+checks, header/payload parsing, domain limits and canonicalization; later composition-source
+admission and retained-size bookkeeping are outside. Nested Prefab acquisition/decoding belongs
+inside `scene_structure`, so that phase is not pure layout work. The raw report's previous scope
+sentence predates these hooks; its metadata and subsequent executable text correct that wording
+without changing measured data. These wall envelopes overlap and are not additive CPU time.
+
+The nine expansions are semantically required by the existing script: startup plus four Travels
+each preparing another checkpoint level for progress validation and then the destination.
+Publication is startup, four destination commits and one Retry. Retry uses resident compiled
+source; cancelled validation preparations retain original custody and must not be skipped.
+
+Source-confirmed repeated whole-value cost scans make existing component materialization/output
+the selected bounded optimization. Reuse is private to one compiler candidate and must refresh
+after migration, defaults and Properties changes, then disappear on recomposition. Full reference
+planning and visit admission remain even for empty plans. Added metadata pays the original work
+allowance. This cannot solve the larger source-decoding envelope; no improvement is claimed
+until the modified compiler and complete consumer are qualified.
+
+#### Validated Value Cost Qualification
+
+The compiler now carries the complete cost returned by existing normalized-value validation in
+its private reference program. Migration/default expansion precedes that fact. Properties
+Set/Absent replaces value and cost together after final validation and invalidates the old plan.
+Opaque records carry admitted raw cost; selected contextual defaults carry independent costs.
+Reference closure leaves values unchanged; output applies its existing old/new reference delta
+to that same cost. Recomposition drops the candidate and its costs together. Complete source and
+depth checks, reference planning and plan visits remain; even empty plans pay original work.
+Added metadata pays the existing component-entry allowance or `size_of::<ReferenceProgram>()`.
+There is no public record, cross-compilation cache or increased ceiling.
+
+Qualified positive reports are [64](data/2026-11-14-development-runtime/authored-tiles-source-cost-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-source-cost-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-source-cost-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-source-cost-baseline.json), with
+[selected source/executable/test/report hashes](data/2026-11-14-development-runtime/authored-tiles-source-cost-metadata.json).
+The new source hooks record 311 Scene entries per 64/4K lifetime, 329 per 16K and 275 per baseline.
+Those counts include content reads and staged subphases; they are not comparable to the earlier
+149-entry envelope as an amount of work or a performance score.
+
+| Qualified scope | Actual result |
+| --- | --- |
+| Original root content/residency and public receiving-limit controls | 81/81; 867 outside filter; `5f7edfe7-3856-4320-bf0e-0ddcfc230414` |
+| Complete Scene/Reflect all-feature library controls | 981/981, no skips; `919378ba-391d-4097-8fad-507cba2ace0a` |
+| Public finite reference-entry/conversion, including value-bearing recomposition | 5/5; `9ca1d716-a883-4906-8d98-89ffbb30aba3` |
+| Release game/library/metric/span controls and all four native wrappers | 143/143, no skips; `5b9cc68a-ac8f-4742-8865-cf9a622e65de` |
+
+Nine Tile lifetimes retain 2,379 initialized presentations and all previous gameplay/retirement
+facts; three baseline lifetimes retain 257. Twenty-seven original inputs pass GPU replay and
+exact retained-output rereads, with original Host/prefix cleanup. Both panic controls retain
+complete observation and physical cleanup, including copied-source removal for Tilemaps.
+Positive source observations require actual owner/worker reads and Scene candidate decodes,
+plus worker Prefab candidate decode at 16K, and zero unfinished or retained spans. These are
+physical Windows/hardware DX12 results, not foreign platform, GPU duration or scanout evidence.
+
+The new public conversion removes the separate watcher query, so only the selected component
+can demand both P occurrences. S/1, P/1 and P/2 reads witness its two reference-driven
+recompositions. An independently known one-component/two-node/fourteen-byte effective output
+fits, while node/byte one-short limits preserve exact diagnostics. Source/provenance, unchanged
+prepare-time document/history, commit and Undo/Redo are checked together. Unit controls cover
+layered growth/shrink/Absent, migration/default replacement and opaque raw/hidden-default
+admission. Independent review reports no P1/P2. Observed exact/one-short work tests alone do
+not independently prove every metadata debit; the unchanged full plan visits and explicit
+metadata charge are also source-reviewed. A broad opaque Addition/Set/root-binding matrix and
+combined contextual-default/recomposition cost matrix are not newly qualified here.
+
+For a finite comparison, four sequential processes run before/after/after/before on the same
+host, compiler/profile and phase hooks. Each completes three original 16K Travel lifetimes and
+nine GPU replays. All twelve lifetimes and 36 replays pass with the same actual RTX4090/DX12
+adapter. Raw reports are [1 before](data/2026-11-14-development-runtime/authored-tiles-source-cost-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-source-cost-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-source-cost-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-source-cost-paired-4-before.json).
+[Paired metadata](data/2026-11-14-development-runtime/authored-tiles-source-cost-paired-metadata.json)
+retains exact old/new executable and source hashes, report hashes, order and limits. The old
+executable is frozen outside the repository; no source checkout is rewritten to compare versions.
+
+| Named wall envelope, median over six full lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| `scene_source_decode` | 1,236.780 ms | 1,323.715 ms |
+| `prefab_source_decode` | 1,225.452 ms | 1,325.417 ms |
+| `scene_component_materialization` | 591.236 ms | 592.519 ms |
+| `scene_compile_output` | 38.455 ms | 0.145 ms |
+| `scene_expand`, including nested Prefab loading | 1,891.559 ms | 1,969.560 ms |
+
+Compile-output samples range over 32.271–48.981 ms before and 0.133–0.166 ms after. That local
+decrease is consistent with removing its whole-value cost traversal. Materialization medians
+are nearly equal; complete expansion and whole-process wall do not demonstrate a consistent
+improvement. Process walls in order are 24.814, 27.878, 25.873 and 26.834 seconds, including source
+generation, native startup/waits and independent replay. Named spans overlap, and driver/cache/
+clock state and unrelated host load are uncontrolled. There is no statistical, CPU, frame-rate
+or end-to-end speedup claim. Subsequent work should target source/candidate decoding through its
+existing owners while retaining complete wire limits, errors, source freshness and cleanup.
+
+Source attribution is `a7c7a27`, and private cost reuse plus owner/public regressions are
+`4aaa3d8`. No-default-feature Scene and feature-off workload targets compile. Scoped root
+content, Scene all-target/all-feature and workload/metric/span release correctness Clippy pass,
+as do root/sample formatting and exact source/report/test hashes, added document links and
+whitespace checks. Existing warnings remain. All four scoped agents are closed. Cargo and native
+workloads run serially against the original target; no cache clean, remote CI execution or
+remote publication occurs. Full Foundation/R9/R12 and paused Editor/UI/Dialogue work remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

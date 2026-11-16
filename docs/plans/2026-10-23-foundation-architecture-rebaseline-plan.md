@@ -5461,6 +5461,26 @@ not establish CPU time, extraction speedup or a single transition delay. Source 
 owner-local optimization, numeric budgets, foreign execution and full Foundation/R9/R12 remain
 open; paused Editor/UI/Dialogue work remains excluded.
 
+The [source/decode and value-cost successor](2026-11-13-rust-state-reconstruction-plan.md#source-decode-and-expansion-attribution-successor)
+at `a7c7a27`/`4aaa3d8` separates capability/read/digest envelopes, source Scene/Prefab candidate
+decoding and staged compiler operations. Source review explains nine expansions versus six
+Scene commits: each Travel first validates another checkpoint level, then prepares its destination;
+Retry uses resident compiled data. Those validation/cancellation paths remain. Private validated
+value costs survive only within the original compilation candidate, refresh after migration/
+defaults/Properties changes and disappear on reference-driven recomposition. Full source/value/
+reference checks and original metadata/work admission remain, without a new cache or larger limit.
+Original root/public controls pass 81/81, complete Scene/Reflect libraries 981/981, public
+value-bearing reference conversion 5/5 and game/metric/span/native controls 143/143. Nine Tile
+lifetimes retain 2,379 initialized presentations and 27 GPU replays; three baseline lifetimes and
+both panic cleanup controls retain original assertions. A balanced four-process before/after/
+after/before comparison adds twelve original 16K lifetimes and 36 replays. The
+[measured report](../benchmarks/2026-11-14-development-runtime-costs.md#validated-value-cost-qualification)
+records a local compile-output wall median of 38.455 ms before and 0.145 ms after; component
+materialization is nearly unchanged and complete expansion/process do not show a consistent
+speedup. Source/candidate decoding remains the larger separate target. Compiler/feature checks,
+correctness Clippy, formatting and exact evidence remain scoped to the linked qualification;
+numeric runtime budgets, foreign execution and full Foundation/R9/R12 stay open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
