@@ -14,6 +14,7 @@ fn content() -> Content {
         player: SceneEntityId::new("player").unwrap(),
         checkpoint: SceneEntityId::new("checkpoint").unwrap(),
         checkpoint_position: Vec2::ZERO,
+        bank: nara::asset::AssetRef::Product(crate::sound_bank::bank_product()),
         pickups: BTreeMap::from([
             (SceneEntityId::new("first-pickup").unwrap(), Vec2::X),
             (SceneEntityId::new("second-pickup").unwrap(), Vec2::Y),

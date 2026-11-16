@@ -13,6 +13,14 @@ use nara::{
 
 use super::{AudioOptions, AudioPlugin, AudioWitness, device::NativeGate, start_audio, witness};
 
+fn isolated_audio(gate: Option<NativeGate>) -> AudioPlugin {
+    AudioPlugin {
+        options: AudioOptions::default(),
+        native_gate: gate,
+        test_clips: Some(super::PreparedClips::new(Arc::from([0.0]), Arc::from([0.0])).unwrap()),
+    }
+}
+
 fn start(app: App) -> Result<RuntimeInstance, String> {
     match RuntimeInstance::start(app) {
         Ok(runtime) => Ok(runtime),
@@ -105,11 +113,8 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     let callback_gate = gate.clone();
     let worker = thread::spawn(move || {
         let mut app = App::new();
-        app.add_plugin(AudioPlugin {
-            options: AudioOptions::default(),
-            native_gate: Some(callback_gate),
-        })
-        .map_err(|error| error.to_string())?;
+        app.add_plugin(isolated_audio(Some(callback_gate)))
+            .map_err(|error| error.to_string())?;
         let runtime = match start(app) {
             Ok(runtime) => runtime,
             Err(error) => {
@@ -170,11 +175,7 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     assert!(!original.gate.timed_out());
 
     let mut app = App::new();
-    app.add_plugin(AudioPlugin {
-        options: AudioOptions::default(),
-        native_gate: None,
-    })
-    .unwrap();
+    app.add_plugin(isolated_audio(None)).unwrap();
     let mut runtime = ManagedRuntime(Some(start(app).unwrap()));
     let fresh = witness(runtime.0.as_ref().unwrap().world()).unwrap();
     wait(
@@ -194,13 +195,9 @@ fn a_later_startup_failure_retires_the_original_opened_audio_device() {
     let captured = Arc::new(Mutex::new(None::<AudioWitness>));
     let observe = captured.clone();
     let mut app = App::new();
-    app.add_plugin(AudioPlugin {
-        options: AudioOptions::default(),
-        native_gate: None,
-    })
-    .unwrap();
+    app.add_plugin(isolated_audio(None)).unwrap();
     app.add_systems(
-        StartupStage::Runtime,
+        StartupStage::Tooling,
         (move |world: &mut World| -> Result<(), BevyError> {
             *observe.lock().unwrap() = witness(world);
             Err(BevyError::error(std::io::Error::other(
@@ -236,11 +233,7 @@ fn a_later_startup_failure_retires_the_original_opened_audio_device() {
 #[ignore = "requires an actual Windows stereo 48 kHz f32 output device; run serially"]
 fn a_native_wait_assertion_unwinds_only_after_its_original_runtime_is_physically_retired() {
     let mut app = App::new();
-    app.add_plugin(AudioPlugin {
-        options: AudioOptions::default(),
-        native_gate: None,
-    })
-    .unwrap();
+    app.add_plugin(isolated_audio(None)).unwrap();
     let runtime = start(app).unwrap();
     let observed = witness(runtime.world()).unwrap();
     let result = catch_unwind(AssertUnwindSafe(move || {

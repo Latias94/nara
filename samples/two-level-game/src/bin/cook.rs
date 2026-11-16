@@ -68,8 +68,9 @@ fn run(options: input::Options) -> Result<(), String> {
             .create_child_directory(&cache_name)
             .map_err(|error| error.to_string())?,
     };
-    let content = content::prepare(fence.root(), &cache, &options.target, options.runtime)?;
-    fence.verify()?;
+    let (content, observations) =
+        content::prepare(fence.root(), &cache, &options.target, options.runtime)?;
+    fence.bind_raw_inputs(&observations)?;
     let limits = PlayerPackageLimits::default();
     let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits)
         .map_err(|error| error.to_string())?;

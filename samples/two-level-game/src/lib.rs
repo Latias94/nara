@@ -9,6 +9,7 @@ mod host;
 pub mod levels;
 pub mod resume;
 pub mod save;
+pub mod sound_bank;
 
 #[cfg(feature = "desktop")]
 pub use gameplay::cooked_desktop_recipe;
@@ -18,8 +19,8 @@ pub use gameplay::resume::{GameResumeError, capture_resume, request_resume};
 #[cfg(feature = "desktop")]
 pub use gameplay::resume::{capture_desktop_resume, restore_desktop_resume};
 pub use gameplay::{
-    GamePhase, GameSnapshot, RunOptions, Scenario, configured_recipe, cooked_recipe, player_launch,
-    player_launch_result, product_recipe,
+    GamePhase, GameSnapshot, RunOptions, Scenario, SoundPalette, configured_recipe, cooked_recipe,
+    player_launch, player_launch_result, product_recipe,
 };
 pub use host::{open_explicit_project_root, open_project_root};
 #[cfg(feature = "development")]

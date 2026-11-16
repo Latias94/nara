@@ -252,7 +252,12 @@ fn retained_cpu_domain_owner_keeps_its_budget_without_reserving_a_scene_generati
         "Hello world"
     );
     assert_eq!(loader.budget_snapshot().active_generations(), 0);
-    assert!(loader.budget_snapshot().active(ProjectContentBudgetKind::RetainedBytes) > 0);
+    assert!(
+        loader
+            .budget_snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes)
+            > 0
+    );
     assert!(loader.budget_snapshot().active_reservations() > 0);
     drop(retained);
     assert_eq!(loader.budget_snapshot().active_generations(), 0);

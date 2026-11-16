@@ -5,9 +5,22 @@ mod source;
 
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+
+use nara::{
+    asset::{AssetPath, AssetPathScope, AssetSourcePath, SourceAssetBuild},
+    asset_build::{
+        ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation, ArtifactBuildStore,
+        ArtifactContentDigest, ArtifactSourceRequest, VerifiedArtifactGroup, build_source,
+    },
+    core::FormatVersion,
+    project_tooling::host_fs,
+};
+use two_level_game::sound_bank::{BANK_PATH, SoundBankDomain};
+
+const RENAMED_PICKUP: &str = "assets/audio/pickup-v2.wav";
 
 struct Directory(PathBuf);
 
@@ -29,6 +42,10 @@ impl Directory {
             ("assets/textures/meadow.png.meta", "meta A"),
             ("assets/textures/cavern.png", "image B"),
             ("assets/textures/cavern.png.meta", "meta B"),
+            ("assets/audio/game.soundbank.json", "bank"),
+            ("assets/audio/game.soundbank.json.meta", "bank meta"),
+            ("assets/audio/pickup.wav", "pickup"),
+            ("assets/audio/travel.wav", "travel"),
             ("Cargo.toml", "package"),
             ("Cargo.lock", "lock"),
             ("build.rs", "fn main() {}"),
@@ -40,6 +57,52 @@ impl Directory {
             fs::write(target, bytes).unwrap();
         }
         Self(path)
+    }
+
+    fn renamed_sound_bank() -> Self {
+        let directory = Self::new();
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for name in [
+            "assets/audio/game.soundbank.json.meta",
+            "assets/audio/pickup.wav",
+            "assets/audio/travel.wav",
+        ] {
+            fs::copy(sample.join(name), directory.0.join(name)).unwrap();
+        }
+        fs::rename(
+            directory.0.join("assets/audio/pickup.wav"),
+            directory.0.join(RENAMED_PICKUP),
+        )
+        .unwrap();
+        fs::write(
+            directory.0.join("assets/audio/game.soundbank.json"),
+            br#"{"pickup":"audio/pickup-v2.wav","travel":"audio/travel.wav"}"#,
+        )
+        .unwrap();
+        directory
+    }
+
+    fn build_sound_bank(&self) -> VerifiedArtifactGroup {
+        let cache = self.0.join("cache");
+        fs::create_dir(&cache).unwrap();
+        let store = ArtifactBuildStore::open(
+            host_fs::writable_directory(&cache).unwrap(),
+            ArtifactBuildLimits::default(),
+        )
+        .unwrap();
+        let request = ArtifactSourceRequest::new(
+            host_fs::readable_directory(&self.0.join("assets")).unwrap(),
+            AssetPathScope::under(AssetSourcePath::new("assets").unwrap()),
+            AssetPath::new(BANK_PATH).unwrap(),
+            ArtifactBuildDefinition {
+                id: SoundBankDomain::BUILD_ID.to_owned(),
+                revision: FormatVersion::new(SoundBankDomain::BUILD_REVISION).unwrap(),
+                implementation: ArtifactContentDigest::of_bytes(b"cook-source-fence-test/v1"),
+            },
+        );
+        build_source::<SoundBankDomain>(&store, &request, |_| Ok(()))
+            .unwrap()
+            .into_group()
     }
 }
 
@@ -94,5 +157,72 @@ fn code_set_changes_and_rebinding_are_refused() {
     fence.bind_code(&inputs).unwrap();
     assert!(fence.bind_code(&inputs).is_err());
     fs::write(directory.0.join("src/later.rs"), "new code").unwrap();
+    assert!(fence.verify().is_err());
+}
+
+#[test]
+fn renamed_sound_bank_dependency_is_fenced_without_its_old_path() {
+    let directory = Directory::renamed_sound_bank();
+    assert!(!directory.0.join("assets/audio/pickup.wav").exists());
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let group = directory.build_sound_bank();
+    assert!(group.observations().iter().any(|observation| matches!(
+        observation,
+        ArtifactBuildObservation::Raw { path, digest: Some(_) }
+            if path.as_str() == RENAMED_PICKUP
+    )));
+    fence.bind_raw_inputs(group.observations()).unwrap();
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    fence.bind_code(&inputs).unwrap();
+    fence.verify().unwrap();
+}
+
+#[test]
+fn edited_raw_dependency_is_rejected_after_observation_binding() {
+    let directory = Directory::renamed_sound_bank();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let group = directory.build_sound_bank();
+    fence.bind_raw_inputs(group.observations()).unwrap();
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    fence.bind_code(&inputs).unwrap();
+    let path = directory.0.join(RENAMED_PICKUP);
+    let mut bytes = fs::read(&path).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    fs::write(path, bytes).unwrap();
+    assert!(fence.verify().unwrap_err().contains(RENAMED_PICKUP));
+}
+
+#[test]
+fn stale_raw_observation_is_rejected_instead_of_rebaselining_at_binding() {
+    let directory = Directory::renamed_sound_bank();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let group = directory.build_sound_bank();
+    let path = directory.0.join(RENAMED_PICKUP);
+    let mut bytes = fs::read(&path).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    fs::write(path, bytes).unwrap();
+    assert!(
+        fence
+            .bind_raw_inputs(group.observations())
+            .unwrap_err()
+            .contains(RENAMED_PICKUP)
+    );
+}
+
+#[test]
+fn binding_raw_observations_preserves_prebuild_source_file_identity() {
+    let directory = Directory::renamed_sound_bank();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let group = directory.build_sound_bank();
+    let path = directory.0.join("assets/audio/game.soundbank.json");
+    let bytes = fs::read(&path).unwrap();
+    fs::rename(&path, path.with_extension("original")).unwrap();
+    fs::write(&path, bytes).unwrap();
+    assert!(
+        fence
+            .bind_raw_inputs(group.observations())
+            .unwrap_err()
+            .contains("assets/audio/game.soundbank.json")
+    );
     assert!(fence.verify().is_err());
 }

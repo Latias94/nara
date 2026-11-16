@@ -266,9 +266,16 @@ pub(super) fn advance(world: &mut World) {
         return;
     }
     let request = pending.request.unwrap();
+    #[cfg(all(windows, feature = "audio-cpal"))]
+    let audio_bank = crate::audio::bank_guard(world);
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
-            Content::read(view.scene()).map(|content| (content, view.source_content_stamp()))
+            let content = Content::read(view.scene())?;
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            if let Some(bank) = &audio_bank {
+                bank.validate(view.domain_assets(), &content.bank)?;
+            }
+            Ok((content, view.source_content_stamp()))
         }),
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         state => Some(Err(format!(

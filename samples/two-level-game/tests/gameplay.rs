@@ -49,6 +49,10 @@ impl Directory {
             "assets/textures/meadow.png.meta",
             "assets/textures/cavern.png",
             "assets/textures/cavern.png.meta",
+            "assets/audio/game.soundbank.json",
+            "assets/audio/game.soundbank.json.meta",
+            "assets/audio/pickup.wav",
+            "assets/audio/travel.wav",
             "schema/authoring.bundle.json",
             "prefabs/README.md",
         ] {

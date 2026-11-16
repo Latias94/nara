@@ -1,0 +1,17 @@
+{
+  "kind": "asset_meta",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "asset": {
+      "stable_id": "6c7d4d42-cb57-4a47-9f16-741293f5aab2",
+      "path": "audio/game.soundbank.json",
+      "source_kind": {"other":"two-level-game.sound-bank"}
+    },
+    "settings": {}
+  }
+}

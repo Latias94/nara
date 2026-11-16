@@ -51,10 +51,14 @@ for name, frames in [("pickup", 5_760), ("travel", 11_520)]:
         output.writeframes(struct.pack(f"<{frames}h", *values))
 ```
 
-`src/audio/clips.rs` decodes with Hound 3.5.1 during preparation, before callback creation.
-It refuses a different rate, channel count, sample format, empty input, or a clip longer
-than one second. Each PCM16 sample is normalized by exactly 32,768 into immutable
-`Arc<[f32]>` storage. The CPU mixer copies the mixed mono value to stereo, without
+`game.soundbank.json` names these raw dependencies. Its single `.meta` file supplies the bank's
+stable primary Product; the two raw WAVs have no separate identity sidecars. The game-owned
+`src/sound_bank` importer validates the complete RIFF structure and Hound 3.5.1 format admission
+before preparing either clip. It refuses a different rate, channel count, sample format, empty
+input, or a clip longer than one second. Each PCM16 sample is normalized by exactly 32,768 into
+immutable `Arc<[f32]>` storage. The source-free Runtime format retains complete Product identity,
+fixed descriptors and canonical PCM16 with no source paths. The native callback keeps the acquired
+bank's original content budget owner along with its sample allocations. The CPU mixer copies the mixed mono value to stereo, without
 resampling, and clamps the final sum to `[-1, 1]`. One-shots follow the output device
 clock even while game time is paused. CPU frame positions describe submitted callback
 samples; they do not establish physical playback or human audibility.

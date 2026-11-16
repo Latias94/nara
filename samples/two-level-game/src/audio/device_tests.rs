@@ -582,7 +582,8 @@ fn failed_scope_controls_do_not_apply_a_scope_or_change_native_retirement_facts(
 
 #[test]
 fn refusal_before_native_construction_completes_without_inventing_a_stream_drop() {
-    let error = AudioDevice::open(0, DeviceSettings::default()).unwrap_err();
+    let clips = PreparedClips::new(Arc::from([0.0]), Arc::from([0.0])).unwrap();
+    let error = AudioDevice::open(0, clips, DeviceSettings::default()).unwrap_err();
     assert_eq!(error.stage, "runtime");
     assert!(error.retirement.physical_complete);
     assert!(!error.retirement.stream_created);

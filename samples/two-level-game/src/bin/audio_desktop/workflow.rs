@@ -110,6 +110,9 @@ struct ControlEvidence {
     failed_travel: Option<GameEvidence>,
     failed_travel_error: Option<String>,
     failed_travel_audio_accepted: u64,
+    changed_bank_error: Option<String>,
+    changed_bank_audio_accepted: u64,
+    revised_scene_travels: u64,
     retry_before_instance: Option<u64>,
     retry_after_instance: Option<u64>,
     retry_audio_accepted: u64,
@@ -649,6 +652,29 @@ impl Session {
         evidence.failed_travel_audio_accepted = audio.accepted;
         project.repair_cavern()?;
 
+        project.change_travel_samples(true)?;
+        let changed_bank = self.step(Some(action("two-level-game.travel")?), true)?;
+        if !changed_bank
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("Sound Bank changed"))
+            || changed_bank.current_instance != before.current_instance
+            || changed_bank.level != before.level
+            || changed_bank.score != before.score
+            || changed_bank.player != before.player
+            || changed_bank.collected != before.collected
+            || changed_bank.markers != before.markers
+            || changed_bank.travel_count != before.travel_count
+            || self.audio()?.accepted != 1
+        {
+            return Err(
+                "changed Sound Bank did not refuse travel before game/audio publication".into(),
+            );
+        }
+        evidence.changed_bank_error = changed_bank.error.clone();
+        evidence.changed_bank_audio_accepted = self.audio()?.accepted;
+        project.change_travel_samples(false)?;
+
         let entered = self.step(Some(action("two-level-game.travel")?), false)?;
         if entered.level != Some(LevelKey::main(LevelId::Cavern))
             || entered.travel_count != 1
@@ -705,8 +731,35 @@ impl Session {
             return Err("Save/Restore reconstruction replayed a game sound".into());
         }
         evidence.save_restore_audio_accepted = audio.accepted;
+        let mut final_game = restored;
+        for (revision, level) in [LevelId::Meadow, LevelId::Cavern, LevelId::Meadow]
+            .into_iter()
+            .enumerate()
+        {
+            project.edit_scene_position(level, revision)?;
+            let before = final_game;
+            final_game = self.step(Some(action("two-level-game.travel")?), false)?;
+            if final_game.level != Some(LevelKey::main(level))
+                || final_game.current_instance == before.current_instance
+                || final_game.score != before.score
+                || final_game.collected != before.collected
+                || final_game.travel_count != before.travel_count + 1
+                || final_game.restarts != before.restarts
+                || final_game.restores != before.restores
+            {
+                return Err(
+                    "unchanged Sound Bank blocked or changed a newly authored Scene revision"
+                        .into(),
+                );
+            }
+            let accepted = 3 + revision as u64;
+            self.wait_audio(|audio| {
+                audio.accepted == accepted && audio.completed + audio.cancelled == accepted
+            })?;
+            evidence.revised_scene_travels += 1;
+        }
         evidence.exact_steps = self.exact_steps;
-        Ok((restored, evidence))
+        Ok((final_game, evidence))
     }
 
     fn scripted(&mut self) -> Result<GameSnapshot, String> {
@@ -911,6 +964,8 @@ struct ProjectCopy {
     directory: PathBuf,
     project: PathBuf,
     cavern: Vec<u8>,
+    meadow: Vec<u8>,
+    travel: Vec<u8>,
 }
 
 impl ProjectCopy {
@@ -942,6 +997,8 @@ impl ProjectCopy {
             "assets/textures/cavern.png.meta",
             "assets/audio/pickup.wav",
             "assets/audio/travel.wav",
+            "assets/audio/game.soundbank.json",
+            "assets/audio/game.soundbank.json.meta",
             "schema/authoring.bundle.json",
             "prefabs/README.md",
         ] {
@@ -970,12 +1027,90 @@ impl ProjectCopy {
         }
         let cavern = fs::read(project.join("scenes/cavern.scene.json"))
             .map_err(|error| error.to_string())?;
+        let meadow = fs::read(project.join("scenes/meadow.scene.json"))
+            .map_err(|error| error.to_string())?;
+        let travel =
+            fs::read(project.join("assets/audio/travel.wav")).map_err(|error| error.to_string())?;
         Ok(Self {
             temporary_parent,
             directory,
             project,
             cavern,
+            meadow,
+            travel,
         })
+    }
+
+    fn edit_scene_position(&self, level: LevelId, revision: usize) -> Result<(), String> {
+        let path = fs::canonicalize(
+            self.project
+                .join("scenes")
+                .join(level.scene_path().as_str()),
+        )
+        .map_err(|error| error.to_string())?;
+        if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
+            return Err("copied Scene escaped its original temporary project".into());
+        }
+        let original = match level {
+            LevelId::Meadow => &self.meadow,
+            LevelId::Cavern => &self.cavern,
+        };
+        let mut scene: serde_json::Value =
+            serde_json::from_slice(original).map_err(|error| error.to_string())?;
+        let pickup = scene["payload"]["entities"]
+            .as_array_mut()
+            .and_then(|entities| entities.iter_mut().find(|entity| entity["id"] == "gem-far"))
+            .ok_or("copied level lacks the expected authored pickup")?;
+        pickup["components"]["nara.transform.Transform2d"]["value"]["value"]["translation"]["value"]
+            ["x"]["value"] = serde_json::json!(81 + revision);
+        let bytes = serde_json::to_vec_pretty(&scene).map_err(|error| error.to_string())?;
+        fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+        if fs::read(&path).map_err(|error| error.to_string())? != bytes {
+            return Err("copied Scene edit differs from its requested authored revision".into());
+        }
+        Ok(())
+    }
+
+    fn restore_scene_positions(&self) -> Result<(), String> {
+        for (level, bytes) in [
+            (LevelId::Meadow, &self.meadow),
+            (LevelId::Cavern, &self.cavern),
+        ] {
+            let path = fs::canonicalize(
+                self.project
+                    .join("scenes")
+                    .join(level.scene_path().as_str()),
+            )
+            .map_err(|error| error.to_string())?;
+            if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
+                return Err("copied Scene escaped its original temporary project".into());
+            }
+            fs::write(&path, bytes).map_err(|error| error.to_string())?;
+            if fs::read(&path).map_err(|error| error.to_string())? != *bytes {
+                return Err("repaired copied level differs from its original bytes".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn change_travel_samples(&self, changed: bool) -> Result<(), String> {
+        let path = fs::canonicalize(self.project.join("assets/audio/travel.wav"))
+            .map_err(|error| error.to_string())?;
+        if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
+            return Err("copied WAV escaped the original temporary project".into());
+        }
+        let mut bytes = self.travel.clone();
+        if changed {
+            let sample = bytes
+                .get_mut(48)
+                .ok_or("copied WAV lacks its PCM samples")?;
+            *sample ^= 1;
+        }
+        fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+        if fs::read(&path).map_err(|error| error.to_string())? != bytes {
+            return Err("copied WAV replacement differs from the requested complete bytes".into());
+        }
+        Ok(())
     }
 
     fn remove_cavern(&self) -> Result<(), String> {
@@ -1077,6 +1212,12 @@ fn causes(scripted: bool) -> Vec<AudioCause> {
             AudioCause::Travel { level: cavern },
             AudioCause::Travel { level: meadow },
         ]);
+    } else {
+        causes.extend([
+            AudioCause::Travel { level: meadow },
+            AudioCause::Travel { level: cavern },
+            AudioCause::Travel { level: meadow },
+        ]);
     }
     causes
 }
@@ -1157,6 +1298,10 @@ fn verify() -> Report {
         let failed = evidence.failure.is_some();
         report.runs.push(evidence);
         if failed {
+            break;
+        }
+        if !scripted && let Err(error) = project.restore_scene_positions() {
+            report.failure = Some(error);
             break;
         }
     }

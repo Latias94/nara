@@ -17,6 +17,7 @@ pub(super) enum RuntimeKind {
     #[default]
     Headless,
     Desktop,
+    AudioDesktop,
 }
 
 impl RuntimeKind {
@@ -25,7 +26,13 @@ impl RuntimeKind {
             "headless" => Ok(Self::Headless),
             "desktop" if cfg!(feature = "desktop") => Ok(Self::Desktop),
             "desktop" => Err("desktop cooking requires the cooker's desktop Cargo feature".into()),
-            _ => Err("--runtime requires headless or desktop".into()),
+            "audio-desktop" if cfg!(all(windows, feature = "desktop", feature = "audio-cpal")) => {
+                Ok(Self::AudioDesktop)
+            }
+            "audio-desktop" => Err(
+                "audio-desktop cooking requires Windows and the cooker's desktop and audio-cpal Cargo features".into(),
+            ),
+            _ => Err("--runtime requires headless, desktop or audio-desktop".into()),
         }
     }
 
@@ -33,6 +40,7 @@ impl RuntimeKind {
         match self {
             Self::Headless => "headless",
             Self::Desktop => "desktop",
+            Self::AudioDesktop => "audio-desktop",
         }
     }
 
@@ -40,6 +48,7 @@ impl RuntimeKind {
         match self {
             Self::Headless => "two-level-shipping",
             Self::Desktop => "two-level-desktop-shipping",
+            Self::AudioDesktop => "two-level-audio-desktop-shipping",
         }
     }
 
@@ -47,6 +56,7 @@ impl RuntimeKind {
         match self {
             Self::Headless => "player",
             Self::Desktop => "player_desktop",
+            Self::AudioDesktop => "player_audio",
         }
     }
 
@@ -54,6 +64,13 @@ impl RuntimeKind {
         match self {
             Self::Headless => vec!["cooked-player".into()],
             Self::Desktop => vec!["cooked-player".into(), "desktop".into()],
+            Self::AudioDesktop => {
+                vec![
+                    "cooked-player".into(),
+                    "desktop".into(),
+                    "audio-cpal".into(),
+                ]
+            }
         }
     }
 
@@ -66,6 +83,12 @@ impl RuntimeKind {
             Self::Desktop => {
                 Err("desktop cooking requires the cooker's desktop Cargo feature".into())
             }
+            #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
+            Self::AudioDesktop => Ok(two_level_game::audio::cooked_recipe()),
+            #[cfg(not(all(windows, feature = "desktop", feature = "audio-cpal")))]
+            Self::AudioDesktop => Err(
+                "audio-desktop cooking requires Windows and the cooker's desktop and audio-cpal Cargo features".into(),
+            ),
         }
     }
 }

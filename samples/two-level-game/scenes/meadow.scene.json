@@ -75,6 +75,15 @@
               }
             }
           },
+          "two-level-game.SoundPalette": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "bank": { "type": "map", "value": { "kind": { "type": "string", "value": "stable_id" }, "value": { "type": "string", "value": "6c7d4d42-cb57-4a47-9f16-741293f5aab2" } } }
+              }
+            }
+          },
           "nara.render.Camera2d": {
             "version": 1,
             "value": {

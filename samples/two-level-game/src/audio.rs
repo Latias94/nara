@@ -1,5 +1,6 @@
 //! The game's optional Windows CPAL one-shots and original managed device retirement.
 
+mod bank;
 mod clips;
 mod device;
 #[cfg(test)]
@@ -30,7 +31,8 @@ use nara::{
 use serde::Serialize;
 
 use crate::{RunOptions, levels::LevelKey};
-use clips::ClipKind;
+use bank::RetainedSoundBank;
+use clips::{ClipKind, PreparedClips};
 use device::{
     AudioController, AudioDevice, AudioWitness as DeviceWitness, CueRecordKind, DeviceRecord,
     DeviceSettings, DeviceSnapshot,
@@ -61,10 +63,27 @@ impl ProductConfiguration for AudioOptions {
 
 /// An explicit audible source-game composition; ordinary and cooked recipes stay independent.
 pub fn recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
-    crate::configured_recipe(options)
+    with_audio(crate::configured_recipe(options), audio)
+}
+
+/// The explicitly observed audible Player placement selected by the cooker.
+#[cfg(feature = "desktop")]
+pub fn cooked_recipe() -> ProductRecipe {
+    with_audio(
+        crate::cooked_desktop_recipe(),
+        AudioOptions {
+            capture_output: true,
+        },
+    )
+}
+
+fn with_audio(recipe: ProductRecipe, audio: AudioOptions) -> ProductRecipe {
+    recipe
         .add_configured_plugin(audio, |options| AudioPlugin {
             options: *options,
             native_gate: None,
+            #[cfg(test)]
+            test_clips: None,
         })
         .expect("the game's fixed audio contribution is valid")
 }
@@ -289,13 +308,22 @@ impl GameAudioState {
 }
 
 #[derive(Resource)]
-struct GameAudio(AudioWitness);
+struct GameAudio {
+    witness: AudioWitness,
+    bank: Option<RetainedSoundBank>,
+}
 
 /// Observes only this Runtime's original optional audio owner.
 pub fn witness(world: &World) -> Option<AudioWitness> {
     world
         .get_resource::<GameAudio>()
-        .map(|audio| audio.0.clone())
+        .map(|audio| audio.witness.clone())
+}
+
+pub(crate) fn bank_guard(world: &World) -> Option<RetainedSoundBank> {
+    world
+        .get_resource::<GameAudio>()
+        .and_then(|audio| audio.bank.clone())
 }
 
 pub(crate) fn pickup_collected(world: &mut World, level: LevelKey, entity: SceneEntityId) {
@@ -373,6 +401,8 @@ fn publish(world: &mut World, clip: ClipKind, cause: AudioCause) {
 struct AudioPlugin {
     options: AudioOptions,
     native_gate: Option<device::NativeGate>,
+    #[cfg(test)]
+    test_clips: Option<PreparedClips>,
 }
 
 #[derive(Default)]
@@ -389,6 +419,8 @@ struct FailedRetirement {
 struct NativeOwner {
     slot: Rc<RefCell<DeviceSlot>>,
     settings: DeviceSettings,
+    #[cfg(test)]
+    test_clips: Option<PreparedClips>,
 }
 
 impl Plugin for AudioPlugin {
@@ -412,8 +444,10 @@ impl Plugin for AudioPlugin {
                 capture: self.options.capture_output,
                 native_gate: self.native_gate.clone(),
             },
+            #[cfg(test)]
+            test_clips: self.test_clips.clone(),
         });
-        app.add_systems(StartupStage::Runtime, start_audio)?;
+        app.add_systems(StartupStage::Tooling, start_audio)?;
         app.add_systems(CoreStage::Last, maintain_audio)?;
         Ok(())
     }
@@ -424,7 +458,28 @@ fn start_audio(world: &mut World) -> Result<(), BevyError> {
     let owner = world.non_send::<NativeOwner>();
     let slot = owner.slot.clone();
     let settings = owner.settings.clone();
-    match AudioDevice::open(runtime, settings) {
+    #[cfg(test)]
+    let injected = owner.test_clips.clone();
+    #[cfg(not(test))]
+    let injected: Option<PreparedClips> = None;
+    let (clips, bank) = match injected {
+        Some(clips) => (clips, None),
+        None => {
+            let reference = crate::gameplay::sound_bank_reference(world)
+                .map_err(|error| BevyError::error(std::io::Error::other(error)))?;
+            let assets = world
+                .get_resource::<nara::project_host::ProjectDomainAssets>()
+                .ok_or_else(|| {
+                    BevyError::error(std::io::Error::other(
+                        "audio startup lacks acquired content",
+                    ))
+                })?;
+            let bank = RetainedSoundBank::acquire(assets, &reference)
+                .map_err(|error| BevyError::error(std::io::Error::other(error)))?;
+            (PreparedClips::from_bank(&bank), Some(bank))
+        }
+    };
+    match AudioDevice::open(runtime, clips, settings) {
         Ok(device) => {
             let state = GameAudioState {
                 control: device.control(),
@@ -435,7 +490,10 @@ fn start_audio(world: &mut World) -> Result<(), BevyError> {
                 error: None,
             };
             slot.borrow_mut().device = Some(device);
-            world.insert_resource(GameAudio(AudioWitness(Arc::new(Mutex::new(state)))));
+            world.insert_resource(GameAudio {
+                witness: AudioWitness(Arc::new(Mutex::new(state))),
+                bank,
+            });
             Ok(())
         }
         Err(mut error) => {

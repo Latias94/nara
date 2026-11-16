@@ -2,11 +2,11 @@ use super::input::RuntimeKind;
 use nara::{
     asset::{
         AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetSourceKind, AssetSourcePath,
-        ProjectAssetDatabase, RuntimeAssetCodec,
+        ProjectAssetDatabase, RuntimeAssetCodec, SourceAssetBuild, SourceAssetImporter,
     },
     asset_build::{
-        ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildStore, ArtifactContentDigest,
-        ArtifactSourceRequest, build_image_import,
+        ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation, ArtifactBuildStore,
+        ArtifactContentDigest, ArtifactSourceRequest, build_image_import, build_source,
     },
     core::FormatVersion,
     fs::{DirectoryCapability, RelativePath},
@@ -24,7 +24,10 @@ use nara::{
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
-use two_level_game::levels::LevelId;
+use two_level_game::{
+    levels::LevelId,
+    sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
+};
 
 const DOCUMENT_BYTES: u64 = 1024 * 1024;
 const METADATA_BYTES: u64 = 64 * 1024;
@@ -35,7 +38,10 @@ pub(super) fn prepare(
     cache: &DirectoryCapability,
     triple: &str,
     runtime: RuntimeKind,
-) -> Result<PreparedRuntimeContent, String> {
+) -> Result<(PreparedRuntimeContent, Vec<ArtifactBuildObservation>), String> {
+    if runtime == RuntimeKind::AudioDesktop && !triple.contains("-windows-") {
+        return Err("audio-desktop Player requires an explicit Windows target".into());
+    }
     let settings = project_settings(root, runtime)?;
     let configuration = settings
         .runtime_configuration()
@@ -64,7 +70,7 @@ pub(super) fn prepare(
         AssetSourcePath::new(settings.paths.assets.as_str())
             .map_err(|error| format!("assets root: {error}"))?,
     );
-    let definition = image_import_definition()?;
+    let definition = import_definition("two-level-game.image-import", FormatVersion::ONE)?;
     let assets = root
         .open_directory(
             &RelativePath::new(settings.paths.assets.as_str())
@@ -72,8 +78,9 @@ pub(super) fn prepare(
         )
         .map_err(|error| format!("opening the original assets root: {error}"))?;
     let store = ArtifactBuildStore::open(cache.share(), ArtifactBuildLimits::default())
-        .map_err(|error| format!("Image import cache: {error}"))?;
+        .map_err(|error| format!("asset import cache: {error}"))?;
     let mut database = ProjectAssetDatabase::default();
+    let mut observations = Vec::new();
     for level in LevelId::ALL {
         let path = AssetPath::new(match level {
             LevelId::Meadow => "textures/meadow.png",
@@ -114,7 +121,50 @@ pub(super) fn prepare(
         builder
             .add_group(&imported)
             .map_err(|error| format!("{source}: {error}"))?;
+        observations.extend_from_slice(imported.observations());
     }
+
+    let path =
+        AssetPath::new(BANK_PATH).map_err(|error| format!("SoundBank source path: {error}"))?;
+    let source = scope.resolve(&path);
+    let metadata_path = source.meta_path();
+    let metadata = read(root, &metadata_path, METADATA_BYTES)?;
+    let identity = AssetMetaIdentityCandidate::decode_json_bytes(&metadata)
+        .map_err(|error| format!("{metadata_path}: {error}"))?
+        .into_identity();
+    if identity.path() != &path
+        || identity.source_kind() != &AssetSourceKind::Other(SoundBankDomain::SOURCE_KIND.into())
+        || identity.stable_id() != bank_product().source()
+    {
+        return Err(format!(
+            "{metadata_path}: expected the game's SoundBank identity and path"
+        ));
+    }
+    database
+        .insert_identity(&scope, path.clone(), identity)
+        .map_err(|error| format!("{metadata_path}: {error}"))?;
+    let definition = import_definition(
+        SoundBankDomain::BUILD_ID,
+        FormatVersion::new(SoundBankDomain::BUILD_REVISION)
+            .ok_or("SoundBank build revision must be nonzero")?,
+    )?;
+    let request = ArtifactSourceRequest::new(assets.share(), scope.clone(), path, definition);
+    let imported = build_source::<SoundBankDomain>(&store, &request, |_| Ok(()))
+        .map_err(|error| format!("{source}: SoundBank import failed: {error}"))?
+        .into_group();
+    if imported.seed().source != bank_product()
+        || imported.seed().location.as_ref() != Some(&source)
+        || imported.members().len() != 1
+        || imported.members()[0].products.as_slice() != [bank_product()]
+    {
+        return Err(format!(
+            "{source}: imported group must supply only the game's SoundBank Product"
+        ));
+    }
+    builder
+        .add_group(&imported)
+        .map_err(|error| format!("{source}: {error}"))?;
+    observations.extend_from_slice(imported.observations());
 
     for level in LevelId::ALL {
         let source = scene_source(&settings, level)?;
@@ -164,8 +214,21 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 4 {
-        return Err("cooked content must contain exactly two Scenes and two Images".to_owned());
+    if catalog.members().len() != 5 {
+        return Err(
+            "cooked content must contain exactly two Scenes, two Images and one SoundBank"
+                .to_owned(),
+        );
+    }
+    let bank = catalog
+        .member_for_product(bank_product())
+        .ok_or("missing cooked game SoundBank")?;
+    if bank.products() != [bank_product()]
+        || !matches!(bank.kind(), RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == SoundBankCodec::RUNTIME_KIND
+                && version.get() == SoundBankCodec::RUNTIME_VERSION)
+    {
+        return Err("cooked SoundBank identity or format changed".into());
     }
     for level in LevelId::ALL {
         let scene = catalog
@@ -191,7 +254,7 @@ pub(super) fn prepare(
             return Err(format!("cooked {level:?} Image identity or format changed"));
         }
     }
-    Ok(prepared)
+    Ok((prepared, observations))
 }
 
 fn project_settings(
@@ -208,14 +271,14 @@ fn project_settings(
         .ok_or_else(|| "nara.toml: project manifest is absent".to_owned())?
         .resolve_profile(match runtime {
             RuntimeKind::Headless => None,
-            RuntimeKind::Desktop => Some("desktop"),
+            RuntimeKind::Desktop | RuntimeKind::AudioDesktop => Some("desktop"),
         })
         .map_err(|error| format!("nara.toml: {error}"))?;
-    if settings.window.enabled != (runtime == RuntimeKind::Desktop) {
+    if settings.window.enabled != (runtime != RuntimeKind::Headless) {
         return Err(format!(
             "nara.toml: the {} Player requires window.enabled={}",
             runtime.name(),
-            runtime == RuntimeKind::Desktop
+            runtime != RuntimeKind::Headless
         ));
     }
     if settings.input.action_map.is_some() {
@@ -251,7 +314,7 @@ fn read(root: &DirectoryCapability, path: &str, limit: u64) -> Result<Vec<u8>, S
         .map_err(|error| format!("{path}: {error}"))
 }
 
-fn image_import_definition() -> Result<ArtifactBuildDefinition, String> {
+fn import_definition(id: &str, revision: FormatVersion) -> Result<ArtifactBuildDefinition, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("locating the cooker executable: {error}"))?;
     let file = host_fs::readable_file(&executable)
@@ -260,8 +323,8 @@ fn image_import_definition() -> Result<ArtifactBuildDefinition, String> {
         .digest(COOKER_BYTES)
         .map_err(|error| format!("hashing the cooker executable: {error}"))?;
     Ok(ArtifactBuildDefinition {
-        id: "two-level-game.image-import".to_owned(),
-        revision: FormatVersion::ONE,
+        id: id.to_owned(),
+        revision,
         implementation: ArtifactContentDigest::from_content(digest),
     })
 }

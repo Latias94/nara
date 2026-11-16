@@ -536,11 +536,15 @@ pub(super) struct AudioDevice {
 }
 
 impl AudioDevice {
-    pub(super) fn open(runtime: u64, settings: DeviceSettings) -> Result<Self, DeviceError> {
+    pub(super) fn open(
+        runtime: u64,
+        clips: PreparedClips,
+        settings: DeviceSettings,
+    ) -> Result<Self, DeviceError> {
         let shared = Arc::new(Shared::new(runtime));
         let mut failure_witness = None;
         let result = catch_unwind(AssertUnwindSafe(|| {
-            Self::build(shared.clone(), settings, &mut failure_witness)
+            Self::build(shared.clone(), clips, settings, &mut failure_witness)
         }));
         let mut device = match result {
             Ok(Ok(device)) => device,
@@ -628,6 +632,7 @@ impl AudioDevice {
 
     fn build(
         shared: Arc<Shared>,
+        clips: PreparedClips,
         settings: DeviceSettings,
         failure_witness: &mut Option<AudioWitness>,
     ) -> Result<Self, (&'static str, String)> {
@@ -637,7 +642,6 @@ impl AudioDevice {
                 "audio requires a nonzero Runtime generation".into(),
             ));
         }
-        let clips = PreparedClips::embedded().map_err(|error| ("clips", error.to_string()))?;
         let host = cpal::host_from_id(cpal::HostId::Wasapi)
             .map_err(|error| ("host", error.to_string()))?;
         let output = host

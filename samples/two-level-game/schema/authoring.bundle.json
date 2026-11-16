@@ -2495,6 +2495,44 @@
                   }
                 }
               }
+            },
+            {
+              "id": "two-level-game.SoundPalette",
+              "aliases": [
+                "Sound palette"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "bank",
+                  "aliases": [
+                    "Bank"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "bank"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "asset_ref",
+                    "demand": "immediate"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
             }
           ],
           "type_tombstones": []

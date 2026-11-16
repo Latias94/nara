@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use nara::{
+    asset::AssetRef,
     identity::SceneEntityId,
     prelude::{Component, PersistentComponent, PersistentComponentProvider, Vec2},
     reflect::ComponentTypeId,
@@ -29,12 +30,31 @@ pub struct ObjectRole {
     pub kind: u32,
 }
 
+/// One immutable one-shot bank shared by this level's gameplay cues.
+#[derive(Debug, Clone, Component, PersistentComponent)]
+#[nara(
+    id = "two-level-game.SoundPalette",
+    version = 1,
+    alias = "Sound palette",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub struct SoundPalette {
+    #[nara(
+        id = "bank",
+        alias = "Bank",
+        capabilities(scene, inspect, edit, asset_ref)
+    )]
+    pub bank: AssetRef,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct Content {
     pub player: SceneEntityId,
     pub checkpoint: SceneEntityId,
     pub checkpoint_position: Vec2,
     pub pickups: BTreeMap<SceneEntityId, Vec2>,
+    pub bank: AssetRef,
 }
 
 impl Content {
@@ -47,7 +67,9 @@ impl Content {
         let mut pickups = BTreeMap::new();
         let mut portals = 0;
         let mut cameras = 0;
+        let mut bank = None;
         for entity in scene.entities() {
+            let palette = decode::<SoundPalette>(entity)?;
             if entity
                 .components()
                 .keys()
@@ -57,6 +79,9 @@ impl Content {
                 if !scene.roots().contains(entity.id()) || effective_position(entity)?.is_none() {
                     return Err("camera must be a transformed level root".into());
                 }
+                bank = Some(palette.ok_or("camera lacks its SoundPalette")?.bank);
+            } else if palette.is_some() {
+                return Err("SoundPalette must belong to the level camera".into());
             }
             let Some(role) = decode::<ObjectRole>(entity)? else {
                 continue;
@@ -97,6 +122,7 @@ impl Content {
             checkpoint,
             checkpoint_position,
             pickups,
+            bank: bank.ok_or("level lacks its camera SoundPalette")?,
         })
     }
 

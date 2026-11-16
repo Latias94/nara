@@ -138,3 +138,12 @@ admission, shared Image/TileSet,
 Deferred Scene travel, whole-directory relocation and unavailable source/cache/Cargo at execution.
 Its actual qualification remains in the owning plan/evidence; foreign builds, native presentation,
 server stripping and additional platforms require their separate consumers.
+
+The [Two-Level Game's audible placement](../../samples/two-level-game/README.md#source-free-audible-player)
+adds a concrete game-owned Sound Bank through ordinary `SourceAssetBuild` and `add_group`.
+Both Scenes declare the same primary Product; the catalog includes its source-free PCM member.
+The cooker binds the actual import groups' raw observations through publication, including a
+renamed WAV selected by the descriptor. CPU preparation requires no audio device. Only the
+explicit Windows `audio-desktop` recipe opens the original WASAPI device at Runtime startup.
+Its complete native delivery acceptance, observation costs and platform limits belong to the
+[game's current unit](../plans/2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player).

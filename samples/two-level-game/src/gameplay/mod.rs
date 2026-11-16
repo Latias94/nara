@@ -37,6 +37,7 @@ use crate::{
     },
 };
 use content::Content;
+pub use content::SoundPalette;
 pub use player_launch::{player_launch, player_launch_result};
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("two-level-game.exploration");
@@ -355,19 +356,33 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
     )
     .expect("static game schema and composition");
     ProductRecipe::new()
+        .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
+        .expect("the game's Sound Bank source importer is valid")
+        .add_runtime_asset_codec::<
+            crate::sound_bank::SoundBankDomain,
+            crate::sound_bank::SoundBankCodec,
+        >(nara::runtime_content::RuntimeCodecDefinitionId::new(
+            "two-level-game.sound-bank",
+            1,
+        ))
+        .expect("the game's Sound Bank Runtime codec is valid")
         .add_contribution(contribution)
         .expect("static game recipe")
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
     Ok(ComponentSchemaCatalog {
-        components: vec![content::ObjectRole::persistent_component_schema()],
+        components: vec![
+            content::ObjectRole::persistent_component_schema(),
+            content::SoundPalette::persistent_component_schema(),
+        ],
         ..Default::default()
     })
 }
 fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry
-        .register_persistent_component::<content::ObjectRole>()
+        .register_persistent_component::<content::ObjectRole>()?
+        .register_persistent_component::<content::SoundPalette>()
         .map(|_| ())
 }
 
@@ -415,6 +430,19 @@ fn fail(world: &mut World, error: String) {
     session.phase = GamePhase::Degraded;
     session.held = [false; 4];
     session.error = Some(error);
+}
+
+#[cfg(all(windows, feature = "audio-cpal"))]
+pub(crate) fn sound_bank_reference(world: &World) -> Result<nara::asset::AssetRef, String> {
+    let session = world.resource::<Session>();
+    if !session.initialized || session.phase != GamePhase::Running {
+        return Err("audio requires successful initial game reconstruction".into());
+    }
+    world
+        .resource::<ActiveLevel>()
+        .content()
+        .map(|content| content.bank.clone())
+        .ok_or_else(|| "initial game content lacks its Sound Bank".into())
 }
 
 fn player(world: &World) -> Option<nara::ecs::Entity> {

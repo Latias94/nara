@@ -16,7 +16,10 @@ use nara::{
     scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
 };
 use serde_json::{Value, json};
-use two_level_game::levels::{LevelId, LevelKey};
+use two_level_game::{
+    levels::{LevelId, LevelKey},
+    sound_bank::{SoundBankCodec, SoundCue, bank_product},
+};
 
 use super::process::read_bounded;
 
@@ -87,8 +90,8 @@ pub fn inspect_package(
     assert!(catalog.addressable_roots().is_empty());
     assert_eq!(
         catalog.members().len(),
-        4,
-        "two processed Scenes and two Images; keyboard declarations are code-first"
+        5,
+        "two processed Scenes, two Images and one shared Sound Bank; keyboard declarations are code-first"
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -138,6 +141,15 @@ pub fn inspect_package(
                 "color_space": image.color_space(), "extent": image.extent(), "pixel_bytes": image.pixels().len(),
                 "pixel_blake3": ContentDigest::of_bytes(image.pixels()).as_bytes(),
                 "content_hash": image.content_hash().as_bytes(), "source_free": true}));
+        } else if product == bank_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { .. }
+            ));
+            let bank = SoundBankCodec::decode_runtime(data).unwrap();
+            assert_eq!(bank.product(), product);
+            assert!(!bank.samples(SoundCue::Pickup).is_empty());
+            assert!(!bank.samples(SoundCue::Travel).is_empty());
         } else {
             assert!(
                 LevelId::ALL
@@ -153,6 +165,14 @@ pub fn inspect_package(
     }
     assert_eq!(offset, bytes.len());
     assert_eq!(images.len(), 2);
+    assert_eq!(
+        products,
+        LevelId::ALL
+            .into_iter()
+            .flat_map(|level| [level.scene_product(), level.image_product()])
+            .chain([bank_product()])
+            .collect()
+    );
     images
 }
 

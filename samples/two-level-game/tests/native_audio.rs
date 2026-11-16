@@ -65,6 +65,9 @@ struct Controls {
     failed_travel: Option<Game>,
     failed_travel_error: Option<String>,
     failed_travel_audio_accepted: u64,
+    changed_bank_error: Option<String>,
+    changed_bank_audio_accepted: u64,
+    revised_scene_travels: u64,
     retry_before_instance: Option<u64>,
     retry_after_instance: Option<u64>,
     retry_audio_accepted: u64,
@@ -291,7 +294,7 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
             assert_eq!(run.trajectory, "interactive_commands");
             assert_eq!(
                 (audio.accepted, pcm.accepted_pickups, pcm.accepted_travels),
-                (2, 1, 1)
+                (5, 1, 4)
             );
             assert!(pcm.stale_scope_cancellations > 0);
             assert_eq!(
@@ -303,7 +306,7 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
                     game.saves,
                     game.restores
                 ),
-                (10, 1, 2, 1, 1, 1)
+                (10, 1, 5, 1, 1, 1)
             );
             let controls = run
                 .controls
@@ -333,6 +336,14 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
                     .is_some_and(|error| !error.is_empty())
             );
             assert_eq!(controls.failed_travel_audio_accepted, 1);
+            assert!(
+                controls
+                    .changed_bank_error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("Sound Bank changed"))
+            );
+            assert_eq!(controls.changed_bank_audio_accepted, 1);
+            assert_eq!(controls.revised_scene_travels, 3);
             assert!(
                 controls.retry_before_instance.is_some() && controls.retry_after_instance.is_some()
             );

@@ -5,11 +5,12 @@ use std::{
 };
 
 use nara::{
+    asset_build::ArtifactBuildObservation,
     fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath},
     project_tooling::host_fs,
 };
 
-const CONTENT: [&str; 8] = [
+const CONTENT: [&str; 10] = [
     "nara.toml",
     "schema/authoring.bundle.json",
     "scenes/meadow.scene.json",
@@ -18,6 +19,8 @@ const CONTENT: [&str; 8] = [
     "assets/textures/meadow.png.meta",
     "assets/textures/cavern.png",
     "assets/textures/cavern.png.meta",
+    "assets/audio/game.soundbank.json",
+    "assets/audio/game.soundbank.json.meta",
 ];
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -56,6 +59,50 @@ impl ContentFence {
 
     pub fn root(&self) -> &DirectoryCapability {
         &self.root
+    }
+
+    pub fn bind_raw_inputs(
+        &mut self,
+        observations: &[ArtifactBuildObservation],
+    ) -> Result<(), String> {
+        let mut total = self
+            .files
+            .values()
+            .map(|(_, digest)| digest.length())
+            .sum::<u64>();
+        for observation in observations {
+            let ArtifactBuildObservation::Raw {
+                path,
+                digest: Some(digest),
+            } = observation
+            else {
+                return Err("cooked source imports must report present raw inputs".into());
+            };
+            let name = path.as_str();
+            let digest = digest.content();
+            let file = self
+                .root
+                .open_file(&relative(name)?)
+                .map_err(|error| error.to_string())?;
+            if file.digest(MAX_BYTES).map_err(|error| error.to_string())? != digest {
+                return Err(format!("build input changed: {name}"));
+            }
+            if let Some((identity, captured)) = self.files.get(name) {
+                if file.identity() != *identity || digest != *captured {
+                    return Err(format!("content selection changed: {name}"));
+                }
+            } else {
+                total = total
+                    .checked_add(digest.length())
+                    .ok_or("content inventory overflow")?;
+                if total > MAX_BYTES {
+                    return Err("content inventory exceeds 64 MiB".into());
+                }
+                self.files
+                    .insert(name.to_owned(), (file.identity(), digest));
+            }
+        }
+        self.verify()
     }
 
     pub fn bind_code(&mut self, inputs: &[RelativePath]) -> Result<(), String> {

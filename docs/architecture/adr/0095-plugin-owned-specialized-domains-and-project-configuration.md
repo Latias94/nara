@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-20
-**Last Revised**: 2026-11-15
+**Last Revised**: 2026-11-16
 **Supersedes**: [ADR 0019](0019-physics-strategy.md) and
 [ADR 0030](0030-audio-strategy.md)
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
@@ -101,6 +101,16 @@ reference traversal, and dependency closure remain fail-closed until the require
 bindings are complete.
 
 ### No Universal Provider Layer
+
+The Two-Level Game's concrete one-shot audio follows the existing asset-domain contract. Its
+Scene declares one primary Sound Bank containing its finite pickup/travel inventory; source import
+records both raw WAV dependencies and the Runtime codec carries complete Product identity and
+canonical PCM without source paths. CPU content preparation is separate from optional device
+construction. A native mixer retains the exact admitted content collection and its budget owner
+together with its immutable sample allocations. A resource identity alone is not a data-version
+guarantee. This game fixes the complete bank for one audio Runtime and rejects changed bank
+meaning before Scene travel commits; another product may select a different, explicitly qualified
+reload contract. This does not establish a shared audio format, playback API or device provider.
 
 Nara will not predefine `PhysicsBackend2d`, `AudioBackend`, `TextBackend`, `UiBackend`, a universal
 service locator, or an exclusive provider slot merely because multiple libraries exist in a domain.

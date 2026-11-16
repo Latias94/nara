@@ -42,6 +42,7 @@ schema command. It is not a hand-maintained second definition of component layou
 | `--no-default-features --features cook` | Cook/package executable and Cargo tools, without the development Host or watcher |
 | `--no-default-features --features cooked-player` | Headless shipping Player and shared gameplay, without Cargo tools, watcher, UI or GPU/window backends |
 | `--no-default-features --features cooked-player,desktop` | Shipping Player with the explicit native window/GPU placement, without development tools, watcher or UI |
+| `--no-default-features --features cooked-player,desktop,audio-cpal` | Explicit Windows audible Player, without development tools, watcher or UI |
 
 Cargo features are additive. Enabling `cooked-player` with defaults still enables development;
 the production cooker always disables defaults for its separate captured Player build. Its own
@@ -53,6 +54,8 @@ cargo tree --locked --no-default-features --features cooked-player --edges norma
 cargo tree --locked --no-default-features --features cooked-player,desktop --edges normal,build
 ```
 
+Every selection includes the game's CPU Sound Bank importer/codec and Hound for WAV admission;
+headless and silent selections exclude CPAL and rtrb and never open an audio device.
 The shared root Runtime still includes project/schema, CPU Image and Material support, including
 Naga. This split does not claim to remove every source-oriented implementation or provide a
 complete dedicated-server product. The delivery tests check these selected dependency/features
@@ -78,12 +81,18 @@ gameplay. The existing exact-reconstruction inventory continues refusing this un
 audio service.
 
 The optional recipe owns a finite cue queue, sixteen voices, a 4096-effect duplicate ledger,
-bounded observation and managed device shutdown. It prepares the checked-in [original WAVs](assets/audio/README.md)
-before callbacks. Its normal data callback neither allocates nor locks game state. Actual stream
+bounded observation and managed device shutdown. The camera's `SoundPalette` declares the one
+[Sound Bank descriptor](assets/audio/game.soundbank.json), whose metadata supplies its stable
+primary Product. Source import reads both [original WAVs](assets/audio/README.md) through the
+admitted raw-dependency reader; cooked content contains the validated canonical PCM and complete
+Product identity. The device opens only after successful Scene/game initialization. Immutable
+sample storage retains its original content collection and budget throughout playback. Its normal
+data callback neither allocates nor locks game state. Actual stream
 destruction stays on the original Runtime driver and waits for CPAL's original WASAPI worker;
 pause admission or a consumed sample is not physical playback completion. Device shutdown and
-native calls remain cooperative. Default and cooked recipes do not acquire this service merely
-because `audio-cpal` is compiled; the current cooker does not select it for shipping Players.
+native calls remain cooperative. Ordinary headless and silent desktop recipes do not acquire this
+service merely because `audio-cpal` is compiled. One audio Runtime fixes the complete bank; travel
+with changed Product or PCM meaning refuses before Scene commit and requires a fresh Runtime.
 
 For the finite ordinary-game qualification, choose hardware DX12 or Vulkan and set
 `NARA_WGPU_FORCE_FALLBACK=0`. The executable uses a private copy of the project for deliberate
@@ -92,6 +101,35 @@ source failure/repair, then retires both original native Runtimes and their reco
 ```text
 cargo +1.95.0 run --locked --offline --release --features desktop,audio-cpal --bin audio_desktop -- --verify
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --lib --test native_audio --run-ignored only -E 'test(audio::native_tests::) | test(ordinary_audible_game)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+### Source-Free Audible Player
+
+Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop,audio-cpal`.
+Use the same explicit project/output/target/tool paths documented for the desktop Player below.
+This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
+`cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain two Scenes,
+two Images and one shared Sound Bank. The finite content fence includes the bank descriptor,
+metadata and both raw WAVs. Cook and Check prepare CPU content without opening a device.
+
+The published `player_audio.exe` opens only its generated executable-relative content pack.
+There is no source-directory or embedded-WAV fallback. It accepts normal interactive play and
+`--save ABSOLUTE_PATH`; `--verify` instead executes the complete Travel script. It starts with
+isolated native input and completes original focus/physical-key reconciliation before Resume.
+It requires the selected hardware DX12/Vulkan backend and a real WASAPI device; keep the desktop
+idle and game keys Up. It emits
+the existing `TWO_LEVEL_DESKTOP_RESULT` record with an `audio` member after original physical
+retirement. Verification compares every captured output sample against the original acquired bank
+and independent cause/scope/mix arithmetic. The separate delivery test compares this bank and
+whole output hash against independently decoded source WAVs after relocation and source/cache
+removal. Neither observation establishes human audibility, DAC timing or scanout.
+
+This explicit placement always captures/drains callback output; normal play discards PCM while
+`--verify` retains only its finite verification interval. That observation cost is part of this
+placement and is not a production performance claim.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --all-features --test cooked_audio --run-ignored only -E 'test(production_cooked_audio_player)' --test-threads=1 --no-fail-fast --no-tests fail
 ```
 
 The report compares complete captured device-callback samples with the original WAVs and exact
@@ -133,9 +171,10 @@ key or that a particular platform has passed the full interactive trajectory.
 ## Source-Free Cooked Player
 
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
-Player. It uses Nara's existing Image importer, Scene compiler, cooked-content assembler,
-captured Cargo executable and whole-directory publisher. Both levels and their two original
-Images are included. Authoring retains `ProjectLocation` identities; shipping Scene Products
+Player. It uses Nara's existing Image importer, the game's Sound Bank domain, Scene compiler,
+cooked-content assembler, captured Cargo executable and whole-directory publisher. Both levels,
+their two original Images and one shared Sound Bank are included. Authoring retains
+`ProjectLocation` identities; shipping Scene Products
 are explicit entries in `LevelId`, separate from logical level instances.
 
 Run with Rust 1.95, one Cargo job, the shared absolute engine target and cached dependencies.
@@ -159,6 +198,11 @@ opens the pack beside its actual executable and works from an unrelated current 
 no source, metadata, import cache, Cargo or rustc available. The cooker keeps its reusable
 `two-level-cook-cache` separately under the output parent; that cache is not an installation
 member. Publication refuses an existing destination rather than replacing it.
+
+The source fence keeps the actual verified Image/Sound Bank import observations through code
+generation, Cargo build and publication. Renaming a raw WAV and changing its bank descriptor is
+valid; no hardcoded old filename is required. A later change to the actual observed dependency
+refuses publication instead of silently relabeling the previously prepared PCM.
 
 ```text
 player --verify-travel
