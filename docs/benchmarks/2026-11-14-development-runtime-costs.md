@@ -1307,3 +1307,100 @@ binaries or proof of a CPU, power or tail-latency improvement. Parent response p
 10 ms, Windows waits remain quantized, vendor internal wakes and notification-loss fallback
 remain, and synchronous/native callbacks retain cooperative deadlines. Foreign execution,
 universal quiescence and full Foundation/R12 remain open.
+
+## Active Gameplay Workload Baseline
+
+The selected November 16 successor measures the existing ordinary `Scenario::Travel` workflow
+rather than repeating neutral continuous play. Three sequential native runs each create a fresh
+Runtime, native window and renderer, recovering only the original physical event loop between
+runs. Loaded code, driver state and filesystem caches are shared. The script issues normal
+semantic movement, collects three pickups, creates markers, crosses level/instance boundaries,
+restarts an instance and returns to Meadow. The game retains all gameplay and source owners.
+No manual frame delta, exact Step, private source mutation or second input/render authority is
+introduced by the measuring executable.
+
+Before measurement, select hardware DX12 and `NARA_WGPU_FORCE_FALLBACK=0` on this Windows host.
+Use Rust 1.95.0/release with `desktop,cost-measurement`, one Cargo build job and the root target.
+The finite acceptance requires three complete verified trajectories, at least twenty unique
+initialized presented frames per run, no more than 4096 retained frames, a sixty-second
+cooperative gameplay deadline and complete telemetry plus original native retirement. Report
+the actual observed sample count; do not stretch the script with idle frames to meet a quantile
+claim. A failed sample/control gate remains failed rather than being relaxed after observation.
+
+Frame wall spans run from the exact original `FrameExecutionStart` to its matching post-Host
+observation, including native/driver/submission waits. Original queue-completion observations
+are separate and are not GPU execution or scanout. Per-run nearest-rank P50/P95/P99/max values
+describe these finite correlated samples, not a production tail estimate. Whole-process CPU
+deltas and initial/final memory points include the measuring observer and all process threads.
+The baseline makes no speedup, steady-state memory bound or leak claim and selects no frame-time
+pass threshold. Its purpose is to expose actual gameplay and scene-transition work before
+choosing an optimization. Exact source/toolchain/adapter, complete trace, method and cleanup facts
+belong in the resulting report.
+
+### Active Gameplay Results And Qualification
+
+The measuring consumer, native controls and pure CI target are committed at
+`6c9471ae36f1e0992d60919dd9ade1a5b792b4f8`.
+
+The [original full report](data/2026-11-14-development-runtime/active-gameplay.json) retains all
+447 unique initialized presentations, exact App/render/window/backend/device identities,
+gameplay snapshots and original completion observations. The
+[metadata](data/2026-11-14-development-runtime/active-gameplay-metadata.json) records the binary,
+selected source and report SHA256 values, compiler, command and test identities. This is a
+release executable measured from the uncommitted implementation on `fb07a22`, not a clean
+historical binary. The actual adapter is NVIDIA GeForce RTX 4090, hardware DX12, driver
+`32.0.16.2114`, with a 960 by 540 physical surface. The machine and uncontrolled background
+conditions remain as described above.
+
+| Run | Initialized presentations | Observed moving / transition frames | App-to-post-Host P50 | P95 | P99 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 147 | 38 / 21 | 6.9061 ms | 7.3097 ms | 7.6679 ms | 607.6306 ms |
+| 2 | 151 | 38 / 21 | 6.8985 ms | 7.2816 ms | 14.3425 ms | 601.0571 ms |
+| 3 | 149 | 38 / 21 | 6.9443 ms | 7.2664 ms | 13.7485 ms | 604.7734 ms |
+
+Each maximum is the first initialized-baseline frame, retained as its own classification rather
+than discarded as an outlier. Its broad original frame span includes first-presentation work;
+this observation does not attribute the approximately 0.6 seconds to a particular GPU, shader,
+driver or source stage. Moving-frame medians are 6.7749, 6.9658 and 6.7572 ms. The observed
+scene-transition medians are 6.8652, 6.8763 and 6.9528 ms. Classification compares adjacent actual
+presented snapshots; it does not measure internal load, simulation or render stages separately.
+The script reaches its own verified final facts in every run: three pickups, score 30, four
+travels, one restart, Meadow at `(-120, 0)`, live marker `[1]`, released movement and a current
+six-member Scene. Each run observes five actual Scene-instance changes. Fixed/logical tick counts
+vary with native pacing and are retained rather than forced equal across runs.
+
+Whole-process CPU deltas are 31.25, 93.75 and 31.25 ms over separate counter windows of 1.003883,
+1.032589 and 1.0165361 seconds. Those windows begin at the first initialized post-Host point,
+after that frame's broad first-presentation span; they must not be divided by a different frame
+wall interval to infer CPU utilization. Quantization and variation prevent a stable CPU-cost
+claim. Initial/final private committed memory is 496.08/499.55, 657.99/661.22 and 533.46/536.37
+MiB. These are shared-process point readings across scene changes, not per-Scene ownership,
+steady-state residency or a leak trend. Original telemetry seals retain zero pending/lost
+completion and resource-retirement evidence, with every initialized presentation matched to its
+own completion. Logical tracked GPU payload sizes are not full physical GPU residency.
+
+Native acceptance passes **2/2** in `39cc07bd-09ce-4f16-8f70-da81214c770a`: the three-run
+gameplay measurement and a registered-observer panic after an actual presentation. The latter
+requires a failed measurement report, original window destruction, physical event-loop recovery
+and normal contained-process exit/empty containment/stopped readers/drained output. It cannot
+pass on startup failure or a missing report. All three normal runs also complete their explicit
+original telemetry seal, native/window/provider retirement and event-loop recovery before reuse.
+
+Eight pure arithmetic, identity and public-snapshot controls pass in
+`d114397c-ceb4-4285-8ce8-c9e21152942e`. The final gameplay library plus those controls passes
+**102/102**, with no skips, in `fd687a6a-4300-4cc5-b9ec-86afaf0eb671`. Correctness Clippy for the
+new executable and tests, root/sample formatting, evidence integrity, TOML and added local links
+pass. CI adds the pure metric target; no remote CI execution or hardware-runner claim follows.
+First compilation exposed an incorrect digest import, and the added failure-control
+wrapper used the wrong process-command argument method; both were corrected before acceptance.
+Independent review corrected the registered callback's panic boundary and post-poll deadline
+checks. Three scoped agents close, with no remaining reported P1/P2.
+
+This is a small game with six authored Scene members plus dynamic markers. Its native keyboard
+input is isolated while the original semantic-command script drives gameplay. It does not prove
+physical-input latency, a larger-world capacity, production tail bounds, GPU execution/scanout,
+foreign platforms or shipping instrumentation overhead. No engine optimization follows merely
+from collecting this baseline. The next relevant measurement should attribute the first
+initialized frame through existing startup/GPU observations and extend a named content workload
+before selecting a broader steady-state budget. Full Foundation/R12 remains open; paused
+Editor/UI/Dialogue product work is unchanged.

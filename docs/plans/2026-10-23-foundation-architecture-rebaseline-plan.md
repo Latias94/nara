@@ -5311,6 +5311,17 @@ correction without changing counters or gates: headless 105-to-nine checks (91.4
 cleanup intact. Arbitrary native checkpointing, admission isolation, foreign execution and full
 Foundation/R12 remain open; Editor/UI/Dialogue product work stays paused.
 
+The November 16 [active gameplay baseline](../benchmarks/2026-11-14-development-runtime-costs.md#active-gameplay-workload-baseline)
+extends neutral runtime measurements through three complete ordinary Travel trajectories. The
+original native Runtime presents 147/151/149 initialized frames, movement, pickups, markers,
+five Scene-instance changes per run and the exact final game facts, then seals its original
+telemetry and physically retires before event-loop reuse. Native acceptance and observer-panic
+cleanup pass 2/2; final game library and metric controls pass 102/102. The first initialized
+frame's approximately 0.6-second broad span remains explicit beside finite moving/transition
+observations. Per-run quantiles, process points and raw provenance are descriptive; they prove
+neither scalable-world budgets nor an optimization. Further first-frame attribution, larger
+named workloads, foreign execution and full Foundation/R12 remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

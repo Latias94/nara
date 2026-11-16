@@ -1,0 +1,46 @@
+{
+  "format": "two-level-active-runtime-workload-evidence/v1",
+  "observed_at": "2026-11-16T02:11:53.924077+00:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "os_build": "10.0.26300",
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900KF",
+  "physical_cores": 24,
+  "logical_processors": 32,
+  "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "repository_base": "fb07a22fb8ae408c45465f1abf74357b72819829",
+  "qualified_implementation_revision": "6c9471ae36f1e0992d60919dd9ade1a5b792b4f8",
+  "source_state": "measurement implementation uncommitted on the base; exact selected file SHA256 and binary digest retained; no clean historical binary claim",
+  "selected_source_sha256": {
+    "samples/two-level-game/Cargo.toml": "92fab87fb9a81aeaef458427b14ea5d606f976ab15fe44b5104ea40147a3cd33",
+    "samples/two-level-game/Cargo.lock": "1c5aad4078ed45c0dc8ad9704186762dfdcd467ad04b2f3f73707e01b97befce",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "1928cd8f2cb94f18d8f345dd15c6fee0dac03f3e523d4a3630ce8b3ff7babb3c",
+    "samples/two-level-game/src/bin/runtime_workload/observe.rs": "05d3d44dcfb420991ec2b56cacf09db89f3825b49db4afd428d516adcf98896b",
+    "samples/two-level-game/src/bin/runtime_cost/process_cost.rs": "039cdc61c316f9beb8ad6551baddfadb3e5f72068ceb694de31e7dd1c9a3d402",
+    "samples/two-level-game/tests/runtime_workload.rs": "68d61c0d6ccf62e9c823e8e5db1fb03d3e44c7bb6d417b8875b5e0b53d523d63",
+    "samples/two-level-game/tests/runtime_workload_metrics.rs": "82f69d9c01e7398d617eb7e37bb6c9b04a7225d9662b36995d02a54e16b39e32",
+    "samples/two-level-game/src/gameplay/mod.rs": "3001c08830833e326b5c5f54cb9d90d4d0620a5071fbf6240fe9658bfab019b3",
+    "samples/two-level-game/src/gameplay/verification.rs": "89102f26fdc7a8b07d25b2abee8c5eb8a62b2bde576fcad86940ce5f88b63fd4",
+    "samples/two-level-game/src/gameplay/commands.rs": "885d935e022dcb9e968412292e422f845a145ed7ab32a3116247402eb2b118fa",
+    "samples/two-level-game/src/gameplay/travel.rs": "145b8f8b59eadbbe0e8c3b5286a718db535c9788df965128c8d4bfcd80427dd8",
+    "samples/two-level-game/nara.toml": "13ef230121b9a9c32eb335bb2b09de2b7c9671cd22086463a1b00d1ba065f77f",
+    "samples/two-level-game/scenes/meadow.scene.json": "8d0f678dccbe4d71fe478b67cc252790881b792ebace1f4a7ce1988eb335b001",
+    "samples/two-level-game/scenes/cavern.scene.json": "fc5fc0476a77a8cee40918491de3f4b7b46e07eb5211160f8cc119c6092cb6cf"
+  },
+  "binary_sha256": "02ce0fcdc2d733059fc9687e5e31e92da8bafa46d52392d49e234a46e465c92c",
+  "report_sha256": "19af2265bfe7c419e34bd5843d0944228dcf241685523fc2ab2c548b43a0df10",
+  "test_run_id": "39cc07bd-09ce-4f16-8f70-da81214c770a",
+  "native_tests": {
+    "passed": 2,
+    "skipped": 0,
+    "includes_registered_observer_panic_cleanup": true
+  },
+  "metric_test_run_id": "d114397c-ceb4-4285-8ce8-c9e21152942e",
+  "gameplay_library_and_metrics_run_id": "fd687a6a-4300-4cc5-b9ec-86afaf0eb671",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "small existing two-level game, six authored Scene entities plus dynamic markers; sequential original lifetimes in one process; not larger-content scalability, production tail latency, pure GPU duration or a memory-leak qualification"
+}

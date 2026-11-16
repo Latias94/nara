@@ -3083,6 +3083,18 @@ regression and the corrected wait-before-probe comparison remain in the [existin
 concrete ADR0076 game workflow; it grants no admission freeze, worker-join proof, arbitrary game
 checkpoint or native rollback. Full Foundation/R12 and foreign execution remain open.
 
+The November 16 [active gameplay baseline](../../benchmarks/2026-11-14-development-runtime-costs.md#active-gameplay-workload-baseline)
+uses the existing Travel script and original native Runtime/presentation/retirement owners.
+Its measuring consumer and controls are committed at `6c9471a`.
+Three complete trajectories retain 447 exact initialized presentations and completion matches,
+real movement/pickup/marker/scene changes and final game facts. Actual native acceptance plus
+registered-observer panic cleanup passes 2/2; final game library/metric controls pass 102/102.
+Correctness Clippy, formatting and evidence checks pass. The linked report keeps the first
+initialized frame's broad approximately 0.6-second span separate from later frame classes,
+with descriptive quantiles and whole-process points. This adds a measuring consumer rather than
+a production owner or engine optimization. Larger workloads, first-frame attribution, reliable
+tail/resource budgets, foreign execution and full R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
