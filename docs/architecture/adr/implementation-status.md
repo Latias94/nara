@@ -3199,14 +3199,26 @@ keeps native waits, resource points, source-layout confounds and process-memory 
 Correctness Clippy, formatting, provenance and independent review pass. Further attribution,
 numeric runtime budgets, foreign execution and full Foundation/R9/R12 remain open; UI stays paused.
 
-The same Tile consumer now has an opt-in Scene span attribution pass. It records existing
-`nara::scene::work` boundaries without changing default runtime behavior: 138/138 feature-qualified
-metric controls and 4/4 native population/baseline/panic workflows pass. The 16K workload's named
-dominant ranges are decode 233.047–322.339 ms, expansion 200.378–241.257 ms, flat admission
-33.138–42.060 ms and unbound preparation 201.786–278.200 ms; bind/publish remain small. These
-spans overlap and do not prove CPU, allocation or extraction cost. The next owner-local choice is
-still open between an extraction/UV context and a dedicated existing-owner extraction span, with
-full source-refresh and captured-input acceptance preserved.
+The same Tile consumer initially added opt-in span attribution at `a58c630`. The thread-local
+subscriber omitted IO workers, so the historical ranges below are partial and are rejected as
+complete preparation attribution. The binary-local correction below requires actual worker
+entries, six original preparations/publications and no outstanding spans after physical retirement.
+The initial implementation records existing `nara::scene::work` boundaries without changing
+default runtime behavior: 138/138 feature-qualified metric controls and 4/4 native workflows pass,
+but the 109-entry reports do not qualify worker coverage. `scene_decode` is compiled-component
+preflight/native codec validation, not source file reading or JSON/RON parsing.
+
+The [corrected worker observation and per-map extraction](../../benchmarks/2026-11-14-development-runtime-costs.md#corrected-original-worker-coverage-and-per-map-extraction)
+at `a91e68c`/`f25312c` qualifies 139/139 game/metric/thread controls, 56/56 complete Sprite controls
+and 4/4 hardware DX12 workflows. Every complete run retains 149 original span entries, including eight worker
+expansions/flat admissions and six owner preparations/publications, with no unfinished or retained
+spans at physical retirement. Old-span exits cannot charge a later run; failed reports retain
+original observation and cleanup facts. Nine Tile lifetimes retain 1,655 initialized presentations
+and 27 original-input GPU replays. A private context reuses only current per-map material/image,
+tile axes and the last index/UV result, preserving complete extraction, per-cell diagnostics,
+authorization, cleared-dirty refresh and retained inputs. Nested ranges are not CPU or a controlled
+speedup; source I/O/parsing, extraction timing, reliable runtime budgets, foreign execution and
+full Foundation/R9/R12 remain open. UI/Dialogue work stays paused.
 
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:

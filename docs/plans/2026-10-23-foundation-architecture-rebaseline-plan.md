@@ -5435,15 +5435,31 @@ Surface waits and differing source layouts remain explicit. Further owner-local 
 replacement and extraction attribution, controlled budgets, foreign execution and full R12 remain
 open. This runtime unit does not resume paused Editor/UI/Dialogue product work.
 
-An opt-in existing-span follow-up now separates the dominant Scene work from Surface waits:
+An initial opt-in existing-span follow-up at `a58c630` omitted IO workers because its subscriber
+was thread-local. The historical ranges below are partial and are rejected as complete preparation
+costs; passing gameplay/named-span tests did not prove coverage. The correction below requires
+actual worker entries, six exact original preparations/publications, and no outstanding spans
+after physical retirement before replay. The partial observation recorded:
 across 64/4K/16K, all observed `nara::scene::work` ranges are 8.883–9.439 ms,
-96.911–126.164 ms and 816.388–1,052.739 ms. At 16K, decode, expansion, flat admission and
-unbound preparation dominate; bind and publish remain small. Feature-qualified controls pass
+96.911–126.164 ms and 816.388–1,052.739 ms. Its 16K values include decode, expansion, flat admission
+and unbound preparation, but cannot rank full cross-thread work. Feature-qualified controls pass
 138/138 and native population/baseline/panic controls pass 4/4. This is nested wall attribution,
 not CPU or total allocation accounting, and Sprite extraction/queue remains unmeasured. The next
-runtime candidate is an owner-local extraction context/UV reuse or an existing extraction span,
-gated by the full native consumer and current refresh/authorization/source-order contracts. No
-cross-frame cache or dirty-only skip is selected.
+runtime candidate was an owner-local extraction context/UV reuse or an existing extraction span,
+gated by the full native consumer and current refresh/authorization/source-order contracts.
+
+The [corrected cross-thread observation and per-map context](2026-11-13-rust-state-reconstruction-plan.md#cross-thread-observation-and-per-map-extraction-context)
+now passes 139/139 game/metric/thread controls, 56/56 complete Sprite controls and 4/4 hardware
+DX12 workflows. Each complete run retains 149 Scene entries across original owner/worker threads,
+with six owner preparations/publications and no unfinished or retained spans at physical retirement.
+Nine Tile lifetimes retain 1,655 initialized presentations and 27 original-input GPU replays;
+baseline and both panic-cleanup controls preserve original assertions. The optional binary-local
+subscriber is not a new production Task owner. Extraction reuses only the current map's material/
+image, transformed axes and last index/UV result while retaining full cell scans and diagnostics.
+No cross-frame cache or dirty-only skip is selected. The measured nested ranges overlap and do
+not establish CPU time, extraction speedup or a single transition delay. Source I/O/parsing,
+owner-local optimization, numeric budgets, foreign execution and full Foundation/R9/R12 remain
+open; paused Editor/UI/Dialogue work remains excluded.
 
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.

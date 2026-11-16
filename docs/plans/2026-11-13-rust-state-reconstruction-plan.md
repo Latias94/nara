@@ -2277,20 +2277,90 @@ full Foundation/R9/R12 remain open.
 
 ### Existing Scene Span Attribution
 
-The opt-in `scene-work-observation` feature now consumes the existing `nara::scene::work` spans
-without changing the default runtime. The feature-qualified metric controls pass 138/138, and
-the complete native population/baseline/panic cohort passes 4/4. Each run observes 109 Scene span
-entries. Across 64/4K/16K cells, all observed Scene span wall ranges are 8.883–9.439 ms,
-96.911–126.164 ms and 816.388–1,052.739 ms. The dominant named ranges at 16K are decode
-233.047–322.339 ms, expansion 200.378–241.257 ms, flat admission 33.138–42.060 ms and
-unbound preparation 201.786–278.200 ms; bind is 0.482–0.551 ms and publish 1.448–1.496 ms.
+The original `a58c630` cross-thread claim is rejected: its thread-local subscriber omitted IO
+worker spans. The following 109-entry/range observations are historical partial coverage. Passing
+gameplay and named-span checks did not prove worker work. Correct the binary-local collector
+before ranking costs: install its optional subscriber once before Runtime construction, bind
+each new span to the original run, and finish after physical retirement but before independent
+replay. Require actual worker expansion, six owner preparations/publications, and no unfinished or
+retained spans. A real spawned-thread and consecutive-run control must catch the omission and
+reject reentrant/unfinished observations. No production Task/Scene lifecycle owner changes follow.
+
+The initial opt-in `scene-work-observation` implementation consumes existing `nara::scene::work`
+spans without changing the default runtime. Its feature-qualified metric controls pass 138/138,
+and the native population/baseline/panic cohort passes 4/4. These results qualify the original
+gameplay and cleanup checks, not complete observation. Each historical run observes 109 entries.
+Across 64/4K/16K cells, the partial nested wall sums range over 8.883–9.439 ms, 96.911–126.164 ms
+and 816.388–1,052.739 ms. The 16K partial observations include compiled-component preflight
+(`scene_decode`) at 233.047–322.339 ms, expansion at 200.378–241.257 ms, flat admission at
+33.138–42.060 ms and unbound preparation at 201.786–278.200 ms. Source I/O and JSON/RON parsing
+are not individually timed by these phases.
 The [raw feature-qualified reports](../benchmarks/2026-11-14-development-runtime-costs.md#existing-scene-work-span-attribution)
 retain exact source, executable and report metadata.
 
-These are nested worker/owner wall spans, not additive CPU time or a total allocation model. They
-attribute Scene preparation, but the Sprite extraction/queue path remains outside this span set.
+These historical spans omit worker threads and are not additive CPU time or a total allocation
+model. The Sprite extraction/queue path also remains outside this span set.
 The 16K root-bound Prefab representation remains a source-layout confound. Keep complete source
 decode, Prefab/Scene admission, authorization, source order, multi-View diagnostics, cleared-dirty
 refresh and captured-input lifetimes. The next candidate is a per-extraction TileSet context or
 UV reuse, or an existing-owner extraction span, followed by the complete native consumer. Do not
 introduce a cross-frame cache or dirty-only skip before that evidence exists.
+
+### Cross-Thread Observation And Per-Map Extraction Context
+
+Correct the measurement before using it to select Scene optimizations. Install one optional
+subscriber in the explicit measurement binary, attach every span to its original run at creation,
+and distinguish owner/worker entries. Seal only after physical Runtime retirement and before
+independent GPU replay. Reject live, reentrant or otherwise unfinished spans; a late old span must
+not charge the next run. Preserve observation and cleanup facts on every failure path. Nested
+wall sums overlap and are not end-to-end preparation or CPU durations.
+
+Within the original full Tilemap extraction, introduce a private per-map context for the current
+authorized image/material, transformed tile axes and the most recent index/UV result. Retain the
+complete cell scan, per-cell diagnostics, colors, positions, ordering and Y-sort. Invalid repeated
+indices still count per cell; revisiting an earlier index recomputes it. The context ends with
+that map's extraction: no cross-frame cache, dirty-only skip or new resource authority follows.
+
+Require complete Sprite tests, an independent all-field multi-map/next-frame oracle, actual
+cross-thread and consecutive-run controls, and the unchanged complete native gameplay/pixel/
+retirement cohort. Default feature-off execution must retain disabled observation. Rebind new
+raw reports to their actual source and executable; keep the old partial attempt explicitly
+rejected. No elapsed-time improvement is claimed without a controlled extraction measurement.
+
+The final observed-source cohort passes 139/139 release game/metric/thread controls at
+`bc6bdf20-73d9-47ac-a51b-81ad35982046`; complete Sprite controls pass 56/56 at
+`2dd0e831-f328-4e9f-9935-3312e0d8c7fa`. The full native population/baseline and two panic-cleanup
+controls pass 4/4 hardware DX12 at `67547b48-173f-4906-a027-82289f09380e`. The
+[corrected report and exact metadata](../benchmarks/2026-11-14-development-runtime-costs.md#corrected-original-worker-coverage-and-per-map-extraction)
+retain all four positive raw reports. Every complete run records 149 original entries: expansion
+and flat admission each include eight worker calls; preparation and publication each include six
+owner calls and no worker calls. Physical retirement leaves zero live/unfinished spans. A real
+worker barrier proves finish refusal while active and prevents late old exits charging a new run.
+
+The nine Tile lifetimes retain 1,655 initialized presentations, complete original gameplay and
+source-retirement facts, and pass 27 original-input GPU replays with exact retained rereads and
+Host/prefix cleanup. Three baseline lifetimes retain 261 initialized presentations. Both panic
+controls retain complete observation and native cleanup, with copied-source removal for Tilemaps.
+Independent reviews close the omitted worker coverage, incomplete failure report and decode
+semantics; the extraction review reports no remaining P1/P2. The first corrected native cohort
+was RED 1/4 before the evidence path and diagnostic/report fixes; the report retains its exact
+limits rather than treating a later pass as a causal explanation for an earlier native stop.
+
+The complete native cohort without `scene-work-observation` passes 4/4 at
+`57d61c33-2a4f-4781-a547-fde00c9599f9`; both failure controls retain explicitly disabled Scene
+records, and all original gameplay/pixel/physical-cleanup assertions remain. Separate instrumented
+and uninstrumented sequential runs do not establish a controlled speedup.
+
+The 16K lifetime's nested wall ranges are expansion 1,844.166–2,038.457 ms, compiled-component
+preflight 558.751–660.309 ms, flat admission 370.201–504.269 ms and owner unbound preparation
+203.776–303.773 ms. They include all repeated attempts, overlap and do not measure CPU or one
+transition. Source I/O and JSON/RON parsing remain separately unobserved, and Prefab halves
+remain a representation confound. Continue with existing-owner Scene/source-work attribution
+before broader reuse or caching. The per-map context has behavioral/native acceptance, not an
+elapsed-time improvement claim. Numeric runtime budgets, foreign execution and full Foundation/
+R9/R12 remain open; paused Editor/UI/Dialogue work remains excluded.
+
+The observation correction is `a91e68c`, and per-map extraction is `f25312c`. Scoped release
+correctness Clippy, root/sample formatting, workflow YAML, added document links and exact selected
+source/report hashes pass; warnings remain. All four scoped agents are closed. No Cargo commands
+overlap, no cache is cleaned and no remote publication or remote CI execution occurs.
