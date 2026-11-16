@@ -2144,3 +2144,133 @@ attribution; it does not keep expanding a timing framework or claim full Foundat
 The original-owner implementation is committed at `4a2584d`; the complete consumer and raw
 evidence at `e29e51c`. Source, executable/report hashes, added document links/fragments and
 whitespace checks pass. All changes remain local, with paused UI/Dialogue work preserved.
+
+## Authored Tile Workloads Through Native Travel
+
+Status: implemented and qualified on Windows/Rust1.95 hardware DX12, starting from `51486f2`
+after the bounded namespace investigation. The original-owner correction is `2b98a0c` and the
+complete consumer/evidence is `9f0e5dc`. Extend the
+ordinary complete game consumer with explicit 64/4,096/16,384-cell source-authored Tilemap
+placements, three original native Travel lifetimes per population. These are named test workloads,
+not supported-world capacity claims. Keep the same source game, native pacing, semantic script,
+two levels, six Scene members, markers, pickups, restart, five instance changes and complete
+Runtime/native retirement. Reuse the original public source/Prefab/TileSet/Image/stock/Host owners.
+
+Construct bounded private source copies; leave the checked-out game content unchanged. Every
+population covers the same 256-by-256 world footprint. The 16,384-cell representation exceeds
+one source file's original wire-node bound, so use an existing root-bound Prefab for half of the
+map instead of increasing limits or removing cell color data. Attach maps to existing checkpoint
+and portal identities, preserving all game roles and final membership. TileSets use original
+16-by-16 Images with ordinary source RON/metadata/dependency admission. Validate authored files
+with original default limits. Report actual source bytes/digests and source-layout differences;
+do not treat different Prefab preparation as a pure cell-count scaling experiment.
+
+At exact original post-Host observations, retain only scalar content/instance/extraction/queue/
+successful-drawing and logical GPU resource facts. Keep source-generation, App/render/window/
+device receipt and completion joins. Distinguish authored cells, extracted cells, visible queued
+quads and successful draws. Root content-budget internals remain with their original owner;
+process points and tracked GPU payloads are not total memory or a leak proof. Record transition
+curves without claiming a resource plateau from unquiesced samples or evicting caches for a test.
+
+Retain a bounded original sealed capture from each level and the final returned level, accepting
+each only through its matching real presentation. After original World/source retirement, replay
+those exact inputs through an independent public Host with equal-sized target adaptation and
+independent known-source ground/background pixel witnesses. Retain/reread earlier outputs after
+later publication and producer retirement, then require original-prefix and Host cleanup. Pixels
+are captured-input replay evidence, not screen capture/scanout. Preserve failure/panic custody.
+
+Supplement externally visible counts with a focused original content-owner regression: large
+raw/compiled Scene values survive while an escaped source needs them; root-bound Prefab inputs
+are retained by their original snapshot and need not survive flat compilation's last snapshot.
+Keep the captured generation's original conservative budget until its final legal source/pixel
+owner drops, distinguishing allocation reachability from the shared reservation lifetime.
+Use actual Weak references and original budget, not a new public memory dashboard. Existing
+cancel/failed-travel/retained-image controls remain independent safety evidence.
+
+Qualify pure source/accounting/oracle controls, complete native population workflows and observer
+failure cleanup serially. Report finite per-run distributions, transition categories and exact
+source/toolchain/hardware conditions. No preselected numeric speed target or universal tail/VRAM
+budget is introduced; choose subsequent owner-local changes only from this complete workload.
+Full Foundation/R9/R12 and foreign execution remain open; Editor/UI/Dialogue work stays paused.
+
+The first independent sample CPU cohort passes 138/138 without skips at
+`12e7f345-c6b4-48c6-9f7a-ca0721fb2f9d`, including source preservation, all three populations
+under original default file limits, cleanup refusal controls and independent pixel-oracle
+negative controls. Two read-only reviews close without remaining P1/P2. The failure wrapper now
+requires copied-source cleanup after observer panic as well as original native retirement;
+positive wrappers inspect actual replay pixels, retained-output rereads and final Host accounting.
+Native gameplay, GPU replay and the original content-budget regression remain unqualified until
+their execution below; source generation and compilation alone do not close this unit.
+
+The first original content-owner run is RED, 1/2 at
+`cfc40141-7874-47cb-bc48-99bf99921d87`: the existing escaped-source control passes, while the
+new two-map source exceeds the original compilation working allowance (633,004,514 modeled
+bytes versus 536,869,785 available). This is an allocation-model diagnostic, not measured RSS.
+The staged reference planner pre-reserves the complete value model multiplied by configured
+maximum depth even when no EntityRef leaves exist. Replace only its record/default/replan
+reservations with Reflect's existing admitted planner; charge actual traversal and allocation
+deltas against the original cumulative ledger, preserving Schema admission, structural/unmarked
+reference validation, error classes and ceilings. Property-claim reservations retain their
+separate unchanged caller contract. Add a large explicit-list regression with and without one
+real local reference and retain exact/one-short quota controls.
+
+The first native population run is also RED at `ef877cbe-34e3-4de0-8d74-61935f9a9fbe`, before
+qualifying gameplay/pixels: the fixture omitted an explicit nearest sampler while its independent
+texel oracle requires one. Author `NEAREST_CLAMP` in the copied TileSet and assert its decoded
+source value; do not relax the oracle into accepting an unrelated filtering result. That failure
+still reports original native retirement and copied-source removal.
+
+The admitted-planner correction also charges each later plan visit through Reflect's original
+path-access model; planning does not prepay later eager prefix copies. Persistent references
+receive the same visit admission even though they create no source-origin entry. Long-key
+controls preserve default work-byte refusal, then isolate their original copy/working guard
+using test-local options. Production defaults and the actual Tile workloads remain unchanged.
+The first full corrected Reflect/Scene cohort passes 976/976 at
+`f5beb3b0-f9b4-4fd6-8e0a-f31bbfd49f8f` in the debug test profile. Earlier quota-oracle failures
+retain their stricter exact/one-short acceptance after accounting for expansion as well as sealing.
+
+The complete content-owner cohort then exposes a separate receiving-limit mismatch: dependency
+collection uses the generic 16,384-node reference default after admitting a much larger complete
+component. Move the existing value-to-reference-limit conversion from Scene into Reflect's
+`ComponentValueMaterializationLimits` and reuse it in Scene and root content collection. The
+root retains its original receiving value policy and actual allocation callback; no new parser,
+inventory cache or larger file/Host-memory setting is introduced. A 32,768-item no-asset control
+must still scan the complete value and preserve the caller's exact refusal. The first combined
+run passes 1,048/1,049; its remaining fixture assertion incorrectly expects a disk Schema bundle
+in a Native-provider closure. Remove that unconsumed fixture artifact and keep exact membership
+for the seven actual source files. Final large-source custody and native qualification remain
+required below.
+
+### Authored Tile Qualification And Continuation
+
+The final [measured report](../benchmarks/2026-11-14-development-runtime-costs.md#authored-tile-workloads-through-native-travel)
+retains exact source/executable/report hashes and all four raw positive reports. Final shared
+Reflect/Scene/content/residency controls pass 1,049/1,049, with 867 cases outside the selected
+filter, at `ad17f549-d801-443e-97f1-d2bbd76a28d5` in the debug test profile. The game library,
+source, oracle and metric controls pass 138/138 release at
+`283fb232-f419-431f-997d-535bb0ab08c5`. The complete native population/baseline and two panic-cleanup
+controls pass 4/4 release hardware DX12 at `6f494450-d654-4ff7-b087-39f1ea8ee691`.
+
+Nine Tilemap lifetimes retain 1,551 initialized presentations, complete all original gameplay
+facts and physically retire the original Runtime/window. All five predecessor Scene receipts
+stop resolving; six source views retire; copied sources are explicitly removed. Twenty-seven
+selected original inputs then pass independent known-source GPU pixel checks and exact retained
+image rereads after later publication/producer retirement. Original submission prefixes complete
+and final Host resource/candidate counters and cleanup faults are zero. Three independent baseline
+lifetimes retain 257 initialized presentations and all earlier assertions. These are captured-input
+image checks, not swapchain capture, complete rasterization, GPU duration or scanout.
+
+Shared all-target/all-feature, root-library and consumer correctness Clippy, root/sample formatting
+and document/provenance checks pass; warnings remain. Independent rereview closes the missing
+plan-visit debit and confirms the shared conversion and root receiving-policy seam. All six scoped
+agents are closed. No Cargo commands overlap, no cache is cleaned and no remote publication or
+remote CI execution occurs. Paused UI/Dialogue changes remain excluded.
+
+The final stable-frame wall medians remain near 16.5 ms and include large Surface-acquisition
+waits; they are not rendering CPU or a production tail target. Scene-transition observations and
+complete intervals grow with the larger source workloads, with the 16K Prefab layout as an
+additional variable. Continue with owner-local attribution of Scene preparation/replacement and
+extraction under this same complete consumer before selecting reuse or another optimization.
+Keep source-copy generation outside the runtime entry endpoint, and retain default admission,
+source freshness, original results and physical cleanup. Numeric budgets, foreign execution and
+full Foundation/R9/R12 remain open.

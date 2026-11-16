@@ -3183,6 +3183,22 @@ foreign execution and full Foundation/R12 remain open.
 
 The namespace owner implementation is `4a2584d`; its complete consumer and evidence are `e29e51c`.
 
+The [authored Tile workload successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#authored-tile-workloads-through-native-travel)
+at `2b98a0c`/`9f0e5dc` qualifies copied 64/4K/16K source terrain through nine complete native Travel
+lifetimes, preserving original members, input/game facts and five Scene-instance replacements.
+It closes two admission mismatches through existing owners: complete-value/depth reference
+over-reservation and generic reference limits narrower than the receiving compiled-value policy.
+Reflect supplies the shared conversion and plan-visit admission, with default file/value/Host-memory
+policies unchanged. The 16K representation uses root-bound Prefab halves under original wire limits.
+Shared owner/content controls pass 1,049/1,049, sample controls 138/138 and hardware DX12 workflow/
+panic cleanup 4/4. Twenty-seven original-input GPU replays retain/reread earlier images after later
+publication and producer retirement, and complete original prefix/Host cleanup. Source copies are
+removed; original source Weak/budget lifetimes have separate focused coverage. The
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#authored-tile-workloads-through-native-travel)
+keeps native waits, resource points, source-layout confounds and process-memory limits explicit.
+Correctness Clippy, formatting, provenance and independent review pass. Further attribution,
+numeric runtime budgets, foreign execution and full Foundation/R9/R12 remain open; UI stays paused.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

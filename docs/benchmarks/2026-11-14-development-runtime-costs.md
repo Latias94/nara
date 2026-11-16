@@ -1582,3 +1582,152 @@ are retained. Both independent reviews close without remaining P1/P2, and all fo
 close. No remote CI, other-platform execution or new Foundation/R12 completion claim follows.
 The bounded acquisition-cost investigation closes with the original official path retained;
 larger named gameplay/resource workloads and reliable runtime tail/memory budgets remain open.
+
+## Authored Tile Workloads Through Native Travel
+
+The November 16 successor starts from `51486f2`. The original-owner correction is
+`2b98a0c`; the complete measuring consumer and captured evidence are `9f0e5dc`.
+It adds 64/4,096/16,384 source-authored Tilemap cells to the ordinary two-level game,
+with three complete native Travel lifetimes per population. Every lifetime retains movement,
+three pickups, score 30, markers, four travels, one restart, six observed Scene instances,
+five instance changes, the exact final Meadow position and released input holds. The original
+verifier and six authored Scene members are unchanged. The separate three-run no-Tile baseline
+and both original/native-source observer-panic controls remain accepted.
+
+Raw population reports are [64 cells](data/2026-11-14-development-runtime/authored-tiles-64.json),
+[4,096 cells](data/2026-11-14-development-runtime/authored-tiles-4096.json) and
+[16,384 cells](data/2026-11-14-development-runtime/authored-tiles-16384.json), alongside the
+[baseline](data/2026-11-14-development-runtime/authored-tiles-baseline.json) and exact
+[source/executable/report metadata](data/2026-11-14-development-runtime/authored-tiles-metadata.json).
+These are qualified worktree builds with selected source hashes, not clean historical or cold
+machine builds. Native execution uses Windows 11, Rust1.95.0/release, one build job,
+locked/offline dependencies and hardware DX12/RTX4090. The fixed official wgpu revision remains
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`.
+
+### Authored Representation And Admission Corrections
+
+Each population covers world `[-120,136] x [-128,128]`, a 256-by-256 footprint. Cell sizes are
+32, 4 and 2 world units. Original 16-by-16 PNGs supply the TileSets, with explicit white cell
+colors, tile zero, layer -10 and `NEAREST_CLAMP`. Source copies are private, bounded and removed
+after the original native lifetime and independent replay. The checked-out game content is not
+edited. The 16K representation uses two 8,192-cell maps: one on the checkpoint, and one supplied
+by a root-bound Prefab on the existing portal. It adds no Scene member or child. One inline 16K
+value exceeds the original one-million wire-node file limit; splitting uses the existing source
+representation rather than changing that limit, dropping color data or reducing the population.
+
+| Cells | Source layout per level | Reported final source-file bytes across both levels and shared inputs | Initialized presentations per run | Source-copy/generation wall per run |
+| ---: | --- | ---: | --- | --- |
+| 64 | One direct map, no Prefab | 174,779 | 87 / 87 / 85 | 39.984 / 40.164 / 46.462 ms |
+| 4,096 | One direct map, no Prefab | 2,909,047 | 133 / 135 / 133 | 248.563 / 270.628 / 257.513 ms |
+| 16,384 | Two maps, one root-bound Prefab | 11,267,421 | 301 / 297 / 293 | 812.574 / 781.326 / 784.751 ms |
+
+The final source-file byte column comes from the report's actual files/digests, not decoded heap
+size. Copying, generation, serialization and default-limit preflight are timed before the native
+entry endpoint. Those numbers are not engine Scene-loading latency. The 16K source layout differs
+from smaller populations and is not a pure cell-count scaling experiment.
+
+The new original content regression first failed before native gameplay. Staged compilation
+reserved complete component-value bytes multiplied by configured maximum depth, even for an
+empty entity-reference plan: two 4,096-cell maps requested 633,004,514 modeled working bytes
+against 536,869,785 available. This diagnostic is not observed RSS. The correction uses Reflect's
+existing admitted planner and separately admits every later plan visit through the original
+cumulative ledger. Visit bounds include eager path-prefix copies, scratch growth and diagnostics;
+Persistent references pay too. Source ownership, reference errors, exact quota refusal and
+unchanged file/value/Host-memory policies remain covered. Property-claim preparation keeps its
+separate conservative reservation and is not claimed optimized here.
+
+After compilation succeeded, root asset discovery exposed an independent receiving mismatch:
+its generic reference traversal default admitted only 16,384 nodes, although the compiled value
+had already crossed the Host's much larger complete-value policy. Reflect now owns the existing
+value-to-reference-limit conversion, reused by Scene and the receiving content Host. The original
+allocation callback and caller-error identity remain authoritative. No source parser, reference
+cache or second content/GPU owner is added. A 32,768-item no-asset control proves complete scanning
+and exact refusal rather than skipping values without references. Synthetic long-key controls
+retain default work-byte refusal, then isolate later copy/working guards using test-local options.
+
+The native fixture also initially omitted its nearest sampler. The independent pixel oracle
+refused that linear-filtered input; the copied TileSet now explicitly authors the intended
+sampler, with a source decoding assertion. A separate fixture assertion wrongly counted an
+unconsumed disk Schema bundle under its Native provider. It now verifies the seven actual closure
+members without that unused artifact. These corrections retain the workload and pixel assertions.
+
+### Presented Resource And Timing Observations
+
+At each original presentation, the consumer joins Runtime/App/render/window/backend/device facts
+and completion data before recording current CPU asset counts, extraction, queue, successful
+drawing and logical GPU payloads. Running, non-restoring frames require the declared full cell
+count, original RenderFrame identity, zero missing/invalid/unprepared items and matching actual
+quad statistics. All recorded initialized Tilemap points have one current Image, TileSet, PreparedImage,
+SoundBank and Scene instance. Those current-store points exclude other retained captures and do
+not prove a resource plateau or complete retained-memory bound.
+
+| Cells | Per-run stable-gameplay App-to-post-Host P50 range | P95 range | Original backend tracked-payload high water in each run | Final Meadow quads / draw calls |
+| ---: | ---: | ---: | ---: | ---: |
+| 64 | 16.528–16.557 ms | 16.734–17.094 ms | 2,311,652 bytes | 70 / 6 |
+| 4,096 | 16.485–16.572 ms | 16.784–17.061 ms | 2,634,212 bytes | 4,102 / 6 |
+| 16,384 | 16.239–16.466 ms | 16.722–17.582 ms | 3,617,252 bytes | 16,390 / 6 |
+
+These native wall spans include waits. In run one, stable-frame Surface-acquisition medians are
+15.635/14.635/10.608 ms for the three populations; program-execution medians are
+0.475/0.473/0.566 ms. Component medians are separate distributions and must not be added into a
+supposed median frame. Unmeasured App remainder includes extraction and other work; it does not
+identify one CPU stage. Native pacing and warm state are not controlled across sequential batches,
+so no before/after speedup or throughput inference follows from these ranges.
+
+Observed Scene-transition frame counts are 21/21/21, 68/67/66 and 229/222/225. Complete initialized
+measurement intervals are about 1.94–2.01, 2.76–2.82 and 5.51–5.65 seconds. These are finite
+correlated observations, not independent samples, pure preparation times or a production P99
+budget. Source generation, original startup, first initialized frames, transition frames and
+stable gameplay remain distinct in the raw reports. Each original native lifetime retains one
+Adapter/Device request pair and reuses it through all Scene changes. Independent replay later
+creates its own Host outside the measured interval; it can affect subsequent warm driver state.
+
+Whole-process private-byte points span roughly 499–774 MiB at the first initialized boundaries
+and 501–752 MiB at final boundaries across the nine Tilemap runs. They include driver/code/allocator state,
+background work and measurement retention. They are not attributable content bytes, allocation
+peaks, physical GPU residency or leak evidence. Native GPU points cover only the existing tracked
+payload model; they cannot be compared directly to process private bytes.
+
+### Retained Original Inputs And Qualification
+
+Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first
+Cavern and final returned Meadow. A four-entry original Seal ledger and exact accepted native
+receipts select them. After the original World, raw Scene owner and native window retire, an independent public
+Host replays those 27 inputs into equal-sized 960-by-540 `Rgba8Unorm` linear/premultiplied images.
+It neither reconstructs a newer source snapshot nor claims to capture the displayed swapchain.
+
+The independent oracle checks the complete captured terrain geometry and original texture
+identity, then fixed known-source ground/background pixel witnesses in all four quadrants. Per
+image, the 64-cell variant checks 144 ground and 36 clear physical pixels; the 4K/16K variants
+check 72 ground and 36 clear pixels. The 16K witness samples the independently inspected center
+texel, not an invented white fallback. These finite witnesses are not a full rasterization oracle.
+Every complete output image is reread byte-for-byte after later publication and all producer
+retirements. Actual render/readback/retirement prefixes complete; final Host tracked resources,
+candidate metadata and cleanup faults are zero, without abandoned callbacks. Three retained
+images account for 6,220,800 CPU baseline bytes and 6,223,876 observed Host payload bytes before
+release, plus separately bounded readback and original captured-input storage.
+
+The focused original content regression retains actual raw/compiled Scene allocations through
+escaped materializers and releases raw Prefab input with its last original snapshot. It checks
+the captured generation's complete conservative budget through successive source drops and the
+final refund. Actual Weak reachability and reservation lifetime are distinct; neither is a process
+heap measurement. Every Tilemap lifetime separately rejects all five old Scene receipts, observes
+six retired source views and removes its exact copied source tree.
+
+| Scope | Actual final result |
+| --- | --- |
+| Reflect/Scene plus original content/residency, debug test profile | 1,049/1,049; 867 outside the selected filter; `ad17f549-d801-443e-97f1-d2bbd76a28d5` |
+| Game library/source/oracle/metric controls, release | 138/138, no skips; `283fb232-f419-431f-997d-535bb0ab08c5` |
+| Native population/baseline workflows and two observer-panic cleanup controls, release hardware DX12 | 4/4, no skips; `6f494450-d654-4ff7-b087-39f1ea8ee691` |
+
+Scoped shared all-target/all-feature, root library and consumer correctness Clippy pass, as do
+root/sample formatting and source/executable/report integrity checks. Warnings remain. Independent
+review closes the previously missing plan-visit admission and strengthens copied-source panic
+cleanup and positive replay-result checks; all six scoped agents are closed. CI already selects
+the metric/source/oracle target; hardware native execution remains explicitly qualified here,
+not claimed as a remote CI run.
+
+The continuation should attribute larger Scene preparation/replacement and extraction work in
+this same complete workflow before selecting reuse or another optimization. Controlled pacing,
+numeric runtime tail/resource budgets, larger named game workloads and foreign execution remain
+open. This unit does not complete Foundation/R9/R12 or resume paused Editor/UI/Dialogue work.

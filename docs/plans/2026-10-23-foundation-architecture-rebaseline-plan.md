@@ -5414,6 +5414,27 @@ retains precise hardware/wait/sampling limits. No speedup, selected new GPU owne
 Foundation/R12 completion follows; larger named runtime workloads and budgets remain open.
 Owner implementation is `4a2584d`; complete consumer and evidence are `e29e51c`.
 
+The [authored Tile workload successor](2026-11-13-rust-state-reconstruction-plan.md#authored-tile-workloads-through-native-travel)
+returns to complete game/resource workloads. Its original-owner correction `2b98a0c` replaces
+depth-multiplied reference reservations with admitted planning and per-visit path work, and shares
+Reflect's value-derived traversal policy with Scene and root content collection. Default file,
+materialization and Host-memory policies remain intact. Large raw/compiled source custody and
+exact budget release pass with the original content/residency controls. The complete consumer
+`9f0e5dc` adds copied 64/4K/16K authored terrain while preserving the game's six members and all
+Travel behavior. The 16K source uses an existing root-bound Prefab to respect wire limits.
+
+The final [report](../benchmarks/2026-11-14-development-runtime-costs.md#authored-tile-workloads-through-native-travel)
+qualifies 1,049/1,049 shared owner/content tests, 138/138 sample controls and 4/4 actual hardware
+DX12 workflow/panic controls. Nine Tilemap lifetimes retain 1,551 initialized presentations and
+27 original-input GPU image replays after original World/source retirement; three baseline
+lifetimes retain all earlier assertions. Retained outputs survive later publication and producer
+retirement, final original prefixes/Host accounting complete, and copied sources are removed on
+success and observer panic. Correctness Clippy, formatting, provenance and independent review pass.
+The observed wall/payload/resource points do not establish production tail or total-memory bounds;
+Surface waits and differing source layouts remain explicit. Further owner-local Scene preparation,
+replacement and extraction attribution, controlled budgets, foreign execution and full R12 remain
+open. This runtime unit does not resume paused Editor/UI/Dialogue product work.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
