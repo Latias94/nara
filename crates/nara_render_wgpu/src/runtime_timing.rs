@@ -49,6 +49,7 @@ impl WgpuRuntimeFramePhase {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuRuntimeFrameTimings {
     phases: [Option<Duration>; WgpuRuntimeFramePhase::ALL.len()],
+    namespace: WgpuNamespaceTimings,
 }
 
 impl WgpuRuntimeFrameTimings {
@@ -59,6 +60,80 @@ impl WgpuRuntimeFrameTimings {
     }
 
     pub(crate) fn record(&mut self, phase: WgpuRuntimeFramePhase, elapsed: Duration) {
+        self.phases[phase.index()] = Some(elapsed);
+    }
+
+    /// Returned original native operations nested inside namespace preparation.
+    ///
+    /// These values overlap their containing namespace phase. Add only the five disjoint nested
+    /// operations when computing that phase's unmeasured remainder. A reused device does not
+    /// request an Adapter or Device again; those missing calls are not measured zero.
+    #[must_use]
+    pub const fn namespace(self) -> WgpuNamespaceTimings {
+        self.namespace
+    }
+
+    pub(crate) fn namespace_mut(&mut self) -> &mut WgpuNamespaceTimings {
+        &mut self.namespace
+    }
+}
+
+/// Original native operations inside one observed namespace preparation attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WgpuNamespacePhase {
+    /// Ensuring the original Instance; an already available Instance is a returned no-op.
+    InstancePreparation,
+    /// Ensuring the original Surface; an existing compatible Surface is a returned no-op.
+    SurfaceCreation,
+    /// Requesting an Adapter through the original wgpu selection policy.
+    AdapterRequest,
+    /// Requesting the Device/Queue from that exact admitted Adapter.
+    DeviceRequest,
+    /// Configuring the original Surface when required, including a returned no-op.
+    SurfaceConfiguration,
+}
+
+impl WgpuNamespacePhase {
+    /// Disjoint original operations, excluding namespace bookkeeping and validation between them.
+    pub const ALL: [Self; 5] = [
+        Self::InstancePreparation,
+        Self::SurfaceCreation,
+        Self::AdapterRequest,
+        Self::DeviceRequest,
+        Self::SurfaceConfiguration,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::InstancePreparation => 0,
+            Self::SurfaceCreation => 1,
+            Self::AdapterRequest => 2,
+            Self::DeviceRequest => 3,
+            Self::SurfaceConfiguration => 4,
+        }
+    }
+}
+
+/// Fixed returned-call wall observations from the original namespace preparation path.
+///
+/// Missing values mean that a call was not made or did not return. In particular, a ready
+/// Device does not produce Adapter/Device-request spans. These operations are disjoint within
+/// their containing namespace span, but must not be added to that parent as independent costs.
+/// Observations do not provide Adapter/device identity, successful acquisition or readiness;
+/// those facts remain with the original device owner and transaction. Native waits are included.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuNamespaceTimings {
+    phases: [Option<Duration>; WgpuNamespacePhase::ALL.len()],
+}
+
+impl WgpuNamespaceTimings {
+    /// Returns the original call's wall span, including zero, or no completed observation.
+    #[must_use]
+    pub const fn get(self, phase: WgpuNamespacePhase) -> Option<Duration> {
+        self.phases[phase.index()]
+    }
+
+    pub(crate) fn record(&mut self, phase: WgpuNamespacePhase, elapsed: Duration) {
         self.phases[phase.index()] = Some(elapsed);
     }
 }
@@ -99,6 +174,39 @@ impl RuntimeFramePhaseTimer {
 mod tests {
     use super::*;
     use crate::{WgpuBackendTelemetryConfig, backend::WgpuRenderBackend};
+
+    #[test]
+    fn namespace_snapshots_are_detached_and_clear_at_the_original_transaction_boundary() {
+        let mut backend = WgpuRenderBackend::default();
+        let mut nested = WgpuNamespaceTimings::default();
+        for (index, phase) in WgpuNamespacePhase::ALL.into_iter().enumerate() {
+            nested.record(phase, Duration::from_nanos(index as u64));
+        }
+        backend.record_runtime_namespace_timings(Some(nested));
+        assert_eq!(backend.frame_transaction_stats().runtime_timings(), None);
+        backend.configure_telemetry(
+            WgpuBackendTelemetryConfig::default().with_runtime_frame_timings(),
+        );
+        backend.begin_frame_transaction(8, Some(11));
+        backend.record_runtime_namespace_timings(Some(nested));
+        let original = backend.frame_transaction_stats();
+        assert_eq!(original.runtime_timings().unwrap().namespace(), nested);
+        backend.begin_frame_transaction(9, Some(12));
+        let next = backend.frame_transaction_stats().runtime_timings().unwrap();
+        for phase in WgpuNamespacePhase::ALL {
+            assert_eq!(next.namespace().get(phase), None);
+        }
+        nested.record(WgpuNamespacePhase::AdapterRequest, Duration::from_secs(7));
+        backend.record_runtime_namespace_timings(Some(nested));
+        assert_eq!(
+            original
+                .runtime_timings()
+                .unwrap()
+                .namespace()
+                .get(WgpuNamespacePhase::AdapterRequest),
+            Some(Duration::from_nanos(2)),
+        );
+    }
 
     #[test]
     fn existing_configuration_defaults_require_explicit_phase_timing_opt_in() {

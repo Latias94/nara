@@ -1339,6 +1339,7 @@ mod native {
                         .as_ref()
                         .expect("registered window authority"),
                     packet,
+                    None,
                 )
                 .unwrap();
             let mut renderer = execution

@@ -31,7 +31,8 @@ use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::quad::create_quad_texture_bind_group_layout;
 use crate::runtime_timing::{
-    RuntimeFramePhaseCapture, WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings,
+    RuntimeFramePhaseCapture, WgpuNamespacePhase, WgpuNamespaceTimings, WgpuRuntimeFramePhase,
+    WgpuRuntimeFrameTimings,
 };
 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::stock_quad::StockQuadResources;
@@ -766,6 +767,17 @@ impl WgpuRenderBackend {
         });
     }
 
+    pub(crate) fn record_runtime_namespace_timings(
+        &mut self,
+        details: Option<WgpuNamespaceTimings>,
+    ) {
+        if let (Some(details), Some(timings)) =
+            (details, &mut self.frame_transaction_stats.runtime_timings)
+        {
+            *timings.namespace_mut() = details;
+        }
+    }
+
     pub(super) fn reject_captured_packet(&mut self) {
         self.frame_transaction_stats.packet_admissions = 0;
         self.frame_transaction_stats.packet_rejections = 1;
@@ -817,6 +829,7 @@ impl WgpuRenderBackend {
         &mut self,
         handles: &BackendWindowHandles,
         window: RenderWindowPacket,
+        mut namespace_timing: Option<&mut WgpuNamespaceTimings>,
     ) -> Result<WgpuDeviceNamespace, WgpuRenderError> {
         self.fail_if_device_lost()?;
         self.retire_requested_surfaces()?;
@@ -828,15 +841,36 @@ impl WgpuRenderBackend {
             window.resolution.physical_height,
         );
         let size = if let Some(size) = size {
-            self.ensure_instance()?;
-            if !self.create_surface_if_missing(window, handles, size)? {
+            let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
+            let instance = self.ensure_instance();
+            timing.finish(|elapsed| {
+                if let Some(timings) = namespace_timing.as_deref_mut() {
+                    timings.record(WgpuNamespacePhase::InstancePreparation, elapsed);
+                }
+            });
+            instance?;
+            let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
+            let created = self.create_surface_if_missing(window, handles, size);
+            timing.finish(|elapsed| {
+                if let Some(timings) = namespace_timing.as_deref_mut() {
+                    timings.record(WgpuNamespacePhase::SurfaceCreation, elapsed);
+                }
+            });
+            if !created? {
                 return Err(WgpuRenderError::SurfaceMissing {
                     window_id: window.id,
                 });
             }
-            self.ensure_device(window.id)?;
+            self.ensure_device(window.id, namespace_timing.as_deref_mut())?;
             self.fail_if_device_lost()?;
-            self.configure_surface_if_needed(window, size)?;
+            let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
+            let configured = self.configure_surface_if_needed(window, size);
+            timing.finish(|elapsed| {
+                if let Some(timings) = namespace_timing {
+                    timings.record(WgpuNamespacePhase::SurfaceConfiguration, elapsed);
+                }
+            });
+            configured?;
             size
         } else {
             self.configured_surface_extent(window.id)
@@ -859,7 +893,7 @@ impl WgpuRenderBackend {
     /// Uses the normal device owner without manufacturing a platform target or Surface.
     pub(super) fn prepare_image_device(&mut self) -> Result<WgpuDeviceNamespace, WgpuRenderError> {
         self.device_owner.fail_if_device_lost()?;
-        if let Some(epoch) = self.device_owner.acquire(None)? {
+        if let Some(epoch) = self.device_owner.acquire(None, None)? {
             self.telemetry.begin_device_epoch(epoch);
             self.last_error = None;
         }
@@ -1083,7 +1117,7 @@ impl WgpuRenderBackend {
                 return Ok(());
             }
         }
-        self.ensure_device(window.id)?;
+        self.ensure_device(window.id, None)?;
         self.fail_if_device_lost()?;
         #[cfg(feature = "stock-ui")]
         if let Some(ui_submissions) = ui_submissions.as_deref_mut() {
@@ -1431,7 +1465,11 @@ impl WgpuRenderBackend {
         self.device_owner.ensure_instance()
     }
 
-    fn ensure_device(&mut self, window_id: WindowId) -> Result<(), WgpuRenderError> {
+    fn ensure_device(
+        &mut self,
+        window_id: WindowId,
+        namespace_timing: Option<&mut WgpuNamespaceTimings>,
+    ) -> Result<(), WgpuRenderError> {
         if self.state() == WgpuBackendState::Unavailable {
             return Err(WgpuRenderError::BackendUnavailable);
         }
@@ -1440,7 +1478,7 @@ impl WgpuRenderBackend {
             .get(&window_id)
             .ok_or(WgpuRenderError::SurfaceMissing { window_id })?
             .surface(window_id)?;
-        if let Some(epoch) = self.device_owner.acquire(Some(surface))? {
+        if let Some(epoch) = self.device_owner.acquire(Some(surface), namespace_timing)? {
             self.telemetry.begin_device_epoch(epoch);
             self.last_error = None;
         }
@@ -2722,7 +2760,7 @@ mod tests {
         backend.device_owner.mark_unavailable();
 
         assert_eq!(
-            backend.ensure_device(WindowId::PRIMARY),
+            backend.ensure_device(WindowId::PRIMARY, None),
             Err(WgpuRenderError::BackendUnavailable)
         );
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
@@ -2756,7 +2794,7 @@ mod tests {
         for destroy_device in [false, true] {
             let mut backend = WgpuRenderBackend::default();
             backend.begin_runtime_execution();
-            let epoch = backend.device_owner.acquire(None).unwrap().unwrap();
+            let epoch = backend.device_owner.acquire(None, None).unwrap().unwrap();
             backend.telemetry.begin_device_epoch(epoch);
             // This is the same pre-upload custody operation used by ensure_device.
             backend.retain_runtime_retirement().unwrap();

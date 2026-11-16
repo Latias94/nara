@@ -709,6 +709,19 @@ residual. Durations include synchronous driver/error-scope waits and are neither
 execution nor scanout. The ordinary game's `runtime_workload` consumer preserves these facts,
 startup observations and complete Travel/retirement acceptance in its finite report.
 
+The same enabled snapshot's `namespace()` value exposes fixed `WgpuNamespacePhase::ALL`
+observations for Instance preparation, Surface creation, Adapter request, Device request and
+Surface configuration. They are disjoint calls inside the parent namespace span, so never add
+them to that parent as independent costs. An existing Instance/Surface/configuration still
+returns through its ensure operation. A Ready Device skips Adapter and Device requests entirely;
+their spans remain absent. An incomplete or refused attempt can retain only the calls that
+returned. Exact device state and epoch still belong to the original owner.
+
+Adapter and Device request timers include constructing the original wgpu Future and driving it
+to completion. Native wgpu may perform synchronous work before returning that Future. These
+observations add no selection, filtering, recovery, diagnostics logger or native request. Read
+them with their original transaction, and use a matching namespace span for any residual.
+
 Use `DesktopRunOptions::with_initial_pause()` for a game-owned controlled session and
 `with_initial_visibility(false)` to create its original native window hidden and non-activating.
 `reveal()` acts on that live original window and requests another native frame; it does not

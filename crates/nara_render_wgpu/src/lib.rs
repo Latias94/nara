@@ -129,7 +129,9 @@ pub use crate::program::{
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::retirement::{WgpuGpuRetirement, WgpuGpuRetirementError};
-pub use crate::runtime_timing::{WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings};
+pub use crate::runtime_timing::{
+    WgpuNamespacePhase, WgpuNamespaceTimings, WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings,
+};
 #[cfg(feature = "stock-ui")]
 pub use crate::stock_policy::WgpuCompositeColor;
 pub use crate::stock_policy::{

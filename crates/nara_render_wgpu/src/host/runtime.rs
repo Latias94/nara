@@ -10,7 +10,7 @@ use crate::{
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderError,
     backend::render_backend_state,
     runtime::{WgpuRuntimeCapture, WgpuRuntimeResult},
-    runtime_timing::WgpuRuntimeFramePhase,
+    runtime_timing::{WgpuNamespaceTimings, WgpuRuntimeFramePhase},
 };
 
 /// Owned CPU facts for native-session observation, independent of GPU handle authority.
@@ -314,10 +314,20 @@ impl WgpuRenderHost {
                 },
             ))
         } else {
+            let mut details = self
+                .backend
+                .frame_transaction_stats()
+                .runtime_timings()
+                .map(|_| WgpuNamespaceTimings::default());
             let timing = self.backend.begin_runtime_frame_phase();
-            let namespace = self.prepare_namespace_with_authority(Some(window), Some(handles));
+            let namespace = self.prepare_namespace_with_authority(
+                Some(window),
+                Some(handles),
+                details.as_mut(),
+            );
             self.backend
                 .finish_runtime_frame_phase(WgpuRuntimeFramePhase::NamespacePreparation, timing);
+            self.backend.record_runtime_namespace_timings(details);
             namespace
         };
         if namespace.is_ok() || self.backend.surface_count() != 0 {

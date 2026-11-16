@@ -37,6 +37,7 @@ use crate::{
     policy::{BuiltPolicy, PolicyInstances},
     presented::{WgpuImageCompositeReceipt, WgpuSubmittedImageReceipt, WgpuWindowPresentedReceipt},
     retirement::WgpuGpuRetirement,
+    runtime_timing::WgpuNamespaceTimings,
     submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
 };
 
@@ -1349,13 +1350,14 @@ impl WgpuRenderHost {
         window: Option<RenderWindowPacket>,
     ) -> Result<WgpuDeviceNamespace, WgpuRenderHostError> {
         let handles = self.handles.clone();
-        self.prepare_namespace_with_authority(window, handles.as_ref())
+        self.prepare_namespace_with_authority(window, handles.as_ref(), None)
     }
 
     fn prepare_namespace_with_authority(
         &mut self,
         window: Option<RenderWindowPacket>,
         handles: Option<&BackendWindowHandles>,
+        namespace_timing: Option<&mut WgpuNamespaceTimings>,
     ) -> Result<WgpuDeviceNamespace, WgpuRenderHostError> {
         self.maintain_producers()?;
         if self.backend.runtime_close_started() {
@@ -1378,6 +1380,7 @@ impl WgpuRenderHost {
                     window_id: window.id,
                 })?,
                 window,
+                namespace_timing,
             )?,
             None => self.backend.prepare_image_device()?,
         })

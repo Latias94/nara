@@ -14,6 +14,7 @@ use crate::{
     backend::WgpuBackendState,
     host::WgpuRenderProducerId,
     requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError},
+    runtime_timing::{RuntimeFramePhaseCapture, WgpuNamespacePhase, WgpuNamespaceTimings},
     telemetry::WgpuAdapterSummary,
 };
 
@@ -298,6 +299,7 @@ impl WgpuDeviceOwner {
     pub(super) fn acquire(
         &mut self,
         compatible_surface: Option<&wgpu::Surface<'_>>,
+        mut namespace_timing: Option<&mut WgpuNamespaceTimings>,
     ) -> Result<Option<u64>, WgpuRenderError> {
         self.fail_if_device_lost()?;
         match &self.domain {
@@ -319,25 +321,36 @@ impl WgpuDeviceOwner {
         self.invalidate_presentations();
         self.domain = DeviceDomain::Initializing;
         let requested = (|| {
-            let adapter = pollster::block_on(self.instance()?.request_adapter(
-                &wgpu::RequestAdapterOptions {
+            let instance = self.instance()?;
+            let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                     compatible_surface,
                     force_fallback_adapter,
                     ..Default::default()
-                },
-            ))
-            .map_err(|error| WgpuRenderError::AdapterUnavailable {
+                }));
+            timing.finish(|elapsed| {
+                if let Some(timings) = namespace_timing.as_deref_mut() {
+                    timings.record(WgpuNamespacePhase::AdapterRequest, elapsed);
+                }
+            });
+            let adapter = adapter.map_err(|error| WgpuRenderError::AdapterUnavailable {
                 message: error.to_string(),
             })?;
             self.requirements
                 .validate_adapter(adapter.features(), &adapter.limits())
                 .map_err(WgpuRenderError::DeviceRequirements)?;
             let descriptor = self.requirements.descriptor();
+            let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
+            let requested_device = pollster::block_on(adapter.request_device(&descriptor));
+            timing.finish(|elapsed| {
+                if let Some(timings) = namespace_timing {
+                    timings.record(WgpuNamespacePhase::DeviceRequest, elapsed);
+                }
+            });
             let (device, queue) =
-                pollster::block_on(adapter.request_device(&descriptor)).map_err(|error| {
-                    WgpuRenderError::DeviceUnavailable {
-                        message: error.to_string(),
-                    }
+                requested_device.map_err(|error| WgpuRenderError::DeviceUnavailable {
+                    message: error.to_string(),
                 })?;
             self.requirements
                 .validate_enabled(device.features(), &device.limits())
@@ -633,7 +646,7 @@ mod tests {
         let original =
             WgpuDeviceRequirements::new(wgpu::Features::TIMESTAMP_QUERY, wgpu::Limits::default());
         owner.request_device_requirements(&original).unwrap();
-        assert_eq!(owner.acquire(None).unwrap(), Some(1));
+        assert_eq!(owner.acquire(None, None).unwrap(), Some(1));
         let ready = owner.ready().unwrap();
         let old_device = ready.device.clone();
         assert_eq!(ready.device.features(), original.required_features());
@@ -678,7 +691,7 @@ mod tests {
         );
         assert_eq!(owner.requirements, original);
         assert_eq!(owner.ready().unwrap().device, old_device);
-        assert_eq!(owner.acquire(None).unwrap(), None);
+        assert_eq!(owner.acquire(None, None).unwrap(), None);
         assert_eq!(owner.device_epoch(), 1);
 
         old_device.destroy();
@@ -688,7 +701,7 @@ mod tests {
         );
         owner.clear();
         assert_eq!(owner.requirements, original);
-        assert_eq!(owner.acquire(None).unwrap(), Some(2));
+        assert_eq!(owner.acquire(None, None).unwrap(), Some(2));
         assert_eq!(
             owner.ready().unwrap().device.features(),
             original.required_features()
@@ -707,13 +720,33 @@ mod tests {
     fn private_surface_less_acquisition_keeps_one_complete_generation_and_monotonic_epoch() {
         let mut owner = WgpuDeviceOwner::default();
         let incarnation = owner.instance_id();
-        assert_eq!(owner.acquire(None).unwrap(), Some(1));
+        let mut initial_timings = WgpuNamespaceTimings::default();
+        assert_eq!(
+            owner.acquire(None, Some(&mut initial_timings)).unwrap(),
+            Some(1)
+        );
+        assert!(
+            initial_timings
+                .get(WgpuNamespacePhase::AdapterRequest)
+                .is_some()
+        );
+        assert!(
+            initial_timings
+                .get(WgpuNamespacePhase::DeviceRequest)
+                .is_some()
+        );
         assert_eq!(owner.state(), WgpuBackendState::Ready);
         assert!(owner.instance().is_ok());
         assert!(owner.adapter_summary().is_some());
         let old_device = owner.ready().unwrap().device.clone();
         let old_queue = owner.ready().unwrap().queue.clone();
-        assert_eq!(owner.acquire(None).unwrap(), None);
+        let mut reused_timings = WgpuNamespaceTimings::default();
+        assert_eq!(
+            owner.acquire(None, Some(&mut reused_timings)).unwrap(),
+            None
+        );
+        assert_eq!(reused_timings.get(WgpuNamespacePhase::AdapterRequest), None);
+        assert_eq!(reused_timings.get(WgpuNamespacePhase::DeviceRequest), None);
         assert_eq!(owner.ready().unwrap().device, old_device);
         assert_eq!(owner.ready().unwrap().queue, old_queue);
         assert_eq!(owner.device_epoch(), 1);
@@ -726,7 +759,21 @@ mod tests {
         assert!(owner.ready().is_err());
         assert!(owner.device_queue().is_none());
 
-        assert_eq!(owner.acquire(None).unwrap(), Some(2));
+        let mut recovered_timings = WgpuNamespaceTimings::default();
+        assert_eq!(
+            owner.acquire(None, Some(&mut recovered_timings)).unwrap(),
+            Some(2)
+        );
+        assert!(
+            recovered_timings
+                .get(WgpuNamespacePhase::AdapterRequest)
+                .is_some()
+        );
+        assert!(
+            recovered_timings
+                .get(WgpuNamespacePhase::DeviceRequest)
+                .is_some()
+        );
         assert_eq!(owner.state(), WgpuBackendState::Ready);
         assert_eq!(owner.instance_id(), incarnation);
         assert_eq!(owner.device_epoch(), 2);
@@ -763,9 +810,18 @@ mod tests {
         owner.clear();
         assert_eq!(owner.state(), WgpuBackendState::Unavailable);
         assert_eq!(owner.device_epoch(), 2);
+        let mut unavailable_timings = WgpuNamespaceTimings::default();
         assert_eq!(
-            owner.acquire(None),
+            owner.acquire(None, Some(&mut unavailable_timings)),
             Err(WgpuRenderError::BackendUnavailable)
+        );
+        assert_eq!(
+            unavailable_timings.get(WgpuNamespacePhase::AdapterRequest),
+            None
+        );
+        assert_eq!(
+            unavailable_timings.get(WgpuNamespacePhase::DeviceRequest),
+            None
         );
         assert!(owner.instance().is_err());
         assert!(owner.ready().is_err());
@@ -776,13 +832,13 @@ mod tests {
     #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
     fn private_surface_less_device_observes_native_loss_without_queued_work() {
         let mut owner = WgpuDeviceOwner::default();
-        assert_eq!(owner.acquire(None).unwrap(), Some(1));
+        assert_eq!(owner.acquire(None, None).unwrap(), Some(1));
         owner.ready().unwrap().device.destroy();
         assert_eq!(
             owner.fail_if_device_lost(),
             Err(WgpuRenderError::DeviceLost)
         );
-        assert_eq!(owner.acquire(None), Err(WgpuRenderError::DeviceLost));
+        assert_eq!(owner.acquire(None, None), Err(WgpuRenderError::DeviceLost));
         assert_eq!(owner.device_epoch(), 1);
         owner.mark_unavailable();
         assert_eq!(owner.state(), WgpuBackendState::Unavailable);
@@ -795,7 +851,7 @@ mod tests {
         let mut owner =
             WgpuDeviceOwner::with_retired_epoch(std::num::NonZeroU64::new(u64::MAX).unwrap());
         assert_eq!(
-            owner.acquire(None),
+            owner.acquire(None, None),
             Err(WgpuRenderError::DeviceEpochExhausted)
         );
         assert_eq!(owner.state(), WgpuBackendState::Uninitialized);
