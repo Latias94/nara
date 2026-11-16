@@ -252,6 +252,7 @@ pub fn effective_component_value_owned(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<ComponentValue, ComponentCodecError> {
     effective_component_value_owned_impl(schema, value, DefaultSelection::Canonical, limits)
+        .map(|(value, _)| value)
 }
 
 /// Supplies source-selected defaults to an owned candidate through the ordinary materializer.
@@ -262,12 +263,14 @@ pub fn effective_component_value_owned(
 /// cloning any selected default. The caller retains and admits the entire override map separately,
 /// including hidden declarations. The raw candidate needs prior admission, as for
 /// [`effective_component_value_owned`]. This consumes the candidate on either success or failure.
+/// Returns the effective tree's checked cost when defaults were inserted. Without insertion,
+/// returns no new cost and preserves the prior-admission, no-scan move path.
 pub fn effective_component_value_owned_with_default_overrides(
     schema: &ComponentSchema,
     value: ComponentValue,
     overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, ComponentCodecError> {
+) -> Result<(ComponentValue, Option<ComponentValueCost>), ComponentCodecError> {
     effective_component_value_owned_impl(
         schema,
         value,
@@ -281,12 +284,13 @@ fn effective_component_value_owned_impl(
     mut value: ComponentValue,
     defaults: DefaultSelection<'_>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, ComponentCodecError> {
+) -> Result<(ComponentValue, Option<ComponentValueCost>), ComponentCodecError> {
     if let Some(plan) = plan_defaults(schema, &value, defaults)? {
-        preflight_materialization(&plan, &value, limits)?;
+        let cost = preflight_materialization_cost(&plan, &value, limits, None)?;
         apply_plan(&plan, &mut value)?;
+        return Ok((value, Some(cost)));
     }
-    Ok(value)
+    Ok((value, None))
 }
 
 /// Performs one effective-value admission against raw residual ceilings and returns the exact
@@ -690,10 +694,11 @@ struct MaterializationBudget<'a> {
 }
 
 #[doc(hidden)]
+/// Checks the complete source value and returns its exact logical cost from the same traversal.
 pub fn validate_value_materialization_budget(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-) -> Result<(), ComponentCodecError> {
+) -> Result<ComponentValueCost, ComponentCodecError> {
     validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Source)
 }
 
@@ -706,6 +711,7 @@ pub fn validate_native_component_value_references_with_limits(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
     validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Native)
+        .map(|_| ())
 }
 
 /// Checks the same complete Native value while admitting traversal scratch before allocation.
@@ -804,6 +810,8 @@ fn component_field_default_requires_context_impl<'admit>(
 
 #[cfg(test)]
 mod context_admission_tests;
+#[cfg(test)]
+mod cost_tests;
 
 /// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
 /// No default plan or value copy is constructed. Caller refusals retain their exact identity.
@@ -842,7 +850,9 @@ fn validate_value_materialization_budget_with_policy_and_admission<E>(
     };
     match refusal {
         Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
-        None => result.map_err(EffectiveValueAdmissionError::Value),
+        None => result
+            .map(|_| ())
+            .map_err(EffectiveValueAdmissionError::Value),
     }
 }
 
@@ -851,8 +861,8 @@ fn validate_value_materialization_budget_impl<'admit>(
     limits: ComponentValueMaterializationLimits,
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
     reference_policy: ReferencePolicy,
-) -> Result<(), ComponentCodecError> {
-    MaterializationBudget {
+) -> Result<ComponentValueCost, ComponentCodecError> {
+    let mut budget = MaterializationBudget {
         maximum_nodes: limits.nodes(),
         maximum_bytes: limits.bytes(),
         maximum_depth: limits.depth(),
@@ -860,8 +870,9 @@ fn validate_value_materialization_budget_impl<'admit>(
         bytes: 0,
         admission,
         reference_policy,
-    }
-    .observe_tree(value, 1)
+    };
+    budget.observe_tree(value, 1)?;
+    Ok(ComponentValueCost::from_parts(budget.nodes, budget.bytes))
 }
 
 enum ValueFrame<'value> {

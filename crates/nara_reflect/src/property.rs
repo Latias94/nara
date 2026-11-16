@@ -693,6 +693,7 @@ fn admit_property_value(
 ) -> Result<(), ComponentPropertyError> {
     match limits {
         Some(limits) => validate_value_materialization_budget(value, limits)
+            .map(|_| ())
             .map_err(ComponentPropertyError::InvalidValue),
         None => validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget),
     }

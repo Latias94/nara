@@ -251,7 +251,8 @@ pub(super) fn prepare_claims(
                     contextual_defaults,
                     limits,
                 )
-                .map_err(codec_failure)?;
+                .map_err(codec_failure)?
+                .0;
             candidate
                 .set_path(field.path(), default.clone())
                 .map_err(|_| SceneCompilationFailureKind::Component)?;

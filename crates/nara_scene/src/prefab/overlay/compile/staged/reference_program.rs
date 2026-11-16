@@ -63,6 +63,10 @@ where
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<ReferenceProgram, SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_value_reference_plan")
+                .entered();
         let limits = self.value_program_limits();
         let plan = plan_declared_entity_references_with_admission::<PrefabReferenceRemapError, _>(
             schema,
@@ -282,6 +286,10 @@ where
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<(), SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_value_reference_validation")
+                .entered();
         let plan = match program.plan.take() {
             Some(plan) => plan,
             None => plan_declared_entity_references_with_admission::<PrefabReferenceRemapError, _>(

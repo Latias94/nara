@@ -12,7 +12,7 @@ use nara_reflect::__private::{
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
     ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits,
+    ComponentValueMaterializationLimits, validate_component_value_with_limits,
 };
 
 use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, ReferencePrograms};
@@ -193,7 +193,10 @@ where
             }
         }
         let admitted = (|| {
-            let cost = bounded_value_cost(&original.value, limits)?;
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_value_admission").entered();
+            let cost = validate_value_materialization_budget(&original.value, limits)?;
             for default in original.contextual_defaults.values() {
                 validate_value_materialization_budget(default, limits)?;
             }
@@ -209,13 +212,18 @@ where
                 .and_then(|bytes| bytes.checked_add(contextual_defaults_work_bytes(original)?));
             Ok::<_, ComponentCodecError>((cost, metadata))
         })();
-        let (cost, metadata) =
+        let (mut cost, metadata) =
             admitted.map_err(|error| self.normalization_failure(&error, entity))?;
         self.admit(metadata)?;
         // Every attempt pays for the complete authored clone, including hidden defaults.
         // Only final lowering charges the materialized value counters.
         self.admit(value_work_bytes(cost))?;
-        let mut record = self.component(program.record, component).clone();
+        let mut record = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_value_clone").entered();
+            self.component(program.record, component).clone()
+        };
         if opaque {
             return Ok((
                 record,
@@ -240,6 +248,9 @@ where
         }
         let record_scope = self.record_reference_scope(program.record)?;
         if matches!(program.record, Record::Source { .. }) {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_value_migration").entered();
             let previous_version = record.version;
             let value = std::mem::replace(&mut record.value, ComponentValue::Null);
             let migrated = match authority.migrate_owned(component, &record, value) {
@@ -260,12 +271,23 @@ where
             }
             record.version = migrated.version;
             record.value = migrated.value;
-            bounded_value_cost(&record.value, limits)
+            cost = validate_value_materialization_budget(&record.value, limits)
                 .map_err(|error| self.normalization_failure(&error, entity))?;
         }
         let schema = authority.current_schema(component, &record)?;
-        self.materialize_defaults(schema, &mut record, entity)?;
-        let cost = components::validate_value(schema, &record.value, self.value_program_limits())?;
+        cost = self.materialize_defaults(schema, &mut record, cost, entity)?;
+        {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_value_validation")
+                    .entered();
+            validate_component_value_with_limits(
+                schema,
+                &record.value,
+                self.value_program_limits(),
+            )
+            .map_err(components::codec_failure)?;
+        }
         let declaration = match program.record {
             Record::Source { .. } => None,
             Record::Addition { scope, index } => {
@@ -314,7 +336,7 @@ where
                     });
                     let cost = match &claim.intent {
                         PrefabPropertyIntent::Set(value) => {
-                            let cost = bounded_value_cost(value, limits)?;
+                            let cost = validate_value_materialization_budget(value, limits)?;
                             bytes = bytes.and_then(|bytes| {
                                 bytes.checked_add(value_work_bytes(cost)?.checked_mul(3)?)
                             });
@@ -330,7 +352,7 @@ where
                                     .find(|field| field.id() == &claim.path.root)
                                     .and_then(|field| field.default_value())
                             })
-                            .map(|value| bounded_value_cost(value, limits))
+                            .map(|value| validate_value_materialization_budget(value, limits))
                             .transpose()?
                             .unwrap_or_default(),
                     };
@@ -438,9 +460,12 @@ where
         &mut self,
         schema: &ComponentSchema,
         record: &mut SceneComponentRecord,
+        old_cost: ComponentValueCost,
         entity: &SceneEntityId,
-    ) -> Result<(), SceneCompilationFailure> {
-        let old_cost = record.value.cost();
+    ) -> Result<ComponentValueCost, SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_value_defaults").entered();
         let limits = self.value_program_limits();
         // Nonempty declarations were validated after raw-copy admission and before migration.
         // Empty maps still need the current Schema's source-context requirement checked.
@@ -449,13 +474,13 @@ where
         }
         self.reserve_program_temporary(schema, record, old_cost, entity)?;
         let value = std::mem::replace(&mut record.value, ComponentValue::Null);
-        record.value = match effective_component_value_owned_with_default_overrides(
+        let (effective, cost) = match effective_component_value_owned_with_default_overrides(
             schema,
             value,
             &record.contextual_defaults,
             limits,
         ) {
-            Ok(value) => value,
+            Ok(result) => result,
             Err(error) => {
                 if self.normalization_failure(&error, entity)
                     == SceneCompilationFailureKind::WorkLimit
@@ -481,7 +506,8 @@ where
                 return Err(SceneCompilationFailureKind::Component.into());
             }
         };
-        Ok(())
+        record.value = effective;
+        Ok(cost.unwrap_or(old_cost))
     }
 
     fn validate_program_contextual_defaults(
@@ -525,7 +551,7 @@ where
                 .get(field.id())
                 .or_else(|| field.default_value())
             {
-                let cost = bounded_value_cost(default, limits)
+                let cost = validate_value_materialization_budget(default, limits)
                     .map_err(|error| self.normalization_failure(&error, entity))?;
                 bytes = bytes
                     .and_then(|bytes| bytes.checked_add(value_work_bytes(cost)?.checked_mul(3)?));
@@ -650,15 +676,6 @@ fn value_work_bytes(cost: ComponentValueCost) -> Option<usize> {
     cost.nodes()
         .checked_mul(96)?
         .checked_add(cost.logical_bytes())
-}
-
-// Reuse Reflect's complete source-value walker before derived Clone can recurse.
-fn bounded_value_cost(
-    value: &ComponentValue,
-    limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValueCost, ComponentCodecError> {
-    validate_value_materialization_budget(value, limits)?;
-    Ok(value.cost())
 }
 
 fn contextual_defaults_work_bytes(record: &SceneComponentRecord) -> Option<usize> {

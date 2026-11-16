@@ -384,7 +384,7 @@ fn contextual_defaults_select_field_ids_and_charge_actual_payloads_with_canonica
             exact,
         )
         .unwrap(),
-        expected,
+        (expected.clone(), Some(cost)),
     );
     assert!(matches!(
         effective_component_value_with_default_overrides_with_budget(
@@ -477,7 +477,7 @@ fn explicit_null_hides_retained_contextual_defaults_and_reset_exposes_their_full
             limits(hidden_cost.nodes(), hidden_cost.logical_bytes()),
         )
         .unwrap(),
-        explicit,
+        (explicit.clone(), None),
     );
 
     // Reset removes the explicit slot while retaining the source's contextual declaration.
