@@ -1628,6 +1628,29 @@ limits. This game-owned integration selects no universal backend or official eng
 human audibility, system-mixer output, hot-switch/streaming/cooked audio, native reconstruction,
 foreign execution, numerical budgets and complete R10/R12/Foundation remain open.
 
+The November 16 [source-owned Sound Bank successor](2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player)
+at `b292ed9`, with shared CPU custody correction `bd5941e`, replaces production embedded WAVs with
+the game's primary asset Product, tracked raw dependencies and a source-free canonical PCM codec.
+Both Scenes declare that same bank. CPU preparation remains
+available without a device; only the explicit audible composition opens WASAPI after successful
+Scene/game startup. The mixer retains the original immutable content and its byte reservation.
+Plain CPU domain collections no longer pin an unrelated decoded Scene generation, while actual
+Scene sources and escaped Image/Material views preserve their original generation owners. Travel
+compares the complete bank before commit and refuses changed meaning until a fresh Runtime.
+The cooker binds actual import-group raw observations through generated-code build/publication,
+including descriptor-selected renamed WAVs. The complete audible delivery passes 1/1 after real
+release cooking, installation relocation and physical removal of the copied source/cache. An
+independent parent reconstructs the full output hash from original WAVs; 208,512 stereo callback
+samples agree with zero maximum error. A separate Player performs physical pickup/travel and
+WM_CLOSE, with original Runtime/device/window/process retirement. Corrupt content and catalog
+expectation changes refuse before game/device publication. The linked unit owns final regression
+results, corrections and exact Windows/Rust1.95 scope. Final ordinary sample, minimal shipping and
+independent asset cohorts pass 269/269, 141/141 and 95/95 respectively. Original headless/silent
+delivery and actual Rust rebuild/adoption each pass 1/1. Owning correctness Clippy, formatting and
+exact shipping dependency graphs pass. Arbitrary audio-service reconstruction, streaming,
+hot-switch, human audibility, hardware output/latency, foreign execution, numerical budgets and
+complete R10/R12/Foundation remain open.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;

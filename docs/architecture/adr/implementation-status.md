@@ -1699,6 +1699,27 @@ device, and unsupported native reconstruction remains refused. This qualifies th
 Windows consumer, not human audibility, an engine-wide AudioBackend/default, streaming,
 hot-switch/cooked audio, foreign execution, numeric budgets or full R10/R12/Foundation.
 
+The November 16 [source-owned Sound Bank and audible delivery successor](../../plans/2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player)
+at `b292ed9`, with CPU custody correction `bd5941e`, uses one game-owned primary Product, tracked
+WAV dependencies and a source-independent canonical PCM codec through the existing asset-domain/
+cooker owners. The native mixer retains the original
+immutable collection and byte reservation. Plain CPU collection escape no longer reserves an
+unrelated Scene-generation slot; actual Scene/Image/Material generation custody and the original
+two-generation ceiling remain intact. Prepared travel refuses changed bank meaning before commit.
+Actual import observations, rather than fixed WAV filenames, fence cooker inputs through publication.
+Complete audible delivery passes 1/1 after real release build, installation relocation and physical
+removal of copied source/cache. The independent original-WAV oracle agrees with 208,512 stereo
+callback samples at zero maximum error; another Player performs physical pickup/travel/WM_CLOSE.
+Original native retirement and corrupt-content/catalog refusal retain their exact receipts.
+Final ordinary sample, minimal shipping and independent asset cohorts pass 269/269, 141/141 and
+95/95 respectively. Original headless/silent delivery and actual Rust rebuild/adoption each pass
+1/1. Owning correctness Clippy, formatting,
+independent diagnostic consumer compilation and exact shipping dependency graphs pass. The linked
+plan records exact runs, review corrections and bounded Windows/Rust1.95 scope.
+This implements concrete cooked game audio without selecting an engine-wide backend or qualifying
+arbitrary native reconstruction, streaming/hot-switch, human audibility, hardware delivery/latency,
+other platforms, performance budgets or complete R10/R12/Foundation.
+
 The [November 15 transformed-collision successor](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 adds opt-in fixed-input publication to the original Hierarchy/Transform owners. Prepare's current
 deferred sources complete before Simulate without replacing Historical, completed Fixed or

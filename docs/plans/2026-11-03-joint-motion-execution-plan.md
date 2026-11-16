@@ -448,6 +448,181 @@ claimed. Actual foreign devices, audible/system-mixer output, latency budgets, h
 streaming/cooked audio and native reconstruction remain unqualified. Full R10/R12/Foundation
 and the paused UI/Dialogue scope are unchanged.
 
+## Source-Owned Sound Bank And Source-Free Audible Player
+
+Status: implemented and qualified for the selected Windows/Rust1.95 workflow, starting from
+`efe3f21`. The preceding native consumer embeds both WAVs in the executable. This successor
+replaces that production path with a game-owned CPU Sound Bank domain and complete source/processed
+delivery through the original asset, Scene, cook, package and Runtime owners. Existing offline
+prediction remains separate; Editor/Dialogue product work stays paused.
+
+Use one primary bank Product for the game's finite pickup/travel inventory. Its source JSON names
+two Assets-relative raw PCM16 WAV dependencies; only the bank has a typed identity sidecar. The
+source importer reads all bytes through its admitted reader, validates both complete clips before
+publication and records actual raw dependencies. SourceAssetBuild supplies the existing tracked
+group and Runtime codec, without another cache or format resolver. The processed bank contains
+only complete Product identity, fixed format descriptors and canonical PCM samples, without raw
+source paths, importer recipes or trusted content hashes. Bounds, work/retention cost and finite
+float/length checks belong to that concrete codec.
+
+Declare the bank in one game-owned persistent Scene component under the original Schema provider.
+Both levels use the same game bank identity; every recipe selects its source/processed CPU facets
+independently of the optional Windows CPAL device. Headless play may decode CPU content but never
+opens a device. Current content and escaped clip samples retain their actual original collection
+and budget owner. A Runtime's one-shot bank is fixed at audio startup: later travel may admit only
+the same exact bank meaning. A changed bank requires a fresh audio Runtime; do not silently play
+old bytes under changed Scene content or invent callback-side allocation/reclamation to support
+unqualified live bank reload. Old captured banks remain immutable after source edits or retirement.
+
+The existing cooker builds the bank through build_source and includes its verified group in the
+same closed catalog as the actual Scenes/Images. Add a separately selected audible desktop Player
+placement with its own generated content expectation and exact Cargo features. Its native device
+opens only at actual Runtime startup, never during Check/cook/composition. Existing headless and
+silent desktop placements remain device-free, with their actual feature graphs checked. Generated
+Player startup and package publication retain exact code/content binding and original process
+custody. All required source files, including bank JSON/metadata and both WAVs, join the existing
+freshness fence. No build-time include_bytes fallback or source-directory lookup is allowed in
+the shipping audio path.
+
+Acceptance must prove source import/tracked auxiliary edits, malformed/oversized/foreign Product
+and processed-format refusals, source/Runtime sample equality and complete original retention.
+Run the ordinary source audible game against acquired content, then actual production cooking,
+relocation, source/cache removal and a fresh sealed audible Player with original native device,
+gameplay, sample/cause and physical cleanup evidence. Corrupt required bank content and mismatch
+generated code/catalog to refuse before gameplay/native publication, preserving earlier accepted
+packages. Retain existing silent/headless delivery and development reconstruction controls with
+the new declared Scene content. Independently review domain/retention and delivery adapters,
+run focused serial nextest/native checks and create precise local commits. No root source/schema
+stripping, generic audio module, streaming, hot switching, arbitrary native audio restoration,
+foreign execution or numeric latency/memory claim is implied. Full Foundation remains active.
+
+### Sound Bank Implementation And Initial Qualification
+
+The implementation uses the game's primary Product
+`6c7d4d42-cb57-4a47-9f16-741293f5aab2` and one `SoundPalette` on each existing level camera.
+`SoundBankDomain` uses the original SourceAssetImporter/SourceAssetBuild owners; the source-free
+64-byte header plus canonical PCM16 format admits only this complete primary identity. Source
+JSON is bounded to 1,024 bytes, each WAV to 100,140 bytes and one cue to 48,000 mono 48 kHz frames.
+Runtime encoded input is bounded to 192,064 bytes, import work to 1,304,576 bytes and Runtime work
+to 1,156,224 bytes. Retention includes both Arc allocations, counters and alignment. These are
+admission limits and modeled reservations, not observed peak memory or latency measurements.
+
+The original native device now opens at Tooling after successful Scene/game initialization.
+Its existing Mixer owns the acquired sample allocations and original ProjectDomainAssets lease;
+ordinary voices retain only their slot and cursor. No production clip embeds WAV source.
+Prepared travel compares the complete original bank with actual target content before commit.
+Changed PCM under the same Product refuses without replacing the incumbent Scene or publishing
+a cue. Restoring the file permits ordinary travel again.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f` AudioSource retains encoded Arc bytes in
+its decoder; pinned Godot `7a37606a433c0e7735525037cdf774f043146a21` playback retains its WAV
+resource Ref. These are lifetime mechanisms, not immutable version guarantees. Their source
+files are respectively `crates/bevy_audio/src/audio_source.rs`, `audio_output.rs`, and
+`scene/resources/audio/audio_stream_wav.{h,cpp}`. Nara keeps the original immutable value and
+budget owner rather than inferring content from an ID or generated path.
+
+Independent review exposes two concrete corrections. First, making a plain CPU collection retain
+the startup Scene generation blocks later edited Scene revisions under the original two-generation limit. The
+source collection now retains its original ProjectContentLease without a Scene-generation lease;
+actual Scene sources, escaped Images and embedded Material views preserve their existing generation
+owners. Pure CPU bytes remain charged through the last collection drop. Second, fixed WAV names
+in the cooker fence disagree with the descriptor's legal relative paths. The original verified
+Image and Sound Bank groups now supply their actual raw observations; the fence checks those
+original digests and captured identities through build/publication without rebaselining a change.
+
+Initial all-feature library compilation passes. The actual compiled headless project tool regenerates
+the authoritative Schema bundle. An initial focused CPU run passes 157/175: the new authored
+reference used an invalid ComponentValue tag and independent fixtures reopened a different root
+capability. The Scene now uses the original structural asset-reference encoding, and each fixture
+shares its original admitted root. The corrected full selected CPU run passes 175/175 with three native
+cases selected separately, run `1c557a5d-fef4-4e39-8780-f6ac7ecb2103`. This includes 22 domain controls,
+five source/processed/retention/travel consumers and five acquired-PCM oracle controls.
+
+Actual Windows hardware/native acceptance passes 4/4 on DX12, run
+`fbb33035-8862-4e0d-9d92-4236123c5e81`, and the ordinary game passes 1/1 on Vulkan, run
+`ec2fef4b-ef83-4a8e-ad7b-e14013531803`. Both preserve original Pause/Step/Resume, failed source
+travel, Retry, Save/Restore, fresh Runtime and complete original stream/window/pump retirement.
+The first game trajectory adds changed-bank refusal and three newly authored Scene revisions
+while the original bank remains live; it now has one pickup/four travel cues. The fresh ordinary
+script retains its three pickups/four travel cues. Every callback sample is compared with
+independently decoded original WAVs. Affected shared-owner controls pass 119/119,
+run `1b6d5ecd-bf7b-434d-a34b-3e718b8bcf01`, including the original escaped-Image third-generation
+refusal/recovery. The seven original/actual-import cooker fence controls pass 7/7, run
+`5317445e-7076-4732-b035-74cb519bd214`.
+
+The first complete generated audible package builds, relocates and removes its copied source/cache,
+then fails honestly before Resume: the new validation adapter selected initial input isolation but
+did not perform the original input activation. The original gate rejects Resume and the failed
+Runtime, stream, window, worker and physical pump retire. The Player adapter now freezes its exact
+neutral movement inventory, completes paused maintenance, requests original focus/physical-key
+reconciliation and waits for Active without simulating a tick. First-tick launch and Resume follow
+that real activation; no native or Runtime gate is relaxed. A second run completes every sealed
+worker assertion but the outer test cannot parse a marker sharing libtest's test-name line. The
+worker now starts its structured report on a new line; product assertions remain unchanged.
+
+Final complete audible publication passes 1/1, run
+`77bc692f-76c8-4870-aeef-1f0fe5c1207c`. It performs a real release cook with exact
+`cooked-player,desktop,audio-cpal`, defaults disabled, and physically renames a valid raw WAV while
+updating its descriptor before cooking. The exact five-member pack and generated build inputs are
+checked, the whole installation moves, and the copied source/cache are physically removed before a
+fresh allowlisted-desktop worker runs the executable from an unrelated empty directory with no Cargo
+or rustc path. The verified Player executes the original complete Travel trajectory and compares
+208,512 stereo samples over 104,256 frames with zero maximum error. Its independent parent uses
+the original source WAV PCM and actual cue/scope records to reconstruct the complete output hash;
+the Player's separate oracle uses its immutable acquired bank. Both agree exactly.
+
+A second actual Player admits physical D/E input, collects/travels and closes through WM_CLOSE.
+Both original processes exit successfully without forced termination, with empty containment,
+stopped readers, drained output and destroyed original windows. Their original Runtime, stream,
+callbacks, surface/provider and physical pump retire. Corrupt bank bytes and a changed compiled
+catalog expectation each refuse before gameplay/device publication; accepted installation digests
+remain unchanged. Actual Windows DX12/RTX4090 and WASAPI are the scope; callback data does not
+establish human audibility, system-mixer/DAC delivery, scanout or numeric latency. The audible
+placement always drains bounded callback capture and retains PCM only for verification, so its
+observation cost is explicit.
+
+Final ordinary all-feature sample regression passes 269/269 with 22 explicitly selected native/build
+cases outside this aggregate, run `96a18c7d-449c-4fa6-be96-403c9e325170`. Minimal cooked-headless
+with defaults disabled passes 141/141 without skips, run `31b74756-4e6f-41e6-84d2-41d1ca387b20`.
+The existing actual headless release delivery
+passes 1/1, run `30fc87a8-1ab2-4b28-881d-b3f9f6d10b8d`. The first silent desktop delivery fails
+at its old four-member catalog assertion after a successful cook. Its adapter now checks the exact
+five-member Scene/Image/bank set, decodes the bank and preserves all original physical play,
+Save/fresh-Restore and native cleanup requirements. The complete corrected silent desktop delivery
+passes 1/1, run `5db7901b-ec84-431c-a15d-9cc95b95aff8`. The complete independently locked asset-domain
+consumer passes 95/95 without skips, run `a2294a1c-d6e2-4634-b7d7-a4ac1b2beaa0`; its CPU collection
+escape control preserves charged bytes/reservations without pinning a Scene generation. The
+existing independent Editor diagnostic consumer's library/example/test compile passes with its
+declared optional game dependency. That consumer's lock adds only the existing Hound3.5.1 package
+and the game's new normal dependency edge; no version/source changes are selected. The shared
+CPU-custody correction is committed at `bd5941e`; complete game/delivery implementation is
+`b292ed9`. Actual-rebuild and static checks follow separately; these overlapping cohorts are not
+one aggregate test count.
+
+The existing production game-owned rebuild/adoption regression passes 1/1, run
+`4b44fbe4-2054-4b3a-969d-eb17f9dbc91a`, after actual movement-body and private-representation
+edits with the new Schema/content inventory. Complete canonical restoration, compile/probe failure
+preservation, foreign/stale/consumed ticket refusal, fresh-adopter state and independent predecessor
+retirement remain qualified. This control exercises the existing headless development placement;
+native audio reconstruction remains explicitly unsupported.
+
+All-target/all-feature correctness Clippy passes for the sample, and correctness Clippy passes for
+the affected root Runtime library with `runtime-2d,serde,project-tooling`, defaults disabled.
+Root/sample format checks pass. The first independent format check flags only the newly edited
+budget assertion; its rustfmt layout is corrected without behavior changes. Existing non-correctness
+Clippy warnings remain; this is not a warning-free workspace claim. TOML/lock/JSON and CI YAML
+parse, added local links/fragments and whitespace checks pass. The CI selection adds CPU bank and
+acquired-PCM controls only; no remote CI or physical audio device runner is claimed. Eight scoped
+implementation/research/review agents are closed. Full R10/R12/Foundation remains active.
+
+The corrected independently locked workspace format check passes. Fresh exact normal/build
+dependency trees confirm that headless and silent desktop exclude CPAL/rtrb; audible desktop selects
+CPAL0.18.2/rtrb0.3.5. All three select CPU Hound3.5.1 and exclude development notify, Editor/UI
+toolkits and Cargo metadata. The cooker separately binds each actual executable's explicit feature
+selection; an all-feature supervising test is not the shipping dependency graph. All Cargo
+qualification is serial, jobs1, locked/offline, release, Rust1.95 on Windows with the original root
+target. The game Schema/catalog change requires regeneration and recooking of earlier installations.
+
 ## Managed startup pause correction (November 13)
 
 Runtime work resumes while Editor UI and physical mixed-DPI qualification are deferred. The
