@@ -3235,6 +3235,22 @@ The local output envelope drops from a 38.455 ms wall median to 0.145 ms, but wh
 process do not show consistent improvement. Source/candidate decoding, numeric budgets, foreign
 execution and full Foundation/R9/R12 remain open; paused UI/Dialogue work stays excluded.
 
+The [source payload successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#source-payload-decode-successor)
+at `e40f2a5`/`920cd9a` separates wire/header/payload/finish observations and removes repeated
+untagged buffering for known component List/Map payloads. Scalars, value-first, serialized form,
+JSON/RON and parent-buffered semantics retain their original paths. Direct nested RON Map/Seq
+representations are corrected after independent review. Full Reflect/Scene controls pass
+1,010/1,010, strengthened wire 29/29, Scene format/conversion 36/36, public Reflect formats and
+references 20/20, root/public limits 81/81 and complete game/metric/span/native controls 143/143.
+Original byte/shape/header-contract/payload/admission order, source freshness and physical cleanup
+remain. Nine Tile lifetimes retain 27 GPU replays; twelve paired 16K lifetimes add 36. The
+[exact measured report](../../benchmarks/2026-11-14-development-runtime-costs.md#streamed-container-qualification-and-comparison)
+records payload wall medians of 3,463.926/1,197.454 ms and whole-process walls of
+43.919/34.897/34.488/42.650 seconds in before/after/after/before order. This is finite Windows/
+hardware DX12 workload evidence, not CPU/GPU duration, production tail or physical-memory bounds.
+Feature checks, correctness Clippy, formatting and source/executable/report integrity pass;
+full Foundation/R9/R12 and foreign execution remain open, and paused UI/Dialogue stays excluded.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

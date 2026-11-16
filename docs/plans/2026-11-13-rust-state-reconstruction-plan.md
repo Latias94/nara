@@ -2522,3 +2522,61 @@ accept Map/Seq forms that raw `deserialize_struct` does not. Add an explicit reg
 the shared value visitor through a nested-value seed; retain the original top-level struct
 entry. Raw RON struct keys also need serde's identifier/string handling. Full shared/public and
 native qualification remain required; the first 28-case green result is incomplete evidence.
+
+The corrected implementation uses an ordinary nested-value seed to accept the original container
+child Map/Seq forms, while retaining the top-level struct entry. Wire field identifiers and
+business Map keys preserve RON identifiers, quoted keys and previously buffered strings/UTF-8
+bytes. Numbers, Null, EntityRef, unknown tags and value-before-type retain the original payload
+classification. Serialization is unchanged. Malformed child values may report an earlier real
+parser coordinate; typed error stage and syntax/data distinction remain, without synthetic offsets.
+
+Full Reflect/Scene library controls pass 1,010/1,010 at
+`80570866-d780-40ba-bdf8-45f79a405323`, including the direct child-form regression and a new
+source-format diagnostic control. The public format/conversion cohort passes 36/36 at
+`52a4c6d3-daa4-49f3-b434-4b1367a51093`. The two concrete child forms are also added to the
+parent-buffered matrix, followed by a focused rerun. Full receiving-budget and native game
+qualification remain in progress; no elapsed improvement is claimed from source inspection.
+
+The strengthened wire matrix passes 29/29 at `898eb88b-c488-459c-8305-68d94f96459d`, with 200
+outside its filter. Original content/residency and public receiving limits pass 81/81 at
+`4383d866-1d2a-4b51-b555-f82b7203ec80`, with 867 outside the selected filter. Existing exact
+quotas, failed-load refunds, original source generations and typed error stages remain.
+Independent resource/error review reports no P1/P2 after the RON child-form correction. The
+parser API retains actual locations; the new semantic diagnostic control checks stage/data/
+location presence rather than freezing the previous buffering cursor or proving a particular
+bad-child coordinate. No custom offsets or parser replay are introduced.
+
+The final release game/library/metric/span/native cohort passes 143/143 at
+`9e5dfac7-e5d6-43d6-9755-96c4819ca17f`, without skips. Nine Tile lifetimes retain 1,951 initialized
+presentations and twenty-seven original-input GPU replays with exact retained-image rereads;
+three baseline lifetimes retain 273. Both panic controls preserve original physical retirement,
+complete Scene span closure and copied-source removal where applicable. The source decoder
+envelopes each contribute exactly one call to each new format subphase, including actual worker
+and owner execution. All original gameplay/source/Host/prefix assertions remain. The
+[qualified reports and comparison](../benchmarks/2026-11-14-development-runtime-costs.md#streamed-container-qualification-and-comparison)
+retain exact changed-source, executable and raw-report hashes.
+
+The frozen original and new executables complete twelve additional 16K Travel lifetimes and
+36 GPU replays in before/after/after/before order. Across six lifetimes per version, payload wall
+medians are 3,463.926/1,197.454 ms and complete expansion 3,477.677/2,504.648 ms; wire/header
+medians stay nearly unchanged. Complete process walls in order are 43.919/34.897/34.488/42.650
+seconds. Both new groups are faster for this finite declared workload, while component
+materialization is higher. Nested wall sums are not CPU, a single transition delay or scanout;
+driver/cache/clock state and host load remain uncontrolled. These results do not establish a
+statistical guarantee, production tail budget, physical-memory bound or equal gains on the
+unchanged scalar/value-first paths. Full Foundation/R9/R12 and foreign execution remain open.
+
+The source-format observations are `e40f2a5`; the streaming adapter, compatibility matrix and
+semantic diagnostic control are `920cd9a`. Public Reflect catalog/bundle/authored/durable-reference
+controls pass 20/20 at `958f73cd-de1a-42b2-978b-378031da424c`. Reflect/Scene feature-free and
+feature-off workload targets compile. Owning all-target/all-feature and game workload/metric/span
+release correctness Clippy pass; root/sample formatting and exact source/executable/report
+provenance pass. Existing warnings remain. Parser-location tests establish real location
+presence and typed stages, not a frozen semantic-error cursor or every malformed child's exact
+coordinate. All four scoped agents are closed. Cargo and native workloads run serially against
+the original target without cache clean, remote CI execution or remote publication.
+
+Continue from these measurements through existing owners. Wire-shape checking, component
+materialization and retained resource costs remain separate candidates; preserve complete input
+validation and the same game/source/pixel/retirement workflow. Numeric budgets, larger named
+game workloads and foreign platform execution remain required before broader runtime claims.

@@ -688,6 +688,12 @@ separate existing staged expansion operations. Nested Prefab source loading is p
 `scene_structure`; that label does not mean pure layout time. `status: complete` describes the
 registered spans' lifetime, not measurement of every source-loading operation.
 
+The source-format subphases are `scene_wire_preflight`, `scene_header_decode`,
+`scene_payload_decode` and `scene_source_finish`. They preserve the existing byte/shape/header/
+compatibility gates; finish covers domain checks and canonical ordering. Each successful source
+Scene/Prefab candidate decode contributes one call to each phase. The counters distinguish owner
+and worker execution, and nested wall sums remain separate from CPU or single-transition latency.
+
 `entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
 ends at the original first actual presented observation. It includes caller/native waits and
 excludes process loading; it is not cold-start, GPU duration or scanout. The first presentation and

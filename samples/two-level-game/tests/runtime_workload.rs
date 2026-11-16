@@ -234,6 +234,23 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                         "missing source Prefab worker decode: {work}"
                     );
                 }
+                let source_decodes = work["phases"]["scene_source_decode"]["calls"]
+                    .as_u64()
+                    .unwrap()
+                    + work["phases"]["prefab_source_decode"]["calls"]
+                        .as_u64()
+                        .unwrap();
+                for phase in [
+                    "scene_wire_preflight",
+                    "scene_header_decode",
+                    "scene_payload_decode",
+                    "scene_source_finish",
+                ] {
+                    assert_eq!(work["phases"][phase]["calls"], source_decodes);
+                    for thread in ["owner_thread_calls", "worker_thread_calls"] {
+                        assert!(work["phases"][phase][thread].as_u64().unwrap() > 0);
+                    }
+                }
             }
             #[cfg(not(feature = "scene-work-observation"))]
             {

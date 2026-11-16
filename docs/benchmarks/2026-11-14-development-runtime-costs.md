@@ -1931,6 +1931,116 @@ whitespace checks. Existing warnings remain. All four scoped agents are closed. 
 workloads run serially against the original target; no cache clean, remote CI execution or
 remote publication occurs. Full Foundation/R9/R12 and paused Editor/UI/Dialogue work remain open.
 
+#### Component Container Payload Decode Successor
+
+The `e40f2a5` observation extends the same source workload with four original format phases:
+wire-shape preflight, header decode, payload decode and domain/canonical finish. Byte, wire,
+header contract and payload gates retain their original order. The
+[pre-streaming 16K report](data/2026-11-14-development-runtime/authored-tiles-payload-before-16384.json)
+and [selected source/executable hashes](data/2026-11-14-development-runtime/authored-tiles-payload-before-metadata.json)
+retain three complete original Travel lifetimes, physical retirement and nine GPU replays.
+Across eighteen Scene/Prefab decodes per lifetime, payload wall sums are 3,436.010–3,814.791 ms,
+wire preflight 592.815–746.551 ms, header decode 68.950–79.720 ms and finish 74.173–82.646 ms.
+These are nested lifetime totals rather than one transition delay, CPU time or scanout.
+
+Source review identifies unconditional untagged buffering in Reflect's component-value adapter,
+including canonical type-before-value containers. The selected reduction uses ordinary serde
+MapAccess/SeqAccess and seeds for already known List/Map payloads. Scalars, unknown tags and
+value-before-type preserve the previous payload classification; serialization stays unchanged.
+The top-level struct entry remains, while nested values accept the original buffered Map/Seq
+forms. Strict wire-field checks, business-map insertion behavior, RON struct/quoted keys and
+parent-buffered values are retained. No custom JSON/RON parser or cross-load cache is introduced.
+
+The characterization first passes 28/28 on the original decoder, including the existing public
+authored-reference control. A first streaming implementation also passes that matrix but misses
+direct RON child tuples and brace maps. Independent review supplies the actual counterexamples;
+the nested-value entry is corrected and the exact inputs are added in both outer field orders
+and parent-buffered contexts. The strengthened matrix passes 29/29 at
+`898eb88b-c488-459c-8305-68d94f96459d`. Numeric integer/float coercions, finite/signed zero,
+Null presence, duplicates/unknown fields, EntityRefs and JSON/RON ordering remain covered.
+Semantic child errors can point to an earlier real parser location; no synthetic legacy cursor
+is generated. Payload stage, syntax/data classification and actual parser locations remain.
+
+Complete Reflect/Scene library controls pass 1,010/1,010 at
+`80570866-d780-40ba-bdf8-45f79a405323`, public format/reference conversion 36/36 at
+`52a4c6d3-daa4-49f3-b434-4b1367a51093`, and original content/residency/public limits 81/81 at
+`4383d866-1d2a-4b51-b555-f82b7203ec80` with 867 outside the filter. The original receiving
+predecode reservation, exact quota refusals, failed-load refunds and retained source generations
+remain. Container construction is owned by the current visitor and released on failure; the
+logical retained-byte model is not a physical peak-memory or Vec-capacity guarantee. Final native
+game/pixel/failure controls and measured before/after results remain required below.
+
+#### Streamed Container Qualification And Comparison
+
+The final release game/library/metric/span/native cohort passes 143/143 at
+`9e5dfac7-e5d6-43d6-9755-96c4819ca17f`, without skips. Nine original Tile lifetimes retain 1,951
+initialized presentations; three baseline lifetimes retain 273. Both panic-cleanup controls,
+twenty-seven original-input GPU replays and exact retained-image rereads pass. Copied sources
+are removed, original native/event-loop retirement completes, and original Host/prefix cleanup
+remains. Every successful source decode contributes one wire, header, payload and finish call,
+with actual owner and worker entries; no registered spans remain live or unfinished at sealing.
+There are eighteen format decodes per 16K lifetime, nine for Scene and nine for Prefab.
+
+Raw qualified reports are [64](data/2026-11-14-development-runtime/authored-tiles-payload-stream-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-payload-stream-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-payload-stream-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-payload-stream-baseline.json), with
+[source/executable/report metadata](data/2026-11-14-development-runtime/authored-tiles-payload-stream-metadata.json).
+The four added format subphases change the registered totals to 347 entries per 64/4K lifetime,
+401 per 16K and 311 per baseline. These are named-operation coverage, not a cost score or a
+comparison against the previous 329-entry 16K report.
+
+For a finite comparison, the frozen original executable and new executable run in before/
+after/after/before order on the same actual RTX4090/DX12 host and locked toolchain/profile. Each
+process completes three original 16K Travel lifetimes and nine GPU replays. All twelve lifetimes
+and 36 replays pass. Raw reports are [1 before](data/2026-11-14-development-runtime/authored-tiles-payload-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-payload-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-payload-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-payload-paired-4-before.json).
+[Paired metadata](data/2026-11-14-development-runtime/authored-tiles-payload-paired-metadata.json)
+retains source/executable/report hashes and order. The qualified native executable and paired
+after executable have the same hash. No source checkout is rewritten to compare versions.
+
+| Named wall envelope, median over six complete lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Wire-shape preflight | 629.486 ms | 633.750 ms |
+| Header decode | 78.489 ms | 77.933 ms |
+| Payload decode | 3,463.926 ms | 1,197.454 ms |
+| Domain/canonical finish | 77.124 ms | 85.186 ms |
+| Scene candidate decode | 2,144.028 ms | 960.831 ms |
+| Prefab candidate decode | 2,114.618 ms | 1,008.948 ms |
+| Component materialization | 1,275.166 ms | 1,397.676 ms |
+| Expansion, including nested Prefab source loading | 3,477.677 ms | 2,504.648 ms |
+
+Payload-decode samples range over 3,362.480–3,863.958 ms before and 1,050.214–1,347.691 ms after.
+Its median decreases by 65.43% in this finite observation; complete expansion's median decreases
+by 27.98%, while wire/header medians remain nearly unchanged. Component materialization is
+higher, so the data does not imply every stage improves. Nested phases overlap and cannot be
+summed into total CPU or transition delay.
+
+Complete process walls in order are 43.919, 34.897, 34.488 and 42.650 seconds: both new groups
+finish sooner than both original groups. This endpoint includes private source generation,
+native startup/pacing/waits, three complete games and independent replay. Original initialized
+presentation counts total 3,300 before and 2,550 after; waiting-for-source frames are part of the
+ordinary workflow, so those counts are not rendering throughput evidence. Driver/filesystem/
+clock state, allocator state and unrelated host load remain uncontrolled. This is observed
+wall-time improvement for the declared workload, not CPU/GPU duration, scanout, statistical
+confidence, a production tail budget or a physical-memory bound. Value-before-type and scalar
+paths retain their original classification and are not claimed to have the same improvement.
+
+The observation code is `e40f2a5`; the streaming adapter and owner regressions are `920cd9a`.
+Additional public Reflect catalog/bundle/authored/durable-reference controls pass 20/20 at
+`958f73cd-de1a-42b2-978b-378031da424c`. Feature-free Reflect/Scene and feature-off workload targets
+compile. Owning all-target/all-feature and game workload/metric/span release correctness Clippy,
+root/sample formatting and source/executable/report integrity checks pass; existing warnings
+remain. Independent wire-correctness and resource/error reviews close without P1/P2 after the
+RON child-form correction. The semantic-location control requires typed stage, data classification
+and a real positive parser coordinate, not an exact old buffering cursor. All four scoped agents
+are closed. No Cargo/native workloads overlap, no cache is cleaned, and no remote CI execution
+or publication occurs. Continue existing-owner investigation of remaining wire/normalization/
+resource costs; full Foundation/R9/R12, numeric budgets and foreign execution stay open, with
+Editor/UI/Dialogue work paused.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

@@ -1,0 +1,74 @@
+{
+  "format": "nara-component-container-stream-evidence/v1",
+  "observed_at": "2026-11-16T23:38:54.251045+08:00",
+  "repository_base": "e40f2a5e9697825418ed30376627a4ca9f5ebd1e",
+  "source_state": "Qualified source recorded while the known-tag container streaming change was uncommitted on e40f2a5. Scalar and value-first classification and serialized format are unchanged. Paused UI/Dialogue changes excluded. Exact selected source, executable and report hashes retained; the implementation is now committed separately.",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "crates/nara_reflect/src/value/wire.rs": "a8a33dc19661fc27dc131697bff765174539dc6cc9ca06f4e150abb86db2cf08",
+    "crates/nara_reflect/src/value/wire/tests.rs": "4bcdc79255139ca8d45d49f06bd8aba8c6988787a29dad6278503be7da861ef6",
+    "crates/nara_scene/src/format.rs": "ec8891badc199a162a43d77e28e1323f2e8d068afa650b49305e97578c2a5cad",
+    "crates/nara_scene/src/format/diagnostic_tests.rs": "ada08b5a2b44d4b299ca369acbe21f4a762a36cbd5f087d991148ab61c5698eb",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "30fe18b8cdba42c996df277e8b5211f0bc2a303dc70fd86128f6a4f925624512",
+    "samples/two-level-game/tests/runtime_workload.rs": "70631fe5a16d27486bf130e2a98b47611b06266e2f4758d7cf5b90875a5515a5"
+  },
+  "binary_sha256": "6d21d097282d86102fe167a826751a311a35149b42162db1efd55c689d0a100e",
+  "reports_sha256": {
+    "authored-tiles-payload-stream-64.json": "11adc209fe76c4b8c17ee221df36b2319b8c0593b18e92d20e156c89b9f65854",
+    "authored-tiles-payload-stream-4096.json": "e7dfb939e0097970a6160421cf76c06b2db42b26be850eac09e636fac00b110c",
+    "authored-tiles-payload-stream-16384.json": "d92d8dc6a76a6d74ed2ab27c7d1b83d0f9ac8d2df090db2e3840019bc088a641",
+    "authored-tiles-payload-stream-baseline.json": "b543847c5ac7eeb53eb5b880efdac92ac5c1a1e329a5e0f1c7685e2bb4698ca3"
+  },
+  "nextest_run_id": "9e5dfac7-e5d6-43d6-9755-96c4819ca17f",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --lib --test runtime_workload_metrics --test runtime_workload_spans --test runtime_workload --run-ignored all --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "143 game/metric/span/native cases; nine Tile and three baseline original lifetimes, two panic-cleanup controls and27 GPU replays. Original byte/shape/header-contract/payload/admission order, receiving limits and physical cleanup remain. Source/read/format/expansion wall spans overlap over an original Runtime lifetime, not CPU or scanout. Optional instrumentation is off by default. No physical allocation-peak, foreign-execution, production-tail or statistical guarantee follows.",
+  "paired_metadata": "authored-tiles-payload-paired-metadata.json",
+  "implementation_commit": "920cd9ad35cc6ccb9d4f1ff308250325e67489e0",
+  "observation_commit": "e40f2a5e9697825418ed30376627a4ca9f5ebd1e",
+  "qualification": {
+    "original_wire": {
+      "run_id": "202c3fa8-0371-41fc-ac78-592d04a54114",
+      "passed": 28,
+      "outside_filter": 200
+    },
+    "strengthened_wire": {
+      "run_id": "898eb88b-c488-459c-8305-68d94f96459d",
+      "passed": 29,
+      "outside_filter": 200
+    },
+    "owner_libraries": {
+      "run_id": "80570866-d780-40ba-bdf8-45f79a405323",
+      "passed": 1010
+    },
+    "scene_public": {
+      "run_id": "52a4c6d3-daa4-49f3-b434-4b1367a51093",
+      "passed": 36
+    },
+    "root_receiving": {
+      "run_id": "4383d866-1d2a-4b51-b555-f82b7203ec80",
+      "passed": 81,
+      "outside_filter": 867
+    },
+    "reflect_public": {
+      "run_id": "958f73cd-de1a-42b2-978b-378031da424c",
+      "passed": 20
+    },
+    "game_native": {
+      "run_id": "9e5dfac7-e5d6-43d6-9755-96c4819ca17f",
+      "passed": 143
+    },
+    "checks": "Feature-free Reflect/Scene and feature-off workload targets compile; owning all-target/all-feature and game workload/metric/span release correctness Clippy and root/sample formatting pass. Existing warnings remain."
+  }
+}

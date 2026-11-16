@@ -5481,6 +5481,26 @@ speedup. Source/candidate decoding remains the larger separate target. Compiler/
 correctness Clippy, formatting and exact evidence remain scoped to the linked qualification;
 numeric runtime budgets, foreign execution and full Foundation/R9/R12 stay open.
 
+The [source payload successor](2026-11-13-rust-state-reconstruction-plan.md#source-payload-decode-successor)
+at `e40f2a5`/`920cd9a` separates mandatory wire/header gates from payload decoding, then streams
+known-tag component List/Map contents through the existing serde adapter. Serialization, scalar
+classification, value-before-type fallback, JSON/RON field ordering, parent buffering and original
+source/receiving limits remain. Independent review exposes and closes a direct RON child Map/Seq
+compatibility gap before qualification. Full Reflect/Scene controls pass 1,010/1,010, strengthened
+wire controls 29/29, public Scene format/conversion 36/36, public Reflect persistent formats and
+references 20/20, original content/public limits 81/81 and game/metric/span/native controls 143/143.
+Nine Tile lifetimes retain 1,951 initialized presentations and 27 original-input GPU replays;
+baseline and both panic-cleanup controls retain original assertions. A balanced frozen-old/new
+comparison adds twelve 16K lifetimes and 36 replays. The
+[report](../benchmarks/2026-11-14-development-runtime-costs.md#streamed-container-qualification-and-comparison)
+records six-lifetime payload wall medians of 3,463.926/1,197.454 ms before/after and complete
+process walls of 43.919/34.897/34.488/42.650 seconds. Both new groups finish sooner in this finite
+workload; wire/header medians remain nearly unchanged and component materialization is higher.
+The result is observed workload wall time, without CPU/scanout, statistical confidence, production
+tail or physical-memory claims. Feature-free/feature-off compilation, correctness Clippy,
+formatting and exact evidence retain their linked scope. Full Foundation/R9/R12 and foreign
+execution stay open; Editor/UI/Dialogue work remains paused.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
