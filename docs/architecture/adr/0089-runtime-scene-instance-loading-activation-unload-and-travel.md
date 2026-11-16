@@ -76,6 +76,12 @@ sources and escaped immutable Images share an acyclic decoded-generation lease; 
 and delivery receipts do not hold that generation. The existing two-generation ceiling follows the
 last real decoded owner, including old render packets after a future Scene commit.
 
+Escaped immutable CPU domain collections retain their original byte/reservation lease without
+retaining a Scene source or its decoded-generation slot. Their exact data remains charged until
+the last collection owner drops. This allows a Runtime-persistent sound bank to coexist with
+current/prepared Scene generations. A domain product that owns an Image or Material view still
+retains that view's independently required generation custody; collection escape cannot remove it.
+
 This Trial does not change this ADR's `Proposed` status and does not accept asynchronous loading,
 additive scenes, multiple active instances, a public scene manager/session, a provider registry,
 active-set revisions, retained-entity travel, or scene-scoped service retirement. Scratch entities

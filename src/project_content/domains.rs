@@ -242,6 +242,8 @@ impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
 ///
 /// File-backed Hosts install this resource before gameplay startup and replace it only after a
 /// successful Scene transaction. Clones keep the exact products and their budget reservation alive.
+/// Plain CPU collections retain no Scene source and do not reserve a decoded Scene generation.
+/// Products containing retained image/material views preserve those views' own custody.
 /// Heterogeneous storage is private; no public erased store or mutable World callback is exposed.
 #[derive(Clone, Resource)]
 pub struct ProjectDomainAssets {
@@ -257,7 +259,6 @@ struct DomainAssetsInner {
 enum DomainAssetsCustody {
     Source {
         _lease: ProjectContentLease,
-        _generation: ProjectContentGenerationLease,
     },
     Processed {
         _lease: RuntimeContentLease,
@@ -299,15 +300,11 @@ impl ProjectDomainAssets {
     pub(super) fn new(
         collections: Vec<Box<dyn ErasedCollection>>,
         lease: ProjectContentLease,
-        generation: ProjectContentGenerationLease,
     ) -> Self {
         Self {
             inner: Arc::new(DomainAssetsInner {
                 collections: collections.into_boxed_slice(),
-                _custody: DomainAssetsCustody::Source {
-                    _lease: lease,
-                    _generation: generation,
-                },
+                _custody: DomainAssetsCustody::Source { _lease: lease },
             }),
         }
     }

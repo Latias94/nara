@@ -2168,11 +2168,7 @@ impl<'a> LoadContext<'a> {
                 prefabs,
                 images,
                 tilesets,
-                domain_assets: ProjectDomainAssets::new(
-                    domain_collections,
-                    runtime_lease.clone(),
-                    generation_lease.clone(),
-                ),
+                domain_assets: ProjectDomainAssets::new(domain_collections, runtime_lease.clone()),
                 sources,
                 _generation_lease: generation_lease,
                 _runtime_lease: runtime_lease,

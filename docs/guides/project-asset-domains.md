@@ -157,8 +157,12 @@ path aliases only a real primary source record; processed collections have no pa
 always select the exact primary Product. Use the concrete product's own lookup API to select a
 value inside a returned compound bundle. `source_records()` visits actual source records only;
 `iter()` visits stored values independently of aliases. No mutable collection is exposed.
-Clone `ProjectDomainAssets` when retaining data beyond a borrow; this keeps its generation and
+Clone `ProjectDomainAssets` when retaining data beyond a borrow; this keeps its immutable data and
 budget alive. A domain whose products share allocations must retain this owner alongside them.
+Plain CPU collections hold no Scene source and do not reserve a decoded Scene-generation slot.
+Retained Images or Material views inside a product keep their own generation custody. This
+distinction allows long-lived CPU sound banks while current and prepared Scenes use the existing
+two-generation bound; retaining the bank never refunds its actual bytes early.
 
 The Host installs products before gameplay startup. Ready Scene requests expose target
 `domain_assets()` for preparation, while the current runtime keeps its old collection. An explicit

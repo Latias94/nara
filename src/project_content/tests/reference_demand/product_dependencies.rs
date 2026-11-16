@@ -262,7 +262,13 @@ fn material_product_prepares_its_texture_and_records_its_raw_shader_input() {
     drop(closure);
     let retained = snapshot.domain_assets().clone();
     drop(snapshot);
-    assert_eq!(loader.budget_snapshot().active_generations(), 1);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
+    assert!(
+        loader
+            .budget_snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes)
+            > 0
+    );
     assert_eq!(
         retained
             .collection::<MaterialDomain>()
