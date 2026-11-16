@@ -1,0 +1,53 @@
+{
+  "format": "two-level-authored-tile-scene-work-evidence/v1",
+  "observed_at": "2026-11-16T20:17:01+08:00",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "52d759130c350566b9291811696e23973cd4a53bad8ec830a3bdd557b4c21324",
+    "samples/two-level-game/src/bin/runtime_workload/observe.rs": "64a354248ff48300f711764b2c2e03915bec59edf76fb9c8e8293c8fca639987",
+    "samples/two-level-game/src/bin/runtime_workload/project.rs": "c7b88aa3db1ff3094348c29490628f2ed57f858e530bfd576aa68816001d95f9",
+    "samples/two-level-game/src/bin/runtime_workload/tiles.rs": "1acef835f0b3e39cb54baa64a3b2d836e6e949090334ec57731a39b995f5f9f9",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "59b2035eed0855f930b7f3e1be1400f9843db5752f45864131a8dcc46427aad8",
+    "samples/two-level-game/tests/runtime_workload.rs": "0003b5b33580dc250b6689b3250e3c4d2df81677da7b6af8f6c08d648f6db993"
+  },
+  "binary_sha256": "45183100facf000d6cd4638769658b3433588f5c5e35dc8f5078e9ec6e7429a7",
+  "reports_sha256": {
+    "authored-tiles-scene-work-64.json": "f3fced13e7824c4bd5bd70b175719ca08360d0fbe9c439987ffeedd6d9e0eb56",
+    "authored-tiles-scene-work-4096.json": "9f8dd86fdbed643a3c5644f797e0c7012f05d44a02b158566e3fe43258e742ca",
+    "authored-tiles-scene-work-16384.json": "694dfa6bffec828527415e43b2bf515690478cf0813cebfdc44910ae4b3bebe2",
+    "authored-tiles-scene-work-baseline.json": "85ed61a9fd4f8175ada5d800103a9e3f952af89a15ae3ccb31cad18c28c8e06c"
+  },
+  "nextest_run_id": "ca5b12a2-5be3-4756-b9ae-99be09354da3",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "phases": [
+    "scene_decode",
+    "scene_expand",
+    "scene_structure",
+    "scene_compile_output",
+    "scene_authoring_finish",
+    "scene_native_preview",
+    "scene_flat_admission",
+    "scene_prepare_unbound",
+    "scene_bind",
+    "scene_bind_revalidate",
+    "scene_publish",
+    "scene_final_validate",
+    "scene_predecessor",
+    "scene_retirement_hierarchy",
+    "scene_identity_adopt",
+    "scene_identity_prepare",
+    "scene_identity_bind",
+    "scene_hierarchy_publish",
+    "scene_epoch_publish"
+  ],
+  "scope": "Existing nara::scene::work tracing spans collected during the complete original process. Wall spans can run on worker or owner threads and nested phases overlap; totals are not CPU time or additive work. Feature is opt-in and disabled by default. Native workflow remains the authored Tile consumer, with 64/4096/16384 populations, three runs each, baseline and panic-cleanup controls."
+}

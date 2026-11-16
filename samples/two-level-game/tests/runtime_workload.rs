@@ -157,6 +157,27 @@ fn execute(fail_observer: bool, population: Option<usize>) {
             assert_eq!(run["cleanup"]["physical_event_loop_recovered"], true);
             assert_eq!(run["cleanup"]["native_destroyed"], true);
             assert_eq!(run["startup_frozen_after_first_presentation"], true);
+            #[cfg(feature = "scene-work-observation")]
+            {
+                let work = &run["scene_work"];
+                assert_eq!(work["enabled"], true);
+                assert_eq!(work["target"], "nara::scene::work");
+                assert!(work["total_calls"].as_u64().unwrap() > 0);
+                assert!(work["total_wall_ns"].as_u64().unwrap() > 0);
+                for phase in [
+                    "scene_decode",
+                    "scene_expand",
+                    "scene_flat_admission",
+                    "scene_prepare_unbound",
+                    "scene_bind",
+                    "scene_publish",
+                ] {
+                    assert!(
+                        work["phases"][phase]["calls"].as_u64().unwrap() > 0,
+                        "missing Scene work span {phase}: {work}"
+                    );
+                }
+            }
             let startup = &run["startup"]["operation_wall_ns"];
             assert_eq!(startup.as_object().unwrap().len(), 5);
             assert!(

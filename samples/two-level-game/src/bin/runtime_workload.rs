@@ -16,6 +16,8 @@ mod project;
 mod tiles;
 #[path = "runtime_workload/timing.rs"]
 mod timing;
+#[path = "runtime_workload/work.rs"]
+mod work;
 
 use std::{
     cell::{Cell, RefCell},
@@ -180,10 +182,12 @@ fn execute(options: Options) -> Value {
             "native_poll_wait_cap_ms": POLL.as_millis(),
             "fresh_runtime_window_renderer_per_run": true,
             "runtime_phase_wall_observation": true,
+            "scene_work_span_observation": cfg!(feature = "scene-work-observation"),
             "startup_operation_observation": true,
             "recovered_original_physical_event_loop": true,
             "shared_process_code_driver_filesystem_caches": true,
             "frame_wall_scope": "exact original App frame start to matching post-Host observation; includes native, driver and submission waits, excludes the observer work after that timestamp",
+            "scene_work_scope": "existing nara::scene::work spans across source decode, expansion and original Scene preparation/publication; feature-off reports retain an explicit disabled record",
             "completion_scope": "original App frame start to queue completion callback observation; not GPU execution or scanout",
             "statistics_scope": "per-run finite correlated samples; descriptive nearest-rank quantiles, not a production P99, cold-start comparison or speedup",
             "cpu_memory_scope": "whole process with observer and telemetry enabled; CPU delta and point memory include all threads and driver work; not per-frame CPU, retained-owner bytes or a leak bound",
@@ -425,6 +429,7 @@ fn run_one(
         startup: None,
         project,
     };
+    let scene_work = work::RunObservation::start();
     let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure()))
         .unwrap_or_else(|_| Err("gameplay observer or native callback panicked".into()));
     let startup = experiment.startup;
@@ -465,6 +470,7 @@ fn run_one(
             );
         }
     };
+    report["scene_work"] = scene_work.snapshot();
     report["cleanup"] = json!({ "normal_exit": true, "telemetry_complete": true,
         "native_destroyed": true, "surface_retired": true, "provider_released": true,
         "physical_event_loop_recovered": true });

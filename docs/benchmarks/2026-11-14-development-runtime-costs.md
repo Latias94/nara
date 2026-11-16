@@ -1688,6 +1688,39 @@ background work and measurement retention. They are not attributable content byt
 peaks, physical GPU residency or leak evidence. Native GPU points cover only the existing tracked
 payload model; they cannot be compared directly to process private bytes.
 
+#### Existing Scene Work Span Attribution
+
+The same native consumer was rerun with the opt-in `scene-work-observation` feature. It attaches
+to the existing `nara::scene::work` spans; it does not add a profiler owner or alter the default
+runtime. Raw reports are [64](data/2026-11-14-development-runtime/authored-tiles-scene-work-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-scene-work-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-scene-work-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-scene-work-baseline.json), with
+[source and executable metadata](data/2026-11-14-development-runtime/authored-tiles-scene-work-metadata.json).
+The feature-qualified native cohort passes 4/4 with the same baseline, Tilemap and panic-cleanup
+workflow. The existing metric controls with the feature pass 138/138.
+
+Each run observes 109 Scene span entries across the three complete Travel lifetimes. The table
+shows the range across the three runs; values are nested wall spans and can overlap. `decode`,
+`expand`, `flat` and `prepare` are the named phases that dominate this workload; `bind` and
+`publish` stay small. These are measurements of the existing owner boundaries, not claims that
+one phase owns every byte or that nested values can be summed into CPU time.
+
+| Cells | All observed Scene spans | `scene_decode` | `scene_expand` | `scene_flat_admission` | `scene_prepare_unbound` | `scene_bind` | `scene_publish` |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 8.883–9.439 ms | 2.991–3.182 ms | 0.426–0.768 ms | 0.322–0.579 ms | 3.070–3.113 ms | 0.466–0.483 ms | 0.500–0.554 ms |
+| 4,096 | 96.911–126.164 ms | 41.525–56.475 ms | 10.085–13.000 ms | 5.621–7.415 ms | 37.105–50.226 ms | 0.438–0.624 ms | 0.726–0.832 ms |
+| 16,384 | 816.388–1,052.739 ms | 233.047–322.339 ms | 200.378–241.257 ms | 33.138–42.060 ms | 201.786–278.200 ms | 0.482–0.551 ms | 1.448–1.496 ms |
+
+This changes the next optimization boundary. Scene source decode/Prefab expansion and unbound
+preparation now have direct evidence of scaling with the authored representation, while sprite
+extraction/queue CPU remains unmeasured. The current source layout is a confound for 16K because
+it uses root-bound Prefab halves. Do not add a cross-frame cache or skip extraction from dirty
+hints before measuring the owner-local path: existing tests require full observation after cleared
+hints, current TileSet/Image authorization, source order, multi-View diagnostics and retained
+captured inputs. The next candidate is a narrow per-extraction TileSet context/UV reuse or a
+separate existing-owner extraction span, with the complete native consumer as the acceptance gate.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

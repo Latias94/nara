@@ -3199,6 +3199,15 @@ keeps native waits, resource points, source-layout confounds and process-memory 
 Correctness Clippy, formatting, provenance and independent review pass. Further attribution,
 numeric runtime budgets, foreign execution and full Foundation/R9/R12 remain open; UI stays paused.
 
+The same Tile consumer now has an opt-in Scene span attribution pass. It records existing
+`nara::scene::work` boundaries without changing default runtime behavior: 138/138 feature-qualified
+metric controls and 4/4 native population/baseline/panic workflows pass. The 16K workload's named
+dominant ranges are decode 233.047–322.339 ms, expansion 200.378–241.257 ms, flat admission
+33.138–42.060 ms and unbound preparation 201.786–278.200 ms; bind/publish remain small. These
+spans overlap and do not prove CPU, allocation or extraction cost. The next owner-local choice is
+still open between an extraction/UV context and a dedicated existing-owner extraction span, with
+full source-refresh and captured-input acceptance preserved.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

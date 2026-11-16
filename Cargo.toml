@@ -223,6 +223,7 @@ yaml-rust2.workspace = true
 
 [features]
 editor-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
+scene-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 default = ["runtime-core"]
 parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-core = [

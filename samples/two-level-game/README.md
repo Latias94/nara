@@ -43,6 +43,7 @@ schema command. It is not a hand-maintained second definition of component layou
 | `--no-default-features --features cooked-player` | Headless shipping Player and shared gameplay, without Cargo tools, watcher, UI or GPU/window backends |
 | `--no-default-features --features cooked-player,desktop` | Shipping Player with the explicit native window/GPU placement, without development tools, watcher or UI |
 | `--no-default-features --features cooked-player,desktop,audio-cpal` | Explicit Windows audible Player, without development tools, watcher or UI |
+| `desktop,cost-measurement,scene-work-observation` | Development-only native workload with existing Scene owner span attribution; disabled by default |
 
 Cargo features are additive. Enabling `cooked-player` with defaults still enables development;
 the production cooker always disables defaults for its separate captured Player build. Its own
@@ -661,6 +662,12 @@ App-frame wall span are separate from CPU counters and queue-completion observat
 stays `null` when an initial presentation has no matching App start; actual operation spans are
 still retained. Startup spans overlap and must not be added together. The completed startup
 snapshot must remain unchanged through gameplay and original retirement.
+
+Add `scene-work-observation` to the desktop/cost-measurement features to record the existing
+`nara::scene::work` spans for source decode, Prefab expansion, flat admission and Scene
+preparation/publication. These are nested wall spans across worker and owner threads; they are not
+a CPU profiler, additive phase budget or extraction/queue measurement. The feature is opt-in and
+leaves the default runtime without tracing instrumentation.
 
 `entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
 ends at the original first actual presented observation. It includes caller/native waits and

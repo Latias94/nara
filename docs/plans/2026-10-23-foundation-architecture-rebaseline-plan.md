@@ -5435,6 +5435,16 @@ Surface waits and differing source layouts remain explicit. Further owner-local 
 replacement and extraction attribution, controlled budgets, foreign execution and full R12 remain
 open. This runtime unit does not resume paused Editor/UI/Dialogue product work.
 
+An opt-in existing-span follow-up now separates the dominant Scene work from Surface waits:
+across 64/4K/16K, all observed `nara::scene::work` ranges are 8.883–9.439 ms,
+96.911–126.164 ms and 816.388–1,052.739 ms. At 16K, decode, expansion, flat admission and
+unbound preparation dominate; bind and publish remain small. Feature-qualified controls pass
+138/138 and native population/baseline/panic controls pass 4/4. This is nested wall attribution,
+not CPU or total allocation accounting, and Sprite extraction/queue remains unmeasured. The next
+runtime candidate is an owner-local extraction context/UV reuse or an existing extraction span,
+gated by the full native consumer and current refresh/authorization/source-order contracts. No
+cross-frame cache or dirty-only skip is selected.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

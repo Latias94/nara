@@ -2274,3 +2274,23 @@ extraction under this same complete consumer before selecting reuse or another o
 Keep source-copy generation outside the runtime entry endpoint, and retain default admission,
 source freshness, original results and physical cleanup. Numeric budgets, foreign execution and
 full Foundation/R9/R12 remain open.
+
+### Existing Scene Span Attribution
+
+The opt-in `scene-work-observation` feature now consumes the existing `nara::scene::work` spans
+without changing the default runtime. The feature-qualified metric controls pass 138/138, and
+the complete native population/baseline/panic cohort passes 4/4. Each run observes 109 Scene span
+entries. Across 64/4K/16K cells, all observed Scene span wall ranges are 8.883–9.439 ms,
+96.911–126.164 ms and 816.388–1,052.739 ms. The dominant named ranges at 16K are decode
+233.047–322.339 ms, expansion 200.378–241.257 ms, flat admission 33.138–42.060 ms and
+unbound preparation 201.786–278.200 ms; bind is 0.482–0.551 ms and publish 1.448–1.496 ms.
+The [raw feature-qualified reports](../benchmarks/2026-11-14-development-runtime-costs.md#existing-scene-work-span-attribution)
+retain exact source, executable and report metadata.
+
+These are nested worker/owner wall spans, not additive CPU time or a total allocation model. They
+attribute Scene preparation, but the Sprite extraction/queue path remains outside this span set.
+The 16K root-bound Prefab representation remains a source-layout confound. Keep complete source
+decode, Prefab/Scene admission, authorization, source order, multi-View diagnostics, cleared-dirty
+refresh and captured-input lifetimes. The next candidate is a per-extraction TileSet context or
+UV reuse, or an existing-owner extraction span, followed by the complete native consumer. Do not
+introduce a cross-frame cache or dirty-only skip before that evidence exists.
