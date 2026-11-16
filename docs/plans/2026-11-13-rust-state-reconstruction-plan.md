@@ -1,6 +1,6 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Updated: 2026-11-16. Status: qualified for the shipped Windows source/headless
+Date: 2026-11-13. Updated: 2026-11-17. Status: qualified for the shipped Windows source/headless
 workflow and explicit source/desktop reconstruction/adoption through the finite development Host.
 Continuous Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline
 R12 runtime lane.
@@ -2673,3 +2673,85 @@ agents are closed. Cargo/native workloads remain serial against the original tar
 cache clean, remote CI execution or remote publication. Original paused UI/Dialogue changes stay
 excluded. Continue runtime work through complete consumers; larger named workloads, numeric
 budgets, foreign execution and full Foundation/R9/R12 remain open.
+
+### Reference Planning Without Duplicate Payload Scans
+
+Status: implemented at `d5acd0d` and qualified within the finite Windows scope below. The same
+complete authored Tile game continues from `17e0d4f`; its qualified executable was frozen before
+editing, with an original 16K run retaining complete gameplay, physical retirement and independent
+captured-input GPU replay. The preceding bounded-cost-return comparison does not establish
+end-to-end improvement; do not infer a whole-game gain from fewer walks.
+
+Reflect's reference collector first scans the complete raw payload under the receiving limits,
+then interprets Schema fields, then scans the raw payload again to detect undeclared references
+and enforce combined result/payload limits. Return that first scan's existing complete node/byte
+counters privately. After all Schema interpretation succeeds, omit the second scan only when the
+first found no EntityRef and its checked counts plus actual reference-result counts fit the same
+receiving limits. Complete counts are necessary: ordinary Tilemap data includes a non-null TileSet
+AssetRef, so a zero-result-only condition would miss the actual large component. If an EntityRef
+exists or either combined count exceeds its limit or overflows, keep the original second scan and
+its refusal order. Complete initial structural admission and every existing Schema/path/capability/
+shape check remain, including selected field/value and AssetRef callers.
+
+Account for actual traversal and scratch growth through the original callback. Removing physical
+work may reduce cumulative work charges; it must not raise a configured ceiling, suppress a real
+visit, change reference-bearing errors, or reuse a result across different values. Keep the first
+undeclared path, node/byte/depth refusal, admitted versus unadmitted Schema distinction, original
+reference visits/rewrite and failure identity. No cache, public witness or new traversal owner is
+needed. Qualify those receiving boundaries and public consumers, then run the original complete
+native game and frozen-old/new comparison before claiming a benefit. Editor/UI/Dialogue stays
+paused, and full Foundation/R9/R12, numeric budgets and foreign execution remain open.
+
+The implementation retains the complete first raw walk's node/byte counters only inside the
+current collector call. Checked addition proves the final combined limits before the redundant
+walk is omitted. Over-limit and overflowing results run the original final walker rather than
+substituting a different refusal. Eight additive tests exercise complete one-pass work debit,
+exact/one-short callback admission, implicit opaque and explicit Null payloads, three collector
+seams, raw/Schema error precedence, late undeclared references, public rewriting and AssetRef
+combined limits. A non-null TileSet plus 4,097 scalar cells charges exactly 4,096 more raw nodes
+than one cell through both entity planning and asset collection; no payload bytes or mandatory
+Schema interpretation disappear. The prior zero-output-only candidate was broadened before
+qualification because it would miss ordinary asset-backed Tilemaps.
+
+Complete all-feature Reflect/Scene/Material libraries pass 1,102/1,102 without skips at
+`fff0419b-6cc6-4c50-841c-fa322d5fe295`. Public Reflect controls pass 26/26 at
+`c0f42bb6-f85f-4a66-8a2d-46d5dfcdc8e4`, and public Scene format/selected-reference conversion
+passes 36/36 at `f03b2736-e0b9-4037-8f1c-95e16c4fae49`. Feature-free new controls pass 8/8 at
+`626ec272-e62c-43be-aef4-5feac70e2455`, with 195 outside the filter. Independent review of the
+final combined-count condition and all eight tests finds no P1/P2.
+
+The separate ownership study finds one complete source-record clone, required by the current
+immutable source and independently mutable candidate. Migration and defaults already consume the
+owned value rather than cloning its existing tree again. Do not erase that clone by sharing mutable
+source state. A later candidate can inspect the post-migration cost refresh when the original owned
+migration contract guarantees an unchanged current-version value; real migrations and hidden
+defaults retain their complete receiving checks and accounting. Keep that change separate from
+this reference-scan comparison.
+
+The unchanged root content/residency and public receiving-limit cohort passes 81/81 at
+`2f4f749f-9dbb-42e0-85a8-2a8e1d09affc`, with 1,547 cases outside the selected filter; all 81
+test names match the preceding qualification. The complete release game/library/metric/span/
+native cohort passes 143/143 without skips at `8cfca769-639e-4c18-ac9c-8f937602b92f`. Nine
+64/4K/16K Tile lifetimes retain 771 initialized presentations and 27 original-input GPU replays;
+three baseline lifetimes retain 195. Complete gameplay, original receipts, copied-source removal,
+retained-image rereads, original Host/submission-prefix retirement and both observer-panic cleanup
+controls remain. The qualified executable hash matches the frozen paired-after executable.
+
+The [balanced comparison and exact evidence](../benchmarks/2026-11-14-development-runtime-costs.md#reference-planning-without-duplicate-payload-scans)
+retain twelve additional 16K lifetimes and 36 GPU replays. Six-lifetime cumulative wall medians
+are reference planning 105.020/49.845 ms, component materialization 420.116/361.724 ms and
+expansion 996.156/945.196 ms before/after. Whole-process walls are
+19.190/18.975/18.742/19.728 seconds in before/after/after/before order. Both changed groups are
+faster in this observation; uncontrolled host/driver/cache/clock state and correlated samples
+do not establish a general speedup, CPU/GPU duration, physical-memory or production-tail budgets.
+Nested spans overlap and are not one transition delay. Full Foundation/R9/R12 and foreign
+execution remain open; Editor/UI/Dialogue work stays paused.
+
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene/Material library
+checks, root/sample formatting and selected source/executable/report checks pass; existing
+warnings remain. Four scoped research/implementation/review agents are closed. One intermediate
+release build was stopped before execution when the zero-result-only condition was superseded;
+the final source then passed its complete release build and every recorded acceptance gate.
+Cargo/native workloads remain serial against the original target, without cache cleaning,
+remote CI execution or publication. Paused UI/Dialogue changes remain excluded. This completes
+the named reference-scan unit, not the full Foundation/R9/R12 or its numeric runtime budgets.

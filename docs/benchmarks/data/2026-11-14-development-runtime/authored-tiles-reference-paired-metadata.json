@@ -1,0 +1,103 @@
+{
+  "format": "nara-reference-free-planning-paired-observation/v1",
+  "observed_at": "2026-11-17T02:04:23.728340+08:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "command": "runtime_workload.exe --tiles 16384",
+  "order": [
+    "before",
+    "after",
+    "after",
+    "before"
+  ],
+  "binary_sha256": {
+    "before": "c9e5a2d3ae6b5ffd9eefdd06b193055e51ee83ac26b620f31fedecf4ef705e11",
+    "after": "d77fcfb85b23ff00090ed2082556d727f94a19aa454940b14b1e6f4768e52196"
+  },
+  "source_sha256_before": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "5da7141fb4bc867b711ee2f5dcfa88184c4a51241851c3bf2971ecacfb00070e",
+    "crates/nara_reflect/src/property.rs": "61e6da794c83e4fb046780886931da7822f224bdf5823dd2cbb5acb32d575126",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "4e8f35236e12c62df6db06b971a74b41e760fe9c2718d7fc7ed970fb36978da1",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5793910e14f43d00c84c80cefaa1a2033312b71e248ba8dcb03698a716e40fe7",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b59ad0bae2fd64810057a4c2ff26b56bd1d9cd5b1105eebac995894158daf385",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a",
+    "crates/nara_reflect/src/entity_reference.rs": "47e37692d8e3a47987144fd812da66b73be4b58ce07df3aec657618701a570c5",
+    "crates/nara_reflect/src/value.rs": "dd5d93a4d4858a209c1cdb515305f4841c1ca5248a7de75ca7722b52fceab2a6"
+  },
+  "source_sha256_after": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "5da7141fb4bc867b711ee2f5dcfa88184c4a51241851c3bf2971ecacfb00070e",
+    "crates/nara_reflect/src/property.rs": "61e6da794c83e4fb046780886931da7822f224bdf5823dd2cbb5acb32d575126",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "4e8f35236e12c62df6db06b971a74b41e760fe9c2718d7fc7ed970fb36978da1",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5793910e14f43d00c84c80cefaa1a2033312b71e248ba8dcb03698a716e40fe7",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b59ad0bae2fd64810057a4c2ff26b56bd1d9cd5b1105eebac995894158daf385",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a",
+    "crates/nara_reflect/src/entity_reference.rs": "4f00246ce7b23223a09aaed5985badbeddc05bca39749fbe71e4ce32c88307bc",
+    "crates/nara_reflect/src/value.rs": "dd5d93a4d4858a209c1cdb515305f4841c1ca5248a7de75ca7722b52fceab2a6"
+  },
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "adapter": {
+    "backend": "dx12",
+    "device": 9860,
+    "device_type": "discrete-gpu",
+    "driver": "32.0.16.2114",
+    "driver_info": "",
+    "name": "NVIDIA GeForce RTX 4090",
+    "vendor": 4318
+  },
+  "observations": [
+    {
+      "sequence": 1,
+      "version": "before",
+      "report": "authored-tiles-reference-paired-1-before.json",
+      "report_sha256": "ab2a38723d67f98cd5db68405d6712b56d4278dae95e324faf3d622f968edd85",
+      "complete_process_wall_seconds": 19.190393100012443
+    },
+    {
+      "sequence": 2,
+      "version": "after",
+      "report": "authored-tiles-reference-paired-2-after.json",
+      "report_sha256": "f213f53241ca09b50c53a6b819ef85e55ae554ca3c1ffbd6fc1bd26f9a491edc",
+      "complete_process_wall_seconds": 18.975264299995615
+    },
+    {
+      "sequence": 3,
+      "version": "after",
+      "report": "authored-tiles-reference-paired-3-after.json",
+      "report_sha256": "256a2120032e7e602c63cc3ce1e0d688a11a53c3d9f53cbbc26d77808ce8e578",
+      "complete_process_wall_seconds": 18.74158339999849
+    },
+    {
+      "sequence": 4,
+      "version": "before",
+      "report": "authored-tiles-reference-paired-4-before.json",
+      "report_sha256": "3e1abdc116db6ae835c34a24a792389fa099adbae4736dfca98c6c4575cf62ff",
+      "complete_process_wall_seconds": 19.728390899996157
+    }
+  ],
+  "repository_before": "17e0d4f13edcb98196f1531b8f1bc951bb8ceb51",
+  "implementation_commit": "d5acd0dccdf3e7dec7c1cd1c0ee2a4bbc0ca4e5c",
+  "environment": {
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "Four sequential original16KTravel processes in before/after/after/before order, three complete native lifetimes and nine retained-input GPU replays per process. Same compiler/profile/source workload/phase hooks. Changed reference collection omits its final raw scan only when complete raw preflight found no EntityRef and its full node/byte counts plus Schema reference results fit the same receiving limits. EntityRef-bearing, overflowing and over-limit cases keep the original final walk. All initial raw/Schema admission, limits, original gameplay and physical cleanup remain. Nested wall envelopes overlap; driver/cache/clocks and unrelated host load remain uncontrolled. No CPU/GPU-duration, statistical-confidence or production-budget claim.",
+  "comparison_disposition": "Reference-planning, full component-materialization and expansion wall medians decrease in this finite comparison; both changed whole-process groups are faster than both originals. Source workload, original gameplay, physical retirement and captured-input pixel checks pass. Uncontrolled host/cache/clock state and six correlated lifetimes per version do not establish statistical confidence, CPU/GPU duration, physical-memory or production-tail budgets.",
+  "owner_regression": {
+    "run_id": "fff0419b-6cc6-4c50-841c-fa322d5fe295",
+    "passed": 1102
+  },
+  "qualified_native_reports": "authored-tiles-reference-scan-metadata.json"
+}

@@ -3265,6 +3265,20 @@ tests/checks, scoped correctness Clippy, formatting and source/executable/report
 No new cache, witness or budget owner is introduced. Full Foundation/R9/R12 and foreign
 execution remain open; paused UI/Dialogue work stays excluded.
 
+The [reference-scan successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#reference-planning-without-duplicate-payload-scans)
+at `d5acd0d` reuses complete counts from the original first raw walk within each collector call.
+Full Schema interpretation remains; only reference-free payloads whose checked payload and result
+counts fit the original limits omit the final repeated scan. Non-null AssetRef results are included,
+while EntityRef-bearing, overflowing and over-limit cases preserve the original walker and errors.
+All-feature owner libraries pass 1,102/1,102, public Reflect/Scene controls 26/26 and 36/36,
+root receiving controls 81/81 and game/metric/span/native controls 143/143. The
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#reference-planning-without-duplicate-payload-scans)
+retains complete native/pixel/failure evidence and a balanced frozen-executable comparison:
+reference planning and materialization wall medians decrease, and both changed process groups
+are faster in this finite observation. It does not establish general performance, CPU/scanout,
+memory or production-tail budgets. No cache, public witness, larger limit or new owner is added;
+full Foundation/R9/R12 and foreign execution remain open, with UI/Dialogue paused.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

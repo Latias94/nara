@@ -2164,6 +2164,82 @@ Both scoped agents are closed. No Cargo/native workloads overlap, no cache is cl
 remote CI execution or publication occurs. Full Foundation/R9/R12, production budgets and
 foreign execution remain open, with Editor/UI/Dialogue work paused.
 
+#### Reference Planning Without Duplicate Payload Scans
+
+The [owning successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#reference-planning-without-duplicate-payload-scans)
+reuses the original first raw reference scan's complete node/byte counts within one collector
+call. Schema interpretation still follows that full bounded preflight. If no EntityRef occurred
+and checked addition of actual Schema reference-result counts fits both receiving limits, the
+final repeated payload scan cannot discover an undeclared reference or a new combined-limit
+failure. EntityRef-bearing, overflowing and over-limit cases retain the original final walker,
+including its error order. Non-null TileSet AssetRefs contribute result bytes and are included in
+the proof; an earlier zero-output-only condition would not cover this ordinary Tilemap workload.
+
+No source, Schema, depth, capability, shape, reference-visit or rewrite admission is removed.
+Actual cumulative traversal and scratch charges decrease only with the work no longer performed;
+all configured ceilings and the immutable-source candidate clone remain. The change introduces
+no cross-value witness, source cache or new authority. The same optional phase hooks and complete
+gameplay/GPU-replay/physical-retirement endpoints remain the comparison surface. Passing
+receiving-limit tests alone is not a performance claim.
+
+The frozen original and `d5acd0d` executables run before/after/after/before with the same original
+16K Travel workload, phase hooks, compiler/profile and actual RTX 4090/DX12 adapter. All twelve
+complete lifetimes and 36 original-input GPU replays pass. Original gameplay, source removal,
+physical native retirement and complete owner/worker span closure remain required. Raw reports
+are [1 before](data/2026-11-14-development-runtime/authored-tiles-reference-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-reference-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-reference-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-reference-paired-4-before.json), with
+[exact source/executable/report/order metadata](data/2026-11-14-development-runtime/authored-tiles-reference-paired-metadata.json).
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/clone admission | 45.009 ms | 45.004 ms |
+| Value clone | 179.751 ms | 176.689 ms |
+| Migration, including post-migration admission | 44.567 ms | 43.693 ms |
+| Default materialization | 43.377 ms | 42.518 ms |
+| Semantic validation | 1.279 ms | 1.233 ms |
+| Reference planning | 105.020 ms | 49.845 ms |
+| Reference-program validation | 0.014 ms | 0.015 ms |
+| Complete component materialization | 420.116 ms | 361.724 ms |
+| Expansion, including nested Prefab acquisition | 996.156 ms | 945.196 ms |
+| Source payload decode | 653.219 ms | 660.926 ms |
+
+Reference-planning wall median is 52.54% lower, complete component materialization 13.90% lower
+and expansion 5.12% lower in this finite comparison. Smaller differences in other envelopes are
+not attributed to this optimization. Complete process walls in order are
+19.190, 18.975, 18.742 and 19.728 seconds. Both changed groups are faster than both originals in
+this observation, unlike the preceding bounded-cost-return comparison. These endpoints also
+include source-copy generation, native startup/pacing/waits, complete gameplay and independent
+replay. Initialized presentation counts are 764 before and 730 after; they are not rendering
+throughput. Six correlated lifetimes per version and uncontrolled host/driver/cache/clock state
+do not establish statistical confidence, a general speedup, CPU/GPU duration, physical-memory or
+production-tail budgets. Nested wall envelopes overlap and must not be added into a CPU total
+or one transition latency.
+
+The original root content/residency and public receiving-limit controls pass 81/81 at
+`2f4f749f-9dbb-42e0-85a8-2a8e1d09affc`, with 1,547 outside the filter and all 81 original test
+names retained. Complete release game/library/metric/span/native controls pass 143/143 without
+skips at `8cfca769-639e-4c18-ac9c-8f937602b92f`. Nine 64/4K/16K native Tile lifetimes retain
+771 initialized presentations and 27 original-input GPU replays; three baseline lifetimes
+retain 195. Both observer-panic controls and all original gameplay, copied-source removal,
+receipt retirement, retained-image rereads and original Host/submission-prefix cleanup pass.
+Raw reports are [64](data/2026-11-14-development-runtime/authored-tiles-reference-scan-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-reference-scan-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-reference-scan-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-reference-scan-baseline.json), with
+[source/executable/report and qualification metadata](data/2026-11-14-development-runtime/authored-tiles-reference-scan-metadata.json).
+The qualified executable hash matches the frozen paired-after executable. Complete all-feature
+Reflect/Scene/Material libraries pass 1,102/1,102; public Reflect/Scene controls pass 26/26 and
+36/36, and new feature-free controls pass 8/8 with 195 outside their filter. The owning plan
+records their exact run IDs. Independent final-condition and test review finds no P1/P2.
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene/Material library
+checks, root/sample formatting and source/executable/report integrity pass; existing warnings
+remain. All four scoped agents are closed. One superseded intermediate release build was stopped
+before execution; final-source qualification passes. No Cargo/native workloads overlap, no cache
+is cleaned, and no remote CI or publication occurs. These results close this named optimization;
+full Foundation/R9/R12, numeric budgets and foreign execution remain open, with UI/Dialogue paused.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

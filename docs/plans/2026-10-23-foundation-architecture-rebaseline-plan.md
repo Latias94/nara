@@ -5520,6 +5520,24 @@ This removes redundant pure cost walks without a new cache, owner or larger limi
 budgets, larger workloads, foreign execution and full Foundation/R9/R12 remain open; paused
 Editor/UI/Dialogue work stays excluded.
 
+The [reference-scan successor](2026-11-13-rust-state-reconstruction-plan.md#reference-planning-without-duplicate-payload-scans)
+at `d5acd0d` keeps complete first-scan counts within the original Reflect collector. After full
+Schema interpretation, a payload without EntityRef can omit its final repeated raw scan only
+when checked combined payload/result counts fit the same limits, including non-null TileSet
+AssetRefs. Reference-bearing, overflowing and over-limit cases retain the original final walker
+and refusal order; no source cache, cross-value witness, larger limit or new owner is introduced.
+Complete Reflect/Scene/Material libraries pass 1,102/1,102, public Reflect/Scene controls 26/26
+and 36/36, root receiving controls 81/81 and game/metric/span/native controls 143/143. Nine Tile
+lifetimes retain 771 initialized presentations and 27 original-input GPU replays, with baseline
+and both panic-cleanup controls preserved. The
+[balanced comparison](../benchmarks/2026-11-14-development-runtime-costs.md#reference-planning-without-duplicate-payload-scans)
+adds twelve 16K lifetimes and 36 replays. Reference-planning cumulative wall median is
+105.020/49.845 ms before/after, component materialization 420.116/361.724 ms, and process walls
+19.190/18.975/18.742/19.728 seconds. Both changed groups are faster in this finite observation;
+correlated samples and uncontrolled host/cache/clock state do not establish a general speedup,
+CPU/GPU duration, physical-memory or production-tail budgets. Full Foundation/R9/R12 and foreign
+execution remain open; Editor/UI/Dialogue work stays paused.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

@@ -1,0 +1,71 @@
+{
+  "format": "nara-reference-free-scan-native-qualification/v1",
+  "observed_at": "2026-11-17T02:16:22.633917+08:00",
+  "implementation_commit": "d5acd0dccdf3e7dec7c1cd1c0ee2a4bbc0ca4e5c",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "5da7141fb4bc867b711ee2f5dcfa88184c4a51241851c3bf2971ecacfb00070e",
+    "crates/nara_reflect/src/property.rs": "61e6da794c83e4fb046780886931da7822f224bdf5823dd2cbb5acb32d575126",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "4e8f35236e12c62df6db06b971a74b41e760fe9c2718d7fc7ed970fb36978da1",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5793910e14f43d00c84c80cefaa1a2033312b71e248ba8dcb03698a716e40fe7",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b59ad0bae2fd64810057a4c2ff26b56bd1d9cd5b1105eebac995894158daf385",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a",
+    "crates/nara_reflect/src/entity_reference.rs": "4f00246ce7b23223a09aaed5985badbeddc05bca39749fbe71e4ce32c88307bc",
+    "crates/nara_reflect/src/value.rs": "dd5d93a4d4858a209c1cdb515305f4841c1ca5248a7de75ca7722b52fceab2a6"
+  },
+  "owner_test_sha256": "98937cbe31fbc94682062865f4cc7503b47b49e6d1ffdff70065048289d0f378",
+  "binary_sha256": "d77fcfb85b23ff00090ed2082556d727f94a19aa454940b14b1e6f4768e52196",
+  "reports_sha256": {
+    "authored-tiles-reference-scan-64.json": "265d2783fd1f5e1c5d119b6b8a040241817e82fd26343ea175ec38ec15a24d28",
+    "authored-tiles-reference-scan-4096.json": "ff44b276de605ae2937e942a4f3ea8fd7ac5d59f9791595c80cfbb0a160de175",
+    "authored-tiles-reference-scan-16384.json": "adffeafdc3a7c8227fd7765505209e9748adb08b9cfc51243509b8726278414b",
+    "authored-tiles-reference-scan-baseline.json": "3c58061c4fca170f8bfba8746224d8cbcccf686b59321e98b5a487c6dc524b9d"
+  },
+  "nextest_run_id": "8cfca769-639e-4c18-ac9c-8f937602b92f",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --lib --test runtime_workload --test runtime_workload_metrics --test runtime_workload_spans --run-ignored all --test-threads=1 --no-fail-fast --no-tests fail",
+  "environment": {
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "qualification": {
+    "owner_libraries": {
+      "run_id": "fff0419b-6cc6-4c50-841c-fa322d5fe295",
+      "passed": 1102
+    },
+    "reflect_public": {
+      "run_id": "c0f42bb6-f85f-4a66-8a2d-46d5dfcdc8e4",
+      "passed": 26
+    },
+    "scene_public": {
+      "run_id": "f03b2736-e0b9-4037-8f1c-95e16c4fae49",
+      "passed": 36
+    },
+    "feature_free_cost": {
+      "run_id": "626ec272-e62c-43be-aef4-5feac70e2455",
+      "passed": 8,
+      "outside_filter": 195
+    },
+    "root_receiving": {
+      "run_id": "2f4f749f-9dbb-42e0-85a8-2a8e1d09affc",
+      "passed": 81,
+      "outside_filter": 1547
+    },
+    "game_native": {
+      "run_id": "8cfca769-639e-4c18-ac9c-8f937602b92f",
+      "passed": 143
+    },
+    "checks": "Owning Reflect/Scene/Material all-target/all-feature correctness Clippy, feature-free library checks, root/sample formatting and selected source/executable/report integrity pass. Existing warnings remain."
+  },
+  "paired_metadata": "authored-tiles-reference-paired-metadata.json",
+  "scope": "Unchanged complete source-authored native64/4096/16384Tile Travel scripts, original baseline and both observer-panic cleanup controls on Windows hardwareDX12. Nine Tile lifetimes retain27original-input GPU replays after original native/World/source retirement; whole-image retained rereads and exact original Host/submission-prefix cleanup remain. Original source, complete Schema/ref/limit admission and immutable clone remain. No new configured capacity, cross-value witness, cache or lifecycle authority. Captured-input pixels do not read the swapchain or qualify scanout/totalVRAM/production tail budgets. Foreign native execution and fullFoundation/R9/R12 remain open.",
+  "review": "Final combined-count condition and all eight additive tests independently reviewed without P1/P2; four scoped agents closed."
+}
