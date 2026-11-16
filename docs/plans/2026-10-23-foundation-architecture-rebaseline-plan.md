@@ -1422,6 +1422,15 @@ generation controls remain. The [cost report](../benchmarks/2026-11-15-public-ge
 preserves the negative result and process variation. This does not reverse the earlier selected
 immutable-value correction or admit cross-frame geometry retention.
 
+The November 16 [bounded tile extraction reuse trial](../benchmarks/2026-11-15-public-geometry.md#bounded-tile-extraction-reuse-trial)
+also rejects its private candidate under the preselected gate. Three baseline and three candidate
+processes retain all 36 groups and full pixel/lifetime/native-work controls, but zero of 24 large
+static/camera comparisons meets the 15% P50 criterion. The cache and dedicated revision API are
+removed; original extraction remains selected. Source-refresh/current-owner and independent
+warmed-capture regressions remain, with exact candidate source and raw evidence in the report.
+This advances the evidence-gated R9c decision without selecting a public geometry topology or
+completing R9/R12/Foundation.
+
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and

@@ -30,6 +30,55 @@ serde to `Material2dInstance` or keeping an old pipeline cache entry does not co
 No visual Shader Graph, new renderer, universal publication manager or parallel asset registry
 is selected. R9a View/history, R9c measured geometry locality and broader 3D retain their scopes.
 
+## Bounded Tile Extraction Reuse Trial
+
+The November 16 R9c successor starts from `8cd4bb6`. Reuse the existing independent public
+geometry consumer, its 64/4096/65536-cell, one/two-View, plain/bound Material and
+static/one-cell/camera workloads. First capture three fresh baseline processes before Rust
+source edits. Retain the original full-pixel reference, direct edits after cleared dirty hints,
+late original input realization, retained output and zero original Host cleanup controls.
+Earlier neutral-game and Adapter-startup observations do not qualify this geometry decision.
+
+The simplest candidate keeps the existing flat frame payload and queue. A private per-Tilemap
+extraction cache may reuse immutable base geometry only after the same complete source key is
+observed across adjacent extractions. A continuously edited map stays on the original path.
+Returned frame payloads still own their copied geometry and current Material bindings; no old
+cache can substitute an earlier generation or lifetime owner. Camera movement does not alter
+world-space map geometry. Preserve exact floating operation order, source order and every
+per-frame asset/coherent-content authorization before reuse.
+
+Dirty chunk hints and Bevy change ticks alone are insufficient keys. The Tilemap owner may
+expose a doc-hidden nominal cell revision for this unavoidable domain handoff; every actual
+cell mutation changes it, clones acquire an independent mutation lineage, and counter exhaustion
+rotates identity. Public size/layer/sort/anchor/tileset fields, exact presented matrix and the
+original typed asset-slot revision complete the key. Material resolution and captured bindings
+remain current on every extraction. Cache only the latest eligible base for each current entity;
+prune removed entities and invalid/error paths. Never retain a second document or native resource
+owner. A modeled 32 MiB base-geometry allowance and 128-map bound are private trial limits;
+overflow or allocation refusal falls back to the original correct extraction without hiding draws.
+
+The preselected gate requires at least 15% lower managed-drive/capture P50 than the fastest
+matching new baseline in every 65536-cell static and moving-camera group, in all three candidate
+processes. Investigate any one-cell P50 regression above 0.25 ms and any 64-cell regression above
+0.1 ms against the fastest matching baseline. Rendering/count/upload controls must agree,
+captured inputs remain immutable and CPU retention must stay within the modeled allowance.
+Report distributions per process, not pooled correlated samples, and retain rejected candidates
+as evidence rather than relaxing the gate. If reuse fails the complete gate, remove its
+production mechanism and keep the simple path. Numeric population/engine-tail guarantees and
+full R9c/R12 remain separate.
+
+The [executed comparison](../benchmarks/2026-11-15-public-geometry.md#bounded-tile-extraction-reuse-trial)
+rejects this candidate: zero of 24 large static/camera comparisons meets 15%, and their P50
+regressions range from 1.238 to 17.803% against the fastest matching baseline. The largest
+large one-cell P50 regression is 0.9181 ms. Native work fields and complete pixels agree in all
+six processes, but correctness does not satisfy the CPU adoption gate. The complete candidate
+source and compressed raw evidence remain in the report. Remove cache/revision production
+mechanisms and retain only useful source/lifetime and independent warmed-input regressions.
+The simple existing extraction remains selected. Final post-removal owners pass 158/158,
+independent CPU/Vulkan hardware controls 4/4 and DX12 software native controls 2/2. Owning
+correctness Clippy, independent strict Clippy, formatting and independently audited data/source
+integrity pass. The linked report retains exact runs, candidate source and qualification limits.
+
 ## Graph-Shared Material Texture Successor
 
 Status: implemented at `13a0927`, with independent consumers at `e9d8755` and scoped

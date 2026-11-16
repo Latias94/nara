@@ -7,6 +7,9 @@ correctness review and three independent candidate measurement processes. The ba
 [owning plan](../plans/2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
 keeps the remaining R9c geometry decisions separate. The subsequent visible-queue candidate
 at `6c88c87` is rejected under its independent 10% gate; the original queue is retained.
+The November 16 bounded tile extraction reuse trial below is also rejected under its separate
+15% gate. Its production cache and revision API are removed while the new source/lifetime and
+warmed-capture regressions remain.
 
 ## Workload And Source
 
@@ -247,3 +250,89 @@ waiting serializes frames and includes polling delay. These measurements do not 
 pipelined throughput, physical scanout, GPU duration, general Material workloads, a supported
 map population or a product frame-time SLO. Actual foreign-platform execution and complete
 R8/R9/R12/Foundation acceptance remain separate. Editor/Dialogue product work remains paused.
+
+## Bounded Tile Extraction Reuse Trial
+
+Retained source/lifetime and independent warmed-input regressions are committed at
+`9b2474197f3120426ae759bb5c882b45a7ae3f90`. The rejected production mechanism is absent from
+that revision; its exact trial source is retained only in the evidence artifact below.
+
+The [selected trial](../plans/2026-11-14-durable-material-and-shader-plan.md#bounded-tile-extraction-reuse-trial)
+starts from `8cd4bb6da2437757c16f4d3d28b2f07f5db37f5c`. Three fresh baseline processes precede
+three candidate processes through the same independently locked public geometry consumer.
+Each completes the existing 36 groups, eight warmups and 64 samples per group, full pixels,
+late original captures, retained output and zero final Host resource/candidate/cleanup checks.
+The [summary](data/2026-11-16-tile-extraction-reuse/summary.json) retains all per-process
+distributions, adapter facts, Nextest IDs and six original compressed JSONL files. Raw and
+compressed SHA256 values bind all 13,824 numeric sample rows. The actual adapter is Vulkan,
+RTX 4090, driver 621.14, on Windows 11/Rust 1.95.0 release with one build job.
+
+The candidate keeps one latest base per Tilemap, at most 128 maps and a modeled 32 MiB geometry
+allowance. It promotes only after adjacent observations of the same complete source key;
+continuously edited maps use ordinary extraction. A nominal cell token, bitwise map fields and
+presented matrix, and the exact original TileSet slot revision fence reuse. Dirty hints are not
+authority. Base entries exclude Material and coherent ImageContent owners; current validated
+bindings and snapshots are reattached, with current global source order, on every reused copy.
+The resulting public frame payload stays independently owned. Invalid or unauthorized maps and
+spatial-preflight failures clear private reuse eligibility without changing published-output
+failure behavior. Metadata and geometry use fallible reservations, with ordinary fallback.
+
+The [exact candidate source](data/2026-11-16-tile-extraction-reuse/candidate-source.json)
+retains the complete owned tracked patch, new files and source SHA256 values before removal.
+`tests.rs` was physically CRLF when hashed; Git's saved patch is LF, so restoring that file's
+CRLF is required for its raw-byte digest. The other six recorded source digests match LF content.
+The candidate label in raw output is an uncommitted trial on the recorded base, not a separate
+historical commit. The added independent warm-edit control is outside timed groups; it uses the
+same script owner and does not change the existing measurement cases. Source changes affect
+both retained representation and lookup/copy overhead, so the result does not isolate one
+instruction or allocator cost.
+
+The preselected gate requires every 65,536-cell static and moving-camera group in each of the
+three candidate processes to improve managed-drive/capture P50 by at least 15% against the
+fastest matching new baseline. Observed P50 milliseconds are:
+
+| Views / Material / scenario | Baseline runs 1 / 2 / 3 | Candidate runs 1 / 2 / 3 |
+| --- | ---: | ---: |
+| 1 / plain / static | 4.2760 / 4.5362 / 4.0096 | 4.1393 / 4.4602 / 4.6557 |
+| 1 / plain / moving-camera | 3.9522 / 4.7429 / 4.0623 | 4.4420 / 4.4269 / 4.6558 |
+| 1 / bound / static | 5.4576 / 6.0191 / 5.5077 | 5.7264 / 5.7453 / 6.0568 |
+| 1 / bound / moving-camera | 5.5823 / 6.1555 / 5.3738 | 5.5371 / 5.9181 / 6.0811 |
+| 2 / plain / static | 4.3759 / 5.1706 / 4.4756 | 5.0012 / 4.7585 / 5.1031 |
+| 2 / plain / moving-camera | 4.3867 / 5.2783 / 4.5342 | 4.5974 / 4.7714 / 5.0167 |
+| 2 / bound / static | 5.7663 / 6.4685 / 6.1049 | 5.8860 / 6.2620 / 5.8985 |
+| 2 / bound / moving-camera | 5.8488 / 6.4126 / 6.1496 | 5.9212 / 6.2443 / 6.0023 |
+
+**Zero of 24** target comparisons meets the gate. Each is 1.238--17.803% slower than the
+fastest matching baseline. Maximum 64-cell P50 regression is 0.0108 ms, below its 0.1 ms
+investigation threshold. Maximum large one-cell regression is 0.9181 ms, above its 0.25 ms
+threshold. All thirteen native/count/upload/retained fields match corresponding samples across
+every baseline/candidate pair. Correct pixels and equal native work do not make the CPU trial
+an acceptable optimization. Sequential variation remains; the decision applies to this design
+and workload rather than proving all domain-local retention is ineffective.
+
+Remove the production extraction cache, cell revision token, custom Clone/equality behavior and
+cache-only tests. Tilemap and extraction production sources return exactly to their pre-trial
+contents. Retain eight meaningful source-refresh tests: stable geometry/source order, cleared
+dirty hints, clone divergence, public fields and parented shear, TileSet mutations/ABA/foreign
+stores, Entity generation reuse, presentation interpolation and actual current Material owner
+lifetime. Retain the new independent native control that warms three frames, saves an original
+input, edits a cell with cleared hints, retires World, first realizes changed and old inputs
+through separate original producers, compares full pixels and rereads retained outputs.
+
+The candidate's owning cohort passes 164/164 after correcting a new fixture's unsupported
+assumption of immediate allocator slot reuse. The correction uses Bevy's explicit
+`despawn_no_free` successor and `spawn_at`; it still proves the same index with a new generation.
+Its independent Vulkan CPU/native cohort passes 4/4 before the three complete candidate runs.
+Independent review additionally corrects current image lifetime, invalid/error eligibility and
+fallible metadata allocation. Final no-cache owning tests pass **158/158**, with no skips,
+in `3d4f3795-c256-4212-8686-e7dea023519d`. The independent CPU plus Vulkan hardware pixel/lifetime
+cohort passes **4/4**, with one measurement-only skip, in
+`1377c05f-e00b-4ffd-adc9-4eab3888ff0d`. Both native pixel trajectories also pass on explicit
+DX12 Microsoft Basic Render Driver software: **2/2**, three outside selection, in
+`19791350-b72c-4529-a8c3-f6f9579a341f`. These selections overlap. Owning all-target/all-feature
+correctness Clippy, independent all-target strict Clippy, root/independent formatting and
+source/data/document integrity checks pass. Four scoped agents close; separate data review
+recomputes every percentile and gate, validates six raw/gzip digests and confirms production
+Tilemap/extraction byte equality with the base. Warmups are described by metadata and the
+collector loop; they are not extra numeric rows in JSONL. This does not adopt cross-frame geometry retention,
+establish a population/tail/memory SLO or complete R9c/R12/Foundation.

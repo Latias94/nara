@@ -2477,6 +2477,17 @@ Shader/Image capture controls remain. This negative outcome adds no new render o
 Final selected Material/Sprite 138, independent CPU 2 and actual DX12 software full-pixel control
 pass in their separate scopes; correctness Clippy, format and document/data checks pass.
 
+The November 16 [bounded tile extraction trial](../../benchmarks/2026-11-15-public-geometry.md#bounded-tile-extraction-reuse-trial)
+is also rejected under ADR0096. All six public measurement processes retain complete pixels,
+old-input/output lifetime and identical native work fields, but zero of 24 large static/camera
+comparisons meets the preselected 15% P50 gate. The private cache and dedicated nominal cell
+revision are removed; Tilemap and extraction production sources match the pre-trial base.
+Eight source-refresh/current-owner tests and an independent warmed-input-after-World-retirement
+pixel control remain at `9b24741`. Final owners pass 158/158, independent CPU/Vulkan hardware
+4/4 and DX12 software native 2/2, with correctness/strict Clippy and formatting. The linked report retains
+candidate source, all raw digests and independent data review. No geometry-cache adoption or
+general rendering budget follows; R9c/R12/Foundation remain open.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
