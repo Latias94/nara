@@ -514,6 +514,35 @@ Set `CARGO_BUILD_JOBS=1`, the absolute shared `CARGO_TARGET_DIR`, and
 `NARA_DEVELOPMENT_NOTIFICATIONS_OUTPUT` to the new JSON path. Actual results and scope belong
 to the [runtime cost report](../../docs/benchmarks/2026-11-14-development-runtime-costs.md).
 
+## Active Gameplay Runtime Baseline
+
+`runtime_workload` measures three complete ordinary `Scenario::Travel` scripts through the
+native Runtime. They move the player, collect pickups, create markers, travel between levels
+and instances, restart and return to Meadow. It uses normal semantic commands, native pacing
+and the original renderer. Native keyboard input stays isolated; no manual delta or exact
+Step is used by the measurement. Each run must finish the script and physically retire its
+original native owners before the next recovers the same physical event loop.
+
+Select hardware DX12 and an absolute new output file in PowerShell:
+
+```powershell
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+$env:NARA_RUNTIME_WORKLOAD_OUTPUT = Join-Path $env:TEMP 'nara-active-workload.json'
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --bin runtime_workload
+```
+
+The file is created exclusively; choose a new name for another run. The report retains actual
+original presentation IDs, gameplay facts, per-run finite wall-time distributions, original
+queue-completion samples, whole-process CPU/memory and telemetry/native cleanup. These
+descriptive quantiles are not production tail bounds, GPU execution or scanout. Loaded code,
+driver and filesystem caches are shared between runs. Scripted verification remains ineligible
+for the interactive resume format; the measurement does not weaken that policy.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
 ## Development Cost Observations
 
 `DevelopmentHost::enable_timings()` enables fixed cumulative elapsed observations. The default

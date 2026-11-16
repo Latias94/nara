@@ -87,6 +87,13 @@ test = false
 bench = false
 
 [[bin]]
+name = "runtime_workload"
+path = "src/bin/runtime_workload.rs"
+required-features = ["desktop", "cost-measurement"]
+test = false
+bench = false
+
+[[bin]]
 name = "cook"
 path = "src/bin/cook.rs"
 required-features = ["cook"]
