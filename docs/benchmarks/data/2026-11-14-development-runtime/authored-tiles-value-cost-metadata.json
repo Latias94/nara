@@ -1,0 +1,77 @@
+{
+  "format": "nara-bounded-materialization-cost-evidence/v1",
+  "observed_at": "2026-11-17T01:14:46.401979+08:00",
+  "repository_base": "6db82a61add4764a49f164c842a9b2de7867f733",
+  "source_state": "Qualified sources recorded while the checked-cost return and Scene propagation were uncommitted on6db82a6. Seven optional materialization subphase hooks are included. Paused UI/Dialogue changes excluded. Exact selected source/executable/report hashes retained; implementation is now committed at the separate recorded revision.",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "crates/nara_reflect/src/effective.rs": "5da7141fb4bc867b711ee2f5dcfa88184c4a51241851c3bf2971ecacfb00070e",
+    "crates/nara_reflect/src/property.rs": "61e6da794c83e4fb046780886931da7822f224bdf5823dd2cbb5acb32d575126",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "4e8f35236e12c62df6db06b971a74b41e760fe9c2718d7fc7ed970fb36978da1",
+    "crates/nara_reflect/src/effective/cost_tests.rs": "d4bbd66aa93149b4efe3cb1b725b71eb4eddc18b9a2c191d807b0eb882f95473",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5793910e14f43d00c84c80cefaa1a2033312b71e248ba8dcb03698a716e40fe7",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b59ad0bae2fd64810057a4c2ff26b56bd1d9cd5b1105eebac995894158daf385",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "samples/two-level-game/tests/runtime_workload.rs": "536b3a96ed81cf6c4e78b56e255f5ac23b572d73b1bbc3ccc0220a68056d946e"
+  },
+  "binary_sha256": "c9e5a2d3ae6b5ffd9eefdd06b193055e51ee83ac26b620f31fedecf4ef705e11",
+  "reports_sha256": {
+    "authored-tiles-value-cost-64.json": "df33855a23ae887f645554cd9b364a1bfba1c219b193436295228b66004db8fb",
+    "authored-tiles-value-cost-4096.json": "a625efd0f55cbb7b717d78306c929d39a4846f39fe143d2fd5e2d026472c3460",
+    "authored-tiles-value-cost-16384.json": "0b7f6eb5d15efa017a235f43e161d990f8548914f2110a22174465d06bfd0ae9",
+    "authored-tiles-value-cost-baseline.json": "02511a7b9f253c4eabdb7ff011d2669379f0c35278c9bdd04666439fa0e3680e"
+  },
+  "nextest_run_id": "761c1fcb-c2f7-4c0c-911e-3ded640f3c58",
+  "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --lib --test runtime_workload_metrics --test runtime_workload_spans --test runtime_workload --run-ignored all --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "143 game/library/metric/span/native controls; nine Tile and three baseline original lifetimes, two panic-cleanup controls and27 GPU replays. Original source/admission/semantic/reference/working-budget/pixel/lifetime assertions remain. New subphase spans observe existing materializer wall time, not CPU, one transition or scanout. Value-admission excludes the independent optional source-policy gate; migration includes post-migration admission. No cross-value witness/cache, new budget owner, higher limit, physical-memory bound, foreign execution or production guarantee.",
+  "paired_metadata": "authored-tiles-value-paired-metadata.json",
+  "implementation_commit": "e9c6f5df76fc537b702b4f7aa4ab538fc0467092",
+  "qualification": {
+    "focused": {
+      "run_id": "94ef707d-93d7-4849-8462-6236b9ccb177",
+      "passed": 33,
+      "outside_filter": 982
+    },
+    "owner_libraries": {
+      "run_id": "591b3a6f-6a3d-4bde-b991-c23012233d6c",
+      "passed": 1094
+    },
+    "reflect_public": {
+      "run_id": "02863b1e-1122-4ff6-a19b-cc0167171cff",
+      "passed": 26
+    },
+    "scene_public": {
+      "run_id": "df30cdc4-db4a-4c4d-bac6-ab8a03f8215a",
+      "passed": 36
+    },
+    "root_receiving": {
+      "run_id": "c089c7f4-6b7e-4dad-8527-148b4cfdadf0",
+      "passed": 81,
+      "outside_filter": 867
+    },
+    "feature_free_cost": {
+      "run_id": "766afa03-a7e1-4a2d-9e4b-3e59ac5f6848",
+      "passed": 17,
+      "outside_filter": 178
+    },
+    "game_native": {
+      "run_id": "761c1fcb-c2f7-4c0c-911e-3ded640f3c58",
+      "passed": 143
+    },
+    "checks": "Feature-free Reflect/Scene/Material libraries and observation-off workload compile; owning all-target/all-feature and workload/metric/span release correctness Clippy and root/sample formatting pass. Existing warnings remain."
+  }
+}

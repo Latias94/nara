@@ -1,0 +1,27 @@
+{
+  "format": "nara-materialization-cost-before/v1",
+  "observed_at": "2026-11-17T00:31:51.687486+08:00",
+  "repository_base": "6db82a61add4764a49f164c842a9b2de7867f733",
+  "source_state": "Seven optional materialization subphase hooks; original bounded value-cost/mutation implementation unchanged.",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "bf08f9582dd29aebd793367bfa2c329810abe820e642f4bcaae5a749cfe35afe",
+    "crates/nara_reflect/src/property.rs": "27a648a0708372bf13b6181b520c1d598d428b68a56adb174d581d2869424a2a",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "2c11afc8864be14304d2418229b12c99aa59055aa6f6c439d0fb0f03c10d78a4",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "f5b20652c15c13fbd4383f35f2295c1ee653b1a268abf2e13f1e55215336ceac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "449ce0757a7f8c9a1a57d30530ceac6756ffa8ea403400c70d8a3b5ec58b942d",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a"
+  },
+  "report": "authored-tiles-value-before-16384.json",
+  "report_sha256": "7cbb9c503c35dc2f13767a5f05804f6525709beb98d45e3715f0516833b64ecf",
+  "binary_sha256": "3e0515b0248eceef3471a8634db90d058382e5ba57f3c6ae666c32db9c2f651f",
+  "command": "cargo +1.95.0 build --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --bin runtime_workload; runtime_workload.exe --tiles 16384",
+  "scope": "Three complete original16KTravel lifetimes, physical retirement and9GPUreplays. Named wall sums overlap over original Runtime construction through physical retirement; source-copy generation and GPU replay excluded. Not CPU, individual transition, scanout, allocation or production budget.",
+  "frozen_binary_retention": "Original instrumented executable retained locally outside the repository for finite comparison; not a released artifact."
+}

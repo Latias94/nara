@@ -3251,6 +3251,20 @@ hardware DX12 workload evidence, not CPU/GPU duration, production tail or physic
 Feature checks, correctness Clippy, formatting and source/executable/report integrity pass;
 full Foundation/R9/R12 and foreign execution remain open, and paused UI/Dialogue stays excluded.
 
+The [bounded materialization-cost successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#component-materialization-and-bounded-cost-return)
+at `e9c6f5d` reuses complete cost returned by the original Reflect raw walker and default
+preflight within the original Scene candidate. No-insertion preserves its no-scan move, Native/
+admitted wrappers retain unit success and exact errors, and source/depth/semantic/reference/work
+admission remains. Full Reflect/Scene/Material libraries pass 1,094/1,094, public Reflect/Scene
+26/26 and 36/36, root receiving limits 81/81 and game/metric/span/native controls 143/143.
+Nine Tile lifetimes retain 27 GPU replays; twelve paired 16K lifetimes add 36. The
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#bounded-cost-return-qualification-and-comparison)
+records lower local materialization wall medians but both changed process groups are slower;
+there is no demonstrated end-to-end speedup or production/CPU/scanout/memory budget. Feature-free
+tests/checks, scoped correctness Clippy, formatting and source/executable/report integrity pass.
+No new cache, witness or budget owner is introduced. Full Foundation/R9/R12 and foreign
+execution remain open; paused UI/Dialogue work stays excluded.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

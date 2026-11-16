@@ -694,6 +694,14 @@ compatibility gates; finish covers domain checks and canonical ordering. Each su
 Scene/Prefab candidate decode contributes one call to each phase. The counters distinguish owner
 and worker execution, and nested wall sums remain separate from CPU or single-transition latency.
 
+Materialization also separates `scene_value_admission`, `scene_value_clone`,
+`scene_value_migration`, `scene_value_defaults`, `scene_value_validation`,
+`scene_value_reference_plan` and `scene_value_reference_validation`. Migration includes its
+post-migration value admission. These are existing compiler operations, not another profiler
+owner or permission to skip checks. The ordinary workload compares their actual owner/worker
+call counts and seals only after the original Runtime physically retires; their nested wall
+sums do not replace whole-game or allocation measurements.
+
 `entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
 ends at the original first actual presented observation. It includes caller/native waits and
 excludes process loading; it is not cold-start, GPU duration or scanout. The first presentation and

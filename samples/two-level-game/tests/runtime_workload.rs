@@ -251,6 +251,23 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                         assert!(work["phases"][phase][thread].as_u64().unwrap() > 0);
                     }
                 }
+                let value_calls = work["phases"]["scene_value_admission"]["calls"]
+                    .as_u64()
+                    .unwrap();
+                assert!(value_calls > 0);
+                for phase in [
+                    "scene_value_clone",
+                    "scene_value_migration",
+                    "scene_value_defaults",
+                    "scene_value_validation",
+                    "scene_value_reference_plan",
+                    "scene_value_reference_validation",
+                ] {
+                    assert_eq!(work["phases"][phase]["calls"], value_calls);
+                    for thread in ["owner_thread_calls", "worker_thread_calls"] {
+                        assert!(work["phases"][phase][thread].as_u64().unwrap() > 0);
+                    }
+                }
             }
             #[cfg(not(feature = "scene-work-observation"))]
             {

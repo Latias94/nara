@@ -2580,3 +2580,96 @@ Continue from these measurements through existing owners. Wire-shape checking, c
 materialization and retained resource costs remain separate candidates; preserve complete input
 validation and the same game/source/pixel/retirement workflow. Numeric budgets, larger named
 game workloads and foreign platform execution remain required before broader runtime claims.
+
+### Component Materialization And Bounded Cost Return
+
+Continue the original complete Travel/source/pixel/retirement consumer. Split existing component
+materialization into original-value admission, clone, migration with post-migration admission,
+default materialization, semantic validation, reference planning and reference-plan validation.
+The optional fixed spans stay at those existing owner boundaries and default builds add no clocks.
+They are nested wall envelopes, not instruction-level CPU or allocation profiling.
+
+Inspect the original Reflect raw materialization walker, which already counts complete nodes and
+logical bytes while enforcing depth and source-reference policy. Its Scene caller currently
+drops that cost and walks the same immutable value again. Return the checked complete cost from
+that original owner and reuse it for the immediate bounded-cost result; preserve all checks,
+error order and receiving limits, including authored references and separate hidden defaults.
+Avoid a second traversal implementation, reusable cross-value witness or a source cache. Native
+and admitted validation callers retain their original semantics and exact admission errors.
+
+Measure the unchanged implementation with the same added phase hooks before selecting wider
+reuse across migration/default mutation. Qualify the direct owning cost/error boundary and all
+affected Scene/Reflect, public receiving-limit and complete native game controls. Freeze an
+instrumented original executable for before/after/after/before observation. Full Foundation/
+R9/R12, runtime budgets and foreign execution remain open; Editor/UI/Dialogue stays paused.
+
+The [instrumented original materialization report](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-value-before-16384.json)
+and [selected source/executable metadata](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-value-before-metadata.json)
+retain three complete original 16K Travel lifetimes, physical retirement and nine GPU replays.
+Each lifetime records 180 original component operations in each of the seven added subphases.
+Component materialization wall sums are 1,086.821–1,394.656 ms; admission is
+156.483–201.889 ms, clone 290.633–341.635 ms, migration including post-admission
+160.732–203.455 ms, defaults 131.073–188.435 ms, semantic validation 57.301–80.043 ms and
+reference planning 288.431–381.335 ms. Reference-program validation is 0.019–0.023 ms.
+These are nested lifetime wall observations, not CPU time or a single transition delay.
+
+The selected cost-return implementation uses the same original raw walker, complete limits and
+Source policy, returning its counters only after success. Native and admitted wrappers preserve
+their unit return and exact refusal identity. The existing owned default materializer returns a
+checked cost only when insertion already performed a preflight; no-insertion returns no cost
+and preserves the public owned operation's no-scan move contract. Scene carries the admitted raw
+cost, replaces it after actual migration, then selects inserted-default cost or the unchanged
+cost. Full semantic validation and reference planning/visits remain. Properties Set/Absent still
+refreshes cost from its final validated candidate. Opaque values retain admitted raw cost.
+
+Scene and Material production libraries compile with all features. Focused cost/default/reference/
+property/quota controls pass 33/33 at `94ef707d-93d7-4849-8462-6236b9ccb177`, with 982 outside the
+filter. Full Reflect/Scene/Material library controls pass 1,094/1,094 without skips at
+`591b3a6f-6a3d-4bde-b991-c23012233d6c`; public Reflect defaults/encoding/property-reference controls
+pass 26/26 at `02863b1e-1122-4ff6-a19b-cc0167171cff`, and public Scene format/reference conversion
+passes 36/36 at `df30cdc4-db4a-4c4d-bac6-ab8a03f8215a`. Five additive Reflect controls compare
+the returned result with independently computed complete costs, exercise authored routes and
+node/byte/depth refusal order, missing nested defaults and selected overrides, and preserve
+17K-value/scalar allocations on the no-insertion path. No new cost cache, owned witness or
+larger budget is introduced. This implementation removes redundant cost walks but does not
+claim to eliminate mandatory value clones or full semantic/reference validation.
+
+Independent correctness review closes without P1/P2 after checking the full reference visit and
+output-cost delta chain, migrated/default/Properties costs, original quota/error controls and all
+direct hidden callers. Material's callers discard the successful cost; Reflect property preserves
+unit success; Scene Properties discards the intermediate default cost and revalidates the final
+changed candidate. The public conversion run above checks value-bearing reference-triggered
+recomposition, exact effective quota refusal, source/history preservation and commit/Undo/Redo.
+Original receiving-limit and full native game/pixel/failure qualification remain in progress.
+
+The original root content/residency and public receiving-limit cohort passes 81/81 at
+`c089c7f4-6b7e-4dad-8527-148b4cfdadf0`, with 867 outside the filter. The complete release game/
+library/metric/span/native cohort passes 143/143 at `761c1fcb-c2f7-4c0c-911e-3ded640f3c58`, with
+no skips. Nine Tile lifetimes retain 845 initialized presentations and 27 original-input GPU
+replays; three baseline lifetimes retain 193. All original gameplay/source/retained-pixel/Host/
+prefix/physical-cleanup assertions remain, including both panic controls. Seven materialization
+phase call counts agree for the actual ordinary operations, include owner and worker execution,
+and leave zero live/unfinished spans at sealing. The
+[qualified reports and comparison](../benchmarks/2026-11-14-development-runtime-costs.md#bounded-cost-return-qualification-and-comparison)
+retain exact source/executable/report hashes and actual native scope.
+
+Four frozen-old/new processes in before/after/after/before order complete twelve additional 16K
+lifetimes and 36 GPU replays. Six-lifetime wall medians are cost/clone admission
+82.823/46.477 ms, migration with post-admission 81.628/47.319 ms, defaults 52.881/45.535 ms,
+semantic validation 19.397/1.306 ms and complete component materialization 514.843/460.009 ms.
+Clone and reference planning are higher; complete expansion is 1,092.808/1,045.651 ms. Process
+walls are 20.277/20.809/20.414/20.199 seconds: both changed groups are slower, so no end-to-end
+speedup is demonstrated. Keep local reductions distinct from whole gameplay/pacing/replay cost.
+Nested wall spans, uncontrolled host/cache/clock state and finite correlated samples do not
+qualify CPU/GPU duration, statistical confidence, runtime tail or physical-memory budgets.
+
+Implementation and owning regressions are `e9c6f5d`. Reflect's feature-free cost/reference
+cohort passes 17/17 at `766afa03-a7e1-4a2d-9e4b-3e59ac5f6848`, with 178 outside the filter.
+Reflect/Scene/Material feature-free libraries and the observation-off workload compile. Owning
+all-target/all-feature and workload/metric/span release correctness Clippy, root/sample
+formatting and exact source/executable/report checks pass; existing warnings remain. Independent
+review and its hidden-caller/reference/accounting follow-up close without P1/P2. Both scoped
+agents are closed. Cargo/native workloads remain serial against the original target, without
+cache clean, remote CI execution or remote publication. Original paused UI/Dialogue changes stay
+excluded. Continue runtime work through complete consumers; larger named workloads, numeric
+budgets, foreign execution and full Foundation/R9/R12 remain open.

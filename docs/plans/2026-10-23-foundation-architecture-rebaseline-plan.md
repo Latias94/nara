@@ -5501,6 +5501,25 @@ tail or physical-memory claims. Feature-free/feature-off compilation, correctnes
 formatting and exact evidence retain their linked scope. Full Foundation/R9/R12 and foreign
 execution stay open; Editor/UI/Dialogue work remains paused.
 
+The [bounded materialization-cost successor](2026-11-13-rust-state-reconstruction-plan.md#component-materialization-and-bounded-cost-return)
+at `e9c6f5d` returns already checked costs from the original Reflect walker and default-insertion
+preflight, then carries them through the current Scene candidate. Source/depth/semantic/reference
+checks and original metadata/scratch accounting remain; no-insertion still moves a previously
+admitted value without scanning it, and the public owned API keeps its result shape. Seven
+optional existing-owner subphases distinguish admission, clone, migration, defaults, semantic
+validation and reference work. Full Reflect/Scene/Material libraries pass 1,094/1,094, public
+Reflect and Scene controls 26/26 and 36/36, root receiving controls 81/81 and complete game/
+metric/span/native controls 143/143. Nine Tile lifetimes retain 845 initialized presentations
+and 27 GPU replays, with baseline and both panic-cleanup controls preserving original assertions.
+The [balanced comparison](../benchmarks/2026-11-14-development-runtime-costs.md#bounded-cost-return-qualification-and-comparison)
+adds twelve 16K lifetimes and 36 replays. Component-materialization wall median is
+514.843/460.009 ms before/after, but process walls are 20.277/20.809/20.414/20.199 seconds:
+both changed groups are slower, so no end-to-end speedup is demonstrated. Feature-free tests,
+checks and scoped correctness Clippy/format/evidence checks retain their qualification scope.
+This removes redundant pure cost walks without a new cache, owner or larger limit. Runtime
+budgets, larger workloads, foreign execution and full Foundation/R9/R12 remain open; paused
+Editor/UI/Dialogue work stays excluded.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

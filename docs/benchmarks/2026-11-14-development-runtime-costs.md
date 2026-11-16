@@ -2041,6 +2041,129 @@ or publication occurs. Continue existing-owner investigation of remaining wire/n
 resource costs; full Foundation/R9/R12, numeric budgets and foreign execution stay open, with
 Editor/UI/Dialogue work paused.
 
+#### Original Materialization Cost Return
+
+The [original instrumented 16K report](data/2026-11-14-development-runtime/authored-tiles-value-before-16384.json)
+and [exact selected source/executable metadata](data/2026-11-14-development-runtime/authored-tiles-value-before-metadata.json)
+retain three complete Travel lifetimes, physical retirement and nine original-input GPU replays
+before bounded-cost return. Seven optional subphases split the existing component materializer.
+The original full component value, source admission, hidden defaults, Schema semantics and
+reference planning remain; the spans do not add another profiler or value owner.
+
+| Original materialization envelope, wall range across three complete lifetimes | Original calls per lifetime | Wall range |
+| --- | ---: | ---: |
+| Component materialization | 9 | 1,086.821–1,394.656 ms |
+| Original-value admission | 180 | 156.483–201.889 ms |
+| Value clone | 180 | 290.633–341.635 ms |
+| Migration, including post-migration admission | 180 | 160.732–203.455 ms |
+| Default materialization | 180 | 131.073–188.435 ms |
+| Semantic validation | 180 | 57.301–80.043 ms |
+| Reference planning | 180 | 288.431–381.335 ms |
+| Reference-program validation | 180 | 0.019–0.023 ms |
+
+These nested wall sums overlap and cover the whole original Runtime lifetime. They are not
+instruction-level CPU attribution, one transition delay or allocation measurements. Source
+preparation checks and mandatory clones remain separate from the selected reduction.
+The value-admission subphase starts after the independent optional source-value policy gate and
+includes bounded clone-cost/hidden-default checks and metadata sizing. It is not an envelope
+for all source or file admission. Migration includes its original post-migration bounded check;
+clone covers the complete candidate record, including retained contextual declarations.
+
+The original Reflect raw materialization walker already counts complete nodes/logical bytes
+while enforcing depth and source-reference policy. It now returns those counters on success;
+the Scene caller does not rescan the same value only to recover cost. Native/admitted wrappers
+preserve their previous unit success and exact failure identity. The owned default materializer
+returns checked cost only when insertion already used complete preflight; without insertion it
+returns no new cost and preserves the prior-admission no-scan move path. Scene carries raw cost,
+replaces it after migration and takes either inserted-default cost or the unchanged value's cost.
+Full semantic validation, reference planning/visits and final reference rewrite delta remain.
+Properties Set/Absent still obtains cost from the final validated candidate. Opaque records and
+hidden defaults retain their separate existing admission. There is no reusable cross-value
+witness, cross-compilation cache, new budget owner or higher limit.
+
+Production Scene/Material all-feature library checks pass. Focused new/existing cost/reference/
+default/property/quota controls pass 33/33 at `94ef707d-93d7-4849-8462-6236b9ccb177`, with 982
+outside the filter. Full Reflect/Scene/Material library controls pass 1,094/1,094 at
+`591b3a6f-6a3d-4bde-b991-c23012233d6c`, public Reflect defaults/encoding/property-reference
+controls 26/26 at `02863b1e-1122-4ff6-a19b-cc0167171cff`, and public Scene format/reference
+conversion 36/36 at `df30cdc4-db4a-4c4d-bac6-ab8a03f8215a`. The latter retains value-bearing
+reference-driven recomposition, exact output quotas, source/history and commit/Undo/Redo.
+Five new owner controls compare returned costs with independently known complete values,
+including authored routes, zero-byte values, original error order and no-insertion allocations.
+Independent correctness review checks all hidden callers and original reference/error accounting
+without P1/P2. Receiving-limit and complete native comparison results remain required below.
+
+#### Bounded Cost Return Qualification And Comparison
+
+The original root content/residency and public receiving-limit cohort passes 81/81 at
+`c089c7f4-6b7e-4dad-8527-148b4cfdadf0`, with 867 outside the filter. The release game/library/
+metric/span/native cohort passes 143/143 at `761c1fcb-c2f7-4c0c-911e-3ded640f3c58`, without skips.
+Nine Tile lifetimes retain 845 initialized presentations and 27 original-input GPU replays;
+three baseline lifetimes retain 193. Both observer-panic controls preserve physical cleanup and
+complete span closure, plus copied-source removal for Tilemaps. All original gameplay,
+source/receipt retirement, retained-image rereads and original Host/prefix assertions remain.
+
+Raw qualified reports are [64](data/2026-11-14-development-runtime/authored-tiles-value-cost-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-value-cost-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-value-cost-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-value-cost-baseline.json), with
+[exact selected source/executable/report metadata](data/2026-11-14-development-runtime/authored-tiles-value-cost-metadata.json).
+Each of the seven new value phases has 171 operations per 64/4K lifetime, 180 per 16K and 162
+per baseline, including both owner and worker execution. Original raw-cost/clone/default/semantic/
+reference phases retain corresponding call counts. No spans remain live or unfinished after
+physical Runtime retirement. Registered totals are 1,544/1,544/1,661/1,445 respectively; adding
+named envelopes does not mean more semantic work or constitute a performance score.
+
+The frozen original and changed executables also run before/after/after/before on the same
+actual RTX4090/DX12 adapter, compiler/profile and 16K source workload, with identical phase hooks.
+All twelve complete lifetimes and 36 GPU replays pass. Raw reports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-value-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-value-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-value-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-value-paired-4-before.json), with
+[source/executable/report/order metadata](data/2026-11-14-development-runtime/authored-tiles-value-paired-metadata.json).
+The qualified native and paired-after executable hashes match; the frozen original stays outside
+the repository, without rewriting a source checkout to compare versions.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/clone admission | 82.823 ms | 46.477 ms |
+| Value clone | 181.842 ms | 198.354 ms |
+| Migration, including post-migration admission | 81.628 ms | 47.319 ms |
+| Default materialization | 52.881 ms | 45.535 ms |
+| Semantic validation | 19.397 ms | 1.306 ms |
+| Reference planning | 90.226 ms | 115.722 ms |
+| Reference-program validation | 0.013 ms | 0.013 ms |
+| Complete component materialization | 514.843 ms | 460.009 ms |
+| Expansion, including nested Prefab acquisition | 1,092.808 ms | 1,045.651 ms |
+| Source payload decode | 658.323 ms | 663.890 ms |
+
+Admission, post-migration admission and semantic validation decrease where the same value's
+pure cost walk was removed. Complete component-materialization median is 10.65% lower in this
+finite observation. Clone and reference planning are higher; the result does not imply every
+stage improves, and the measurements do not establish the cause of those differences. Nested
+envelopes overlap and cannot be added into a CPU total or a single transition delay.
+
+Complete process walls in order are 20.277, 20.809, 20.414 and 20.199 seconds. Both changed
+groups are slower than both original groups, despite fewer pure cost walks and lower local
+materialization. There is no demonstrated end-to-end speedup. Those endpoints include source
+generation, native startup/pacing/waits, complete gameplay and independent replay. Initialized
+presentation counts total 794 before and 786 after, not rendering throughput. Driver/filesystem/
+clock state, allocator state and host load are uncontrolled; these finite wall observations
+are not CPU/GPU duration, scanout, statistical confidence, production-tail or physical-memory
+bounds. Continue owner-local runtime work without relaxing complete source, semantic, reference
+or physical-retirement contracts.
+
+Implementation and owner regressions are `e9c6f5d`. Feature-free Reflect cost/reference controls
+pass 17/17 at `766afa03-a7e1-4a2d-9e4b-3e59ac5f6848`, with 178 outside the filter. Feature-free
+Reflect/Scene/Material libraries and the observation-off workload compile. Owning all-target/
+all-feature and game workload/metric/span release correctness Clippy, root/sample formatting
+and selected source/executable/report integrity pass; existing warnings remain. Independent
+correctness review and hidden-caller/reference/error-accounting follow-up close without P1/P2.
+Both scoped agents are closed. No Cargo/native workloads overlap, no cache is cleaned and no
+remote CI execution or publication occurs. Full Foundation/R9/R12, production budgets and
+foreign execution remain open, with Editor/UI/Dialogue work paused.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

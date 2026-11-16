@@ -1,0 +1,94 @@
+{
+  "format": "nara-bounded-materialization-cost-paired-observation/v1",
+  "observed_at": "2026-11-17T01:15:15.227055+08:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "command": "runtime_workload.exe --tiles 16384",
+  "order": [
+    "before",
+    "after",
+    "after",
+    "before"
+  ],
+  "binary_sha256": {
+    "before": "3e0515b0248eceef3471a8634db90d058382e5ba57f3c6ae666c32db9c2f651f",
+    "after": "c9e5a2d3ae6b5ffd9eefdd06b193055e51ee83ac26b620f31fedecf4ef705e11"
+  },
+  "source_sha256_before": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "bf08f9582dd29aebd793367bfa2c329810abe820e642f4bcaae5a749cfe35afe",
+    "crates/nara_reflect/src/property.rs": "27a648a0708372bf13b6181b520c1d598d428b68a56adb174d581d2869424a2a",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "2c11afc8864be14304d2418229b12c99aa59055aa6f6c439d0fb0f03c10d78a4",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "f5b20652c15c13fbd4383f35f2295c1ee653b1a268abf2e13f1e55215336ceac",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "449ce0757a7f8c9a1a57d30530ceac6756ffa8ea403400c70d8a3b5ec58b942d",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a"
+  },
+  "source_sha256_after": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "Cargo.lock": "3613a7be232bf896b4230340dda20be889f3acec156f86aa38ad574de3f2fc07",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "100bd485425704d43fef128f938f46d8280362691662ceb477e23add65d7ae0d",
+    "crates/nara_reflect/src/effective.rs": "5da7141fb4bc867b711ee2f5dcfa88184c4a51241851c3bf2971ecacfb00070e",
+    "crates/nara_reflect/src/property.rs": "61e6da794c83e4fb046780886931da7822f224bdf5823dd2cbb5acb32d575126",
+    "crates/nara_reflect/src/inline_reference_tests.rs": "4e8f35236e12c62df6db06b971a74b41e760fe9c2718d7fc7ed970fb36978da1",
+    "crates/nara_scene/src/prefab/overlay/components.rs": "91e82184a11236733637aba17d9b07a8ab1c738ef067108df6246c3083ab5111",
+    "crates/nara_scene/src/prefab/overlay/properties.rs": "5793910e14f43d00c84c80cefaa1a2033312b71e248ba8dcb03698a716e40fe7",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/values.rs": "b59ad0bae2fd64810057a4c2ff26b56bd1d9cd5b1105eebac995894158daf385",
+    "crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs": "f5710b03ca999d339d1dedd585b7c67b80a1b848cf53de4336ed5a569b9e6d2a"
+  },
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "adapter": {
+    "backend": "dx12",
+    "device": 9860,
+    "device_type": "discrete-gpu",
+    "driver": "32.0.16.2114",
+    "driver_info": "",
+    "name": "NVIDIA GeForce RTX 4090",
+    "vendor": 4318
+  },
+  "observations": [
+    {
+      "sequence": 1,
+      "version": "before",
+      "report": "authored-tiles-value-paired-1-before.json",
+      "report_sha256": "a2823854972b77e9cf1a84ab814ca218ae4ee3e291d8a266854c94bb60332462",
+      "complete_process_wall_seconds": 20.276513899996644
+    },
+    {
+      "sequence": 2,
+      "version": "after",
+      "report": "authored-tiles-value-paired-2-after.json",
+      "report_sha256": "bb2f2b0a74800f5bdfd9bedce5c5fc292766348e73d1dedd336f02102bfe447c",
+      "complete_process_wall_seconds": 20.808890799991786
+    },
+    {
+      "sequence": 3,
+      "version": "after",
+      "report": "authored-tiles-value-paired-3-after.json",
+      "report_sha256": "b8aa3f9ce668ff210b2dc6895f21dcbfb9397cc88758df2e807f5d0b4788d36d",
+      "complete_process_wall_seconds": 20.414189799994347
+    },
+    {
+      "sequence": 4,
+      "version": "before",
+      "report": "authored-tiles-value-paired-4-before.json",
+      "report_sha256": "5735d595994c69f7d57786175e1b0d4f27cd6769684f987021d87286a7dc4847",
+      "complete_process_wall_seconds": 20.19870730000548
+    }
+  ],
+  "environment": {
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "Four sequential processes in before/after/after/before order, each completing three original16KTravel lifetimes and nine GPU replays. Identical compiler/profile, source workload and materialization-phase hooks; source-copy generation and independent replay are excluded from named spans. Before validates then rescans for raw cost; after returns original checked cost and reuses default-insertion preflight cost. Mandatory clone, source/semantic/reference checks and original limits remain. Nested wall time is not CPU/scanout or a statistical guarantee; driver/cache/clock state and unrelated host load remain uncontrolled.",
+  "qualified_native_reports": "authored-tiles-value-cost-metadata.json",
+  "comparison_disposition": "Original-value admission, post-migration admission, semantic validation and overall component-materialization wall medians decrease in this finite comparison. Clone and reference planning are higher. Whole-process walls do not improve: before20.277/20.199s and after20.809/20.414s. No end-to-end speedup is demonstrated; observations are not CPU/scanout, statistical confidence or a production guarantee.",
+  "implementation_commit": "e9c6f5df76fc537b702b4f7aa4ab538fc0467092"
+}
