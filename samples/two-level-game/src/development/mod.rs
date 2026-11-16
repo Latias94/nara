@@ -948,8 +948,8 @@ fn eligible_selection(
 
 fn eligible_features(features: &[String], placement: DevelopmentPlacement) -> bool {
     match placement {
-        DevelopmentPlacement::SourceHeadless => features.is_empty(),
-        DevelopmentPlacement::SourceDesktop => features == ["desktop"],
+        DevelopmentPlacement::SourceHeadless => features == ["development"],
+        DevelopmentPlacement::SourceDesktop => features == ["desktop", "development"],
     }
 }
 
@@ -1038,4 +1038,56 @@ fn clean_game_retirement(report: &RetirementReport) -> bool {
         && report.native.containment_empty()
         && report.native.readers_stopped()
         && report.native.output_drained()
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use nara::project_workflow::cargo::CargoBuildSelection;
+
+    use super::{DevelopmentPlacement, eligible_features, eligible_selection};
+
+    #[test]
+    fn development_admission_requires_its_exact_declared_placement() {
+        for (placement, features) in [
+            (DevelopmentPlacement::SourceHeadless, vec!["development"]),
+            (
+                DevelopmentPlacement::SourceDesktop,
+                vec!["desktop", "development"],
+            ),
+        ] {
+            let selection = |target, features: Vec<&str>, defaults| {
+                CargoBuildSelection::new(
+                    "two-level-game",
+                    target,
+                    "dev",
+                    "x86_64-pc-windows-msvc",
+                    features,
+                    defaults,
+                )
+                .unwrap()
+            };
+            let admitted = selection("continuity", features.clone(), false);
+            assert!(eligible_selection(&admitted, placement));
+            assert!(eligible_features(admitted.features(), placement));
+            assert!(!eligible_selection(
+                &selection("continuity", features.clone(), true),
+                placement,
+            ));
+            assert!(!eligible_selection(
+                &selection("player", features.clone(), false),
+                placement,
+            ));
+            for extra in ["cook", "cooked-player", "cost-measurement"] {
+                let mut widened = features.clone();
+                widened.push(extra);
+                let widened = selection("continuity", widened, false);
+                assert!(!eligible_selection(&widened, placement));
+                assert!(!eligible_features(widened.features(), placement));
+            }
+            for undeclared in [vec![], vec!["desktop"], vec!["cooked-player"]] {
+                let undeclared = selection("continuity", undeclared, false);
+                assert!(!eligible_selection(&undeclared, placement));
+            }
+        }
+    }
 }

@@ -1,6 +1,6 @@
 //! R12 qualification through actual Rust edits, public Cargo builds and fresh native processes.
 
-#![cfg(any(windows, target_os = "linux"))]
+#![cfg(all(feature = "development", any(windows, target_os = "linux")))]
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;

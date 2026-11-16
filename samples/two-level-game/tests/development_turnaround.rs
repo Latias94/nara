@@ -1,6 +1,6 @@
 //! Finite paused control turnaround observations through the production desktop Host.
 
-#![cfg(all(feature = "desktop", windows))]
+#![cfg(all(feature = "desktop", windows, feature = "development"))]
 #![forbid(unsafe_code)]
 
 #[path = "support/development_host.rs"]

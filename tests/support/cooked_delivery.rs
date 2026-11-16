@@ -7,7 +7,7 @@ use nara::{
         RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentMemberKind,
     },
 };
-#[cfg(feature = "cook")]
+#[cfg(all(feature = "cook", feature = "development"))]
 use serde::de::DeserializeOwned;
 
 const HEADER_BYTES: usize = 20;
@@ -101,7 +101,7 @@ fn corrupt_catalog(bytes: &mut [u8]) -> Result<Range<usize>, String> {
     Ok(range)
 }
 
-#[cfg(feature = "cook")]
+#[cfg(all(feature = "cook", feature = "development"))]
 fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
     let mut records = text.lines().filter_map(|line| line.strip_prefix(prefix));
     let json = records
@@ -113,7 +113,7 @@ fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
     serde_json::from_str(json).map_err(|error| format!("invalid {prefix} JSON: {error}"))
 }
 
-#[cfg(feature = "cook")]
+#[cfg(all(feature = "cook", feature = "development"))]
 pub mod native {
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -406,6 +406,7 @@ pub mod native {
     pub fn accept(cooker: &Path) {
         let fixture = Fixture::new();
         assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
+        fixture.assert_player_feature_closure(false);
         assert!(fixture.project.join("build.rs").is_file());
         let target = fixture.repository.join("target").canonicalize().unwrap();
         let tools = CargoBuildTools::discover_in(&fixture.repository).unwrap();

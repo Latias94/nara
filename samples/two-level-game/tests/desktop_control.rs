@@ -1,4 +1,8 @@
-#![cfg(all(feature = "desktop", any(windows, target_os = "linux")))]
+#![cfg(all(
+    feature = "desktop",
+    any(windows, target_os = "linux"),
+    feature = "development"
+))]
 #![forbid(unsafe_code)]
 
 use std::{

@@ -103,8 +103,10 @@ impl Arguments {
             &self.profile,
             &self.target,
             match self.placement {
-                DevelopmentPlacement::SourceHeadless => Vec::new(),
-                DevelopmentPlacement::SourceDesktop => vec!["desktop".to_owned()],
+                DevelopmentPlacement::SourceHeadless => vec!["development".to_owned()],
+                DevelopmentPlacement::SourceDesktop => {
+                    vec!["development".to_owned(), "desktop".to_owned()]
+                }
             },
             false,
         )
@@ -335,7 +337,26 @@ mod tests {
 
     use nara::fs::RelativePath;
 
-    use super::{inventory, read_command};
+    use super::{Arguments, DevelopmentPlacement, inventory, read_command};
+
+    #[test]
+    fn cli_builds_only_the_explicit_development_placement() {
+        let mut arguments = Arguments {
+            project_root: "project".into(),
+            work_parent: "work".into(),
+            target_dir: "target".into(),
+            target: "x86_64-pc-windows-msvc".into(),
+            profile: "dev".into(),
+            placement: DevelopmentPlacement::SourceHeadless,
+        };
+        let selection = arguments.selection().unwrap();
+        assert_eq!(selection.features(), ["development"]);
+        assert!(!selection.default_features());
+        arguments.placement = DevelopmentPlacement::SourceDesktop;
+        let selection = arguments.selection().unwrap();
+        assert_eq!(selection.features(), ["desktop", "development"]);
+        assert!(!selection.default_features());
+    }
 
     #[test]
     fn source_inventory_admits_the_actual_nested_continuity_product() {

@@ -108,6 +108,7 @@ pub fn accept(cooker: &Path) {
         process: None,
     };
     let fixture = custody.fixture();
+    fixture.assert_player_feature_closure(true);
     let target = fixture.repository.join("target").canonicalize().unwrap();
     let tools = CargoBuildTools::discover_in(&fixture.repository).unwrap();
     let triple = fixture.request().selection().target_triple().to_owned();

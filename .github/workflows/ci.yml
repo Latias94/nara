@@ -346,6 +346,12 @@ jobs:
         run: cargo fmt --manifest-path samples/two-level-game/Cargo.toml --all -- --check
       - name: Check Two-Level Game sample all features
         run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --all-features --all-targets
+      - name: Check Two-Level Game shipping desktop without development tools
+        run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player,desktop --all-targets
+      - name: Test Two-Level Game shipping headless without development tools
+        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player --all-targets --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test Two-Level Game cook-only source controls
+        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cook --test cook_source --test cooked_delivery --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test Two-Level Game sample headless
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features cook,cooked-player --test-threads=1 --no-fail-fast
       - name: Test active runtime measurement arithmetic

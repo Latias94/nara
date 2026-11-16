@@ -1,6 +1,11 @@
 //! Actual public Host comparison of two reconciliation intervals with identical native watchers.
 
-#![cfg(all(windows, feature = "desktop", feature = "cost-measurement"))]
+#![cfg(all(
+    windows,
+    feature = "desktop",
+    feature = "cost-measurement",
+    feature = "development"
+))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[path = "support/development_host.rs"]

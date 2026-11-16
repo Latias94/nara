@@ -1,6 +1,11 @@
 //! Physical native acceptance for the ordinary active-gameplay measurement executable.
 
-#![cfg(all(windows, feature = "desktop", feature = "cost-measurement"))]
+#![cfg(all(
+    windows,
+    feature = "desktop",
+    feature = "cost-measurement",
+    feature = "development"
+))]
 #![forbid(unsafe_code)]
 
 use std::{

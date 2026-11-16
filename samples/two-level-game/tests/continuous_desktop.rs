@@ -1,6 +1,6 @@
 //! Actual continuous desktop play, source rebuild, exact adoption and matched native input.
 
-#![cfg(all(feature = "desktop", windows))]
+#![cfg(all(feature = "desktop", windows, feature = "development"))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[path = "support/development_host.rs"]

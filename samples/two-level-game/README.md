@@ -34,6 +34,30 @@ does not choose the process working directory or silently create an arbitrary sa
 The authoring bundle is generated from this product's real native schema provider with the existing
 schema command. It is not a hand-maintained second definition of component layouts.
 
+### Development And Shipping Features
+
+| Selection | Compiled role |
+| --- | --- |
+| Default, or `--no-default-features --features development` | Source executables, game-owned rebuild Host, Cargo/process tools and the private continuity watcher |
+| `--no-default-features --features cook` | Cook/package executable and Cargo tools, without the development Host or watcher |
+| `--no-default-features --features cooked-player` | Headless shipping Player and shared gameplay, without Cargo tools, watcher, UI or GPU/window backends |
+| `--no-default-features --features cooked-player,desktop` | Shipping Player with the explicit native window/GPU placement, without development tools, watcher or UI |
+
+Cargo features are additive. Enabling `cooked-player` with defaults still enables development;
+the production cooker always disables defaults for its separate captured Player build. Its own
+features and the supervising tests' tooling do not become Player features. Check the exact
+normal/build graph with Cargo rather than the test process or an all-feature workspace graph:
+
+```text
+cargo tree --locked --no-default-features --features cooked-player --edges normal,build
+cargo tree --locked --no-default-features --features cooked-player,desktop --edges normal,build
+```
+
+The shared root Runtime still includes project/schema, CPU Image and Material support, including
+Naga. This split does not claim to remove every source-oriented implementation or provide a
+complete dedicated-server product. The delivery tests check these selected dependency/features
+before generating and executing the actual relocated Players.
+
 ## Checkpoint Acceptance
 
 Create an application-owned directory, then run the same headless binary twice:
@@ -74,7 +98,7 @@ Create the output parent outside this source package first. Supply the actual na
 triple and absolute Cargo/rustc executables from the selected toolchain:
 
 ```text
-cargo +1.95.0 run --locked --offline --release --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
 ```
 
 The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
@@ -142,7 +166,7 @@ window setting or an authored startup Input selection: this game declares its ke
 in the executable and needs no separately cooked Input asset.
 
 ```text
-cargo +1.95.0 run --locked --offline --release --features cook,desktop --bin cook -- --runtime desktop --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelDesktop --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+cargo +1.95.0 run --locked --offline --release --no-default-features --features cook,desktop --bin cook -- --runtime desktop --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelDesktop --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
 ```
 
 The published directory contains exactly `player_desktop` (with the platform's executable
@@ -264,7 +288,8 @@ restore native GPU/audio/physics services or patch Rust code inside a running pr
 
 Construct `DevelopmentHost` with the explicit absolute project root and an existing trusted work
 parent outside that project. `start` consumes a `CapturedCargoExecutable` selecting this game's
-native `continuity` binary with default features disabled and no requested/resolved features.
+native `continuity` binary with default features disabled and exactly `development` in both
+requested and resolved features.
 `capture` and `step` always target the active game. Supply an explicit public `CargoBuildRequest`,
 the expected initial complete `ResumeState` and finite `ProbeStep` expectations to
 `prepare_rebuild`. The Host builds the edited source and compares complete canonical state after
@@ -406,8 +431,8 @@ observe OS input. The [owning plan](../../docs/plans/2026-11-13-rust-state-recon
 records actual execution results and remaining integration limits.
 
 For the CLI, compile `develop` with `--features desktop` and pass `--placement desktop` after
-the Cargo argument separator. The CLI selects the `continuity` child's exact `desktop` feature;
-compiling the Host with that feature alone does not select native execution. `ready` reports
+the Cargo argument separator. The CLI selects exactly `desktop,development` for its `continuity`
+child; compiling the Host with desktop support alone does not select native execution. `ready` reports
 the actual placement. Contained product launches retain the reviewed desktop-session environment
 projection; parent `WGPU_BACKEND` and `NARA_WGPU_FORCE_FALLBACK` hints are not inherited. The child
 uses the stock default selection and reports its actual adapter/backend in presentation results.

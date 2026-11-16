@@ -1,4 +1,9 @@
-#![cfg(all(windows, feature = "cook", feature = "desktop"))]
+#![cfg(all(
+    windows,
+    feature = "cook",
+    feature = "desktop",
+    feature = "development"
+))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use two_level_game::development::protocol;

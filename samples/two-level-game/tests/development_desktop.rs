@@ -1,6 +1,6 @@
 //! Actual body/private-structure edits adopted through the production desktop development Host.
 
-#![cfg(all(feature = "desktop", windows))]
+#![cfg(all(feature = "desktop", windows, feature = "development"))]
 #![forbid(unsafe_code)]
 
 #[path = "support/development_host.rs"]

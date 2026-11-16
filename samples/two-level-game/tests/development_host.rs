@@ -1,6 +1,6 @@
 //! Public production Host acceptance, separate from the original process/protocol oracle.
 
-#![cfg(any(windows, target_os = "linux"))]
+#![cfg(all(feature = "development", any(windows, target_os = "linux")))]
 #![forbid(unsafe_code)]
 
 use std::{

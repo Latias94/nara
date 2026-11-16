@@ -1,3 +1,5 @@
+#![cfg(any(feature = "development", feature = "cook"))]
+
 #[path = "../src/bin/cook/source.rs"]
 mod source;
 

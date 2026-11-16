@@ -1,5 +1,6 @@
 //! A complete small exploration product: authored levels, finite travel and explicit checkpoints.
 
+#[cfg(feature = "development")]
 pub mod development;
 mod gameplay;
 mod host;
@@ -19,5 +20,6 @@ pub use gameplay::{
     player_launch_result, product_recipe,
 };
 pub use host::{open_explicit_project_root, open_project_root};
+#[cfg(feature = "development")]
 #[doc(hidden)]
 pub use nara::project_tooling::{ProductObservationTarget, record_product_observation};

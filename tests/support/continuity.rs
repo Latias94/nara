@@ -178,7 +178,7 @@ impl Fixture {
             .bounded_stdout(NonZeroUsize::new(MAX_TOOL_STDOUT).unwrap());
         let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
         let mut native = FiniteProcess::new(self, owner);
-        let bytes = match native.capture_stdout(REQUEST_TIMEOUT) {
+        let bytes = match native.capture_stdout(REQUEST_TIMEOUT, MAX_TOOL_STDOUT) {
             Ok(bytes) => bytes,
             Err(error) => panic!("{}", native.fail(error)),
         };
@@ -218,11 +218,106 @@ impl Fixture {
     }
 
     pub fn request(&self) -> CargoBuildRequest {
-        self.request_features(&[])
+        self.request_features(&["development"])
     }
 
     pub fn desktop_request(&self) -> CargoBuildRequest {
-        self.request_features(&["desktop"])
+        self.request_features(&["desktop", "development"])
+    }
+
+    pub fn assert_player_feature_closure(&self, desktop: bool) {
+        let features = if desktop {
+            "cooked-player,desktop"
+        } else {
+            "cooked-player"
+        };
+        let limit = 256 * 1024;
+        let command = SupervisedProcessCommand::new(self.tools.cargo_path(), &self.project)
+            .arguments([
+                "tree",
+                "--locked",
+                "--offline",
+                "--target",
+                &self.host,
+                "--no-default-features",
+                "--features",
+                features,
+                "--edges",
+                "normal,build",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}|{f}",
+            ])
+            .environment("RUSTUP_AUTO_INSTALL", "0")
+            .bounded_stdout(NonZeroUsize::new(limit).unwrap());
+        let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
+        let mut native = FiniteProcess::new(self, owner);
+        let bytes = match native.capture_stdout(REQUEST_TIMEOUT, limit) {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("{}", native.fail(error)),
+        };
+        let graph = String::from_utf8(bytes).unwrap();
+        let mut game = false;
+        let mut runtime = false;
+        let mut renderer = false;
+        for line in graph.lines() {
+            let (package, features) = line.split_once('|').expect("Cargo's selected tree format");
+            let name = package.split_whitespace().next().unwrap();
+            let features = features
+                .trim_end_matches(" (*)")
+                .split(',')
+                .collect::<Vec<_>>();
+            assert!(
+                !matches!(
+                    name,
+                    "notify" | "nara_asset_watch" | "nara_tooling" | "nara-editor"
+                ) && !name.starts_with("nara_ui")
+                    && !name.starts_with("dear-imgui"),
+                "shipping runtime inherited development or UI package: {line}",
+            );
+            match name {
+                "two-level-game" => {
+                    game = true;
+                    let expected: &[&str] = if desktop {
+                        &["cooked-player", "desktop"]
+                    } else {
+                        &["cooked-player"]
+                    };
+                    assert_eq!(features, expected, "{line}");
+                }
+                "nara" => {
+                    runtime = true;
+                    for forbidden in [
+                        "default",
+                        "project-tooling",
+                        "project-workflow",
+                        "tooling",
+                        "asset-watch",
+                        "runtime-ui",
+                        "presentation-ui",
+                    ] {
+                        assert!(!features.contains(&forbidden), "{line}");
+                    }
+                }
+                "nara_render_wgpu" | "nara_winit" | "wgpu" | "winit" => {
+                    renderer = true;
+                    assert!(
+                        desktop,
+                        "headless shipping runtime inherited presentation: {line}"
+                    );
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            game && runtime,
+            "Cargo must report the actual game and Nara nodes"
+        );
+        assert_eq!(renderer, desktop);
+        println!(
+            "TWO_LEVEL_PLAYER_FEATURE_CLOSURE desktop={desktop} development=false tooling=false watcher=false ui=false",
+        );
     }
 
     fn request_features(&self, features: &[&str]) -> CargoBuildRequest {
@@ -1119,7 +1214,7 @@ impl<'a> FiniteProcess<'a> {
         }
     }
 
-    fn capture_stdout(&mut self, timeout: Duration) -> Result<Vec<u8>, String> {
+    fn capture_stdout(&mut self, timeout: Duration, maximum: usize) -> Result<Vec<u8>, String> {
         let deadline = Instant::now() + timeout;
         let mut bytes = Vec::new();
         loop {
@@ -1134,20 +1229,20 @@ impl<'a> FiniteProcess<'a> {
                 if output.stream() != ProcessOutputStream::Stdout {
                     continue;
                 }
-                if output.loss() || output.bytes().len() > MAX_TOOL_STDOUT - bytes.len() {
-                    return Err("the compiler probe lost its bounded exact stdout".into());
+                if output.loss() || output.bytes().len() > maximum - bytes.len() {
+                    return Err("the tool probe lost its bounded exact stdout".into());
                 }
                 bytes.extend_from_slice(output.bytes());
             }
             if owner.state() == ProcessState::Complete {
                 check_cleanup(owner)?;
                 if !owner.cleanup_receipt().unwrap().exit().success() {
-                    return Err(format!("compiler probe failed: {}", self.diagnostics()));
+                    return Err(format!("tool probe failed: {}", self.diagnostics()));
                 }
                 return Ok(bytes);
             }
             if Instant::now() >= deadline {
-                return Err(format!("compiler probe exceeded {timeout:?}"));
+                return Err(format!("tool probe exceeded {timeout:?}"));
             }
             std::thread::sleep(POLL);
         }

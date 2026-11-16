@@ -1,6 +1,6 @@
 //! Windows native sequential reconstruction, supervised outside its main-thread child.
 
-#![cfg(all(feature = "desktop", windows))]
+#![cfg(all(feature = "desktop", windows, feature = "development"))]
 #![forbid(unsafe_code)]
 
 use std::{

@@ -1,6 +1,6 @@
 //! Finite real-build cost observations through the qualified production desktop workflow.
 
-#![cfg(all(feature = "desktop", windows))]
+#![cfg(all(feature = "desktop", windows, feature = "development"))]
 #![forbid(unsafe_code)]
 
 #[path = "support/development_host.rs"]

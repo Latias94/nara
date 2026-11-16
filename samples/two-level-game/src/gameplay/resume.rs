@@ -32,7 +32,7 @@ use crate::{
 #[cfg(feature = "desktop")]
 pub use capture::capture_desktop_resume;
 pub use capture::capture_resume;
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", feature = "development"))]
 pub(crate) use capture::capture_world;
 #[cfg(feature = "desktop")]
 pub use desktop::restore_desktop_resume;

@@ -1,8 +1,10 @@
+#[cfg(feature = "development")]
+use std::process::Command;
+
 use std::{
     fs,
     num::NonZeroU32,
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Mutex,
         atomic::{AtomicU64, Ordering},
@@ -21,6 +23,7 @@ use two_level_game::{
     levels::{LevelId, LevelKey},
 };
 
+#[cfg(feature = "development")]
 #[path = "support/child.rs"]
 mod child;
 
@@ -62,6 +65,7 @@ impl Drop for Directory {
     }
 }
 
+#[cfg(feature = "development")]
 #[test]
 fn public_headless_process_saves_in_b_then_a_fresh_process_restores_two_instances() {
     let directory = Directory::new();
@@ -100,6 +104,7 @@ fn public_headless_process_saves_in_b_then_a_fresh_process_restores_two_instance
     );
 }
 
+#[cfg(feature = "development")]
 #[test]
 fn ordinary_travel_returns_to_a_and_retry_replaces_current_b_without_losing_progress() {
     let directory = Directory::new();
