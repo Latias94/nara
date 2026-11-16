@@ -7,8 +7,8 @@ use std::mem::size_of;
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::__private::{
-    EffectiveValueAdmissionError, effective_component_value_with_default_overrides,
-    validate_value_materialization_budget,
+    EffectiveValueAdmissionError, effective_component_value_in_place_with_default_overrides,
+    effective_component_value_with_default_overrides, validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
@@ -480,12 +480,27 @@ where
             self.validate_program_contextual_defaults(schema, record, entity)?;
         }
         self.reserve_program_temporary(schema, record, old_cost, entity)?;
-        let (effective, cost) = match effective_component_value_with_default_overrides(
-            schema,
-            record.value(),
-            &record.contextual_defaults,
-            limits,
-        ) {
+        let result = if let Some((value, defaults)) = record.unique_value_mut_with_defaults() {
+            effective_component_value_in_place_with_default_overrides(
+                schema, value, defaults, limits,
+            )
+            .map(|cost| (None, cost))
+        } else {
+            effective_component_value_with_default_overrides(
+                schema,
+                record.value(),
+                &record.contextual_defaults,
+                limits,
+            )
+            .map(|(effective, cost)| {
+                let owned = match effective {
+                    Cow::Borrowed(_) => None,
+                    Cow::Owned(value) => Some(value),
+                };
+                (owned, cost)
+            })
+        };
+        let (effective, cost) = match result {
             Ok(result) => result,
             Err(error) => {
                 if self.normalization_failure(&error, entity)
@@ -512,7 +527,7 @@ where
                 return Err(SceneCompilationFailureKind::Component.into());
             }
         };
-        if let Cow::Owned(effective) = effective {
+        if let Some(effective) = effective {
             record.set_value(effective);
         }
         Ok(cost.unwrap_or(old_cost))

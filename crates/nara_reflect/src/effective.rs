@@ -315,12 +315,49 @@ fn effective_component_value_cow_impl<'value>(
     defaults: DefaultSelection<'_>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(Cow<'value, ComponentValue>, Option<ComponentValueCost>), ComponentCodecError> {
-    if let Some(plan) = plan_defaults(schema, &value, defaults)? {
-        let cost = preflight_materialization_cost(&plan, &value, limits, None)?;
+    if let Some((plan, cost)) = prepare_default_materialization(schema, &value, defaults, limits)? {
         apply_plan(&plan, value.to_mut())?;
         return Ok((value, Some(cost)));
     }
     Ok((value, None))
+}
+
+/// Supplies source-selected defaults into an already isolated and admitted candidate.
+///
+/// The caller admits the complete source, overrides and materialization work before entry.
+/// Planning and full effective-value preflight finish before mutation. Existing descendants
+/// retain their allocations; only selected defaults and missing containers are allocated.
+/// No insertion returns no new cost, preserving the original prior-admission contract.
+pub fn effective_component_value_in_place_with_default_overrides(
+    schema: &ComponentSchema,
+    value: &mut ComponentValue,
+    overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<Option<ComponentValueCost>, ComponentCodecError> {
+    let Some((plan, cost)) = prepare_default_materialization(
+        schema,
+        value,
+        DefaultSelection::Overrides(overrides),
+        limits,
+    )?
+    else {
+        return Ok(None);
+    };
+    apply_plan(&plan, value)?;
+    Ok(Some(cost))
+}
+
+fn prepare_default_materialization<'defaults>(
+    schema: &'defaults ComponentSchema,
+    value: &ComponentValue,
+    defaults: DefaultSelection<'defaults>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<Option<(DefaultPlan<'defaults>, ComponentValueCost)>, ComponentCodecError> {
+    let Some(plan) = plan_defaults(schema, value, defaults)? else {
+        return Ok(None);
+    };
+    let cost = preflight_materialization_cost(&plan, value, limits, None)?;
+    Ok(Some((plan, cost)))
 }
 
 /// Performs one effective-value admission against raw residual ceilings and returns the exact

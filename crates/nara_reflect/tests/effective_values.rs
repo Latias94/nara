@@ -343,6 +343,43 @@ fn explicit_null_or_wrong_container_ancestors_reject_without_overwrite() {
 }
 
 #[test]
+fn in_place_defaults_reject_a_late_sparse_plan_before_any_earlier_field_is_inserted() {
+    use nara_reflect::__private::effective_component_value_in_place_with_default_overrides;
+
+    let schema = materialization_schema([
+        default_field(
+            "first",
+            ComponentFieldPath::from_fields(["a_valid"]),
+            ComponentValue::U64(7),
+        ),
+        default_field(
+            "sparse",
+            ComponentFieldPath::new([
+                ComponentFieldPathSegment::field("rows"),
+                ComponentFieldPathSegment::index(2),
+            ]),
+            ComponentValue::U64(9),
+        ),
+    ]);
+    let mut candidate =
+        ComponentValue::map([("rows", ComponentValue::List(vec![ComponentValue::U64(1)]))]);
+    let original = candidate.clone();
+    let limits = ComponentValueMaterializationLimits::default();
+    let expected = effective_component_value_owned(&schema, original.clone(), limits).unwrap_err();
+    assert_eq!(
+        effective_component_value_in_place_with_default_overrides(
+            &schema,
+            &mut candidate,
+            &Default::default(),
+            limits,
+        ),
+        Err(expected),
+    );
+    assert_eq!(candidate, original);
+    assert!(candidate.get("a_valid").is_none());
+}
+
+#[test]
 fn list_defaults_construct_contiguous_suffixes_and_nested_containers() {
     let path = |index, field| {
         ComponentFieldPath::new([

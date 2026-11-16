@@ -1,4 +1,8 @@
 use std::ptr;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use nara_core::DepthLimit;
 use nara_ecs::World;
@@ -6,8 +10,8 @@ use nara_identity::{
     EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
-    ComponentRegistryBuilder, ComponentSchemaOwnerSnapshot, ComponentValueKind,
-    ComponentValueMaterializationLimits,
+    ComponentCodecError, ComponentRegistryBuilder, ComponentSchemaOwnerSnapshot,
+    ComponentValueKind, ComponentValueMaterializationLimits,
 };
 
 use super::*;
@@ -51,6 +55,25 @@ fn sharing_schema(version: ComponentSchemaVersion) -> ComponentSchema {
 }
 
 fn sharing_registry(version: ComponentSchemaVersion) -> ComponentRegistrySnapshot {
+    sharing_registry_with_migration(sharing_schema(version), |mut value| {
+        value
+            .set_path(
+                &ComponentFieldPath::from_fields(["revision"]),
+                ComponentValue::U64(11),
+            )
+            .unwrap();
+        Ok(value)
+    })
+}
+
+fn sharing_registry_with_migration(
+    schema: ComponentSchema,
+    migrate: impl Fn(ComponentValue) -> Result<ComponentValue, ComponentCodecError>
+    + Send
+    + Sync
+    + 'static,
+) -> ComponentRegistrySnapshot {
+    let version = schema.version();
     let mut registry = ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("game.overlay-links"),
         ComponentSchemaCatalog::default(),
@@ -59,7 +82,7 @@ fn sharing_registry(version: ComponentSchemaVersion) -> ComponentRegistrySnapsho
     .unwrap();
     registry
         .register_persistent_component_with_codec::<SharingPayload, _, _>(
-            sharing_schema(version),
+            schema,
             |value| Ok(SharingPayload(value.clone())),
             |value| Ok(value.0.clone()),
         )
@@ -70,15 +93,7 @@ fn sharing_registry(version: ComponentSchemaVersion) -> ComponentRegistrySnapsho
                 &sharing_component(),
                 ComponentSchemaVersion::ONE,
                 version,
-                |mut value| {
-                    value
-                        .set_path(
-                            &ComponentFieldPath::from_fields(["revision"]),
-                            ComponentValue::U64(11),
-                        )
-                        .unwrap();
-                    Ok(value)
-                },
+                migrate,
             )
             .unwrap();
     }
@@ -333,6 +348,139 @@ fn migration_and_default_insertion_preserve_sources_and_previous_compilations() 
             ComponentSchemaVersion::ONE,
         );
         drop(document);
+        assert_eq!(compiled_record(&previous, &id("host")).value(), &original);
+        assert_eq!(compiled_record(&report, &id("host")).value(), &expected);
+    }
+}
+
+#[test]
+fn native_migration_defaults_reuse_list_storage_and_keep_original_budgets() {
+    fn list_ptr(value: &ComponentValue) -> usize {
+        let Some(ComponentValue::List(items)) = value.get("payload") else {
+            panic!("expected retained list payload")
+        };
+        items.as_ptr() as usize
+    }
+
+    let migrations = Arc::new(AtomicUsize::new(0));
+    let migrated_list = Arc::new(AtomicUsize::new(0));
+    let version = ComponentSchemaVersion::new(2).unwrap();
+    let schema =
+        sharing_schema(version).with_fields([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("settings"),
+            "Settings",
+            ComponentFieldPath::from_fields(["settings", "values"]),
+            ComponentValueShape::list(ComponentValueKind::U64.into()),
+            ComponentValue::List(vec![ComponentValue::U64(42)]),
+        )
+        .with_capabilities([ComponentCapability::Scene])]);
+    let registry = sharing_registry_with_migration(schema, {
+        let migrations = Arc::clone(&migrations);
+        let migrated_list = Arc::clone(&migrated_list);
+        move |mut value| {
+            migrations.fetch_add(1, Ordering::SeqCst);
+            migrated_list.store(list_ptr(&value), Ordering::SeqCst);
+            let ComponentValue::Map(fields) = &mut value else {
+                panic!("expected migrating map payload")
+            };
+            fields.insert("revision".into(), ComponentValue::U64(11));
+            assert_eq!(fields.remove("target"), Some(ComponentValue::Null));
+            Ok(value)
+        }
+    });
+    let original = sharing_value(ComponentValue::Null);
+    let document = sharing_document(original.clone());
+    let before = document.clone();
+    let current = sharing_registry(ComponentSchemaVersion::ONE);
+    let sources = InMemoryPrefabSourceResolver::new();
+    let previous = expand(&current, &document, &sources, Default::default());
+    let compile = |limits| {
+        let mut loader = |_: &AssetRef, _: &mut crate::prefab::SceneCompilationWorkingSet| {
+            Ok::<_, std::convert::Infallible>(None)
+        };
+        let mut context = crate::prefab::SceneCompilationContext::new(
+            (&registry).into(),
+            &mut loader,
+            SceneCompilationOptions::default().with_limits(limits),
+            None,
+        );
+        context.admit_terminal_work(7, 11, Some(13)).unwrap();
+        let report = context.compile_scene_document(&document);
+        (report, context.usage, context.reference_work)
+    };
+    let (report, usage, reference_work) = compile(Default::default());
+    let compiled = compiled_record(&report, &id("host"));
+    let mut expected = original.clone();
+    let ComponentValue::Map(fields) = &mut expected else {
+        panic!("expected effective map payload")
+    };
+    fields.insert("revision".into(), ComponentValue::U64(11));
+    fields.insert(
+        "settings".into(),
+        ComponentValue::map([(
+            "values",
+            ComponentValue::List(vec![ComponentValue::U64(42)]),
+        )]),
+    );
+    assert_eq!(compiled.value(), &expected);
+    assert_eq!(compiled.version(), version);
+    assert!(report.source_upgrade_required());
+    assert_eq!(migrations.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        list_ptr(compiled.value()),
+        migrated_list.load(Ordering::SeqCst)
+    );
+    let exact = SceneCompilationLimits::default()
+        .with_working_bytes(ByteLimit::new(usage.checked_work_bytes().unwrap()).unwrap())
+        .with_reference_work_nodes(ItemLimit::new(reference_work.0).unwrap())
+        .with_reference_work_bytes(ByteLimit::new(reference_work.1).unwrap());
+    let (fits, exact_usage, exact_work) = compile(exact);
+    assert_eq!(compiled_record(&fits, &id("host")).value(), &expected);
+    assert_eq!(exact_usage, usage);
+    assert_eq!(exact_work, reference_work);
+    assert_eq!(migrations.load(Ordering::SeqCst), 2);
+    let shallow = ComponentValueMaterializationLimits::new(
+        ItemLimit::new(4_096).unwrap(),
+        ByteLimit::new(1024 * 1024).unwrap(),
+        DepthLimit::new(3).unwrap(),
+    );
+    let depth_limit = exact.with_materialization_limits(shallow);
+    let source_limit = exact.with_materialization_limits(shallow.with_nodes(ItemLimit::ONE));
+    let short = exact.working_bytes().get() - 1;
+    let working_limit = exact.with_working_bytes(ByteLimit::new(short).unwrap());
+    for (limits, kind, maximum, calls) in [
+        (depth_limit, "materialized-value-depth", 3, 1),
+        (working_limit, "working-bytes", short, 1),
+        (source_limit, "source-value-nodes", 1, 0),
+    ] {
+        migrations.store(0, Ordering::SeqCst);
+        let (refused, refused_usage, refused_work) = compile(limits);
+        assert!(refused.candidate.is_none());
+        let diagnostic = refused
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+            })
+            .unwrap();
+        for (name, value) in [
+            ("budget-kind", DiagnosticValueRef::Identifier(kind)),
+            ("maximum", DiagnosticValueRef::Unsigned(maximum as u64)),
+        ] {
+            assert_eq!(field(diagnostic, name), value);
+        }
+        assert!(matches!(
+            field(diagnostic, "observed"),
+            DiagnosticValueRef::Unsigned(value) if value > maximum as u64
+        ));
+        assert_eq!(migrations.load(Ordering::SeqCst), calls);
+        assert!(refused_work.0 >= 7 && refused_work.1 >= 11);
+        assert!(refused_usage.scratch_bytes >= 13);
+        if kind != "working-bytes" {
+            assert_eq!(refused_usage.materialized_value_nodes, 0);
+            assert_eq!(refused_usage.materialized_value_bytes, 0);
+        }
+        assert_eq!(document, before);
         assert_eq!(compiled_record(&previous, &id("host")).value(), &original);
         assert_eq!(compiled_record(&report, &id("host")).value(), &expected);
     }

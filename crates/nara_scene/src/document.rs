@@ -4,8 +4,9 @@ use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_identity::SceneEntityId;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
+    ComponentDecodeContext, ComponentFieldId, ComponentRegistrySnapshot, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits,
+    PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
@@ -279,6 +280,17 @@ impl SceneComponentRecord {
             value: self.value.clone(),
             contextual_defaults: self.contextual_defaults.clone(),
         }
+    }
+
+    pub(crate) fn unique_value_mut_with_defaults(
+        &mut self,
+    ) -> Option<(
+        &mut ComponentValue,
+        &BTreeMap<ComponentFieldId, ComponentValue>,
+    )> {
+        self.value
+            .get_mut()
+            .map(|value| (value, &self.contextual_defaults))
     }
 
     /// Extracts an isolated owned value and leaves an explicit null in the record.

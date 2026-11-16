@@ -9,7 +9,8 @@ use nara_identity::{
 };
 
 use super::{
-    effective_component_value_owned, effective_component_value_owned_with_default_overrides,
+    effective_component_value_in_place_with_default_overrides, effective_component_value_owned,
+    effective_component_value_owned_with_default_overrides,
     effective_component_value_with_default_overrides,
     validate_native_component_value_references_with_limits, validate_value_materialization_budget,
 };
@@ -331,8 +332,19 @@ fn inserted_defaults_return_exact_cost_for_nested_containers_and_overrides() {
         );
         assert_eq!(
             effective_component_value_with_default_overrides(&schema, &raw, &overrides, limits),
+            Err(error.clone()),
+        );
+        let mut candidate = raw.clone();
+        assert_eq!(
+            effective_component_value_in_place_with_default_overrides(
+                &schema,
+                &mut candidate,
+                &overrides,
+                limits,
+            ),
             Err(error),
         );
+        assert_eq!(candidate, raw, "preflight refusal precedes all mutation");
     }
     let (borrowed_result, borrowed_cost) = effective_component_value_with_default_overrides(
         &schema,
@@ -344,6 +356,23 @@ fn inserted_defaults_return_exact_cost_for_nested_containers_and_overrides() {
     assert!(matches!(borrowed_result, std::borrow::Cow::Owned(_)));
     assert_eq!(borrowed_result.as_ref(), &expected);
     assert_eq!(borrowed_cost, Some(cost));
+    let mut isolated = raw.clone();
+    let retained = isolated.get("retained").unwrap().as_str().unwrap().as_ptr();
+    assert_eq!(
+        effective_component_value_in_place_with_default_overrides(
+            &schema,
+            &mut isolated,
+            &overrides,
+            limits(9, 51, 4),
+        )
+        .unwrap(),
+        Some(cost),
+    );
+    assert_eq!(isolated, expected);
+    assert_eq!(
+        isolated.get("retained").unwrap().as_str().unwrap().as_ptr(),
+        retained
+    );
     let (value, observed) = effective_component_value_owned_with_default_overrides(
         &schema,
         raw,
@@ -401,7 +430,7 @@ fn owned_defaults_return_none_and_keep_allocations_without_insertions() {
     let payload_pointer = payload.as_ptr();
     let label = "retained allocation".to_owned();
     let label_pointer = label.as_ptr();
-    let raw = ComponentValue::map([
+    let mut raw = ComponentValue::map([
         ("payload", ComponentValue::List(payload)),
         ("label", ComponentValue::String(label)),
         ("optional", ComponentValue::Null),
@@ -425,6 +454,13 @@ fn owned_defaults_return_none_and_keep_allocations_without_insertions() {
         );
     }
     let tiny = limits(1, 1, 1);
+    assert_eq!(
+        effective_component_value_in_place_with_default_overrides(
+            &schema, &mut raw, &overrides, tiny
+        )
+        .unwrap(),
+        None,
+    );
     let (borrowed, cost) =
         effective_component_value_with_default_overrides(&schema, &raw, &overrides, tiny).unwrap();
     assert!(matches!(borrowed, std::borrow::Cow::Borrowed(_)));

@@ -135,6 +135,7 @@ pub mod __private {
         EffectiveValueAdmissionError, component_defaults_are_explicit_with_admission,
         component_field_default_requires_context,
         component_field_default_requires_context_with_admission,
+        effective_component_value_in_place_with_default_overrides,
         effective_component_value_owned_with_default_overrides,
         effective_component_value_with_admission, effective_component_value_with_budget,
         effective_component_value_with_default_overrides,

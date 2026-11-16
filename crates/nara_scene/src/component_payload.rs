@@ -22,6 +22,10 @@ impl ComponentPayload {
         Arc::make_mut(&mut self.0)
     }
 
+    pub(crate) fn get_mut(&mut self) -> Option<&mut ComponentValue> {
+        Arc::get_mut(&mut self.0)
+    }
+
     pub(crate) fn deep_clone(&self) -> Self {
         Self::from(self.0.as_ref().clone())
     }
