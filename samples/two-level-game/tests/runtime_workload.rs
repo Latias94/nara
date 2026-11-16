@@ -133,6 +133,14 @@ fn execute(fail_observer: bool, population: Option<usize>) {
             "{logs}"
         );
         assert_eq!(report["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            report["runs"][0]["scene_work"]["status"],
+            if cfg!(feature = "scene-work-observation") {
+                "complete"
+            } else {
+                "disabled"
+            }
+        );
         assert!(
             report["runs"][0]["failure"]
                 .as_str()
@@ -161,9 +169,35 @@ fn execute(fail_observer: bool, population: Option<usize>) {
             {
                 let work = &run["scene_work"];
                 assert_eq!(work["enabled"], true);
+                assert_eq!(work["status"], "complete");
                 assert_eq!(work["target"], "nara::scene::work");
                 assert!(work["total_calls"].as_u64().unwrap() > 0);
-                assert!(work["total_wall_ns"].as_u64().unwrap() > 0);
+                assert!(work["nested_span_wall_sum_ns"].as_u64().unwrap() > 0);
+                assert_eq!(work["unfinished_entries"], 0);
+                assert!(
+                    work["phases"]["scene_expand"]["worker_thread_calls"]
+                        .as_u64()
+                        .unwrap()
+                        > 0
+                );
+                assert!(
+                    work["phases"]["scene_flat_admission"]["worker_thread_calls"]
+                        .as_u64()
+                        .unwrap()
+                        > 0
+                );
+                assert_eq!(
+                    work["phases"]["scene_prepare_unbound"]["owner_thread_calls"],
+                    6
+                );
+                assert_eq!(
+                    work["phases"]["scene_prepare_unbound"]["worker_thread_calls"],
+                    0
+                );
+                assert_eq!(work["phases"]["scene_publish"]["owner_thread_calls"], 6);
+                assert_eq!(work["phases"]["scene_publish"]["worker_thread_calls"], 0);
+                assert_eq!(work["phases"]["scene_prepare_unbound"]["calls"], 6);
+                assert_eq!(work["phases"]["scene_publish"]["calls"], 6);
                 for phase in [
                     "scene_decode",
                     "scene_expand",

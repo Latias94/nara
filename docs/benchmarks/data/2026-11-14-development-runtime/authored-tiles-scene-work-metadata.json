@@ -1,5 +1,6 @@
 {
   "format": "two-level-authored-tile-scene-work-evidence/v1",
+  "qualification_disposition": "Rejected as complete cross-thread attribution: a58c630 used a thread-local subscriber and omitted IO-worker spans. Raw reports retain their original successful gameplay, pixels and cleanup scope only; their Scene phase ranges are partial.",
   "observed_at": "2026-11-16T20:17:01+08:00",
   "compiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
   "locked_wgpu_revision": "cddb2f5d80dc0009b2ef6767635140cacf90a007",

@@ -664,10 +664,17 @@ still retained. Startup spans overlap and must not be added together. The comple
 snapshot must remain unchanged through gameplay and original retirement.
 
 Add `scene-work-observation` to the desktop/cost-measurement features to record the existing
-`nara::scene::work` spans for source decode, Prefab expansion, flat admission and Scene
-preparation/publication. These are nested wall spans across worker and owner threads; they are not
-a CPU profiler, additive phase budget or extraction/queue measurement. The feature is opt-in and
-leaves the default runtime without tracing instrumentation.
+`nara::scene::work` spans for compiled-component preflight/native decoding, Prefab expansion,
+flat admission and Scene preparation/publication. `scene_decode` is nested in preparation and
+other receiving validation; source reads and JSON/RON parsing are not separately timed. These
+are nested wall spans across worker and owner threads. The explicit measurement binary installs
+its subscriber once, binds each span to the original run and seals after original physical
+retirement, before independent GPU replay. `owner_thread_calls` and `worker_thread_calls` expose
+coverage; retained, unfinished or reentrant spans reject the observation. The
+`nested_span_wall_sum_ns` field overlaps phases and is not CPU time, an additive phase budget or
+an extraction/queue measurement. The feature is opt-in and leaves the default runtime without
+tracing instrumentation. A failed run retains its Scene and physical cleanup facts in the report;
+stderr carries the short failure rather than duplicating that report.
 
 `entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
 ends at the original first actual presented observation. It includes caller/native waits and

@@ -135,13 +135,17 @@ fn write_report(report: &Value) -> Result<(), String> {
 }
 
 fn execute(options: Options) -> Value {
+    let scene_work = match work::Collector::install() {
+        Ok(collector) => collector,
+        Err(error) => return json!({"accepted":false,"failure":error}),
+    };
     let mut event_loop = None;
     let mut runs = Vec::with_capacity(RUNS);
     let mut failure = None;
     let mut adapter = None;
     for index in 0..RUNS {
         eprintln!("runtime_workload: run={} starting", index + 1);
-        let attempt = run_one(event_loop.take(), index + 1, options);
+        let attempt = run_one(event_loop.take(), index + 1, options, &scene_work);
         match attempt {
             Ok((physical, report)) => {
                 event_loop = Some(physical);
@@ -154,8 +158,16 @@ fn execute(options: Options) -> Value {
                 adapter.get_or_insert_with(|| report["adapter"].clone());
                 runs.push(report);
             }
-            Err(report) => {
-                failure = Some(report.to_string());
+            Err(mut report) => {
+                if report.get("scene_work").is_none() {
+                    report["scene_work"] = work::aborted_record();
+                }
+                failure = Some(
+                    report["failure"]
+                        .as_str()
+                        .unwrap_or("runtime workload failed; inspect the retained run report")
+                        .to_owned(),
+                );
                 runs.push(report);
             }
         }
@@ -187,7 +199,7 @@ fn execute(options: Options) -> Value {
             "recovered_original_physical_event_loop": true,
             "shared_process_code_driver_filesystem_caches": true,
             "frame_wall_scope": "exact original App frame start to matching post-Host observation; includes native, driver and submission waits, excludes the observer work after that timestamp",
-            "scene_work_scope": "existing nara::scene::work spans across source decode, expansion and original Scene preparation/publication; feature-off reports retain an explicit disabled record",
+            "scene_work_scope": "existing nara::scene::work spans for compiled-component preflight/native decoding, expansion and original Scene preparation/publication; source file reads/JSON/RON parsing are not separately timed; feature-off reports retain a disabled record",
             "completion_scope": "original App frame start to queue completion callback observation; not GPU execution or scanout",
             "statistics_scope": "per-run finite correlated samples; descriptive nearest-rank quantiles, not a production P99, cold-start comparison or speedup",
             "cpu_memory_scope": "whole process with observer and telemetry enabled; CPU delta and point memory include all threads and driver work; not per-frame CPU, retained-owner bytes or a leak bound",
@@ -268,6 +280,9 @@ impl Experiment {
             }
             if self.observer_panicked.get() {
                 return Err("registered observer panicked inside its protected boundary".into());
+            }
+            if let Some(error) = self.collector.borrow().error() {
+                return Err(error.to_owned());
             }
             if progress != DesktopRunProgress::Running {
                 return Err(format!(
@@ -358,6 +373,7 @@ fn run_one(
     event_loop: Option<WinitEventLoop>,
     index: usize,
     options: Options,
+    scene_work: &work::Collector,
 ) -> Result<(WinitEventLoop, Value), Value> {
     let source_preparation_started = Instant::now();
     let project = options
@@ -367,6 +383,9 @@ fn run_one(
         .map_err(|error| json!({"failure": error}))?;
     let source_preparation_wall = options.tiles.map(|_| source_preparation_started.elapsed());
     let entry_started_at = Instant::now();
+    let scene_run = scene_work
+        .begin()
+        .map_err(|error| json!({"failure":error}))?;
     let root = match &project {
         Some(project) => two_level_game::open_explicit_project_root(project.root()),
         None => two_level_game::open_project_root(),
@@ -429,7 +448,6 @@ fn run_one(
         startup: None,
         project,
     };
-    let scene_work = work::RunObservation::start();
     let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure()))
         .unwrap_or_else(|_| Err("gameplay observer or native callback panicked".into()));
     let startup = experiment.startup;
@@ -441,22 +459,32 @@ fn run_one(
             experiment.run().request_close();
             let retry = catch_unwind(AssertUnwindSafe(|| experiment.retire(false)))
                 .unwrap_or_else(|_| Err("original cleanup retry panicked".into()));
-            let cleanup = match retry {
+            let (cleanup, scene_observation) = match retry {
                 Ok(physical) => {
                     drop(physical);
-                    "completed on explicit retry".to_owned()
+                    (
+                        "completed on explicit retry".to_owned(),
+                        work::finish_record(scene_run.finish()),
+                    )
                 }
-                Err(error) => format!("unresolved original custody: {error}"),
+                Err(error) => {
+                    drop(scene_run);
+                    (
+                        format!("unresolved original custody: {error}"),
+                        work::aborted_record(),
+                    )
+                }
             };
             return Err(json!({ "run": index, "failure": measured.err(),
-                "retirement_failure": error, "cleanup": cleanup }));
+                "retirement_failure": error, "cleanup": cleanup, "scene_work": scene_observation }));
         }
     };
+    let scene_observation = work::finish_record(scene_run.finish());
     if let Err(error) = measured {
         drop(physical);
         return Err(
             experiment.retired_failure(json!({ "run": index, "failure": error,
-            "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } })),
+            "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true }, "scene_work": scene_observation })),
         );
     }
     let report = experiment.collector.borrow().finish();
@@ -466,47 +494,51 @@ fn run_one(
             drop(physical);
             return Err(
                 experiment.retired_failure(json!({ "run": index, "failure": error,
-                "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } })),
+                "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true }, "scene_work": scene_observation })),
             );
         }
     };
-    report["scene_work"] = scene_work.snapshot();
+    report["scene_work"] = scene_observation;
     report["cleanup"] = json!({ "normal_exit": true, "telemetry_complete": true,
         "native_destroyed": true, "surface_retired": true, "provider_released": true,
         "physical_event_loop_recovered": true });
+    if report["scene_work"]["status"] == "rejected" {
+        report["failure"] = report["scene_work"]["reason"].clone();
+        return Err(experiment.retired_failure(report));
+    }
     let mut report =
         match timing::finish_startup_report(report, startup, experiment.run().startup_timings()) {
             Ok(report) => report,
             Err(report) => return Err(experiment.retired_failure(report)),
         };
-    report["copied_source_preparation_wall_ns"] = json!(
-        source_preparation_wall
-            .map(observe::duration_ns)
-            .transpose()
-            .map_err(|error| json!({"failure":error}))?
-    );
+    report["copied_source_preparation_wall_ns"] = match source_preparation_wall
+        .map(observe::duration_ns)
+        .transpose()
+    {
+        Ok(wall) => json!(wall),
+        Err(error) => {
+            report["failure"] = json!(error);
+            return Err(experiment.retired_failure(report));
+        }
+    };
     if let Some(population) = options.tiles {
         let retained = experiment.collector.borrow_mut().take_tile_captures();
         let replay = match tiles::replay(&retained, population) {
             Ok(replay) => replay,
             Err(error) => {
                 drop(retained);
-                return Err(experiment.retired_failure(json!({
-                    "run":index,"failure":error,
-                    "cleanup":{"native_destroyed":true,"physical_event_loop_recovered":true}
-                })));
+                report["failure"] = json!(error);
+                return Err(experiment.retired_failure(report));
             }
         };
         report["tile_replay"] = replay;
         drop(retained);
     }
-    experiment
-        .finish_copied_source(&mut report)
-        .map_err(|error| {
-            json!({
-                "run":index,"failure":error,
-                "cleanup":{"native_destroyed":true,"physical_event_loop_recovered":true}
-            })
-        })?;
+    if let Err(error) = experiment.finish_copied_source(&mut report) {
+        report["failure"] = json!(error);
+        report["copied_source_cleanup_failure"] = json!(error);
+        report["copied_source_removed"] = json!(false);
+        return Err(report);
+    }
     Ok((physical, report))
 }
