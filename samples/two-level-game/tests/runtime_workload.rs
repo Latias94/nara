@@ -23,16 +23,30 @@ use nara::project_tooling::process::{
 #[test]
 #[ignore = "three real hardware DX12 gameplay runs; execute serially on an interactive Windows desktop"]
 fn ordinary_active_gameplay_records_original_frames_and_physically_retires_every_run() {
-    execute(false);
+    execute(false, None);
 }
 
 #[test]
 #[ignore = "requires a hardware DX12 desktop; proves original native cleanup after an injected observer panic"]
 fn a_registered_observer_panic_retires_the_original_window_before_failure_returns() {
-    execute(true);
+    execute(true, None);
 }
 
-fn execute(fail_observer: bool) {
+#[test]
+#[ignore = "nine complete native hardware DX12 game lifetimes with authored 64/4096/16384-cell content and retained-input GPU replay; execute serially"]
+fn authored_tile_populations_complete_original_travel_and_retained_input_replay() {
+    for population in [64, 4096, 16_384] {
+        execute(false, Some(population));
+    }
+}
+
+#[test]
+#[ignore = "requires hardware DX12; proves original native and copied-source custody on a Tilemap observer failure"]
+fn an_authored_tile_observer_panic_retires_original_native_owners() {
+    execute(true, Some(4096));
+}
+
+fn execute(fail_observer: bool, population: Option<usize>) {
     assert_eq!(std::env::var("WGPU_BACKEND").as_deref(), Ok("dx12"));
     assert_eq!(
         std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref(),
@@ -57,6 +71,9 @@ fn execute(fail_observer: bool) {
     .environment("NARA_RUNTIME_WORKLOAD_OUTPUT", output_path.as_os_str());
     if fail_observer {
         command = command.argument("--fail-observer");
+    }
+    if let Some(population) = population {
+        command = command.argument("--tiles").argument(population.to_string());
     }
     let mut process = SupervisedProcessOwner::spawn(
         &command,
@@ -127,6 +144,10 @@ fn execute(fail_observer: bool) {
             report["runs"][0]["cleanup"]["physical_event_loop_recovered"],
             true
         );
+        if population.is_some() {
+            assert_eq!(report["runs"][0]["copied_source_removed"], true);
+            assert!(report["runs"][0]["copied_source_cleanup_failure"].is_null());
+        }
     } else {
         assert!(logs.contains("RUNTIME_WORKLOAD_OK runs=3 gameplay_verified=true telemetry_complete=true original_native_retired=true"), "{logs}");
         assert_eq!(report["runs"].as_array().unwrap().len(), 3);
@@ -241,9 +262,70 @@ fn execute(fail_observer: bool) {
                 device_requests, 1,
                 "one original Device request across the complete native lifetime"
             );
+            if let Some(population) = population {
+                assert_eq!(run["authored_tile_cells"], population);
+                assert_eq!(run["old_scene_receipts_checked"], 5);
+                assert_eq!(run["observed_source_views_retired"], 6);
+                assert_eq!(run["copied_source_removed"], true);
+                let replay = &run["tile_replay"];
+                assert_eq!(replay["accepted"], true);
+                assert_eq!(replay["population"], population);
+                assert_eq!(
+                    replay["original_world_and_sources_retired_before_replay"],
+                    true
+                );
+                assert_eq!(
+                    replay["retained_outputs_exact_after_later_publication_and_producer_retirement"],
+                    true
+                );
+                assert_eq!(replay["frames"].as_array().unwrap().len(), 3);
+                for replayed in replay["frames"].as_array().unwrap() {
+                    assert_eq!(replayed["original_source_and_world_retired"], true);
+                    assert_eq!(replayed["replay_source_matches_original"], true);
+                    assert_eq!(replayed["submitted_prefix_complete"], true);
+                    assert_eq!(replayed["reread_exact_bytes_equal"], true);
+                    assert_eq!(replayed["reread_prefix_complete"], true);
+                    assert!(
+                        replayed["pixels"]["ground_tile_witness_count"]
+                            .as_u64()
+                            .unwrap()
+                            > 0
+                    );
+                    assert_eq!(replayed["pixels"]["background_pixels"], 36);
+                }
+                let cleanup = &replay["cleanup"];
+                assert_eq!(cleanup["original_producers_retired"], true);
+                assert_eq!(cleanup["original_submission_prefixes_complete"], true);
+                assert_eq!(cleanup["original_host_retired"], true);
+                assert_eq!(cleanup["retained_resource_bytes"], 0);
+                assert_eq!(cleanup["retained_candidate_metadata_bytes"], 0);
+                assert_eq!(cleanup["cleanup_fault_count"], 0);
+                assert_eq!(cleanup["callback_abandoned"], false);
+                for frame in frames.iter().filter(|frame| {
+                    frame["initialized"] == true
+                        && frame["gameplay"]["phase"] == "Running"
+                        && frame["gameplay"]["restoring"] != true
+                }) {
+                    let content = &frame["content_and_render"];
+                    assert_eq!(content["authored_tile_cells"], population);
+                    assert_eq!(content["extraction"]["tile_cells"], population);
+                    assert_eq!(content["render_frame"], frame["render_frame"]);
+                    assert_eq!(content["active_scene_instances"], 1);
+                    assert_eq!(
+                        content["successful_drawing"]["quads"],
+                        content["extraction"]["queued_items"]
+                    );
+                }
+            }
         }
         if let Some(evidence) = std::env::var_os("NARA_RUNTIME_WORKLOAD_EVIDENCE") {
-            let evidence = std::path::PathBuf::from(evidence);
+            let mut evidence = std::path::PathBuf::from(evidence);
+            if let Some(population) = population {
+                evidence = evidence.with_file_name(format!(
+                    "{}-tiles-{population}.json",
+                    evidence.file_stem().unwrap().to_str().unwrap()
+                ));
+            }
             assert!(evidence.is_absolute());
             fs::OpenOptions::new()
                 .write(true)

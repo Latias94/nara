@@ -10,6 +10,10 @@
 mod observe;
 #[path = "runtime_cost/process_cost.rs"]
 mod process_cost;
+#[path = "runtime_workload/project.rs"]
+mod project;
+#[path = "runtime_workload/tiles.rs"]
+mod tiles;
 #[path = "runtime_workload/timing.rs"]
 mod timing;
 
@@ -44,14 +48,14 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(2);
 
 fn main() -> ExitCode {
-    let fail_observer = match arguments() {
-        Ok(fail_observer) => fail_observer,
+    let options = match arguments() {
+        Ok(options) => options,
         Err(error) => {
             eprintln!("runtime_workload: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let report = execute(fail_observer);
+    let report = execute(options);
     let success = report["accepted"] == true;
     if let Err(error) = write_report(&report) {
         eprintln!("runtime_workload: write report: {error}");
@@ -68,13 +72,32 @@ fn main() -> ExitCode {
     }
 }
 
-fn arguments() -> Result<bool, String> {
-    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
-    let fail_observer = match args.as_slice() {
-        [] => false,
-        [flag] if flag == "--fail-observer" => true,
-        _ => return Err("usage: runtime_workload [--fail-observer] (set NARA_RUNTIME_WORKLOAD_OUTPUT to an absolute new file)".into()),
+#[derive(Clone, Copy)]
+struct Options {
+    fail_observer: bool,
+    tiles: Option<usize>,
+}
+
+fn arguments() -> Result<Options, String> {
+    let mut options = Options {
+        fail_observer: false,
+        tiles: None,
     };
+    let mut args = std::env::args_os().skip(1);
+    while let Some(argument) = args.next() {
+        if argument == "--fail-observer" && !options.fail_observer {
+            options.fail_observer = true;
+        } else if argument == "--tiles" && options.tiles.is_none() {
+            options.tiles = match args.next().as_deref().and_then(|value| value.to_str()) {
+                Some("64") => Some(64),
+                Some("4096") => Some(4096),
+                Some("16384") => Some(16384),
+                _ => return Err("--tiles requires 64, 4096 or 16384".into()),
+            };
+        } else {
+            return Err("usage: runtime_workload [--tiles 64|4096|16384] [--fail-observer] (set NARA_RUNTIME_WORKLOAD_OUTPUT to an absolute new file)".into());
+        }
+    }
     if !cfg!(windows) {
         return Err(
             "this measurement requires the qualified Windows native process counters".into(),
@@ -85,7 +108,7 @@ fn arguments() -> Result<bool, String> {
     {
         return Err("select WGPU_BACKEND=dx12 and NARA_WGPU_FORCE_FALLBACK=0".into());
     }
-    Ok(fail_observer)
+    Ok(options)
 }
 
 fn write_report(report: &Value) -> Result<(), String> {
@@ -109,14 +132,14 @@ fn write_report(report: &Value) -> Result<(), String> {
     }
 }
 
-fn execute(fail_observer: bool) -> Value {
+fn execute(options: Options) -> Value {
     let mut event_loop = None;
     let mut runs = Vec::with_capacity(RUNS);
     let mut failure = None;
     let mut adapter = None;
     for index in 0..RUNS {
         eprintln!("runtime_workload: run={} starting", index + 1);
-        let attempt = run_one(event_loop.take(), index + 1, fail_observer);
+        let attempt = run_one(event_loop.take(), index + 1, options);
         match attempt {
             Ok((physical, report)) => {
                 event_loop = Some(physical);
@@ -143,7 +166,8 @@ fn execute(fail_observer: bool) -> Value {
         "format": "two-level-active-runtime-workload/v1",
         "accepted": failure.is_none() && runs.len() == RUNS,
         "failure": failure,
-        "injected_observer_failure": fail_observer,
+        "injected_observer_failure": options.fail_observer,
+        "authored_tile_cells": options.tiles,
         "method": {
             "runs": RUNS,
             "scenario": "ordinary Scenario::Travel semantic-command script",
@@ -187,11 +211,29 @@ struct Experiment {
     collector: Rc<RefCell<Collector>>,
     observer_panicked: Rc<Cell<bool>>,
     startup: Option<DesktopStartupTimings>,
+    project: Option<project::Project>,
 }
 
 impl Experiment {
     fn run(&mut self) -> &mut DesktopRun {
         self.run.as_mut().expect("original DesktopRun is retained")
+    }
+
+    fn finish_copied_source(&mut self, report: &mut Value) -> Result<(), String> {
+        if let Some(project) = &mut self.project {
+            report["source_workload"] = project.source_report();
+            project.cleanup()?;
+            report["copied_source_removed"] = json!(true);
+        }
+        Ok(())
+    }
+
+    fn retired_failure(&mut self, mut report: Value) -> Value {
+        if let Err(error) = self.finish_copied_source(&mut report) {
+            report["copied_source_cleanup_failure"] = json!(error);
+            report["copied_source_removed"] = json!(false);
+        }
+        report
     }
 
     fn measure(&mut self) -> Result<(), String> {
@@ -300,6 +342,7 @@ impl Drop for Experiment {
             )
         {
             std::mem::forget(run);
+            std::mem::forget(self.project.take());
             eprintln!(
                 "runtime_workload: original unresolved native owner retained until process exit"
             );
@@ -310,16 +353,35 @@ impl Drop for Experiment {
 fn run_one(
     event_loop: Option<WinitEventLoop>,
     index: usize,
-    fail_observer: bool,
+    options: Options,
 ) -> Result<(WinitEventLoop, Value), Value> {
+    let source_preparation_started = Instant::now();
+    let project = options
+        .tiles
+        .map(project::Project::new)
+        .transpose()
+        .map_err(|error| json!({"failure": error}))?;
+    let source_preparation_wall = options.tiles.map(|_| source_preparation_started.elapsed());
     let entry_started_at = Instant::now();
-    let root = two_level_game::open_project_root()
-        .map_err(|error| json!({"failure": error.to_string()}))?;
-    let recipe = two_level_game::configured_recipe(RunOptions {
+    let root = match &project {
+        Some(project) => two_level_game::open_explicit_project_root(project.root()),
+        None => two_level_game::open_project_root(),
+    }
+    .map_err(|error| json!({"failure": error.to_string()}))?;
+    let mut recipe = two_level_game::configured_recipe(RunOptions {
         scenario: Scenario::Travel,
         save_path: None,
     });
-    let collector = Rc::new(RefCell::new(Collector::new(index, entry_started_at)));
+    if options.tiles.is_some() {
+        recipe = recipe
+            .add_plugin::<tiles::TileCapturePlugin>()
+            .map_err(|error| json!({"failure":error.to_string()}))?;
+    }
+    let collector = Rc::new(RefCell::new(Collector::new(
+        index,
+        entry_started_at,
+        options.tiles,
+    )));
     let observer = Rc::clone(&collector);
     let observer_panicked = Rc::new(Cell::new(false));
     let callback_panicked = Rc::clone(&observer_panicked);
@@ -331,7 +393,7 @@ fn run_one(
             if callback_panicked.get() {
                 return DesktopPresentationControl::Exit(AppExit::Requested);
             }
-            let inject = fail_observer && observation.presented_frame().is_some();
+            let inject = options.fail_observer && observation.presented_frame().is_some();
             match catch_unwind(AssertUnwindSafe(|| {
                 let control = observer.borrow_mut().observe(observation);
                 if inject {
@@ -361,6 +423,7 @@ fn run_one(
         collector,
         observer_panicked,
         startup: None,
+        project,
     };
     let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure()))
         .unwrap_or_else(|_| Err("gameplay observer or native callback panicked".into()));
@@ -386,22 +449,58 @@ fn run_one(
     };
     if let Err(error) = measured {
         drop(physical);
-        return Err(json!({ "run": index, "failure": error,
-            "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } }));
+        return Err(
+            experiment.retired_failure(json!({ "run": index, "failure": error,
+            "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } })),
+        );
     }
     let report = experiment.collector.borrow().finish();
     let mut report = match report {
         Ok(report) => report,
         Err(error) => {
             drop(physical);
-            return Err(json!({ "run": index, "failure": error,
-                "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } }));
+            return Err(
+                experiment.retired_failure(json!({ "run": index, "failure": error,
+                "cleanup": { "native_destroyed": true, "physical_event_loop_recovered": true } })),
+            );
         }
     };
     report["cleanup"] = json!({ "normal_exit": true, "telemetry_complete": true,
         "native_destroyed": true, "surface_retired": true, "provider_released": true,
         "physical_event_loop_recovered": true });
-    let report =
-        timing::finish_startup_report(report, startup, experiment.run().startup_timings())?;
+    let mut report =
+        match timing::finish_startup_report(report, startup, experiment.run().startup_timings()) {
+            Ok(report) => report,
+            Err(report) => return Err(experiment.retired_failure(report)),
+        };
+    report["copied_source_preparation_wall_ns"] = json!(
+        source_preparation_wall
+            .map(observe::duration_ns)
+            .transpose()
+            .map_err(|error| json!({"failure":error}))?
+    );
+    if let Some(population) = options.tiles {
+        let retained = experiment.collector.borrow_mut().take_tile_captures();
+        let replay = match tiles::replay(&retained, population) {
+            Ok(replay) => replay,
+            Err(error) => {
+                drop(retained);
+                return Err(experiment.retired_failure(json!({
+                    "run":index,"failure":error,
+                    "cleanup":{"native_destroyed":true,"physical_event_loop_recovered":true}
+                })));
+            }
+        };
+        report["tile_replay"] = replay;
+        drop(retained);
+    }
+    experiment
+        .finish_copied_source(&mut report)
+        .map_err(|error| {
+            json!({
+                "run":index,"failure":error,
+                "cleanup":{"native_destroyed":true,"physical_event_loop_recovered":true}
+            })
+        })?;
     Ok((physical, report))
 }

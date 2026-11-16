@@ -8,6 +8,12 @@ mod observe;
 #[path = "../src/bin/runtime_cost/process_cost.rs"]
 #[allow(dead_code)]
 mod process_cost;
+#[path = "../src/bin/runtime_workload/project.rs"]
+#[allow(dead_code)]
+mod project;
+#[path = "../src/bin/runtime_workload/tiles.rs"]
+#[allow(dead_code, unused_imports)]
+mod tiles;
 #[path = "../src/bin/runtime_workload/timing.rs"]
 #[allow(dead_code)]
 mod timing;

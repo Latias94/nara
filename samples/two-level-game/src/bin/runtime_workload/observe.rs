@@ -14,8 +14,9 @@ use std::{
 };
 
 use nara::{
-    advanced_prelude::CurrentScene,
+    advanced_prelude::{CurrentScene, SceneSourceView},
     app::{AppExit, FixedTime, FrameExecutionStart, RuntimeGeneration},
+    identity::{EntityLookup, SpawnedSceneInstance},
     project_host::{
         DesktopPresentationControl, DesktopPresentationObservation, DesktopTelemetrySealOutcome,
     },
@@ -184,6 +185,8 @@ struct Frame {
     issued_native_work: Value,
     surface_extent: [u32; 2],
     gameplay: Value,
+    content_and_render: Value,
+    gpu_resources: Value,
 }
 
 #[derive(Clone, Copy)]
@@ -217,6 +220,11 @@ impl ProcessPoint {
 pub(super) struct Collector {
     entry_started_at: Instant,
     run_index: usize,
+    tile_population: Option<usize>,
+    tile_frames: Vec<super::tiles::PresentedTileFrame>,
+    previous_receipt: Option<SpawnedSceneInstance>,
+    source_views: Vec<SceneSourceView>,
+    retired_instance_checks: usize,
     observer_callbacks: u64,
     identities: BTreeSet<PresentationIdentity>,
     frames: Vec<Frame>,
@@ -242,10 +250,19 @@ pub(super) struct Collector {
 }
 
 impl Collector {
-    pub(super) fn new(run_index: usize, entry_started_at: Instant) -> Self {
+    pub(super) fn new(
+        run_index: usize,
+        entry_started_at: Instant,
+        tile_population: Option<usize>,
+    ) -> Self {
         Self {
             entry_started_at,
             run_index,
+            tile_population,
+            tile_frames: Vec::new(),
+            previous_receipt: None,
+            source_views: Vec::new(),
+            retired_instance_checks: 0,
             observer_callbacks: 0,
             identities: BTreeSet::new(),
             frames: Vec::new(),
@@ -277,6 +294,10 @@ impl Collector {
 
     pub(super) fn completed(&self) -> bool {
         self.completed && self.failure.is_none()
+    }
+
+    pub(super) fn take_tile_captures(&mut self) -> Vec<super::tiles::PresentedTileFrame> {
+        std::mem::take(&mut self.tile_frames)
     }
 
     pub(super) fn request_seal(&mut self) {
@@ -468,6 +489,8 @@ impl Collector {
             .ok_or("presented GameSnapshot is unavailable")?;
         let classification = classify(self.previous.as_ref(), snapshot)?;
         let completed = travel_completed(snapshot)?;
+        let content_and_render =
+            content_observation(world, snapshot, self.tile_population, identity.render_frame)?;
         let start = world.get_resource::<FrameExecutionStart>().copied();
         let matching_start = start.filter(|start| start.frame() == identity.app_frame);
         let app_to_post_host_wall_ns = matching_start
@@ -503,6 +526,33 @@ impl Collector {
                         .into(),
                 );
             }
+            if self.tile_population.is_some() {
+                if let Some(previous) = &self.previous_receipt {
+                    if previous.instance_id() != current.receipt().instance_id() {
+                        for entity in previous.entity_ids() {
+                            if matches!(previous.resolve(world, entity), EntityLookup::Resolved(_))
+                            {
+                                return Err(
+                                    "old Scene receipt still resolves after original replacement"
+                                        .into(),
+                                );
+                            }
+                        }
+                        self.retired_instance_checks += 1;
+                    }
+                }
+                if self.previous_receipt.as_ref().is_none_or(|previous| {
+                    previous.instance_id() != current.receipt().instance_id()
+                }) {
+                    if self.source_views.len() == 8 {
+                        return Err(
+                            "finite original Scene lifetime observation limit exceeded".into()
+                        );
+                    }
+                    self.source_views.push(current.source_view());
+                }
+                self.previous_receipt = Some(current.receipt().clone());
+            }
             let stats = observation.frame_completion_stats();
             let resources = observation.gpu_resource_stats();
             if !stats.enabled()
@@ -535,6 +585,23 @@ impl Collector {
             .first_observation
             .ok_or("initial observer timestamp is unavailable")?;
         self.first_presentation_at.get_or_insert(now);
+        if let Some(population) = self.tile_population {
+            if let Some(captured) = super::tiles::join(observation, population)? {
+                let level = captured.snapshot().level.map(|key| key.level());
+                let already_seen = self
+                    .tile_frames
+                    .iter()
+                    .any(|frame| frame.snapshot().level.map(|key| key.level()) == level);
+                if !already_seen || (completed && self.tile_frames.len() == 2) {
+                    if self.tile_frames.len() == 3 {
+                        return Err(
+                            "finite retained original Tilemap capture limit exceeded".into()
+                        );
+                    }
+                    self.tile_frames.push(captured);
+                }
+            }
+        }
         self.frames.push(Frame {
             identity,
             initialized: snapshot.initialized,
@@ -545,6 +612,8 @@ impl Collector {
             issued_native_work: super::timing::native_work(transaction.native_work()),
             surface_extent: [extent.width, extent.height],
             gameplay: snapshot_value(snapshot),
+            content_and_render,
+            gpu_resources: resource_value(observation.gpu_resource_stats()),
         });
         self.previous = Some(snapshot.clone());
         self.completed = completed;
@@ -642,6 +711,24 @@ impl Collector {
                 "ordinary Travel and its explicitly requested telemetry seal did not complete"
                     .into(),
             );
+        }
+        if self.tile_population.is_some() {
+            if self.retired_instance_checks != 5 || self.source_views.len() != 6 {
+                return Err(
+                    "authored Tilemap workload did not observe all six original Scene instances"
+                        .into(),
+                );
+            }
+            if self
+                .source_views
+                .iter()
+                .any(|source| source.with_document(|_| ()).is_some())
+            {
+                return Err("original Scene source remains live after Runtime retirement".into());
+            }
+            if self.tile_frames.len() != 3 {
+                return Err("both original levels and final returned level lack retained presented captures".into());
+            }
         }
         let registry = self
             .target
@@ -759,6 +846,10 @@ impl Collector {
         Ok(json!({
             "run_index": self.run_index,
             "scenario": "travel",
+            "authored_tile_cells": self.tile_population,
+            "old_scene_receipts_checked": self.retired_instance_checks,
+            "observed_source_views_retired": self.source_views.len(),
+            "resource_scope": "per-presentation current CPU asset counts and original backend logical GPU payloads; pending/cache grace are retained; no total content budget, full VRAM, memory plateau or leak claim",
             "adapter": self.adapter.as_ref().ok_or("missing observed hardware adapter")?,
             "acceptance": {
                 "minimum_unique_initialized_presentations": MIN_INITIALIZED_PRESENTATIONS,
@@ -804,6 +895,90 @@ impl Collector {
             "telemetry_seal": self.seal_report,
         }))
     }
+}
+
+fn content_observation(
+    world: &nara::ecs::World,
+    snapshot: &GameSnapshot,
+    expected_tiles: Option<usize>,
+    expected_render_frame: u64,
+) -> Result<Value, String> {
+    use nara::{
+        asset::Assets,
+        identity::WorldIdentityDomain,
+        image::{ImageAsset, PreparedImages},
+        material::Material2dAsset,
+        project_host::ProjectDomainAssets,
+        render::{FrameStats, RenderFrame},
+        sprite_render::SpriteRenderStats,
+        tilemap::{TileSet, Tilemap},
+    };
+    let mut maps = 0_usize;
+    let mut cells = 0_usize;
+    for entity in world.iter_entities() {
+        if let Some(map) = entity.get::<Tilemap>() {
+            maps += 1;
+            cells = cells
+                .checked_add(map.cell_count())
+                .ok_or("Tilemap cell count overflow")?;
+        }
+    }
+    let render = world.get_resource::<SpriteRenderStats>();
+    let drawn = world.get_resource::<FrameStats>();
+    if let Some(population) = expected_tiles {
+        if snapshot.initialized && snapshot.phase == GamePhase::Running && !snapshot.restoring {
+            if world
+                .get_resource::<RenderFrame>()
+                .is_none_or(|frame| frame.index != expected_render_frame)
+            {
+                return Err("successful drawing statistics do not belong to the original presented render frame".into());
+            }
+            let stats = render.ok_or("the original Sprite render statistics are unavailable")?;
+            let drawn = drawn.ok_or("the original successful frame statistics are unavailable")?;
+            if cells != population || maps != if population == 16_384 { 2 } else { 1 } {
+                return Err(format!(
+                    "authored Tilemap workload changed: maps={maps}, cells={cells}, expected={population}"
+                ));
+            }
+            if stats.extracted_tile_cells as usize != population
+                || stats.missing_materials != 0
+                || stats.missing_tilesets != 0
+                || stats.invalid_tile_regions != 0
+                || stats.unprepared_textures != 0
+                || stats.invalid_texture_regions != 0
+                || stats.queued_items == 0
+                || drawn.sprites != stats.queued_items
+                || drawn.draw_calls == 0
+            {
+                return Err(format!(
+                    "actual Tilemap extraction/queue/drawing disagrees: {stats:?}, {drawn:?}"
+                ));
+            }
+        }
+    }
+    let identity = world
+        .get_resource::<WorldIdentityDomain>()
+        .map(WorldIdentityDomain::stats);
+    let bank = world
+        .get_resource::<ProjectDomainAssets>()
+        .and_then(|assets| assets.collection::<two_level_game::sound_bank::SoundBankDomain>())
+        .map(|collection| collection.iter().len());
+    Ok(json!({
+        "tilemaps": maps, "authored_tile_cells": cells,
+        "image_assets": world.get_resource::<Assets<ImageAsset>>().map(Assets::len),
+        "tileset_assets": world.get_resource::<Assets<TileSet>>().map(Assets::len),
+        "material_assets": world.get_resource::<Assets<Material2dAsset>>().map(Assets::len),
+        "prepared_images": world.get_resource::<PreparedImages>().map(PreparedImages::len),
+        "sound_banks": bank,
+        "active_scene_instances": identity.map(|stats| stats.active_scene_instances),
+        "active_scene_entities": identity.map(|stats| stats.active_scene_entities),
+        "render_frame": world.get_resource::<RenderFrame>().map(|frame| frame.index),
+        "extraction": render.map(|stats| json!({"sprites":stats.extracted_sprites,"tile_cells":stats.extracted_tile_cells,
+            "queued_items":stats.queued_items,"batches":stats.batches,"missing_materials":stats.missing_materials,
+            "missing_tilesets":stats.missing_tilesets,"invalid_tile_regions":stats.invalid_tile_regions,
+            "unprepared_textures":stats.unprepared_textures,"invalid_texture_regions":stats.invalid_texture_regions})),
+        "successful_drawing": drawn.map(|stats| json!({"draw_calls":stats.draw_calls,"quads":stats.sprites})),
+    }))
 }
 
 fn snapshot_value(snapshot: &GameSnapshot) -> Value {

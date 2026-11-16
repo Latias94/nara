@@ -680,6 +680,29 @@ another adapter enumeration or a device cache shared between Runtimes.
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
 ```
 
+Add `-- --tiles 64`, `-- --tiles 4096` or `-- --tiles 16384` to the `cargo run` command
+to execute the same three complete Travel lifetimes with source-authored Tilemaps. Each population
+covers the same 256-by-256 world footprint. The consumer constructs and later removes a private
+content copy; it leaves this checkout's authored sources unchanged. The 16,384-cell variant uses
+a root-bound Prefab for half of its terrain to respect the original per-file wire limits, so its
+source layout differs from the smaller populations. These finite workloads do not establish a
+supported-world capacity or a pure cell-count scaling curve.
+
+Tile reports include original Scene-instance retirement checks, current CPU asset counts,
+extracted versus visible queued cells, actual drawing statistics and logical GPU resource points.
+After the original native Runtime, World and sources retire, three retained original inputs
+are replayed into equal-sized images through an independent public Host. Known-source ground
+and background pixels are checked, earlier outputs are reread after later publication and producer
+retirement, and original submission prefixes and Host resources must retire. This proves selected
+captured-input pixels and ownership; it does not read the swapchain or measure total VRAM, a
+memory plateau, GPU execution or scanout. Source-copy preparation is timed separately from the
+entry-to-first-presentation endpoint. The default baseline retains its original source path.
+
+The ignored native population test runs all three populations serially. Its separate observer-panic
+control must retire the original native owners and remove the copied content. Set
+`NARA_RUNTIME_WORKLOAD_EVIDENCE` to a new absolute JSON path to preserve positive reports; population
+reports use that filename stem followed by `-tiles-64`, `-tiles-4096` or `-tiles-16384`.
+
 ## Development Cost Observations
 
 `DevelopmentHost::enable_timings()` enables fixed cumulative elapsed observations. The default
