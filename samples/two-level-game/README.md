@@ -58,6 +58,51 @@ Naga. This split does not claim to remove every source-oriented implementation o
 complete dedicated-server product. The delivery tests check these selected dependency/features
 before generating and executing the actual relocated Players.
 
+## Optional Windows Game Audio
+
+The explicit `audio-cpal` composition adds two original game-owned one-shots through CPAL
+0.18.2/WASAPI: a committed pickup and a successfully reconstructed travel entry. It currently
+requires a real Windows output device supporting stereo 48 kHz `f32`. Missing or unsupported
+devices refuse startup; another device or silent fallback is not selected automatically.
+
+```text
+cargo +1.95.0 run --locked --offline --release --features desktop,audio-cpal --bin audio_desktop
+```
+
+Use the same WASD, E/Q, marker, checkpoint and Retry controls as the ordinary desktop game.
+Game Pause freezes simulation while already started short effects continue on the device clock.
+An exact Step can produce one new pickup; Resume does not replay it. Successful Scene replacement
+cancels that old instance's voices. Failed travel retains it; Retry and checkpoint Restore do not
+invent a new travel-entry cue. Playback refusal reports its own error without undoing committed
+gameplay. The existing exact-reconstruction inventory continues refusing this unrepresented native
+audio service.
+
+The optional recipe owns a finite cue queue, sixteen voices, a 4096-effect duplicate ledger,
+bounded observation and managed device shutdown. It prepares the checked-in [original WAVs](assets/audio/README.md)
+before callbacks. Its normal data callback neither allocates nor locks game state. Actual stream
+destruction stays on the original Runtime driver and waits for CPAL's original WASAPI worker;
+pause admission or a consumed sample is not physical playback completion. Device shutdown and
+native calls remain cooperative. Default and cooked recipes do not acquire this service merely
+because `audio-cpal` is compiled; the current cooker does not select it for shipping Players.
+
+For the finite ordinary-game qualification, choose hardware DX12 or Vulkan and set
+`NARA_WGPU_FORCE_FALLBACK=0`. The executable uses a private copy of the project for deliberate
+source failure/repair, then retires both original native Runtimes and their recovered event loop:
+
+```text
+cargo +1.95.0 run --locked --offline --release --features desktop,audio-cpal --bin audio_desktop -- --verify
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --lib --test native_audio --run-ignored only -E 'test(audio::native_tests::) | test(ordinary_audible_game)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The report compares complete captured device-callback samples with the original WAVs and exact
+game causes, alongside Pause/Step, failed travel, cancellation and Save/Restore. Separate native
+controls hold a real callback through managed Close, fail Startup after acquisition and unwind a
+test assertion before proving original cleanup. Capture observes this game's output buffer only;
+it proves neither human audibility nor system-mixer output, DAC delivery, latency or foreign
+platform support. Device hot-switch/recovery, streaming music and native audio-state restoration
+remain separate work. The [owning plan](../../docs/plans/2026-11-03-joint-motion-execution-plan.md#concrete-game-audio-and-native-retirement-successor)
+records exact qualification and remaining scope.
+
 ## Checkpoint Acceptance
 
 Create an application-owned directory, then run the same headless binary twice:

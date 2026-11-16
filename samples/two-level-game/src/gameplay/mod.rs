@@ -473,6 +473,11 @@ fn simulate(world: &mut World) {
                 "two_level_game: collected={id} level={key:?} score={}",
                 progress.checkpoint().score
             );
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            {
+                drop(progress);
+                crate::audio::pickup_collected(world, key, id);
+            }
         }
     }
     travel::hide_collected(world);

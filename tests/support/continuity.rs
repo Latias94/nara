@@ -271,7 +271,7 @@ impl Fixture {
             assert!(
                 !matches!(
                     name,
-                    "notify" | "nara_asset_watch" | "nara_tooling" | "nara-editor"
+                    "notify" | "nara_asset_watch" | "nara_tooling" | "nara-editor" | "cpal"
                 ) && !name.starts_with("nara_ui")
                     && !name.starts_with("dear-imgui"),
                 "shipping runtime inherited development or UI package: {line}",

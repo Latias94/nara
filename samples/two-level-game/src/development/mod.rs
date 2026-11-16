@@ -1077,7 +1077,7 @@ mod selection_tests {
                 &selection("player", features.clone(), false),
                 placement,
             ));
-            for extra in ["cook", "cooked-player", "cost-measurement"] {
+            for extra in ["cook", "cooked-player", "cost-measurement", "audio-cpal"] {
                 let mut widened = features.clone();
                 widened.push(extra);
                 let widened = selection("continuity", widened, false);

@@ -185,6 +185,8 @@ fn retry_current(world: &mut World) -> Result<(), String> {
             report.diagnostics
         ));
     }
+    #[cfg(all(windows, feature = "audio-cpal"))]
+    crate::audio::scene_replaced(world);
     {
         let mut session = world.resource_mut::<Session>();
         session.markers.clear();
@@ -333,6 +335,8 @@ pub(super) fn advance(world: &mut World) {
         );
         return;
     }
+    #[cfg(all(windows, feature = "audio-cpal"))]
+    crate::audio::scene_replaced(world);
     ack(world, request);
     {
         let mut session = world.resource_mut::<Session>();
@@ -344,6 +348,10 @@ pub(super) fn advance(world: &mut World) {
     match reconstruct(world) {
         Ok(()) => {
             world.resource_mut::<Session>().phase = GamePhase::Running;
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            if !pending.restore {
+                crate::audio::travel_entered(world, pending.target);
+            }
             println!(
                 "two_level_game: entered {:?} score={} restored={}",
                 pending.target, pending.checkpoint.score, pending.restore

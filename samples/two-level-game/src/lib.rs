@@ -1,5 +1,7 @@
 //! A complete small exploration product: authored levels, finite travel and explicit checkpoints.
 
+#[cfg(all(windows, feature = "audio-cpal"))]
+pub mod audio;
 #[cfg(feature = "development")]
 pub mod development;
 mod gameplay;
