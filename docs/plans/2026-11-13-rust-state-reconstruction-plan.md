@@ -2755,3 +2755,86 @@ the final source then passed its complete release build and every recorded accep
 Cargo/native workloads remain serial against the original target, without cache cleaning,
 remote CI execution or publication. Paused UI/Dialogue changes remain excluded. This completes
 the named reference-scan unit, not the full Foundation/R9/R12 or its numeric runtime budgets.
+
+### Current-Version Migration Cost Reuse
+
+Status: implemented at `81a9d59` and qualified within the finite Windows scope below. The complete
+authored Tile game continues from `9ed1b1f`; its qualified executable and exact source hashes were
+frozen before editing. The native comparison retains the same compiler/profile and phase hooks
+in before/after/after/before order. The original immutable source still needs one
+complete candidate clone. This unit addresses only the pure cost refresh after an owned migration
+returns its input version unchanged.
+
+`SchemaAuthority::migrate_owned` has three concrete routes. Native and Mixed-native use Reflect's
+owned migration, which moves a current-version value unchanged without invoking a migration
+callback; actual migrations strictly advance the version. Mixed-data and Authoring accept only
+the current version and move the same value. Record that internal guarantee at the owner, then
+reuse the already bounded raw cost only for unchanged-version success. Actual migration output
+still receives its complete depth/node/byte admission before defaults. Preserve source syntax
+policy, hidden contextual defaults, owner/Schema checks, source-upgrade reporting, default insertion,
+semantic validation, reference planning and final effective costs. No configured limit, callback
+work charge, public interface, new cache or cross-value witness changes.
+
+Extend the existing migration/default cost matrix with a large explicit current-version payload;
+retain grow/shrink/default cases, exact and one-short final limits, owned-storage controls and all
+affected Scene/public reference-conversion tests. Qualify the unchanged native population/baseline/
+panic consumers, then compare frozen programs before reporting a benefit. Full Foundation/R9/R12,
+numeric budgets and foreign execution remain open; Editor/UI/Dialogue work stays paused.
+
+Implementation and the existing cost-matrix extension are `81a9d59`. Complete all-feature Scene
+library controls plus Reflect's owned migration/storage control pass 783/783 at
+`fef40ab3-18f1-412c-9c4a-c9928106a32d`, with 240 unchanged Reflect cases outside the filter.
+Public format/effective-reference/hidden-default/selected-reference controls pass 45/45 at
+`9760a272-3b8f-4d4b-ab5b-027effec2646`. Independent review confirms the concrete authority's
+unchanged-value guarantee, pre-migration immutability, actual-migration admission and final
+cost/reference deltas without P1/P2 or additional test gaps. The scoped reviewer is closed.
+The complete release game/library/metric/span/native cohort passes 143/143 without skips at
+`a2c95a6c-d55d-485f-b0c1-3480b59a2f5f`. Nine 64/4K/16K native Tile lifetimes retain 773 initialized
+presentations and 27 original-input GPU replays; three baseline lifetimes retain 191. Both observer
+panic controls and original gameplay, retirement of sources/receipts, copied-source removal,
+rereads of retained images and Host/submission-prefix cleanup pass. The qualified executable hash matches the
+frozen paired-after program.
+
+The [balanced comparison and exact evidence](../benchmarks/2026-11-14-development-runtime-costs.md#current-version-migration-cost-reuse)
+add twelve 16K lifetimes and 36 GPU replays. Cumulative migration wall median is 43.325/0.051 ms,
+complete materialization 359.971/338.568 ms and expansion 945.356/937.516 ms before/after. Clone,
+defaults and reference planning are higher, without established causes. Whole-process walls are
+18.620/18.620/18.626/18.712 seconds: no meaningful end-to-end speedup is established. Nested spans
+and correlated samples do not qualify CPU/GPU duration, physical-memory or production-tail budgets.
+Full Foundation/R9/R12 and foreign execution remain open, with Editor/UI/Dialogue paused.
+
+Owning Scene all-target/all-feature correctness Clippy, feature-free Scene library checks, root
+formatting and selected source/executable/report integrity pass; existing warnings remain. The
+ordinary game and observation source hashes are unchanged. The correctness reviewer and separate
+ownership-study agent are both closed. Cargo/native work stays serial against the original target,
+without cache cleaning, remote CI or publication. This closes the named cost-reuse unit; it does
+not select or implement the following shared-storage study.
+
+### Shared Component Payload Ownership Study
+
+Status: source research at `81a9d59`; no shared-storage interface or implementation is selected. The
+remaining clone envelope motivates a separate complete ownership change rather than moving
+copies into migration/default/reference entry points. A self-contained component payload could
+share its own allocation without retaining an entire raw Prefab, resolver or snapshot. Retaining
+an entire document would change the existing
+[escaped Tilemap custody control](../../src/project_content/tests/tilemap_custody.rs): raw Prefabs
+can retire while an escaped SceneSource still reads its inherited values. Backing through a
+snapshot or ProjectSourceContent would also risk a strong cycle through its own candidate.
+
+Raw source retention and compiled output currently receive separate retained allowances through
+the root ProjectContentLease; compilation's cumulative working model is not that lease.
+ResolvedPrefabSource carries no budget or generation claim. Compiled data preparation can escape
+independently, and public `snapshot.scene().clone()` currently owns independent value trees.
+Cheap shared clones must not keep original allocations alive after their original charge is
+refunded. Each retained owner could conservatively keep a complete logical allowance, including
+the shared-container overhead; deduplicating actual allocation charges instead requires its
+original custody to follow the last holder. Neither choice changes per-occurrence materialized
+node/byte limits. No budget-saving claim follows from sharing alone.
+
+Before implementation, select the source/compiled interface and audit its real public consumers.
+Prove raw-document release, payload/candidate reachability, independent preparation, source edit
+isolation, exact/one-short work and retained limits, generation capacity and final refund through
+the original 16K Travel/native/pixel workflow. Actual defaults/properties/reference writes must
+separate storage only when mutation is needed; mechanical `Arc::make_mut` at every owned entry
+can merely relocate the clone. Keep original retained owners and receipts; no universal cache or
+new lifecycle authority is implied by this study. The scoped read-only research agent is closed.

@@ -3279,6 +3279,18 @@ are faster in this finite observation. It does not establish general performance
 memory or production-tail budgets. No cache, public witness, larger limit or new owner is added;
 full Foundation/R9/R12 and foreign execution remain open, with UI/Dialogue paused.
 
+The [current-version migration successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#current-version-migration-cost-reuse)
+at `81a9d59` preserves bounded raw cost only when the concrete authority moves the same value
+without advancing its version. Actual migration output still receives complete admission before
+defaults; final Schema/reference/cost and original work/retained limits remain. Complete Scene
+and owned-storage controls pass 783/783, public consumers 45/45 and game/metric/span/native controls
+143/143. The [report](../../benchmarks/2026-11-14-development-runtime-costs.md#current-version-migration-cost-reuse)
+retains exact native/pixel/failure evidence and a balanced frozen-program comparison: the migration
+wall envelope is almost eliminated, but no meaningful end-to-end speedup is established. Shared
+payload storage remains research with unresolved public-clone and retained-custody interfaces;
+no cache, budget owner or capacity change is introduced. Full Foundation/R9/R12 and foreign
+execution stay open, with UI/Dialogue paused.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

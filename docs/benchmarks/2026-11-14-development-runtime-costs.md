@@ -2240,6 +2240,76 @@ before execution; final-source qualification passes. No Cargo/native workloads o
 is cleaned, and no remote CI or publication occurs. These results close this named optimization;
 full Foundation/R9/R12, numeric budgets and foreign execution remain open, with UI/Dialogue paused.
 
+#### Current-Version Migration Cost Reuse
+
+The [owning successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#current-version-migration-cost-reuse)
+continues from the qualified `9ed1b1f` executable, frozen before editing. The same seven existing
+value-phase hooks remain. Scene previously refreshed the complete raw cost after every successful
+owned source migration, including current-version values that the original concrete authority
+moves unchanged. Native and Mixed-native invoke callbacks only for strictly advancing migration
+chains; Mixed-data and Authoring accept only the current version and return the same owned value.
+
+Scene now reuses its already bounded raw cost when the returned version equals the input version.
+Real migration output still receives complete node/byte/depth admission before defaults. The
+source-upgrade flag, hidden contextual defaults, actual default insertion, semantic/reference
+validation, final effective costs, cumulative working charges and configured limits remain. No
+new callback, cache, witness or public interface is needed. The immutable-source candidate still
+owns its complete cloned value. The existing grow/shrink/default cost matrix adds a 256-item
+unchanged-version case with exact and one-short final limits; it does not introduce another
+test harness or change the ordinary native workload.
+
+The frozen original and `81a9d59` executables complete before/after/after/before with the same
+original 16K workload, compiler/profile, phase hooks and RTX 4090/DX12 adapter. All twelve complete
+lifetimes and 36 original-input GPU replays pass. Raw reports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-current-migration-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-current-migration-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-current-migration-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-current-migration-paired-4-before.json),
+with [exact source/executable/report/order metadata](data/2026-11-14-development-runtime/authored-tiles-current-migration-paired-metadata.json).
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/clone admission | 45.029 ms | 44.899 ms |
+| Value clone | 179.303 ms | 182.473 ms |
+| Migration, including post-migration admission | 43.325 ms | 0.051 ms |
+| Default materialization | 42.405 ms | 44.944 ms |
+| Semantic validation | 1.206 ms | 1.260 ms |
+| Reference planning | 48.204 ms | 63.768 ms |
+| Reference-program validation | 0.014 ms | 0.014 ms |
+| Complete component materialization | 359.971 ms | 338.568 ms |
+| Expansion, including nested Prefab acquisition | 945.356 ms | 937.516 ms |
+| Source payload decode | 661.586 ms | 670.802 ms |
+
+The current-version migration envelope is almost eliminated; complete materialization is 5.95%
+lower and expansion 0.83% lower in this finite observation. Clone, defaults and reference planning
+are higher; their causes are not established. Complete process walls in order are
+18.620, 18.620, 18.626 and 18.712 seconds. No meaningful end-to-end speedup is established.
+Both versions retain 726 initialized presentations, which is not a throughput measurement.
+These endpoints include source-copy generation, startup/pacing/waits, complete gameplay and
+independent replay. Correlated lifetimes and uncontrolled host/driver/cache/clock state do not
+qualify statistical confidence, general performance, CPU/GPU duration, physical-memory or
+production-tail budgets. Nested wall envelopes overlap and are not one transition delay.
+Complete release game/library/metric/span/native controls pass 143/143 without skips at
+`a2c95a6c-d55d-485f-b0c1-3480b59a2f5f`. Nine 64/4K/16K native Tile lifetimes retain 773 initialized
+presentations and 27 original-input GPU replays; three baseline lifetimes retain 191. Both panic
+controls and original gameplay, receipts/source retirement, copied-source removal, retained-image
+rereads and original Host/submission-prefix cleanup pass. Raw reports are
+[64](data/2026-11-14-development-runtime/authored-tiles-current-migration-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-current-migration-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-current-migration-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-current-migration-baseline.json), with
+[source/executable/report and qualification metadata](data/2026-11-14-development-runtime/authored-tiles-current-migration-metadata.json).
+The qualified executable matches the paired-after hash. Complete Scene library and owned-storage
+controls pass 783/783, with 240 unchanged Reflect cases outside the filter; public format, effective
+references, hidden defaults and selected-reference controls pass 45/45. Exact IDs and independent review
+are retained in the owning plan. This unit does not change cumulative working charges or receiving
+limits; it does not claim another run of the preceding root receiving cohort.
+Owning Scene all-target/all-feature correctness Clippy, feature-free Scene library checks, root
+formatting and source/executable/report integrity pass; existing warnings remain. Two scoped
+review/research agents are closed. Work remains serial against the original target without cache
+cleaning, remote CI or publication. Full Foundation/R9/R12, numeric budgets, foreign execution and
+the separate shared-payload storage design remain open; UI/Dialogue stays paused.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

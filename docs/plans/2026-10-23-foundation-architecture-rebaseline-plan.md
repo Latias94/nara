@@ -5538,6 +5538,20 @@ correlated samples and uncontrolled host/cache/clock state do not establish a ge
 CPU/GPU duration, physical-memory or production-tail budgets. Full Foundation/R9/R12 and foreign
 execution remain open; Editor/UI/Dialogue work stays paused.
 
+The [current-version migration successor](2026-11-13-rust-state-reconstruction-plan.md#current-version-migration-cost-reuse)
+at `81a9d59` reuses the admitted raw cost when the concrete owned migration returns its input
+version unchanged. Actual migration output still receives full bounded admission before defaults;
+Schema/reference checks, final costs, cumulative charges and limits remain. Complete Scene and
+owned-storage controls pass 783/783, public consumers 45/45 and game/metric/span/native controls
+143/143. Nine Tile lifetimes retain 27 GPU replays, with baseline and panic cleanup preserved.
+The [balanced comparison](../benchmarks/2026-11-14-development-runtime-costs.md#current-version-migration-cost-reuse)
+adds twelve 16K lifetimes and 36 replays: migration wall median is 43.325/0.051 ms before/after,
+materialization 359.971/338.568 ms and whole-process walls approximately 18.62 seconds. No meaningful
+end-to-end speedup or production budget is established. The separate
+[shared-payload ownership study](2026-11-13-rust-state-reconstruction-plan.md#shared-component-payload-ownership-study)
+identifies retained-budget and public-clone requirements; no storage interface is selected or
+implemented. Full Foundation/R9/R12 and foreign execution stay open; UI/Dialogue remains paused.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
