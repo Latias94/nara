@@ -2012,3 +2012,74 @@ retirement retain their original owners. The continuous child reports Vulkan and
 before Close. These are correctness workflows, not controlled iteration-speed measurements.
 Outer tests use release; actual captured game children use dev with explicit no-default feature
 selection. Headless/default and final static checks follow separately.
+
+## First Initialized Frame Cost Attribution
+
+Status: implemented and qualified for Windows/Rust1.95 hardware DX12, starting from `3be7b0a`
+after source-free audible delivery. Continue the qualified
+[active gameplay baseline](../benchmarks/2026-11-14-development-runtime-costs.md#active-gameplay-workload-baseline)
+through the same ordinary Travel consumer. Its first initialized frame contains approximately
+0.6 seconds between original App-frame entry and post-Host observation. This broad span does not
+identify Shader, device, source preparation or GPU execution as the cause.
+
+Enable the existing original Desktop startup timings. Add opt-in fixed Runtime transaction wall
+observations for namespace preparation, Surface acquisition, candidate preparation, program execution
+and Surface presentation inside the original WGPU Host. Keep observations with original transaction
+identity and clear them at each new transaction. Disabled instrumentation performs no new clock
+reads; completed returned errors can retain reached operation spans, while unwinding and unreached
+operations cannot invent completion. Observation never creates a submission/presentation receipt,
+changes error handling, waits for extra work or grants device authority.
+
+Extend the existing complete native consumer with first-presentation startup snapshots and every
+original frame's phase/work facts. Check matching Runtime/App/render/window/backend/device identity,
+complete five-phase observations for actual initialized successful presentations and finite nonnegative
+accounting inside the original broad frame. Retain unmeasured residual explicitly; driver waits and
+error-scope polling remain wall time. Keep all movement, pickups, markers, travel/restart, exact
+completion, observer-panic cleanup and physical native retirement assertions. Three sequential runs
+share process/driver/cache state and are not cold-start or independent hardware trials.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f` separates Main startup, per-device
+RenderStartup, asset preparation and pipeline states. Its native renderer initialization still
+blocks, and PipelineCache is not a deduplicating disk PSO cache. Pinned Godot
+`7a37606a433c0e7735525037cdf774f043146a21` separates Display/Rendering/Load Game benchmarks
+from actual RenderingDevice submission/presentation. Its current 2D pipeline path still waits
+for compilation. Follow their ownership distinctions without assuming asynchronous names or
+cache presence remove work. Relevant source paths are `crates/bevy_app/src/main_schedule.rs`,
+`crates/bevy_render/src/{settings.rs,render_asset.rs,render_resource/pipeline_cache.rs}` and
+Godot `main/main.cpp`, `core/os/os.cpp`,
+`servers/rendering/{rendering_device.cpp,renderer_rd/renderer_canvas_render_rd.cpp}`.
+
+Qualify the instrumentation through CPU and independent public consumers plus actual hardware DX12
+Travel/panic-cleanup acceptance. Attribute the observed first-frame cost before choosing an
+optimization; a moved cost must not be reported as a lower complete startup endpoint. Preserve
+the original render/device/resource-prefix and Runtime owners. No generic profiler, second render
+World, cross-Runtime cache, speculative prewarming, numeric production budget or complete
+Foundation/R12 claim follows. Editor/UI/Dialogue product work remains paused.
+
+The [executed attribution](../benchmarks/2026-11-14-development-runtime-costs.md#first-initialized-frame-attribution)
+retains the complete report and selected-source/executable provenance. Owning CPU controls pass
+19/19, the ordinary game library and metric controls 130/130, actual three-run Travel and
+registered-observer panic cleanup 2/2, and the affected original native Host cohort 8/8. The new
+observations preserve returned-error, no-clock-disabled, per-transaction reset and unwind semantics.
+The sample checks exact phase sums inside matching frame envelopes, keeps actual spans without
+an early App start, and preserves verified original cleanup when attribution itself refuses.
+
+First initialized outer spans are 619.0608/599.9730/633.0067 ms. Namespace preparation accounts for
+587.5639/571.3827/606.9740 ms, or 94.91%/95.23%/95.89% of those same frames. Program execution is
+29.8027/27.5906/25.0220 ms. Whole entry-to-first-present endpoints are
+734.7560/626.6711/675.7288 ms. These observations locate the next investigation in the original
+device/namespace operations; they do not isolate a single Adapter/driver call or establish a
+speedup. Later Surface-acquisition medians near 6.1 ms retain native pacing and do not imply
+gameplay CPU/GPU cost. Default clocks remain disabled for ordinary/shipping consumers.
+
+Minimal no-default WGPU library compilation, all-target/all-feature owning correctness Clippy,
+consumer executable/test correctness Clippy and root/sample formatting pass. Existing unrelated
+non-correctness warnings remain. Source/CPU/consumer review and document/provenance closure stay
+with this unit; no remote CI or other-platform execution is claimed. The next original-owner
+cost investigation must retain the complete entry endpoint and all correct-result/cleanup facts.
+
+Owner code is committed at `46f798c`; complete consumer/evidence at `e88ec46`. Both independent
+reviews close with no remaining P1/P2 after the two consumer corrections. All five scoped agents
+are closed. Added document links/fragments, source/executable/report hashes and whitespace checks
+pass. Local commits retain the paused UI/Dialogue work; no remote publication or whole-Goal
+completion follows.

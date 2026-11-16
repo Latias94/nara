@@ -1404,3 +1404,88 @@ from collecting this baseline. The next relevant measurement should attribute th
 initialized frame through existing startup/GPU observations and extend a named content workload
 before selecting a broader steady-state budget. Full Foundation/R12 remains open; paused
 Editor/UI/Dialogue product work is unchanged.
+
+## First Initialized Frame Attribution
+
+The November 16 successor on base `3be7b0a` retains the complete ordinary Travel workload above
+and explicitly enables existing Desktop startup observations plus five fixed operation wall spans
+inside the original WGPU Runtime transaction. It adds no device, native-loop, resource or
+presentation owner. Disabled phase collection performs no instrumentation clock reads. Returned
+errors may retain reached spans; unwind and unreached calls remain absent. Each new transaction
+clears its observations. Native work counters remain issued requests, not hardware completion.
+The owner implementation is `46f798c`; the complete consumer and captured evidence are
+`e88ec46`. Measurements use that implementation before those local commits; selected source and
+executable hashes identify the measured worktree rather than a clean historical build.
+
+The [complete report](data/2026-11-14-development-runtime/first-initialized-frame.json) retains
+483 initialized presentations across three fresh Runtime/window/device lifetimes and all original
+completion matches. The [metadata](data/2026-11-14-development-runtime/first-initialized-frame-metadata.json)
+records actual source, compiler, executable/report hashes, command and executed test identities.
+Execution uses Rust1.95.0/release, hardware DX12/RTX4090, one build job, locked/offline resolution
+and the original target. The same process, loaded code/driver/filesystem state and recovered
+physical event loop are shared; these are not cold-process or independent hardware trials.
+
+The original first presentation and first initialized presentation are distinct report fields.
+They happen to coincide in these runs; their App/render/window/backend/device identities are
+checked against the original receipt. The observer retains actual phase spans even if an early
+presentation lacks its matching App start; only the unavailable App residual remains null.
+The entry endpoint starts before source-root/recipe construction and ends at the original first
+presented observation. It includes caller/native waits and excludes executable/process loading.
+
+| Run | Initialized frames | Entry to first presentation | First initialized App to post-Host | Namespace preparation | Program execution | Other App-frame wall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 159 | 734.7560 ms | 619.0608 ms | 587.5639 ms | 29.8027 ms | 0.2714 ms |
+| 2 | 165 | 626.6711 ms | 599.9730 ms | 571.3827 ms | 27.5906 ms | 0.2736 ms |
+| 3 | 159 | 675.7288 ms | 633.0067 ms | 606.9740 ms | 25.0220 ms | 0.2021 ms |
+
+The five disjoint operation spans are namespace preparation, Surface acquisition, candidate
+preparation, program execution and Surface presentation. The omitted table columns are retained
+exactly in each frame: first-frame acquisition is 0.0322/0.0208/0.0144 ms, candidate preparation
+0.0549/0.0444/0.0311 ms and presentation 1.3357/0.6609/0.7631 ms. Their checked sum plus the
+reported App residual equals that exact frame's outer wall duration. The residual is unmeasured
+App work and gaps, not an inferred CPU or waiting duration. Queue-completion observations keep
+their separate exact joins and may precede post-Host observation; no GPU execution/scanout
+duration is derived by subtracting these timestamps.
+
+Namespace preparation accounts for 94.91%, 95.23% and 95.89% of the first initialized frame's
+outer wall span. This is the original namespace call, including producer maintenance and
+instance/surface/Adapter/device/configuration preparation; it does not isolate Adapter selection,
+driver work or a single native API. First-frame program execution includes its native preparation,
+validation, encoding, submission and waits. These samples do not justify attributing all of that
+span to Shader compilation or installing a disk pipeline cache. Later initialized frames have
+namespace medians 0.0028/0.0029/0.0029 ms and Surface-acquisition medians
+6.08865/6.08585/6.12095 ms, with original native pacing unchanged. Those operation wall medians
+do not establish simulation CPU or GPU cost, and are not a steady-state production budget.
+
+Existing startup observations remain separate. Content preparation is 13.3222/13.2450/22.7321 ms,
+Runtime startup 4.1351/3.1648/5.0909 ms and session construction 69.1277/0.0035/0.0042 ms.
+The first native poll takes 649.3214/0.0025/0.0032 ms, while polling through first presentation
+takes 649.3214/611.4251/650.2024 ms. A short first poll can defer initialization to a later poll;
+it is not proof of shorter startup. The polling aggregate overlaps the first poll and excludes
+caller gaps. Completed startup snapshots freeze after the first actual presented poll and remain
+unchanged through the full gameplay/seal/physical-retirement path.
+
+The owning CPU selection passes 19/19 in `f92d4a71-d32c-4476-9cae-860ad5d19882`, covering seven
+new timing controls and original completion/resource/work counters. The independent sample's full
+game library plus metric controls passes 130/130 without skips in
+`f3f78097-7221-411f-99d6-0beb5076b5a6`. Actual three-run Travel and registered-observer panic
+cleanup pass 2/2 in `6a8ee287-031d-4282-87e4-33af37e884f3`. All original movement, pickup,
+marker, Scene-instance, restart, end-state, completion/seal and physical cleanup assertions remain.
+The affected original native Host cohort passes 8/8 in
+`410c0970-da1b-4360-b5b2-61f85e90b54e`, including original-prefix settlement, failed upload,
+no-telemetry execution and producer/device/window permission retirement.
+
+Independent review corrects two consumer defects before the final native qualification: an early
+frame's valid spans must survive a missing App envelope, and later attribution failure must retain
+the already verified native cleanup report. Focused CPU controls cover both. This is executed
+cost attribution, not a speedup or a whole Foundation/R12 completion. The next cost investigation
+belongs to the original device/namespace acquisition operations and must retain the complete entry
+endpoint, exact original lifetimes and failure/cleanup paths. Larger named workloads, reliable
+tail/memory budgets, foreign native execution and paused product work remain separate.
+
+Final minimal no-default WGPU production compilation, all-target/all-feature owning correctness
+Clippy, consumer executable/test correctness Clippy, root/sample format checks and added document
+links/fragments pass. Selected source, executable and report SHA256 values are rechecked after
+qualification. Existing non-correctness warnings remain. Five scoped research, implementation and
+review agents close with no remaining reported P1/P2. No Cargo commands overlap, no build cache is
+cleaned and no remote publication/CI execution occurs.

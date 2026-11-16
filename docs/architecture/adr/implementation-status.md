@@ -3154,6 +3154,21 @@ with descriptive quantiles and whole-process points. This adds a measuring consu
 a production owner or engine optimization. Larger workloads, first-frame attribution, reliable
 tail/resource budgets, foreign execution and full R12 remain open.
 
+The [first-frame attribution successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#first-initialized-frame-cost-attribution)
+extends that same consumer with fixed original WGPU Runtime operation wall spans, Desktop startup
+snapshots and complete entry-to-first-presentation observations. Collection is explicit/default-off,
+per-transaction and independent of submission/presentation authority. CPU controls and independent
+game library/metrics pass 19/19 and 130/130; actual three-run Travel/panic cleanup and affected
+native Host controls pass 2/2 and 8/8. The exact 483-frame
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#first-initialized-frame-attribution)
+places 94.91–95.89% of the first initialized frame's wall span in original namespace preparation,
+without asserting a single-call driver attribution or a performance improvement. Minimal native
+compilation, owning/consumer correctness Clippy and formatting pass. Original lifetimes and all
+gameplay/cleanup checks remain; further device-operation attribution, larger workloads, budgets,
+foreign execution and full Foundation/R12 remain open.
+
+The owner implementation and full consumer above are committed at `46f798c` and `e88ec46`.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

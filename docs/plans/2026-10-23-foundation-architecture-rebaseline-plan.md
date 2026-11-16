@@ -5386,6 +5386,20 @@ observations. Per-run quantiles, process points and raw provenance are descripti
 neither scalable-world budgets nor an optimization. Further first-frame attribution, larger
 named workloads, foreign execution and full Foundation/R12 remain open.
 
+The [first initialized frame successor](2026-11-13-rust-state-reconstruction-plan.md#first-initialized-frame-cost-attribution)
+now observes five fixed operation wall spans through the original WGPU transaction, alongside
+existing Desktop startup timings and a complete entry-to-first-presentation endpoint. Disabled
+collection adds no timing clock reads; errors/unwind, exact transaction reset and success receipts
+remain distinct. The full ordinary Travel consumer retains 483 initialized presentations across
+three native lifetimes. First-frame namespace preparation is 571.38–606.97 ms of
+599.97–633.01 ms outer spans, locating further work in original device/namespace acquisition
+without attributing it to a single native call or claiming a speedup. CPU/consumer controls pass
+19/19 and 130/130; actual Travel/panic cleanup passes 2/2 and affected native Host controls 8/8.
+The [report](../benchmarks/2026-11-14-development-runtime-costs.md#first-initialized-frame-attribution)
+owns source/clock/wait/cache scope and complete evidence. Larger workloads, reliable budgets,
+foreign execution and full Foundation/R12 remain open.
+Owner implementation is `46f798c`; its complete consumer and evidence are `e88ec46`.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
