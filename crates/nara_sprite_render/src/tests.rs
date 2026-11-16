@@ -30,6 +30,7 @@ use nara_transform::{Transform2d, TransformPlugin};
 
 mod authored_material;
 mod material;
+mod source_refresh;
 mod visibility;
 
 #[derive(MaterialParameters)]

@@ -91,6 +91,76 @@ fn adapter_observation_does_not_initialize_an_offscreen_host() {
 }
 
 #[test]
+#[ignore = "native full-pixel replay of a warmed original capture after direct edit and World retirement"]
+fn warmed_original_tile_capture_survives_a_cleared_hint_edit_and_world_retirement() -> Result<()> {
+    require_adapter_selection();
+    let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(64 * 1024 * 1024);
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+        let mut sequence = 0;
+        for views in [1, 2] {
+            for bound in [false, true] {
+                let dropped = Arc::new(AtomicBool::new(false));
+                let mut runtime =
+                    scene::build(64, views, Scenario::WarmedCell, bound, Arc::clone(&dropped))?;
+                let captures = catch_unwind(AssertUnwindSafe(|| {
+                    drop(scene::drive(&mut runtime));
+                    drop(scene::drive(&mut runtime));
+                    let old = scene::drive(&mut runtime);
+                    let old_state = scene::snapshot(&runtime);
+                    let changed = scene::drive(&mut runtime);
+                    let changed_state = scene::snapshot(&runtime);
+                    assert_ne!(scene::expected(old_state), scene::expected(changed_state));
+                    (old, old_state, changed, changed_state)
+                }));
+                retire(runtime);
+                assert!(dropped.load(Ordering::Acquire));
+                let (old, old_state, changed, changed_state) = match captures {
+                    Ok(captures) => captures,
+                    Err(payload) => resume_unwind(payload),
+                };
+                let mut retained = Vec::new();
+                for (capture, state) in [(&changed, changed_state), (&old, old_state)] {
+                    let producer = host.create_producer()?;
+                    let execution = catch_unwind(AssertUnwindSafe(|| -> Result<_> {
+                        sequence += 1;
+                        host.begin_frame(sequence)?;
+                        let input = adapt_input(&mut host, &producer, capture, target(), true);
+                        let frame = submit(&mut host, &producer, &input);
+                        readback::settle(frame.outputs().submitted_prefix());
+                        let texture = frame.final_texture::<WgpuSceneColor>()?;
+                        assert_pixels(
+                            &scene::expected(state),
+                            &readback::read(&mut host, &texture),
+                        );
+                        Ok(texture)
+                    }));
+                    if let Some(prefix) = host.retire_producer(&producer) {
+                        readback::settle(&prefix);
+                    }
+                    let texture = match execution {
+                        Ok(texture) => texture?,
+                        Err(payload) => resume_unwind(payload),
+                    };
+                    retained.push((texture, state));
+                }
+                for (texture, state) in &retained {
+                    assert_pixels(
+                        &scene::expected(*state),
+                        &readback::read(&mut host, texture),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }));
+    readback::finish(&mut host);
+    match result {
+        Ok(result) => result,
+        Err(payload) => resume_unwind(payload),
+    }
+}
+
+#[test]
 #[ignore = "requires an explicitly selected native adapter; complete public pixel and retirement control"]
 fn original_tile_captures_and_pixels_survive_edits_views_and_runtime_retirement() -> Result<()> {
     require_adapter_selection();

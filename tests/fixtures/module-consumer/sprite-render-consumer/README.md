@@ -43,6 +43,13 @@ The same report records the subsequent borrowed-queue candidate's rejection unde
 10% gate. All six follow-up processes preserve complete pixels and original retirement; the
 current production queue retains owned Material resolution and the added semantic controls.
 
+The November 16 bounded extraction-reuse trial in the same report also rejects its production
+cache under a separate 15% gate. The original extraction remains. A new native control retains
+three stable frames, then edits a cell through the ordinary system while clearing dirty hints.
+After World retirement it first realizes both the changed input and the older warmed input,
+compares complete pixels and rereads their retained outputs. This control runs in the same
+`geometry` target and supports the explicitly selected hardware or software adapter.
+
 Run serially from the repository root, reusing its target:
 
 ```powershell

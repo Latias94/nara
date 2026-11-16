@@ -37,6 +37,7 @@ pub enum Scenario {
     Static,
     Cell,
     Camera,
+    WarmedCell,
 }
 
 impl Scenario {
@@ -45,6 +46,7 @@ impl Scenario {
             Self::Static => "static",
             Self::Cell => "one-cell",
             Self::Camera => "moving-camera",
+            Self::WarmedCell => "warmed-cell-control",
         }
     }
 }
@@ -109,7 +111,11 @@ impl State {
     }
 
     pub fn center_red(&self) -> bool {
-        self.scenario != Scenario::Cell || self.sequence.is_multiple_of(2)
+        match self.scenario {
+            Scenario::Cell => self.sequence.is_multiple_of(2),
+            Scenario::WarmedCell => self.sequence < 4,
+            Scenario::Static | Scenario::Camera => true,
+        }
     }
 }
 
@@ -314,7 +320,10 @@ fn change(
     state.sequence += 1;
     match state.scenario {
         Scenario::Static => {}
-        Scenario::Cell => {
+        Scenario::Cell | Scenario::WarmedCell => {
+            if state.scenario == Scenario::WarmedCell && state.sequence < 4 {
+                return;
+            }
             let mut map = maps.get_mut(state.map).unwrap();
             map.set_cell(
                 TileCoord::new(state.side / 2, state.side / 2),
