@@ -1611,6 +1611,23 @@ refusal and managed close. Local/native-I/O and opaque worker-gate exclusions ar
 admission, not static purity analysis. This result does not qualify the separate collision,
 affine-authoring, physical-device or cross-platform requirements.
 
+The November 16 [concrete game audio successor](2026-11-03-joint-motion-execution-plan.md#concrete-game-audio-and-native-retirement-successor)
+at `edc9ea2` extends the actual Two-Level Game through an explicit optional CPAL0.18.2/WASAPI
+composition. Committed pickups and successful travel entries retain Runtime/Scene/event identity;
+short effects follow the independent device clock through game Pause/exact Step, and original
+Scene replacement cancels old voices. Failed travel, Retry and Save/Restore do not invent cues.
+The original Runtime close participant owns stream destruction and the official backend worker
+join, including held callback, partial Startup and assertion-unwind controls. Ordinary gameplay
+on hardware DX12/Vulkan compares complete callback PCM with independently decoded original WAVs.
+Final focused CPU45, ordinary all-feature233, minimal shipping119, independent oracle4,
+DX12/native4 and Vulkan game1 pass in their recorded overlapping scopes. Full samples include
+negative oracle controls for first-cut lifetime and actual Scene-instance association.
+Correctness Clippy, formatting, unchanged existing consumers/locks and exact shipping feature
+graphs pass. The linked plan retains concrete review corrections, exact runs and cooperation
+limits. This game-owned integration selects no universal backend or official engine audio default;
+human audibility, system-mixer output, hot-switch/streaming/cooked audio, native reconstruction,
+foreign execution, numerical budgets and complete R10/R12/Foundation remain open.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;

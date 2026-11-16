@@ -312,6 +312,142 @@ the selected state/refusal/confirmation boundary. R4c's remaining consumers and 
 collision/affine-authoring requirements stay open; no production phase or generic prediction API
 is frozen by this result.
 
+## Concrete Game Audio And Native Retirement Successor
+
+Status: implemented at `edc9ea2` and qualified on Windows/Rust 1.95, starting from `ce363a0`.
+Full R10/R12/Foundation remains active. Continue the runtime-first priority. The selected
+consumer is the actual Two-Level Game with an explicit optional audible desktop composition;
+the existing independent offline prediction/PCM qualification keeps its own semantics. Do not
+promote a new universal AudioBackend, select an official engine default, or make shipping and
+headless recipes acquire an audio device merely because its implementation was compiled.
+
+Own the initial CPAL integration in the game, before extracting a shared crate. Two fixed,
+game-owned short clips represent committed pickup and travel-entry events. Decode/prepare clips
+outside the device callback. Produce effects at the actual gameplay/Scene commit sites, with
+Runtime generation, active Scene instance and a monotonic game-event identity; do not infer
+events by comparing presentation snapshots. Repeated pickup observation, failed travel, Retry
+and Save/Restore reconstruction do not invent new effects. Successful Scene replacement retires
+old-instance pending/active sounds even if later reconstruction fails. An audio refusal reports
+its own failure and never rolls back already committed gameplay.
+
+Select short one-shot effects that continue on the independent device clock while game time is
+paused. Resume never replays them; exact Step and a successful asynchronous travel commit during
+paused maintenance can each publish their actual new event once. Output callback frame positions
+are distinct from fixed ticks, estimated playback position and physical audibility. Commands,
+voices, duplicate/control history and observation capacity are finite. The real callback performs
+bounded work without locks, allocation or game/World access. Queue refusal preserves the original
+request/result semantics; no unbounded deferred retry or second gameplay-command queue is added.
+
+Use the original managed close participant for the concrete device aggregate. Stop admission
+before teardown and retain the original stream, callbacks and prepared data until physical
+retirement is established. CPAL 0.17.3's cached WASAPI source conditionally skips its original
+worker join when Terminate cannot be sent; callback-capture destruction alone does not prove
+that worker has ended. Resolve this owning dependency contract against current official source
+before claiming native cleanup. Do not hide it behind a detached closer, a fabricated receipt or
+a new generic native-lifecycle service. Native library shutdown remains cooperative unless an
+actual backend contract supplies a harder guarantee.
+
+The selected official CPAL **0.18.2**, revision
+[`e1612d5d98152f8dc2a62e1b51ef7cbf4f7f26b7`](https://github.com/RustAudio/cpal/blob/e1612d5d98152f8dc2a62e1b51ef7cbf4f7f26b7/src/host/wasapi/stream.rs#L479-L494), resolves that gap: its WASAPI stream Drop attempts
+Terminate, then waits for the original worker even when command submission failed. Only self-join
+is excluded, so the original Nara driver must own destruction. Join panic results remain ignored
+by CPAL; termination evidence is distinct from successful playback. The Apache-2.0 publication
+requires Rust 1.85 and is compatible with this unit's retained Rust 1.95 baseline. Use its exact
+unified Error API and by-value StreamConfig, with the ordinary WASAPI feature closure; no custom
+WASAPI implementation, library fork or toolchain upgrade is selected. CPAL is target-Windows and
+optional in the game. Hound prepares fixed mono PCM16 clips and rtrb supplies finite SPSC storage;
+no game-owned decoder, resampler or general queue framework is introduced.
+
+Acceptance includes pure cue/mixing/clip oracles, actual game pickup and successful/failed Scene
+transitions, paused/exact-step behavior, bounded refusal, old-instance cancellation and generation
+isolation. Run the same audible game composition through ordinary DesktopRun with real device
+callbacks. Compare bounded captured output against independently decoded original clips, not just
+a nonzero counter. Hold an actual callback during managed close, prove no premature Complete and
+release it before the original stream/worker retirement finishes. Exercise partial startup failure
+and a fresh Runtime after Close. Keep startup, error observation, accepted/started/completed/cancelled
+effects, callback retirement and native worker join as separate facts.
+
+Pinned references: Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_audio/src/audio_output.rs` and its Rodio dependency; Godot
+`7a37606a433c0e7735525037cdf774f043146a21`, `servers/audio/audio_server.cpp` and
+`drivers/wasapi/audio_driver_wasapi.cpp`. CPAL/Rodio public play/pause or queue-empty results
+must not be interpreted as physical completion. Actual human audibility, system-mixer output,
+device hot-switch/recovery, native prediction playback, arbitrary audio restore, foreign native
+execution and numeric latency budgets remain outside the selected qualification. The current
+game reconstruction owner must keep refusing unrepresented native audio state. Full R10/R12
+and Foundation remain active; UI/Dialogue product work stays paused.
+
+### Concrete Audio Implementation And Initial Qualification
+
+The optional game-owned `audio-cpal` module at `edc9ea2` now prepares two original PCM16 WAV assets before
+stream creation, mixes finite stereo `f32` output at 48 kHz, and owns CPAL's original WASAPI
+stream in the Runtime's driver-thread close participant. Compilation alone installs no audio
+plugin. The explicit `audio_desktop` recipe and ordinary entry share actual game commits,
+command/input/Scene ownership and DesktopRun with the reference game. Default/cooked recipes and
+the exact development reconstruction inventory do not admit this new native service implicitly.
+
+The normal output callback owns its preallocated mixer and SPSC consumers/producers, with no
+World access, ordinary lock or allocation. There are sixteen voices, 4096 non-evicting semantic
+effects and a 64-command queue; new work refuses explicitly at capacity. Callback cue records
+reserve accepted/start/terminal space before admission. Latest-instance cancellation uses an
+independent atomic barrier, so a full command queue cannot prevent old-instance retirement.
+Game observation separately reserves cue and scope capacity; a scope-log refusal cannot discard
+an already accepted cue's terminal fact. Optional callback capture is finite, and overflow is a
+fault rather than silently incomplete evidence. These finite allowances are selected consumer
+limits, not an unlimited music/effect system or a measured real-time cost guarantee.
+
+The initial CPU selection passes42/42, run `acf2afe4-ad34-4abf-b1a0-1a956998621a`. The first
+real-device lifecycle selection passes2/2, run `a683061b-0b8f-4d8f-93f9-c2662eba0663`: a held
+actual callback prevents managed completion until released; later Startup failure retires the
+opened device through its original owner. Those are checkpoints preceding independent review.
+Review finds a game-journal partition error and an asynchronous worker-retirement/last-admission
+race; both are corrected in their owners. Callback final destruction now closes admission and
+holds the original producer mutex during final drain; ordinary callback work remains lock-free.
+An exact checked-admission/worker-exit control proves the last queued request gets its refusal
+and returns unused credits. The same review catches unguarded test unwind; the fresh Runtime is
+immediately guarded and a real-device injected assertion proves retirement before propagation.
+One stale CPU fixture assertion after the retirement correction fails44/45, then is corrected
+while preserving its explicit `stream_created=false` and `stream_drop_returned=false` facts.
+
+The corrected focused CPU selection passes45/45, run `fe904024-7d8a-4bd2-af9f-f2c91c67b1a2`.
+The full DX12/native game plus three physical lifecycle controls passes4/4, run
+`44bd0768-65be-4cd4-9b52-5ac6e7512f42`; the same ordinary game passes1/1 on Vulkan, run
+`20f83429-93e5-4169-92f3-2bb0a333160d`. The game uses a private project copy, actual exact
+commands, Pause/Step/Resume and deliberate missing-Cavern refusal/repair. Its first trajectory
+requires exactly one pickup and one successful travel cue, old-instance cancellation on Retry,
+and no new sound on Save/Restore. A fresh Runtime on the recovered original event loop executes
+the full ordinary Travel script with three pickups/four entries, preserving original game facts.
+
+A separate directly retained DX12/RTX4090 report compares160512 and174912 stereo samples across
+80256 and87456 output frames against independently decoded original WAVs; both maximum errors
+are zero. It observes one/four old-scope cancellations, complete original native retirement and
+unchanged old-generation witnesses. Those output facts precede the final oracle strengthening:
+consumer review finds that a completed voice could cross its first scope cut, and Retry/Restore
+scopes were not required to name actual observed game instances. The oracle now checks the first
+replacement boundary and every actual instance, and the workflow joins each Retry/Restore's
+applied scope to its exact GameSnapshot. Four new pure counterexamples include matching but
+incorrect post-cut PCM and unfamiliar no-cue scopes. Their actual final target passes4/4, run
+`438d9536-e050-4dac-a650-f7d6f07a40e6`. The strengthened complete DX12/native selection passes4/4,
+run `6dc69e76-2abd-4989-9bde-a357154c1f87`; Vulkan game acceptance passes1/1, run
+`93849daa-9a21-45fc-8420-8915d8eab84c`. Both retain all original assertions and zero audio faults.
+
+The complete all-feature ordinary sample selection passes233/233 with20 separately selected
+ignored cases, run `bc86afa5-2bf0-4883-9062-a9c39cef42d0`; its selection predates addition of the
+four independent oracle tests above. The final minimal cooked headless selection passes119/119
+with zero skips, run `bfbe1e37-d5ae-4881-bc98-8a3b809a4ff0`. Selected counts overlap and are not
+pooled. All-target/all-feature correctness Clippy passes, as do root/sample formatting and
+manifest/lock/workflow/document checks. The existing independently locked panel library and its
+diagnostic example that actually consumes the game both compile unchanged; this is source/API
+integration evidence, not resumed native Editor development. Cargo's exact shipping normal/build
+graphs keep CPAL/Hound/rtrb, watcher and UI packages out of both shipping selections. The sample
+lock adds the selected optional audio closure without changing existing package versions or
+sources; only necessary Apple dependency edges join those new lock members. Three scoped review
+roles close without remaining P1/P2, and all eight research/implementation/review agents close.
+CPU and oracle gates are configured for ordinary Windows CI; no remote CI/native-device run is
+claimed. Actual foreign devices, audible/system-mixer output, latency budgets, hot-switch,
+streaming/cooked audio and native reconstruction remain unqualified. Full R10/R12/Foundation
+and the paused UI/Dialogue scope are unchanged.
+
 ## Managed startup pause correction (November 13)
 
 Runtime work resumes while Editor UI and physical mixed-DPI qualification are deferred. The

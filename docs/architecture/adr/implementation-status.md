@@ -1685,6 +1685,20 @@ complete membership/retirement and managed close have
 [bounded evidence](../../knowledge/engineering/verification/2026-11/2026-11-03T170523Z-authored-collision-definitions-retain-exact-source-attribution-through-real-rapier-derivation-and-retirement-b550d8d09ee34b72adfa1d18262eec6a.md).
 This remains an independent integration; broader R10 and an official production domain remain open.
 
+The November 16 [actual game audio workflow](../../plans/2026-11-03-joint-motion-execution-plan.md#concrete-game-audio-and-native-retirement-successor)
+at `edc9ea2` adds an optional game-owned CPAL0.18.2/WASAPI composition under ADR0095. Exact
+pickup/travel commits, Scene-instance cancellation and independent device time use existing
+game/Runtime/native owners; the original close participant waits for stream/callback/worker
+retirement. The ordinary desktop game compares complete original-WAV callback samples on
+DX12/Vulkan hardware and retains Pause/Step, failed travel, Retry, Save/Restore and fresh
+generation controls. Focused CPU45, all-feature ordinary233, minimal shipping119, oracle4,
+final DX12/native4 and Vulkan1 pass in their separate scopes, with correctness Clippy,
+formatting and existing independent-consumer compilation. The linked plan owns exact source,
+review corrections and platform/cooperation limits. Default/shipping recipes acquire no audio
+device, and unsupported native reconstruction remains refused. This qualifies the concrete
+Windows consumer, not human audibility, an engine-wide AudioBackend/default, streaming,
+hot-switch/cooked audio, foreign execution, numeric budgets or full R10/R12/Foundation.
+
 The [November 15 transformed-collision successor](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 adds opt-in fixed-input publication to the original Hierarchy/Transform owners. Prepare's current
 deferred sources complete before Simulate without replacing Historical, completed Fixed or
