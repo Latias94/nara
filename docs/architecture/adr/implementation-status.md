@@ -2169,6 +2169,19 @@ the three-file installation stays immutable and stored checkpoint bytes stay unc
 record retains exact rendered-receipt/CPU-content scope; pixel output, numeric costs, foreign
 execution and full Foundation remain open.
 
+The [game-owned shipping feature closure](../../plans/2026-10-20-persistent-two-level-game-plan.md#development-tools-and-cooked-runtime-feature-closure)
+at `20d47a2` removes unconditional development Host/Cargo/watcher selection from this same game.
+The actual target normal/build dependency graph admits only the explicit headless or desktop
+Player features, and production delivery checks it before generated compilation. Default source
+tools and exact development requested/resolved admission retain their existing runtime/process
+owners. Final minimal119, all-feature188 and cook-only7 ordinary controls pass in their separate
+selections; actual source-free headless/desktop packages and headless/continuous-desktop rebuilt
+adoption pass4/4. Existing source/cache deletion, physical keyboard progression, fresh Restore,
+hardware/software presentation and no-intervention cleanup assertions remain. Correctness
+Clippy, selected compilation, formatting and document checks pass. Root/domain Rust, dependency
+versions/sources and locks do not change. This game dependency correction does not complete
+root source/schema stripping, server delivery, foreign execution, numeric budgets or Foundation.
+
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
 runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,

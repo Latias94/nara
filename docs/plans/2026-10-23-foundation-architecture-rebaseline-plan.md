@@ -894,8 +894,8 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
 qualified, including finite source Scene references and global source/processed Input;
-explicit Cargo build/capture and Windows headless cooked Player delivery are qualified within
-their recorded scopes. Native desktop packaged delivery and additional target/platform
+explicit Cargo build/capture and Windows headless/desktop cooked Player delivery are qualified
+within their recorded scopes. Complete server stripping and additional target/platform
 qualification remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
@@ -948,6 +948,21 @@ receipts show no termination intervention, and explicit driver-data directories 
 CWD and immutable installation. These facts do not establish rendered pixels, performance, foreign
 execution or complete R7/R10/R12. The linked record owns exact results/limits. UI/Dialogue product
 work remains paused and Foundation stays active.
+
+The November 16 [game-owned feature closure](2026-10-20-persistent-two-level-game-plan.md#development-tools-and-cooked-runtime-feature-closure)
+at `20d47a2` separates development Host/Cargo/watcher selection from the actual generated Player.
+Source tools keep a default `development` feature and exact requested/resolved placement checks;
+the cooker enables Cargo tooling independently, while Player builds continue disabling defaults.
+Cargo's actual original-target normal/build graph excludes development tools/watchers/UI from
+both shipping placements and excludes Winit/WGPU backends from headless play. Final minimal
+ordinary tests pass119/119, all-feature ordinary188/188 and cook-only source/pack7/7; the existing
+actual headless/desktop package and headless/continuous-desktop rebuild/adoption cohort passes4/4.
+Physical keyboard Save/fresh Restore, twenty additional travels, hardware/software presentation,
+source/cache removal and original native cleanup remain required. Correctness Clippy, minimal
+compilation, formatting and document checks pass. This corrects game-level shipping dependencies
+without changing root/domain owners, dependency versions or locks. Complete root authoring/schema
+stripping, a dedicated-server product, numeric budgets, foreign execution and full R7/R10/R12
+remain separate; UI/Dialogue product work stays paused.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into

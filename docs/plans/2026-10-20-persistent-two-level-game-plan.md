@@ -629,6 +629,109 @@ review agents are closed. No dependency/lock versions, UI defaults or desktop di
 change. Runtime delivery advances while foreign execution, numeric cost budgets, processed exact
 reconstruction, server stripping and the remaining Foundation requirements stay open.
 
+## Development Tools And Cooked Runtime Feature Closure
+
+Status: implemented at `20d47a2` and qualified on Windows/Rust 1.95, starting from `b275ccb`.
+Full R7/R10/R12/Foundation remains active. Continue the runtime-first priority without resuming
+Editor, component or Dialogue development. The preceding source-free Player inherited
+`nara/project-tooling`, the development Host and `notify` through the game's unconditional
+dependencies. Source-free filesystem behavior alone did not establish an appropriate shipping
+dependency or compiled-interface boundary; this unit corrects that game-owned selection.
+
+Keep one game implementation and its original Cargo, package, command, Scene, save and native
+retirement owners. Add an explicit development feature for the source executables, rebuild Host,
+continuity transport and source watcher. Default source development remains convenient; the
+cooker selects each Player with default features disabled, exactly as before. Cooking itself
+requires Cargo tooling but does not require the rebuild Host or watcher. Headless cooked play
+must not enable development/Cargo tooling, a source watcher, desktop platform, UI or GPU renderer;
+desktop cooked play adds only its declared presentation placement. This does not promise to
+remove all authoring/schema code from the root Runtime feature closure or establish a complete
+dedicated-server product.
+
+Migrate exact development build selection and resolved-feature checks together. A source Host
+accepts its explicit development placement, never arbitrary extra features or a shipping Player.
+Test harness tooling may build and supervise a Player without becoming part of that Player's
+selected production dependency graph. Gate development-only tests and binaries by the same
+feature rather than importing disabled interfaces or creating another protocol owner.
+
+Acceptance retains the actual generated Player compilation, package publication, relocated
+source/cache-free Travel, Save/fresh Restore and corruption/catalog refusal trajectories. Run
+the existing headless and desktop delivery consumers serially, plus focused development
+build/adoption regressions and ordinary default/minimal/cook/desktop compilation. Inspect Cargo's
+selected normal/build dependency and feature graph for the exact Player selections; do not infer
+closure from manifest text, binary strings or a reimplemented resolver. Record actual graph and
+native evidence, scope limits and any fixture corrections. No performance, binary-size or
+foreign-platform claim follows without its own measurement.
+
+### Feature Closure Implementation And Qualification
+
+The game now defaults to `development`, which enables its rebuild Host, finite continuity
+transport, source entry points, Cargo tooling and optional `notify`. `cook` separately enables
+the existing Cargo tools. `cooked-player` adds no development capability; `desktop` independently
+selects the original window/render placement. The original cooker already disabled defaults for
+its captured Player build and retains that exact selection. Development source builds now request
+`development` or `desktop,development`; Host admission validates the same exact requested and
+resolved lists and continues refusing other products, default-feature activation and extras.
+
+On November 16, actual Cargo `tree --locked --offline --target x86_64-pc-windows-msvc
+--no-default-features --edges normal,build --prefix none --format '{p}|{f}'` reports:
+
+| Selected game features | Exact selected Nara features | Relevant exclusions |
+| --- | --- | --- |
+| `cooked-player` | `runtime-2d,runtime-core,serde` | No Cargo/tooling feature, watcher, Winit/WGPU backend or UI package |
+| `cook` | `project-tooling,project-workflow,project-workflow-cargo-facts,runtime-2d,runtime-core,serde` | No development Host, watcher, Winit/WGPU backend or UI package |
+| `cooked-player,desktop` | `desktop-winit,presentation-2d,render-wgpu,runtime-2d,runtime-core,serde` | No Cargo/tooling feature, watcher or UI package |
+
+The existing finite process fixture runs that same Cargo query on each actual copied project
+before its production delivery build. It retains the original bounded stdout, exact exit,
+containment/readers/output cleanup and failure custody. It checks package identities and feature
+sets, rather than interpreting the WGPU repository URL as a backend dependency: the CPU Material
+compiler's Naga source intentionally remains. No lockfile version/source changes are required.
+
+Minimal release production compilation and the final minimal headless ordinary cohort pass
+119/119 with no skips, run `d9946383-06fc-423d-9d95-b245db441679`. The all-feature ordinary cohort
+passes 188/188 with 16 separately selected ignored cases, run
+`978731c0-805d-4dd4-88a5-2835663cf525`. Cook-only source and pure pack controls pass 7/7 with no
+skips, run `21d4ae76-3ebb-4f76-b28c-f6f9becf7c05`; the shipping desktop all-target release check
+also passes. The four pure corruption controls remain available without the development/native
+harness. Initial broad test gating omitted them from the first minimal 115/115 run; narrowing
+only the native harness gate restores that coverage before final qualification.
+These are overlapping compile/test selections, not additive feature coverage. Minimal root code
+retains existing source/schema and CPU Image/Material implementation warnings; this unit neither
+hides them nor claims complete server-code stripping. Actual generated Player and rebuilt-source
+native acceptance is recorded below.
+
+The actual Windows/native cohort passes **4/4**, with eight cases outside the explicit selection,
+run `499a58a0-f88d-4be3-83f9-641e28cb186f` (978.496 seconds including nested builds). Both copied
+shipping projects pass their original-target normal/build Cargo-tree guard before generated
+Player compilation. The headless package retains six sealed source/cache-free executions,
+complete Travel, Save/fresh Restore, original Image/Scene facts, Deferred corruption preservation
+and catalog refusal. The desktop package retains two ordinary physical-keyboard sessions and
+three scripted controls on DX12/RTX 4090, a DX12/Microsoft Basic Render Driver first-present
+control, invalid initial-path refusal and twenty additional ordinary travels. Original windows,
+pumps and process containment/readers/output retire without native termination intervention;
+installation/CWD/checkpoint immutability assertions remain unchanged.
+
+The same cohort also passes actual Rust function-body/private-structure rebuilding and exact
+adoption through both headless and continuous desktop DevelopmentHosts. The continuous child
+reports Vulkan hardware, resumes ordinary running play after route exchange, retains stale
+candidate/source refusal and closes while Running. The headless trajectory preserves its
+intentional compile-error, complete probe, foreign/consumed ticket, source-drift and postcommit
+predecessor-cleanup controls. Those two tests validate the changed requested/resolved development
+feature selection rather than inheriting confidence from a manifest check. Their compilation
+durations are fixture facts, not current edit-to-result performance samples.
+
+All-target/all-feature development correctness Clippy and all-target minimal desktop shipping
+correctness Clippy pass. Cook-only all-target checking, the Runtime workload/metrics consumer
+compiled with `desktop,cost-measurement` and defaults disabled, root/sample formatting checks,
+manifest/lock/workflow parsing, selected document links and whitespace checks pass. CI adds
+ordinary minimal headless tests, cook-only source/pack tests and a minimal desktop compile gate;
+remote CI and ignored native execution are not implied. Scoped production/custody and separate
+test/usage reviews close without P1/P2, and all five unit agents are closed. No root/domain Rust,
+dependency version/source or lockfile changes are made. Shipping feature closure is qualified
+for this actual game; broader root authoring/schema stripping, server delivery, foreign native
+execution, numeric size/performance and the remaining Foundation requirements stay open.
+
 ## Follow-Up Triggers
 
 The first required physics/audio domain proves its own native acquisition, teardown and
