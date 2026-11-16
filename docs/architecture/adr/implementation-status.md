@@ -3318,6 +3318,13 @@ document checks pass. The first copy of shared current-version values remains. N
 measurement, value representation, budget or asset-lifecycle owner is selected by that bounded
 correction. The representation decision now compares actual persistent configuration/cells
 granularity before imposing a common borrowed read interface.
+Its [test-only persistent-record probe](../../plans/2026-11-13-rust-state-reconstruction-plan.md#bounded-persistent-tilemap-record-probe)
+at `7088b9e` passes 5/5 release cases without skips, retaining all 16K cells across direct and root-bound
+sources, shared defaults, actual edit isolation, receiving limits and independent cooked values.
+Both stock and split retain the original default-wire refusal and use the same explicit finite
+wire allowance for complete positive cook/readmission. No production limits or representation
+change. Native pairing, TileSet membership, source upgrades and the complete game/GPU/cost
+comparison remain before selection; this does not close full Foundation/R9/R10/R12.
 
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:

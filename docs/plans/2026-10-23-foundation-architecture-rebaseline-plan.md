@@ -5584,6 +5584,14 @@ Owning correctness Clippy, feature-free production and formatting/document check
 establishes allocation identity and error/source preservation for that path; it does not solve
 the measured 16K default-copy problem or add a new native/runtime cost result. The next comparison
 evaluates persistent configuration/cells granularity before selecting a common read interface.
+The [bounded persistent-record probe](2026-11-13-rust-state-reconstruction-plan.md#bounded-persistent-tilemap-record-probe)
+at `7088b9e` passes 5/5 release cases without skips, retaining the actual 16K direct/root-bound records,
+default omissions, cell sharing, edit isolation, complete receiving limits and independent cook.
+Both stock and split exceed the default processed-wire node ceiling; both complete positive cooks
+use the same explicit finite larger wire allowance, with all other limits unchanged. This is
+test-only feasibility evidence. Production same-entity joining, source upgrades, actual rendering
+and complete frozen-program cost comparison remain before selecting a representation; no new
+game capacity, speedup or Foundation/R9/R10/R12 completion is claimed.
 
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.

@@ -3131,6 +3131,79 @@ before adding cell asset identity. A plan review corrected the earlier premature
 engine-wide borrowed values and the use of a synthetic generic List as its primary justification;
 neither finding changes the isolated-migration correction below.
 
+#### Bounded Persistent Tilemap Record Probe
+
+Status: test-only comparison implemented at `7088b9e` and qualified on Windows/Rust1.95;
+no production representation selected. Reuse the
+ordinary `runtime_workload` source generator at 16,384 cells and isolate its two terrain members
+only for the CPU decision probe. Preserve the direct record, root-bound Prefab declaration,
+original source keys/IDs/placements, cell encoding and omitted defaults. Compare the stock two
+records against four explicit configuration/cell records on the same two entities. Do not call
+this a complete game or performance run.
+
+The public consumer must demonstrate that configuration defaults do not replace the Cells
+allocation, while stock defaults still isolate their complete value. Check all 16,384 cell
+values, full native configuration/dirty metadata, canonical provenance, receiving exact and
+one-short aggregate limits, no target publication on refusal/cancellation, independent cooked
+values and source files unchanged after original Scene retirement. An explicit Cells-only
+control must remain without Configuration: the experiment must expose the missing structural
+pairing contract rather than hide it in a codec or required-component hook.
+
+Trace source-upgrade and native/render joining separately. Current one-value component migration
+does not transform one source record into two; field-level upgrade, finite property tools,
+flattened live export or localized Prefab conversion do not silently supply the complete native
+declaration/history conversion. Preserve Add/Replace/Suppress/Properties semantics if that
+production direction is selected. The
+[study](../research/2026-11-17-large-tilemap-payload-ownership.md#bounded-persistent-record-comparison)
+records the concrete costs and distinguishes them from the frozen-view alternative. Passing
+this probe alone cannot select the production split or replace the original complete Travel,
+source-removal, retained-input GPU replay, failure cleanup and balanced frozen-program comparison.
+
+Run the bounded CPU consumer serially against the existing root target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test tile_payload_trial --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The first release build takes 14m43s. Initial execution passes 4/5 without skips at
+`492f16a7-e0de-43f5-9450-de9db584c0ed`: the receiving-boundary control and three original
+source-generator controls pass; the full ownership/cook test reaches an actual processed-wire
+limit, `wire-nodes`, observed 1,000,001 against the default 1,000,000. This is not a compiler
+failure or a passing cook. The successor retains all 16,384 cells and requires the same default
+refusal from the stock control. Both complete positive cooks and trial readmission explicitly
+request 2,000,000 wire nodes through the existing public limit value; all other original ceilings
+remain. No product default changes.
+
+The corrected release consumer passes 5/5 without skips at
+`3f266fd4-7807-4add-9b82-b01d917dc2a0`, 4.327 seconds after the 46.56-second test rebuild. The
+complete ownership/cook/edit-isolation case takes 1.804 seconds and the receiving/pairing control
+0.921 seconds; the other three cases are the original source-generator controls. These are test
+durations, not product loading or performance measurements. Stock and split both preserve the
+default `wire-nodes` refusal. Under the same explicitly requested finite wire limit, both cook
+all 16,384 cells with identical cell values and canonical provenance; the split wire readmits
+under that same limit with independent storage. No game capacity claim follows.
+
+Actual raw/compiled identity proves that default insertion retains direct and inherited Cells
+while the stock value isolates. A single source-cell color edit changes only the new direct
+candidate: old compiled, prepared native, cooked and readmitted values remain unchanged, the
+inherited allocation remains shared and disk sources remain identical. Complete typed comparison
+includes stock configuration, cells and dirty metadata, with the temporary TileSet-handle reuse
+explicitly confined to a data comparison. Exact receiving nodes/bytes/depth 6 succeeds; one-short
+nodes/bytes and depth 5 each refuse with the actual codec error and unchanged entity set.
+Independent review identifies and closes the initial depth-1 coverage gap, then rechecks the
+source-edit control; separate review closes the actual cook-limit correction without a P1/P2.
+Focused release correctness Clippy and sample formatting pass; existing unrelated warnings
+remain. No production source, manifest, lockfile, global limit, codec interface or native owner
+changes. All four scoped research/implementation/review agents close, Cargo remains serial with
+one job and the original target, and paused UI/Dialogue files remain untouched.
+
+The probe establishes a feasible storage boundary and exposes its costs, not a production winner.
+The next decision must reconcile explicit native same-entity joining, actual TileSet membership,
+ordinary mutation/extraction and complete direct/Prefab source-upgrade semantics against the
+closed-view alternative. Preserve the original complete 64/4K/16K game/source-removal/retained-GPU
+and balanced frozen-program acceptance for the selected production direction. Full Foundation,
+R9/R10/R12, numeric budgets and foreign execution remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

@@ -1,7 +1,7 @@
 # Large Tilemap Payload Ownership
 
-Date: 2026-11-17. Status: source research and a recommendation for the next Runtime unit,
-not an adopted representation or implementation plan. Editor/UI/Dialogue remain paused.
+Date: 2026-11-17. Status: source research with a qualified bounded persistent-record comparison,
+not an adopted production representation. Editor/UI/Dialogue remain paused.
 
 The [owning follow-up](../plans/2026-11-13-rust-state-reconstruction-plan.md#closed-effective-values-and-large-payload-follow-up)
 records the complete consumer comparison. Its separate
@@ -47,8 +47,9 @@ locked packages or a recommendation to adopt its APIs/toolchain. Nara's persiste
 and codec implementations, rather than Bevy Reflect alone, govern the affected path. [^N-version]
 [^N-value] [^N-codec]
 
-This study uses local primary source, not moving documentation, search summaries, or comparative
-benchmarks. No Cargo, formatter, runtime, reference-checkout mutation, or Git mutation was run.
+The initial source study uses local primary source, not moving documentation, search summaries,
+or comparative benchmarks. It ran no Cargo, formatter, runtime, reference-checkout mutation, or
+Git mutation. The later Nara-only probe below has its own execution scope.
 
 ## 3. Key Concepts and Source Findings
 
@@ -218,6 +219,73 @@ This trace makes migration and native/public composition part of the decision. I
 semantics cannot be preserved reasonably, they are concrete evidence in favor of the closed-view
 candidate. Conversely, retaining current generic cell encoding during this comparison prevents
 an encoding change from being mistaken for an ownership benefit.
+
+### Bounded Persistent-Record Comparison
+
+The [test-only consumer](../../samples/two-level-game/tests/tile_payload_trial.rs) at `7088b9e`
+reuses the ordinary game's actual 16,384-cell source generator. It keeps Meadow's direct `checkpoint`
+record and the `portal` root-bound Prefab, original source declarations/keys and cell List/Map
+encoding. It omits the other four Scene members and all non-Tilemap components, including
+Transforms; it is not a complete game, world-geometry, atlas-admission, rendering or cost acceptance.
+The stock control contains two Tilemap records; the trial contains two explicit Configuration
+and two explicit Cells records on the same two entities. The probe starts from source revision
+`531d3e7`; the frozen runtime comparison
+program remains `2dd0083`, and the source-only reference pins above are unchanged.
+
+Configuration retains stock fields and defaults except `cells`. Cells has one required List
+without a default. Both use test-local native codecs. The populated fixture's conversion is
+explicitly limited to those records, with no owner/contextual metadata or instance overrides;
+it preserves the omitted `sort_key` and `y_sort_anchor`. It is not a general legacy source
+converter. Compilation, native preparation, cancellation, cook and readmission use the public
+Scene owners. A temporary comparison Tilemap checks complete native data and dirty revisions;
+borrowing the stock TileSet handle for that comparison does not establish actual trial asset
+resolution or renderer support.
+
+The discriminators are original raw/compiled allocation identity through default insertion,
+complete cell/native values, canonical provenance, independent cooked storage, aggregate exact
+and one-short node/byte/depth receiving limits, source preservation and original retirement.
+A Cells-only negative control intentionally demonstrates that ordinary independent component
+registration does not supply or require Configuration. No hidden peer insertion is introduced.
+The first complete cook attempt exposes the separate default processed-wire node ceiling:
+the flattened 16K trial reaches 1,000,001 nodes against a 1,000,000 limit. The source generator's
+two 8K files do not prove that the combined processed wire fits one file's default bound. The
+corrected comparison requires that default refusal for both stock and split controls, then
+requests the same explicit finite 2,000,000 wire nodes for both complete positive cooks and trial
+readmission. All other original wire/value/work/provenance ceilings remain unchanged. This
+does not increase product defaults or qualify the full 16K game under default cook limits.
+The corrected Windows/Rust1.95 release consumer passes 5/5 without skips, including both new
+ownership/receiving cases and the original three source-generator controls. The full direct and
+root-bound values survive source edits, native preparation and independent cook/readmission.
+Exact aggregate node/byte allowances and depth 6 succeed; one-short nodes/bytes and depth 5
+refuse with their actual error kinds and no target publication. Independent review closes the
+initial depth-boundary coverage gap and finds no remaining P1/P2, including the explicit wire
+budget correction. This establishes the proposed granularity's mechanical feasibility, not
+cheaper complete production integration or a selected representation. Structural pairing,
+source upgrade and native/render joining remain unresolved costs.
+Execution and review results belong in the
+[owning plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#bounded-persistent-tilemap-record-probe).
+
+The parallel source-upgrade trace identifies a separate contract: today's per-component migration
+returns one value under one component ID. Finite source tools write selected fields, live export
+flattens source, and Prefab conversion localizes inheritance; none preserves this general
+declaration transformation.
+The existing reviewed schema-upgrade publication/recovery shell preserves field-level record
+counts and currently admits a data-owner successor. Extending it for native record splitting is
+additional product work, not an automatic consequence of registering two native codecs.
+
+If a persistent split is selected, direct entities and additions need both explicit records;
+Set Add/Replace and Suppress must preserve their target and mode on both sides. Properties must
+partition by stable root field ID while retaining Absent/Set/default-equal pins and collection
+selectors, without replacing inherited data with a flattened Set. Nested additions, claims and
+dormant overlays require the same treatment. Keys, IDs, placements, `through` and `expected_base`
+remain unchanged; omission versus explicit empty cells needs a rule. Accepted upgrade history
+uses a reviewed new checkpoint, not arbitrary replay of an old Undo stack after a format change.
+These are integration costs to compare with a closed borrowed-view design, not a selected new
+migration framework. Relevant owners are the
+[component migration API](../../crates/nara_reflect/src/registry.rs),
+[reviewed source-upgrade proposal](../../src/project_host/authoring/project/source_upgrade/proposal.rs),
+[schema-upgrade lowering](../../crates/nara_scene/src/authoring_decode/schema_upgrade.rs) and
+[Prefab overlays](../../crates/nara_scene/src/prefab/overlay.rs).
 
 ## 5. Best Practices: Preserve the Existing Budgets and Escape Rules
 
