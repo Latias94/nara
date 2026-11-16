@@ -2310,6 +2310,84 @@ review/research agents are closed. Work remains serial against the original targ
 cleaning, remote CI or publication. Full Foundation/R9/R12, numeric budgets, foreign execution and
 the separate shared-payload storage design remain open; UI/Dialogue stays paused.
 
+### Component-Local Payload Sharing
+
+Date: 2026-11-17. This comparison starts from the qualified `0db96f5` executable, frozen before
+the component storage change implemented at `bcc481f`. Source records privately retain one immutable component-local
+allocation; private compilation can share that value into a draft and sealed output. Public
+record/document Clone remains deep. Actual default insertion, migration, properties and changed
+references isolate storage. Every retained owner still charges the complete logical payload and
+backing overhead. The source wire format, receiving ceilings and original lifecycle owners remain.
+
+The unchanged `scene_value_clone` hook now measures admitted record capture: a deep value and
+metadata copy before, shared main payload and deep metadata copy afterward. It must not be
+described as the same deep-copy operation becoming faster. Complete source/Schema/default/
+reference interpretation and original work admission remain. These measurements precede the
+separate custom-producer exact-Step correction; the measured Gameplay production sources are
+unchanged. Exact source hashes preserve that distinction from later qualification.
+
+The frozen programs complete before/after/after/before with the same original 16K workload,
+Rust 1.95 release profile and hardware DX12 adapter. All twelve complete lifetimes and 36
+original-input GPU replays pass, including gameplay, source removal, retained-image rereads and
+original native/World/Host/submission-prefix cleanup. Original groups retain 726 initialized
+presentations and changed groups 720; those paced workload counts are not a throughput result.
+Raw reports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-shared-payload-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-shared-payload-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-shared-payload-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-shared-payload-paired-4-before.json),
+with [exact source/program/report/order metadata](data/2026-11-14-development-runtime/authored-tiles-shared-payload-paired-metadata.json).
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 44.874 ms | 44.640 ms |
+| Record capture | 178.443 ms | 0.026 ms |
+| Migration, including post-migration admission | 0.051 ms | 0.036 ms |
+| Default materialization | 44.249 ms | 212.121 ms |
+| Semantic validation | 1.239 ms | 1.258 ms |
+| Reference planning | 64.416 ms | 65.017 ms |
+| Reference-program validation | 0.014 ms | 0.018 ms |
+| Complete component materialization | 335.002 ms | 323.956 ms |
+| Expansion, including nested Prefab acquisition | 938.288 ms | 910.035 ms |
+| Source payload decode | 524.793 ms | 526.745 ms |
+
+The component materialization median is 3.30% lower and expansion 3.01% lower in this finite
+observation. Source inspection explains why record sharing does not remove the dominant copy
+from this workload: its Tilemap source omits `sort_key` and `y_sort_anchor`. The ordinary planner
+inserts those defaults, so copy-on-write still copies the full `cells` payload before mutation.
+That copy moves into default materialization. Do not rewrite the workload's source to hide this
+limitation or claim that sharing eliminated copying for records with missing defaults.
+
+Complete process walls in order are 19.158, 18.514, 19.097 and 18.609 seconds. The changed groups
+do not consistently beat their corresponding original groups; no stable end-to-end speedup is
+established. Correlated lifetimes, host/driver/cache/clock state, nested overlapping wall envelopes
+and the unchanged pacing/control/replay endpoint do not establish CPU/GPU duration, physical-memory
+savings, statistical confidence or production-tail budgets. Fully explicit, unchanged payloads
+have actual compiler/preparation sharing controls, but those controls are not a second native
+performance workload. Whole-unit consumer/native qualification remains recorded in the
+[owning plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#component-payload-sharing-through-existing-retained-owners).
+
+Final behavioral qualification also includes the separate App-owned exact-Step correction at `c8f7c7d`.
+The release game/library/metric/span/native cohort passes 143/143 without skips at
+`a1230ba7-fe18-4fe3-b831-d6703b6c9763`. Nine Tile lifetimes retain 773 initialized presentations
+and 27 original-input GPU replays; baseline lifetimes retain 193. Both observer-panic controls
+and original gameplay, receipts/source retirement, copied-source removal, retained-image rereads
+and original Host/submission-prefix/native cleanup pass. Reports are
+[64](data/2026-11-14-development-runtime/authored-tiles-shared-payload-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-shared-payload-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-shared-payload-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-shared-payload-baseline.json), with
+[source/program/report and qualification metadata](data/2026-11-14-development-runtime/authored-tiles-shared-payload-metadata.json).
+This executable is distinct from the frozen sharing-only comparison, so its results do not
+replace the paired program hashes or support attributing the later scheduling change to sharing.
+Complete independent Scene/Material/Asset-domain consumers pass 262/262 with one existing timing
+case skipped; original App/Input/Gameplay and public scheduling controls pass 250/250. Exact
+source/scope/run IDs and review findings belong to the owning plan. Owning/root/consumer correctness
+Clippy and six additional independently locked release all-target compile checks pass; warnings
+remain. Additional prepared-authoring controls pass 20/20 with three manual measurements ignored,
+and feature-free storage/default controls pass 10/10. These are not scalar allocation or UI
+performance observations. Paused UI/Dialogue changes remain outside this qualification.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

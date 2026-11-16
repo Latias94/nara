@@ -3286,10 +3286,25 @@ defaults; final Schema/reference/cost and original work/retained limits remain. 
 and owned-storage controls pass 783/783, public consumers 45/45 and game/metric/span/native controls
 143/143. The [report](../../benchmarks/2026-11-14-development-runtime-costs.md#current-version-migration-cost-reuse)
 retains exact native/pixel/failure evidence and a balanced frozen-program comparison: the migration
-wall envelope is almost eliminated, but no meaningful end-to-end speedup is established. Shared
-payload storage remains research with unresolved public-clone and retained-custody interfaces;
-no cache, budget owner or capacity change is introduced. Full Foundation/R9/R12 and foreign
-execution stay open, with UI/Dialogue paused.
+wall envelope is almost eliminated, but no meaningful end-to-end speedup is established. The
+[shared-payload successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#component-payload-sharing-through-existing-retained-owners)
+at `bcc481f` implements component-local immutable storage with deep public source Clone, private compiler
+sharing, isolated actual mutations and full independent payload/backing charges. Reflect/Scene
+libraries pass 1,037/1,037, selected public Scene consumers 104/104, Tooling/UI 304/304 and root
+content/custody/receiving controls 91/91. Complete independent consumers pass 262/262, with the
+original timing case skipped; final game/metric/span/native acceptance passes 143/143 without skips.
+The balanced comparison retains complete native/pixel/cleanup evidence but moves most copying
+into required defaults and establishes no stable end-to-end speedup. No cache, budget owner or
+larger capacity is introduced.
+
+Independent acceptance also exposes the separate missing custom Gameplay producer path during
+exact Step. Its [App-owned intent correction](../../plans/2026-11-13-rust-state-reconstruction-plan.md#custom-gameplay-producers-during-exact-step)
+at `c8f7c7d` registers each producer once in the original App graph, preserving final Finish admission, selected
+automatic execution and managed faults. Owner/public scheduling controls pass 250/250, complete
+independent replay passes and the native cohort above remains green. The guide documents the new
+helper ordering boundary. The superseded module-local schedule is removed before commit; final
+review closes its P1 without remaining P1/P2. Full Foundation/R9/R10/R12 and foreign execution stay
+open, with UI/Dialogue paused.
 
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:

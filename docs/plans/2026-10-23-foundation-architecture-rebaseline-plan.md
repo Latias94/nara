@@ -5549,8 +5549,26 @@ adds twelve 16K lifetimes and 36 replays: migration wall median is 43.325/0.051 
 materialization 359.971/338.568 ms and whole-process walls approximately 18.62 seconds. No meaningful
 end-to-end speedup or production budget is established. The separate
 [shared-payload ownership study](2026-11-13-rust-state-reconstruction-plan.md#shared-component-payload-ownership-study)
-identifies retained-budget and public-clone requirements; no storage interface is selected or
-implemented. Full Foundation/R9/R12 and foreign execution stay open; UI/Dialogue remains paused.
+identifies retained-budget and public-clone requirements. Its
+[implementation successor](2026-11-13-rust-state-reconstruction-plan.md#component-payload-sharing-through-existing-retained-owners)
+at `bcc481f` shares component-local immutable storage through private compilation, keeps public source
+Clone deep and charges full independent payload/backing allowances. Actual mutations isolate
+storage. Reflect/Scene libraries pass 1,037/1,037, selected public Scene consumers 104/104,
+Tooling/UI 304/304 and root content/custody/receiving limits 91/91. Complete independent consumers
+pass 262/262 with the original timing case skipped; final game/metric/span/native acceptance
+passes 143/143 without skips. Nine Tile lifetimes retain 27 GPU replays and both panic cleanup
+controls remain. The [balanced comparison](../benchmarks/2026-11-14-development-runtime-costs.md#component-local-payload-sharing)
+shows that copying largely moves into required defaults for this workload: complete materialization
+is 335.002/323.956 ms before/after and no stable end-to-end speedup is established. No physical-memory
+or numeric budget claim follows from sharing alone.
+
+The same independent acceptance exposes a separate missing dynamic-producer path during exact
+Step. Its [App-owned intent correction](2026-11-13-rust-state-reconstruction-plan.md#custom-gameplay-producers-during-exact-step)
+at `c8f7c7d` uses one original producer instance across ordinary frames and Step, with final App graph admission,
+the selected execution profile and original faults. Owner/public scheduling controls pass 250/250;
+complete independent replay and the final native cohort above pass. Helper ordering now belongs
+inside its collection rather than arbitrary raw PreUpdate peers; the guide records that migration.
+Full Foundation/R9/R10/R12 and foreign execution stay open; UI/Dialogue remains paused.
 
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.

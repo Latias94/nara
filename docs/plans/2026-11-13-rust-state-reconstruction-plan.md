@@ -2838,3 +2838,170 @@ the original 16K Travel/native/pixel workflow. Actual defaults/properties/refere
 separate storage only when mutation is needed; mechanical `Arc::make_mut` at every owned entry
 can merely relocate the clone. Keep original retained owners and receipts; no universal cache or
 new lifecycle authority is implied by this study. The scoped read-only research agent is closed.
+
+### Component Payload Sharing Through Existing Retained Owners
+
+Status: implemented at `bcc481f`; Windows qualification is recorded below. Select a component-local
+immutable value allocation, independent of raw documents,
+resolvers and snapshots. `SceneComponentRecord` keeps its source metadata and wire shape, but
+replaces direct public value-field access with borrowed access, explicit mutable access/replacement
+and owned extraction. Public record/document Clone remains a deep value copy. Only the private
+compiler may share source payload storage into its draft and sealed move-only compiled result.
+Compiled value access remains borrowed, so callers cannot detach an uncharged shared allocation.
+
+Keep full logical payload allowances for each source, compiled and independently prepared owner,
+including the new backing allocation overhead. Do not deduplicate charges or enlarge limits.
+Materialized node/byte ceilings remain per occurrence. Existing raw admission, hidden-default
+copies, mutation preparation, immutable publication, receiving definitions and native World checks
+remain authoritative. A shared value never owns its source document or ProjectSourceContent.
+
+Actual migration first obtains an isolated owned value; current versions retain shared storage.
+Default planning uses the existing Reflect planner and produces an owned value only on insertion.
+Reference planning/visits remain complete; final lowering requests mutable storage only when local
+or authored references actually need rewriting. Data preparation keeps its independent retained
+allowance before sharing immutable payload storage. Source edits and public clones must never
+change an older compiled/prepared value.
+
+Migrate real source consumers directly, including independent fixtures and the existing reference
+Editor, without resuming UI/Dialogue product work or changing paused integration files. Preserve
+the wire format and remove the superseded public field rather than keeping parallel value owners.
+Qualify sharing and copy-on-write identity, public deep-clone escape, raw Prefab release, independent
+preparation, exact/one-short work and retained limits, generation capacity, final refunds and all
+actual mutation routes. Run the original complete native Tile populations, source removal,
+retained-input GPU replay and panic cleanup; compare a frozen original executable under the same
+compiler/profile and phase hooks before claiming speed or memory gains. Full Foundation/R9/R12,
+numeric budgets and foreign execution remain open; UI/Dialogue product work stays paused.
+
+The private `ComponentPayload` owns only an immutable `Arc<ComponentValue>`. Public record Clone
+deep-copies its value, metadata and contextual defaults; private compilation alone can share the
+main value into the draft and sealed component. `value()`, `value_mut()`, `set_value()` and
+`into_value()` replace the former source field directly. The original Reflect default planner
+returns a borrowed effective value when it inserts nothing. Final reference lowering retains
+the complete visit and requests mutable storage only for an actual changed reference, including
+the unchanged root-local case. Runtime cook remains an independent deep copy and admits every
+new backing allocation before copying. Root source, compiled and overlay retention retain full
+logical payload and backing fees independently.
+
+Two independent ownership/budget reviews found and closed a needless copy for unchanged
+root-local references and a missing runtime-cook backing fee. The exact cook test independently
+calculates 2,482 bytes for its three scalar roots: exact passes and one byte short refuses before
+copying. Compiler/preparation controls exercise real migration, default insertion, property and
+reference changes, public deep-clone escape, source edits, cancellation and bounded receiving
+definitions. Two initial test-fixture failures were corrected: metadata registration belongs in
+the prepared World baseline, and original provenance must be counted once. No product assertion
+or capacity was reduced.
+
+The focused storage/compiler/default/preparation/cook controls pass 20/20 at
+`da9bed9c-7cd3-41c5-baa6-1cff5ad40891`; complete all-feature Reflect/Scene libraries pass
+1,037/1,037 at `7a60ce7c-3fb2-4e5e-ba81-8bd29e06df2b`. Selected public Scene format, data binding,
+defaults, reference and conversion consumers pass 104/104 at
+`db5e234e-75f7-484c-9514-88995e6bc146`. Tooling/UI libraries pass 304/304 at
+`7cdffe09-197b-45e6-85b0-c8b7c722afe2` after three remaining old-field test accesses were migrated.
+Root content/residency/retention and public receiving-limit controls pass 91/91 at
+`12fc3d5f-0c14-4fbe-aaaa-f67f2e9315ad`, with 1,538 outside the selected filter. The actual 4K direct
+plus 4K root-bound Prefab Tilemap test proves shared raw/compiled values, independent public
+clones and edits, raw Prefab release, original generation/allowance custody and final refund.
+A public deep clone remains readable after the original allowance is refunded. Source and
+compiled retention each independently charge the complete payload and backing. These CPU results
+do not establish copying speed, physical-memory savings or a runtime budget.
+
+The frozen sharing-only release program completes the unchanged balanced 16K comparison before
+the separate Gameplay correction. All twelve complete native lifetimes and 36 original-input
+GPU replays pass. The [report and exact evidence](../benchmarks/2026-11-14-development-runtime-costs.md#component-local-payload-sharing)
+record capture 178.443/0.026 ms, defaults 44.249/212.121 ms, complete component materialization
+335.002/323.956 ms and expansion 938.288/910.035 ms before/after. The workload omits Tilemap
+`sort_key` and `y_sort_anchor`; actual default insertion therefore copies the complete shared
+`cells` value. This moves that required copy into the default envelope. Whole-process walls
+19.158/18.514/19.097/18.609 seconds establish no stable end-to-end speedup. Do not rewrite the
+source to hide omitted defaults, report the capture hook as an accelerated identical deep copy,
+or claim a memory/production budget from sharing. Later optimization of small effective-field
+changes over large payloads needs its own ownership/admission study and complete consumer;
+this unit does not select a persistent value tree or a second value/retention owner.
+
+The first complete independent Scene/Material/Asset-domain cohort runs 262 tests at
+`80e20046-18d6-47ad-88a8-de3ca2b15c8e`: 261 pass, one fails and one additional owner-trial timing case is
+explicitly skipped. The failure is the existing two-seat raw/semantic replay, not a Scene
+storage assertion. A focused repeat at `87c15e4b-56bb-493f-a0eb-33c5001d075a` reproduces it.
+Exact Step resolves newly admitted input, but `add_local_gameplay_command_systems` currently
+places custom producers only in ordinary PreUpdate. Their mapper therefore misses those
+outcomes, and Resume cannot reconstruct the consumed changes. This contradicts the existing
+Input guide's exact-step mapper contract. Keep the correction as a separate Gameplay owner unit
+and preserve complete raw/semantic per-tick replay, fresh connection authority, continuation and
+cleanup assertions; do not weaken or exclude the failing workflow to qualify Scene.
+
+The final complete independent Scene/Material/Asset-domain cohort passes 262/262 at
+`52c46779-78a8-4d77-8335-efcab1466713`, with the original owner-trial timing case explicitly skipped.
+Complete release game/library/metric/span/native
+acceptance passes 143/143 without skips at `a1230ba7-fe18-4fe3-b831-d6703b6c9763`. Nine 64/4K/16K
+Tile lifetimes retain 773 initialized presentations and 27 original-input GPU replays; the three
+baseline lifetimes retain 193. Original gameplay, old-receipt refusal, source removal, retained
+image rereads, original submission-prefix/Host/native-window retirement and both observer-panic
+cleanup controls remain. The final executable includes the separately qualified App-owned Step
+correction below; it is distinct from the sharing-only frozen comparison executable.
+The [qualification metadata](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-shared-payload-metadata.json)
+retains the selected source/program/report hashes, exact commands' compiler/backend scope and
+all final run IDs. Source hashes are recorded after formatting and a Rustdoc-only Input ordering
+correction; there is no later behavior change or substituted native program.
+
+Additional public prepared-authoring acceptance passes 20/20 at
+`c33505e4-0fb4-4c08-b267-ca4f0a1cfe70`, with three explicitly selected manual measurement cases
+left ignored. This is not a scalar allocation or UI performance measurement. Feature-free
+storage/default controls pass 10/10 at `56044aca-1090-4bf4-9e7d-1929efb7672c`, with 482 outside
+the filter. Owning Reflect/Scene and root/App/Input/Gameplay/Tooling/UI/Editor all-target/all-feature
+correctness Clippy pass; existing warnings remain. Six additional independently locked release
+all-target checks pass for behavior languages, Motion consumer, Cargo consumer, native UI Host,
+render consumer and stock consumer. Root/sample/affected independent formatting, owned document
+links, report hashes and whitespace pass. The one previously clean GPUI content fixture receives
+only its source-accessor migration; the original paused UI/Dialogue changes remain unchanged.
+All eleven scoped agents are closed. Cargo/native work stays serial, using the original target,
+without remote CI or publication. Full Foundation/R9/R10/R12, numeric budgets and foreign execution
+remain open. This completes the named storage/consumer qualification, not those broader outcomes.
+
+### Custom Gameplay Producers During Exact Step
+
+Status: implemented at `c8f7c7d`; final qualification is recorded below. This separate correction
+follows the existing two-seat replay failure found during Scene consumer acceptance. Exact Step already resolves
+pending semantic input, but the public dynamic-producer helper previously ran only in ordinary
+PreUpdate. Those producers missed the consumed outcomes. Preserve the original Input, command
+queue, runtime/time/fault owners and one instance of every supplied system.
+
+The original App owns a private intent-preparation phase after ordinary PreUpdate and before
+the exact fixed transaction. It runs for zero-tick frames, once for a catch-up frame and once
+for exact Step; paused maintenance skips it. Ordinary action resolution stays in PreUpdate.
+For an unresolved exact-step frame, Input projects, stages and resolves through that same private
+phase. Existing raw fixed projection and original timeline cursors remain. Gameplay registers
+the supplied systems directly in the App-owned phase, orders collection before lowering and
+keeps the original frame cursor and next-open-tick command admission.
+This intentionally changes the helper's ordering boundary: its constraints now order systems
+within the shared collection, rather than against arbitrary raw PreUpdate peers. Migrate related
+producers through the helper; ordinary-only work remains in PreUpdate before collection.
+
+Do not clone systems or their Local/deferred state across schedules. A provisional private
+`Resource<Schedule>` passed 55 Gameplay and six independent replay tests, but independent review
+found that its early Gameplay Finish initialization bypassed final App graph admission. A later
+plugin Finish could register a cycle or change Local initialization inputs after that private
+graph had initialized. That implementation is superseded before commit. The original App registry
+now initializes the complete graph only after all plugin Finish hooks and applies its selected
+automatic execution profile and managed fault boundary. No module-local executor or nested
+schedule owner remains.
+
+Acceptance preserves complete per-tick raw/semantic replay, connection renewal, held controls,
+configuration boundaries and continued gameplay. The exact Step must admit both newly changed
+player axes on tick eight, and Resume must not replay them. Owner controls exercise no-input,
+zero/multiple ticks, shared Local state, ordered deferred effects, system/command failures,
+late-Finish graph refusal before Startup and Local initialization after final configuration.
+Original App controls also cover private-phase manual-entry refusal, paused/exact-step placement
+and actual Parallel execution of the new automatic phase. Full Foundation/R10/R12, physical
+controller backends and general recording/rollback remain open; UI/Dialogue stays paused.
+
+Final App/Input/Gameplay libraries plus public schedule-registry, compatibility and execution-profile
+controls pass 250/250 at `a6b35a0f-1363-4f9f-94dd-6746bdc29f36`, without skips. The late-Finish cycle
+refuses at final seal before its observed Startup marker, Local reads the later Finish value,
+and the private phase executes through the actual selected Parallel executor. Complete independent
+consumers pass 262/262 at `52c46779-78a8-4d77-8335-efcab1466713`, including the entire raw/semantic
+two-seat replay, with the original
+owner-trial timing case skipped. Final release game/library/metric/span/native acceptance passes
+143/143 at `a1230ba7-fe18-4fe3-b831-d6703b6c9763`, with all original native/pixel/panic cleanup
+assertions. Independent final review closes the superseded private-schedule P1 and finds no
+remaining P1/P2. The remaining Input ordering Rustdoc is synchronized without another behavior
+change. These Windows/Rust1.95 results do not qualify foreign native execution or complete R10/R12.
