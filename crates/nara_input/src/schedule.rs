@@ -3,8 +3,9 @@ use nara_ecs::schedule::SystemSet;
 /// Ordering anchors for normalized input projection, custom UI routing and action delivery.
 ///
 /// The first four sets run in [`nara_app::CoreStage::First`] in declaration order.
-/// [`Self::ResolveActions`] runs in [`nara_app::CoreStage::PreUpdate`]. Fixed Prepare also projects,
-/// stages and resolves input once per App frame before command admission, including exact steps.
+/// [`Self::ResolveActions`] runs in [`nara_app::CoreStage::PreUpdate`]. Exact steps project, stage
+/// and resolve pending input in the App-owned intent phase before local command collection.
+/// Fixed Prepare retains raw projection; semantic input resolves once per App frame.
 /// An unresolved UI decision stays pending until the original UI routing boundary. Ordering constraints apply
 /// only within the same schedule. Membership does not order systems within a set.
 ///

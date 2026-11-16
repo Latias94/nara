@@ -888,13 +888,16 @@ impl Plugin for InputPlugin {
         )?
         .configure_sets(
             CoreStage::FixedUpdate,
+            InputSet::ProjectTimeline.in_set(FixedUpdateSet::Prepare),
+        )?
+        .configure_sets(
+            nara_app::__private::FrameIntent,
             (
                 InputSet::ProjectTimeline,
                 InputSet::StageActions,
                 InputSet::ResolveActions,
             )
-                .chain()
-                .in_set(FixedUpdateSet::Prepare),
+                .chain(),
         )?
         .add_systems(
             CoreStage::First,
@@ -902,21 +905,25 @@ impl Plugin for InputPlugin {
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            // Exact stepping can admit input without an intervening ordinary First stage.
-            // The timeline's projection cursor makes this a no-op for already projected edges.
             project_timeline_input.in_set(InputSet::ProjectTimeline),
         )?
         .add_systems(
-            CoreStage::FixedUpdate,
-            stage_fixed_actions
-                .in_set(InputSet::StageActions)
-                .run_if(fixed_actions_need_resolution),
+            nara_app::__private::FrameIntent,
+            project_timeline_input
+                .in_set(InputSet::ProjectTimeline)
+                .run_if(actions_need_resolution),
         )?
         .add_systems(
-            CoreStage::FixedUpdate,
+            nara_app::__private::FrameIntent,
+            stage_unresolved_actions
+                .in_set(InputSet::StageActions)
+                .run_if(actions_need_resolution),
+        )?
+        .add_systems(
+            nara_app::__private::FrameIntent,
             resolve_action_outcomes
                 .in_set(InputSet::ResolveActions)
-                .run_if(fixed_actions_need_resolution),
+                .run_if(actions_need_resolution),
         )?
         .add_systems(
             CoreStage::First,
@@ -1019,11 +1026,11 @@ fn resolve_action_outcomes(
     }
 }
 
-fn fixed_actions_need_resolution(time: Res<RealTime>, staging: Res<ActionStaging>) -> bool {
+fn actions_need_resolution(time: Res<RealTime>, staging: Res<ActionStaging>) -> bool {
     staging.resolved_frame != Some(time.frame)
 }
 
-fn stage_fixed_actions(
+fn stage_unresolved_actions(
     maps: Res<ActionMaps>,
     mut staging: ResMut<ActionStaging>,
     mut timeline: ResMut<InputTimeline>,

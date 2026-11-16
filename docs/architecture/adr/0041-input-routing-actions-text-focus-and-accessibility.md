@@ -132,9 +132,11 @@ retains a paused candidate and reports its actual result rather than claiming ro
 
 `InputSet` supplies supported ordering anchors for independent mapping configuration and UI
 adapters. ProjectTimeline, PublishObservations, RouteUi and StageActions run in First, in that
-order; ResolveActions runs in PreUpdate. Fixed Prepare reuses projection, staging and resolution
-for a frame not already resolved; later catch-up ticks leave late input for the next First mapping
-boundary. Unresolved UI decisions retain their original routing boundary. Order a configuration
+order; ResolveActions runs in PreUpdate. Exact Step reuses projection, staging and resolution
+through the original App intent-preparation phase for a frame not already resolved. That phase
+collects custom local gameplay producers and lowers commands once, after ordinary PreUpdate or
+before the exact fixed transaction. Later catch-up ticks leave late semantic input for the next
+First mapping boundary. Unresolved UI decisions retain their original routing boundary. Order a configuration
 change before its required First boundary rather than assuming a constraint crosses schedules.
 Set membership does not order
 peer systems. Custom routers use the original timeline's synchronous `route_pending_ui_input`:

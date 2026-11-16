@@ -242,7 +242,10 @@ impl RuntimeOwnerState {
             .into_iter()
             .map(|stage| stage.intern())
             .chain(CoreStage::ALL.into_iter().map(|stage| stage.intern()))
-            .chain(std::iter::once(crate::__private::FrameCleanup.intern()))
+            .chain([
+                crate::__private::FrameIntent.intern(),
+                crate::__private::FrameCleanup.intern(),
+            ])
         {
             let mut schedule = Schedule::new(label);
             schedule.set_executor(SingleThreadedExecutor::new());

@@ -53,6 +53,11 @@ pub use time_continuation::{
 pub mod __private {
     use nara_ecs::schedule::ScheduleLabel;
 
+    /// Engine-owned intent collection after ordinary PreUpdate or before one exact fixed tick.
+    /// Input and Gameplay place complete producers here without cloning their system state.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+    pub struct FrameIntent;
+
     /// Engine-owned transient retirement after all frame or exact-step observers have completed.
     /// This is not a public gameplay ordering anchor.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
@@ -147,6 +152,7 @@ fn is_built_in_schedule(schedule: InternedScheduleLabel) -> bool {
         || CoreStage::ALL
             .into_iter()
             .any(|stage| stage.intern() == schedule)
+        || __private::FrameIntent.intern() == schedule
         || __private::FrameCleanup.intern() == schedule
 }
 
@@ -2065,6 +2071,9 @@ impl runtime::RuntimeOwnerState {
                 frame_status = Some(status);
             } else if !paused_stages_only || stage_runs_while_paused(stage) {
                 self.run_managed_schedule(stage)?;
+                if stage == CoreStage::PreUpdate {
+                    self.run_managed_schedule(__private::FrameIntent)?;
+                }
             }
         }
 
@@ -2111,6 +2120,7 @@ impl runtime::RuntimeOwnerState {
         *self.world.resource_mut::<VirtualTime>() = virtual_time;
         *self.world.resource_mut::<FixedTime>() = fixed_time;
 
+        self.run_managed_schedule(__private::FrameIntent)?;
         self.run_managed_schedule(CoreStage::FixedUpdate)?;
 
         fixed_time.finish_exact_step();

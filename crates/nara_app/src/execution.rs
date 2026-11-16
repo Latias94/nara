@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::PluginPlanFingerprint;
 
-/// Selects the executor of every engine-driven Startup, Core and frame-cleanup schedule.
+/// Selects the executor of every engine-driven Startup, Core, intent and frame-cleanup schedule.
 ///
 /// Custom schedules retain their owner's executor. Parallel execution uses the existing
 /// Host-initialized process-global Bevy ComputeTaskPool; it does not initialize or size a pool.

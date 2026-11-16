@@ -123,6 +123,10 @@ fn assert_parallel_managed_execution() {
         peers.push((format!("{stage:?}"), add_peers(&mut app, stage, deadline)));
     }
     peers.push((
+        "frame intent".to_owned(),
+        add_peers(&mut app, nara_app::__private::FrameIntent, deadline),
+    ));
+    peers.push((
         "frame cleanup".to_owned(),
         add_peers(&mut app, nara_app::__private::FrameCleanup, deadline),
     ));

@@ -310,6 +310,17 @@ semantic recording can preserve meaning after a physical rebind, but must valida
 bounded vocabulary, version and value kinds before submission. Runtime resources are not
 recording artifacts.
 
+Register a dynamic game mapper with `nara_gameplay::add_local_gameplay_command_systems`.
+Its systems run once after ordinary input resolution, including zero-tick frames, and once
+before an exact Step admits commands. Catch-up ticks do not repeat collection. The same system
+instances retain `Local` state, deferred commands and managed error policy in both paths.
+Ordering supplied through this helper applies within its collection; a raw PreUpdate system
+does not gain exact-Step execution. Resume does not replay changes already consumed by a Step.
+This replaces the helper's previous placement inside PreUpdate. A `before`/`after` relation to
+a raw PreUpdate peer no longer orders that peer with collection. Register related producers
+through the same helper, or retain ordinary-only work in PreUpdate and observe admitted commands
+through the public Consume/Capture phases.
+
 For an isolated complete semantic recording, construct the original empty queue with
 `GameplayCommandQueue::for_replay(settings, source_id)`. Only the exact Replay source is admitted;
 local mapping, AI, Test, External and another Replay ID refuse before command storage or source

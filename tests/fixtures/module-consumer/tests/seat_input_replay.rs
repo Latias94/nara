@@ -90,26 +90,29 @@ fn assert_live_checkpoints(live: &Harness) {
     assert_eq!(pending.game, paused.game);
     assert_eq!(pending.passes, paused.passes);
     assert_eq!(
-        step.passes, paused.passes,
-        "exact Step must not resolve actions again"
+        step.passes,
+        paused.passes + 1,
+        "exact Step resolves new input and runs the original local command producers once"
     );
-    assert_eq!(step.edges, paused.edges);
-    assert_eq!(step.semantic, paused.semantic);
+    assert_eq!(step.edges, paused.edges + 2);
+    assert_eq!(step.semantic, [(1.0, true), (-0.5, true)]);
     assert_eq!(step.game.tick, paused.game.tick + 1);
-    assert_eq!(step.game.players[0].held_axis, 0.0);
-    assert_eq!(step.game.players[1].held_axis, 0.5);
-    assert_eq!(step.game.players[1].position, -12.0);
+    assert_eq!(step.game.players[0].held_axis, 1.0);
+    assert_eq!(step.game.players[0].position, 5.5);
+    assert_eq!(step.game.players[1].held_axis, -0.5);
+    assert_eq!(step.game.players[1].position, -9.0);
     assert_eq!(resumed.game, step.game);
     assert_eq!(resumed.passes, step.passes + 1);
+    assert_eq!(resumed.edges, step.edges);
     assert_eq!(resumed.semantic, [(1.0, true), (-0.5, true)]);
-    assert_eq!(resumed.pending_commands, 2);
+    assert_eq!(resumed.pending_commands, 0);
     assert_eq!(
         live.frame("resumed-two-ticks").game.players[0].position,
-        7.5
+        9.5
     );
     assert_eq!(
         live.frame("resumed-two-ticks").game.players[1].position,
-        -9.0
+        -6.0
     );
 
     for checkpoint in [
@@ -194,8 +197,8 @@ fn assert_live_checkpoints(live: &Harness) {
     );
     let final_state = &live.frame("new-controller-controls-player").game;
     assert_eq!(final_state.tick, 27);
-    assert_eq!(final_state.players[0].position, 35.5);
-    assert_eq!(final_state.players[1].position, -10.5);
+    assert_eq!(final_state.players[0].position, 37.5);
+    assert_eq!(final_state.players[1].position, -7.5);
     assert_eq!(final_state.players[0].held_axis, 1.0);
     assert_eq!(final_state.players[1].held_axis, -0.5);
     assert_eq!(final_state.players[0].shots, 11);
@@ -308,6 +311,20 @@ fn two_seat_raw_and_semantic_artifacts_replay_every_fixed_tick() {
     let semantic = SemanticRecording::capture(&original_ticks);
     assert_eq!(semantic.ticks.len(), 27);
     assert_eq!(original_ticks[0].commands.len(), 6);
+    assert_eq!(original_ticks[7].state.tick, 8);
+    assert_eq!(original_ticks[7].commands.len(), 2);
+    for (entry, player, value) in [
+        (&original_ticks[7].commands[0], Player::Copper, 1.0),
+        (&original_ticks[7].commands[1], Player::Indigo, -0.5),
+    ] {
+        assert_eq!(entry.source(), &GameplayCommandSource::LocalAction);
+        assert_eq!(Player::from_target(entry.target()), Some(player));
+        assert_eq!(entry.command_type().as_str(), MOVE_COMMAND);
+        assert_eq!(
+            entry.payload().get("value"),
+            Some(&GameplayCommandValue::F64(value))
+        );
+    }
     assert_eq!(
         original_ticks[0]
             .commands

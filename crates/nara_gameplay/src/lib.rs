@@ -3,6 +3,7 @@
 mod action;
 mod command;
 mod local;
+mod local_collection;
 mod queue;
 mod schedule;
 
@@ -45,20 +46,22 @@ use crate::schedule::GameplayCommandInternalSet;
 pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.gameplay.commands");
 
-/// Registers frame-local semantic command producers without exposing the owning core schedule.
+/// Registers semantic command producers in one shared collection schedule.
 ///
-/// The gameplay module places these systems after input action resolution and before it drains
-/// [`LocalGameplayCommands`] into the authoritative command queue. Callers may compose or order
-/// their own systems through ordinary schedule configs, but do not need to depend on
-/// [`CoreStage::PreUpdate`] or the engine-private mapping phase.
+/// Collection runs once per App frame after input action resolution and before command lowering,
+/// both in ordinary frames and exact fixed steps. Catch-up ticks do not repeat collection. The
+/// same system instances retain their local state, conditions and deferred buffers across both
+/// paths, including when Input is not installed. Ordinary paused frames do not collect commands.
+///
+/// Ordering among supplied systems, including separate calls to this helper, belongs to the shared
+/// collection schedule. Constraints do not cross into [`CoreStage::PreUpdate`]. Register directly
+/// in that core schedule when a system requires ordering with other raw PreUpdate systems; such
+/// a system does not run during exact steps. Registration may precede or follow plugin installation.
 pub fn add_local_gameplay_command_systems<'a, M>(
     app: &'a mut App,
     systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
 ) -> Result<&'a mut App, PluginError> {
-    app.add_systems(
-        CoreStage::PreUpdate,
-        systems.in_set(GameplayCommandInternalSet::CollectLocalCommands),
-    )
+    local_collection::add_systems(app, systems)
 }
 
 impl __RuntimeDriverPort for GameplayCommandQueue {
@@ -132,10 +135,11 @@ impl Plugin for GameplayCommandPlugin {
         let consumption_faults = admission_faults.clone();
         let acknowledgement_faults = admission_faults.clone();
         app.configure_sets(
-            CoreStage::PreUpdate,
+            nara_app::__private::FrameIntent,
             (
                 GameplayCommandInternalSet::CollectLocalCommands
-                    .after(nara_input::InputSet::ResolveActions),
+                    .after(nara_input::InputSet::ResolveActions)
+                    .run_if(local_collection::needs_collection),
                 GameplayCommandInternalSet::MapLocalActions,
             )
                 .chain(),
@@ -156,18 +160,8 @@ impl Plugin for GameplayCommandPlugin {
                 .chain(),
         )?
         .add_systems(
-            CoreStage::PreUpdate,
-            map_action_outcomes_to_commands
-                .after(nara_input::InputSet::ResolveActions)
-                .in_set(GameplayCommandInternalSet::MapLocalActions),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            map_action_outcomes_to_commands
-                .in_set(FixedUpdateSet::Prepare)
-                .in_set(GameplayCommandInternalSet::MapLocalActions)
-                .after(nara_input::InputSet::ResolveActions)
-                .before(GameplayCommandInternalSet::Admit),
+            nara_app::__private::FrameIntent,
+            map_action_outcomes_to_commands.in_set(GameplayCommandInternalSet::MapLocalActions),
         )?
         .add_systems(
             CoreStage::FixedUpdate,

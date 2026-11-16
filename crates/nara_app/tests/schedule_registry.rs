@@ -39,6 +39,78 @@ enum DomainSet {
 #[derive(Debug, Default, Resource)]
 struct DomainTrace(Vec<&'static str>);
 
+#[test]
+fn automatic_intent_preparation_runs_once_per_frame_and_exact_step_but_not_paused_maintenance() {
+    let mut app = App::new();
+    app.init_resource::<DomainTrace>().unwrap();
+    app.add_systems(CoreStage::PreUpdate, |mut trace: ResMut<DomainTrace>| {
+        trace.0.push("pre-update");
+    })
+    .unwrap();
+    app.add_systems(
+        nara_app::__private::FrameIntent,
+        |mut trace: ResMut<DomainTrace>| {
+            trace.0.push("intent");
+        },
+    )
+    .unwrap();
+    app.add_systems(CoreStage::FixedUpdate, |mut trace: ResMut<DomainTrace>| {
+        trace.0.push("fixed");
+    })
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime.world().resource::<DomainTrace>().0,
+        ["pre-update", "intent"]
+    );
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
+    assert_eq!(
+        runtime.world().resource::<DomainTrace>().0,
+        [
+            "pre-update",
+            "intent",
+            "pre-update",
+            "intent",
+            "fixed",
+            "fixed",
+            "fixed"
+        ]
+    );
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    let paused = runtime.world().resource::<DomainTrace>().0.len();
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    assert_eq!(runtime.world().resource::<DomainTrace>().0.len(), paused);
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::StepFixedTick),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        &runtime.world().resource::<DomainTrace>().0[paused..],
+        ["intent", "fixed"]
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime.world().resource::<DomainTrace>().0.len(),
+        paused + 2
+    );
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Resume),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        &runtime.world().resource::<DomainTrace>().0[paused + 2..],
+        ["pre-update", "intent"]
+    );
+    runtime.finish().unwrap();
+}
+
 #[derive(Resource)]
 struct StartupObserved(Arc<AtomicBool>);
 
@@ -320,7 +392,10 @@ fn explicit_custom_schedule_rejects_builtin_missing_pending_and_paused_entries()
         .into_iter()
         .map(|schedule| schedule.intern())
         .chain(CoreStage::ALL.into_iter().map(|schedule| schedule.intern()))
-        .chain([nara_app::__private::FrameCleanup.intern()])
+        .chain([
+            nara_app::__private::FrameIntent.intern(),
+            nara_app::__private::FrameCleanup.intern(),
+        ])
     {
         assert_eq!(
             runtime.run_schedule(schedule),

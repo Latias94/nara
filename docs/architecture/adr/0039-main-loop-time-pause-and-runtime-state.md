@@ -107,6 +107,9 @@ The product contract is:
   time by exactly one fixed timestep, preserves pre-existing pending time, debt, remainder, render
   interpolation, time scale, and paused settings, runs the complete fixed transaction once, clears
   trackers once, and returns to paused only after success.
+  The original App intent-preparation phase resolves pending input and runs registered local
+  gameplay producers before command admission. It reuses their ordinary-frame system state;
+  it does not run the general PreUpdate/Update schedules or repeat collection for catch-up ticks.
 - Startup is a separate once-only committed lifecycle phase. On the first run it completes before
   frame planning, may configure time resources, and is not rolled back if the subsequent frame is
   rejected. A retry does not rerun Startup; it plans from the committed Startup state.

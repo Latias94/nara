@@ -33,7 +33,8 @@ flowchart TD
     Frame --> First[First]
     First --> TaskUpdate[TaskUpdate]
     TaskUpdate --> PreUpdate[PreUpdate]
-    PreUpdate --> FixedUpdate[FixedUpdate when due]
+    PreUpdate --> FrameIntent[Private intent preparation]
+    FrameIntent --> FixedUpdate[FixedUpdate when due]
     FixedUpdate --> Update[Update]
     Update --> PostUpdate[PostUpdate]
     PostUpdate --> Extract[Extract]
@@ -52,6 +53,14 @@ Recommended stage vocabulary:
 |---|---|---|
 | Startup | `Core`, `Platform`, `Runtime`, `Scene`, `Tooling` | One-time initialization order |
 | Frame | `First`, `TaskUpdate`, `PreUpdate`, `FixedUpdate`, `Update`, `PostUpdate`, `Extract`, `Prepare`, `Queue`, `Sort`, `Render`, `Cleanup`, `Last` | Repeated runtime flow |
+
+The App also owns one private intent-preparation schedule. Ordinary running frames drive it
+after PreUpdate, including zero-tick frames; an exact Step drives it before its single fixed
+transaction. Paused maintenance skips it and catch-up ticks do not repeat it. Input and Gameplay
+register complete input/command preparation through their own APIs, retaining one instance of
+each producer system. This schedule belongs to the original App registry, automatic execution
+profile, final post-Finish graph initialization and managed fault boundary. A module-local
+executor or an early plugin Finish hook must not replace those responsibilities.
 
 These labels define the engine-owned schedules that the standard runner drives automatically; they
 are not the only schedules an `App` may contain. The schedule registry must accept arbitrary typed
