@@ -3169,6 +3169,20 @@ foreign execution and full Foundation/R12 remain open.
 
 The owner implementation and full consumer above are committed at `46f798c` and `e88ec46`.
 
+The [original namespace acquisition successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#original-namespace-acquisition-costs)
+borrows fixed nested observations through the original Host/device operations. The actual complete
+479-frame native report attributes 450.75–502.32 ms to Adapter requests and 52.54–62.00 ms to
+Device requests. First-namespace request ownership and all subsequent Ready-frame absences are
+checked separately from aggregate counts. CPU/consumer controls pass 27/27 and 132/132, full
+Travel/panic cleanup 2/2 and original native Device/Host controls 11/11. Owning compilation,
+correctness Clippy, formatting and source/report/executable provenance pass. The
+[report](../../benchmarks/2026-11-14-development-runtime-costs.md#original-namespace-acquisition-results)
+separates official wgpu candidate probing from Nara policy; it selects no new filtering, cache or
+GPU owner and claims no speedup. Further native sampling, larger workloads, reliable budgets,
+foreign execution and full Foundation/R12 remain open.
+
+The namespace owner implementation is `4a2584d`; its complete consumer and evidence are `e29e51c`.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

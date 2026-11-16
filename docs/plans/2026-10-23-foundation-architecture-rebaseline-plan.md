@@ -5400,6 +5400,20 @@ owns source/clock/wait/cache scope and complete evidence. Larger workloads, reli
 foreign execution and full Foundation/R12 remain open.
 Owner implementation is `46f798c`; its complete consumer and evidence are `e88ec46`.
 
+The [original namespace successor](2026-11-13-rust-state-reconstruction-plan.md#original-namespace-acquisition-costs)
+now separates Instance/Surface/Adapter/Device/configuration calls through that same opt-in
+transaction. The 479-frame complete native report measures Adapter requests at 450.75–502.32 ms,
+Device requests at 52.54–62.00 ms and Instance preparation at 37.39–40.99 ms. Each first namespace
+owns exactly one request pair; later Ready frames through Scene travel retain absent requests.
+Original loss/recovery and native retirement stay qualified. CPU/consumer controls pass 27/27 and
+132/132; full Travel/panic cleanup passes 2/2 and native Device/Host controls 11/11. Owning checks,
+Clippy, formatting and provenance pass. Source review separates official wgpu candidate probing
+from Nara selection policy and rejects unmeasured power-preference/manual-enumeration/cache
+workarounds. The [report](../benchmarks/2026-11-14-development-runtime-costs.md#original-namespace-acquisition-results)
+retains precise hardware/wait/sampling limits. No speedup, selected new GPU owner or full
+Foundation/R12 completion follows; larger named runtime workloads and budgets remain open.
+Owner implementation is `4a2584d`; complete consumer and evidence are `e29e51c`.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

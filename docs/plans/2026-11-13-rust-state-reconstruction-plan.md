@@ -2083,3 +2083,64 @@ reviews close with no remaining P1/P2 after the two consumer corrections. All fi
 are closed. Added document links/fragments, source/executable/report hashes and whitespace checks
 pass. Local commits retain the paused UI/Dialogue work; no remote publication or whole-Goal
 completion follows.
+
+## Original Namespace Acquisition Costs
+
+Status: implemented and qualified for Windows/Rust1.95 hardware DX12, starting from `4b4ed44`.
+The preceding complete workload locates approximately
+95% of the first initialized frame in the original namespace preparation call. Resolve its
+actual Instance/Surface/Adapter/Device/configuration costs in that same complete consumer before
+selecting an optimization. Earlier temporary Adapter probes are investigation leads, not evidence
+for these new frames.
+
+Extend the existing opt-in transaction observation with five fixed nested native-operation spans.
+Borrow their temporary value through the original private Host/backend/device calls; keep GPU,
+device epochs, admission, loss, Surface and submission custody unchanged. Record returned calls,
+including errors, before propagating the result. A Ready device must retain missing Adapter/Device
+request spans; a returned ensure/configure no-op can be measured. Clear nested data with every
+original transaction and publish it only when the containing namespace call returns. Disabled
+instrumentation makes no clock reads, allocations, logging, native requests or extra polls.
+
+The consumer retains all complete Travel and panic-cleanup controls, exact frame and completion
+joins, startup observations and entry-to-first-presentation endpoint. Nested operations are disjoint
+inside the parent namespace span; their sum cannot exceed that same observed parent, and missing
+calls remain distinct from zero. They are not additive with the parent. Report reuse and unmeasured
+namespace remainder without equating either to CPU usage, GPU execution or scanout. Keep selected
+source/binary/report provenance and actual default-off native controls.
+
+Inspect the locked official wgpu `cddb2f5d80dc0009b2ef6767635140cacf90a007` selection path before
+changing Nara policy. Its Core request enumerates candidates and checks fallback/surface eligibility
+before power-preference sorting; DX12 HAL creates capability-probe devices while exposing adapters.
+Switching power preference alone does not omit that work. Reject a workaround that bypasses real
+Surface/capability/fallback checks, rewrites official HAL selection or introduces a cross-Runtime
+GPU/cache owner merely to improve a local number. A justified optimization must improve a complete
+correct-result endpoint with the original native ownership and failure/cleanup facts. Full
+Foundation/R12, representative workload budgets, foreign execution and paused UI remain open.
+
+The [executed namespace results](../benchmarks/2026-11-14-development-runtime-costs.md#original-namespace-acquisition-results)
+retain 479 initialized frames across the same three full Travel trajectories. Adapter requests
+take 502.3248/451.8774/450.7521 ms; Device requests 52.5445/62.0042/60.6964 ms; Instance preparation
+40.9853/39.5566/37.3908 ms. Surface creation is 0.0279/0.0149/0.0144 ms and configuration
+4.9608/3.7883/3.7944 ms. Checked nested residuals remain explicit. Each run has one exact request
+pair in its first original namespace and none in later Ready frames through five Scene-instance
+changes. Independent native owner controls preserve original acquisition, reuse, loss/recovery,
+features and late predecessor isolation. These spans do not identify a particular native driver
+or SetupAPI call, and batch-to-batch ranges are not an optimization comparison.
+
+Owning CPU controls pass 27/27, independent game library/metric controls 132/132, full native
+Travel/observer-panic cleanup 2/2 and native Device/Host controls 11/11. Minimal no-default WGPU
+compilation, owning all-target/all-feature and consumer correctness Clippy, root/sample formatting
+and exact source/executable/report provenance pass; existing warnings remain. Independent review
+closes a private-call migration omission and strengthens fresh-versus-reused per-frame attribution.
+Both reviews close without remaining P1/P2; all four scoped agents are closed.
+
+Retain the official acquisition path. Explicit DX12 and absent validation/GBV overrides already
+apply in this measured release workflow. Power preference, eager manual enumeration and added
+cross-Runtime caching do not provide an evidence-supported fix under the current contract.
+More detailed native call-stack sampling can remain an upstream/platform investigation. The
+runtime delivery continuation returns to larger named gameplay/resource workloads and budget
+attribution; it does not keep expanding a timing framework or claim full Foundation completion.
+
+The original-owner implementation is committed at `4a2584d`; the complete consumer and raw
+evidence at `e29e51c`. Source, executable/report hashes, added document links/fragments and
+whitespace checks pass. All changes remain local, with paused UI/Dialogue work preserved.

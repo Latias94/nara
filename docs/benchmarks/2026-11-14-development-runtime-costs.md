@@ -1489,3 +1489,96 @@ links/fragments pass. Selected source, executable and report SHA256 values are r
 qualification. Existing non-correctness warnings remain. Five scoped research, implementation and
 review agents close with no remaining reported P1/P2. No Cargo commands overlap, no build cache is
 cleaned and no remote publication/CI execution occurs.
+
+## Original Namespace Acquisition Results
+
+The successor on `4b4ed44` borrows five fixed nested observations through the original private
+Host/backend/device calls. It preserves the existing optional transaction collection, one device
+owner, original Surface authority, requirements/fallback checks, epochs and physical retirement.
+It adds no adapter enumeration, eager device request, callback, logging or GPU cache. Timers cover
+the native call expression as well as driving its returned Future; the locked native wgpu request
+can perform synchronous work before constructing that Future. Returned errors retain reached
+operation spans; missing/unwound calls do not invent completion. Nested observations publish only
+when the original containing namespace call returns and clear with the original next transaction.
+The owner implementation is `4a2584d`; the complete consumer and captured evidence are `e29e51c`.
+Qualification uses that implementation before those local commits, with exact measured worktree
+source/executable hashes retained rather than a clean historical-build claim.
+
+The [full report](data/2026-11-14-development-runtime/namespace-acquisition.json) and
+[metadata](data/2026-11-14-development-runtime/namespace-acquisition-metadata.json) retain 479
+initialized frames, selected source/executable/report hashes and exact execution identities.
+The same three-run ordinary Travel consumer uses Rust1.95.0/release, one job, locked/offline,
+hardware DX12/RTX4090 and the existing target. Runtime/window/device owners are fresh per run;
+loaded process/driver/filesystem state and the recovered physical loop are shared. The prior
+batch's 483 frames and temporary probes are separate observations, not interchangeable samples.
+
+| Run | Initialized frames | First-frame namespace | Instance preparation | Surface creation | Adapter request | Device request | Surface configuration |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 157 | 600.8823 ms | 40.9853 ms | 0.0279 ms | 502.3248 ms | 52.5445 ms | 4.9608 ms |
+| 2 | 161 | 557.2569 ms | 39.5566 ms | 0.0149 ms | 451.8774 ms | 62.0042 ms | 3.7883 ms |
+| 3 | 161 | 552.6635 ms | 37.3908 ms | 0.0144 ms | 450.7521 ms | 60.6964 ms | 3.7944 ms |
+
+Other unmeasured work inside those namespace spans is 0.0390/0.0155/0.0154 ms. Each nested sum
+plus its own residual equals that exact parent phase. The parent overlaps all children and must
+not be added again. Whole first initialized frames are 630.0250/583.7951/580.0763 ms, and full
+entry-to-first-presentation observations are 752.4937/608.5443/605.6519 ms. These sequential
+ranges do not establish an improvement over the previous batch. All operation durations are
+wall time including driver and native waits, not CPU usage, GPU execution or scanout.
+
+Every run's actual Adapter and Device request pair belongs to its first original App/render frame,
+device epoch one. Every later observed namespace, through all Scene transitions, has both request
+spans absent. Returned Instance/Surface/configuration ensure calls can still report a measured
+duration on reuse. Exact first-frame ownership is checked in addition to total request counts;
+one misplaced later `Some(0)` cannot replace a missing initial request observation. All original
+movement, pickups, markers, five Scene-instance changes, restart, final-state, completion/seal and
+native retirement checks remain. The original owner independently exercises a real initial request,
+Ready reuse and recovery into the next epoch, preserving late-predecessor-loss isolation.
+
+### Official wgpu Mechanism And Nara Policy
+
+Source inspection uses official wgpu `cddb2f5d80dc0009b2ef6767635140cacf90a007`:
+
+- `wgpu-core/src/instance.rs::Instance::request_adapter` completes HAL enumeration before fallback
+  and actual Surface filtering, then performs power-preference sorting. `HighPerformance` changes
+  ranking after that work; it does not short-circuit candidate exposure.
+- `wgpu-hal/src/dx12/instance.rs::enumerate_adapters` ignores its Surface hint and fully collects
+  exposed DXGI candidates. `auxil/dxgi/factory.rs` contains the original platform blacklist and
+  duplicate-WARP exclusions. Adding a generic software/virtual-device exclusion would change it.
+- `wgpu-hal/src/dx12/adapter.rs::Adapter::expose` creates a real D3D12 capability-probe device,
+  queries features and PCI information, and can scan Windows SetupAPI properties per candidate.
+  `Adapter::open` reuses the probe device while creating the queue/fence/wrappers. These source
+  facts explain why Adapter-request cost can exceed Device-request cost; the measured spans do
+  not identify one candidate, SetupAPI or a particular driver call as the cause.
+- `wgpu/src/backend/wgpu_core.rs::request_adapter` performs synchronous Core selection before
+  returning a ready Future. Timing only a separately constructed Future's `block_on` would miss
+  that work. `wgpu-types/src/backend.rs::Dx12BackendOptions` exposes no public pre-enumeration
+  name/LUID/WARP/PCI-query filter.
+
+Nara retains one original request with the actual compatible Surface and explicit fallback hint,
+default power preference, followed by its original selected-Adapter and enabled-Device requirements
+checks. It does not retry other candidates after selected-Adapter requirements refusal. Changing
+that policy needs its own concrete consumer/selection contract; it is not an enumeration-speed fix.
+The current experiment already selects DX12 only and observes the validation/GBV/compiler
+environment overrides as absent. Release defaults preserve official indirect-validation flags.
+No evidence selects a broader backend restriction, removed validation, manual HAL selection or
+cross-Runtime Device/Queue reuse. A future upstream/native call-stack investigation can distinguish
+SetupAPI, driver probing and capability-query work without changing Nara ownership. It is separate
+from further ordinary engine-runtime implementation and is not a completed optimization here.
+
+### Namespace Qualification
+
+| Scope | Actual result |
+| --- | --- |
+| Owning Device/timing/telemetry/work CPU controls | 27/27, `79587e05-d997-42ee-97cc-9a04a320f019`; 499 cases outside the filter |
+| Independent game library and metric controls | 132/132, `68fd14b0-d031-4302-894d-b55057d55719`; no skips |
+| Complete hardware Travel and observer-panic cleanup | 2/2, `a8f94ae5-7880-4639-9b25-10e9bd665765`; no skips |
+| Original native Device/recovery/Host consumers | 11/11, `26bc4c47-7582-4e7b-9314-b45ed2178cb3`; 515 cases outside the filter |
+
+Minimal no-default WGPU library compilation, all-target/all-feature owning correctness Clippy,
+consumer executable/test correctness Clippy and root/sample formatting pass. Existing warnings
+remain. Review corrects an omitted private-call argument in an existing Windows ImGui test and
+strengthens per-frame fresh/reused request attribution beyond aggregate counts; original assertions
+are retained. Both independent reviews close without remaining P1/P2, and all four scoped agents
+close. No remote CI, other-platform execution or new Foundation/R12 completion claim follows.
+The bounded acquisition-cost investigation closes with the original official path retained;
+larger named gameplay/resource workloads and reliable runtime tail/memory budgets remain open.
