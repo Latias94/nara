@@ -73,9 +73,9 @@ fn admission_counts_the_same_selector_walk_and_preserves_the_shared_budget() {
     }
     assert_eq!(observed.0, 2 * ordinary.scanned_entries());
     assert_eq!(observed.1, 2 * ordinary.scanned_logical_bytes());
-    assert!(
-        observed.2 > 0,
-        "the member declaration path owns temporary storage"
+    assert_eq!(
+        observed.2, 0,
+        "successful declaration lookup borrows selector prefixes"
     );
     let exhausted = resolve_component_property_schema_claim_with_admission(
         &schema,
@@ -112,7 +112,7 @@ fn every_selector_callback_can_refuse_with_the_exact_nonclone_caller_error() {
         },
     )
     .unwrap();
-    assert!(charges.iter().any(|charge| charge.2 > 0));
+    assert!(charges.iter().all(|charge| charge.2 == 0));
 
     #[derive(Debug)]
     struct Refusal<'a>(&'a str);
@@ -212,4 +212,63 @@ fn admitted_schema_claims_keep_version_selector_and_declaration_depth_guards() {
         .unwrap_err(),
         ComponentPropertyAdmissionError::Property(ComponentPropertyError::PathDepthLimit)
     );
+}
+
+#[test]
+fn retired_member_diagnostics_admit_owned_lineage_before_copying() {
+    let mut schema = schema(ComponentValueShape::map(
+        ComponentValueShape::record_members([]),
+    ));
+    let retired = ComponentMemberPath::new([
+        ComponentMemberPathSegment::MapEntry,
+        ComponentMemberPathSegment::Member(id("gone")),
+    ]);
+    schema.fields[0].member_tombstones.push(retired.clone());
+    let path = ComponentPropertyPath::new(id("root")).with_steps([
+        ComponentPropertyStep::MapEntry("actual-key".into()),
+        ComponentPropertyStep::Member(id("gone")),
+    ]);
+    let mut charges = Vec::new();
+    let result = resolve_component_property_schema_claim_with_admission(
+        &schema,
+        schema.version(),
+        &path,
+        &mut budget(128, 1024),
+        |nodes, bytes, allocated| {
+            charges.push((nodes, bytes, allocated));
+            Ok::<_, ()>(())
+        },
+    );
+    assert!(
+        matches!(result, Err(ComponentPropertyAdmissionError::Property(
+        ComponentPropertyError::RetiredMember(actual)
+    )) if actual == retired)
+    );
+    assert!(charges.iter().any(|charge| charge.2 > 0));
+    struct Refusal;
+    let refusal = Refusal;
+    for denied in 0..charges.len() {
+        let mut calls = 0;
+        let result = resolve_component_property_schema_claim_with_admission(
+            &schema,
+            schema.version(),
+            &path,
+            &mut budget(128, 1024),
+            |nodes, bytes, allocated| {
+                let call = calls;
+                calls += 1;
+                assert_eq!((nodes, bytes, allocated), charges[call]);
+                if call == denied {
+                    Err(&refusal)
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(
+            matches!(result, Err(ComponentPropertyAdmissionError::Admission(actual))
+            if std::ptr::eq(actual, &refusal))
+        );
+        assert_eq!(calls, denied + 1);
+    }
 }

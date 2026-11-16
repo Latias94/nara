@@ -474,6 +474,9 @@ impl ImguiEditorPanel for ComputedEditPanel {
                     EditorAuthoringProjection::Members { .. } => {
                         panic!("the root-scalar panel does not request member discovery")
                     }
+                    EditorAuthoringProjection::Properties { .. } => {
+                        panic!("the root-scalar panel does not request recursive discovery")
+                    }
                 });
             }
             PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentProperty(Ok(

@@ -3,7 +3,10 @@ use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentMemberPathSegment,
     ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertyStep, ComponentTypeId,
 };
-use nara_scene::{AuthoringEntityView, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId};
+use nara_scene::{
+    AuthoringEntityView, AuthoringPropertyChild, AuthoringPropertyChildrenContinuation,
+    AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId,
+};
 
 use super::{
     EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport, WorkspaceDocumentContext,
@@ -11,10 +14,11 @@ use super::{
 };
 use crate::{
     EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
-    EditorAuthoringProjection, EditorAuthoringQuery, EditorAuthoringQueryPosition,
-    EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorPropertyObservation, EditorPropertyRead, EditorPropertyValue,
-    authoring_query::AuthoringPagePosition,
+    EditorAuthoringProjection, EditorAuthoringPropertyStatus, EditorAuthoringQuery,
+    EditorAuthoringQueryPosition, EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis,
+    EditorDocumentQueryRejection, EditorPropertyObservation, EditorPropertyRead,
+    EditorPropertyValue,
+    authoring_query::{AuthoringPagePosition, PropertyPagePosition, property_metadata_bytes},
 };
 
 pub(super) fn rejected_basis_report(
@@ -96,8 +100,8 @@ impl EditorWorkspace {
         Ok(slot)
     }
 
-    /// Discovers actual direct components, declared roots, or one-level Record members without
-    /// reading their value trees.
+    /// Discovers actual direct components, declared roots, Record members or durable descendants.
+    /// Only collection selectors inspect the selected source's actual/defaulted identities.
     /// Entries without direct durable identity consume scan work without producing a row.
     /// Metadata is preflighted for the complete page and its continuation before any source IDs
     /// are copied; insufficient budgets reject terminally.
@@ -119,6 +123,11 @@ impl EditorWorkspace {
                         next_member: 0,
                         next_tombstone: 0,
                     },
+                    EditorAuthoringProjection::Properties { .. } => {
+                        AuthoringPagePosition::Properties {
+                            position: PropertyPagePosition::Initial,
+                        }
+                    }
                 };
                 (target, None, position)
             }
@@ -130,8 +139,20 @@ impl EditorWorkspace {
             }
         };
         let slot = self.resolve_document_query_slot(&target.basis, expected_kind)?;
+        if target.metadata_bytes() > query.limits.max_metadata_bytes() {
+            return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
+        }
+        if let EditorAuthoringProjection::Properties { property, .. } = &target.projection
+            && property.steps.len() > ComponentPropertyPath::MAX_STEPS
+        {
+            return Err(nara_scene::AuthoringReadError::Property(
+                nara_reflect::ComponentPropertyError::PathDepthLimit,
+            )
+            .into());
+        }
         let entity = entity_view(slot, &target.entity)?;
         let count = query.limits.max_scan_entries().min(query.limits.max_rows());
+        let mut scanned_logical_bytes = 0;
         let (rows, next, scanned_entries): (Vec<_>, _, _) = match (&target.projection, position) {
             (
                 EditorAuthoringProjection::Components,
@@ -236,6 +257,34 @@ impl EditorWorkspace {
                     });
                 (rows, next, scanned_entries)
             }
+            (
+                EditorAuthoringProjection::Properties {
+                    component,
+                    property,
+                },
+                AuthoringPagePosition::Properties { position },
+            ) => {
+                let page = entity.component(component)?.property_children(
+                    property,
+                    to_scene_property_position(position),
+                    query.limits.max_scan_entries(),
+                    query.limits.max_rows(),
+                    query.limits.max_scan_logical_bytes(),
+                )?;
+                scanned_logical_bytes = page.scanned_logical_bytes;
+                let rows = page
+                    .children
+                    .into_iter()
+                    .map(|child| BorrowedRow::Property {
+                        parent: property,
+                        child,
+                    })
+                    .collect();
+                let next = page
+                    .next
+                    .map(|continuation| NextPosition::Properties { continuation });
+                (rows, next, page.scanned_entries)
+            }
             _ => return Err(EditorDocumentQueryRejection::InvalidContinuation),
         };
         let mut metadata_bytes = target.metadata_bytes();
@@ -261,6 +310,7 @@ impl EditorWorkspace {
             target,
             rows,
             scanned_entries,
+            scanned_logical_bytes,
             metadata_bytes,
             next,
         })
@@ -273,15 +323,15 @@ impl EditorWorkspace {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         let slot = self.resolve_document_query_slot(&request.target.basis, None)?;
+        let metadata_bytes = request.target.metadata_bytes();
+        if metadata_bytes > request.limits.max_metadata_bytes() {
+            return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
+        }
         if request.target.property.steps.len() > nara_reflect::ComponentPropertyPath::MAX_STEPS {
             return Err(nara_scene::AuthoringReadError::Property(
                 nara_reflect::ComponentPropertyError::PathDepthLimit,
             )
             .into());
-        }
-        let metadata_bytes = request.target.metadata_bytes();
-        if metadata_bytes > request.limits.max_metadata_bytes() {
-            return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
         let mut budget = ComponentPropertyReadBudget::new(
             ItemLimit::new(request.limits.max_scan_entries()).expect("validated scan limit"),
@@ -334,6 +384,44 @@ fn entity_view<'a>(
     }
 }
 
+fn to_scene_property_position(position: PropertyPagePosition) -> AuthoringPropertyChildrenPosition {
+    match position {
+        PropertyPagePosition::Initial => AuthoringPropertyChildrenPosition::Initial,
+        PropertyPagePosition::Empty => AuthoringPropertyChildrenPosition::Empty,
+        PropertyPagePosition::Record {
+            next_member,
+            next_tombstone,
+        } => AuthoringPropertyChildrenPosition::Record {
+            next_member,
+            next_tombstone,
+        },
+        PropertyPagePosition::Map { after } => AuthoringPropertyChildrenPosition::Map { after },
+        PropertyPagePosition::KeyedList { next_item } => {
+            AuthoringPropertyChildrenPosition::KeyedList { next_item }
+        }
+    }
+}
+
+fn from_scene_property_position(
+    position: AuthoringPropertyChildrenPosition,
+) -> PropertyPagePosition {
+    match position {
+        AuthoringPropertyChildrenPosition::Initial => PropertyPagePosition::Initial,
+        AuthoringPropertyChildrenPosition::Empty => PropertyPagePosition::Empty,
+        AuthoringPropertyChildrenPosition::Record {
+            next_member,
+            next_tombstone,
+        } => PropertyPagePosition::Record {
+            next_member,
+            next_tombstone,
+        },
+        AuthoringPropertyChildrenPosition::Map { after } => PropertyPagePosition::Map { after },
+        AuthoringPropertyChildrenPosition::KeyedList { next_item } => {
+            PropertyPagePosition::KeyedList { next_item }
+        }
+    }
+}
+
 enum BorrowedRow<'a> {
     Component(&'a AuthoringRecordFact),
     Root(&'a ComponentFieldSchema),
@@ -344,6 +432,10 @@ enum BorrowedRow<'a> {
         edit_capability: bool,
         retired: bool,
     },
+    Property {
+        parent: &'a ComponentPropertyPath,
+        child: AuthoringPropertyChild<'a>,
+    },
 }
 
 impl BorrowedRow<'_> {
@@ -352,6 +444,9 @@ impl BorrowedRow<'_> {
             Self::Component(fact) => fact.component().as_str().len(),
             Self::Root(field) => field.id().as_str().len(),
             Self::Member { root, id, .. } => root.as_str().len().saturating_add(id.as_str().len()),
+            Self::Property { parent, child } => {
+                property_metadata_bytes(parent).saturating_add(child.metadata_bytes())
+            }
         }
     }
     fn into_owned(self) -> EditorAuthoringRow {
@@ -384,6 +479,16 @@ impl BorrowedRow<'_> {
                     EditorAuthoringMemberStatus::Available
                 },
             },
+            Self::Property { parent, child } => EditorAuthoringRow::Property {
+                property: parent.clone().with_steps([child.to_step()]),
+                kind: child.kind,
+                edit_capability: child.edit_capability,
+                status: if child.retired {
+                    EditorAuthoringPropertyStatus::Retired
+                } else {
+                    EditorAuthoringPropertyStatus::Available
+                },
+            },
         }
     }
 }
@@ -400,6 +505,9 @@ enum NextPosition<'a> {
         next_member: usize,
         next_tombstone: usize,
     },
+    Properties {
+        continuation: AuthoringPropertyChildrenContinuation<'a>,
+    },
 }
 
 impl NextPosition<'_> {
@@ -408,6 +516,7 @@ impl NextPosition<'_> {
             Self::Components { after, .. } => after.as_str().len(),
             Self::Roots { .. } => 0,
             Self::Members { .. } => 0,
+            Self::Properties { continuation } => continuation.metadata_bytes(),
         }
     }
     fn into_owned(self) -> AuthoringPagePosition {
@@ -423,6 +532,9 @@ impl NextPosition<'_> {
             } => AuthoringPagePosition::Members {
                 next_member,
                 next_tombstone,
+            },
+            Self::Properties { continuation } => AuthoringPagePosition::Properties {
+                position: from_scene_property_position(continuation.to_position()),
             },
         }
     }

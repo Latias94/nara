@@ -15,11 +15,11 @@ use nara_scene::{
 };
 use nara_tooling::{
     EditorAuthoringMemberStatus, EditorAuthoringPage, EditorAuthoringProjection,
-    EditorAuthoringQuery, EditorAuthoringQueryLimits, EditorAuthoringQueryPosition,
-    EditorAuthoringQueryTarget, EditorAuthoringRow, EditorDocumentId, EditorDocumentQueryBasis,
-    EditorDocumentQueryRejection, EditorDocumentSourceBinding, EditorPropertyRead,
-    EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue, EditorWorkspace,
-    EditorWorkspaceCommand,
+    EditorAuthoringPropertyStatus, EditorAuthoringQuery, EditorAuthoringQueryLimits,
+    EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow, EditorDocumentId,
+    EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorDocumentSourceBinding,
+    EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
+    EditorWorkspace, EditorWorkspaceCommand,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -305,6 +305,12 @@ fn members() -> EditorAuthoringProjection {
     EditorAuthoringProjection::Members {
         component: ComponentTypeId::new("game.Data"),
         root: ComponentFieldId::new("record"),
+    }
+}
+fn properties(path: ComponentPropertyPath) -> EditorAuthoringProjection {
+    EditorAuthoringProjection::Properties {
+        component: ComponentTypeId::new("game.Data"),
+        property: path,
     }
 }
 fn read(
@@ -598,6 +604,102 @@ fn member_discovery_is_one_level_durable_bounded_and_rejects_unreadable_roots() 
                 .len(),
             1
         );
+        assert_eq!(workspace.authoring_model(), before);
+    }
+}
+
+#[test]
+fn recursive_property_discovery_preserves_durable_paths_and_selection_independence() {
+    for prefab in [false, true] {
+        let (workspace, document) = fixture(prefab);
+        let before = workspace.authoring_model();
+        let record = ComponentPropertyPath::new(ComponentFieldId::new("record"));
+        let mut page = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: basis(&workspace, document),
+                    entity: id("item"),
+                    projection: properties(record.clone()),
+                }),
+                limits: EditorAuthoringQueryLimits::new(256, 2, 4096).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(page.scanned_entries, 2);
+        assert!(matches!(
+            &page.rows[..],
+            [
+                EditorAuthoringRow::Property {
+                    property,
+                    kind: Some(ComponentValueKind::U64),
+                    status: EditorAuthoringPropertyStatus::Available,
+                    ..
+                },
+                EditorAuthoringRow::Property {
+                    property: nested,
+                    kind: Some(ComponentValueKind::Map),
+                    status: EditorAuthoringPropertyStatus::Available,
+                    ..
+                }
+            ] if property == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("first"))])
+                && nested == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("nested"))])
+        ));
+        assert!(page.next.is_some());
+        page = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Continue(page.next.take().unwrap()),
+                limits: EditorAuthoringQueryLimits::new(256, 2, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(matches!(
+            &page.rows[..],
+            [
+                EditorAuthoringRow::Property {
+                    property,
+                    kind: Some(ComponentValueKind::String),
+                    ..
+                },
+                EditorAuthoringRow::Property {
+                    property: retired,
+                    kind: None,
+                    status: EditorAuthoringPropertyStatus::Retired,
+                    ..
+                }
+            ] if property == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("second"))])
+                && retired == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired"))])
+        ));
+        assert!(page.next.is_none());
+
+        let nested = record.with_steps([ComponentPropertyStep::Member(ComponentFieldId::new(
+            "nested",
+        ))]);
+        let nested_page = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: basis(&workspace, document),
+                    entity: id("item"),
+                    projection: properties(nested.clone()),
+                }),
+                limits: EditorAuthoringQueryLimits::new(256, 4, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(matches!(
+            &nested_page.rows[..],
+            [
+                EditorAuthoringRow::Property {
+                    property,
+                    kind: Some(ComponentValueKind::Bool),
+                    status: EditorAuthoringPropertyStatus::Available,
+                    ..
+                },
+                EditorAuthoringRow::Property {
+                    property: retired,
+                    kind: None,
+                    status: EditorAuthoringPropertyStatus::Retired,
+                    ..
+                }
+            ] if property == &nested.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("leaf"))])
+                && retired == &nested.with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired_leaf"))])
+        ));
         assert_eq!(workspace.authoring_model(), before);
     }
 }

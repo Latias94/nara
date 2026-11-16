@@ -2,9 +2,11 @@ use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPathError, ComponentFieldSchema,
-    ComponentMemberPath, ComponentPropertyError, ComponentPropertyPath,
-    ComponentPropertyReadBudget, ComponentShapeMember, ComponentTypeId, ComponentValue,
-    ComponentValueShape, resolve_component_property_in_root,
+    ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError, ComponentPropertyKey,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertySchemaClaim,
+    ComponentPropertyStep, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, resolve_component_property_in_root,
+    resolve_component_property_schema_in_root,
 };
 
 use super::{
@@ -159,6 +161,236 @@ pub struct AuthoringDirectMembers<'a> {
     edit_capability: bool,
 }
 
+/// Position for the source-owned direct-child property stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthoringPropertyChildrenPosition {
+    Initial,
+    Empty,
+    Record {
+        next_member: usize,
+        next_tombstone: usize,
+    },
+    Map {
+        after: Option<String>,
+    },
+    KeyedList {
+        next_item: usize,
+    },
+}
+
+/// One source-owned durable child selector. The parent path is supplied by the caller and the
+/// child step is admitted by the same Schema/value owner that serves property reads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuthoringPropertyChild<'a> {
+    step: PropertyChildStep<'a>,
+    pub kind: Option<ComponentValueKind>,
+    pub edit_capability: bool,
+    pub retired: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PropertyChildStep<'a> {
+    Member(&'a ComponentFieldId),
+    MapEntry(&'a str),
+    ListItem {
+        by: &'a ComponentFieldId,
+        key: &'a ComponentValue,
+    },
+}
+
+impl AuthoringPropertyChild<'_> {
+    /// Logical identity bytes copied by `to_step`, excluding the caller's parent selector.
+    #[must_use]
+    pub fn metadata_bytes(&self) -> usize {
+        match self.step {
+            PropertyChildStep::Member(id) => id.as_str().len(),
+            PropertyChildStep::MapEntry(key) => key.len(),
+            PropertyChildStep::ListItem { by, key } => {
+                by.as_str().len().saturating_add(match key {
+                    ComponentValue::String(value) => value.len(),
+                    _ => 8,
+                })
+            }
+        }
+    }
+
+    /// Copies this admitted child identity after the caller admits its complete owned page.
+    #[must_use]
+    pub fn to_step(&self) -> ComponentPropertyStep {
+        match self.step {
+            PropertyChildStep::Member(id) => ComponentPropertyStep::Member(id.clone()),
+            PropertyChildStep::MapEntry(key) => ComponentPropertyStep::MapEntry(key.to_owned()),
+            PropertyChildStep::ListItem { by, key } => ComponentPropertyStep::ListItem {
+                by: by.clone(),
+                key: ComponentPropertyKey::from_value(key)
+                    .expect("borrowed key was admitted by the source owner"),
+            },
+        }
+    }
+}
+
+/// Borrowed successor position; copying a map anchor is deferred until page admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoringPropertyChildrenContinuation<'a>(PropertyChildrenNext<'a>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PropertyChildrenNext<'a> {
+    Record {
+        next_member: usize,
+        next_tombstone: usize,
+    },
+    Map {
+        after: &'a str,
+    },
+    KeyedList {
+        next_item: usize,
+    },
+}
+
+impl AuthoringPropertyChildrenContinuation<'_> {
+    #[must_use]
+    pub const fn metadata_bytes(&self) -> usize {
+        match self.0 {
+            PropertyChildrenNext::Map { after } => after.len(),
+            _ => 0,
+        }
+    }
+
+    #[must_use]
+    pub fn to_position(&self) -> AuthoringPropertyChildrenPosition {
+        match self.0 {
+            PropertyChildrenNext::Record {
+                next_member,
+                next_tombstone,
+            } => AuthoringPropertyChildrenPosition::Record {
+                next_member,
+                next_tombstone,
+            },
+            PropertyChildrenNext::Map { after } => AuthoringPropertyChildrenPosition::Map {
+                after: Some(after.to_owned()),
+            },
+            PropertyChildrenNext::KeyedList { next_item } => {
+                AuthoringPropertyChildrenPosition::KeyedList { next_item }
+            }
+        }
+    }
+}
+
+/// Bounded borrowed direct-child page. It copies no identities, values or mutation authority.
+#[derive(Debug, PartialEq)]
+pub struct AuthoringPropertyChildrenPage<'a> {
+    pub children: Vec<AuthoringPropertyChild<'a>>,
+    pub next: Option<AuthoringPropertyChildrenContinuation<'a>>,
+    pub scanned_entries: usize,
+    pub scanned_logical_bytes: usize,
+}
+
+fn unwrap_authoring_shape<'a>(
+    mut shape: &'a ComponentValueShape,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<&'a ComponentValueShape, AuthoringReadError> {
+    while let ComponentValueShape::Optional { value } = shape {
+        budget.observe_entry(0)?;
+        shape = value;
+    }
+    Ok(shape)
+}
+
+fn admit_child_scan(
+    budget: &mut ComponentPropertyReadBudget,
+    initial_entries: usize,
+    logical_bytes: usize,
+) -> Result<bool, AuthoringReadError> {
+    match budget.observe_entry(logical_bytes) {
+        Ok(()) => Ok(true),
+        Err(ComponentPropertyError::ReadBudgetExceeded)
+            if budget.scanned_entries() > initial_entries =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn authoring_property_value(value: AuthoringPropertyValue<'_>) -> Option<&ComponentValue> {
+    match value {
+        AuthoringPropertyValue::Present(value) | AuthoringPropertyValue::Defaulted(value)
+            if !matches!(value, ComponentValue::Null) =>
+        {
+            Some(value)
+        }
+        AuthoringPropertyValue::Present(_)
+        | AuthoringPropertyValue::Defaulted(_)
+        | AuthoringPropertyValue::Missing => None,
+    }
+}
+
+fn keyed_list_member<'a>(
+    shape: &'a ComponentValueShape,
+    key: &ComponentFieldId,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<Option<&'a ComponentShapeMember>, AuthoringReadError> {
+    let ComponentValueShape::Record { members } = unwrap_authoring_shape(shape, budget)? else {
+        return Ok(None);
+    };
+    for member in members {
+        budget.observe_entry(
+            member
+                .name
+                .len()
+                .saturating_add(member.id.as_ref().map_or(0, |id| id.as_str().len())),
+        )?;
+        if member.id.as_ref() == Some(key) {
+            return Ok(Some(member));
+        }
+    }
+    Ok(None)
+}
+
+fn property_step_matches_member_path(
+    step: &ComponentPropertyStep,
+    segment: &ComponentMemberPathSegment,
+) -> bool {
+    match (step, segment) {
+        (ComponentPropertyStep::Member(left), ComponentMemberPathSegment::Member(right)) => {
+            left == right
+        }
+        (ComponentPropertyStep::ListItem { .. }, ComponentMemberPathSegment::ListItem)
+        | (ComponentPropertyStep::MapEntry(_), ComponentMemberPathSegment::MapEntry) => true,
+        _ => false,
+    }
+}
+
+fn tombstone_direct_child<'a>(
+    tombstone: &'a ComponentMemberPath,
+    property: &ComponentPropertyPath,
+) -> Option<&'a ComponentFieldId> {
+    let segments = tombstone.segments();
+    if segments.len() != property.steps.len() + 1
+        || !property
+            .steps
+            .iter()
+            .zip(segments.iter())
+            .all(|(step, segment)| property_step_matches_member_path(step, segment))
+    {
+        return None;
+    }
+    match segments.last() {
+        Some(ComponentMemberPathSegment::Member(id)) => Some(id),
+        _ => None,
+    }
+}
+
+fn member_path_logical_bytes(path: &ComponentMemberPath) -> usize {
+    path.segments()
+        .iter()
+        .map(|segment| match segment {
+            ComponentMemberPathSegment::Member(id) => id.as_str().len(),
+            ComponentMemberPathSegment::ListItem | ComponentMemberPathSegment::MapEntry => 1,
+        })
+        .fold(0usize, usize::saturating_add)
+}
+
 impl<'a> AuthoringDirectMembers<'a> {
     #[must_use]
     pub const fn members(&self) -> &'a [ComponentShapeMember] {
@@ -271,6 +503,323 @@ impl<'a> AuthoringComponentView<'a> {
             AuthoringPropertyValue::Defaulted(selected)
         } else {
             AuthoringPropertyValue::Present(selected)
+        })
+    }
+
+    /// Borrows the current Schema claim for a root or descendant selector.
+    ///
+    /// This observes declarations through the same owner and lookup budget as a property read;
+    /// it does not inspect a target value, choose a default, or authorize a write.
+    pub fn property_schema_claim(
+        &self,
+        property: &ComponentPropertyPath,
+        budget: &mut ComponentPropertyReadBudget,
+    ) -> Result<ComponentPropertySchemaClaim<'a>, AuthoringReadError> {
+        let entry = self.schema()?;
+        property.validate()?;
+        if entry
+            .schema
+            .field_tombstones()
+            .binary_search(&property.root)
+            .is_ok()
+        {
+            return Err(ComponentPropertyError::RetiredField(property.root.clone()).into());
+        }
+        let fields = entry.schema.fields();
+        let index = fields
+            .binary_search_by(|field| field.id().cmp(&property.root))
+            .map_err(|_| AuthoringReadError::FieldNotFound)?;
+        Ok(resolve_component_property_schema_in_root(
+            &fields[index],
+            property,
+            budget,
+        )?)
+    }
+
+    /// Enumerates directly addressable children of a root or descendant through the source owner.
+    ///
+    /// Record declarations and retained tombstones are schema-owned. Map entries and keyed-list
+    /// items are value-owned; ordinary list positions refuse because they have no durable
+    /// selectors. Record declarations can be observed below an absent optional parent; their
+    /// availability does not assert value presence. Collection identities require the actual
+    /// selected explicit/default value. Lookup and child scans share the supplied allowance.
+    /// An exhausted scan returns a continuation only after actual child-stream progress.
+    pub fn property_children(
+        &self,
+        property: &ComponentPropertyPath,
+        position: AuthoringPropertyChildrenPosition,
+        max_scan_entries: usize,
+        max_rows: usize,
+        max_logical_bytes: usize,
+    ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
+        if max_scan_entries == 0 || max_rows == 0 || max_logical_bytes == 0 {
+            return Err(ComponentPropertyError::ReadBudgetExceeded.into());
+        }
+        let mut budget = ComponentPropertyReadBudget::new(
+            nara_core::ItemLimit::new(max_scan_entries)
+                .expect("property child scan entries are positive"),
+            nara_core::ByteLimit::new(max_logical_bytes)
+                .expect("property child logical bytes are positive"),
+        );
+        let claim = self.property_schema_claim(property, &mut budget)?;
+        let shape = unwrap_authoring_shape(claim.shape, &mut budget)?;
+        if matches!(shape, ComponentValueShape::List { .. }) {
+            return Err(ComponentPropertyError::UnkeyedList {
+                step: property.steps.len(),
+            }
+            .into());
+        }
+        if matches!(
+            shape,
+            ComponentValueShape::Record { .. }
+                | ComponentValueShape::Map { .. }
+                | ComponentValueShape::KeyedList { .. }
+        ) && property.steps.len() == ComponentPropertyPath::MAX_STEPS
+        {
+            return Err(ComponentPropertyError::PathDepthLimit.into());
+        }
+        let value = if matches!(
+            shape,
+            ComponentValueShape::Map { .. } | ComponentValueShape::KeyedList { .. }
+        ) || property.steps.iter().any(|step| {
+            matches!(
+                step,
+                ComponentPropertyStep::MapEntry(_) | ComponentPropertyStep::ListItem { .. }
+            )
+        }) {
+            Some(self.property_value(property, &mut budget)?)
+        } else {
+            None
+        };
+        let position = match (position, shape) {
+            (AuthoringPropertyChildrenPosition::Initial, ComponentValueShape::Record { .. }) => {
+                AuthoringPropertyChildrenPosition::Record {
+                    next_member: 0,
+                    next_tombstone: 0,
+                }
+            }
+            (AuthoringPropertyChildrenPosition::Initial, ComponentValueShape::Map { .. }) => {
+                AuthoringPropertyChildrenPosition::Map { after: None }
+            }
+            (AuthoringPropertyChildrenPosition::Initial, ComponentValueShape::KeyedList { .. }) => {
+                AuthoringPropertyChildrenPosition::KeyedList { next_item: 0 }
+            }
+            (AuthoringPropertyChildrenPosition::Initial, _) => {
+                AuthoringPropertyChildrenPosition::Empty
+            }
+            (position, _) => position,
+        };
+        let initial_entries = budget.scanned_entries();
+        let mut children = Vec::new();
+        let next = match (position, shape) {
+            (
+                AuthoringPropertyChildrenPosition::Record {
+                    mut next_member,
+                    mut next_tombstone,
+                },
+                ComponentValueShape::Record { members },
+            ) => {
+                if next_member > members.len()
+                    || next_tombstone > claim.field.member_tombstones.len()
+                {
+                    return Err(AuthoringReadError::InvalidFieldPath);
+                }
+                while children.len() < max_rows {
+                    if let Some(member) = members.get(next_member) {
+                        if !admit_child_scan(
+                            &mut budget,
+                            initial_entries,
+                            member
+                                .id
+                                .as_ref()
+                                .map_or(member.name.len(), |id| id.as_str().len()),
+                        )? {
+                            break;
+                        }
+                        next_member += 1;
+                        let Some(id) = member.id.as_ref() else {
+                            continue;
+                        };
+                        children.push(AuthoringPropertyChild {
+                            step: PropertyChildStep::Member(id),
+                            kind: Some(member.shape.value_kind()),
+                            edit_capability: claim.field.has_capability(ComponentCapability::Edit),
+                            retired: false,
+                        });
+                    } else if let Some(tombstone) =
+                        claim.field.member_tombstones.get(next_tombstone)
+                    {
+                        if !admit_child_scan(
+                            &mut budget,
+                            initial_entries,
+                            member_path_logical_bytes(tombstone),
+                        )? {
+                            break;
+                        }
+                        next_tombstone += 1;
+                        let direct = tombstone_direct_child(tombstone, property);
+                        if let Some(id) = direct {
+                            children.push(AuthoringPropertyChild {
+                                step: PropertyChildStep::Member(id),
+                                kind: None,
+                                edit_capability: false,
+                                retired: true,
+                            });
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                let has_more = next_member < members.len()
+                    || next_tombstone < claim.field.member_tombstones.len();
+                has_more.then_some(AuthoringPropertyChildrenContinuation(
+                    PropertyChildrenNext::Record {
+                        next_member,
+                        next_tombstone,
+                    },
+                ))
+            }
+            (
+                AuthoringPropertyChildrenPosition::Map { after },
+                ComponentValueShape::Map { value: value_shape },
+            ) => {
+                let Some(ComponentValue::Map(values)) = value.and_then(authoring_property_value)
+                else {
+                    return Ok(AuthoringPropertyChildrenPage {
+                        children,
+                        next: None,
+                        scanned_entries: budget.scanned_entries(),
+                        scanned_logical_bytes: budget.scanned_logical_bytes(),
+                    });
+                };
+                let mut last = match after.as_deref() {
+                    Some(after) => Some(
+                        values
+                            .get_key_value(after)
+                            .ok_or(AuthoringReadError::InvalidFieldPath)?
+                            .0
+                            .as_str(),
+                    ),
+                    None => None,
+                };
+                let mut entries = match last {
+                    Some(after) => values.range::<str, _>((
+                        std::ops::Bound::Excluded(after),
+                        std::ops::Bound::Unbounded,
+                    )),
+                    None => values
+                        .range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)),
+                };
+                let mut pending = false;
+                while children.len() < max_rows {
+                    let Some((key, _)) = entries.next() else {
+                        break;
+                    };
+                    if !admit_child_scan(&mut budget, initial_entries, key.len())? {
+                        pending = true;
+                        break;
+                    }
+                    last = Some(key.as_str());
+                    children.push(AuthoringPropertyChild {
+                        step: PropertyChildStep::MapEntry(key),
+                        kind: Some(value_shape.value_kind()),
+                        edit_capability: claim.field.has_capability(ComponentCapability::Edit),
+                        retired: false,
+                    });
+                }
+                let has_more = pending || entries.next().is_some();
+                has_more.then(|| {
+                    AuthoringPropertyChildrenContinuation(PropertyChildrenNext::Map {
+                        after: last.expect("a continuation advances"),
+                    })
+                })
+            }
+            (
+                AuthoringPropertyChildrenPosition::KeyedList { mut next_item },
+                ComponentValueShape::KeyedList { item, key },
+            ) => {
+                let Some(ComponentValue::List(values)) = value.and_then(authoring_property_value)
+                else {
+                    return Ok(AuthoringPropertyChildrenPage {
+                        children,
+                        next: None,
+                        scanned_entries: budget.scanned_entries(),
+                        scanned_logical_bytes: budget.scanned_logical_bytes(),
+                    });
+                };
+                let Some(key_member) = keyed_list_member(item, key, &mut budget)? else {
+                    return Err(AuthoringReadError::InvalidFieldPath);
+                };
+                if next_item > values.len() {
+                    return Err(AuthoringReadError::InvalidFieldPath);
+                }
+                let initial_entries = budget.scanned_entries();
+                while next_item < values.len() && children.len() < max_rows {
+                    let index = next_item;
+                    let item_value = &values[index];
+                    let key_source = item_value.get(key_member.name.as_str()).ok_or(
+                        AuthoringReadError::Property(ComponentPropertyError::InvalidListItemKey {
+                            step: 0,
+                            index,
+                        }),
+                    )?;
+                    let key_logical_bytes = match key_source {
+                        ComponentValue::String(value) => value.len(),
+                        ComponentValue::I64(_) | ComponentValue::U64(_) => 8,
+                        _ => {
+                            return Err(AuthoringReadError::Property(
+                                ComponentPropertyError::InvalidListItemKey { step: 0, index },
+                            ));
+                        }
+                    };
+                    if !admit_child_scan(
+                        &mut budget,
+                        initial_entries,
+                        key.as_str().len().saturating_add(key_logical_bytes),
+                    )? {
+                        break;
+                    }
+                    if key_source.kind() != key_member.shape.value_kind() {
+                        return Err(AuthoringReadError::Property(
+                            ComponentPropertyError::KeyTypeMismatch {
+                                step: 0,
+                                expected: key_member.shape.value_kind(),
+                                actual: key_source.kind(),
+                            },
+                        ));
+                    }
+                    next_item += 1;
+                    children.push(AuthoringPropertyChild {
+                        step: PropertyChildStep::ListItem {
+                            by: key,
+                            key: key_source,
+                        },
+                        kind: Some(item.value_kind()),
+                        edit_capability: claim.field.has_capability(ComponentCapability::Edit),
+                        retired: false,
+                    });
+                }
+                (next_item < values.len()).then_some(AuthoringPropertyChildrenContinuation(
+                    PropertyChildrenNext::KeyedList { next_item },
+                ))
+            }
+            (AuthoringPropertyChildrenPosition::Empty, shape)
+                if !matches!(
+                    shape,
+                    ComponentValueShape::Record { .. }
+                        | ComponentValueShape::Map { .. }
+                        | ComponentValueShape::KeyedList { .. }
+                ) =>
+            {
+                None
+            }
+            _ => return Err(AuthoringReadError::InvalidFieldPath),
+        };
+        Ok(AuthoringPropertyChildrenPage {
+            children,
+            next,
+            scanned_entries: budget.scanned_entries(),
+            scanned_logical_bytes: budget.scanned_logical_bytes(),
         })
     }
 

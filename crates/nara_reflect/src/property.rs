@@ -253,6 +253,15 @@ impl ComponentPropertyReadBudget {
         self.scanned_logical_bytes
     }
 
+    /// Charges one owner-observed declaration or collection identity before inspecting it.
+    ///
+    /// Source owners reuse this allowance across selector resolution and child enumeration.
+    /// This does not validate a declaration, copy values or authorize a source mutation.
+    #[doc(hidden)]
+    pub fn observe_entry(&mut self, logical_bytes: usize) -> Result<(), ComponentPropertyError> {
+        self.observe(logical_bytes)
+    }
+
     fn observe(&mut self, bytes: usize) -> Result<(), ComponentPropertyError> {
         let entries = self.scanned_entries.checked_add(1);
         let bytes = self.scanned_logical_bytes.checked_add(bytes);
@@ -411,8 +420,8 @@ pub fn resolve_component_property_with_limits<'schema, 'value>(
 /// a durable selector/address nor authority to edit, retain or publish the supplied value.
 ///
 /// Before copying the complete root storage coordinate, the callback admits its segment storage
-/// and string bytes. Later storage-vector growth, selected wire-name copies and declaration
-/// scratch are admitted before allocation. These are modeled storage allowances, not allocator/RSS bounds.
+/// and string bytes. Later storage-vector growth, selected wire-name copies and retired-member
+/// diagnostic storage are admitted before allocation. These are modeled storage allowances, not allocator/RSS bounds.
 /// Refusal returns the exact caller error without performing the denied allocation step.
 #[doc(hidden)]
 pub fn resolve_component_property_storage_path_with_admission<E>(
@@ -474,8 +483,9 @@ pub fn resolve_component_property_schema_claim<'schema>(
 /// Resolves a selector through the same walker with pre-scan and pre-growth work admission.
 ///
 /// The caller supplies an admitted schema and retains the shared read budget across lookups.
-/// Callback deltas count examined entries, logical identity bytes and modeled declaration
-/// scratch, excluding shared catalog storage. Refusal returns the exact caller error before
+/// Callback deltas count examined entries, logical identity bytes and modeled retired-member
+/// diagnostic storage, excluding shared catalog storage. Successful lookup borrows selector
+/// prefixes. Refusal returns the exact caller error before
 /// the next declaration comparison or scratch allocation. Selector/version/depth guards and
 /// interpretation errors remain the same as the ordinary schema-claim entry point.
 pub fn resolve_component_property_schema_claim_with_admission<'schema, E>(
@@ -589,6 +599,28 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
         value: selected
             .value
             .expect("value resolution retains its observation"),
+    })
+}
+
+/// Borrows a selector's declaration below an already admitted and indexed root field.
+///
+/// Root lookup and source presence remain the caller's responsibility. Nested declarations,
+/// optional wrappers, tombstones and collection policy share the ordinary property walker.
+/// No source values are inspected and no effective component is materialized.
+#[doc(hidden)]
+pub fn resolve_component_property_schema_in_root<'schema>(
+    field: &'schema ComponentFieldSchema,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
+    path.validate()?;
+    if field.id != path.root {
+        return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
+    }
+    let selected = resolve_root_location(field, None, path, Some(budget), None, None)?;
+    Ok(ComponentPropertySchemaClaim {
+        field,
+        shape: selected.shape,
     })
 }
 
@@ -754,7 +786,6 @@ fn resolve_root_location<'schema, 'value>(
     mut admission: Option<&mut PropertyAdmission<'_>>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
-    let mut declaration = Vec::new();
     let mut depth = 0;
     for (step, selector) in path.steps.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
@@ -768,9 +799,6 @@ fn resolve_root_location<'schema, 'value>(
         advance_declaration_depth(&mut depth)?;
         match selector {
             ComponentPropertyStep::Member(id) => {
-                reserve_declaration(&mut declaration, &mut admission)?;
-                admit_property_work(&mut admission, 0, 0, id.as_str().len())?;
-                declaration.push(ComponentMemberPathSegment::Member(id.clone()));
                 for tombstone in &root.member_tombstones {
                     if budget.is_some() {
                         for segment in tombstone.segments() {
@@ -781,7 +809,42 @@ fn resolve_root_location<'schema, 'value>(
                             observe_read(&mut budget, &mut admission, bytes)?;
                         }
                     }
-                    if declaration.starts_with(tombstone.segments()) {
+                    let prefix = &path.steps[..=step];
+                    if tombstone.segments().len() <= prefix.len()
+                        && prefix.iter().zip(tombstone.segments()).all(
+                            |(selector, segment)| match (selector, segment) {
+                                (
+                                    ComponentPropertyStep::Member(left),
+                                    ComponentMemberPathSegment::Member(right),
+                                ) => left == right,
+                                (
+                                    ComponentPropertyStep::ListItem { .. },
+                                    ComponentMemberPathSegment::ListItem,
+                                )
+                                | (
+                                    ComponentPropertyStep::MapEntry(_),
+                                    ComponentMemberPathSegment::MapEntry,
+                                ) => true,
+                                _ => false,
+                            },
+                        )
+                    {
+                        let mut declaration = Vec::new();
+                        for selector in prefix {
+                            reserve_declaration(&mut declaration, &mut admission)?;
+                            declaration.push(match selector {
+                                ComponentPropertyStep::Member(id) => {
+                                    admit_property_work(&mut admission, 0, 0, id.as_str().len())?;
+                                    ComponentMemberPathSegment::Member(id.clone())
+                                }
+                                ComponentPropertyStep::ListItem { .. } => {
+                                    ComponentMemberPathSegment::ListItem
+                                }
+                                ComponentPropertyStep::MapEntry(_) => {
+                                    ComponentMemberPathSegment::MapEntry
+                                }
+                            });
+                        }
                         return Err(ComponentPropertyError::RetiredMember(
                             ComponentMemberPath::new(declaration),
                         ));
@@ -869,8 +932,6 @@ fn resolve_root_location<'schema, 'value>(
                     });
                 }
                 shape = item;
-                reserve_declaration(&mut declaration, &mut admission)?;
-                declaration.push(ComponentMemberPathSegment::ListItem);
                 let Some(value) = current else {
                     continue;
                 };
@@ -931,8 +992,6 @@ fn resolve_root_location<'schema, 'value>(
                     storage.push(ComponentFieldPathSegment::field(key));
                 }
                 shape = entry;
-                reserve_declaration(&mut declaration, &mut admission)?;
-                declaration.push(ComponentMemberPathSegment::MapEntry);
             }
         }
     }

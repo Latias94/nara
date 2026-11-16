@@ -1,6 +1,6 @@
 use nara_reflect::{
-    ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    ComponentFieldId, ComponentPropertyPath, ComponentPropertyStep, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{AuthoringRecordReadiness, SceneEntityId};
 
@@ -13,6 +13,7 @@ pub const MAX_EDITOR_PROPERTY_READ_VALUE_NODES: usize = 4_096;
 pub const MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES: usize = 256 * 1024;
 pub const MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES: usize = 65_536;
 pub const MAX_EDITOR_PROPERTY_READ_SCAN_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES: usize = 4 * 1024 * 1024;
 
 /// Operation-local discovery limits. Metadata counts all returned/cursor UTF-8 ID bytes.
 /// Fixed-size fields are bounded independently by row count; this is not an allocator bound.
@@ -21,6 +22,7 @@ pub struct EditorAuthoringQueryLimits {
     max_scan_entries: usize,
     max_rows: usize,
     max_metadata_bytes: usize,
+    max_scan_logical_bytes: usize,
 }
 
 impl EditorAuthoringQueryLimits {
@@ -39,6 +41,7 @@ impl EditorAuthoringQueryLimits {
             max_scan_entries,
             max_rows,
             max_metadata_bytes,
+            max_scan_logical_bytes: MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES,
         })
     }
     #[must_use]
@@ -53,9 +56,29 @@ impl EditorAuthoringQueryLimits {
     pub const fn max_metadata_bytes(self) -> usize {
         self.max_metadata_bytes
     }
+
+    /// Sets the logical bytes available to source-owned recursive property discovery.
+    ///
+    /// Existing component/root/member queries do not need this allowance, but retaining it in
+    /// the shared limits keeps collection traversal explicit for callers that use `Properties`.
+    pub fn with_scan_logical_bytes(
+        mut self,
+        logical_bytes: usize,
+    ) -> Result<Self, EditorDocumentQueryRejection> {
+        if !(1..=MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES).contains(&logical_bytes) {
+            return Err(EditorDocumentQueryRejection::InvalidAuthoringLimits);
+        }
+        self.max_scan_logical_bytes = logical_bytes;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn max_scan_logical_bytes(self) -> usize {
+        self.max_scan_logical_bytes
+    }
 }
 
-/// Discovery never copies values, even when every value would fit a later read budget.
+/// Discovery copies compact metadata and durable selectors, never selected payload trees.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorAuthoringProjection {
     Components,
@@ -65,6 +88,14 @@ pub enum EditorAuthoringProjection {
     Members {
         component: ComponentTypeId,
         root: ComponentFieldId,
+    },
+    /// Enumerates the directly addressable children of an admitted root or descendant.
+    ///
+    /// Record members, map entries and keyed-list items have durable selectors. Ordinary list
+    /// positions are intentionally not exposed because they have no stable source identity.
+    Properties {
+        component: ComponentTypeId,
+        property: ComponentPropertyPath,
     },
 }
 
@@ -87,8 +118,38 @@ impl EditorAuthoringQueryTarget {
                 EditorAuthoringProjection::Members { component, root } => {
                     component.as_str().len().saturating_add(root.as_str().len())
                 }
+                EditorAuthoringProjection::Properties {
+                    component,
+                    property,
+                } => component
+                    .as_str()
+                    .len()
+                    .saturating_add(property_metadata_bytes(property)),
             })
     }
+}
+
+fn property_step_metadata_bytes(step: &ComponentPropertyStep) -> usize {
+    match step {
+        ComponentPropertyStep::Member(id) => id.as_str().len(),
+        ComponentPropertyStep::ListItem { by, key } => {
+            by.as_str().len().saturating_add(match key {
+                nara_reflect::ComponentPropertyKey::String(value) => value.len(),
+                nara_reflect::ComponentPropertyKey::I64(_)
+                | nara_reflect::ComponentPropertyKey::U64(_) => 8,
+            })
+        }
+        ComponentPropertyStep::MapEntry(key) => key.len(),
+    }
+}
+
+pub(crate) fn property_metadata_bytes(property: &ComponentPropertyPath) -> usize {
+    property
+        .steps
+        .iter()
+        .fold(property.root.as_str().len(), |bytes, step| {
+            bytes.saturating_add(property_step_metadata_bytes(step))
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +187,25 @@ pub(crate) enum AuthoringPagePosition {
         next_member: usize,
         next_tombstone: usize,
     },
+    Properties {
+        position: PropertyPagePosition,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PropertyPagePosition {
+    Initial,
+    Empty,
+    Record {
+        next_member: usize,
+        next_tombstone: usize,
+    },
+    Map {
+        after: Option<String>,
+    },
+    KeyedList {
+        next_item: usize,
+    },
 }
 
 /// Availability of one discovered durable Record member.
@@ -134,6 +214,14 @@ pub enum EditorAuthoringMemberStatus {
     /// A current durable Schema declaration; this does not assert that a source value is present.
     Available,
     /// A retained declaration path with no current member shape.
+    Retired,
+}
+
+/// Declaration or collection-identity availability in an exact source observation.
+/// Value presence and explicit Null remain separate property-read facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorAuthoringPropertyStatus {
+    Available,
     Retired,
 }
 
@@ -162,6 +250,15 @@ pub enum EditorAuthoringRow {
         edit_capability: bool,
         status: EditorAuthoringMemberStatus,
     },
+    Property {
+        /// A durable selector with one additional child step relative to the query target.
+        property: ComponentPropertyPath,
+        /// Retired declarations have no current shape and therefore report `None`.
+        kind: Option<ComponentValueKind>,
+        /// The root field's declared Edit capability; final candidate admission still decides.
+        edit_capability: bool,
+        status: EditorAuthoringPropertyStatus,
+    },
 }
 
 /// Owned historical observation. A current page is not mutation authority after its basis changes.
@@ -170,6 +267,8 @@ pub struct EditorAuthoringPage {
     pub target: EditorAuthoringQueryTarget,
     pub rows: Vec<EditorAuthoringRow>,
     pub scanned_entries: usize,
+    /// Source-owned property selector and child-identity work; zero for older projections.
+    pub scanned_logical_bytes: usize,
     /// Aggregate returned and continuation UTF-8 ID bytes, including duplicated identities.
     pub metadata_bytes: usize,
     pub next: Option<EditorAuthoringCursor>,
@@ -254,27 +353,11 @@ pub struct EditorPropertyTarget {
 
 impl EditorPropertyTarget {
     pub(crate) fn metadata_bytes(&self) -> usize {
-        // Length-only preflight precedes selector validation, whose errors may own invalid IDs.
-        let mut bytes = self
-            .entity
+        self.entity
             .as_str()
             .len()
             .saturating_add(self.component.as_str().len())
-            .saturating_add(self.property.root.as_str().len());
-        for step in &self.property.steps {
-            use nara_reflect::{ComponentPropertyKey, ComponentPropertyStep};
-            bytes = bytes.saturating_add(match step {
-                ComponentPropertyStep::Member(id) => id.as_str().len(),
-                ComponentPropertyStep::ListItem { by, key } => {
-                    by.as_str().len().saturating_add(match key {
-                        ComponentPropertyKey::String(value) => value.len(),
-                        _ => 8,
-                    })
-                }
-                ComponentPropertyStep::MapEntry(key) => key.len(),
-            });
-        }
-        bytes
+            .saturating_add(property_metadata_bytes(&self.property))
     }
 }
 

@@ -25,8 +25,9 @@ mod structure;
 use complete_value::validate_complete_value;
 pub(crate) use copy_admission::CopyAdmissionError;
 pub use read::{
-    AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyValue,
-    AuthoringReadError,
+    AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyChild,
+    AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPage,
+    AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringReadError,
 };
 pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
 pub(crate) use retention::prefab_inputs_bytes as retained_prefab_inputs_bytes;

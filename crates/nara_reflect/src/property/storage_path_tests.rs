@@ -470,14 +470,13 @@ fn selected_long_member_and_map_strings_are_admitted_before_copying() {
     let root_bytes =
         3 * size_of::<ComponentFieldPathSegment>() + "envelope".len() + "payload".len();
     let growth_bytes = 6 * size_of::<ComponentFieldPathSegment>();
-    let declaration_bytes = 4 * size_of::<ComponentMemberPathSegment>();
     for is_member in [true, false] {
         let wire_name = "w".repeat(if is_member {
             ComponentFieldId::MAX_BYTES
         } else {
             64 * 1024
         });
-        let (shape, step, expected_charges) = if is_member {
+        let (shape, step) = if is_member {
             (
                 ComponentValueShape::record_members([ComponentShapeMember::new(
                     &wire_name,
@@ -485,21 +484,14 @@ fn selected_long_member_and_map_strings_are_admitted_before_copying() {
                 )
                 .with_id(id("leaf"))]),
                 ComponentPropertyStep::Member(id("leaf")),
-                vec![
-                    root_bytes,
-                    declaration_bytes,
-                    "leaf".len(),
-                    growth_bytes,
-                    wire_name.len(),
-                ],
             )
         } else {
             (
                 ComponentValueShape::map(ComponentValueKind::U64.into()),
                 ComponentPropertyStep::MapEntry(wire_name.clone()),
-                vec![root_bytes, growth_bytes, wire_name.len(), declaration_bytes],
             )
         };
+        let expected_charges = [root_bytes, growth_bytes, wire_name.len()];
         let schema = schema(shape);
         let value = payload(ComponentValue::map([(
             wire_name.as_str(),
@@ -529,7 +521,7 @@ fn selected_long_member_and_map_strings_are_admitted_before_copying() {
         assert_eq!(charges, expected_charges);
         assert_eq!(remaining, 0);
 
-        let copy = expected_charges.len() - if is_member { 1 } else { 2 };
+        let copy = expected_charges.len() - 1;
         let before_copy = expected_charges[..copy].iter().sum::<usize>();
         let mut remaining = before_copy + wire_name.len() - 1;
         let mut calls = 0;
