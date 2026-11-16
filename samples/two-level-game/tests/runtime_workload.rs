@@ -135,6 +135,53 @@ fn execute(fail_observer: bool) {
             assert_eq!(run["cleanup"]["telemetry_complete"], true);
             assert_eq!(run["cleanup"]["physical_event_loop_recovered"], true);
             assert_eq!(run["cleanup"]["native_destroyed"], true);
+            assert_eq!(run["startup_frozen_after_first_presentation"], true);
+            let startup = &run["startup"]["operation_wall_ns"];
+            assert_eq!(startup.as_object().unwrap().len(), 5);
+            assert!(
+                startup["native_polling_to_first_presentation"]
+                    .as_u64()
+                    .unwrap()
+                    >= startup["first_native_poll"].as_u64().unwrap()
+            );
+            let frames = run["observed_trace"].as_array().unwrap();
+            assert_eq!(&run["first_presentation"], frames.first().unwrap());
+            assert_eq!(
+                &run["first_initialized_presentation"],
+                frames
+                    .iter()
+                    .find(|frame| frame["initialized"] == true)
+                    .unwrap()
+            );
+            let entry = run["entry_to_first_presentation_observation_wall_ns"]
+                .as_u64()
+                .unwrap();
+            if let Some(wall) = frames[0]["app_to_post_host_wall_ns"].as_u64() {
+                assert!(entry >= wall);
+            }
+            assert_eq!(run["runtime_phase_order"].as_array().unwrap().len(), 5);
+            for frame in frames {
+                let wall = &frame["runtime_wall"];
+                if frame["initialized"] != true && wall.is_null() {
+                    continue;
+                }
+                let phases = wall["phase_wall_ns"].as_array().unwrap();
+                assert_eq!(phases.len(), 5);
+                let total = phases
+                    .iter()
+                    .try_fold(0_u64, |sum, phase| sum.checked_add(phase.as_u64().unwrap()))
+                    .unwrap();
+                assert_eq!(wall["measured_phase_wall_ns"].as_u64(), Some(total));
+                if let Some(frame_wall) = frame["app_to_post_host_wall_ns"].as_u64() {
+                    assert_eq!(
+                        total.checked_add(wall["other_app_frame_wall_ns"].as_u64().unwrap()),
+                        Some(frame_wall),
+                    );
+                } else {
+                    assert!(wall["other_app_frame_wall_ns"].is_null());
+                }
+                assert_eq!(frame["issued_native_work"].as_object().unwrap().len(), 11);
+            }
         }
         if let Some(evidence) = std::env::var_os("NARA_RUNTIME_WORKLOAD_EVIDENCE") {
             let evidence = std::path::PathBuf::from(evidence);

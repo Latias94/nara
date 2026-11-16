@@ -8,6 +8,9 @@ mod observe;
 #[path = "../src/bin/runtime_cost/process_cost.rs"]
 #[allow(dead_code)]
 mod process_cost;
+#[path = "../src/bin/runtime_workload/timing.rs"]
+#[allow(dead_code)]
+mod timing;
 
 use std::{collections::BTreeSet, time::Duration};
 
@@ -19,6 +22,96 @@ use two_level_game::{
     levels::{LevelId, LevelKey},
     save::MarkerId,
 };
+
+#[test]
+fn runtime_phase_accounting_retains_measured_zero_and_unattributed_frame_work() {
+    let costs = timing::RuntimeFrameTiming::from_durations(
+        [1, 2, 3, 4, 5].map(|value| Some(Duration::from_nanos(value))),
+        Some(20),
+    )
+    .unwrap();
+    let value = serde_json::to_value(costs).unwrap();
+    assert_eq!(value["phase_wall_ns"], serde_json::json!([1, 2, 3, 4, 5]));
+    assert_eq!(value["measured_phase_wall_ns"], 15);
+    assert_eq!(value["other_app_frame_wall_ns"], 5);
+    let zero =
+        timing::RuntimeFrameTiming::from_durations([Some(Duration::ZERO); 5], Some(0)).unwrap();
+    assert_eq!(
+        serde_json::to_value(zero).unwrap()["measured_phase_wall_ns"],
+        0
+    );
+}
+
+#[test]
+fn runtime_phase_accounting_refuses_each_unobserved_operation() {
+    for (index, name) in timing::RUNTIME_PHASE_NAMES.into_iter().enumerate() {
+        let mut phases = [Some(Duration::ZERO); 5];
+        phases[index] = None;
+        assert!(
+            timing::RuntimeFrameTiming::from_durations(phases, Some(100))
+                .unwrap_err()
+                .contains(name)
+        );
+    }
+}
+
+#[test]
+fn runtime_phase_accounting_refuses_excess_and_overflow_without_saturating() {
+    assert!(
+        timing::RuntimeFrameTiming::from_durations([Some(Duration::from_nanos(3)); 5], Some(14))
+            .is_err()
+    );
+    assert!(
+        timing::RuntimeFrameTiming::from_durations(
+            [Some(Duration::from_nanos(u64::MAX)); 5],
+            Some(u64::MAX),
+        )
+        .is_err()
+    );
+    assert!(
+        timing::RuntimeFrameTiming::from_durations([Some(Duration::MAX); 5], Some(u64::MAX))
+            .is_err()
+    );
+}
+
+#[test]
+fn a_startup_presentation_without_an_app_start_retains_original_operation_spans() {
+    let measured =
+        timing::RuntimeFrameTiming::from_durations([Some(Duration::from_nanos(7)); 5], None)
+            .unwrap();
+    let value = serde_json::to_value(measured).unwrap();
+    assert_eq!(value["phase_wall_ns"], serde_json::json!([7, 7, 7, 7, 7]));
+    assert_eq!(value["measured_phase_wall_ns"], 35);
+    assert!(value["other_app_frame_wall_ns"].is_null());
+}
+
+#[test]
+fn startup_attribution_refusal_preserves_the_supplied_retirement_report() {
+    use nara::project_host::DesktopStartupTimings;
+    for (first, retired) in [
+        (None, None),
+        (Some(DesktopStartupTimings::default()), None),
+        (
+            Some(DesktopStartupTimings::default()),
+            Some(DesktopStartupTimings::default()),
+        ),
+    ] {
+        let before = serde_json::json!({
+            "run_index": 3,
+            "cleanup": {"native_destroyed": true, "physical_event_loop_recovered": true},
+            "first_presentation": {"runtime_generation": 9},
+        });
+        let failed = timing::finish_startup_report(before.clone(), first, retired).unwrap_err();
+        assert_eq!(failed["accepted"], false);
+        assert!(
+            failed["failure"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty())
+        );
+        assert_eq!(failed["cleanup"], before["cleanup"]);
+        assert_eq!(failed["first_presentation"], before["first_presentation"]);
+    }
+}
 
 #[test]
 fn nearest_rank_uses_observed_values_for_small_even_and_unsorted_samples() {

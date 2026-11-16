@@ -10,6 +10,8 @@
 mod observe;
 #[path = "runtime_cost/process_cost.rs"]
 mod process_cost;
+#[path = "runtime_workload/timing.rs"]
+mod timing;
 
 use std::{
     cell::{Cell, RefCell},
@@ -26,7 +28,7 @@ use nara::{
     fs::ContentDigest,
     project_host::{
         DesktopPresentationControl, DesktopRun, DesktopRunIntent, DesktopRunOptions,
-        DesktopRunProgress, WinitEventLoop,
+        DesktopRunProgress, DesktopStartupPhase, DesktopStartupTimings, WinitEventLoop,
     },
     render_wgpu::WgpuBackendTelemetryConfig,
     window::{WindowId, backend::WindowTargetPhase},
@@ -153,6 +155,8 @@ fn execute(fail_observer: bool) -> Value {
             "maximum_retained_frames": 4096,
             "native_poll_wait_cap_ms": POLL.as_millis(),
             "fresh_runtime_window_renderer_per_run": true,
+            "runtime_phase_wall_observation": true,
+            "startup_operation_observation": true,
             "recovered_original_physical_event_loop": true,
             "shared_process_code_driver_filesystem_caches": true,
             "frame_wall_scope": "exact original App frame start to matching post-Host observation; includes native, driver and submission waits, excludes the observer work after that timestamp",
@@ -182,6 +186,7 @@ struct Experiment {
     run: Option<DesktopRun>,
     collector: Rc<RefCell<Collector>>,
     observer_panicked: Rc<Cell<bool>>,
+    startup: Option<DesktopStartupTimings>,
 }
 
 impl Experiment {
@@ -205,6 +210,13 @@ impl Experiment {
                 return Ok(());
             }
             let progress = self.run().poll(POLL);
+            if self.startup.is_none() {
+                self.startup = self.run().startup_timings().filter(|timings| {
+                    timings
+                        .get(DesktopStartupPhase::NativePollingToFirstPresentation)
+                        .is_some()
+                });
+            }
             if Instant::now() >= deadline {
                 return Err("gameplay poll returned after its cooperative deadline".into());
             }
@@ -300,19 +312,21 @@ fn run_one(
     index: usize,
     fail_observer: bool,
 ) -> Result<(WinitEventLoop, Value), Value> {
+    let entry_started_at = Instant::now();
     let root = two_level_game::open_project_root()
         .map_err(|error| json!({"failure": error.to_string()}))?;
     let recipe = two_level_game::configured_recipe(RunOptions {
         scenario: Scenario::Travel,
         save_path: None,
     });
-    let collector = Rc::new(RefCell::new(Collector::new(index)));
+    let collector = Rc::new(RefCell::new(Collector::new(index, entry_started_at)));
     let observer = Rc::clone(&collector);
     let observer_panicked = Rc::new(Cell::new(false));
     let callback_panicked = Rc::clone(&observer_panicked);
     let mut execution = DesktopRunOptions::new()
         .with_input_isolation(true)
-        .with_telemetry(WgpuBackendTelemetryConfig::default())
+        .with_startup_timings()
+        .with_telemetry(WgpuBackendTelemetryConfig::default().with_runtime_frame_timings())
         .with_presentation_observer(move |observation| {
             if callback_panicked.get() {
                 return DesktopPresentationControl::Exit(AppExit::Requested);
@@ -346,9 +360,11 @@ fn run_one(
         )),
         collector,
         observer_panicked,
+        startup: None,
     };
     let measured = catch_unwind(AssertUnwindSafe(|| experiment.measure()))
         .unwrap_or_else(|_| Err("gameplay observer or native callback panicked".into()));
+    let startup = experiment.startup;
     let closed = catch_unwind(AssertUnwindSafe(|| experiment.retire(measured.is_ok())))
         .unwrap_or_else(|_| Err("original cleanup panicked".into()));
     let physical = match closed {
@@ -385,5 +401,7 @@ fn run_one(
     report["cleanup"] = json!({ "normal_exit": true, "telemetry_complete": true,
         "native_destroyed": true, "surface_retired": true, "provider_released": true,
         "physical_event_loop_recovered": true });
+    let report =
+        timing::finish_startup_report(report, startup, experiment.run().startup_timings())?;
     Ok((physical, report))
 }

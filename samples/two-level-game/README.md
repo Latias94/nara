@@ -653,6 +653,21 @@ descriptive quantiles are not production tail bounds, GPU execution or scanout. 
 driver and filesystem caches are shared between runs. Scripted verification remains ineligible
 for the interactive resume format; the measurement does not weaken that policy.
 
+The same consumer explicitly enables original Desktop startup observations and five fixed native
+Runtime operation wall spans. Every original frame retains namespace preparation, Surface
+acquisition, candidate preparation, program execution and Surface presentation in the report's
+`runtime_phase_order`, along with issued native work counters. Their checked sum and the remaining
+App-frame wall span are separate from CPU counters and queue-completion observations. The remainder
+stays `null` when an initial presentation has no matching App start; actual operation spans are
+still retained. Startup spans overlap and must not be added together. The completed startup
+snapshot must remain unchanged through gameplay and original retirement.
+
+`entry_to_first_presentation_observation_wall_ns` starts before source-root/recipe construction and
+ends at the original first actual presented observation. It includes caller/native waits and
+excludes process loading; it is not cold-start, GPU duration or scanout. The first presentation and
+first initialized presentation are reported separately. These explicitly observed recipes retain
+their measurement cost; ordinary shipping options leave the new clocks disabled.
+
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
 ```

@@ -33,6 +33,7 @@ use two_level_game::{
 };
 
 use super::process_cost::{self, ProcessCost};
+use super::timing::{RUNTIME_PHASE_NAMES, RuntimeFrameTiming};
 
 pub(super) const MAX_SAMPLES: usize = 4_096;
 const MIN_INITIALIZED_PRESENTATIONS: usize = 20;
@@ -179,6 +180,8 @@ struct Frame {
     classification: FrameClass,
     post_host_since_first_observation_ns: u64,
     app_to_post_host_wall_ns: Option<u64>,
+    runtime_wall: Option<RuntimeFrameTiming>,
+    issued_native_work: Value,
     surface_extent: [u32; 2],
     gameplay: Value,
 }
@@ -212,6 +215,7 @@ impl ProcessPoint {
 }
 
 pub(super) struct Collector {
+    entry_started_at: Instant,
     run_index: usize,
     observer_callbacks: u64,
     identities: BTreeSet<PresentationIdentity>,
@@ -221,6 +225,7 @@ pub(super) struct Collector {
     visited: BTreeSet<LevelKey>,
     scene_instance_changes: usize,
     first_observation: Option<Instant>,
+    first_presentation_at: Option<Instant>,
     last_observation: Option<Instant>,
     first_measured_start: Option<Instant>,
     last_measured_post_host: Option<Instant>,
@@ -237,8 +242,9 @@ pub(super) struct Collector {
 }
 
 impl Collector {
-    pub(super) fn new(run_index: usize) -> Self {
+    pub(super) fn new(run_index: usize, entry_started_at: Instant) -> Self {
         Self {
+            entry_started_at,
             run_index,
             observer_callbacks: 0,
             identities: BTreeSet::new(),
@@ -248,6 +254,7 @@ impl Collector {
             visited: BTreeSet::new(),
             scene_instance_changes: 0,
             first_observation: None,
+            first_presentation_at: None,
             last_observation: None,
             first_measured_start: None,
             last_measured_post_host: None,
@@ -466,7 +473,16 @@ impl Collector {
         let app_to_post_host_wall_ns = matching_start
             .map(|start| elapsed_ns(start.started_at(), now))
             .transpose()?;
+        let runtime_wall = transaction
+            .runtime_timings()
+            .map(|phases| RuntimeFrameTiming::capture(phases, app_to_post_host_wall_ns))
+            .transpose()?;
         if snapshot.initialized {
+            if runtime_wall.is_none() {
+                return Err(
+                    "initialized presentation lacks its original Runtime wall observations".into(),
+                );
+            }
             let start = matching_start
                 .ok_or("initialized presentation has no matching original App frame start")?;
             let fixed = world
@@ -518,12 +534,15 @@ impl Collector {
         let first = self
             .first_observation
             .ok_or("initial observer timestamp is unavailable")?;
+        self.first_presentation_at.get_or_insert(now);
         self.frames.push(Frame {
             identity,
             initialized: snapshot.initialized,
             classification,
             post_host_since_first_observation_ns: elapsed_ns(first, now)?,
             app_to_post_host_wall_ns,
+            runtime_wall,
+            issued_native_work: super::timing::native_work(transaction.native_work()),
             surface_extent: [extent.width, extent.height],
             gameplay: snapshot_value(snapshot),
         });
@@ -760,6 +779,12 @@ impl Collector {
             "classification_scope": "adjacent unique presented snapshots only; moving means changed player position within the same running Scene; transitions mean observed phase/restoring/level/Scene-instance/travel/restart changes; no internal stage duration is inferred",
             "classifications": classes,
             "observed_trace": self.frames,
+            "entry_to_first_presentation_observation_wall_ns": elapsed_ns(self.entry_started_at, self.first_presentation_at.ok_or("missing first original presentation")?)?,
+            "entry_scope": "from run_one entry before source root/recipe/collector construction to the original first post-Host observation; caller/native waits included; excludes process loading and later gameplay/cleanup",
+            "first_presentation": self.frames.first(),
+            "first_initialized_presentation": self.frames.iter().find(|frame| frame.initialized),
+            "runtime_phase_order": RUNTIME_PHASE_NAMES,
+            "runtime_phase_scope": "disjoint original Runtime namespace preparation, Surface acquisition, candidate preparation, program execution and Surface presentation operations within the matching App frame; includes native/driver/error-scope waits; residual is other App work and unmeasured gaps, not CPU time or inferred wait time; observations never grant presentation authority",
             "final_snapshot": snapshot_value(final_snapshot),
             "gameplay_verified": true,
             "app_to_post_host_wall_ns": wall,
