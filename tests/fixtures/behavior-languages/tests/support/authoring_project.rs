@@ -48,7 +48,7 @@ pub fn edit_save_reopen(
     let initial_label = record(original, "label", LABEL);
     assert_eq!(
         label_schema.authoring_initial_value(),
-        Some(&initial_label.value),
+        Some(initial_label.value()),
         "the external Label catalog must supply its actual Attach template",
     );
     assert_eq!(
@@ -80,7 +80,7 @@ pub fn edit_save_reopen(
             .components
             .get_mut(&component(kind))
             .unwrap();
-        let ComponentValue::Map(fields) = &mut record.value else {
+        let ComponentValue::Map(fields) = record.value_mut() else {
             panic!("the fixed behavior record must be a Map");
         };
         assert!(fields.insert(wire.into(), value).is_some());
@@ -124,7 +124,7 @@ pub fn edit_save_reopen(
             MOVER,
             "amount",
             record(original, "actor", MOVER)
-                .value
+                .value()
                 .field("amount")
                 .unwrap()
                 .clone(),
@@ -157,7 +157,7 @@ pub fn edit_save_reopen(
             "label",
             LABEL,
             "text",
-            initial_label.value.field("wire_text").unwrap().clone(),
+            initial_label.value().field("wire_text").unwrap().clone(),
         );
         replay(&mut editor, document, true);
         assert_label_present(&editor, document, false);
@@ -184,7 +184,7 @@ pub fn edit_save_reopen(
             "label",
             LABEL,
             "text",
-            initial_label.value.field("wire_text").unwrap().clone(),
+            initial_label.value().field("wire_text").unwrap().clone(),
         );
         replay(&mut editor, document, false);
         assert_label_present(&editor, document, false);
@@ -220,7 +220,7 @@ pub fn edit_save_reopen(
             "label",
             LABEL,
             "text",
-            initial_label.value.field("wire_text").unwrap().clone(),
+            initial_label.value().field("wire_text").unwrap().clone(),
         );
         replay(&mut editor, document, true);
         assert_value(
@@ -269,7 +269,12 @@ pub fn edit_save_reopen(
         );
         let result = project.read();
         assert_eq!(result, saved);
-        assert!(record(&result, "label", LABEL).value.field("text").is_err());
+        assert!(
+            record(&result, "label", LABEL)
+                .value()
+                .field("text")
+                .is_err()
+        );
         assert_eq!(fs::read(project.scene_path()).unwrap(), saved_bytes);
         close(&mut reopened);
         drop(reopened);
@@ -336,7 +341,7 @@ fn assert_siblings(
             entity,
             NAME,
             "value",
-            record(source, entity, NAME).value.clone(),
+            record(source, entity, NAME).value().clone(),
         );
     }
     for field in ["images", "targets"] {
@@ -347,7 +352,7 @@ fn assert_siblings(
             SENSOR,
             field,
             record(source, "actor", SENSOR)
-                .value
+                .value()
                 .field(field)
                 .unwrap()
                 .clone(),

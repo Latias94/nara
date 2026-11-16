@@ -373,7 +373,11 @@ pub(super) fn unavailable_copy_bytes(
         .checked_add(retention::placement_dynamic_bytes(placement)?)?
         .checked_add(retention::placement_dynamic_bytes(anchor_placement)?)?
         .checked_add(provenance_string_bytes(component.as_str())?)?
-        .checked_add(retention::value_bytes_impl(&record.value, limits, scratch)?)?
+        .checked_add(retention::value_bytes_impl(
+            record.value(),
+            limits,
+            scratch,
+        )?)?
         .checked_add(retention::contextual_defaults_bytes(
             &record.contextual_defaults,
             limits,
@@ -462,7 +466,7 @@ pub(super) fn selected_effective_value<'value>(
 > {
     nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
         schema,
-        &record.value,
+        record.value(),
         &record.contextual_defaults,
         limits.component_materialization_limits(),
         |nodes, bytes, allocated| {

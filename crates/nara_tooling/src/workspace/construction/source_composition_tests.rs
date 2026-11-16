@@ -65,7 +65,7 @@ fn title(value: &str) -> SceneComponentRecord {
 
 fn data_basis() -> AuthoringSchemaBasis {
     let mut read_only = schema(READ_ONLY, "wire_title", ComponentValueKind::String)
-        .with_authoring_initial_value(title("fixed").value);
+        .with_authoring_initial_value(title("fixed").into_value());
     read_only.fields[0].capabilities = [ComponentCapability::Scene, ComponentCapability::Inspect]
         .into_iter()
         .collect();
@@ -74,9 +74,9 @@ fn data_basis() -> AuthoringSchemaBasis {
         ComponentSchemaCatalog {
             components: vec![
                 schema(HEALTH, "wire_health", ComponentValueKind::I64)
-                    .with_authoring_initial_value(health(5).value),
+                    .with_authoring_initial_value(health(5).into_value()),
                 schema(TITLE, "wire_title", ComponentValueKind::String)
-                    .with_authoring_initial_value(title("New entity").value),
+                    .with_authoring_initial_value(title("New entity").into_value()),
                 schema(NO_TEMPLATE, "wire_title", ComponentValueKind::String),
                 read_only,
             ],

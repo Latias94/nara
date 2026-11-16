@@ -132,7 +132,7 @@ fn independent_scene_request_runs_off_owner_and_preserves_remapped_data_through_
         .unwrap()
         .components[&ComponentTypeId::new(nested_schema::COMPONENT_ID)];
     assert_eq!(
-        payload.value.get("targets"),
+        payload.value().get("targets"),
         Some(&ComponentValue::map([(
             "friends",
             ComponentValue::List(vec![

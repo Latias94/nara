@@ -137,12 +137,13 @@ fn flat_claims(document: SceneDraft, origins: SceneEntityProvenanceMap) -> claim
                     .into_iter()
                     .map(|(id, record)| {
                         assert!(record.contextual_defaults.is_empty());
+                        let (schema_owner, version, value) = record.into_compiled_parts();
                         (
                             id,
                             claims::FlatSceneComponentClaim {
-                                schema_owner: record.owner,
-                                version: record.version,
-                                value: record.value,
+                                schema_owner,
+                                version,
+                                value,
                             },
                         )
                     })
@@ -267,7 +268,7 @@ fn admission_moves_payloads_and_preserves_order_canonical_identity_and_selected_
     let (registry, calls) = registry(schema, Some("game.compiled-owner"));
     let mut root = entity("root", ComponentValue::Null);
     root.children = vec![id("z"), id("a")];
-    let ComponentValue::Map(fields) = &mut root.components.get_mut(&component()).unwrap().value
+    let ComponentValue::Map(fields) = root.components.get_mut(&component()).unwrap().value_mut()
     else {
         unreachable!()
     };
@@ -339,7 +340,11 @@ fn later_authored_leaves_in_declared_and_retained_values_refuse_the_complete_bat
         ]),
     ] {
         let mut later = entity("z", ComponentValue::Null);
-        later.components.get_mut(&component()).unwrap().value = later_value;
+        later
+            .components
+            .get_mut(&component())
+            .unwrap()
+            .set_value(later_value);
         let document = flat_draft([entity("a", ComponentValue::Null), later]);
         let report = diagnostics(seal(document, &registry));
         assert!(
@@ -422,7 +427,11 @@ fn contextual_defaults_cannot_be_silently_discarded_by_the_sealer() {
 fn implicit_defaults_are_refused_while_explicit_null_is_retained() {
     let (registry, calls) = registry(schema(Some(ComponentValue::Null)), None);
     let mut implicit = entity("a", ComponentValue::Null);
-    implicit.components.get_mut(&component()).unwrap().value = ComponentValue::Map(BTreeMap::new());
+    implicit
+        .components
+        .get_mut(&component())
+        .unwrap()
+        .set_value(ComponentValue::Map(BTreeMap::new()));
     let report = diagnostics(seal(flat_draft([implicit]), &registry));
     assert!(
         has_code(&report, "scene.compiled-incomplete-value"),
@@ -495,15 +504,12 @@ fn mixed_definitions_require_the_data_owner_and_flat_data_values() {
             ExpandedSceneEntity {
                 id: id("z"),
                 children: Vec::new(),
-                components: [(
-                    data_component.clone(),
-                    SceneComponentRecord {
-                        owner: claim,
-                        version: ComponentSchemaVersion::ONE,
-                        value: value(target),
-                        contextual_defaults: BTreeMap::new(),
-                    },
-                )]
+                components: [(data_component.clone(), {
+                    let mut record =
+                        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target));
+                    record.owner = claim;
+                    record
+                })]
                 .into_iter()
                 .collect(),
             },

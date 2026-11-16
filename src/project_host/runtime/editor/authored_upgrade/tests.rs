@@ -686,7 +686,7 @@ fn begin_fences_writes_and_retains_all_profile_originals_and_dirty_working_histo
                         assert!(std::ptr::eq(working, scene_sources[index].as_ref()));
                         assert_eq!(
                             working.entities[0].components[&name_component()]
-                                .value
+                                .value()
                                 .as_str(),
                             Some(format!("working-{index}").as_str())
                         );
@@ -701,7 +701,7 @@ fn begin_fences_writes_and_retains_all_profile_originals_and_dirty_working_histo
                         assert!(std::ptr::eq(working, prefab_source.as_ref()));
                         assert_eq!(
                             working.entities[0].components[&name_component()]
-                                .value
+                                .value()
                                 .as_str(),
                             Some("working-2")
                         );

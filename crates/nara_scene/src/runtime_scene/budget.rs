@@ -120,6 +120,7 @@ impl WorkBudget {
                     size_of::<(ComponentTypeId, FlatSceneComponentClaim)>()
                         .checked_add(6 * size_of::<usize>())
                         .and_then(|bytes| bytes.checked_add(component.as_str().len()))
+                        .and_then(|bytes| bytes.checked_add(record.value_storage_retained_bytes()))
                         .and_then(|bytes| {
                             bytes.checked_add(
                                 record

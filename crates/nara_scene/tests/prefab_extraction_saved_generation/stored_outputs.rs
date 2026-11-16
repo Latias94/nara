@@ -461,12 +461,14 @@ fn stored_anchor_component_and_moved_reference_forgery_are_not_valid_corresponde
                     .components
                     .get_mut(&component())
                     .unwrap();
-                target.value = link(EntityReference::Authored {
-                    reference: AuthoredEntityReference::input(
-                        ReferenceInputId::new("extracted.0").unwrap(),
-                    ),
-                })
-                .value;
+                target.set_value(
+                    link(EntityReference::Authored {
+                        reference: AuthoredEntityReference::input(
+                            ReferenceInputId::new("extracted.0").unwrap(),
+                        ),
+                    })
+                    .into_value(),
+                );
             } else {
                 document
                     .entities

@@ -541,11 +541,11 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
         for payload in expected_components.values_mut() {
             let plan = plan_declared_entity_references::<Infallible>(
                 &schema(),
-                &payload.value,
+                payload.value(),
                 Default::default(),
             )
             .unwrap();
-            plan.rewrite_in_place(&mut payload.value, |_, reference| {
+            plan.rewrite_in_place(payload.value_mut(), |_, reference| {
                 Ok::<_, Infallible>(match reference {
                     EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
                         entity: remap[entity].clone(),
@@ -597,11 +597,11 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
                 7
             };
             assert_eq!(
-                payload.value.get("score"),
+                payload.value().get("score"),
                 Some(&ComponentValue::U64(score))
             );
-            assert_eq!(payload.value.get("persistent"), Some(&persistent()));
-            assert_eq!(payload.value.get("image"), Some(&image()));
+            assert_eq!(payload.value().get("persistent"), Some(&persistent()));
+            assert_eq!(payload.value().get("image"), Some(&image()));
         }
     }
     assert_eq!(selected.asset_references.len(), components);
@@ -1011,7 +1011,7 @@ fn only_retained_selected_references_open_a_structurally_suppressed_dependency()
                 .find(|entity| fragment.provenance[entity.id()].local_entity_id() == &id("host"))
                 .unwrap();
             assert_eq!(
-                host.components()[&component()].value.get("target"),
+                host.components()[&component()].value().get("target"),
                 Some(&local(host.id().as_str()))
             );
         } else {

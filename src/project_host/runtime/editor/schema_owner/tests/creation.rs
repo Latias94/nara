@@ -83,8 +83,8 @@ fn assert_successor(fixture: &Fixture, editor: &EditorProjectSession, document: 
         .entities[0]
         .components[&component()];
     assert_eq!(
-        stored.value,
-        ComponentValue::map([("health", ComponentValue::I64(100))])
+        stored.value(),
+        &ComponentValue::map([("health", ComponentValue::I64(100))])
     );
 }
 

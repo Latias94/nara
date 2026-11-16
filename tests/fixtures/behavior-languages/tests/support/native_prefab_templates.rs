@@ -871,7 +871,7 @@ fn csharp_native_prefab_templates_are_independent_editable_project_sources_after
         .components
         .get_mut(&ComponentTypeId::new(NAME))
         .unwrap()
-        .value = ComponentValue::String(SAVED_NAME.into());
+        .set_value(ComponentValue::String(SAVED_NAME.into()));
     assert_eq!(
         PrefabDocumentCandidate::decode_json_bytes(&saved)
             .unwrap()

@@ -723,11 +723,11 @@ fn headless_run_publishes_file_backed_tilesets_after_image_dependencies() {
         );
     let mut other_tilemap = tilemap.clone();
     other_tilemap.id = scene_id("other-terrain");
-    let ComponentValue::Map(fields) = &mut other_tilemap
+    let ComponentValue::Map(fields) = other_tilemap
         .components
         .get_mut(&ComponentTypeId::new("nara.tilemap.Tilemap"))
         .unwrap()
-        .value
+        .value_mut()
     else {
         panic!("Tilemap fixture must have a map payload");
     };

@@ -199,7 +199,7 @@ fn assert_encoded_selection(editor: &EditorProjectSession, operation: EditorPref
                     .find(|record| record.id == id(entity))
                     .unwrap();
                 assert_eq!(
-                    entity.components[&name_component()].value.as_str(),
+                    entity.components[&name_component()].value().as_str(),
                     Some(value)
                 );
             }
@@ -239,7 +239,7 @@ fn assert_encoded_selection(editor: &EditorProjectSession, operation: EditorPref
                             .any(|entity| entity.id == id("child"))
                     );
                     assert_eq!(
-                        branch.components[&name_component()].value.as_str(),
+                        branch.components[&name_component()].value().as_str(),
                         Some("dirty-branch")
                     );
                     assert!(

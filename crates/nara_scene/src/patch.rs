@@ -1206,7 +1206,7 @@ fn add_patch_record_cost(
     if limits.is_some_and(|limits| cost.operation_count > limits.validation_work().get()) {
         return None;
     }
-    add_patch_value_cost(cost, &record.value, depth, limits, observer)?;
+    add_patch_value_cost(cost, record.value(), depth, limits, observer)?;
     for (field, value) in &record.contextual_defaults {
         source_cost_progress(observer, 1, field.as_str().len())?;
         cost.structural_logical_bytes = cost
@@ -2746,7 +2746,7 @@ fn set_field_value<D: EntityDocument>(
         operation_index,
     )?;
     let previous = component_record
-        .value
+        .value_mut()
         .set_path(path, value)
         .map_err(|error| {
             with_component_field_id(
@@ -2850,22 +2850,25 @@ fn remove_field_value<D: EntityDocument>(
         path,
         operation_index,
     )?;
-    let previous = component_record.value.remove_path(path).map_err(|error| {
-        with_component_field_id(
-            with_component_field_path_error(
-                patch_diagnostic(
-                    operation_index,
-                    "scene.patch-invalid-field-path",
-                    "Patch field path cannot be removed",
-                    Some(entity),
-                    Some(component),
-                    Some(path),
+    let previous = component_record
+        .value_mut()
+        .remove_path(path)
+        .map_err(|error| {
+            with_component_field_id(
+                with_component_field_path_error(
+                    patch_diagnostic(
+                        operation_index,
+                        "scene.patch-invalid-field-path",
+                        "Patch field path cannot be removed",
+                        Some(entity),
+                        Some(component),
+                        Some(path),
+                    ),
+                    &error,
                 ),
-                &error,
-            ),
-            field,
-        )
-    })?;
+                field,
+            )
+        })?;
     Ok(previous)
 }
 

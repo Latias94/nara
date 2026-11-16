@@ -301,7 +301,7 @@ fn classify_record(
                 })?;
                 bytes.checked_mul(segments.len().checked_add(3)?)
             })?;
-            let payload = match record.value.get_path(field.path()) {
+            let payload = match record.value().get_path(field.path()) {
                 Ok(payload) => Some(payload),
                 Err(
                     ComponentFieldPathError::MissingField { .. }

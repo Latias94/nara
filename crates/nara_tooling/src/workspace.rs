@@ -3566,7 +3566,7 @@ fn prefab_field_value<'a>(
         .fields()
         .iter()
         .find(|candidate| candidate.id() == field)?;
-    component.value.get_path(&field.path).ok()
+    component.value().get_path(&field.path).ok()
 }
 
 #[cfg(test)]

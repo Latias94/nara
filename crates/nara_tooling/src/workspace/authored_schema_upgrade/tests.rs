@@ -255,20 +255,20 @@ fn upgraded(entities: &mut [SceneEntityRecord]) {
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap();
     let health = record
-        .value
+        .value()
         .field_i64("wire_health")
         .unwrap()
         .checked_mul(1000)
         .unwrap();
-    let armor = record.value.field_i64("armor").unwrap();
+    let armor = record.value().field_i64("armor").unwrap();
     record.version = ComponentSchemaVersion(2);
-    record.value = ComponentValue::map([
+    record.set_value(ComponentValue::map([
         (
             "wire_health",
             ComponentValue::map([("milli", ComponentValue::I64(health))]),
         ),
         ("armor", ComponentValue::I64(armor)),
-    ]);
+    ]));
 }
 
 fn proposals(workspace: &EditorWorkspace) -> Vec<EditorAuthoredSchemaUpgradeProposal> {

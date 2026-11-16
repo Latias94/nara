@@ -225,7 +225,9 @@ fn capture_preadmits_storage_and_settles_a_partial_capture_before_retry() {
         .components
         .get_mut(&ComponentTypeId::new("missing.Opaque"))
         .unwrap()
-        .value = ComponentValue::String("x".repeat(required.peak_retained_bytes));
+        .set_value(ComponentValue::String(
+            "x".repeat(required.peak_retained_bytes),
+        ));
     let path = "scenes/extra.scene.json";
     let published = SceneDocumentCandidate::decode_json_str(&source.to_json_string().unwrap())
         .unwrap()

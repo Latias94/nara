@@ -541,7 +541,7 @@ fn omitted_schema_default_introduces_a_required_scene_dependency() {
     assert_eq!(snapshot.scene(), &authored);
     assert!(
         snapshot.scene().entities[0].components[&component]
-            .value
+            .value()
             .get("target")
             .is_none()
     );

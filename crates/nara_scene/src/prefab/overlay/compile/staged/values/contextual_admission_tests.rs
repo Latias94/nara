@@ -8,7 +8,7 @@ use nara_identity::EntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentValue, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 
 use super::*;
@@ -170,8 +170,8 @@ fn assert_effective_empty(report: &Compilation) {
     assert_eq!(document.entities.len(), 1);
     let record = &document.entities[0].components[&component()];
     assert_eq!(
-        record.value,
-        ComponentValue::map([("payload", empty_list())])
+        record.value(),
+        &ComponentValue::map([("payload", empty_list())])
     );
     assert!(record.contextual_defaults.is_empty());
     assert_eq!(report.usage.materialized_components, 1);
@@ -240,7 +240,7 @@ fn large_explicit_values_admit_actual_reference_work_without_a_depth_multiplier(
             .components
             .get_mut(&component())
             .unwrap()
-            .value = value.clone();
+            .set_value(value.clone());
         let before = fixture.source.clone();
         let limits = SceneCompilationLimits::default()
             .with_working_bytes(ByteLimit::new(8 * 1024 * 1024).unwrap());
@@ -253,7 +253,14 @@ fn large_explicit_values_admit_actual_reference_work_without_a_depth_multiplier(
             !report.budget_failed && !report.diagnostics.has_errors(),
             "{report:?}"
         );
-        assert_eq!(document.entities[0].components[&component()].value, value);
+        assert_eq!(
+            document.entities[0].components[&component()].value(),
+            &value
+        );
+        assert!(std::ptr::eq(
+            document.entities[0].components[&component()].value(),
+            fixture.source.entities[0].components[&component()].value(),
+        ));
         assert_eq!(report.usage.materialized_value_nodes, PAYLOAD_ITEMS + 2);
         assert!(report.usage.checked_work_bytes().unwrap() <= limits.working_bytes().get());
         assert!(report.reference_work.0 >= PAYLOAD_ITEMS);
@@ -285,7 +292,7 @@ fn persistent_reference_visits_keep_long_path_storage_in_the_original_quota() {
         .components
         .get_mut(&component())
         .unwrap()
-        .value = value.clone();
+        .set_value(value.clone());
     let before = fixture.source.clone();
     let defaults = SceneCompilationLimits::default();
     assert_budget(
@@ -296,8 +303,8 @@ fn persistent_reference_visits_keep_long_path_storage_in_the_original_quota() {
     let limits = defaults.with_reference_work_bytes(ByteLimit::new(usize::MAX).unwrap());
     let observed = fixture.compile(limits);
     assert_eq!(
-        observed.result.as_ref().unwrap().entities[0].components[&component()].value,
-        value
+        observed.result.as_ref().unwrap().entities[0].components[&component()].value(),
+        &value
     );
     assert!(
         !observed.budget_failed && !observed.diagnostics.has_errors(),
@@ -475,7 +482,7 @@ fn opaque_cost_preserves_raw_payload_and_separate_hidden_default_admission() {
         .get_mut(&component())
         .unwrap();
     record.version = ComponentSchemaVersion::new(2).unwrap();
-    record.value = ComponentValue::String("opaque".repeat(32));
+    record.set_value(ComponentValue::String("opaque".repeat(32)));
     let original = record.clone();
     let before = fixture.source.clone();
     let limits = SceneCompilationLimits::default()

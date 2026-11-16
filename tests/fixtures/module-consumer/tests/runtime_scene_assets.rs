@@ -265,7 +265,7 @@ fn processed_native_assets_resolve_actual_primary_and_auxiliary_values_without_s
     let output = bindings.export_live_scene(&world).into_output().unwrap();
     for reference in references {
         assert!(output.document.entities.iter().any(|entity| {
-            decode_asset_reference_value(&entity.components[&component()].value).unwrap()
+            decode_asset_reference_value(entity.components[&component()].value()).unwrap()
                 == AssetRef::Product(reference)
         }));
     }

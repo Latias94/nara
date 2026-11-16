@@ -513,7 +513,8 @@ fn moved_outward_input_preserves_actual_x_targets_through_authoring_compilation(
         cut.entities().cloned(),
     );
     for entity in &mut q.entities {
-        let ComponentValue::Map(fields) = &mut entity.components.get_mut(&component).unwrap().value
+        let ComponentValue::Map(fields) =
+            entity.components.get_mut(&component).unwrap().value_mut()
         else {
             panic!("the admitted data schema uses a map");
         };
@@ -597,7 +598,7 @@ fn moved_outward_input_preserves_actual_x_targets_through_authoring_compilation(
                     .iter()
                     .find(|record| record.id() == &entity)
                     .unwrap();
-                let value = &entity.components()[&component].value;
+                let value = entity.components()[&component].value();
                 let EntityReference::SceneLocal { entity: target } =
                     value.field_entity_reference("target").unwrap()
                 else {

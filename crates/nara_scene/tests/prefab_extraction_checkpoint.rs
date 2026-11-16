@@ -623,7 +623,7 @@ fn assert_references_and_hierarchy(document: &ExpandedSceneDocument) {
         assert!(x.children().is_empty());
         for (record, target) in [(b, x), (x, b)] {
             assert_eq!(
-                record.components()[&component()].value.get("target"),
+                record.components()[&component()].value().get("target"),
                 Some(&ComponentValue::EntityReference(
                     EntityReference::SceneLocal {
                         entity: target.id().clone(),
@@ -638,7 +638,7 @@ fn assert_references_and_hierarchy(document: &ExpandedSceneDocument) {
         .find(|entity| entity.id() == &id("watcher"))
         .unwrap();
     assert_eq!(
-        watcher.components()[&component()].value.get("target"),
+        watcher.components()[&component()].value().get("target"),
         Some(&ComponentValue::EntityReference(
             EntityReference::SceneLocal {
                 entity: projected(document, "left", "b").id().clone(),
@@ -776,7 +776,7 @@ fn only_actual_changed_outputs_bind_together_and_install_exact_empty_history_che
         .find(|entity| entity.id == id("watcher"))
         .unwrap();
     assert_eq!(
-        watcher.components[&component()].value.get("target"),
+        watcher.components[&component()].value().get("target"),
         Some(&ComponentValue::EntityReference(reference(
             &[("left", "p"), ("k", "q")],
             "b",
@@ -835,7 +835,7 @@ fn only_actual_changed_outputs_bind_together_and_install_exact_empty_history_che
         .find(|entity| entity.id == id("b"))
         .unwrap();
     assert_eq!(
-        moved.components[&component()].value.get("target"),
+        moved.components[&component()].value().get("target"),
         Some(&ComponentValue::EntityReference(
             EntityReference::Authored {
                 reference: AuthoredEntityReference::input(input.clone()),
@@ -849,7 +849,7 @@ fn only_actual_changed_outputs_bind_together_and_install_exact_empty_history_che
         .find(|entity| entity.id == id("x"))
         .unwrap();
     assert_eq!(
-        outside.components[&component()].value.get("target"),
+        outside.components[&component()].value().get("target"),
         Some(&ComponentValue::EntityReference(reference(
             &[("k", "q")],
             "b"

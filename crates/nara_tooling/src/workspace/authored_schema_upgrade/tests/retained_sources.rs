@@ -283,7 +283,7 @@ fn padded_source(bytes: usize) -> SceneDocument {
         .components
         .get_mut(&ComponentTypeId::new("missing.Opaque"))
         .unwrap()
-        .value = ComponentValue::String("x".repeat(bytes));
+        .set_value(ComponentValue::String("x".repeat(bytes)));
     source
 }
 

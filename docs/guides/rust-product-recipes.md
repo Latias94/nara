@@ -142,6 +142,28 @@ let recipe = ProductRecipe::new()
 The recipe rejects duplicate plugin IDs and mismatched provider declarations before any `App` or
 runtime is created.
 
+## Access source component values
+
+`SceneComponentRecord` owns source metadata and one component value. Construct it with
+`SceneComponentRecord::new(version, value)`, borrow its value with `value()`, and use `value_mut()`
+for a local mutation. Replace the complete value with `set_value(value)` or consume the record
+with `into_value()`. The former public `value` field is private; `owner`, `version` and contextual
+default declarations retain their existing source meaning. JSON/RON records keep the same wire
+fields and value encoding.
+
+Public record and document `clone()` operations still produce independent values. Private
+compilation can share immutable component storage with its original source; actual migration,
+missing defaults, properties or changed references isolate the affected value before writing.
+Compiled components expose only `value()`, so consumers cannot detach a shared backing handle.
+That compiled getter is no longer `const`. Calling `value_mut()` may copy a shared value; use
+`value()` for inspection.
+
+Each source, compiled and independently prepared owner retains its complete logical payload
+allowance, including backing overhead. Sharing reduces possible copying; it does not deduplicate
+budgets, enlarge per-occurrence limits or keep raw Prefab documents alive. Existing semantic
+authoring operations remain the route for validated edits, history, persistence and publication;
+direct mutable access alone does not perform those operations.
+
 ## Read spatial data at its owning phase
 
 Keep authored and simulated local values in `Transform2d`. Use the public `nara::transform`

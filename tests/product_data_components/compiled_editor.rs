@@ -426,13 +426,13 @@ fn scoped_sprite_apply_changes_preserves_unchanged_texture_and_round_trips_chang
             .unwrap()
             .into_composition_source()
             .unwrap();
-            let sprite = &saved
+            let sprite = saved
                 .entities
                 .iter()
                 .find(|entity| entity.id == scene_id("player"))
                 .unwrap()
                 .components[&sprite_id]
-                .value;
+                .value();
             let image = sprite.get("material").unwrap().get("image").unwrap();
             let alias = if swap {
                 "textures/other.png"

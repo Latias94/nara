@@ -182,7 +182,7 @@ fn integer_property_actions_use_the_admitted_parameter_and_publish_the_exact_rev
             .unwrap();
         assert_eq!(
             entity.components[&component()]
-                .value
+                .value()
                 .field_i64("amount")
                 .unwrap(),
             12
@@ -279,8 +279,8 @@ fn superseded_request_keeps_physical_custody_without_overwriting_its_successor()
                 .find(|entity| entity.id == created)
                 .unwrap();
             assert_eq!(
-                successor.components[&ComponentTypeId::new("nara.scene.Name")].value,
-                ComponentValue::String("Successor only".into()),
+                successor.components[&ComponentTypeId::new("nara.scene.Name")].value(),
+                &ComponentValue::String("Successor only".into()),
             );
             for _ in 0..4 {
                 held.poll(|| editor.drive_editor_frame(Duration::ZERO));

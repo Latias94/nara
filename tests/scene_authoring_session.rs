@@ -139,7 +139,7 @@ fn prefab_authoring_session_keeps_prefab_source_kind_and_history_identity() {
             .entities
             .first()
             .and_then(|entity| entity.components.get(&label_type_id()))
-            .and_then(|component| component.value.field_str("text").ok()),
+            .and_then(|component| component.value().field_str("text").ok()),
         Some("Try Again")
     );
     assert_eq!(session.revision().source_id(), initial_source);
@@ -965,7 +965,7 @@ fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {
         .iter()
         .find(|entity| entity.id == *id)
         .and_then(|entity| entity.components.get(&label_type_id()))
-        .and_then(|component| component.value.field_str("text").ok())
+        .and_then(|component| component.value().field_str("text").ok())
         .unwrap()
         .to_string()
 }

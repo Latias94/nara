@@ -202,7 +202,7 @@ fn inspect_map(
     tileset: &str,
     covered: &mut BTreeSet<(i64, i64)>,
 ) {
-    let value = &record.value;
+    let value = record.value();
     assert_eq!(
         value.field("tile_size").unwrap().field_f64("x").unwrap(),
         tile_size as f64

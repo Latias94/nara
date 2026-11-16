@@ -321,7 +321,7 @@ fn assert_inventory(
 fn prefab_property_pin_and_materialized_default_keep_distinct_demands_for_one_product() {
     let fixture = Fixture::new(false);
     let original = &fixture.source.entities[0].components[&component()];
-    assert!(original.value.get("wire_fallback").is_none());
+    assert!(original.value().get("wire_fallback").is_none());
     let candidate = fixture.expand(false);
     let record = expanded_record(&candidate);
     let schema = fixture.schema();
@@ -364,7 +364,7 @@ fn prefab_absent_restores_immediate_default_and_property_set_keeps_actual_deferr
     let fixture = Fixture::new(true);
     assert_eq!(
         fixture.source.entities[0].components[&component()]
-            .value
+            .value()
             .get("wire_fallback"),
         Some(&asset(EXPLICIT_DEFAULT))
     );

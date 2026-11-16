@@ -144,7 +144,7 @@ fn scene_spawn_materializes_default_reference_without_rewriting_source() {
     assert_eq!(document, source);
     assert!(
         document.entities[0].components[&component_id()]
-            .value
+            .value()
             .get("target")
             .is_none()
     );
@@ -270,7 +270,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
     assert_eq!(prefab, original_prefab);
     assert!(
         prefab.entities[0].components[&component_id()]
-            .value
+            .value()
             .get("target")
             .is_none()
     );
@@ -326,7 +326,7 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
             entity: target.clone(),
         };
         assert_eq!(
-            component.value.field_entity_reference("target").unwrap(),
+            component.value().field_entity_reference("target").unwrap(),
             &expected,
         );
         assert_eq!(

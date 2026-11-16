@@ -443,7 +443,10 @@ fn declaration(malformed: bool) -> PrefabInstance {
     let mut overlay = PrefabOverlay::new(key("reclassification.base"));
     let mut value = record(7, RECOVERED_OWNER);
     if malformed {
-        value.value = ComponentValue::map([("value", ComponentValue::String("not a u64".into()))]);
+        value.set_value(ComponentValue::map([(
+            "value",
+            ComponentValue::String("not a u64".into()),
+        )]));
     }
     overlay.components.push(PrefabComponentIntent::Set {
         mode: PrefabComponentSetMode::Add,
@@ -913,7 +916,7 @@ fn many_tiny_edits_charge_cumulative_work_separately_from_peak_retention() {
         .components
         .get_mut(&ComponentTypeId::new(UNKNOWN))
         .unwrap()
-        .value = ComponentValue::String("x".repeat(24 * 1024));
+        .set_value(ComponentValue::String("x".repeat(24 * 1024)));
     each_source!(&document, &previous, |session| {
         for index in 0..16 {
             let report = session.apply_authoring_patch(&add(

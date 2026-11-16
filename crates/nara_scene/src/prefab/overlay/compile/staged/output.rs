@@ -258,7 +258,8 @@ where
                 let mut old_bytes = 0usize;
                 let mut new_nodes = 0usize;
                 let mut new_bytes = 0usize;
-                plan.visit(&payload.value, |path, reference| {
+                let mut rewrite_required = false;
+                plan.visit(payload.value(), |path, reference| {
                     if matches!(
                         reference,
                         EntityReference::SceneLocal { .. } | EntityReference::Authored { .. }
@@ -277,6 +278,10 @@ where
                                 let mapped = identifiers
                                     .get(&self.nodes[*target].locator)
                                     .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
+                                rewrite_required |= !matches!(
+                                    reference,
+                                    EntityReference::SceneLocal { entity } if entity == mapped
+                                );
                                 if self.nodes[self.canonical_node(0, *target)].scope != 0 {
                                     accumulate_generated_identifier_bytes(
                                         self.context.usage.generated_identifier_bytes,
@@ -289,6 +294,7 @@ where
                                 (1, mapped.as_str().len())
                             }
                             ResolvedReference::Persistent(reference) => {
+                                rewrite_required = true;
                                 let cost = reference.cost();
                                 (cost.nodes(), cost.logical_bytes())
                             }
@@ -360,16 +366,18 @@ where
                 if !self.context.admit_working_usage(usage, Some(id), None) {
                     return Err(SceneCompilationFailureKind::WorkLimit.into());
                 }
-                plan.rewrite_in_place(&mut payload.value, |path, reference| {
-                    materialized_reference(
-                        reference,
-                        path,
-                        reference_program,
-                        &self.nodes,
-                        &identifiers,
-                    )
-                })
-                .map_err(|_| SceneCompilationFailureKind::Reference)?;
+                if rewrite_required {
+                    plan.rewrite_in_place(payload.value_mut(), |path, reference| {
+                        materialized_reference(
+                            reference,
+                            path,
+                            reference_program,
+                            &self.nodes,
+                            &identifiers,
+                        )
+                    })
+                    .map_err(|_| SceneCompilationFailureKind::Reference)?;
+                }
                 self.context.usage.materialized_value_nodes = nodes;
                 self.context.usage.materialized_value_bytes = bytes;
                 if !component_programs.contextual_defaults.is_empty() {

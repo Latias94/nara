@@ -1594,8 +1594,8 @@ mod tests {
                 .components
                 .get(&nara_reflect::ComponentTypeId::new("nara.scene.Name"))
                 .unwrap()
-                .value,
-            ComponentValue::String("Renamed".to_owned())
+                .value(),
+            &ComponentValue::String("Renamed".to_owned())
         );
         host.commit_reopen(reopened.file, reopened.content_digest);
 

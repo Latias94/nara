@@ -254,7 +254,7 @@ fn initial(bindings: &SceneComponentBindings, name: &str) -> Result<SceneCompone
 fn scene_document(bindings: &SceneComponentBindings) -> Result<SceneDocument> {
     let transform = initial(bindings, "nara.transform.Transform2d")?;
     let mut sprite = initial(bindings, "nara.sprite.Sprite")?;
-    let ComponentValue::Map(fields) = &mut sprite.value else {
+    let ComponentValue::Map(fields) = sprite.value_mut() else {
         anyhow::bail!("the stock Sprite initial value must be a map");
     };
     fields.insert(

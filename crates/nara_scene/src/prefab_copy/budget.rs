@@ -193,7 +193,7 @@ impl CopyBudget {
         schema: &ComponentSchema,
         record: &crate::SceneComponentRecord,
     ) -> Result<(), PrefabCopyError> {
-        let cost = self.planning_cost(&record.value)?;
+        let cost = self.planning_cost(record.value())?;
         self.charge(
             cost.nodes(),
             cost.logical_bytes(),

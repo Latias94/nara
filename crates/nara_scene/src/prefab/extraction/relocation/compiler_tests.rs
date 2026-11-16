@@ -238,7 +238,7 @@ fn snapshot(
         .iter()
         .map(|entity| {
             assert_eq!(entity.components().len(), 1);
-            let ComponentValue::Map(mut fields) = entity.components()[&component()].value.clone()
+            let ComponentValue::Map(mut fields) = entity.components()[&component()].value().clone()
             else {
                 panic!("the real schema admits a map");
             };
@@ -374,11 +374,11 @@ fn proposed_relocation_preserves_compiled_values_references_and_distinct_root_sl
             .retained_target(&p_key, &claim.target, AddressRole::InstanceSlot, &mut admit)
             .unwrap()
             .into_owned();
-        let ComponentValue::Map(fields) = &mut after.entities[1]
+        let ComponentValue::Map(fields) = after.entities[1]
             .components
             .get_mut(&component())
             .unwrap()
-            .value
+            .value_mut()
         else {
             unreachable!()
         };
@@ -399,15 +399,21 @@ fn proposed_relocation_preserves_compiled_values_references_and_distinct_root_sl
         assert_eq!(before, after);
         assert_eq!(
             before["host"],
-            (vec!["b"], record(local("host"), local("host"), 91).value)
+            (
+                vec!["b"],
+                record(local("host"), local("host"), 91).into_value()
+            )
         );
         assert_eq!(
             before["b"],
-            (vec![], record(local("host"), local("host"), 77).value)
+            (
+                vec![],
+                record(local("host"), local("host"), 77).into_value()
+            )
         );
         assert_eq!(
             before["observer"],
-            (vec![], record(local("b"), local("host"), 0).value)
+            (vec![], record(local("b"), local("host"), 0).into_value())
         );
         assert_eq!(scene, original_scene);
     }

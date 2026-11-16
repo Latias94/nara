@@ -339,7 +339,7 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
     let [record] = values.as_slice() else {
         panic!("expected exactly one retained authoring component")
     };
-    assert_large_value(&record.value, record.owner());
+    assert_large_value(record.value(), record.owner());
 
     let cost = large_value().cost();
     for limits in [
@@ -537,7 +537,7 @@ fn assert_cost_value(report: &CostCompilation, items: usize) {
     assert_eq!(document.entities.len(), 1);
     assert_eq!(document.entities[0].id, id("anchor"));
     let record = &document.entities[0].components[&large_component()];
-    assert_eq!(record.value, cost_payload(items));
+    assert_eq!(record.value(), &cost_payload(items));
     assert_eq!(record.owner(), Some(&owner()));
     assert_eq!(report.usage.materialized_entities, 1);
     assert_eq!(report.usage.materialized_components, 1);

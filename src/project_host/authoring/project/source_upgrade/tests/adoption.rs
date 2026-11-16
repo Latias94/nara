@@ -390,7 +390,7 @@ fn final_ready_installs_the_prepared_project_without_readmission_and_rebinds_all
             assert_eq!(document.schema_basis(), basis);
             assert_eq!(
                 document.document().entities[0].components[&ComponentTypeId::new(COMPONENT)]
-                    .value
+                    .value()
                     .field("wire_health")
                     .unwrap()
                     .field_i64("milli")

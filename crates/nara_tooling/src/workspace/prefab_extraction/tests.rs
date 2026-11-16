@@ -326,7 +326,7 @@ fn value(entities: &[SceneEntityRecord]) -> i64 {
         .find(|entity| entity.id == id("branch"))
         .unwrap()
         .components[&ComponentTypeId::new(COMPONENT)]
-        .value
+        .value()
         .field_i64("value")
         .unwrap()
 }

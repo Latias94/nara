@@ -582,7 +582,7 @@ fn validate_structure_operation(
                 } else {
                     value.owner() != Some(&entry.owner)
                 })
-                || (!history && entry.schema.authoring_initial_value() != Some(&value.value))
+                || (!history && entry.schema.authoring_initial_value() != Some(value.value()))
             {
                 return Err(authoring_structure_rejection(
                     "Component creation requires its exact admitted complete template",

@@ -14,7 +14,10 @@ fn malformed_unknown_record_retains_the_complete_workspace_preparation_failure_w
         .components
         .get_mut(&component())
         .unwrap()
-        .value = ComponentValue::map([("health", ComponentValue::String("not an integer".into()))]);
+        .set_value(ComponentValue::map([(
+            "health",
+            ComponentValue::String("not an integer".into()),
+        )]));
     fs::write(
         fixture.root.join(SECOND),
         malformed.to_json_string().unwrap(),

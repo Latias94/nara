@@ -471,7 +471,7 @@ fn a_successful_probe_blocked_by_a_dirty_close_prompt_retains_the_predecessor_re
             .unwrap();
         assert_eq!(
             entity.components[&component()]
-                .value
+                .value()
                 .field_i64("amount")
                 .unwrap(),
             7

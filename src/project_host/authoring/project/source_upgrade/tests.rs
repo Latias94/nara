@@ -798,13 +798,13 @@ fn a_corrected_proposal_reuses_returned_inventory_and_the_exact_single_success_s
                     .components
                     .get_mut(&ComponentTypeId::new(COMPONENT))
                     .unwrap();
-                record.value = ComponentValue::map([
+                record.set_value(ComponentValue::map([
                     (
                         "wire_health",
                         ComponentValue::map([("milli", ComponentValue::I64(110000))]),
                     ),
                     ("armor", ComponentValue::I64(8)),
-                ]);
+                ]));
                 next[1] = document.to_json_string().unwrap().into_bytes();
             })
             .into_shared(&mut budget)

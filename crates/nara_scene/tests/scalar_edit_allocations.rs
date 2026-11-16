@@ -225,7 +225,7 @@ macro_rules! observe_session {
             assert_eq!(session.document().placements, baseline.placements);
             assert_eq!(
                 session.document().entities[0].components[&component]
-                    .value
+                    .value()
                     .field("value")
                     .unwrap(),
                 &ComponentValue::U64(7)

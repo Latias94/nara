@@ -430,7 +430,7 @@ fn observed_raw_cost_preserves_cost_only_results_and_original_record_and_intent_
     // Nested overlay values already belong to operation_count; this direct record does not.
     assert_eq!(
         observer.raw_nodes,
-        cost.operation_count() + record().value.cost().nodes()
+        cost.operation_count() + record().value().cost().nodes()
     );
     assert_eq!(observer.scratch, scratch);
     assert_eq!(observer.records.len(), expected_records.len());
@@ -636,7 +636,7 @@ fn value_and_source_copy_attempts_retain_late_failed_prefixes() {
             let result = if source_copy {
                 work.source_copy(SourceDocumentInput::Scene(&document))
             } else {
-                work.value(&record.value).map(|_| ())
+                work.value(record.value()).map(|_| ())
             };
             assert!(matches!(result, Err(ExtractionError::Capacity)));
             let after = work.usage();
@@ -658,7 +658,7 @@ fn successful_value_and_source_copy_keep_raw_work_and_clone_storage_separate() {
     let record = record();
     let mut scratch = Vec::new();
     let value_cost = record
-        .value
+        .value()
         .cost_up_to_with_admission(usize::MAX, usize::MAX, |bytes| {
             scratch.push(bytes.unwrap());
             Ok::<_, std::convert::Infallible>(())
@@ -666,7 +666,7 @@ fn successful_value_and_source_copy_keep_raw_work_and_clone_storage_separate() {
         .unwrap()
         .unwrap();
     let mut work = ExtractionWork::new(Default::default(), Some(0)).unwrap();
-    assert_eq!(work.value(&record.value).unwrap(), value_cost);
+    assert_eq!(work.value(record.value()).unwrap(), value_cost);
     assert_eq!(
         work.usage(),
         (

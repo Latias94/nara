@@ -766,7 +766,10 @@ impl ExportValueContext<'_> {
             }
             // A live export establishes new Source context from the already admitted,
             // lowered effective value. It cannot recover hidden lexical defaults.
-            let selected = record.value.get_path(field.path()).map_err(|_| invalid())?;
+            let selected = record
+                .value()
+                .get_path(field.path())
+                .map_err(|_| invalid())?;
             let cost = selected
                 .cost_up_to(limits.nodes(), limits.bytes())
                 .ok_or_else(|| {

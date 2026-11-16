@@ -401,7 +401,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
     assert_eq!(resolved.key(), &key);
     assert!(
         prefab.entities[0].components[&component_id]
-            .value
+            .value()
             .get("amount")
             .is_none()
     );

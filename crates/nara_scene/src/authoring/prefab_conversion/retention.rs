@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(projections[0].asset_ref(), &AssetRef::path(&path).unwrap());
         assert!(
             source.entities[0].components[&component()]
-                .value
+                .value()
                 .get("image")
                 .is_none()
         );

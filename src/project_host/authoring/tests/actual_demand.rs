@@ -431,8 +431,8 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
             AuthoringRecordReadiness::Available
         );
         assert_eq!(
-            r.document().entities[0].components[&component()].value,
-            value
+            r.document().entities[0].components[&component()].value(),
+            &value
         );
         let compiled = compile_snapshot(&snapshot);
         assert!(
@@ -616,7 +616,7 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
             .collect::<Vec<_>>();
         assert_eq!(values.len(), if replace { 2 } else { 0 });
         assert!(values.iter().all(|record| {
-            record.value == ComponentValue::map([("flag", ComponentValue::Bool(true))])
+            record.value() == &ComponentValue::map([("flag", ComponentValue::Bool(true))])
         }));
         drop(snapshot);
         let snapshot = receipt.into_session_snapshot().unwrap();

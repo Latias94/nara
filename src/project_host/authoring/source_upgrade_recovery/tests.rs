@@ -881,7 +881,7 @@ fn actual_digest_classification_never_double_converts_already_published_values()
             .unwrap()
             .into_composition_source()
             .unwrap();
-        let value = &native.entities[0].components[&fixture.component].value;
+        let value = native.entities[0].components[&fixture.component].value();
         assert_eq!(
             value,
             &ComponentValue::map([

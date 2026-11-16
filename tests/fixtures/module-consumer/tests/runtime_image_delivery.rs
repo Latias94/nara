@@ -821,7 +821,7 @@ fn imported_pixels_reach_source_free_native_scenes_and_prepared_packets_from_one
     );
     let exported = bindings.export_live_scene(&world).into_output().unwrap();
     let reference =
-        &exported.document.entities[0].components[&ComponentTypeId::new(PORTRAIT)].value;
+        exported.document.entities[0].components[&ComponentTypeId::new(PORTRAIT)].value();
     assert_eq!(
         decode_asset_reference_value(reference).unwrap(),
         AssetRef::Product(auxiliary())

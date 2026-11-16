@@ -1092,7 +1092,7 @@ fn scene_candidate_migrates_to_the_current_schema_and_requires_source_save() {
         .get(&migrating_text_id())
         .unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
-    assert_eq!(component.value.field_str("current").unwrap(), "before");
+    assert_eq!(component.value().field_str("current").unwrap(), "before");
     assert!(session.source_upgrade_required());
     assert!(session.acknowledge_source_saved(session.content_state()));
     assert!(!session.source_upgrade_required());
@@ -1443,7 +1443,7 @@ fn patch_candidate_migrates_whole_component_operations() {
         .map(|entity| {
             let component = entity.components.get(&migrating_text_id()).unwrap();
             assert_eq!(component.version, ComponentSchemaVersion(2));
-            component.value.field_str("current").unwrap()
+            component.value().field_str("current").unwrap()
         })
         .collect::<Vec<_>>();
     assert_eq!(values, ["added", "replaced"]);
@@ -1475,11 +1475,11 @@ fn patch_candidate_resolves_stable_fields_against_the_current_schema_version() {
         .apply_to_scene(&mut document, &registry);
 
     assert!(report.applied, "{:#?}", report.diagnostics);
-    let value = &document.entities[0]
+    let value = document.entities[0]
         .components
         .get(&migrating_text_id())
         .unwrap()
-        .value;
+        .value();
     assert_eq!(value.field_str("current").unwrap(), "after");
 }
 
@@ -1563,7 +1563,7 @@ fn patch_candidate_upgrades_legacy_remove_field_by_stable_identity() {
         .get(&migrating_text_id())
         .unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
-    assert!(component.value.field("note").is_err());
+    assert!(component.value().field("note").is_err());
     let inverse = report.inverse.unwrap();
     let ScenePatchOperation::SetField {
         component_version,
@@ -1718,7 +1718,10 @@ fn prefab_candidate_migrates_source_components_and_preserves_nested_declarations
     let root = &published.entities[0];
     let component = root.components.get(&migrating_text_id()).unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
-    assert_eq!(component.value.field_str("current").unwrap(), "root-before");
+    assert_eq!(
+        component.value().field_str("current").unwrap(),
+        "root-before"
+    );
     assert_eq!(
         root.prefab.as_ref().unwrap().overrides.as_ref(),
         Some(&overlay)

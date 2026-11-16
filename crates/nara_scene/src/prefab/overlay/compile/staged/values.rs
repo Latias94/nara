@@ -1,18 +1,19 @@
 //! Interprets only retained value programs after structural composition has closed.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::__private::{
-    EffectiveValueAdmissionError, effective_component_value_owned_with_default_overrides,
+    EffectiveValueAdmissionError, effective_component_value_with_default_overrides,
     validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
-    ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits, validate_component_value_with_limits,
+    ComponentSchema, ComponentTypeId, ComponentValueCost, ComponentValueMaterializationLimits,
+    validate_component_value_with_limits,
 };
 
 use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, ReferencePrograms};
@@ -182,7 +183,7 @@ where
         // compiler's cumulative storage allowance. Preserve its actual units and ceiling.
         if let Some(source_limits) = self.context.options.limits.source_value_limits {
             let source_admission = (|| {
-                validate_value_materialization_budget(&original.value, source_limits)?;
+                validate_value_materialization_budget(original.value(), source_limits)?;
                 for default in original.contextual_defaults.values() {
                     validate_value_materialization_budget(default, source_limits)?;
                 }
@@ -196,7 +197,7 @@ where
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_value_admission").entered();
-            let cost = validate_value_materialization_budget(&original.value, limits)?;
+            let cost = validate_value_materialization_budget(original.value(), limits)?;
             for default in original.contextual_defaults.values() {
                 validate_value_materialization_budget(default, limits)?;
             }
@@ -209,20 +210,20 @@ where
                     )
                 })
                 .and_then(|bytes| bytes.checked_add(size_of::<SceneComponentRecord>()))
+                .and_then(|bytes| bytes.checked_add(original.value_storage_retained_bytes()))
                 .and_then(|bytes| bytes.checked_add(contextual_defaults_work_bytes(original)?));
             Ok::<_, ComponentCodecError>((cost, metadata))
         })();
         let (mut cost, metadata) =
             admitted.map_err(|error| self.normalization_failure(&error, entity))?;
         self.admit(metadata)?;
-        // Every attempt pays for the complete authored clone, including hidden defaults.
-        // Only final lowering charges the materialized value counters.
         self.admit(value_work_bytes(cost))?;
         let mut record = {
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_value_clone").entered();
-            self.component(program.record, component).clone()
+            self.component(program.record, component)
+                .clone_for_compilation()
         };
         if opaque {
             return Ok((
@@ -251,29 +252,32 @@ where
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_value_migration").entered();
-            let previous_version = record.version;
-            let value = std::mem::replace(&mut record.value, ComponentValue::Null);
-            let migrated = match authority.migrate_owned(component, &record, value) {
-                Ok(migrated) => migrated,
-                Err(error) => {
-                    self.context.diagnostics.push(
-                        crate::validation::component_migration_diagnostic(
-                            entity.as_str(),
-                            component.as_str(),
-                            &error,
-                        ),
-                    );
-                    return Err(SceneCompilationFailureKind::Component.into());
+            let schema_version = authority
+                .schema(component)
+                .ok_or(SceneCompilationFailureKind::Component)?
+                .version();
+            if record.version != schema_version {
+                let previous_version = record.version;
+                let value = record.take_value();
+                let migrated = match authority.migrate_owned(component, &record, value) {
+                    Ok(migrated) => migrated,
+                    Err(error) => {
+                        self.context.diagnostics.push(
+                            crate::validation::component_migration_diagnostic(
+                                entity.as_str(),
+                                component.as_str(),
+                                &error,
+                            ),
+                        );
+                        return Err(SceneCompilationFailureKind::Component.into());
+                    }
+                };
+                if authority.native_snapshot().is_some() && migrated.version != previous_version {
+                    self.context.source_upgrade_required = true;
                 }
-            };
-            let version_changed = migrated.version != previous_version;
-            if authority.native_snapshot().is_some() && version_changed {
-                self.context.source_upgrade_required = true;
-            }
-            record.version = migrated.version;
-            record.value = migrated.value;
-            if version_changed {
-                cost = validate_value_materialization_budget(&record.value, limits)
+                record.version = migrated.version;
+                record.set_value(migrated.value);
+                cost = validate_value_materialization_budget(record.value(), limits)
                     .map_err(|error| self.normalization_failure(&error, entity))?;
             }
         }
@@ -286,7 +290,7 @@ where
                     .entered();
             validate_component_value_with_limits(
                 schema,
-                &record.value,
+                record.value(),
                 self.value_program_limits(),
             )
             .map_err(components::codec_failure)?;
@@ -300,7 +304,7 @@ where
         };
         let mut references = self.record_reference_origins(
             schema,
-            &record.value,
+            record.value(),
             cost,
             record_scope,
             declaration,
@@ -389,7 +393,7 @@ where
             let prepared = properties::prepare_claims(
                 schema,
                 *version,
-                &record.value,
+                record.value(),
                 &record.contextual_defaults,
                 claims,
                 limits,
@@ -417,14 +421,14 @@ where
                 scope,
                 index,
             )?;
-            record.value = prepared.value;
+            record.set_value(prepared.value);
             references.cost = prepared.cost;
             references.plan = None;
         }
         let limits = self.value_program_limits();
         self.validate_reference_program(
             schema,
-            &record.value,
+            record.value(),
             &mut references,
             limits,
             entity,
@@ -476,10 +480,9 @@ where
             self.validate_program_contextual_defaults(schema, record, entity)?;
         }
         self.reserve_program_temporary(schema, record, old_cost, entity)?;
-        let value = std::mem::replace(&mut record.value, ComponentValue::Null);
-        let (effective, cost) = match effective_component_value_owned_with_default_overrides(
+        let (effective, cost) = match effective_component_value_with_default_overrides(
             schema,
-            value,
+            record.value(),
             &record.contextual_defaults,
             limits,
         ) {
@@ -509,7 +512,9 @@ where
                 return Err(SceneCompilationFailureKind::Component.into());
             }
         };
-        record.value = effective;
+        if let Cow::Owned(effective) = effective {
+            record.set_value(effective);
+        }
         Ok(cost.unwrap_or(old_cost))
     }
 

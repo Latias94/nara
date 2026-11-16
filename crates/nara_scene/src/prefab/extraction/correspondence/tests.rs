@@ -312,7 +312,7 @@ fn scene_cut_remaps_actual_growing_ids_and_keeps_persistent_references() {
         .iter()
         .find(|entity| entity.id() == &id("k"))
         .unwrap();
-    let value = &root.components()[&component()].value;
+    let value = root.components()[&component()].value();
     assert_eq!(
         value.get("references"),
         Some(&ComponentValue::List(vec![
@@ -519,7 +519,7 @@ fn independently_recompiled_wrong_actual_sources_refuse_hierarchy_values_and_wra
             "children" => wrong_q.placements.swap(1, 2),
             "roots" => wrong_scene.placements.swap(0, 1),
             "scalar" | "reference" => {
-                let value = &mut wrong_q
+                let value = wrong_q
                     .entities
                     .iter_mut()
                     .find(|entity| entity.id == id("k"))
@@ -527,7 +527,7 @@ fn independently_recompiled_wrong_actual_sources_refuse_hierarchy_values_and_wra
                     .components
                     .get_mut(&component())
                     .unwrap()
-                    .value;
+                    .value_mut();
                 let ComponentValue::Map(fields) = value else {
                     panic!("component map")
                 };

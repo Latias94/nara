@@ -69,7 +69,7 @@ pub(super) fn cook(
                 work.reserve(asset_resolution.resolution_work_bytes(reference.asset_ref()))?;
             }
             rewrite_declared_asset_references_with_admission(
-                &mut record.value,
+                record.value.make_mut(),
                 &references,
                 asset_rewrite_limits(limits.value_limits(), &references),
                 |reference| canonical_product(reference.asset_ref(), asset_resolution),
@@ -90,7 +90,7 @@ pub(super) fn cook(
                 EntityReferencePlanError::Admission(error) => error,
                 EntityReferencePlanError::Reference(_) => reference_error(),
             })?;
-            plan.rewrite_in_place(&mut record.value, |_, reference| {
+            plan.rewrite_in_place(record.value.make_mut(), |_, reference| {
                 match reference {
                     EntityReference::SceneLocal { entity } => Ok(EntityReference::SceneLocal {
                         entity: copy_id(entity, &identifiers, &mut work)?,
@@ -167,7 +167,7 @@ pub(super) fn clone_claims(
                             FlatSceneComponentClaim {
                                 schema_owner: record.schema_owner().cloned(),
                                 version: record.version(),
-                                value: record.value().clone(),
+                                value: record.value().clone().into(),
                             },
                         )
                     })

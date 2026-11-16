@@ -173,7 +173,7 @@ impl<'a> SourceApplyChanges<'a> {
                     "Apply Changes could not read a declared component field",
                 )
             };
-            let previous = field_value(&current.value, field).map_err(path_error)?;
+            let previous = field_value(current.value(), field).map_err(path_error)?;
             let replacement = field_value(&runtime, field).map_err(path_error)?;
             let default = current
                 .contextual_defaults

@@ -261,7 +261,7 @@ fn dormant(document: &mut SceneDocument) -> &mut PrefabOverlay {
 }
 
 fn field<'a>(record: &'a mut SceneComponentRecord, name: &str) -> &'a mut ComponentValue {
-    let ComponentValue::Map(value) = &mut record.value else {
+    let ComponentValue::Map(value) = record.value_mut() else {
         unreachable!()
     };
     value.get_mut(name).unwrap()
@@ -320,7 +320,7 @@ fn stored_pairs_refuse_unrelated_armor_opaque_payload_and_topology_changes() {
                     .components
                     .get_mut(&ComponentTypeId::new("missing.Opaque"))
                     .unwrap()
-                    .value = ComponentValue::String("changed".into());
+                    .set_value(ComponentValue::String("changed".into()));
             }
             _ => successor.placements.reverse(),
         }

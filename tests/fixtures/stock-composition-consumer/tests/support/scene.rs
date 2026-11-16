@@ -193,7 +193,7 @@ pub fn document(registry: &ComponentRegistrySnapshot) -> SceneDocument {
 
 fn document_with_alpha(registry: &ComponentRegistrySnapshot, transparent: bool) -> SceneDocument {
     let mut sprite = initial(registry, "nara.sprite.Sprite");
-    let ComponentValue::Map(fields) = &mut sprite.value else {
+    let ComponentValue::Map(fields) = sprite.value_mut() else {
         panic!("Sprite map")
     };
     fields.insert("size".into(), vec2(4.0, 2.0));

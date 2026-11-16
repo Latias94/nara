@@ -376,7 +376,7 @@ fn mixed_document() -> SceneDocument {
         .components
         .get_mut(&component())
         .unwrap()
-        .value
+        .value_mut()
         .set_path(
             &ComponentFieldPath::from_fields(["settings", "wire_locked", "unknown_native_member"]),
             ComponentValue::String("preserve codec-opaque read-only data".into()),
@@ -443,11 +443,11 @@ fn source_apply_changes_edits_declared_roots_and_undo_preserves_mixed_degraded_s
             if field == &ComponentFieldId::new("optional")
     ));
     let mut expected = original.clone();
-    let value = &mut expected.entities[0]
+    let value = expected.entities[0]
         .components
         .get_mut(&component())
         .unwrap()
-        .value;
+        .value_mut();
     value
         .set_path(
             &ComponentFieldPath::from_fields(["settings", "wire_amount"]),

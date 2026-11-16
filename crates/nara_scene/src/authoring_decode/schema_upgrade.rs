@@ -98,7 +98,7 @@ impl UpgradeSourceValidation<'_, '_> {
     ) -> Result<(), ScenePatchReport> {
         let effective = nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
             schema,
-            &record.value,
+            record.value(),
             &record.contextual_defaults,
             self.limits.component_materialization_limits(),
             |nodes, bytes, allocated| {
@@ -395,7 +395,7 @@ impl AuthoredFieldUpgrade {
             // This proof changes one required field with no default. Every contextual
             // declaration therefore belongs to an unchanged field and must remain exact.
             || old.contextual_defaults != next.contextual_defaults
-            || !preserves_outside(&old.value, &next.value, self.storage_path().segments())
+            || !preserves_outside(old.value(), next.value(), self.storage_path().segments())
         {
             return Err(refused());
         }

@@ -575,7 +575,7 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
                     .iter()
                     .find(|record| &record.id == entity)
                     .unwrap();
-                let value = &record.components[&inventory].value;
+                let value = record.components[&inventory].value();
                 let rows = value.field("items").unwrap();
                 let ComponentValue::List(rows) = rows else {
                     panic!("inventory remains a keyed list")
@@ -681,7 +681,7 @@ fn retained_construction_resolves_local_handles_once_and_commits_one_history_ent
         .find(|record| record.id == second_id)
         .unwrap()
         .components[&component]
-        .value;
+        .value();
     assert_eq!(
         values.field("target").unwrap(),
         &ComponentValue::EntityReference(EntityReference::SceneLocal { entity: first_id })
@@ -931,7 +931,7 @@ fn retained_construction_last_invalid_write_and_raw_write_limit_preserve_source(
             .find(|record| record.id == created)
             .unwrap();
         assert_eq!(
-            record.components[&component].value.field("amount"),
+            record.components[&component].value().field("amount"),
             Ok(&ComponentValue::U64(last_amount))
         );
         let committed = session.commit_authoring_construction(prepared).unwrap();
@@ -1055,7 +1055,7 @@ fn retained_construction_does_not_promote_unavailable_records_through_staged_tem
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
     assert_eq!(
         session.document().entities[1].components[&component]
-            .value
+            .value()
             .field("amount")
             .unwrap(),
         &ComponentValue::U64(3)
@@ -1153,7 +1153,10 @@ fn retained_construction_charges_resolved_local_bytes_before_overwritten_roots_c
                 .find(|record| Some(&record.id) == prepared.entity(&local))
                 .unwrap();
             assert_eq!(
-                created.components[&component].value.field("text").unwrap(),
+                created.components[&component]
+                    .value()
+                    .field("text")
+                    .unwrap(),
                 &ComponentValue::String(String::new())
             );
         } else {
@@ -1498,7 +1501,7 @@ fn retained_construction_bounds_declarations_and_coalesced_property_roots_togeth
             .find(|record| record.id == id("existing"))
             .unwrap();
         assert_eq!(
-            existing.components[&component].value.field("amount"),
+            existing.components[&component].value().field("amount"),
             Ok(&ComponentValue::U64(last_amount))
         );
         assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));

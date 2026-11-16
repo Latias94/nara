@@ -152,7 +152,7 @@ fn equality_guards_complete_source_intent_including_contextual_defaults_base_and
             if let PrefabComponentIntent::Set { record, .. } =
                 &mut instance.overrides.as_mut().unwrap().components[0]
             {
-                record.value = ComponentValue::U64(1);
+                record.set_value(ComponentValue::U64(1));
             }
         },
         |instance| {

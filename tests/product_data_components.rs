@@ -516,13 +516,13 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
         .unwrap();
     assert!(
         source_actor.components[&component(MOTION)]
-            .value
+            .value()
             .field("gain")
             .is_err()
     );
     assert!(
         source_actor.components[&component(SENSOR)]
-            .value
+            .value()
             .field("targets")
             .is_err()
     );

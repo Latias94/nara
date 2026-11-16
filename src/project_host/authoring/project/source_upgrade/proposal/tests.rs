@@ -124,13 +124,13 @@ fn unrelated_armor_proposal(fixture: &Fixture) -> AuthoredSchemaUpgradeProposal 
         .components
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap();
-    record.value = ComponentValue::map([
+    record.set_value(ComponentValue::map([
         (
             "wire_health",
             ComponentValue::map([("milli", ComponentValue::I64(110000))]),
         ),
         ("armor", ComponentValue::I64(8)),
-    ]);
+    ]));
     source.successor = document
         .to_json_string()
         .unwrap()

@@ -339,7 +339,7 @@ fn scalar_defaults_are_admitted_even_without_asset_facts() {
     assert_eq!(stage, Some("classification-defaults"));
     assert!(
         source.entities[0].components[&component()]
-            .value
+            .value()
             .get("value")
             .is_none()
     );

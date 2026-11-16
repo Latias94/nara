@@ -502,7 +502,7 @@ fn authoring_transaction_bounds_forward_and_inverse_values_before_publication() 
                     .components
                     .get_mut(&component_id(component))
                     .unwrap()
-                    .value = ComponentValue::String("x".repeat(40 * 1024));
+                    .set_value(ComponentValue::String("x".repeat(40 * 1024)));
             }
         } else {
             for operation in &mut patch.operations {
@@ -654,8 +654,8 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
             .components
             .get(&component_id("nara.scene.Name"))
             .unwrap()
-            .value,
-        ComponentValue::String("Renamed".to_owned())
+            .value(),
+        &ComponentValue::String("Renamed".to_owned())
     );
 
     let registry = ComponentRegistryBuilder::new().freeze().unwrap();
@@ -667,8 +667,8 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
             .components
             .get(&component_id("nara.scene.Name"))
             .unwrap()
-            .value,
-        ComponentValue::String("Player".to_owned())
+            .value(),
+        &ComponentValue::String("Player".to_owned())
     );
 
     let redo = session.redo(&registry);
@@ -679,8 +679,8 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
             .components
             .get(&component_id("nara.scene.Name"))
             .unwrap()
-            .value,
-        ComponentValue::String("Renamed".to_owned())
+            .value(),
+        &ComponentValue::String("Renamed".to_owned())
     );
 
     let before_document = session.document().clone();

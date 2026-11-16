@@ -432,7 +432,7 @@ fn decode_record<T>(
             actual: record.version,
         });
     }
-    decode(&record.value).map_err(|source| UiAuthoringCanvasCompileError::ComponentDecode {
+    decode(record.value()).map_err(|source| UiAuthoringCanvasCompileError::ComponentDecode {
         entity: entity.clone(),
         component,
         source,

@@ -269,7 +269,7 @@ impl Certificate {
             )?;
         }
         self.node(depth + 1)?;
-        self.value(depth + 1, &record.value)?;
+        self.value(depth + 1, record.value())?;
         if contextual {
             self.container(depth + 1, record.contextual_defaults.len())?;
             for (field, value) in &record.contextual_defaults {

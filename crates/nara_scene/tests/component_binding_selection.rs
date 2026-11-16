@@ -373,7 +373,7 @@ fn validation_keeps_real_native_codecs_strict_and_defaults_out_of_the_source() {
         .components
         .get_mut(&visibility)
         .unwrap()
-        .value = ComponentValue::String("not-a-visibility".into());
+        .set_value(ComponentValue::String("not-a-visibility".into()));
     assert_code(
         &bindings.validate_scene(&document, None, Default::default()),
         "scene.invalid-component-payload",

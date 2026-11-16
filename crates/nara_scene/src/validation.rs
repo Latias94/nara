@@ -170,7 +170,7 @@ fn validate_effective_values<E>(
                 component,
                 schema_owner: record.owner(),
                 version: record.version,
-                value: &record.value,
+                value: record.value(),
                 authored_metadata: !record.contextual_defaults.is_empty(),
             })
     });
@@ -1117,9 +1117,9 @@ fn preflight_source_values_with_context(
             // Current-version values remain borrowed until complete effective admission. Only
             // native migration requires an owned input; admit that input before its clone.
             let migrated = if component.version == schema.version() {
-                Cow::Borrowed(&component.value)
+                Cow::Borrowed(component.value())
             } else {
-                if let Err(error) = value_budget.admit_input(&component.value) {
+                if let Err(error) = value_budget.admit_input(component.value()) {
                     push_with_operation_index(
                         &mut diagnostics,
                         component_payload_diagnostic(
@@ -1135,7 +1135,7 @@ fn preflight_source_values_with_context(
                 match registry.migrate_component_value(
                     component_id,
                     component.version,
-                    &component.value,
+                    component.value(),
                 ) {
                     Ok(migrated) if migrated.version == schema.version() => {
                         Cow::Owned(migrated.value)
@@ -2573,7 +2573,7 @@ mod tests {
                 .components
                 .get_mut(&native_id())
                 .unwrap();
-            record.value = value;
+            record.set_value(value);
             record.contextual_defaults.clear();
             let source = preflight_authoring_scene(&missing_context, &registry);
             assert!(source.diagnostics.has_errors());
@@ -2594,10 +2594,10 @@ mod tests {
             ComponentFieldId::new("target"),
             effective.get("target").unwrap().clone(),
         );
-        record.value = ComponentValue::map([("target", ComponentValue::Null)]);
+        record.set_value(ComponentValue::map([("target", ComponentValue::Null)]));
         // Retained metadata is one map keyed by stable field ID, independent of the
         // effective value. A hidden authored default still consumes that complete cost.
-        let contextual_cost = retained_default_cost.saturating_add(record.value.cost());
+        let contextual_cost = retained_default_cost.saturating_add(record.value().cost());
         for (nodes, bytes, accepted) in [
             (
                 contextual_cost.nodes(),
@@ -2657,7 +2657,7 @@ mod tests {
                 .components
                 .get_mut(&native_id())
                 .unwrap()
-                .value = value;
+                .set_value(value);
             let source = preflight_authoring_scene(&invalid, &registry);
             assert!(source.diagnostics.has_errors());
             assert_eq!(calls.load(Ordering::SeqCst), 0);

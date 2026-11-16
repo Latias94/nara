@@ -208,7 +208,7 @@ fn convert_record(record: &mut SceneComponentRecord) -> Result<(), UpgradeError>
     if let Some(field) = record.contextual_defaults.keys().next() {
         return Err(UpgradeError::ContextualDefault(field.clone()));
     }
-    convert_value(&mut record.value)?;
+    convert_value(record.value_mut())?;
     record.version = V2;
     Ok(())
 }

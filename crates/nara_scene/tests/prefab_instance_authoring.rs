@@ -323,7 +323,7 @@ fn declaration_replacement_repairs_only_its_overlay_and_restores_the_exact_manif
                     .components
                     .get_mut(&ComponentTypeId::new("missing.Opaque"))
                     .unwrap()
-                    .value = ComponentValue::String("changed".into());
+                    .set_value(ComponentValue::String("changed".into()));
             } else {
                 drifted
                     .entities

@@ -50,7 +50,7 @@ pub fn assert_record(
     });
     assert_eq!(actual.schema_owner().map(|owner| owner.as_str()), owner);
     assert_eq!(actual.version(), expected.version);
-    assert_eq!(actual.value(), &expected.value);
+    assert_eq!(actual.value(), expected.value());
 }
 
 pub fn assert_components(

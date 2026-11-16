@@ -499,11 +499,13 @@ fn copied_source_needs_a_new_enclosing_identity_before_catalogue_admission() {
         .components
         .get_mut(&ComponentTypeId::new("consumer.bundle.Caption"))
         .unwrap()
-        .value = Caption {
-        product: AssetRef::Product(foreign),
-    }
-    .__encode_persistent_component()
-    .unwrap();
+        .set_value(
+            Caption {
+                product: AssetRef::Product(foreign),
+            }
+            .__encode_persistent_component()
+            .unwrap(),
+        );
     fs::write(
         fixture.root.join("scenes/other.scene.json"),
         copied_scene.to_json_string().unwrap(),

@@ -757,7 +757,7 @@ fn unavailable_nested_declarations_keep_distinct_paths_and_survive_reopen() {
             .components
             .get_mut(&component())
             .unwrap()
-            .value = ComponentValue::U64(4);
+            .set_value(ComponentValue::U64(4));
         let drifted = readmission
             .reopen_scene_candidate(
                 SceneDocumentCandidate::decode_json_bytes(

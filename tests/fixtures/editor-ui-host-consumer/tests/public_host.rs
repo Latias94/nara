@@ -229,7 +229,10 @@ fn controlled_panel_edits_nonactive_source_with_exact_results_history_and_persis
         .components
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap()
-        .value = ComponentValue::map([(FIELD, ComponentValue::String("external draft".into()))]);
+        .set_value(ComponentValue::map([(
+            FIELD,
+            ComponentValue::String("external draft".into()),
+        )]));
     assert_eq!(saved, expected_source);
     let (batch, save_acknowledge_id) = through(
         &mut host,

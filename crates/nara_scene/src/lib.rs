@@ -10,6 +10,7 @@ mod candidate;
 mod compiled;
 mod component_binding_plugin;
 mod component_bindings;
+mod component_payload;
 mod data_components;
 mod diagnostics;
 mod document;

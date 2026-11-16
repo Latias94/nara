@@ -156,12 +156,12 @@ fn preparation_is_private_and_commit_publishes_the_complete_group() {
     let records = &output.document.entities[0].components;
     assert_eq!(records.len(), 3);
     assert_eq!(
-        records[&component("game.Score")].value,
-        ComponentValue::U64(7)
+        records[&component("game.Score")].value(),
+        &ComponentValue::U64(7)
     );
     assert_eq!(
-        records[&component("game.Visible")].value,
-        ComponentValue::Bool(true)
+        records[&component("game.Visible")].value(),
+        &ComponentValue::Bool(true)
     );
     assert_eq!(
         retire_and_despawn_scene_instance(&mut world, &instance).unwrap(),
@@ -244,8 +244,8 @@ fn invalid_source_recompilation_preserves_the_last_good_activation_and_data() {
     assert_eq!(world.resource::<WorldIdentityDomain>().stats(), old_stats);
     let output = bindings.export_live_scene(&world).into_output().unwrap();
     assert_eq!(
-        output.document.entities[0].components[&component("game.Score")].value,
-        ComponentValue::U64(7)
+        output.document.entities[0].components[&component("game.Score")].value(),
+        &ComponentValue::U64(7)
     );
     let replacement = succeeded(
         bindings

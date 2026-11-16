@@ -323,7 +323,7 @@ fn qualify_native_source_tool(owned_inspector: bool) {
         .components
         .get_mut(&ComponentTypeId::new(STATS))
         .unwrap()
-        .value = stats(125, 10);
+        .set_value(stats(125, 10));
     expected.entities[1].components.insert(
         ComponentTypeId::new(STATS),
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, stats(100, 10))

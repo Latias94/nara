@@ -101,7 +101,7 @@ fn copy_record(
     })?;
     let (effective, _) = effective_component_value_with_default_overrides_with_budget(
         schema,
-        &record.value,
+        record.value(),
         &record.contextual_defaults,
         limits.nodes(),
         limits.bytes(),
@@ -128,7 +128,7 @@ fn copy_record(
     )
     .map_err(|error| collection_error(source, error))?;
     for reference in &effective_assets {
-        if record.value.get_path(reference.path()).is_err()
+        if record.value().get_path(reference.path()).is_err()
             && !record
                 .contextual_defaults
                 .contains_key(reference.field_id())
@@ -143,7 +143,7 @@ fn copy_record(
     let traversal = budget.traversal()?;
     let plan = plan_declared_entity_references_with_admission::<PrefabCopyError, _>(
         schema,
-        &record.value,
+        record.value(),
         traversal,
         |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
     )
@@ -151,7 +151,7 @@ fn copy_record(
         EntityReferencePlanError::Admission(error) => error,
         EntityReferencePlanError::Reference(error) => reference_error(source, error),
     })?;
-    plan.rewrite_in_place(&mut record.value, |_, reference| {
+    plan.rewrite_in_place(record.value_mut(), |_, reference| {
         copy_reference(reference, source, mapping, budget)
     })
     .map_err(|error| reference_error(source, error))?;
@@ -159,13 +159,13 @@ fn copy_record(
     let references = collect_declared_effective_asset_references_with_admission(
         schema,
         record.version,
-        &record.value,
+        record.value(),
         traversal,
         |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
     )
     .map_err(|error| collection_error(source, error))?;
-    rewrite_assets(&mut record.value, &references, source, mapping, budget)?;
-    budget.value(&record.value)?;
+    rewrite_assets(record.value_mut(), &references, source, mapping, budget)?;
+    budget.value(record.value())?;
     for (id, value) in &mut record.contextual_defaults {
         let field = schema
             .fields()

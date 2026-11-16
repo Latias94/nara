@@ -1993,7 +1993,7 @@ fn real_import_reaches_source_free_primary_and_auxiliary_tilemap_publication_and
         .export_live_scene(&world)
         .into_output()
         .unwrap();
-    let value = &exported.document.entities[0].components[&ComponentTypeId::new(TILEMAP)].value;
+    let value = exported.document.entities[0].components[&ComponentTypeId::new(TILEMAP)].value();
     assert_eq!(
         decode_asset_reference_value(value.get("tileset").unwrap()).unwrap(),
         AssetRef::Product(tileset_product(true))

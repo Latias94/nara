@@ -321,7 +321,7 @@ fn effective_asset_defaults_require_catalogue_membership_only_when_database_is_s
             .find(|entity| entity.id == scene_id("source"))
             .unwrap()
             .components[&reference_id()]
-            .value
+            .value()
             .get("images")
             .is_none()
     );
@@ -622,7 +622,7 @@ fn published_data_authoring_closes_known_local_edges_and_preserves_unknown_recor
                 .components
                 .get_mut(&reference_id())
                 .unwrap()
-                .value
+                .value_mut()
                 .remove_path(&ComponentFieldPath::from_fields(["links"]))
                 .unwrap();
         }

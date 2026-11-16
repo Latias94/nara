@@ -114,7 +114,7 @@ impl Definition {
                 ComponentValueKind::U64,
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
-            .with_authoring_initial_value(motion(2).value);
+            .with_authoring_initial_value(motion(2).into_value());
         let sensor = ComponentSchema::new(component(SENSOR), "Sensor", ComponentSchemaVersion::ONE)
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)
             .with_fields([ComponentFieldSchema::required(
@@ -240,7 +240,7 @@ fn resolve(world: &World, instance: &SpawnedSceneInstance, id: &SceneEntityId) -
 fn assert_data_record(actual: &CompiledSceneComponent, expected: &SceneComponentRecord) {
     assert_eq!(actual.schema_owner(), expected.owner());
     assert_eq!(actual.version(), expected.version);
-    assert_eq!(actual.value(), &expected.value);
+    assert_eq!(actual.value(), expected.value());
 }
 
 fn export(bindings: &SceneComponentBindings, world: &World) -> LiveSceneExportOutput {
@@ -297,7 +297,11 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
             component: component(SENSOR),
             component_version: ComponentSchemaVersion::ONE,
             field: ComponentFieldId::new("targets"),
-            value: sensor(id("friend")).value.field("targets").unwrap().clone(),
+            value: sensor(id("friend"))
+                .value()
+                .field("targets")
+                .unwrap()
+                .clone(),
         },
     ]);
     let basis = editor.document_query_basis(document).unwrap();
@@ -446,7 +450,7 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
             &mut world,
             entity,
             &component(MOTION),
-            motion(9).value,
+            motion(9).into_value(),
             None,
             ComponentValueMaterializationLimits::default(),
         )
@@ -524,7 +528,7 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
                 &mut world,
                 entity,
                 &component(MOTION),
-                motion(99).value,
+                motion(99).into_value(),
                 None,
                 ComponentValueMaterializationLimits::default(),
             )
@@ -663,8 +667,8 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
     let left_output = exported(&output, &first, &left);
     assert!(!left_output.components.contains_key(&component(MOTION)));
     assert_eq!(
-        left_output.components[&component(NAME)].value,
-        ComponentValue::String("Runtime actor".into())
+        left_output.components[&component(NAME)].value(),
+        &ComponentValue::String("Runtime actor".into())
     );
     for (actor, friend) in [(&left, &left_friend), (&right, &right_friend)] {
         let mapped_friend = output.remap.get(&first.locator(friend).unwrap()).unwrap();

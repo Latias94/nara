@@ -1196,7 +1196,7 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                     .components
                     .get_mut(&ComponentTypeId::new(LINKS))
                     .unwrap()
-                    .value
+                    .value_mut()
                     .get_path_mut(&ComponentFieldPath::from_fields(["target"]))
                     .unwrap();
                 let ComponentValue::EntityReference(EntityReference::Authored { reference }) =
@@ -1463,7 +1463,7 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         .components
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap()
-        .value = ComponentValue::map([("payload", changed)]);
+        .set_value(ComponentValue::map([("payload", changed)]));
     save_and_reopen(&mut editor, &project, PREFAB, &expected, &manifest);
     let repair = instance_patch(Some(declaration.clone()), None);
     let basis = editor.document_query_basis(prefab).unwrap();
@@ -1915,7 +1915,7 @@ fn save_and_reopen(
         .find(|row| row.id == id("actor"))
         .unwrap();
     let expected_root = actor.components[&ComponentTypeId::new(COMPONENT)]
-        .value
+        .value()
         .get_path(&ComponentFieldPath::from_fields(["payload"]))
         .unwrap();
     assert_eq!(&root(editor), expected_root);

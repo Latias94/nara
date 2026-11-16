@@ -620,7 +620,7 @@ fn exported_sprite_texture(document: &SceneDocument) -> (&str, &str) {
         .get(&ComponentTypeId::new("nara.sprite.Sprite"))
         .unwrap();
     let texture = component
-        .value
+        .value()
         .field("material")
         .unwrap()
         .field("image")

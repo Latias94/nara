@@ -526,7 +526,8 @@ fn scene_and_prefab_plans_convert_the_complete_stored_tree_and_preserve_every_ot
     // Proposal production preserves unselected payload fields too. Their final validity is
     // independently decided by the owning Host/Scene admission, not by this command.
     for document in [&mut source, &mut expected] {
-        let ComponentValue::Map(fields) = &mut record_at(document, RecordSite::Direct).value else {
+        let ComponentValue::Map(fields) = record_at(document, RecordSite::Direct).value_mut()
+        else {
             unreachable!()
         };
         fields.insert("unselected-future-payload".into(), opaque());
@@ -700,15 +701,16 @@ fn catalogs_and_values_use_real_public_schemas_and_the_actual_creation_metadata_
     for site in RECORD_SITES {
         let old_record = record_at(&mut source, site);
         let new_record = record_at(&mut converted, site);
-        validate_component_value(old, &old_record.value).unwrap();
-        validate_component_value(next, &new_record.value).unwrap();
+        validate_component_value(old, old_record.value()).unwrap();
+        validate_component_value(next, new_record.value()).unwrap();
         assert_eq!(
-            new_record.value.get("wire_armor"),
-            old_record.value.get("wire_armor")
+            new_record.value().get("wire_armor"),
+            old_record.value().get("wire_armor")
         );
-        assert!(resolve_component_property(old, V1, &old_record.value, &root("health"),).is_ok());
+        assert!(resolve_component_property(old, V1, old_record.value(), &root("health"),).is_ok());
         assert!(
-            resolve_component_property(next, V2, &new_record.value, &health_property_v2(),).is_ok()
+            resolve_component_property(next, V2, new_record.value(), &health_property_v2(),)
+                .is_ok()
         );
     }
 }
@@ -796,7 +798,7 @@ fn record_versions_and_shapes_are_checked_at_every_location_without_touching_the
         }
         for (value, error) in &cases {
             let mut source = fixture(false);
-            record_at(&mut source, site).value = value.clone();
+            record_at(&mut source, site).set_value(value.clone());
             assert_refused_unchanged(&source, error.clone());
         }
     }
@@ -968,8 +970,8 @@ fn checked_scaling_accepts_signed_boundaries_and_zero_but_refuses_the_next_point
     }
     for whole in [i64::MAX / 1000 + 1, i64::MIN / 1000 - 1] {
         let mut source = fixture(false);
-        record_at(&mut source, RecordSite::ClaimNested).value =
-            stats_value(ComponentValue::I64(whole), 5);
+        record_at(&mut source, RecordSite::ClaimNested)
+            .set_value(stats_value(ComponentValue::I64(whole), 5));
         assert_refused_unchanged(&source, UpgradeError::HealthOverflow(whole));
     }
 }

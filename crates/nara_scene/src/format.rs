@@ -2227,7 +2227,7 @@ impl SceneFileCounts {
         self.overlay_nodes = self
             .overlay_nodes
             .saturating_add(record.contextual_defaults.len());
-        self.observe_component_value(record.value.cost(), limits)?;
+        self.observe_component_value(record.value().cost(), limits)?;
         for (field, value) in &record.contextual_defaults {
             self.observe_structural_bytes(field.as_str().len(), limits)?;
             self.observe_component_value(value.cost(), limits)?;

@@ -561,7 +561,7 @@ fn refused_complete_proposal_returns_the_original_capture_for_correction_and_ret
                 .components
                 .get_mut(&ComponentTypeId::new(project_command::COMPONENT))
                 .unwrap();
-            let ComponentValue::Map(fields) = &mut record.value else {
+            let ComponentValue::Map(fields) = record.value_mut() else {
                 unreachable!()
             };
             fields.insert("wire_armor".into(), ComponentValue::I64(999));

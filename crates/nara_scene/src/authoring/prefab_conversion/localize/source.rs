@@ -174,13 +174,13 @@ pub(super) fn localize_record<'a>(
     };
     let plan = plan_declared_entity_references_with_admission::<ScenePatchReport, _>(
         schema,
-        &original.value,
+        original.value(),
         limits,
         |_, _, bytes| work.reserve(bytes),
     )
     .map_err(plan_error)?;
     let mut changed = false;
-    plan.visit(&original.value, |_, reference| {
+    plan.visit(original.value(), |_, reference| {
         changed |= replacement(reference, targets, work)?.is_some();
         Ok::<_, ScenePatchReport>(())
     })
@@ -233,7 +233,7 @@ pub(super) fn localize_record<'a>(
             replacement(reference, targets, work)?.unwrap_or_else(|| reference.clone()),
         )
     };
-    plan.rewrite_in_place(&mut record.value, &mut rewrite)
+    plan.rewrite_in_place(record.value_mut(), &mut rewrite)
         .map_err(reference_error)?;
     for (id, plan) in defaults {
         let value = record

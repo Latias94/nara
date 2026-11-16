@@ -416,7 +416,7 @@ fn verify_value(
 ) -> Result<(), ExtractionError> {
     // Compare the compiler's actual effective record values. Contextual defaults remain source
     // declarations, and must not be reapplied here in a different lexical source environment.
-    for value in [&before.value, &after.value] {
+    for value in [before.value(), after.value()] {
         validate_component_value_with_admission(
             schema,
             value,
@@ -428,11 +428,11 @@ fn verify_value(
             ComponentValueAdmissionError::Value(error) => ExtractionError::Value(error),
         })?;
     }
-    let cost = work.value(&before.value)?;
+    let cost = work.value(before.value())?;
     let traversal = work.traversal()?;
     let plan = plan_declared_entity_references_with_admission::<ExtractionError, _>(
         schema,
-        &before.value,
+        before.value(),
         traversal,
         |nodes, bytes, allocated| work.visit(nodes, bytes, allocated),
     )
@@ -447,7 +447,7 @@ fn verify_value(
             .checked_mul(96)
             .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
     )?;
-    let mut expected = before.value.clone();
+    let mut expected = before.value().clone();
     admit_declared_entity_reference_plan_rewrite(&plan, cost, |nodes, bytes, allocated| {
         work.visit(nodes, bytes, allocated.ok_or(ExtractionError::Capacity)?)
     })?;
@@ -472,8 +472,8 @@ fn verify_value(
     // Actual locator growth participates in the cumulative allowance, including the final
     // complete comparison. Persistent values participate unchanged in ordinary value equality.
     work.value(&expected)?;
-    work.value(&after.value)?;
-    if expected != after.value {
+    work.value(after.value())?;
+    if &expected != after.value() {
         return Err(ExtractionError::InvalidSource);
     }
     Ok(())

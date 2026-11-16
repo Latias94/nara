@@ -286,10 +286,10 @@ fn path_self_edge_reads_its_metadata_without_indexing_unrelated_sources_or_redec
         .values_mut()
         .next()
         .unwrap()
-        .value = nara_reflect::ComponentValue::map([(
-        "image",
-        encode_asset_reference_value(&AssetRef::path("self.scene.json").unwrap()),
-    )]);
+        .set_value(nara_reflect::ComponentValue::map([(
+            "image",
+            encode_asset_reference_value(&AssetRef::path("self.scene.json").unwrap()),
+        )]));
     fs::write(
         project.root.join("assets/self.scene.json"),
         document.to_json_string().unwrap(),

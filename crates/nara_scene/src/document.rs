@@ -10,6 +10,7 @@ use nara_reflect::{
 
 use crate::{
     PrefabInstance, SceneComponentBindings, SceneEntityPlacement,
+    component_payload::ComponentPayload,
     validation::{
         preflight_authoring_scene, preflight_authoring_scene_for_patch,
         preflight_authoring_scene_with_context, preflight_authoring_scene_with_context_for_patch,
@@ -198,7 +199,7 @@ impl SceneEntityRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneComponentRecord {
@@ -208,7 +209,7 @@ pub struct SceneComponentRecord {
     )]
     pub owner: Option<PersistentComponentSchemaOwnerId>,
     pub version: ComponentSchemaVersion,
-    pub value: ComponentValue,
+    value: ComponentPayload,
     /// Source-dependent defaults bound to this record's version and stable root-field IDs.
     /// Explicit values may hide them without removing their declaration.
     #[cfg_attr(
@@ -218,15 +219,82 @@ pub struct SceneComponentRecord {
     pub contextual_defaults: BTreeMap<nara_reflect::ComponentFieldId, ComponentValue>,
 }
 
+impl Clone for SceneComponentRecord {
+    /// Public copies own independent values, including source-dependent defaults.
+    fn clone(&self) -> Self {
+        Self {
+            owner: self.owner.clone(),
+            version: self.version,
+            value: self.value.deep_clone(),
+            contextual_defaults: self.contextual_defaults.clone(),
+        }
+    }
+}
+
 impl SceneComponentRecord {
     #[must_use]
     pub fn new(version: ComponentSchemaVersion, value: ComponentValue) -> Self {
         Self {
             owner: None,
             version,
-            value,
+            value: value.into(),
             contextual_defaults: BTreeMap::new(),
         }
+    }
+
+    /// Borrows the value without exposing its private shared storage.
+    #[must_use]
+    pub fn value(&self) -> &ComponentValue {
+        &self.value
+    }
+
+    /// Isolates the value from any compiled or prepared owner before mutation.
+    pub fn value_mut(&mut self) -> &mut ComponentValue {
+        self.value.make_mut()
+    }
+
+    pub fn set_value(&mut self, value: ComponentValue) {
+        self.value = value.into();
+    }
+
+    /// Moves unique storage out, or copies the value when another private owner shares it.
+    #[must_use]
+    pub fn into_value(self) -> ComponentValue {
+        self.value.into_owned()
+    }
+
+    /// Models the root value allocation and its control/allocator overhead.
+    /// Every retained owner also accounts the full value payload separately, without deduplication.
+    /// This excludes the record's inline handle and all descendant storage.
+    #[must_use]
+    pub const fn value_storage_retained_bytes(&self) -> usize {
+        self.value.retained_bytes()
+    }
+
+    /// Shares only the main payload into an independently admitted compiler draft.
+    pub(crate) fn clone_for_compilation(&self) -> Self {
+        Self {
+            owner: self.owner.clone(),
+            version: self.version,
+            value: self.value.clone(),
+            contextual_defaults: self.contextual_defaults.clone(),
+        }
+    }
+
+    /// Extracts an isolated owned value and leaves an explicit null in the record.
+    pub(crate) fn take_value(&mut self) -> ComponentValue {
+        std::mem::replace(&mut self.value, ComponentValue::Null.into()).into_owned()
+    }
+
+    /// Moves admitted flat storage after the compiler has lowered and cleared source defaults.
+    pub(crate) fn into_compiled_parts(
+        self,
+    ) -> (
+        Option<PersistentComponentSchemaOwnerId>,
+        ComponentSchemaVersion,
+        ComponentPayload,
+    ) {
+        (self.owner, self.version, self.value)
     }
 
     #[must_use]

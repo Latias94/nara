@@ -308,8 +308,8 @@ pub(super) fn verify_unavailable_records(
                     .saturating_add(new.owner().map_or(0, |owner| owner.as_str().len())),
                 0,
             )?;
-            work.value(&old.value)?;
-            work.value(&new.value)?;
+            work.value(old.value())?;
+            work.value(new.value())?;
             for (field, value) in old
                 .contextual_defaults
                 .iter()

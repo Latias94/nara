@@ -286,7 +286,7 @@ impl PrefabCompositionEntityDraft {
         let mut value_nodes = 0usize;
         let mut logical_bytes = 0usize;
         for (component, record) in &components {
-            let cost = record.value.cost();
+            let cost = record.value().cost();
             value_nodes = value_nodes.saturating_add(cost.nodes());
             logical_bytes = logical_bytes
                 .saturating_add(component.as_str().len())

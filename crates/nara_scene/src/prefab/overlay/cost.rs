@@ -460,7 +460,7 @@ impl<'a> CostWalker<'a> {
     ) -> Result<(), PrefabOverlayCostError> {
         self.node(depth)?;
         self.bytes(5_usize.saturating_add(record.owner().map_or(0, |owner| owner.as_str().len())))?;
-        self.value(&record.value, depth.saturating_add(1))?;
+        self.value(record.value(), depth.saturating_add(1))?;
         self.declarations(record.contextual_defaults.len())?;
         for (field, value) in &record.contextual_defaults {
             self.node(depth.saturating_add(1))?;

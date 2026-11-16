@@ -564,8 +564,8 @@ macro_rules! qualify {
                         .find(|entity| entity.id == id("b"))
                         .unwrap()
                         .components[&ty()]
-                        .value,
-                    link(local("anchor")).value
+                        .value(),
+                    link(local("anchor")).value()
                 );
                 let hidden = &reviewed
                     .entities
@@ -573,7 +573,7 @@ macro_rules! qualify {
                     .find(|entity| entity.id == id("anchor"))
                     .unwrap()
                     .components[&hidden_ty()];
-                assert_eq!(hidden.value.get("target"), Some(&ComponentValue::Null));
+                assert_eq!(hidden.value().get("target"), Some(&ComponentValue::Null));
                 assert_eq!(
                     hidden.contextual_defaults[&field()],
                     ComponentValue::EntityReference(local("anchor"))
@@ -607,8 +607,8 @@ macro_rules! qualify {
                                 .find(|entity| entity.id == id(name))
                                 .unwrap()
                                 .components[&ty()]
-                                .value,
-                            link(external()).value
+                                .value(),
+                            link(external()).value()
                         );
                     }
                 }

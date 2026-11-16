@@ -22,6 +22,7 @@ use crate::{
     PrefabProjectionStep, SceneEntityId, SceneEntityProvenanceMap, SourceDocumentKey,
     SourceDocumentKind, SourceDocumentOrigin,
     candidate::validate_flat_scene_provenance,
+    component_payload::ComponentPayload,
     diagnostics::{error, with_codec_error, with_public_locator},
     draft::SceneDraft,
     provenance::CanonicalSceneEntityAddress,
@@ -37,7 +38,7 @@ use crate::{
 pub struct CompiledSceneComponent {
     schema_owner: Option<PersistentComponentSchemaOwnerId>,
     version: ComponentSchemaVersion,
-    value: ComponentValue,
+    value: ComponentPayload,
 }
 
 impl CompiledSceneComponent {
@@ -50,11 +51,13 @@ impl CompiledSceneComponent {
         Self {
             schema_owner: Some(owner),
             version,
-            value,
+            value: value.into(),
         }
     }
 
-    /// Native preparation has admitted its independent retained values before making this copy.
+    /// Shares immutable payload storage only after native preparation has admitted its complete
+    /// independent retained allowance, including the full payload and backing allocation overhead.
+    /// Sharing does not deduplicate either owner's allowance.
     pub(crate) fn copy_for_native_preparation(&self) -> Self {
         Self {
             schema_owner: self.schema_owner.clone(),
@@ -74,8 +77,16 @@ impl CompiledSceneComponent {
     }
 
     #[must_use]
-    pub const fn value(&self) -> &ComponentValue {
+    pub fn value(&self) -> &ComponentValue {
         &self.value
+    }
+
+    /// Models the root value allocation and its control/allocator overhead.
+    /// Every retained owner also accounts the full value payload separately, without deduplication.
+    /// This excludes the record's inline handle and all descendant storage.
+    #[must_use]
+    pub const fn value_storage_retained_bytes(&self) -> usize {
+        self.value.retained_bytes()
     }
 }
 
@@ -280,7 +291,8 @@ pub(crate) fn admit_draft<E>(
     for entity in document.entities {
         let mut components = BTreeMap::new();
         for (component, record) in entity.components {
-            let schema_owner = match record.owner {
+            let (owner, version, value) = record.into_compiled_parts();
+            let schema_owner = match owner {
                 Some(owner) => Some(owner),
                 None => authority
                     .selected_owner_name(&component)
@@ -299,8 +311,8 @@ pub(crate) fn admit_draft<E>(
                 component,
                 FlatSceneComponentClaim {
                     schema_owner,
-                    version: record.version,
-                    value: record.value,
+                    version,
+                    value,
                 },
             );
         }

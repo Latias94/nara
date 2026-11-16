@@ -775,7 +775,7 @@ fn preserved_contexts_still_rewrite_understood_dormant_references() {
         .unwrap();
     let ComponentValue::EntityReference(EntityReference::Authored { reference }) = &entity
         .components[&component()]
-        .value
+        .value()
         .field("target")
         .unwrap()
     else {

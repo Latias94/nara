@@ -77,7 +77,7 @@ fn assert_tilemaps(
             .get(&ComponentTypeId::new(TILEMAP))
             .unwrap();
         assert_eq!(component.version(), expected.version);
-        assert_eq!(component.value(), &expected.value);
+        assert_eq!(component.value(), expected.value());
         let ComponentValue::List(cells) = component.value().field("cells").unwrap() else {
             panic!("the original Tilemap codec must emit a cell list");
         };
@@ -108,7 +108,7 @@ fn large_root_bound_tilemaps_release_original_documents_and_budget_at_their_last
 
     let direct = tilemap_record(plan.schema_validation().snapshot(), 0);
     let inherited = tilemap_record(plan.schema_validation().snapshot(), SIDE * 2);
-    assert_ne!(direct.value, inherited.value);
+    assert_ne!(direct.value(), inherited.value());
     let prefab_key = SourceDocumentKey::project_location(
         "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
         AssetSourcePath::new("prefabs/terrain.prefab.json").unwrap(),
@@ -201,6 +201,48 @@ fn large_root_bound_tilemaps_release_original_documents_and_budget_at_their_last
     );
     assert_eq!(snapshot.tilesets()[0].image_path().as_str(), "unused.png");
     let atlas = snapshot.tilesets()[0].source().atlas;
+    assert_tilemaps(snapshot.compiled_scene(), &direct, &inherited, atlas);
+    let component_id = ComponentTypeId::new(TILEMAP);
+    let direct_source = snapshot
+        .scene()
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "direct-map")
+        .unwrap()
+        .components[&component_id]
+        .value();
+    let inherited_source =
+        snapshot.prefabs()[0].document().entities[0].components[&component_id].value();
+    for (name, source) in [
+        ("direct-map", direct_source),
+        ("bound-map", inherited_source),
+    ] {
+        let compiled = snapshot
+            .compiled_scene()
+            .entities()
+            .iter()
+            .find(|entity| entity.id().as_str() == name)
+            .unwrap()
+            .components()[&component_id]
+            .value();
+        assert!(
+            std::ptr::eq(source, compiled),
+            "{name} must share its original admitted payload"
+        );
+    }
+    let independent_clone = snapshot.scene().clone();
+    let mut public_clone = snapshot.scene().clone();
+    let cloned = public_clone
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id.as_str() == "direct-map")
+        .unwrap()
+        .components
+        .get_mut(&component_id)
+        .unwrap();
+    assert!(!std::ptr::eq(cloned.value(), direct_source));
+    assert_eq!(cloned.value(), direct_source);
+    cloned.set_value(ComponentValue::Null);
     assert_tilemaps(snapshot.compiled_scene(), &direct, &inherited, atlas);
     {
         let closure = snapshot.content_closure();
@@ -301,4 +343,24 @@ fn large_root_bound_tilemaps_release_original_documents_and_budget_at_their_last
     assert!(compiled.upgrade().is_none());
     assert!(raw_prefab.upgrade().is_none());
     assert_active_budget(budget.snapshot(), before);
+    assert_eq!(
+        public_clone
+            .entities
+            .iter()
+            .find(|entity| entity.id.as_str() == "direct-map")
+            .unwrap()
+            .components[&component_id]
+            .value(),
+        &ComponentValue::Null
+    );
+    assert_eq!(
+        independent_clone
+            .entities
+            .iter()
+            .find(|entity| entity.id.as_str() == "direct-map")
+            .unwrap()
+            .components[&component_id]
+            .value(),
+        direct.value()
+    );
 }

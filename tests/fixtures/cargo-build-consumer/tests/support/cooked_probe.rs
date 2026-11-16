@@ -231,7 +231,7 @@ fn assert_compiled_scene(document: &engine::scene::CompiledSceneDocument, scene:
         for (component, record) in entity.components() {
             let source = &source.components[component];
             assert_eq!(record.version(), source.version);
-            assert_eq!(record.value(), &source.value);
+            assert_eq!(record.value(), source.value());
             assert_eq!(
                 record.schema_owner().map(|owner| owner.as_str()),
                 Some("consumer.cooked-player"),

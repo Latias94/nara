@@ -122,7 +122,7 @@ fn reset(field: &str) -> ScenePatchDocument {
 }
 
 fn raw_value(entities: &[SceneEntityRecord]) -> &ComponentValue {
-    &entities[0].components[&component()].value
+    entities[0].components[&component()].value()
 }
 
 fn assert_effective(bundle: &AuthoringSchemaBundle, value: &ComponentValue, field: &str) {
@@ -235,7 +235,7 @@ fn data_only_field_write_inserts_absent_override_and_undo_removes_it() {
         .components
         .get_mut(&component())
         .unwrap()
-        .value
+        .value_mut()
         .remove_path(&ComponentFieldPath::from_fields(["required_default"]))
         .unwrap();
     let published =
@@ -330,7 +330,7 @@ fn data_only_reset_bounds_inverse_values_before_publication() {
         .components
         .get_mut(&component())
         .unwrap()
-        .value
+        .value_mut()
         .set_path(
             &ComponentFieldPath::from_fields(["text"]),
             ComponentValue::String("x".repeat(70 * 1024)),

@@ -3651,7 +3651,8 @@ const IMAGE_RETENTION_OWNER_OVERHEAD: usize =
     ARC_CONTROL_BLOCK_BYTES + size_of::<ProjectImageRetention>();
 const IMAGE_METADATA_OVERHEAD: usize = 256;
 const ENTITY_WORK_BYTES: usize = 128;
-const COMPONENT_WORK_BYTES: usize = 96;
+const COMPONENT_WORK_BYTES: usize =
+    96 + size_of::<nara_reflect::ComponentValue>() + ARC_CONTROL_BLOCK_BYTES;
 const PREFAB_INSTANCE_WORK_BYTES: usize = 128;
 const OVERLAY_DECLARATION_WORK_BYTES: usize = 256;
 const DIAGNOSTIC_SOURCE_WORK_BYTES: usize = 32;
@@ -4299,7 +4300,7 @@ mod tests {
         let compiled = &snapshot.compiled_scene().entities()[0].components()[&data];
         assert_eq!(compiled.schema_owner(), record.owner());
         assert_eq!(compiled.version(), record.version);
-        assert_eq!(compiled.value(), &record.value);
+        assert_eq!(compiled.value(), record.value());
         assert_eq!(snapshot.images().len(), 1);
         assert!(!snapshot.source_upgrade_required());
         assert!(snapshot.content_closure().members().iter().any(|member| {
@@ -4390,7 +4391,9 @@ mod tests {
                 .components
                 .get_mut(&data)
                 .unwrap()
-                .value = nara_reflect::encode_asset_reference_value(&AssetRef::Product(reference));
+                .set_value(nara_reflect::encode_asset_reference_value(
+                    &AssetRef::Product(reference),
+                ));
             fs::write(
                 project.root.join("scenes/startup.scene.json"),
                 selected.to_json_string().unwrap(),
@@ -4447,7 +4450,7 @@ mod tests {
                         Some(PersistentComponentSchemaOwnerId::try_new("test.other").unwrap());
                 }
                 "future" => record.version = ComponentSchemaVersion::new(2).unwrap(),
-                "invalid" => record.value = ComponentValue::Bool(true),
+                "invalid" => record.set_value(ComponentValue::Bool(true)),
                 _ => {}
             }
             let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
@@ -5457,8 +5460,8 @@ mod tests {
                 assert!(!snapshot.source_upgrade_required());
                 assert_eq!(snapshot.prefabs().len(), 1);
                 assert_eq!(
-                    snapshot.prefabs()[0].document().entities[0].components[&component].value,
-                    ComponentValue::Bool(true),
+                    snapshot.prefabs()[0].document().entities[0].components[&component].value(),
+                    &ComponentValue::Bool(true),
                     "composition cannot rewrite the captured source",
                 );
                 let node = snapshot

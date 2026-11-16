@@ -57,7 +57,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     assert_eq!(
         targets.value.as_ref().unwrap(),
         session.document().entities[0].components[&ComponentTypeId::new(COMPONENT_ID)]
-            .value
+            .value()
             .field("targets")
             .unwrap()
     );
@@ -231,7 +231,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             continue;
         };
         exported_components += 1;
-        let value = Relationships::__decode_persistent_component(&record.value).unwrap();
+        let value = Relationships::__decode_persistent_component(record.value()).unwrap();
         assert_eq!(value.weights, [7, 255]);
         let Some(EntityReference::SceneLocal { entity: target }) = &value.targets["friends"][0]
         else {

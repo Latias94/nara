@@ -142,7 +142,7 @@ impl QueryInventory<'_> {
         };
         let plan = plan_declared_entity_references_with_admission::<ScenePatchReport, _>(
             schema,
-            &record.value,
+            record.value(),
             self.limits,
             |nodes, bytes, allocated| {
                 admit_reference_work(
@@ -156,7 +156,7 @@ impl QueryInventory<'_> {
             },
         )
         .map_err(plan_error)?;
-        self.plan(&record.value, &plan)?;
+        self.plan(record.value(), &plan)?;
         for (id, value) in &record.contextual_defaults {
             let field = schema
                 .fields()

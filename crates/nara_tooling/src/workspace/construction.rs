@@ -183,7 +183,7 @@ impl EditorWorkspace {
                 field.has_capability(ComponentCapability::Scene)
                     && field.has_capability(ComponentCapability::Edit)
             }) {
-                let desired = record.value.get_path(field.path()).ok();
+                let desired = record.value().get_path(field.path()).ok();
                 if desired == template.get_path(field.path()).ok() {
                     continue;
                 }
@@ -234,7 +234,7 @@ impl EditorWorkspace {
             || recipe.components().iter().any(|(component, desired)| {
                 actual.components.get(component).is_none_or(|value| {
                     value.version != desired.version
-                        || value.value != desired.value
+                        || value.value() != desired.value()
                         || value.contextual_defaults != desired.contextual_defaults
                         || desired
                             .owner()

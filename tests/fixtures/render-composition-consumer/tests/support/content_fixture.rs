@@ -289,7 +289,7 @@ fn initial(bindings: &SceneComponentBindings, name: &str) -> SceneComponentRecor
 fn scene_document(bindings: &SceneComponentBindings, image: &AssetRef) -> SceneDocument {
     let transform = initial(bindings, "nara.transform.Transform2d");
     let mut sprite = initial(bindings, "nara.sprite.Sprite");
-    let ComponentValue::Map(fields) = &mut sprite.value else {
+    let ComponentValue::Map(fields) = sprite.value_mut() else {
         panic!("Sprite map")
     };
     fields.insert(

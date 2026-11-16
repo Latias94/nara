@@ -293,7 +293,7 @@ fn observe(
             let value = entity.components().get(&component()).map(|record| {
                 assert_eq!(record.owner(), Some(&owner()));
                 assert_eq!(record.version, ComponentSchemaVersion::ONE);
-                let ComponentValue::Map(mut fields) = record.value.clone() else {
+                let ComponentValue::Map(mut fields) = record.value().clone() else {
                     panic!("schema map")
                 };
                 for field in ["target", "external"] {
@@ -482,8 +482,8 @@ fn actual_non_root_split_preserves_values_inputs_hidden_defaults_and_reopened_ab
     assert!(arguments.values.values().any(|value| *value == input("u")));
     let b = &split.extracted.entities[0].components[&component()];
     assert_eq!(
-        b.value,
-        record(local("k"), input(external.as_str()), 2).value
+        b.value(),
+        record(local("k"), input(external.as_str()), 2).value()
     );
     assert_eq!(
         b.contextual_defaults[&ComponentFieldId::new("target")],
@@ -510,16 +510,19 @@ fn actual_non_root_split_preserves_values_inputs_hidden_defaults_and_reopened_ab
         expected["k"],
         (
             vec!["b"],
-            Some(record(local("b"), local("socket"), 1).value)
+            Some(record(local("b"), local("socket"), 1).into_value())
         )
     );
     assert_eq!(
         expected["b"],
-        (vec![], Some(record(local("k"), local("x"), 2).value))
+        (vec![], Some(record(local("k"), local("x"), 2).into_value()))
     );
     assert_eq!(
         expected["x"],
-        (vec![], Some(record(local("b"), local("socket"), 3).value))
+        (
+            vec![],
+            Some(record(local("b"), local("socket"), 3).into_value())
+        )
     );
     for json in [true, false] {
         let sources = [
@@ -577,7 +580,7 @@ fn actual_non_root_split_preserves_values_inputs_hidden_defaults_and_reopened_ab
         );
         assert_eq!(
             actual_reset["b"],
-            (vec![], Some(record(local("x"), local("x"), 2).value))
+            (vec![], Some(record(local("x"), local("x"), 2).into_value()))
         );
     }
     let (nodes, bytes) = work.usage();
@@ -769,13 +772,16 @@ fn actual_split_preserves_nested_root_program_and_local_child_between_inherited_
         actual["k"],
         (
             vec!["d1"],
-            Some(record(local("d1"), local("socket"), 77).value)
+            Some(record(local("d1"), local("socket"), 77).into_value())
         )
     );
     assert_eq!(actual["d1"], (vec!["d0", "b", "d2"], None));
     assert_eq!(
         actual["b"],
-        (vec![], Some(record(local("d0"), local("x"), 2).value))
+        (
+            vec![],
+            Some(record(local("d0"), local("x"), 2).into_value())
+        )
     );
     assert_eq!(p, before);
     assert_eq!(r.as_ref(), &r_before);

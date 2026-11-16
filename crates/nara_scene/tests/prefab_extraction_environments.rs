@@ -579,7 +579,7 @@ fn assert_projection(document: &ExpandedSceneDocument, base: u64) {
     assert!(outside.children().is_empty());
     for (offset, entity) in [trunk, branch, leaf, outside].into_iter().enumerate() {
         assert_eq!(
-            entity.components()[&sentinel_type()].value.get("value"),
+            entity.components()[&sentinel_type()].value().get("value"),
             Some(&ComponentValue::U64(base + offset as u64)),
         );
     }

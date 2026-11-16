@@ -186,7 +186,7 @@ fn authoring_schema_lookup_tracks_component_edits_and_exact_history_in_both_kind
     assert!(prefab.apply_authoring_field_edit(edit).applied);
     assert_eq!(
         scene.document().entities[0].components[&component()]
-            .value
+            .value()
             .field("value")
             .unwrap(),
         &ComponentValue::U64(7)
@@ -574,7 +574,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
             .find(|entity| entity.id() == projected)
             .unwrap()
             .components()[&component()]
-            .value
+            .value()
             .field_u64("value")
             .unwrap(),
         7
@@ -718,13 +718,13 @@ fn authoring_omits_unavailable_complete_overlay_records_but_refuses_property_int
                 )
                 .with_owner(owner(declared_owner));
                 if !reason.is_available() {
-                    record.value = ComponentValue::map([
+                    record.set_value(ComponentValue::map([
                         ("value", ComponentValue::U64(9)),
                         (
                             "unknown",
                             ComponentValue::String("retained raw payload".into()),
                         ),
-                    ]);
+                    ]));
                     record = record.with_contextual_default(
                         ComponentFieldId::new("future-default"),
                         ComponentValue::String("retained unknown default".into()),
@@ -850,7 +850,7 @@ fn authoring_omits_unavailable_complete_overlay_records_but_refuses_property_int
                         assert_eq!(record.version, CURRENT);
                         assert_eq!(record.owner(), Some(&owner(OWNER)));
                         assert_eq!(
-                            record.value.field_u64("value").unwrap(),
+                            record.value().field_u64("value").unwrap(),
                             if pin { 11 } else { 9 }
                         );
                         assert!(record.contextual_defaults.is_empty());
@@ -967,7 +967,7 @@ fn authoring_rejects_current_complete_overlay_records_without_scene_capability_e
             )
             .with_owner(owner(declared_owner));
             if unavailable.is_some() {
-                selected.value = ComponentValue::String("uninterpreted raw value".into());
+                selected.set_value(ComponentValue::String("uninterpreted raw value".into()));
                 selected = selected.with_contextual_default(
                     ComponentFieldId::new("unknown-default"),
                     ComponentValue::String("uninterpreted raw default".into()),

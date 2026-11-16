@@ -475,7 +475,7 @@ mod tests {
             .components
             .get_mut(&root_type)
             .unwrap()
-            .value = ComponentValue::Null;
+            .set_value(ComponentValue::Null);
         let invalid_projection = project_prefab_authoring(&invalid)
             .expect("malformed component values remain projectable for authoring");
         let [first_source, second_source] = ["first-canvas", "second-canvas"].map(|name| {

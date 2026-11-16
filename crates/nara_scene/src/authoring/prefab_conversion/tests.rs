@@ -354,12 +354,16 @@ fn an_invalid_final_reference_or_unavailable_insert_never_publishes() {
     let revision = session.revision();
     let mut bad_reference = patch();
     if let ScenePatchOperation::AddEntity { entity, .. } = &mut bad_reference.operations[1] {
-        entity.components.get_mut(&component()).unwrap().value = ComponentValue::map([(
-            "target",
-            ComponentValue::EntityReference(EntityReference::SceneLocal {
-                entity: id("missing-target"),
-            }),
-        )]);
+        entity
+            .components
+            .get_mut(&component())
+            .unwrap()
+            .set_value(ComponentValue::map([(
+                "target",
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("missing-target"),
+                }),
+            )]));
     }
     let mut future = patch();
     if let ScenePatchOperation::AddEntity { entity, .. } = &mut future.operations[1] {

@@ -265,7 +265,9 @@ fn assert_export(
                     entity
                         .components
                         .get(&ComponentTypeId::new("nara.scene.Name"))
-                        .is_some_and(|record| record.value == ComponentValue::String(name.clone()))
+                        .is_some_and(|record| {
+                            record.value() == &ComponentValue::String(name.clone())
+                        })
                 })
                 .unwrap()
         };
@@ -281,7 +283,7 @@ fn assert_export(
         );
         assert_eq!(
             exported_actor.components[&mover()]
-                .value
+                .value()
                 .get("amount")
                 .unwrap()
                 .as_f64(),
@@ -294,7 +296,7 @@ fn assert_export(
             .unwrap()
             .clone();
         expected_sensor
-            .value
+            .value_mut()
             .set_path(
                 &ComponentFieldPath::from_fields(["targets"]),
                 ComponentValue::List(vec![
@@ -490,7 +492,9 @@ fn workflow(program: &dyn Language) {
                     entity
                         .components
                         .get(&ComponentTypeId::new("nara.scene.Name"))
-                        .is_some_and(|record| record.value == ComponentValue::String(name.clone()))
+                        .is_some_and(|record| {
+                            record.value() == &ComponentValue::String(name.clone())
+                        })
                 })
                 .unwrap()
                 .id
@@ -549,7 +553,7 @@ fn workflow(program: &dyn Language) {
         .components
         .get_mut(&mover())
         .unwrap()
-        .value
+        .value_mut()
         .set_path(
             &ComponentFieldPath::from_fields(["wire_gain"]),
             ComponentValue::f64(3.0).unwrap(),

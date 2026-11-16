@@ -702,8 +702,10 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
                 .entities
                 .iter()
                 .map(|row| {
-                    let ComponentValue::U64(amount) =
-                        row.components[&payload_type()].value.get("amount").unwrap()
+                    let ComponentValue::U64(amount) = row.components[&payload_type()]
+                        .value()
+                        .get("amount")
+                        .unwrap()
                     else {
                         panic!("invalid fixture payload");
                     };

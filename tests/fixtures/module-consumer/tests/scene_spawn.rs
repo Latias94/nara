@@ -58,7 +58,7 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
         for (component, record) in entity.components() {
             let authored = &authored.components[component];
             assert_eq!(record.version(), authored.version);
-            assert_eq!(record.value(), &authored.value);
+            assert_eq!(record.value(), authored.value());
             assert_eq!(
                 record.schema_owner().map(|owner| owner.as_str()),
                 registry

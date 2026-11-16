@@ -3579,7 +3579,7 @@ fn scene_name_value(
         .components
         .get(&ComponentTypeId::new("nara.scene.Name"))
         .unwrap();
-    match &component.value {
+    match component.value() {
         ComponentValue::String(value) => value.clone(),
         value => panic!("the editable Name component has an unexpected value: {value:?}"),
     }
@@ -4650,7 +4650,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
         reopened_panel
             .components
             .get(&ComponentTypeId::new("nara.scene.Name"))
-            .and_then(|record| record.value.as_str()),
+            .and_then(|record| record.value().as_str()),
         Some("Saved Panel")
     );
 }
@@ -8743,7 +8743,7 @@ fn ui_visual_background_image_path<'a>(
         .find(|candidate| candidate.id.as_str() == entity)?
         .components
         .get(&ComponentTypeId::new("nara.ui.UiVisual"))?;
-    let ComponentValue::Map(visual) = &record.value else {
+    let ComponentValue::Map(visual) = record.value() else {
         return None;
     };
     let ComponentValue::Map(background) = visual.get("background")? else {

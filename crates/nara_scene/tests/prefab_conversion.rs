@@ -141,7 +141,7 @@ fn scene_document() -> SceneDocument {
     let mut overlay = PrefabOverlay::new(prefab_source::key("base"));
     let mut addition = PrefabAddition::new(id("leaf"));
     let mut added_link = link("leaf");
-    added_link.value = ComponentValue::map([
+    added_link.set_value(ComponentValue::map([
         (
             "target",
             ComponentValue::EntityReference(EntityReference::Authored {
@@ -157,7 +157,7 @@ fn scene_document() -> SceneDocument {
             }),
         ),
         ("amount", ComponentValue::U64(7)),
-    ]);
+    ]));
     addition.components.insert(component(), added_link);
     overlay.additions.push(addition);
     overlay.placements.push(SceneEntityPlacement::new(
@@ -909,7 +909,7 @@ fn change_dependency(
                     .iter_mut()
                     .find_map(|record| record.components.get_mut(&component()))
                     .unwrap()
-                    .value
+                    .value_mut()
                     .replace_path(
                         &ComponentFieldPath::from_fields(["amount"]),
                         ComponentValue::U64(99),

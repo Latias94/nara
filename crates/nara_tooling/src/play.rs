@@ -788,14 +788,14 @@ fn export_component_change(
         Some(component_record) => match registry.migrate_component_value(
             component,
             component_record.version,
-            &component_record.value,
+            component_record.value(),
         ) {
-            Ok(migrated) => Some(SceneComponentRecord {
-                owner: component_record.owner.clone(),
-                version: migrated.version,
-                value: migrated.value,
-                contextual_defaults: component_record.contextual_defaults.clone(),
-            }),
+            Ok(migrated) => {
+                let mut current = SceneComponentRecord::new(migrated.version, migrated.value);
+                current.owner = component_record.owner.clone();
+                current.contextual_defaults = component_record.contextual_defaults.clone();
+                Some(current)
+            }
             Err(error) => {
                 return ExportedComponentChange {
                     report: rejected_component_report(
@@ -829,10 +829,10 @@ fn export_component_change(
             value: SceneComponentRecord::new(schema.version, value),
         }),
         (Some(mut current), Some(value)) => {
-            if current.value == value {
+            if current.value() == &value {
                 None
             } else {
-                current.value = value;
+                current.set_value(value);
                 Some(ScenePatchOperation::ReplaceComponent {
                     entity: document_entity.id.clone(),
                     component: component.clone(),

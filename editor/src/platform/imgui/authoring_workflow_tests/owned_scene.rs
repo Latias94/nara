@@ -130,7 +130,7 @@ fn add_scene_sprite(project: &Path) -> Result<(), String> {
         ))
     };
     let mut sprite = initial("nara.sprite.Sprite")?;
-    let ComponentValue::Map(fields) = &mut sprite.value else {
+    let ComponentValue::Map(fields) = sprite.value_mut() else {
         return Err("Sprite defaults are not a map".into());
     };
     fields.insert(

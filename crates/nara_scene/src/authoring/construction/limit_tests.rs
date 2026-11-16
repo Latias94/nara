@@ -144,7 +144,7 @@ fn ten_field_construction_preserves_templates_and_one_scene_and_prefab_history_e
         let history = session.history_status();
         let source = session.authoring_source().cloned();
         let template = session.authoring_initial_component(&component()).unwrap();
-        assert_eq!(template.value, values(0));
+        assert_eq!(template.value(), &values(0));
         assert_eq!(template.owner(), Some(&owner()));
         let mut draft = session.begin_authoring_construction(revision).unwrap();
         let local = draft
@@ -187,7 +187,7 @@ fn ten_field_construction_preserves_templates_and_one_scene_and_prefab_history_e
             .find(|entity| entity.id == created)
             .unwrap()
             .components[&component()];
-        assert_eq!(record.value, values(100));
+        assert_eq!(record.value(), &values(100));
         assert_eq!(record.owner(), Some(&owner()));
         assert_eq!(
             expected.placements,

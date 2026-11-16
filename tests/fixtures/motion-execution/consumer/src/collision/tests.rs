@@ -613,7 +613,7 @@ fn public_patch_undo_redo_and_disk_reopen_keep_the_exact_native_definition_witho
             transform_record(Transform2d::IDENTITY)
         );
         let ComponentValue::Map(fields) =
-            &record.components[&ComponentTypeId::new(COMPONENT)].value
+            record.components[&ComponentTypeId::new(COMPONENT)].value()
         else {
             panic!("collision persistence uses one data-only record");
         };

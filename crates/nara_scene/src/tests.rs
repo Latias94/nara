@@ -1457,7 +1457,7 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
         .get(&entity_link_type_id())
         .unwrap();
     assert_eq!(source_component.version, ComponentSchemaVersion::ONE);
-    assert!(source_component.value.field("old_target").is_ok());
+    assert!(source_component.value().field("old_target").is_ok());
 }
 
 #[test]
@@ -2367,8 +2367,8 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
         .get(&position_type_id())
         .unwrap();
     assert_eq!(source_component.version, ComponentSchemaVersion(1));
-    assert!(source_component.value.get("x").is_some());
-    assert!(source_component.value.get("x2").is_none());
+    assert!(source_component.value().get("x").is_some());
+    assert!(source_component.value().get("x2").is_none());
 }
 
 #[test]
@@ -5560,7 +5560,7 @@ fn coupled_field_patch_keeps_intermediate_component_shape_checks() {
         .remove(&ComponentTypeId::new("nara.test.CoupledFields"))
         .unwrap();
     invalid_component
-        .value
+        .value_mut()
         .set_path(
             &ComponentFieldPath::from_fields(["x"]),
             ComponentValue::String("invalid".into()),
@@ -5852,7 +5852,7 @@ fn source_patch_preserves_its_component_payload_and_undo_restores_the_source() {
         .components
         .get(&ComponentTypeId::new("nara.scene.Name"))
         .unwrap()
-        .value
+        .value()
         .as_str()
         .unwrap();
     assert_eq!(stored, payload);
@@ -7004,7 +7004,7 @@ fn exported_entity_link(record: &SceneEntityRecord) -> &EntityReference {
         .components
         .get(&entity_link_type_id())
         .expect("exported source entity must retain its entity-link component")
-        .value
+        .value()
         .field_entity_reference("target")
         .expect("exported entity-link target must remain typed")
 }

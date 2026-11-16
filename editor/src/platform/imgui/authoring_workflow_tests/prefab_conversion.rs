@@ -123,7 +123,7 @@ fn configure(project: &Path) -> Result<(), String> {
             .components
             .get_mut(&nara::reflect::ComponentTypeId::new(TRANSFORM))
             .ok_or("the existing image fixture has no Transform")?;
-        transform.value = ComponentValue::map([
+        transform.set_value(ComponentValue::map([
             (
                 "translation",
                 ComponentValue::map([
@@ -139,7 +139,7 @@ fn configure(project: &Path) -> Result<(), String> {
                     ("y", ComponentValue::f64(1.0).unwrap()),
                 ]),
             ),
-        ]);
+        ]));
     }
     let transform_type = nara::reflect::ComponentTypeId::new(TRANSFORM);
     let preserved_transform = sprite.components[&transform_type].clone();

@@ -255,7 +255,7 @@ fn parameterized_source_copy_needs_no_mount_arguments() {
         .iter()
         .find_map(|entity| entity.components().get(&component("Link")))
         .unwrap();
-    assert_eq!(target.value, link("b").value);
+    assert_eq!(target.value(), link("b").value());
 }
 
 #[test]
@@ -312,7 +312,7 @@ fn copied_parent_supplies_each_actual_child_occurrences_input() {
             let record = entity.components().get(&component("Link"))?;
             let Some(ComponentValue::EntityReference(EntityReference::SceneLocal {
                 entity: target,
-            })) = record.value.get("target")
+            })) = record.value().get("target")
             else {
                 panic!("expected an actually lowered input")
             };

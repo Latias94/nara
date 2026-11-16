@@ -190,8 +190,8 @@ fn whole_closure_copy_retains_hidden_defaults_inputs_and_lexical_argument_routes
     );
     let copied = &host.components[&component("DefaultRoutes")];
     assert_eq!(
-        copied.value,
-        ComponentValue::map([("target", ComponentValue::Null)])
+        copied.value(),
+        &ComponentValue::map([("target", ComponentValue::Null)])
     );
     assert_eq!(
         copied.contextual_defaults[&ComponentFieldId::new("target")],
@@ -212,7 +212,7 @@ fn whole_closure_copy_retains_hidden_defaults_inputs_and_lexical_argument_routes
         );
         assert!(
             host.components[&component(name)]
-                .value
+                .value()
                 .get("target")
                 .is_none()
         );
@@ -263,7 +263,7 @@ fn whole_closure_copy_retains_hidden_defaults_inputs_and_lexical_argument_routes
         .components
         .get_mut(&component("DefaultRoutes"))
         .unwrap();
-    let ComponentValue::Map(fields) = &mut record.value else {
+    let ComponentValue::Map(fields) = record.value_mut() else {
         panic!("record map")
     };
     fields.remove("target");
@@ -304,7 +304,7 @@ fn omitted_contextual_default_remains_a_declaration_instead_of_a_value_pin() {
     );
     assert!(
         prepared.sources()[0].document.entities[0].components[&component("DefaultLink")]
-            .value
+            .value()
             .get("target")
             .is_none()
     );
@@ -530,7 +530,7 @@ fn omitted_asset_default_refuses_instead_of_creating_a_value_pin() {
     ));
     assert!(
         request.sources[0].document.entities[0].components[&component("Assets")]
-            .value
+            .value()
             .get("asset")
             .is_none()
     );

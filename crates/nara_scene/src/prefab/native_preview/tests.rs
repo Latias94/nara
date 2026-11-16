@@ -216,7 +216,7 @@ fn assert_flat_values(
         for (component, record) in &source.components {
             let compiled = &compiled.components()[component];
             assert_eq!(compiled.version(), record.version);
-            assert_eq!(compiled.value(), &record.value);
+            assert_eq!(compiled.value(), record.value());
             assert_eq!(
                 compiled.schema_owner(),
                 basis.component_schema_owner(component)

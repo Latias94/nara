@@ -719,7 +719,7 @@ fn source_patch_accepts_authored_intent_and_flat_payloads_keep_business_checks()
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         document.entities[0].components[&last_id()]
-            .value
+            .value()
             .get("target"),
         Some(&input()),
     );

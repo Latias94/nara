@@ -186,6 +186,80 @@ fn record(value: ComponentValue) -> SceneComponentRecord {
     SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner_id())
 }
 
+#[test]
+fn scalar_cook_copies_admit_each_new_payload_backing_before_allocation() {
+    use crate::compiled::claims::{FlatSceneComponentClaim, FlatSceneEntityClaim};
+    use std::mem::size_of;
+
+    let bindings = bindings();
+    let component = component("game.Number");
+    let document = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots(["first", "second", "third"].map(|name| {
+            SceneEntityRecord::new(id(name))
+                .with_component(component.clone(), record(ComponentValue::U64(7)))
+        })),
+    );
+    let count = document.document().entities().len();
+    let names = ["first", "second", "third"];
+    let strings = names
+        .iter()
+        .map(|name| name.len() + 2 * size_of::<usize>())
+        .sum::<usize>();
+    let backing = size_of::<ComponentValue>() + 4 * size_of::<usize>();
+    let expected_clone = count * size_of::<FlatSceneEntityClaim>()
+        + count * size_of::<SceneEntityId>()
+        + 2 * strings
+        + count
+            * (size_of::<(ComponentTypeId, FlatSceneComponentClaim)>()
+                + 6 * size_of::<usize>()
+                + component.as_str().len()
+                + owner_id().as_str().len()
+                + backing
+                + 96
+                + 8)
+        + count * (size_of::<(&SceneEntityId, &[SceneEntityId])>() + 6 * size_of::<usize>())
+        + count
+            * (size_of::<(&SceneEntityId, usize)>()
+                + size_of::<&SceneEntityId>()
+                + 6 * size_of::<usize>());
+    let defaults = RuntimeSceneLimits::default();
+    let expected = expected_clone
+        + budget::provenance_cost(
+            document.source_key(),
+            document.canonical_provenance(),
+            defaults,
+        )
+        .unwrap();
+    let mut exact =
+        budget::WorkBudget::new(defaults.with_working_bytes(ByteLimit::new(expected).unwrap()));
+    let claims = cook::clone_claims(&document, &mut exact).unwrap();
+    assert_eq!(exact.used(), expected);
+    for entity in &claims.entities {
+        let copied = &entity.components[&component].value;
+        let original = document
+            .document()
+            .entities()
+            .iter()
+            .find(|original| original.id() == &entity.id)
+            .unwrap()
+            .components()[&component]
+            .value();
+        assert_eq!(&**copied, original);
+        assert!(!std::ptr::eq(&**copied, original));
+    }
+    let mut short =
+        budget::WorkBudget::new(defaults.with_working_bytes(ByteLimit::new(expected - 1).unwrap()));
+    assert!(cook::clone_claims(&document, &mut short).is_err());
+    assert!(short.used() < expected);
+    for entity in document.document().entities() {
+        assert_eq!(
+            entity.components()[&component].value(),
+            &ComponentValue::U64(7)
+        );
+    }
+}
+
 fn compile(bindings: &SceneComponentBindings, document: SceneDocument) -> CompiledSceneCandidate {
     let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
@@ -460,7 +534,7 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
         }
         for record in entity.components.values_mut() {
             if let ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) =
-                &mut record.value
+                record.value.make_mut()
             {
                 *entity = renames[entity].clone();
             }
@@ -526,7 +600,8 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
                     ComponentValue::EntityReference(persistent.clone()),
                 ),
                 ("empty", ComponentValue::Null),
-            ])]),
+            ])])
+            .into(),
         },
     );
     anchor.components.insert(
@@ -534,7 +609,7 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
         crate::compiled::claims::FlatSceneComponentClaim {
             schema_owner: Some(owner_id()),
             version: ComponentSchemaVersion::ONE,
-            value: ComponentValue::String(old_target.as_str().to_owned()),
+            value: ComponentValue::String(old_target.as_str().to_owned()).into(),
         },
     );
     let input = seal_claims(claims, &bindings);

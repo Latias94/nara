@@ -449,7 +449,7 @@ fn lower(
             }
             let plan = plan_declared_entity_references_with_admission::<ScenePatchReport, _>(
                 schema,
-                &payload.value,
+                payload.value(),
                 reference_limits,
                 |_, _, allocation_bytes| work.reserve(allocation_bytes),
             )
@@ -458,7 +458,7 @@ fn lower(
                 EntityReferencePlanError::Admission(report) => report,
             })?;
             localize_references(
-                &mut payload.value,
+                payload.value_mut(),
                 &plan,
                 &identifiers,
                 &fragment.targets,

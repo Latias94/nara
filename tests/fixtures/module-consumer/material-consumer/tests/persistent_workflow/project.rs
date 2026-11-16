@@ -260,7 +260,7 @@ impl Project {
             .components
             .get_mut(&ComponentTypeId::new(CARRIER))
             .unwrap()
-            .value = material;
+            .set_value(material);
         document
     }
 

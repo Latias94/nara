@@ -10,6 +10,7 @@ use nara_identity::{
 
 use super::{
     effective_component_value_owned, effective_component_value_owned_with_default_overrides,
+    effective_component_value_with_default_overrides,
     validate_native_component_value_references_with_limits, validate_value_materialization_budget,
 };
 use crate::{
@@ -326,9 +327,23 @@ fn inserted_defaults_return_exact_cost_for_nested_containers_and_overrides() {
                 &overrides,
                 limits,
             ),
+            Err(error.clone()),
+        );
+        assert_eq!(
+            effective_component_value_with_default_overrides(&schema, &raw, &overrides, limits),
             Err(error),
         );
     }
+    let (borrowed_result, borrowed_cost) = effective_component_value_with_default_overrides(
+        &schema,
+        &raw,
+        &overrides,
+        limits(9, 51, 4),
+    )
+    .unwrap();
+    assert!(matches!(borrowed_result, std::borrow::Cow::Owned(_)));
+    assert_eq!(borrowed_result.as_ref(), &expected);
+    assert_eq!(borrowed_cost, Some(cost));
     let (value, observed) = effective_component_value_owned_with_default_overrides(
         &schema,
         raw,
@@ -410,6 +425,11 @@ fn owned_defaults_return_none_and_keep_allocations_without_insertions() {
         );
     }
     let tiny = limits(1, 1, 1);
+    let (borrowed, cost) =
+        effective_component_value_with_default_overrides(&schema, &raw, &overrides, tiny).unwrap();
+    assert!(matches!(borrowed, std::borrow::Cow::Borrowed(_)));
+    assert!(std::ptr::eq(borrowed.as_ref(), &raw));
+    assert_eq!(cost, None);
     let (value, cost) =
         effective_component_value_owned_with_default_overrides(&schema, raw, &overrides, tiny)
             .unwrap();

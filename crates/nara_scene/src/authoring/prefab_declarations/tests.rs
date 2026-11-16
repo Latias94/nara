@@ -572,7 +572,7 @@ fn semantic_value_depth_is_bounded_by_the_existing_raw_cost_owner() {
     let mut original = overlay();
     let mut intent = unknown_intent("payload");
     if let PrefabComponentIntent::Set { record, .. } = &mut intent {
-        record.value = value;
+        record.set_value(value);
     }
     original.components.push(intent);
     let document = document(Some(instance(original)));

@@ -1110,7 +1110,10 @@ fn every_incumbent_is_admitted_before_the_first_malformed_successor_is_classifie
         .components
         .get_mut(&ComponentTypeId::new(RECOVERED))
         .unwrap()
-        .value = ComponentValue::map([("value", ComponentValue::String("wrong kind".into()))]);
+        .set_value(ComponentValue::map([(
+            "value",
+            ComponentValue::String("wrong kind".into()),
+        )]));
     let first = open(
         &mut workspace,
         EditorDocumentKind::Scene,
@@ -1127,7 +1130,7 @@ fn every_incumbent_is_admitted_before_the_first_malformed_successor_is_classifie
         .components
         .get_mut(&ComponentTypeId::new(UNKNOWN))
         .unwrap()
-        .value = ComponentValue::String("x".repeat(128 * 1024));
+        .set_value(ComponentValue::String("x".repeat(128 * 1024)));
     let last = open(
         &mut workspace,
         EditorDocumentKind::Prefab,

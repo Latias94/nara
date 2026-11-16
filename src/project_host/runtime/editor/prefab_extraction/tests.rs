@@ -746,7 +746,7 @@ fn begin_fences_writes_but_keeps_navigation_and_complete_all_profile_review_with
                     if output.project_path() == INACTIVE {
                         assert_eq!(
                             document.entities[0].components[&name_component()]
-                                .value
+                                .value()
                                 .as_str(),
                             Some("dirty-inactive")
                         );
@@ -784,7 +784,7 @@ fn begin_fences_writes_but_keeps_navigation_and_complete_all_profile_review_with
                                 .find(|entity| entity.id == id("branch"))
                                 .unwrap();
                             assert_eq!(
-                                branch.components[&name_component()].value.as_str(),
+                                branch.components[&name_component()].value().as_str(),
                                 Some("dirty-branch")
                             );
                             assert!(
@@ -1012,7 +1012,7 @@ fn saved_before_begin(phase: SaveTestPhase) {
                 .find(|entity| entity.id == id("branch"))
                 .unwrap()
                 .components[&name_component()]
-                .value
+                .value()
                 .as_str(),
             Some("saved-before-capture")
         );

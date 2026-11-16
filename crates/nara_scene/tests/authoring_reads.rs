@@ -226,7 +226,7 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
     assert!(std::ptr::eq(
         amount,
         original.components[&ComponentTypeId::new("game.Data")]
-            .value
+            .value()
             .get("wire")
             .unwrap()
             .get("amount")

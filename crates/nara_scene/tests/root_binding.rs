@@ -343,7 +343,7 @@ fn projected_id(document: &CompiledSceneDocument, anchor: &str, local_id: &str) 
 fn assert_position(document: &CompiledSceneDocument, entity_id: &SceneEntityId, x: u64, y: u64) {
     assert_eq!(
         entity(document, entity_id).components()[&position_type()].value(),
-        &position(x, y).value,
+        position(x, y).value(),
     );
 }
 
@@ -354,10 +354,10 @@ fn assert_link(
 ) {
     assert_eq!(
         entity(document, entity_id).components()[&link_type()].value(),
-        &link(EntityReference::SceneLocal {
+        link(EntityReference::SceneLocal {
             entity: target.clone(),
         })
-        .value,
+        .value(),
     );
 }
 

@@ -31,7 +31,7 @@ pub(super) fn validate_complete_value<'value>(
     let effective =
         nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
             schema,
-            &record.value,
+            record.value(),
             &record.contextual_defaults,
             limits.component_value_nodes().get(),
             limits.component_value_bytes().get(),

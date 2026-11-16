@@ -247,7 +247,10 @@ fn two_scenes_and_repeated_p_keep_actual_reference_targets_and_sibling_order() {
             reference(&[("h2", "p")], "b"),
         );
         if use_default {
-            observer.value = ComponentValue::map(std::iter::empty::<(&str, ComponentValue)>());
+            observer.set_value(ComponentValue::map(std::iter::empty::<(
+                &str,
+                ComponentValue,
+            )>()));
         }
         let mut scene = SceneDocument::from_ordered_roots([
             host("h1"),
@@ -347,8 +350,8 @@ fn two_scenes_and_repeated_p_keep_actual_reference_targets_and_sibling_order() {
                     .find(|e| e.id() == entity)
                     .unwrap();
                 assert_eq!(
-                    entity.components()[&component()].value,
-                    ComponentValue::map([("target", ComponentValue::EntityReference(expected))])
+                    entity.components()[&component()].value(),
+                    &ComponentValue::map([("target", ComponentValue::EntityReference(expected))])
                 );
             }
         }
@@ -1094,8 +1097,10 @@ fn stored_pairs_reject_unrelated_and_dormant_record_property_argument_and_struct
         if case < 2 {
             let record = forged.entities[0].components.get_mut(&component()).unwrap();
             if case == 0 {
-                record.value =
-                    ComponentValue::map([("target", ComponentValue::EntityReference(local("z")))]);
+                record.set_value(ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(local("z")),
+                )]));
             } else {
                 record
                     .contextual_defaults
@@ -1219,7 +1224,7 @@ fn preserved_unknown_storage_stays_exact_at_direct_addition_set_and_property_sit
         version: ComponentSchemaVersion::ONE,
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(field()),
-            intent: PrefabPropertyIntent::Set(opaque.value.clone()),
+            intent: PrefabPropertyIntent::Set(opaque.value().clone()),
         }],
     });
     let SplitSourceDocument::Prefab(after) = rewrite_dependant(
@@ -1253,7 +1258,7 @@ fn preserved_unknown_storage_stays_exact_at_direct_addition_set_and_property_sit
         if case < 3 || case == 7 {
             let record = forged.entities[0].components.get_mut(&unknown).unwrap();
             match case {
-                0 => record.value = ComponentValue::String("mutated".into()),
+                0 => record.set_value(ComponentValue::String("mutated".into())),
                 1 => {
                     record
                         .contextual_defaults
@@ -1264,7 +1269,7 @@ fn preserved_unknown_storage_stays_exact_at_direct_addition_set_and_property_sit
                         Some(PersistentComponentSchemaOwnerId::try_new("missing.other").unwrap())
                 }
                 7 => {
-                    let ComponentValue::Map(map) = &mut record.value else {
+                    let ComponentValue::Map(map) = record.value_mut() else {
                         panic!("Opaque map")
                     };
                     let ComponentValue::List(values) = map.get_mut("opaque").unwrap() else {
@@ -1292,7 +1297,7 @@ fn preserved_unknown_storage_stays_exact_at_direct_addition_set_and_property_sit
                         .components
                         .get_mut(&unknown)
                         .unwrap()
-                        .value = ComponentValue::Null;
+                        .set_value(ComponentValue::Null);
                 }
                 4 => {
                     let PrefabComponentIntent::Set { record, .. } = &mut overlay.components[1]
@@ -1472,12 +1477,12 @@ fn either_raw_side_refuses_before_clone_or_equality_and_retains_its_failed_prefi
             .components
             .get_mut(&unknown)
             .unwrap()
-            .value = ComponentValue::List(vec![
-            ComponentValue::List(vec![ComponentValue::String(
-                "x".into()
-            )]);
-            8_192
-        ]);
+            .set_value(ComponentValue::List(vec![
+                ComponentValue::List(vec![
+                    ComponentValue::String("x".into())
+                ]);
+                8_192
+            ]));
         let mut work = ExtractionWork::new(limits, Some(0)).unwrap();
         let mut first_nodes = 0;
         for attempt in 0..2 {

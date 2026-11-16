@@ -160,7 +160,7 @@ fn lower_with_write_limit<'a>(
                             .available_component_schema(&edit.entity, &edit.component)
                             .ok_or_else(|| rejected_at(operation_index))?,
                         version: record.version,
-                        value: &record.value,
+                        value: record.value(),
                     },
                     None => *staged
                         .get(entry.key())

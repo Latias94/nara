@@ -108,6 +108,7 @@ pub(crate) fn compiled_scene_retained_bytes(
                         .schema_owner()
                         .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
                     component_value_retained_bytes(record.value())?,
+                    record.value_storage_retained_bytes(),
                 ])?,
             )?;
         }
@@ -618,7 +619,8 @@ pub(crate) fn overlay_retained_bytes(
                             record
                                 .owner()
                                 .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-                            component_value_retained_bytes(&record.value)?,
+                            component_value_retained_bytes(record.value())?,
+                            record.value_storage_retained_bytes(),
                             contextual_defaults_retained_bytes(&record.contextual_defaults)?,
                         ])?,
                     )?;
@@ -671,7 +673,8 @@ fn component_record_retained_bytes(
         record
             .owner()
             .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-        component_value_retained_bytes(&record.value)?,
+        component_value_retained_bytes(record.value())?,
+        record.value_storage_retained_bytes(),
         contextual_defaults_retained_bytes(&record.contextual_defaults)?,
     ])
 }
@@ -854,6 +857,47 @@ mod tests {
 
     fn string_bytes(value: &str) -> usize {
         value.len() + 2 * size_of::<usize>()
+    }
+
+    #[test]
+    fn source_and_compiled_records_each_charge_the_complete_payload_and_backing() {
+        use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+        use nara_scene::{CompiledSceneComponent, SceneComponentRecord};
+
+        let component = ComponentTypeId::new("nara.scene.Name");
+        let text = "retained component";
+        let empty = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("root"))]);
+        let mut source = empty.clone();
+        source.entities[0].components.insert(
+            component.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String(text.to_owned()),
+            ),
+        );
+        let payload = text.len() + VALUE_NODE_ALLOCATION_BYTES;
+        let backing = size_of::<ComponentValue>() + 4 * size_of::<usize>();
+        let identity =
+            size_of::<ComponentTypeId>() + BTREE_ENTRY_OVERHEAD + string_bytes(component.as_str());
+        assert_eq!(
+            scene_retained_bytes(&source).unwrap() - scene_retained_bytes(&empty).unwrap(),
+            identity + size_of::<SceneComponentRecord>() + payload + backing,
+        );
+        let mut registry = ComponentRegistryBuilder::new();
+        nara_scene::register_scene_components(&mut registry).unwrap();
+        let registry = registry.freeze().unwrap();
+        let resolver = InMemoryPrefabSourceResolver::new();
+        let compiled = source.compile(&registry, &resolver).candidate.unwrap();
+        let empty_compiled = empty.compile(&registry, &resolver).candidate.unwrap();
+        assert!(std::ptr::eq(
+            source.entities[0].components[&component].value(),
+            compiled.entities()[0].components()[&component].value()
+        ));
+        assert_eq!(
+            compiled_scene_retained_bytes(&compiled).unwrap()
+                - compiled_scene_retained_bytes(&empty_compiled).unwrap(),
+            identity + size_of::<CompiledSceneComponent>() + payload + backing,
+        );
     }
 
     #[test]

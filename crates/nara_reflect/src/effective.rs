@@ -281,13 +281,43 @@ pub fn effective_component_value_owned_with_default_overrides(
 
 fn effective_component_value_owned_impl(
     schema: &ComponentSchema,
-    mut value: ComponentValue,
+    value: ComponentValue,
     defaults: DefaultSelection<'_>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(ComponentValue, Option<ComponentValueCost>), ComponentCodecError> {
+    effective_component_value_cow_impl(schema, Cow::Owned(value), defaults, limits)
+        .map(|(value, cost)| (value.into_owned(), cost))
+}
+
+/// Materializes source-selected defaults while borrowing an unchanged, already admitted value.
+///
+/// The source owner admits the complete overrides and a possible effective-value copy before
+/// calling this operation. Missing defaults use the ordinary planner, bounded preflight and
+/// materializer; a complete explicit value remains borrowed without another value scan. The
+/// returned cost is present only when insertion performed the complete effective preflight.
+pub fn effective_component_value_with_default_overrides<'value>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(Cow<'value, ComponentValue>, Option<ComponentValueCost>), ComponentCodecError> {
+    effective_component_value_cow_impl(
+        schema,
+        Cow::Borrowed(value),
+        DefaultSelection::Overrides(overrides),
+        limits,
+    )
+}
+
+fn effective_component_value_cow_impl<'value>(
+    schema: &ComponentSchema,
+    mut value: Cow<'value, ComponentValue>,
+    defaults: DefaultSelection<'_>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(Cow<'value, ComponentValue>, Option<ComponentValueCost>), ComponentCodecError> {
     if let Some(plan) = plan_defaults(schema, &value, defaults)? {
         let cost = preflight_materialization_cost(&plan, &value, limits, None)?;
-        apply_plan(&plan, &mut value)?;
+        apply_plan(&plan, value.to_mut())?;
         return Ok((value, Some(cost)));
     }
     Ok((value, None))

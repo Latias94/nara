@@ -293,7 +293,7 @@ fn required_field_upgrade_preserves_and_revalidates_unrelated_hidden_contextual_
             }),
         );
         record
-            .value
+            .value_mut()
             .set_path(
                 &ComponentFieldPath::from_fields(["peer"]),
                 ComponentValue::Null,
@@ -486,23 +486,21 @@ fn armor_unknown_data_and_topology_changes_are_outside_the_upgrade() {
         let mut candidate = document(true);
         match mutation {
             0 => {
-                let ComponentValue::Map(value) = &mut candidate.entities[0]
+                let ComponentValue::Map(value) = candidate.entities[0]
                     .components
                     .get_mut(&ComponentTypeId::new(COMPONENT))
                     .unwrap()
-                    .value
+                    .value_mut()
                 else {
                     unreachable!()
                 };
                 value.insert("armor".into(), ComponentValue::I64(99));
             }
-            1 => {
-                candidate.entities[1]
-                    .components
-                    .get_mut(&ComponentTypeId::new("missing.Opaque"))
-                    .unwrap()
-                    .value = ComponentValue::String("changed".into())
-            }
+            1 => candidate.entities[1]
+                .components
+                .get_mut(&ComponentTypeId::new("missing.Opaque"))
+                .unwrap()
+                .set_value(ComponentValue::String("changed".into())),
             _ => candidate.placements.reverse(),
         }
         assert!(prepare(&original, &candidate, &upgrade).is_err());
@@ -552,7 +550,7 @@ fn an_addition_version_change_requires_a_valid_successor_payload() {
         .components
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap()
-        .value = value(false);
+        .set_value(value(false));
     assert!(prepare(&original, &candidate, &upgrade).is_err());
 }
 
@@ -578,11 +576,11 @@ fn an_invalid_old_addition_cannot_be_admitted_by_a_valid_successor() {
     let (previous, successor) = bases();
     let upgrade = upgrade(previous, successor);
     let mut original = document(false);
-    let ComponentValue::Map(value) = &mut overlay_mut(&mut original).additions[0]
+    let ComponentValue::Map(value) = overlay_mut(&mut original).additions[0]
         .components
         .get_mut(&ComponentTypeId::new(COMPONENT))
         .unwrap()
-        .value
+        .value_mut()
     else {
         unreachable!()
     };

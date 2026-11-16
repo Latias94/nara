@@ -590,7 +590,7 @@ fn selected_programmatic_values_are_depth_admitted_before_their_first_clone() {
         }
         assert_eq!(
             document.entities[0].components[&ComponentTypeId::new("test.CompilerC")]
-                .value
+                .value()
                 .cost(),
             original_cost
         );

@@ -87,23 +87,23 @@ pub(super) fn rewrite_record(
 
     let plan = plan_declared_entity_references_with_admission::<ExtractionError, _>(
         schema,
-        &record.value,
+        record.value(),
         work.traversal()?,
         |nodes, bytes, allocated| work.visit(nodes, bytes, allocated),
     )
     .map_err(|error| plan_error(error, work))?;
-    let cost = work.value(&record.value)?;
+    let cost = work.value(record.value())?;
     admit_declared_entity_reference_plan_rewrite(&plan, cost, |nodes, bytes, allocated| {
         work.visit(nodes, bytes, allocated.ok_or(ExtractionError::Capacity)?)
     })?;
-    plan.rewrite_in_place(&mut record.value, |_, reference| rewrite(reference, work))
+    plan.rewrite_in_place(record.value_mut(), |_, reference| rewrite(reference, work))
         .map_err(|error| reference_error(error, work))?;
 
     for (id, value) in &mut record.contextual_defaults {
         let field = contextual_field(schema, id, work)?;
         rewrite_payload(field, field.shape(), value, work, rewrite)?;
     }
-    work.value(&record.value)?;
+    work.value(record.value())?;
     for value in record.contextual_defaults.values() {
         work.value(value)?;
     }
@@ -125,7 +125,7 @@ fn validated_record_value<'value>(
     .map_err(effective_error)?;
     let effective = effective_component_value_with_default_overrides_with_admission(
         schema,
-        &record.value,
+        record.value(),
         &record.contextual_defaults,
         limits,
         |nodes, bytes, allocated| work.visit(nodes, bytes, allocated),

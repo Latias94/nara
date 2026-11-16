@@ -457,7 +457,7 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
     };
     let check_reference = |record: &SceneComponentRecord| {
         let Some(ComponentValue::EntityReference(EntityReference::Authored { reference })) =
-            record.value.get("target")
+            record.value().get("target")
         else {
             panic!("inline authored reference");
         };
@@ -517,14 +517,14 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
     assert_eq!(a.components[&component("Assets")].owner(), Some(&owner()));
     assert_eq!(
         a.components[&component("Assets")]
-            .value
+            .value()
             .get_path(&ComponentFieldPath::from_fields(["asset"]))
             .unwrap(),
         &asset(&reference("copied-leaf"))
     );
     assert_eq!(
         a.components[&component("Assets")]
-            .value
+            .value()
             .get_path(&ComponentFieldPath::from_fields(["plain"]))
             .unwrap(),
         &ComponentValue::String("prefabs/leaf.prefab.json".into())
@@ -894,16 +894,16 @@ fn nested_prefab_copy_remaps_product_sources_without_rekeying_inner_products() {
         .find(|entity| entity.id == id("a"))
         .unwrap();
     assert_eq!(
-        leaf.components[&component("Assets")].value.get("asset"),
+        leaf.components[&component("Assets")].value().get("asset"),
         Some(&asset(&product(new, false)))
     );
     assert_eq!(
-        leaf.components[&component("Assets")].value.get("plain"),
+        leaf.components[&component("Assets")].value().get("plain"),
         Some(&ComponentValue::String(product(old, false).to_string()))
     );
     assert_eq!(
         leaf.components[&component("Container")]
-            .value
+            .value()
             .get("payload")
             .unwrap()
             .get("source"),
@@ -963,7 +963,7 @@ fn product_copy_accepts_only_explicit_enclosing_source_mappings_with_stable_dest
             .unwrap();
         assert_eq!(
             prepared.sources()[0].document.entities[0].components[&component("Assets")]
-                .value
+                .value()
                 .get("asset"),
             Some(&asset(&product(new, false)))
         );
@@ -1019,7 +1019,7 @@ fn complete_product_copy_alias_precedes_enclosing_source_alias() {
         .unwrap();
     assert_eq!(
         prepared.sources()[0].document.entities[0].components[&component("Assets")]
-            .value
+            .value()
             .get("asset"),
         Some(&asset(&product(new, true)))
     );

@@ -1047,7 +1047,7 @@ impl UiAuthoringProjection {
         let schema = authoring_schemas()
             .get(&key.component)
             .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
-        let mut candidate = record.value.clone();
+        let mut candidate = record.value().clone();
         for operation in &patch.operations {
             let ScenePatchOperation::SetField {
                 entity,
@@ -1546,7 +1546,7 @@ fn build_descriptor(
         .iter()
         .filter_map(|field| {
             record
-                .value
+                .value()
                 .get_path(&field.path)
                 .ok()
                 .cloned()
@@ -2146,7 +2146,7 @@ fn authored_gizmo_capabilities(entity: &SceneEntityRecord) -> UiAuthoringGizmoCa
             ),
         };
     };
-    let position_mode = read_string_path(&node.value, &["style", "position_mode"]);
+    let position_mode = read_string_path(node.value(), &["style", "position_mode"]);
     if position_mode != Some("absolute") {
         return UiAuthoringGizmoCapabilities {
             move_node: UiDirectManipulationCapability::ReadOnly(
@@ -2158,8 +2158,8 @@ fn authored_gizmo_capabilities(entity: &SceneEntityRecord) -> UiAuthoringGizmoCa
         };
     }
     UiAuthoringGizmoCapabilities {
-        move_node: dimensions_capability(&node.value, &["left", "top"]),
-        resize_node: dimensions_capability(&node.value, &["width", "height"]),
+        move_node: dimensions_capability(node.value(), &["left", "top"]),
+        resize_node: dimensions_capability(node.value(), &["width", "height"]),
     }
 }
 

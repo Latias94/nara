@@ -235,7 +235,7 @@ pub(super) fn decode(
                             FlatSceneComponentClaim {
                                 schema_owner: record.schema_owner,
                                 version: record.version,
-                                value: record.value,
+                                value: record.value.into(),
                             },
                         )
                     })

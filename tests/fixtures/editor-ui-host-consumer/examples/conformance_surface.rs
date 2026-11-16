@@ -961,7 +961,10 @@ impl Probe {
             .components
             .get_mut(&ComponentTypeId::new(COMPONENT))
             .unwrap()
-            .value = ComponentValue::map([(FIELD, ComponentValue::String("native draft".into()))]);
+            .set_value(ComponentValue::map([(
+                FIELD,
+                ComponentValue::String("native draft".into()),
+            )]));
         assert_eq!(
             SceneDocumentCandidate::decode_json_bytes(&bytes)?.into_composition_source()?,
             expected

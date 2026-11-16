@@ -537,8 +537,10 @@ fn malformed_scene_data_duplicate_source_ids_and_auxiliary_scene_products_are_re
                     .components
                     .get_mut(&component())
                     .unwrap()
-                    .value =
-                    ComponentValue::map([("image", encode_asset_reference_value(&auxiliary))]);
+                    .set_value(ComponentValue::map([(
+                        "image",
+                        encode_asset_reference_value(&auxiliary),
+                    )]));
                 fs::write(
                     project.root.join(SECOND_SCENE),
                     root.to_json_string().unwrap(),

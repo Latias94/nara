@@ -1,5 +1,7 @@
 //! Component value programs exercised through public expansion and complete source namespaces.
 
+#[path = "component_program_tests/payload_sharing.rs"]
+mod payload_sharing;
 #[path = "component_program_tests/property_limits.rs"]
 mod property_limits;
 #[path = "component_program_tests/reference_paths.rs"]
@@ -230,7 +232,7 @@ fn stored<'a>(report: &'a SceneCompilationReport, name: &str) -> &'a CompiledSce
 fn assert_record(actual: &CompiledSceneComponent, expected: &SceneComponentRecord) {
     assert_eq!(actual.schema_owner(), expected.owner());
     assert_eq!(actual.version(), expected.version);
-    assert_eq!(actual.value(), &expected.value);
+    assert_eq!(actual.value(), expected.value());
 }
 
 fn field<'a>(diagnostic: &'a Diagnostic, name: &str) -> DiagnosticValueRef<'a> {
@@ -926,7 +928,7 @@ fn semantic_default_materialization_failure_keeps_its_component_intent_location(
     let PrefabComponentIntent::Set { record, .. } = &mut intent else {
         unreachable!()
     };
-    record.value = ComponentValue::Bool(false);
+    record.set_value(ComponentValue::Bool(false));
     let mut overlay = PrefabOverlay::new(key("base"));
     overlay.components.push(intent);
     let report = expand(

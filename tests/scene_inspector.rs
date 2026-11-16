@@ -126,8 +126,8 @@ fn inspector_projects_defaulted_field_without_mutating_raw_undo_history() {
         Some(ComponentValue::String("Default".to_owned()))
     );
     assert_eq!(
-        document_component(&session.document(), &player, &component).value,
-        empty.value
+        document_component(&session.document(), &player, &component).value(),
+        empty.value()
     );
 
     let report = inspector.apply_command(
@@ -144,7 +144,7 @@ fn inspector_projects_defaulted_field_without_mutating_raw_undo_history() {
     assert!(report.applied);
     assert_eq!(
         document_component(session.document(), &player, &component)
-            .value
+            .value()
             .field_str("text")
             .unwrap(),
         "Edited",
@@ -486,7 +486,7 @@ fn inspector_migrates_legacy_component_for_display_and_atomic_edit() {
     assert_eq!(report.patch.as_ref().unwrap().operations.len(), 2);
     let current = document_component(session.document(), &player, &position_type_id());
     assert_eq!(current.version, ComponentSchemaVersion(2));
-    assert_eq!(current.value.field_i64("x2").unwrap(), 9);
+    assert_eq!(current.value().field_i64("x2").unwrap(), 9);
     assert_eq!(session.history_status().undo_depth, 1);
 
     let undo = session.undo(&registry);
@@ -744,7 +744,7 @@ fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {
         .iter()
         .find(|entity| entity.id == *id)
         .and_then(|entity| entity.components.get(&label_type_id()))
-        .and_then(|component| component.value.field_str("text").ok())
+        .and_then(|component| component.value().field_str("text").ok())
         .unwrap()
         .to_string()
 }

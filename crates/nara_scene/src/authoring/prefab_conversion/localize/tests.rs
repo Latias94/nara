@@ -230,7 +230,7 @@ fn source() -> SceneDocument {
     let mut overlay = PrefabOverlay::new(key("base"));
     let mut addition = PrefabAddition::new(id("leaf"));
     let mut link = reference("leaf");
-    link.value = ComponentValue::map([(
+    link.set_value(ComponentValue::map([(
         "target",
         ComponentValue::EntityReference(EntityReference::Authored {
             reference: AuthoredEntityReference {
@@ -243,7 +243,7 @@ fn source() -> SceneDocument {
                 ))),
             },
         }),
-    )]);
+    )]));
     addition.components.insert(component(), link);
     overlay.additions.push(addition);
     overlay.placements.push(SceneEntityPlacement::new(
@@ -366,7 +366,7 @@ fn target(document: &SceneDocument, entity: &SceneEntityId) -> SceneEntityId {
         record.components[&component()].owner(),
         Some(&schema_owner())
     );
-    let ComponentValue::Map(fields) = &record.components[&component()].value else {
+    let ComponentValue::Map(fields) = record.components[&component()].value() else {
         panic!("complete component map")
     };
     let ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) = &fields["target"]
@@ -917,8 +917,8 @@ fn materialized_persistent_default_keeps_its_namespace_and_identity() {
         .find(|record| &record.id == created)
         .unwrap();
     assert_eq!(
-        record.components[&component()].value,
-        ComponentValue::map([("target", ComponentValue::EntityReference(persistent)),])
+        record.components[&component()].value(),
+        &ComponentValue::map([("target", ComponentValue::EntityReference(persistent)),])
     );
     assert_eq!(sources.documents[&instance("base").source].1.as_ref(), &raw);
 }
@@ -1298,11 +1298,11 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         .components
         .get_mut(&nara_reflect::ComponentTypeId::new("test.LargeUnavailable"))
         .unwrap()
-        .value = ComponentValue::List(
-        (0..4)
-            .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
-            .collect(),
-    );
+        .set_value(ComponentValue::List(
+            (0..4)
+                .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
+                .collect(),
+        ));
     let shallow = open_scene(
         &shallow,
         &session.authoring_schema_basis().unwrap(),
@@ -1378,7 +1378,7 @@ fn unchanged_missing_large_defaults_are_shared_without_schema_or_value_materiali
             .find(|record| record.id == id("other"))
             .unwrap()
             .components[&component()]
-            .value
+            .value()
             .get("payload")
             .is_none()
     );
@@ -1643,7 +1643,7 @@ fn routed_contextual_default_survives_unselected_sibling_property_intent() {
             .find(|record| &record.id == localized.entity())
             .unwrap();
         let payload = &record.components[&component()];
-        assert_eq!(payload.value.get("target"), Some(&ComponentValue::Null));
+        assert_eq!(payload.value().get("target"), Some(&ComponentValue::Null));
         assert_eq!(payload.contextual_defaults.len(), 1);
         assert_eq!(payload.contextual_defaults[&field], socket);
         let reviewed = prepared.document().clone();
@@ -1758,7 +1758,7 @@ fn mixed_contextual_default_updates_inventory_and_mapped_target_after_ordinary_r
         .find(|record| record.id == root)
         .unwrap()
         .components[&component()];
-    assert_eq!(payload.value.get("link"), Some(&mixed(&leaf, &visible)));
+    assert_eq!(payload.value().get("link"), Some(&mixed(&leaf, &visible)));
     assert_eq!(payload.contextual_defaults[&field], expected_default);
     let rebuilt = open_scene(&reviewed, &basis, Default::default());
     let committed = session
@@ -1797,7 +1797,7 @@ fn mixed_contextual_default_updates_inventory_and_mapped_target_after_ordinary_r
         .find(|record| record.id == root)
         .unwrap()
         .components[&component()];
-    assert!(payload.value.get("link").is_none());
+    assert!(payload.value().get("link").is_none());
     assert_eq!(payload.contextual_defaults[&field], expected_default);
     assert_eq!(
         session

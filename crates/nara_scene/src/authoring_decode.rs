@@ -2536,14 +2536,14 @@ fn retain_complete_record(
         let entity_references = if context.admission.is_some() {
             let mut references = Vec::new();
             collect_entity_references_at(
-                &record.value,
+                record.value(),
                 &mut Vec::new(),
                 &mut references,
                 &mut context.admission,
             )?;
             references
         } else {
-            collect_entity_references(&record.value)
+            collect_entity_references(record.value())
         };
         context
             .manifest
@@ -2561,7 +2561,7 @@ fn retain_complete_record(
                 owner: classified.owner,
                 component: component.clone(),
                 version: record.version,
-                value: record.value.clone(),
+                value: record.value().clone(),
                 contextual_defaults: record.contextual_defaults.clone(),
                 entity_references,
                 schema_declared_asset_references,
@@ -3331,8 +3331,8 @@ fn prepare_admitted_field_edit(
         ));
     }
     let previous = match &edit.value {
-        Some(value) => record.value.set_path(field.path(), value.clone()),
-        None => record.value.remove_path(field.path()).map(Some),
+        Some(value) => record.value_mut().set_path(field.path(), value.clone()),
+        None => record.value_mut().remove_path(field.path()).map(Some),
     }
     .map_err(|_| {
         field_edit_rejection(
@@ -3341,6 +3341,10 @@ fn prepare_admitted_field_edit(
             "Authoring field edit path cannot be changed in the component value",
         )
     })?;
+    let default = record
+        .contextual_defaults
+        .get(field.id())
+        .or(field.default_value());
     if field.has_capability(ComponentCapability::EntityRef)
         && !authoring_field_change_is_preservation_safe(field, previous.as_ref(), default)
     {

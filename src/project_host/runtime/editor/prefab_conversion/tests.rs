@@ -854,7 +854,7 @@ fn scene_and_prefab_conversion_publish_only_after_review_and_round_trip_one_hist
             let record = &entity.components[&payload_type()];
             assert_eq!(record.owner.as_ref(), Some(&payload_owner()));
             let Ok(ComponentValue::U64(amount)) = record
-                .value
+                .value()
                 .get_path(&ComponentFieldPath::from_fields(["amount"]))
             else {
                 panic!("the schema-only payload must remain complete: {record:?}");

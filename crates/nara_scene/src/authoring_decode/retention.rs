@@ -273,7 +273,7 @@ fn unavailable_record_dynamic_bytes(
         .checked_add(placement_dynamic_bytes(record.anchor_placement.as_ref())?)?
         .checked_add(owner_bytes(&record.owner)?)?
         .checked_add(provenance_string_bytes(record.component.as_str())?)?
-        .checked_add(value_bytes_impl(&record.value, limits, admission)?)?
+        .checked_add(value_bytes_impl(record.value(), limits, admission)?)?
         .checked_add(contextual_defaults_bytes(
             &record.contextual_defaults,
             limits,

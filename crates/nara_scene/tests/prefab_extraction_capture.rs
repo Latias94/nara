@@ -531,7 +531,7 @@ fn worker_retains_original_captures_and_prepares_real_p_q_sources_and_input_mapp
     assert_eq!(target, &EntityReference::SceneLocal { entity: id("x") });
     let moved = &q.document().entities[0].components[&component()];
     let Some(ComponentValue::EntityReference(EntityReference::Authored { reference })) =
-        moved.value.get("target")
+        moved.value().get("target")
     else {
         panic!("the moved cross-cut reference must use an actual declared Q input");
     };
@@ -583,7 +583,7 @@ fn worker_retains_original_captures_and_prepares_real_p_q_sources_and_input_mapp
             assert!(x.children().is_empty());
             for (record, target) in [(b, x), (x, b)] {
                 assert_eq!(
-                    record.components()[&component()].value.get("target"),
+                    record.components()[&component()].value().get("target"),
                     Some(&ComponentValue::EntityReference(
                         EntityReference::SceneLocal {
                             entity: target.id().clone()

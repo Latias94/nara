@@ -1057,7 +1057,7 @@ mod expansion {
         );
         assert_eq!(actual.schema_owner(), expected.owner());
         assert_eq!(actual.version(), expected.version);
-        assert_eq!(actual.value(), &expected.value);
+        assert_eq!(actual.value(), expected.value());
     }
 
     fn with_link(note: &str, target: ComponentValue) -> PrefabDocument {
@@ -1420,7 +1420,7 @@ mod expansion {
                     let actual = &actual.components()[component];
                     assert_eq!(actual.schema_owner(), expected.owner());
                     assert_eq!(actual.version(), expected.version);
-                    assert_eq!(actual.value(), &expected.value);
+                    assert_eq!(actual.value(), expected.value());
                 }
             }
             assert_eq!(
@@ -1866,7 +1866,7 @@ mod expansion {
             unreachable!()
         };
         payload
-            .value
+            .value_mut()
             .set_path(
                 &ComponentFieldPath::from_fields(["target"]),
                 local("missing"),
@@ -2447,8 +2447,8 @@ mod expansion {
             assert_eq!((&source, &resolver), (&before.0, &before.1));
         }
         assert!(base.entities.iter().all(|entity| {
-            entity.components[&component].value
-                == ComponentValue::map([] as [(&str, ComponentValue); 0])
+            entity.components[&component].value()
+                == &ComponentValue::map([] as [(&str, ComponentValue); 0])
         }));
         assert_eq!((source, resolver), before);
     }

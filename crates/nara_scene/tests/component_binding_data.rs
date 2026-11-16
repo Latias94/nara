@@ -458,7 +458,7 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
             stored_link.version(),
             stored_link.value()
         ),
-        (link.owner(), link.version, &link.value),
+        (link.owner(), link.version, link.value()),
     );
     let stored_score = bindings
         .data_component(&world, entity, &component("game.Score"))
@@ -474,7 +474,7 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
         (
             expected_score.owner(),
             expected_score.version,
-            &expected_score.value
+            expected_score.value()
         ),
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));

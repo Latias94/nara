@@ -521,7 +521,7 @@ impl SceneInspectorCommand {
         }
 
         let migrated = registry
-            .migrate_component_value(component_id, component.version, &component.value)
+            .migrate_component_value(component_id, component.version, component.value())
             .map_err(|_| {
                 component_migration_diagnostic(
                     entity_id,
@@ -530,16 +530,14 @@ impl SceneInspectorCommand {
                     schema.version,
                 )
             })?;
+        let mut replacement = SceneComponentRecord::new(migrated.version, migrated.value);
+        replacement.owner = component.owner.clone();
+        replacement.contextual_defaults = component.contextual_defaults.clone();
         let mut operations = Vec::with_capacity(patch.operations.len() + 1);
         operations.push(ScenePatchOperation::ReplaceComponent {
             entity: entity_id.clone(),
             component: component_id.clone(),
-            value: SceneComponentRecord {
-                owner: component.owner.clone(),
-                version: migrated.version,
-                value: migrated.value,
-                contextual_defaults: component.contextual_defaults.clone(),
-            },
+            value: replacement,
         });
         operations.extend(patch.operations);
         Ok(ScenePatchDocument::new(operations))
@@ -691,7 +689,7 @@ fn build_inspector_model(
                     .components
                     .get(&ComponentTypeId::new("nara.scene.Name"))
                     .filter(|record| record.version == ComponentSchemaVersion::ONE)
-                    .and_then(|record| record.value.as_str())
+                    .and_then(|record| record.value().as_str())
                     .map(str::to_owned),
                 placement: placement.cloned(),
                 inspectable_component_count: inspectable_component_count(
@@ -846,7 +844,7 @@ fn build_entity_view(
                             let effective = match inspector_effective_component_value(
                                 schema,
                                 component,
-                                &component.value,
+                                component.value(),
                             ) {
                                 Ok(effective) => effective,
                                 Err(error) => {
@@ -862,7 +860,7 @@ fn build_entity_view(
                                 component_id,
                                 component,
                                 schema,
-                                &component.value,
+                                component.value(),
                                 effective.as_ref(),
                                 SceneInspectorComponentAccess::read_only(
                                     SceneInspectorReadOnlyReason::KnownUnbound,
@@ -884,7 +882,7 @@ fn build_entity_view(
                     let effective = match inspector_effective_component_value(
                         schema,
                         component,
-                        &component.value,
+                        component.value(),
                     ) {
                         Ok(effective) => effective,
                         Err(error) => {
@@ -900,7 +898,7 @@ fn build_entity_view(
                         component_id,
                         component,
                         schema,
-                        &component.value,
+                        component.value(),
                         effective.as_ref(),
                         SceneInspectorComponentAccess::editable(),
                     ));
@@ -935,7 +933,7 @@ fn build_entity_view(
             match registry.migrate_component_value(
                 component_id,
                 component.version,
-                &component.value,
+                component.value(),
             ) {
                 Ok(migrated) => {
                     let effective = match inspector_effective_component_value(
@@ -1319,7 +1317,7 @@ mod tests {
         assert!(removed.applied, "{:#?}", removed.diagnostics);
         assert!(
             session.document().entities[0].components[&sprite]
-                .value
+                .value()
                 .get("material")
                 .unwrap()
                 .get("image")

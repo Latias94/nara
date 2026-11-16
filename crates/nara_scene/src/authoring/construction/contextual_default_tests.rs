@@ -233,7 +233,7 @@ fn ordinary_add_and_new_entity_templates_preserve_hidden_defaults_absence_and_ex
                 .find(|entity| entity.id == created)
                 .unwrap()
                 .components[&component()];
-            assert!(record.value.get("target").is_none());
+            assert!(record.value().get("target").is_none());
             assert_eq!(
                 record.contextual_defaults,
                 expected_record().contextual_defaults,
@@ -422,7 +422,7 @@ fn context_free_defaults_stay_in_schema_and_raw_records_receive_no_implicit_allo
         |session| {
             let template = session.authoring_initial_component(&component()).unwrap();
             assert!(template.contextual_defaults.is_empty());
-            assert_eq!(template.value, initial());
+            assert_eq!(template.value(), &initial());
             let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
                 entity: id("host"),
                 component: component(),

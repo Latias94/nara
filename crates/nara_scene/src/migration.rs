@@ -264,11 +264,11 @@ fn validate_exact_component_record(
     let schema = require_component_schema(entity, component_id, registry)?;
     require_exact_snapshot_version(entity, component_id, record.version, schema.version)?;
     validate_record_defaults(schema, record, budget)?;
-    budget.observe(&record.value)?;
+    budget.observe(record.value())?;
     let (effective, _) =
         nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
             schema,
-            &record.value,
+            record.value(),
             &record.contextual_defaults,
             budget.limits.component_value_nodes().get(),
             budget.limits.component_value_bytes().get(),
@@ -324,7 +324,7 @@ fn migrate_component_record(
         )));
     }
     let migrated = registry
-        .migrate_component_value(component_id, record.version, &record.value)
+        .migrate_component_value(component_id, record.version, record.value())
         .map_err(|error| {
             publication_error(with_migration_error(
                 with_public_locator(
@@ -343,10 +343,10 @@ fn migrate_component_record(
             ))
         })?;
     budget.observe(&migrated.value)?;
-    let changed = migrated.version != record.version || migrated.value != record.value;
+    let changed = migrated.version != record.version || &migrated.value != record.value();
     if changed {
         record.version = migrated.version;
-        record.value = migrated.value;
+        record.set_value(migrated.value);
     }
     validate_record_defaults(schema, record, budget)?;
     Ok(changed)

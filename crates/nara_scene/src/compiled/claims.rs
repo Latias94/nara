@@ -5,11 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use nara_reflect::{
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
-};
+use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, PersistentComponentSchemaOwnerId};
 
-use crate::{SceneEntityId, SceneEntityProvenanceMap};
+use crate::{SceneEntityId, SceneEntityProvenanceMap, component_payload::ComponentPayload};
 
 #[derive(Debug)]
 pub(crate) struct FlatSceneClaims {
@@ -29,5 +27,5 @@ pub(crate) struct FlatSceneEntityClaim {
 pub(crate) struct FlatSceneComponentClaim {
     pub(crate) schema_owner: Option<PersistentComponentSchemaOwnerId>,
     pub(crate) version: ComponentSchemaVersion,
-    pub(crate) value: ComponentValue,
+    pub(crate) value: ComponentPayload,
 }

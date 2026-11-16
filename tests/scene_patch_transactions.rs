@@ -1553,11 +1553,11 @@ fn scene_entity<'a>(scene: &'a SceneDocument, id: &SceneEntityId) -> &'a SceneEn
 }
 
 fn component_value<'a>(scene: &'a SceneDocument, id: &SceneEntityId) -> &'a ComponentValue {
-    &scene_entity(scene, id)
+    scene_entity(scene, id)
         .components
         .get(&position_type_id())
         .unwrap()
-        .value
+        .value()
 }
 
 fn position_record(x: i32, y: Option<i32>) -> SceneComponentRecord {

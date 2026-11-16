@@ -228,7 +228,10 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
                     .entities
                     .iter()
                     .filter(|entity| entity.components.contains_key(&component()))
-                    .all(|entity| entity.components[&component()].value.get("link").is_none()),
+                    .all(|entity| entity.components[&component()]
+                        .value()
+                        .get("link")
+                        .is_none()),
                 "defaults stay absent in authored source"
             );
             let (changed, inverse) = candidate.into_parts();
@@ -367,7 +370,7 @@ fn source_local_entity_reference_field_edit_is_atomic_and_round_trips_history_an
             .find(|entity| entity.id == id("z"))
             .unwrap()
             .components[&component()]
-            .value
+            .value()
             .get("link")
             .unwrap(),
         &reference("target")
@@ -405,7 +408,7 @@ fn source_local_reference_edit_does_not_publish_a_persistent_inverse() {
         .components
         .get_mut(&component())
         .unwrap()
-        .value
+        .value_mut()
         .set_path(&ComponentFieldPath::from_fields(["link"]), persistent)
         .unwrap();
     let state = full(&document, &state).unwrap();

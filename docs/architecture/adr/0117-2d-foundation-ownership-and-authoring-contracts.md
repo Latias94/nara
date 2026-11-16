@@ -121,6 +121,20 @@ require exact-ID acknowledgement. Runtime close revokes publication interest and
 retain physical worker custody. A later selected closure is not another executable startup
 agreement: its records decode against the already admitted frozen native schema authority.
 
+Source component values may use component-local immutable storage, independent of raw documents,
+resolvers and snapshots. Public source record/document cloning preserves independent values;
+borrowed access does not grant a detachable storage handle. Only private compilation may share
+payload storage through drafts into move-only compiled values. Actual migration, missing defaults,
+properties and reference lowering isolate storage before changing it; requesting mutable access
+must not eagerly copy a value that the operation will only read.
+
+Source, compiled and independently prepared owners each retain their full logical payload
+allowance, including backing overhead, even when they share the same allocation. Existing retained
+leases, generation claims and per-occurrence materialized limits remain authoritative. Shared
+payloads do not deduplicate budgets, own a source document or introduce another lifecycle owner.
+Public source clones remain independent allocations, so they cannot extend original storage
+after its original retained allowance is refunded. The source wire representation is unchanged.
+
 Hosted source changes enter this same Scene owner as semantic principal/metadata observations.
 The successful closure and latest executed automatic failure's requested paths determine dependency
 interest, including a missing input. Relevant changes coalesce into one successor intent behind

@@ -482,7 +482,7 @@ impl<'a> AuthoringComponentView<'a> {
             .components
             .get(self.fact.component())
             .expect("indexed component belongs to its source record");
-        let (value, defaulted) = match record.value.get_path(field.path()) {
+        let (value, defaulted) = match record.value().get_path(field.path()) {
             Ok(value) => (value, false),
             Err(
                 error @ (ComponentFieldPathError::MissingField { .. }

@@ -171,7 +171,7 @@ fn first_nested_write_materializes_only_its_default_root_and_undo_restores_absen
             let stale = $session.prepare_authoring_property_edit(revision, &edits).unwrap();
             assert!($session.commit_authoring_edit(prepared).applied);
             let accepted = $session.document().clone();
-            let value = &accepted.entities[0].components[&component()].value;
+            let value = accepted.entities[0].components[&component()].value();
             assert_eq!(value.get("defaults"), Some(&ComponentValue::map([
                 ("wire_score", ComponentValue::U64(15)),
                 ("wire_tag", ComponentValue::String("changed".into())),
@@ -221,11 +221,11 @@ fn failed_last_defaulted_property_write_leaves_source_revision_and_history_uncha
 #[test]
 fn explicit_null_and_partial_map_are_not_merged_with_defaults() {
     let mut document = document();
-    let value = &mut document.entities[0]
+    let value = document.entities[0]
         .components
         .get_mut(&component())
         .unwrap()
-        .value;
+        .value_mut();
     value
         .set_path(
             &ComponentFieldPath::from_fields(["unrelated"]),
@@ -263,7 +263,7 @@ fn explicit_null_and_partial_map_are_not_merged_with_defaults() {
     assert_eq!(scene.document().entities, prefab.document().entities);
     assert_eq!(
         scene.document().entities[0].components[&component()]
-            .value
+            .value()
             .get("unrelated"),
         Some(&ComponentValue::Null)
     );
@@ -287,7 +287,7 @@ fn root_assignment_can_create_an_optional_root_without_a_default() {
             assert!($session.commit_authoring_edit(prepared).applied);
             assert_eq!(
                 $session.document().entities[0].components[&component()]
-                    .value
+                    .value()
                     .get("plain"),
                 Some(&ComponentValue::U64(8))
             );
@@ -316,7 +316,7 @@ fn first_write_requires_an_existing_storage_parent_and_preserves_it_on_undo() {
                 .components
                 .get_mut(&component())
                 .unwrap()
-                .value
+                .value_mut()
                 .set_path(
                     &ComponentFieldPath::from_fields(["parent"]),
                     ComponentValue::map([] as [(&str, ComponentValue); 0]),
@@ -493,7 +493,7 @@ fn first_write_does_not_create_a_missing_list_slot_even_at_the_end() {
                 .components
                 .get_mut(&component())
                 .unwrap()
-                .value
+                .value_mut()
                 .set_path(
                     &ComponentFieldPath::from_fields(["slots"]),
                     ComponentValue::List(vec![]),

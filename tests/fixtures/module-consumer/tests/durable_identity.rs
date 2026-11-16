@@ -220,7 +220,7 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
     assert_eq!(copied.scene.entities[1], scene.entities[1]);
     assert_eq!(copied.actor, actor);
     let copied_name = copied.actor.entities[0].components.values().next().unwrap();
-    assert_eq!(copied_name.value.as_str().unwrap(), ACTOR_PATH);
+    assert_eq!(copied_name.value().as_str().unwrap(), ACTOR_PATH);
     for (path, bytes) in original_bytes {
         assert_eq!(fixture_bytes(path), bytes);
     }
@@ -585,7 +585,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 live_export.diagnostics
             );
             let exported =
-                &live_export.output().unwrap().document.entities[0].components[&component].value;
+                live_export.output().unwrap().document.entities[0].components[&component].value();
             assert_eq!(
                 exported.field("links").unwrap(),
                 &durable_links_value(&reference)
@@ -681,7 +681,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             assert!(patch_report.applied, "{:?}", patch_report.diagnostics);
             assert!(
                 patched.entities[0].components[&component]
-                    .value
+                    .value()
                     .get("links")
                     .is_none()
             );

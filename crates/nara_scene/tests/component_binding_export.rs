@@ -390,14 +390,14 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
         };
         assert_eq!(
             source.components[&component("game.NativeLink")]
-                .value
+                .value()
                 .field_entity_reference("target")
                 .unwrap(),
             &local,
         );
         let links = &source.components[&component("game.Links")];
         assert_eq!(links.owner(), Some(&owner_id()));
-        let ComponentValue::List(targets) = links.value.field("targets").unwrap() else {
+        let ComponentValue::List(targets) = links.value().field("targets").unwrap() else {
             panic!("nested links must remain a list");
         };
         assert_eq!(targets[0].field_entity_reference("local").unwrap(), &local);
@@ -421,7 +421,7 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
     assert_eq!(mapped_targets.len(), 2);
     assert_eq!(
         exported(&result, &first, "source").components[&component("nara.scene.Name")]
-            .value
+            .value()
             .as_str(),
         Some("live native name"),
     );
@@ -493,7 +493,7 @@ fn data_export_establishes_selected_context_and_reopens_with_the_same_bindings()
             };
             assert_eq!(record.owner(), Some(&owner_id()));
             assert_eq!(
-                record.value.field_entity_reference("target").unwrap(),
+                record.value().field_entity_reference("target").unwrap(),
                 &expected,
             );
             assert_eq!(
@@ -700,8 +700,8 @@ fn data_coverage_refusal_precedes_native_encoding_and_preserves_the_world() {
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert_eq!(result.document.entities.len(), 2);
     assert_eq!(
-        exported(&result, &instance, "a-native").components[&component("nara.scene.Name")].value,
-        ComponentValue::String("unchanged native".into()),
+        exported(&result, &instance, "a-native").components[&component("nara.scene.Name")].value(),
+        &ComponentValue::String("unchanged native".into()),
     );
     assert_eq!(
         exported(&result, &instance, "z-data").components[&component("game.Score")],
@@ -1085,12 +1085,12 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
     ));
     let saved_record = exported(&saved, &instance, "image");
     assert_eq!(
-        saved_record.components[&component("game.Images")].value,
-        images_value([("stable", path.clone())])
+        saved_record.components[&component("game.Images")].value(),
+        &images_value([("stable", path.clone())])
     );
     assert_eq!(
         saved_record.components[&component("game.NativeImage")]
-            .value
+            .value()
             .field("nested")
             .unwrap()
             .field("image")
@@ -1125,12 +1125,12 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
     ));
     let cross_record = exported(&cross_root, &instance, "image");
     assert_eq!(
-        cross_record.components[&component("game.Images")].value,
-        images_value([("stable", product.clone())])
+        cross_record.components[&component("game.Images")].value(),
+        &images_value([("stable", product.clone())])
     );
     assert_eq!(
         cross_record.components[&component("game.NativeImage")]
-            .value
+            .value()
             .field("nested")
             .unwrap()
             .field("image")
@@ -1278,7 +1278,7 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         ));
         let record = exported(&result, &instance, "images");
-        let native = &record.components[&component("game.NativeImage")].value;
+        let native = record.components[&component("game.NativeImage")].value();
         assert_eq!(
             native.field("nested").unwrap().field("image").unwrap(),
             &asset_value(expected),
@@ -1286,8 +1286,8 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         let data = &record.components[&component("game.Images")];
         assert_eq!(data.owner(), Some(&owner_id()));
         assert_eq!(
-            data.value,
-            images_value([("path", expected.clone()), ("stable", expected.clone())]),
+            data.value(),
+            &images_value([("path", expected.clone()), ("stable", expected.clone())]),
         );
     }
     let missing = ProjectAssetDatabase::default();
@@ -1310,8 +1310,8 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         None,
     ));
     assert_eq!(
-        exported(&preserved, &instance, "images").components[&component("game.Images")].value,
-        images_value([("path", path), ("stable", stable)]),
+        exported(&preserved, &instance, "images").components[&component("game.Images")].value(),
+        &images_value([("path", path), ("stable", stable)]),
     );
     assert_eq!(world.resource::<AssetServer>(), &server);
 }
@@ -1346,8 +1346,8 @@ fn unknown_data_paths_remain_paths_without_native_handles_or_loading() {
             Some(metadata.resolver(&nara_asset::AssetPathScope::ROOT)),
         ));
         assert_eq!(
-            exported(&result, &instance, "data").components[&component("game.Images")].value,
-            value,
+            exported(&result, &instance, "data").components[&component("game.Images")].value(),
+            &value,
         );
     }
     assert_eq!(world.resource::<AssetServer>(), &server);
@@ -1467,8 +1467,9 @@ fn later_native_default_uses_the_remaining_export_budget() {
         &[limits(2, 1, 2)],
     );
     assert_eq!(
-        exported(&result, &instance, "z-default").components[&component("zz.NativeDefault")].value,
-        ComponentValue::List(vec![ComponentValue::String("x".into())]),
+        exported(&result, &instance, "z-default").components[&component("zz.NativeDefault")]
+            .value(),
+        &ComponentValue::List(vec![ComponentValue::String("x".into())]),
     );
     for (value_limits, remaining) in [
         (limits(2, 8, 2), limits(1, 1, 2)),
@@ -1575,8 +1576,8 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
         let result = output(bindings.export_live_scene_with_options(&world, export_options, None));
         let record = exported(&result, &instance, "defaulted");
         assert_eq!(
-            record.components[&component("zz.NativeDefault")].value,
-            record.components[&component("zz.DataDefault")].value,
+            record.components[&component("zz.NativeDefault")].value(),
+            record.components[&component("zz.DataDefault")].value(),
         );
         if !zero_byte {
             for bytes in [1, total_bytes - 1] {
@@ -1630,7 +1631,7 @@ fn generated_entity_reference_growth_uses_the_shared_output_budget() {
         .entities
         .iter()
         .flat_map(|entity| entity.components.values())
-        .map(|record| record.value.cost())
+        .map(|record| record.value().cost())
         .fold((0, 0), |(nodes, bytes), cost| {
             (nodes + cost.nodes(), bytes + cost.logical_bytes())
         });
@@ -1674,8 +1675,8 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
         Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     ));
     assert_eq!(
-        exported(&result, &instance, "data").components[&component("game.Images")].value,
-        expected,
+        exported(&result, &instance, "data").components[&component("game.Images")].value(),
+        &expected,
     );
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes() - 1, 5);
     rejected(
@@ -1902,8 +1903,8 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             let record = exported(&result, &instance, "defaulted");
             for name in ["game.NativeDefault", "game.DataDefault"] {
                 assert_eq!(
-                    record.components[&component(name)].value,
-                    ComponentValue::map([("image", asset_value(expected))])
+                    record.components[&component(name)].value(),
+                    &ComponentValue::map([("image", asset_value(expected))])
                 );
             }
             let native_result = output(nara_scene::export_live_scene_with_options(
@@ -1914,8 +1915,8 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             ));
             assert_eq!(
                 native_result.document.entities[0].components[&component("game.NativeDefault")]
-                    .value,
-                ComponentValue::map([("image", asset_value(expected))])
+                    .value(),
+                &ComponentValue::map([("image", asset_value(expected))])
             );
         }
         if default == &stable {
