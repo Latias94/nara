@@ -1,0 +1,27 @@
+{
+  "format": "nara-source-payload-before/v1",
+  "observed_at": "2026-11-16T22:56:37.432069+08:00",
+  "repository_base": "079e1f0c9c6051ccf352b9bd24f363bc8069d592",
+  "source_state": "Uncommitted four format subphase hooks; original ComponentValue decoder unchanged.",
+  "source_sha256": {
+    "Cargo.toml": "6de8f4e91327b149561a34d0eab67b8a77c17d638e4311eb5ae7412de321b4c2",
+    "samples/two-level-game/Cargo.toml": "d4458b24e29332aced3e116d66613f585baa02de8552a9108593c61311a9c78c",
+    "samples/two-level-game/Cargo.lock": "38edaf87b9cd7cf14873c58e3e4e2e3f219255b2dbdc2c4a65daf73320dc4b43",
+    "src/project_content.rs": "6731d04661e9903b10328a7d46e34c0bcde3e3083e814c78622f011ede287c6f",
+    "crates/nara_scene/src/format.rs": "ec8891badc199a162a43d77e28e1323f2e8d068afa650b49305e97578c2a5cad",
+    "crates/nara_reflect/src/value/wire.rs": "81ad80af77a8dfcca87a399f4754b5b102f8da2b27525c1b72133dfa5d7ff32b",
+    "samples/two-level-game/src/bin/runtime_workload.rs": "603e818beeb049860c58d7b1ea197565e26f6ebfb1ccef71c0fc3273277bf600",
+    "samples/two-level-game/src/bin/runtime_workload/work.rs": "30fe18b8cdba42c996df277e8b5211f0bc2a303dc70fd86128f6a4f925624512"
+  },
+  "report": "authored-tiles-payload-before-16384.json",
+  "report_sha256": "aad7ad5aa275d43cc92ea17cae70dd46dc4e40e963466e32e3e67df546ab2815",
+  "binary_sha256": "91576a6a284517aa42f5d301f8e7901b8642d16d5bc96ebfe51f8bd70b494139",
+  "command": "cargo +1.95.0 build --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement,scene-work-observation --bin runtime_workload; runtime_workload.exe --tiles 16384",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "WGPU_BACKEND": "dx12",
+    "NARA_WGPU_FORCE_FALLBACK": "0"
+  },
+  "scope": "Three complete original16Kgame lifetimes with physical retirement and9GPUreplays. Nested source-decode wall subphases across owner/worker calls, notCPU/scanout. Exact raw source/binary/report retained before decoder changes.",
+  "frozen_binary_retention": "Original pre-streaming executable retained outside repository for later comparison."
+}

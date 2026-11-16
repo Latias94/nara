@@ -1708,13 +1708,22 @@ fn decode_json_payload<T: SceneFilePayload>(
         limits.encoded_bytes(),
         &contract,
         |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_wire_preflight").entered();
             let mut deserializer = serde_json::Deserializer::from_slice(bytes);
             preflight_serde_shape(&mut deserializer, limits.shape()).map_err(JsonDecodeError::Shape)
         },
         |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_header_decode").entered();
             serde_json::from_slice::<PersistentFileHeader>(bytes).map_err(JsonDecodeError::Syntax)
         },
         |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_payload_decode").entered();
             serde_json::from_slice::<PersistentFileEnvelope<T::Wire>>(bytes)
                 .map_err(JsonDecodeError::Syntax)
         },
@@ -1740,6 +1749,9 @@ fn decode_ron_payload<T: SceneFilePayload>(
         limits.encoded_bytes(),
         &contract,
         |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_wire_preflight").entered();
             let mut deserializer =
                 ron::de::Deserializer::from_bytes(bytes).map_err(RonDecodeError::Syntax)?;
             preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|error| match error {
@@ -1749,8 +1761,16 @@ fn decode_ron_payload<T: SceneFilePayload>(
                 }
             })
         },
-        |bytes| ron::de::from_bytes::<PersistentFileHeader>(bytes).map_err(RonDecodeError::Syntax),
         |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_header_decode").entered();
+            ron::de::from_bytes::<PersistentFileHeader>(bytes).map_err(RonDecodeError::Syntax)
+        },
+        |bytes| {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_payload_decode").entered();
             ron::de::from_bytes::<PersistentFileEnvelope<T::Wire>>(bytes)
                 .map_err(RonDecodeError::Syntax)
         },
@@ -1811,6 +1831,9 @@ fn finish_decode<T: SceneFilePayload>(
     mut payload: T,
     limits: SceneFileLimits,
 ) -> Result<T, SceneFormatError> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_source_finish").entered();
     payload.validate_contract()?;
     payload.validate_budget(limits)?;
     payload.canonicalize_payload();

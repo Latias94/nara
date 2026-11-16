@@ -2481,3 +2481,44 @@ Root content, Scene all-target/all-feature and game workload/metric/span release
 Clippy, root/sample formatting and evidence checks pass. Existing warnings remain. All four
 scoped agents are closed. Cargo/native workloads run serially against the original target,
 without cache clean, remote CI execution or remote publication.
+
+### Source Payload Decode Successor
+
+Continue the original complete Travel consumer with separate wire-shape preflight, persistent
+header decode, semantic wire payload decode and domain-budget/canonicalization spans. Preserve
+byte/shape/header-contract/payload/admission order, complete JSON/RON grammar, exact receiving
+limits and structured error stages. Measure before selecting a parser or serialization change.
+The optional spans stay in the existing format owner and default builds acquire no clocks.
+
+Investigate `ComponentValue`'s existing serde wire adapter: its untagged payload decoder buffers
+even canonical type-before-value input and can repeatedly deserialize nested Map/List contents.
+If actual payload cost justifies it, use serde's typed MapAccess/DeserializeSeed dispatch for a
+known tag and retain the existing ordinary payload fallback when value precedes type. Preserve
+arbitrary field order, JSON/RON and parent-buffered values, numeric/null/reference semantics,
+strict duplicate/unknown fields and existing outer format limits. Do not build a JSON/RON parser,
+change source syntax, cache later files or skip compatibility/shape checks.
+
+Qualification requires shared Reflect/Scene and public format controls, adversarial field-order/
+type/number/duplicate cases and complete native gameplay/pixel/failure cleanup. Freeze the same
+instrumented pre-change executable/source before balanced old/new comparison; distinguish local
+payload timing from full process, CPU and scanout. Full Foundation/R9/R12 and foreign execution
+remain open; Editor/UI/Dialogue work stays paused.
+
+The [original instrumented payload baseline](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-payload-before-16384.json)
+and [exact selected source/executable metadata](../benchmarks/data/2026-11-14-development-runtime/authored-tiles-payload-before-metadata.json)
+retain three complete 16K Travel lifetimes, original physical retirement and nine GPU replays.
+Each lifetime has eighteen Scene/Prefab format decodes. Nested payload-decode wall sums range
+over 3,436.010–3,814.791 ms, wire preflight 592.815–746.551 ms, header decode 68.950–79.720 ms
+and domain/canonical finish 74.173–82.646 ms. They are not CPU time or one transition delay.
+This selects the existing component-value container decoder rather than weakening the mandatory
+wire/header gates. Serde's untagged payload buffers complete values even after a known tag and
+replays nested container contents; scalar semantics and value-before-type fallback remain.
+
+Twenty-seven additive compatibility cases plus the existing public authored-reference wire
+control pass 28/28 on the original decoder at `202c3fa8-0371-41fc-ac78-592d04a54114`, with 200
+outside the filter. The first streaming attempt also passes those cases, but independent review
+finds a missing direct RON child tuple/brace-map case. Previously buffered container children
+accept Map/Seq forms that raw `deserialize_struct` does not. Add an explicit regression and use
+the shared value visitor through a nested-value seed; retain the original top-level struct
+entry. Raw RON struct keys also need serde's identifier/string handling. Full shared/public and
+native qualification remain required; the first 28-case green result is incomplete evidence.
