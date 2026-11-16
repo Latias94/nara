@@ -10,6 +10,7 @@ use crate::{
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderError,
     backend::render_backend_state,
     runtime::{WgpuRuntimeCapture, WgpuRuntimeResult},
+    runtime_timing::WgpuRuntimeFramePhase,
 };
 
 /// Owned CPU facts for native-session observation, independent of GPU handle authority.
@@ -313,7 +314,11 @@ impl WgpuRenderHost {
                 },
             ))
         } else {
-            self.prepare_namespace_with_authority(Some(window), Some(handles))
+            let timing = self.backend.begin_runtime_frame_phase();
+            let namespace = self.prepare_namespace_with_authority(Some(window), Some(handles));
+            self.backend
+                .finish_runtime_frame_phase(WgpuRuntimeFramePhase::NamespacePreparation, timing);
+            namespace
         };
         if namespace.is_ok() || self.backend.surface_count() != 0 {
             self.handles.get_or_insert_with(|| handles.clone());
@@ -350,7 +355,11 @@ impl WgpuRenderHost {
             .ok_or(WgpuRenderHostError::StaleImageSubmission)?;
             ui.bind_backend(generation)?;
         }
-        let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
+        let timing = self.backend.begin_runtime_frame_phase();
+        let acquired = self.backend.acquire_editor_surface(window.id);
+        self.backend
+            .finish_runtime_frame_phase(WgpuRuntimeFramePhase::SurfaceAcquisition, timing);
+        let Some(acquired) = acquired? else {
             if self.backend.configured_surface_extent(window.id).is_none() {
                 self.invalidate_runtime_presentation(id);
             }
@@ -362,8 +371,12 @@ impl WgpuRenderHost {
             );
             return Ok(());
         };
-        let mut candidate =
-            self.prepare_candidate_in_namespace(id, &namespace, &input, acquired.format, false)?;
+        let timing = self.backend.begin_runtime_frame_phase();
+        let candidate =
+            self.prepare_candidate_in_namespace(id, &namespace, &input, acquired.format, false);
+        self.backend
+            .finish_runtime_frame_phase(WgpuRuntimeFramePhase::CandidatePreparation, timing);
+        let mut candidate = candidate?;
         let policy = &candidate.built.output;
         Self::validate_policy_target(policy, packet, acquired.format, false)?;
         #[cfg(feature = "stock-ui")]
@@ -398,7 +411,8 @@ impl WgpuRenderHost {
         let program = policy.program.clone();
         let final_version = policy.final_version.clone();
         let policy_facts = policy.facts;
-        let mut published = self.execute_program_in_namespace(
+        let timing = self.backend.begin_runtime_frame_phase();
+        let published = self.execute_program_in_namespace(
             id,
             &namespace,
             &program,
@@ -412,7 +426,11 @@ impl WgpuRenderHost {
                 submitted_texture_bytes: &mut submitted_texture_bytes,
             }),
             Some(&mut candidate.built),
-        )?;
+        );
+        self.backend
+            .finish_runtime_frame_phase(WgpuRuntimeFramePhase::ProgramExecution, timing);
+        let mut published = published?;
+        let timing = self.backend.begin_runtime_frame_phase();
         let presentation = (|| {
             #[cfg(feature = "stock-ui")]
             if let Some(facts) = &mut submitted_ui {
@@ -458,6 +476,8 @@ impl WgpuRenderHost {
             frame.mark_submitted();
             Ok(())
         })();
+        self.backend
+            .finish_runtime_frame_phase(WgpuRuntimeFramePhase::SurfacePresentation, timing);
         self.release_published_candidate(candidate, &mut published);
         self.release_publication_value((program, input, published));
         presentation

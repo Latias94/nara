@@ -91,6 +91,15 @@ No runtime plugin installs a global subscriber, alternate task lifecycle, global
 reusable offline evidence/admission service. Complete-frame-to-completion spans are not per-pass
 GPU execution or scanout measurements.
 
+The original WGPU Host may also expose explicitly enabled fixed Runtime operation wall spans
+through its existing transaction observation. Namespace preparation, Surface acquisition, candidate
+preparation, program execution and Surface presentation remain original owner calls, without an
+alternate execution/callback path. Each returned call, including a returned error, may complete
+its observation; unwind and unreached work remain absent. A new transaction clears those values.
+Disabled collection adds no timing clock reads. Such spans include native waits, are independent
+of success/presentation receipts and do not replace existing startup or queue-completion evidence.
+No shared trace registry, global subscriber or additional Runtime/GPU authority follows.
+
 ## Resolved Questions
 
 - **Ownership:** The bus lives in `nara_diagnostic`, not `nara_app`. `nara_app` supplies lifecycle,

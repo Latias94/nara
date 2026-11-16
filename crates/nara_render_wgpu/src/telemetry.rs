@@ -100,17 +100,19 @@ fn bounded_adapter_text(value: &str) -> String {
     bounded
 }
 
-/// Finite opt-in limits for backend-owned GPU completion observations.
+/// Finite opt-in configuration for backend-owned diagnostic observations.
 ///
 /// This controls diagnostic evidence only. It does not change queue submission, presentation, or
 /// frame scheduling. While enabled, the backend never registers more than
 /// `max_pending_frame_completions` completion callbacks and never retains more than
 /// `max_buffered_frame_completions` completed samples. The same bounded callbacks retire tracked
 /// per-frame resource payloads, but sampling and resource retirement keep independent generations.
+/// Original Runtime phase wall timings are disabled unless explicitly requested separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuBackendTelemetryConfig {
     max_pending_frame_completions: u32,
     max_buffered_frame_completions: u32,
+    runtime_frame_timings: bool,
 }
 
 impl WgpuBackendTelemetryConfig {
@@ -141,7 +143,23 @@ impl WgpuBackendTelemetryConfig {
         Ok(Self {
             max_pending_frame_completions,
             max_buffered_frame_completions,
+            runtime_frame_timings: false,
         })
+    }
+
+    /// Enables wall spans for five calls in the original managed Runtime frame transaction.
+    ///
+    /// The spans include driver waits and returned errors. They do not measure CPU usage, GPU
+    /// duration, scanout, or all frame work, and grant no success or presentation authority.
+    /// Disabled configurations make no instrumentation clock calls for these phases.
+    #[must_use]
+    pub const fn with_runtime_frame_timings(mut self) -> Self {
+        self.runtime_frame_timings = true;
+        self
+    }
+
+    pub(crate) const fn runtime_frame_timings_enabled(self) -> bool {
+        self.runtime_frame_timings
     }
 
     #[must_use]
@@ -160,6 +178,7 @@ impl Default for WgpuBackendTelemetryConfig {
         Self {
             max_pending_frame_completions: DEFAULT_PENDING_FRAME_COMPLETIONS,
             max_buffered_frame_completions: DEFAULT_BUFFERED_FRAME_COMPLETIONS,
+            runtime_frame_timings: false,
         }
     }
 }

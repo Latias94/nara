@@ -691,6 +691,24 @@ The ordinary Two-Level Game `runtime_cost` consumer records the same public obse
 original frame/telemetry/cleanup checks; ordinary game and development child options leave them
 disabled. No game protocol or Runtime permission changes.
 
+For more detail inside the existing native Runtime render transaction, select
+`WgpuBackendTelemetryConfig::default().with_runtime_frame_timings()` through
+`DesktopRunOptions::with_telemetry`. The default telemetry configuration leaves these wall
+observations disabled. Read `frame_transaction_stats().runtime_timings()` from the original
+`WgpuRenderObservation`, and use `get(WgpuRuntimeFramePhase)` on that optional snapshot.
+`WgpuRuntimeFramePhase::ALL` lists namespace preparation, Surface acquisition, candidate preparation,
+program execution and Surface presentation in their original execution order. These disjoint calls
+exclude other App/frame work. A returned error can have a completed operation span; absent means
+unobserved, unreached or unwound, never measured zero. Transaction counters and original receipts
+remain the outcome authority. Other execution paths do not fill these Runtime-only phases.
+
+Keep the original Runtime/App/render/window/backend/device identity when copying these facts.
+Only compare their sum with a matching enclosing App-frame observation. An initial presentation
+without that App start can retain its actual operation spans, but cannot supply an App-frame
+residual. Durations include synchronous driver/error-scope waits and are neither CPU usage, GPU
+execution nor scanout. The ordinary game's `runtime_workload` consumer preserves these facts,
+startup observations and complete Travel/retirement acceptance in its finite report.
+
 Use `DesktopRunOptions::with_initial_pause()` for a game-owned controlled session and
 `with_initial_visibility(false)` to create its original native window hidden and non-activating.
 `reveal()` acts on that live original window and requests another native frame; it does not

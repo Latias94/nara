@@ -29,6 +29,7 @@ mod readback_tests;
 mod requirements;
 mod retirement;
 mod runtime;
+mod runtime_timing;
 #[cfg(feature = "stock-sprite")]
 mod sprite;
 #[cfg(all(test, feature = "stock-sprite"))]
@@ -128,6 +129,7 @@ pub use crate::program::{
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::retirement::{WgpuGpuRetirement, WgpuGpuRetirementError};
+pub use crate::runtime_timing::{WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings};
 #[cfg(feature = "stock-ui")]
 pub use crate::stock_policy::WgpuCompositeColor;
 pub use crate::stock_policy::{

@@ -30,6 +30,9 @@ use crate::frame::{LegacyWgpuCapturedFrame, LegacyWgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::quad::create_quad_texture_bind_group_layout;
+use crate::runtime_timing::{
+    RuntimeFramePhaseCapture, WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings,
+};
 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::stock_quad::StockQuadResources;
 use crate::surface::{
@@ -75,6 +78,7 @@ pub struct WgpuFrameTransactionStats {
     candidate_instance_buffer_demand_bytes: u64,
     submitted_instance_buffer_demand_bytes: u64,
     native_work: crate::WgpuNativeWorkStats,
+    runtime_timings: Option<WgpuRuntimeFrameTimings>,
     #[cfg(feature = "stock-ui")]
     ui_packet_count: u64,
     #[cfg(feature = "stock-ui")]
@@ -262,6 +266,17 @@ impl WgpuSubmittedUiFacts {
 }
 
 impl WgpuFrameTransactionStats {
+    /// Returns opt-in wall spans for returned calls in this original Runtime transaction.
+    ///
+    /// `None` means phase timing was disabled at the transaction boundary. An enabled snapshot
+    /// can have absent phases after early rejection or unwind. Spans include returned errors and
+    /// driver waits; they are neither complete frame durations nor success receipts.
+    /// Only the managed Runtime path records these phases.
+    #[must_use]
+    pub const fn runtime_timings(self) -> Option<WgpuRuntimeFrameTimings> {
+        self.runtime_timings
+    }
+
     /// Returns issued preparation/program work for all attempts in this transaction.
     /// Publication, failure, completion and resource retirement do not refund these counts.
     #[must_use]
@@ -404,6 +419,7 @@ pub(crate) struct WgpuRenderBackend {
     #[cfg(test)]
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
+    runtime_frame_timings_enabled: bool,
     presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
     #[cfg(feature = "stock-ui")]
     submitted_ui_facts: Vec<WgpuSubmittedUiFacts>,
@@ -638,6 +654,7 @@ impl WgpuRenderBackend {
     /// earlier instance-buffer submission is retained conservatively and reported as a lost
     /// retirement.
     pub fn configure_telemetry(&mut self, config: WgpuBackendTelemetryConfig) {
+        self.runtime_frame_timings_enabled = config.runtime_frame_timings_enabled();
         self.telemetry.configure(config);
     }
 
@@ -717,6 +734,9 @@ impl WgpuRenderBackend {
     ) {
         self.frame_transaction_stats =
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
+        self.frame_transaction_stats.runtime_timings = self
+            .runtime_frame_timings_enabled
+            .then(WgpuRuntimeFrameTimings::default);
         #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             self.stock_quad.reset_instance_budget();
@@ -728,6 +748,22 @@ impl WgpuRenderBackend {
         }
         #[cfg(feature = "stock-ui")]
         self.clear_submitted_ui_facts();
+    }
+
+    pub(crate) fn begin_runtime_frame_phase(&self) -> RuntimeFramePhaseCapture {
+        RuntimeFramePhaseCapture::start(self.frame_transaction_stats.runtime_timings.is_some())
+    }
+
+    pub(crate) fn finish_runtime_frame_phase(
+        &mut self,
+        phase: WgpuRuntimeFramePhase,
+        capture: RuntimeFramePhaseCapture,
+    ) {
+        capture.finish(|elapsed| {
+            if let Some(timings) = &mut self.frame_transaction_stats.runtime_timings {
+                timings.record(phase, elapsed);
+            }
+        });
     }
 
     pub(super) fn reject_captured_packet(&mut self) {
