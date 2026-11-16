@@ -200,6 +200,10 @@ impl<'a> SchemaAuthority<'a> {
         Ok(())
     }
 
+    /// Moves a current-version value unchanged without invoking a migration callback.
+    ///
+    /// Successful native migrations strictly advance the version. An unchanged returned version
+    /// therefore preserves the input value and its existing bounded materialization cost.
     pub(crate) fn migrate_owned(
         self,
         component: &ComponentTypeId,

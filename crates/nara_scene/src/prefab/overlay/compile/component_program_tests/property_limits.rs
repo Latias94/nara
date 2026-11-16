@@ -596,6 +596,7 @@ fn property_cost_tracks_growth_shrink_and_absent_across_root_bindings() {
 #[test]
 fn migration_and_defaults_replace_raw_value_cost_before_publication() {
     for (raw, migrated, expected) in [
+        (cost_payload(256), None, 256),
         (cost_payload(4), Some(cost_payload(256)), 256),
         (cost_payload(256), Some(cost_payload(4)), 4),
         (cost_payload(256), Some(empty()), 16),

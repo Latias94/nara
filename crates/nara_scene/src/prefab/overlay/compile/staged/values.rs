@@ -266,13 +266,16 @@ where
                     return Err(SceneCompilationFailureKind::Component.into());
                 }
             };
-            if authority.native_snapshot().is_some() && migrated.version != previous_version {
+            let version_changed = migrated.version != previous_version;
+            if authority.native_snapshot().is_some() && version_changed {
                 self.context.source_upgrade_required = true;
             }
             record.version = migrated.version;
             record.value = migrated.value;
-            cost = validate_value_materialization_budget(&record.value, limits)
-                .map_err(|error| self.normalization_failure(&error, entity))?;
+            if version_changed {
+                cost = validate_value_materialization_budget(&record.value, limits)
+                    .map_err(|error| self.normalization_failure(&error, entity))?;
+            }
         }
         let schema = authority.current_schema(component, &record)?;
         cost = self.materialize_defaults(schema, &mut record, cost, entity)?;
