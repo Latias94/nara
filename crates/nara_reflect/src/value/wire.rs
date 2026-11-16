@@ -1,11 +1,18 @@
 //! String discriminants remain intact when a containing format buffers a value before its tag.
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
+#[cfg(test)]
+mod tests;
+
+use std::{collections::BTreeMap, fmt};
+
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor},
+    ser::SerializeStruct,
+};
 
 use super::{ComponentFloat, ComponentValue};
 
-// These are exactly the existing payload types, buffered by serde only when their tag follows
-// the payload. No source interpretation, reference resolution or second value model is added.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Payload {
@@ -20,47 +27,227 @@ enum Payload {
     Unit(()),
 }
 
-fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Payload>, D::Error> {
-    Payload::deserialize(deserializer).map(Some)
+enum Field {
+    Type,
+    Value,
+}
+
+impl<'de> Deserialize<'de> for Field {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(FieldVisitor)
+    }
+}
+
+struct FieldVisitor;
+
+impl<'de> Visitor<'de> for FieldVisitor {
+    type Value = Field;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a component value field")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        match value {
+            "type" => Ok(Field::Type),
+            "value" => Ok(Field::Value),
+            _ => Err(E::unknown_field(value, &["type", "value"])),
+        }
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        match value {
+            0 => Ok(Field::Type),
+            1 => Ok(Field::Value),
+            _ => Err(E::invalid_value(de::Unexpected::Unsigned(value), &self)),
+        }
+    }
+
+    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
+        match std::str::from_utf8(value) {
+            Ok(value) => self.visit_str(value),
+            Err(_) => Err(E::invalid_value(de::Unexpected::Bytes(value), &self)),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for ComponentValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct ValueWire {
-            #[serde(rename = "type")]
-            kind: String,
-            #[serde(default, deserialize_with = "present")]
-            value: Option<Payload>,
+        deserializer.deserialize_struct("ValueWire", &["type", "value"], ValueVisitor)
+    }
+}
+
+struct ValueVisitor;
+
+impl<'de> Visitor<'de> for ValueVisitor {
+    type Value = ComponentValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("struct ValueWire")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut kind = None;
+        let mut value = None;
+        while let Some(field) = map.next_key::<Field>()? {
+            match field {
+                Field::Type => {
+                    if kind.is_some() {
+                        return Err(de::Error::duplicate_field("type"));
+                    }
+                    kind = Some(map.next_value::<String>()?);
+                }
+                Field::Value => {
+                    if value.is_some() {
+                        return Err(de::Error::duplicate_field("value"));
+                    }
+                    value = Some(map.next_value_seed(PayloadSeed(kind.as_deref()))?);
+                }
+            }
         }
-        let wire = ValueWire::deserialize(deserializer)?;
-        match (wire.kind.as_str(), wire.value) {
-            ("null", None | Some(Payload::Unit(()))) => Ok(Self::Null),
-            ("bool", Some(Payload::Bool(value))) => Ok(Self::Bool(value)),
-            ("i64", Some(Payload::Signed(value))) => Ok(Self::I64(value)),
-            ("i64", Some(Payload::Unsigned(value))) => i64::try_from(value)
-                .map(Self::I64)
-                .map_err(serde::de::Error::custom),
-            ("u64", Some(Payload::Unsigned(value))) => Ok(Self::U64(value)),
-            ("u64", Some(Payload::Signed(value))) => u64::try_from(value)
-                .map(Self::U64)
-                .map_err(serde::de::Error::custom),
-            ("f64", Some(Payload::Float(value))) => Ok(Self::F64(value)),
-            ("f64", Some(Payload::Signed(value))) => ComponentFloat::new(value as f64)
-                .map(Self::F64)
-                .map_err(serde::de::Error::custom),
-            ("f64", Some(Payload::Unsigned(value))) => ComponentFloat::new(value as f64)
-                .map(Self::F64)
-                .map_err(serde::de::Error::custom),
-            ("string", Some(Payload::Text(value))) => Ok(Self::String(value)),
-            ("list", Some(Payload::List(value))) => Ok(Self::List(value)),
-            ("map", Some(Payload::Map(value))) => Ok(Self::Map(value)),
-            ("entity_ref", Some(Payload::Reference(value))) => Ok(Self::EntityReference(value)),
-            _ => Err(serde::de::Error::custom(
-                "component value payload does not match its type",
-            )),
+        decode_value(
+            kind.as_deref()
+                .ok_or_else(|| de::Error::missing_field("type"))?,
+            value,
+        )
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+        let kind = sequence
+            .next_element::<String>()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+        let value = sequence.next_element_seed(PayloadSeed(Some(&kind)))?;
+        decode_value(&kind, value)
+    }
+}
+
+fn decode_value<E: de::Error>(kind: &str, value: Option<Payload>) -> Result<ComponentValue, E> {
+    match (kind, value) {
+        ("null", None | Some(Payload::Unit(()))) => Ok(ComponentValue::Null),
+        ("bool", Some(Payload::Bool(value))) => Ok(ComponentValue::Bool(value)),
+        ("i64", Some(Payload::Signed(value))) => Ok(ComponentValue::I64(value)),
+        ("i64", Some(Payload::Unsigned(value))) => i64::try_from(value)
+            .map(ComponentValue::I64)
+            .map_err(serde::de::Error::custom),
+        ("u64", Some(Payload::Unsigned(value))) => Ok(ComponentValue::U64(value)),
+        ("u64", Some(Payload::Signed(value))) => u64::try_from(value)
+            .map(ComponentValue::U64)
+            .map_err(serde::de::Error::custom),
+        ("f64", Some(Payload::Float(value))) => Ok(ComponentValue::F64(value)),
+        ("f64", Some(Payload::Signed(value))) => ComponentFloat::new(value as f64)
+            .map(ComponentValue::F64)
+            .map_err(serde::de::Error::custom),
+        ("f64", Some(Payload::Unsigned(value))) => ComponentFloat::new(value as f64)
+            .map(ComponentValue::F64)
+            .map_err(serde::de::Error::custom),
+        ("string", Some(Payload::Text(value))) => Ok(ComponentValue::String(value)),
+        ("list", Some(Payload::List(value))) => Ok(ComponentValue::List(value)),
+        ("map", Some(Payload::Map(value))) => Ok(ComponentValue::Map(value)),
+        ("entity_ref", Some(Payload::Reference(value))) => {
+            Ok(ComponentValue::EntityReference(value))
         }
+        _ => Err(serde::de::Error::custom(
+            "component value payload does not match its type",
+        )),
+    }
+}
+
+struct PayloadSeed<'a>(Option<&'a str>);
+
+impl<'de> DeserializeSeed<'de> for PayloadSeed<'_> {
+    type Value = Payload;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        match self.0 {
+            Some("list") => deserializer.deserialize_any(ListVisitor).map(Payload::List),
+            Some("map") => deserializer.deserialize_any(MapVisitor).map(Payload::Map),
+            _ => Payload::deserialize(deserializer),
+        }
+    }
+}
+
+struct ListVisitor;
+
+impl<'de> Visitor<'de> for ListVisitor {
+    type Value = Vec<ComponentValue>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a sequence of component values")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+        let mut values = Vec::new();
+        while let Some(value) = sequence.next_element_seed(NestedValueSeed)? {
+            values.push(value);
+        }
+        Ok(values)
+    }
+}
+
+struct NestedValueSeed;
+
+impl<'de> DeserializeSeed<'de> for NestedValueSeed {
+    type Value = ComponentValue;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+struct MapVisitor;
+
+impl<'de> Visitor<'de> for MapVisitor {
+    type Value = BTreeMap<String, ComponentValue>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a map of component values")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut values = BTreeMap::new();
+        while let Some(key) = map.next_key_seed(StringKeySeed)? {
+            values.insert(key, map.next_value_seed(NestedValueSeed)?);
+        }
+        Ok(values)
+    }
+}
+
+struct StringKeySeed;
+
+impl<'de> DeserializeSeed<'de> for StringKeySeed {
+    type Value = String;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(StringKeyVisitor)
+    }
+}
+
+struct StringKeyVisitor;
+
+impl<'de> Visitor<'de> for StringKeyVisitor {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a string map key")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(value.to_owned())
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(value)
+    }
+
+    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
+        std::str::from_utf8(value)
+            .map(str::to_owned)
+            .map_err(|_| E::invalid_value(de::Unexpected::Bytes(value), &self))
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+        String::from_utf8(value)
+            .map_err(|error| E::invalid_value(de::Unexpected::Bytes(error.as_bytes()), &self))
     }
 }
 
