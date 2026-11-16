@@ -3306,6 +3306,19 @@ helper ordering boundary. The superseded module-local schedule is removed before
 review closes its P1 without remaining P1/P2. Full Foundation/R9/R10/R12 and foreign execution stay
 open, with UI/Dialogue paused.
 
+The [large Tilemap payload study](../../research/2026-11-17-large-tilemap-payload-ownership.md)
+compares pinned official packed inline/chunk data with Nara's generic effective-value ownership.
+A frozen borrowed-view or typed payload remains a research candidate, requiring complete codec,
+receiving/reference/cook consumption rather than hidden flattening. The separate
+[isolated migration/default correction](../../plans/2026-11-13-rust-state-reconstruction-plan.md#preserve-isolated-migration-storage-during-defaults)
+at `e2c2a38` preserves unique migration storage through the existing default interpreter. Reflect/Scene release
+libraries pass 1,038/1,038, selected public Scene consumers 62/62 and public effective-value/error
+controls 18/18 without skips; owning correctness Clippy, feature-free production and formatting/
+document checks pass. The first copy of shared current-version values remains. No new native
+measurement, value representation, budget or asset-lifecycle owner is selected by that bounded
+correction. The representation decision now compares actual persistent configuration/cells
+granularity before imposing a common borrowed read interface.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

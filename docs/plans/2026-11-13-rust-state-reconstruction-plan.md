@@ -3005,3 +3005,184 @@ owner-trial timing case skipped. Final release game/library/metric/span/native a
 assertions. Independent final review closes the superseded private-schedule P1 and finds no
 remaining P1/P2. The remaining Input ordering Rustdoc is synchronized without another behavior
 change. These Windows/Rust1.95 results do not qualify foreign native execution or complete R10/R12.
+
+### Closed Effective Values And Large Payload Follow-up
+
+Status: Reflect/Scene research at `2dd0083`. No new value representation is selected or implemented;
+the existing sharing qualification and measured limits remain unchanged. The
+[pinned Tilemap ownership study](../research/2026-11-17-large-tilemap-payload-ownership.md)
+compares current Nara, Godot and Bevy sources, including typed inline and external-asset alternatives.
+
+The [current value representation](../../crates/nara_reflect/src/value.rs),
+`ComponentValue::List(Vec<ComponentValue>)` and `ComponentValue::Map(BTreeMap<String, ComponentValue>)`,
+has deep public `Clone`. The private
+[`ComponentPayload`](../../crates/nara_scene/src/component_payload.rs) shares only a complete tree;
+`make_mut()` and `into_owned()` copy shared storage. Preserve source wire and omissions,
+`SceneComponentRecord::clone()` independence, and its `value()`, `value_mut()`, `set_value()` and
+`into_value()` ownership rules. Public access must not detach an uncharged shared allocation.
+[ADR0045](../architecture/adr/0045-component-schema-capability-metadata.md#effective-values) keeps
+migration before one Reflect default interpretation. [ADR0006](../architecture/adr/0006-scene-and-prefab-data-model.md)
+requires closed current compiled values, selected owner, complete canonical provenance and full
+batch validation before codecs; receiving definitions cannot supply missing defaults or migrations.
+
+Three implementable alternatives remain under consideration:
+
+1. **Reuse an already owned candidate.**
+   [`Compiler::materialize_program`](../../crates/nara_scene/src/prefab/overlay/compile/staged/values.rs)
+   obtains an isolated migration input through `SceneComponentRecord::take_value()`, then stores
+   the owned result. `Compiler::materialize_defaults` subsequently borrows that result, so an
+   insertion through `effective_component_value_cow_impl` copies the tree again. This is a real
+   current structural gap and a separate bounded correction: route an independently owned result
+   through `effective_component_value_owned_with_default_overrides`, preserving the shared
+   planner/preflight/application. Public interfaces need not change. A private non-copying
+   uniqueness check could extend the route; `into_owned()` itself is not such a check. This does
+   not remove the first copy of a current-version shared source with omitted fields and is not
+   evidence of a 16K optimization.
+
+2. **Frozen overlay with a borrowed effective-value view: conditional research candidate.**
+   Reuse [`DefaultPlan`, `plan_defaults_with_admission` and `preflight_plan`](../../crates/nara_reflect/src/effective.rs)
+   to freeze selected defaults and paths over private admitted backing. Selection finishes during
+   compilation; reads do not consult a receiving Schema. Unchanged children remain borrowed, with
+   no second default interpreter. This requires complete consumer migration: registry
+   `ComponentCodec::preflight_with_context` and `register_*_with_codec` inputs; derived
+   `PersistentComponentProvider::__decode_persistent_component`, `PersistentFieldCodec::decode`
+   and generated field reads; compiler draft/output and `CompiledSceneComponent::value()`;
+   shape/coverage and complete native validation; asset/entity reference planning, visits and
+   rewriting; and actual cook/export consumers. A compatibility adapter that silently flattens
+   before the real codec merely relocates the copy. Actual property/reference writes and
+   [`runtime_scene::cook::clone_claims`](../../crates/nara_scene/src/runtime_scene/cook.rs) may retain
+   explicit admitted deep-materialization paths. Source records can retain their existing public
+   owning interfaces; compiled/expanded observations need views. The compiled contract must
+   describe a frozen explicit effective value without weakening closure or receiving checks.
+
+3. **Private persistent children.** Extend the same read interface with path-copying Map/List
+   storage for repeated property and reference edits. Preserve the public owning `ComponentValue`
+   and deep extraction; expose no clonable backing handle. This adds compiler mutation work,
+   retained old-backing accounting and bounded compaction. A shallow root Map copy alone still
+   deep-clones its List children. Current evidence does not select a persistent editing tree.
+
+All alternatives retain complete per-occurrence materialized node/byte/depth limits and independent
+full logical payload plus backing charges for source, compiled and prepared owners. Sharing cannot
+deduplicate allowances or enlarge limits. `Compiler::reserve_program_temporary` and
+`value_work_bytes` currently reserve whole-value work using `96 * nodes + logical_bytes`; overlay
+storage would need separate admitted patch/backing allocations while preserving complete logical
+value and traversal charges. Every actual deep extraction must still be admitted before copying.
+
+Preplanning can consume one ordinary plan before capture for an admitted current-version value.
+It cannot make retained source storage unique or justify filling authored omissions. Old versions
+must first execute `ComponentRegistrySnapshot::migrate_component_value_owned` once, then plan its
+actual result. Do not probe by executing migration/native callbacks twice or run
+`component_defaults_are_explicit_with_admission` followed by a second charged plan.
+
+A large generic List with small omitted defaults is useful supplemental mechanism coverage.
+It does not itself establish pressure to replace every codec's read interface. Reflect/derive,
+Scene compiler/receiver/cook and domain codecs would all need migration if a view is selected;
+that cost belongs in the decision before implementation.
+
+#### Next Executable Consumer: Tilemap Payload Representation Decision
+
+Execution direction: first compare the actual Tilemap ownership boundaries, then select one
+complete production refactor. The first named discriminator remains the original 16K Travel
+consumer, including direct and root-bound Prefab content. A generic effective-value view remains
+a candidate. Do not make it an engine-wide prerequisite before evaluating domain ownership.
+
+| Candidate | Distinct hypothesis | Required discriminating evidence |
+| --- | --- | --- |
+| Frozen defaults plus borrowed read view | The existing generic component boundary is appropriate, but effective reads should not require a full owning tree. | Preserve source wire/omissions and consume the frozen result directly through actual Tilemap validation, references and native codec. Ordinary flattening or offsetting traversal costs can disprove the expected benefit. |
+| Separate persistent configuration and cell records | The current component boundary couples unrelated configuration defaults to large data; existing whole-component sharing may suffice at the right boundary. | Keep the current cell List/Map representation initially. Configuration default insertion must not own/copy cells again. Joining the records must preserve exact entity, Prefab/override, receiving, native preparation and cook semantics without rebuilding the monolithic generic tree. |
+| Compact inline cells | Nested generic source decoding/allocation warrants a domain-specific encoding. | Decode before constructing the old generic cell tree. Measure remaining whole-block copying separately; packing after full generic decoding does not test this hypothesis. Preserve Nara coordinate/index/color semantics rather than copying narrower upstream encodings. |
+
+Trace each candidate through source decode, effective defaults, raw/declared references and
+validation, compiled storage, native preparation and cook. Identify each allocation, full walk,
+retained old backing, public-interface change, Schema version, Prefab path and source-upgrade
+responsibility. Correct the affected Accepted ADRs before changing their contracts. A runtime-only
+Rust struct split occurs too late to resolve the measured compiler copy. A persistent-record split
+also has migration/ergonomic costs and must not be presumed cheap.
+
+Prefer an initial bounded vertical comparison of separate persistent configuration/cells while
+keeping the existing cell encoding. This distinguishes ownership granularity from source encoding;
+it does not require three production implementations or a new benchmarking framework. Preserve
+large generic Scene data support. Select a shared read interface only if an actual retained mixed
+value/override/reference workflow cannot reasonably be served by the domain boundary, or measured
+complete-consumer evidence justifies its additional migration cost.
+
+All candidates retain complete per-occurrence materialized node/byte/depth ceilings, source,
+compiled and prepared owners' full logical payload/backing fees, original cumulative work and
+pre-allocation scratch/copy admission. A packed block is not a one-node budget exemption. Receiving
+definitions cannot add defaults or migrations; all records validate before the first native codec.
+Public source copies remain independent. Preserve cancellation, generation capacity, old captured
+values after source edits and final refunds. Keep one original publication, residency and render owner.
+
+The existing compiler/receiver/cook controls and 64/4K/16K travel/source-removal/retained-input GPU
+replay/panic cleanup remain the product acceptance. Compare the frozen qualified `2dd0083` program
+with actual final source, equal compiler/profile, equivalent gameplay/geometry and balanced order.
+The view candidate preserves source bytes. Record or encoding changes retain the original baseline
+and explicitly identify semantically equivalent new input; report old-format upgrade separately
+from ordinary new-format loading. Do not fill omitted `sort_key`/`y_sort_anchor` to conceal the
+problem. If component count or phase calls change, retain and explain actual counts rather than
+silently dropping the original oracle. Report cumulative nested phase observations separately
+from whole-process variation; no physical-memory, CPU/GPU duration or production-tail claim follows
+from sharing or packed storage alone.
+
+Only the comparison selects the full production direction. Source evidence from official Godot
+and Bevy supports testing inline and configuration/data granularity, not compulsory external cell
+assets or a fastest implementation. Independent reuse/publication/lifetime pressure is needed
+before adding cell asset identity. A plan review corrected the earlier premature preference for
+engine-wide borrowed values and the use of a synthetic generic List as its primary justification;
+neither finding changes the isolated-migration correction below.
+
+### Preserve Isolated Migration Storage During Defaults
+
+Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
+already-owned path before selecting a broader value representation. An actual source migration
+obtains an isolated owned value and stores its
+result in a fresh component-local allocation. If that result still needs defaults, the current
+borrowed materializer copies it again. This is unnecessary ownership loss, distinct from the first
+copy still required for a shared current-version source with omitted fields.
+
+Reflect keeps one default selection, plan, complete effective preflight and application. Add its
+hidden in-place operation for an already admitted isolated value. Scene uses `Arc::get_mut` to
+obtain private unique storage without requesting copy-on-write; only that route uses the in-place
+operation. Shared source values retain the existing borrowed materializer. Do not infer uniqueness
+from a detached count, expose a public mutable backing handle, clone contextual declarations or
+plan twice. Original source/context validation, migration callback order, diagnostic mapping,
+complete effective limits and conservative work/retained fees remain unchanged.
+
+Acceptance requires actual migration followed by missing-default insertion to preserve the
+migration result's large List allocation, while source and preceding compiled output remain
+unchanged. The original migration callback runs once per attempted compilation; failure paths
+retain their full diagnostics and bounded admission. Reflect's nested Map/List suffix and contextual
+override matrix compares owned/borrowed/in-place costs and exact/one-short byte/node/depth errors,
+with no mutation on preflight refusal. Explicit Null and no-insertion prior admission remain.
+This does not claim a speedup for the unchanged 16K Tile workload or qualify a frozen-overlay,
+packed cell format, independent cell asset or persistent editing tree.
+
+The full all-feature Reflect/Scene release libraries pass 1,038/1,038 without skips at
+`f30f45c2-3038-4f7d-a25b-1c30bb557505`. The new real registry migration test preserves the migration
+result's List allocation through default insertion and checks exact work, one-short work,
+effective-depth and initial source-node refusal with the original callback counts. Source and
+previous compiled values remain unchanged. The initial focused Reflect defaults/admission cohort
+also passes 20/20 at `db721847-b773-45af-868f-02e7558904b6`, with 221 outside its filter.
+Independent code review finds no P1/P2 and requests two additional direct failure controls:
+late sparse-plan refusal before any insertion and actual migrated invalid-default-parent refusal.
+Both public integration controls pass in the complete selected public effective-value cohort,
+18/18 without skips at `91f03b40-a6df-49e8-82de-04fb614d2530`. Selected Scene format, default-property, effective-reference, selected-entry
+and data-binding consumers pass 62/62 at `90757ed3-925e-4a74-bc27-a71cd7504140`, without skips.
+Owning all-target/all-feature release correctness Clippy, feature-free Reflect/Scene production
+library checks, final root formatting and owned document links/whitespace pass; existing warnings
+remain. No manifest, lockfile or public source/compiled interface changes are needed.
+No complete native game or balanced cost comparison is rerun for this already-owned correction;
+the qualified `2dd0083` program is frozen separately as the next representation comparison's
+baseline. These results establish allocation identity and semantic/refusal behavior, not a new
+16K speedup, physical-memory or runtime-tail budget.
+
+An independent plan review also found that the first follow-up draft prematurely selected a
+common borrowed view and used a synthetic generic List as its main justification. The corrected
+decision above first compares the actual persistent Tilemap configuration/data boundary and its
+source-upgrade/native composition costs with the view and packed alternatives. Final review closes
+both findings without a remaining P1/P2. That document closure is not a measured result for any
+new representation. All five scoped research/implementation/review agents are closed.
+Cargo stays serial with one build job against the original target. The first full owner release
+test build takes 25 minutes; later selected public compilation takes 7m38s. No product acceptance
+failed or was replaced by a weaker assertion. Original paused UI/Dialogue work remains unchanged,
+and no remote CI or publication occurs. Full Foundation/R9/R10/R12 and foreign execution stay open.

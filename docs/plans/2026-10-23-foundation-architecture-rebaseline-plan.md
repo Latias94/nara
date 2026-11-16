@@ -5570,6 +5570,21 @@ complete independent replay and the final native cohort above pass. Helper order
 inside its collection rather than arbitrary raw PreUpdate peers; the guide records that migration.
 Full Foundation/R9/R10/R12 and foreign execution stay open; UI/Dialogue remains paused.
 
+The [large-payload source study](../research/2026-11-17-large-tilemap-payload-ownership.md)
+separates official Godot packed inline cells and Bevy typed chunk data from Nara's proposed
+effective-value storage. It does not select an external cell asset or claim another engine's
+performance. The [closed effective-value follow-up](2026-11-13-rust-state-reconstruction-plan.md#closed-effective-values-and-large-payload-follow-up)
+compares an end-to-end borrowed view with typed payloads while preserving complete receiving
+semantics and full original fees. The separate
+[isolated-migration correction](2026-11-13-rust-state-reconstruction-plan.md#preserve-isolated-migration-storage-during-defaults)
+at `e2c2a38` reuses already unique migration output during defaults without changing the current-version
+shared-source path. All-feature Reflect/Scene release libraries pass 1,038/1,038, selected public
+Scene consumers 62/62 and direct public effective-value/error controls 18/18, without skips.
+Owning correctness Clippy, feature-free production and formatting/document checks pass. This
+establishes allocation identity and error/source preservation for that path; it does not solve
+the measured 16K default-copy problem or add a new native/runtime cost result. The next comparison
+evaluates persistent configuration/cells granularity before selecting a common read interface.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
