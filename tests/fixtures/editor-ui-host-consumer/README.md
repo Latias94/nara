@@ -15,6 +15,18 @@ foreign/superseded/dropped candidates, action-slot filtering and explicit retry
 after capacity refusal returns the original edit/construction candidate. These
 are semantic CPU tests; compiling a UI frame is not presentation or OS input.
 
+`tests/property_children.rs` adds a separate recursive-discovery workflow through the same public
+Host. The panel discovers durable Record, Map and KeyedList selectors from bounded pages, reads a
+one-node/eight-byte leaf beside a 48 KiB untouched sibling, computes a replacement, cancels one
+candidate and retains two competing candidates. It checks exact dispatch IDs, stale refusal,
+Undo/Redo and Save, then changes memory before Reopen and verifies the complete saved source and
+old query-basis refusal. Wire names differ from durable IDs. No Dear context, native window or
+GPU is required for this workflow.
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --locked --offline --release --test property_children --test public_host --test-threads=1 --no-fail-fast --no-tests fail
+```
+
 Both optional `native` examples use public `EditorPanelImageHost` attachment in
 a real Winit window. This Host borrows the original window and accepts complete
 image candidates only through exact original native outcomes. `WgpuRenderHost`
