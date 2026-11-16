@@ -160,6 +160,10 @@ fn execute(fail_observer: bool) {
                 assert!(entry >= wall);
             }
             assert_eq!(run["runtime_phase_order"].as_array().unwrap().len(), 5);
+            assert_eq!(run["namespace_phase_order"].as_array().unwrap().len(), 5);
+            let mut adapter_requests = 0;
+            let mut device_requests = 0;
+            let mut observed_namespaces = 0;
             for frame in frames {
                 let wall = &frame["runtime_wall"];
                 if frame["initialized"] != true && wall.is_null() {
@@ -181,7 +185,62 @@ fn execute(fail_observer: bool) {
                     assert!(wall["other_app_frame_wall_ns"].is_null());
                 }
                 assert_eq!(frame["issued_native_work"].as_object().unwrap().len(), 11);
+                let namespace = &wall["namespace"];
+                let parts = namespace["phase_wall_ns"].as_array().unwrap();
+                assert_eq!(parts.len(), 5);
+                let nested_sum = parts
+                    .iter()
+                    .try_fold(0_u64, |sum, value| {
+                        if value.is_null() {
+                            Some(sum)
+                        } else {
+                            sum.checked_add(value.as_u64().unwrap())
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(
+                    namespace["measured_phase_wall_ns"].as_u64(),
+                    Some(nested_sum)
+                );
+                assert_eq!(
+                    nested_sum.checked_add(namespace["other_namespace_wall_ns"].as_u64().unwrap()),
+                    phases[0].as_u64(),
+                );
+                for index in [0, 1, 4] {
+                    assert!(parts[index].as_u64().is_some());
+                }
+                assert_eq!(parts[2].is_null(), parts[3].is_null());
+                if observed_namespaces == 0 {
+                    assert!(
+                        parts[2].as_u64().is_some(),
+                        "fresh original namespace must retain its Adapter request"
+                    );
+                    assert!(
+                        parts[3].as_u64().is_some(),
+                        "fresh original namespace must retain its Device request"
+                    );
+                } else {
+                    assert!(
+                        parts[2].is_null(),
+                        "Ready namespace must not invent another Adapter request"
+                    );
+                    assert!(
+                        parts[3].is_null(),
+                        "Ready namespace must not invent another Device request"
+                    );
+                }
+                observed_namespaces += 1;
+                adapter_requests += usize::from(!parts[2].is_null());
+                device_requests += usize::from(!parts[3].is_null());
             }
+            assert_eq!(
+                adapter_requests, 1,
+                "one original Adapter request across the complete native lifetime"
+            );
+            assert_eq!(
+                device_requests, 1,
+                "one original Device request across the complete native lifetime"
+            );
         }
         if let Some(evidence) = std::env::var_os("NARA_RUNTIME_WORKLOAD_EVIDENCE") {
             let evidence = std::path::PathBuf::from(evidence);

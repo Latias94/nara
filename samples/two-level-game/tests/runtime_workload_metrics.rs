@@ -114,6 +114,61 @@ fn startup_attribution_refusal_preserves_the_supplied_retirement_report() {
 }
 
 #[test]
+fn nested_namespace_accounting_preserves_actual_request_absence_on_reuse() {
+    let first = timing::NamespaceTiming::from_durations(
+        [1, 2, 3, 4, 5].map(|value| Some(Duration::from_nanos(value))),
+        20,
+    )
+    .unwrap();
+    let first = serde_json::to_value(first).unwrap();
+    assert_eq!(first["phase_wall_ns"], serde_json::json!([1, 2, 3, 4, 5]));
+    assert_eq!(first["measured_phase_wall_ns"], 15);
+    assert_eq!(first["other_namespace_wall_ns"], 5);
+    let reused = timing::NamespaceTiming::from_durations(
+        [
+            Some(Duration::ZERO),
+            Some(Duration::ZERO),
+            None,
+            None,
+            Some(Duration::ZERO),
+        ],
+        7,
+    )
+    .unwrap();
+    let reused = serde_json::to_value(reused).unwrap();
+    assert_eq!(
+        reused["phase_wall_ns"],
+        serde_json::json!([0, 0, null, null, 0])
+    );
+    assert_eq!(reused["other_namespace_wall_ns"], 7);
+}
+
+#[test]
+fn nested_success_accounting_refuses_missing_setup_partial_requests_and_excess_cost() {
+    for index in [0, 1, 4] {
+        let mut phases = [Some(Duration::ZERO); 5];
+        phases[index] = None;
+        assert!(timing::NamespaceTiming::from_durations(phases, 100).is_err());
+    }
+    for index in [2, 3] {
+        let mut phases = [Some(Duration::ZERO); 5];
+        phases[index] = None;
+        assert!(timing::NamespaceTiming::from_durations(phases, 100).is_err());
+    }
+    assert!(
+        timing::NamespaceTiming::from_durations([Some(Duration::from_nanos(3)); 5], 14).is_err()
+    );
+    assert!(
+        timing::NamespaceTiming::from_durations(
+            [Some(Duration::from_nanos(u64::MAX)); 5],
+            u64::MAX
+        )
+        .is_err()
+    );
+    assert!(timing::NamespaceTiming::from_durations([Some(Duration::MAX); 5], u64::MAX).is_err());
+}
+
+#[test]
 fn nearest_rank_uses_observed_values_for_small_even_and_unsorted_samples() {
     let report = observe::distribution(&[100, 1, 4, 2]).unwrap();
     assert_eq!(report["count"], 4);

@@ -668,6 +668,14 @@ excludes process loading; it is not cold-start, GPU duration or scanout. The fir
 first initialized presentation are reported separately. These explicitly observed recipes retain
 their measurement cost; ordinary shipping options leave the new clocks disabled.
 
+The nested `runtime_wall.namespace` report follows `namespace_phase_order`: Instance preparation,
+Surface creation, Adapter request, Device request and Surface configuration. It checks their sum
+inside that same frame's parent namespace span. Reused devices have absent Adapter/Device requests,
+distinct from a measured zero. The complete native control requires exactly one original request
+pair across each Travel lifetime; continued Scene changes reuse that original device. This is
+returned-call wall attribution, including original wgpu candidate probing and driver waits, without
+another adapter enumeration or a device cache shared between Runtimes.
+
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --test runtime_workload --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
 ```

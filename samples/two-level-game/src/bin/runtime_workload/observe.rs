@@ -33,7 +33,7 @@ use two_level_game::{
 };
 
 use super::process_cost::{self, ProcessCost};
-use super::timing::{RUNTIME_PHASE_NAMES, RuntimeFrameTiming};
+use super::timing::{NAMESPACE_PHASE_NAMES, RUNTIME_PHASE_NAMES, RuntimeFrameTiming};
 
 pub(super) const MAX_SAMPLES: usize = 4_096;
 const MIN_INITIALIZED_PRESENTATIONS: usize = 20;
@@ -784,6 +784,8 @@ impl Collector {
             "first_presentation": self.frames.first(),
             "first_initialized_presentation": self.frames.iter().find(|frame| frame.initialized),
             "runtime_phase_order": RUNTIME_PHASE_NAMES,
+            "namespace_phase_order": NAMESPACE_PHASE_NAMES,
+            "namespace_phase_scope": "disjoint returned native calls inside the matching namespace preparation span; Adapter/Device request spans are absent on reuse, not measured zero; contains native/driver waits; sum and other_namespace_wall_ns equal only that parent phase and must not be added to it",
             "runtime_phase_scope": "disjoint original Runtime namespace preparation, Surface acquisition, candidate preparation, program execution and Surface presentation operations within the matching App frame; includes native/driver/error-scope waits; residual is other App work and unmeasured gaps, not CPU time or inferred wait time; observations never grant presentation authority",
             "final_snapshot": snapshot_value(final_snapshot),
             "gameplay_verified": true,
