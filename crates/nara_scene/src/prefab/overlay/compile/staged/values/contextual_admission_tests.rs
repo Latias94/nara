@@ -61,6 +61,14 @@ struct Fixture {
 
 impl Fixture {
     fn new(canonical: ComponentValue, contextual: Option<ComponentValue>) -> Self {
+        Self::with_root(canonical, contextual, "payload")
+    }
+
+    fn with_root(
+        canonical: ComponentValue,
+        contextual: Option<ComponentValue>,
+        root: &str,
+    ) -> Self {
         let capabilities = ComponentCapability::SCENE_AUTHORING;
         let schema = ComponentSchema::new(
             component(),
@@ -71,7 +79,7 @@ impl Fixture {
         .with_fields([ComponentFieldSchema::optional_with_default(
             field(),
             "Payload",
-            ComponentFieldPath::from_fields(["payload"]),
+            ComponentFieldPath::from_fields([root]),
             ComponentValueShape::list(ComponentValueShape::optional(
                 ComponentValueShape::EntityRef,
             )),
@@ -95,7 +103,7 @@ impl Fixture {
         let basis = AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
         let mut record = SceneComponentRecord::new(
             ComponentSchemaVersion::ONE,
-            ComponentValue::map([("payload", empty_list())]),
+            ComponentValue::map([(root, empty_list())]),
         )
         .with_owner(owner);
         if let Some(contextual) = contextual {
@@ -217,6 +225,99 @@ fn masked_canonical_reference_default_stops_before_program_scratch() {
 }
 
 #[test]
+fn large_explicit_values_admit_actual_reference_work_without_a_depth_multiplier() {
+    for with_reference in [false, true] {
+        let mut payload = vec![ComponentValue::Null; PAYLOAD_ITEMS];
+        if with_reference {
+            payload[PAYLOAD_ITEMS / 2] =
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: SceneEntityId::new("root").unwrap(),
+                });
+        }
+        let value = ComponentValue::map([("payload", ComponentValue::List(payload))]);
+        let mut fixture = Fixture::new(empty_list(), None);
+        fixture.source.entities[0]
+            .components
+            .get_mut(&component())
+            .unwrap()
+            .value = value.clone();
+        let before = fixture.source.clone();
+        let limits = SceneCompilationLimits::default()
+            .with_working_bytes(ByteLimit::new(8 * 1024 * 1024).unwrap());
+        let report = fixture.compile(limits);
+        let document = report
+            .result
+            .as_ref()
+            .expect("bounded complete reference planning must fit");
+        assert!(
+            !report.budget_failed && !report.diagnostics.has_errors(),
+            "{report:?}"
+        );
+        assert_eq!(document.entities[0].components[&component()].value, value);
+        assert_eq!(report.usage.materialized_value_nodes, PAYLOAD_ITEMS + 2);
+        assert!(report.usage.checked_work_bytes().unwrap() <= limits.working_bytes().get());
+        assert!(report.reference_work.0 >= PAYLOAD_ITEMS);
+        assert_budget(
+            &fixture.compile(limits.with_reference_work_nodes(ItemLimit::new(64).unwrap())),
+            "reference-work-nodes",
+            64,
+        );
+        assert_eq!(fixture.source, before);
+    }
+}
+
+#[test]
+fn persistent_reference_visits_keep_long_path_storage_in_the_original_quota() {
+    use nara_identity::{
+        PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    };
+
+    let root = "route".repeat(2048);
+    let reference = ComponentValue::EntityReference(EntityReference::Persistent {
+        entity: PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("test.reference-visits").unwrap(),
+            PersistentRuntimeId::parse_str("34567890-3456-4456-8456-345678901abc").unwrap(),
+        ),
+    });
+    let value = ComponentValue::map([(root.as_str(), ComponentValue::List(vec![reference; 16]))]);
+    let mut fixture = Fixture::with_root(empty_list(), None, &root);
+    fixture.source.entities[0]
+        .components
+        .get_mut(&component())
+        .unwrap()
+        .value = value.clone();
+    let before = fixture.source.clone();
+    let defaults = SceneCompilationLimits::default();
+    assert_budget(
+        &fixture.compile(defaults),
+        "reference-work-bytes",
+        defaults.reference_work_bytes().get(),
+    );
+    let limits = defaults.with_reference_work_bytes(ByteLimit::new(usize::MAX).unwrap());
+    let observed = fixture.compile(limits);
+    assert_eq!(
+        observed.result.as_ref().unwrap().entities[0].components[&component()].value,
+        value
+    );
+    assert!(
+        !observed.budget_failed && !observed.diagnostics.has_errors(),
+        "{observed:?}"
+    );
+    let working = observed.usage.checked_work_bytes().unwrap();
+    assert!(observed.usage.scratch_bytes >= root.len() * 16 * 2 * 3);
+    let exact = limits.with_working_bytes(ByteLimit::new(working).unwrap());
+    let fits = fixture.compile(exact);
+    assert_eq!(fits.result, observed.result);
+    assert_eq!(fits.usage, observed.usage);
+    assert_budget(
+        &fixture.compile(exact.with_working_bytes(ByteLimit::new(working - 1).unwrap())),
+        "working-bytes",
+        working - 1,
+    );
+    assert_eq!(fixture.source, before);
+}
+
+#[test]
 fn hidden_contextual_payload_uses_the_original_node_and_byte_quotas() {
     for (payload, limits, kind) in [
         (
@@ -246,6 +347,8 @@ fn hidden_contextual_payload_uses_the_original_node_and_byte_quotas() {
 
 #[test]
 fn masked_defaults_fit_exact_compiler_allowances_and_refuse_one_short() {
+    let empty = Fixture::new(empty_list(), None).compile(output_limits());
+    assert_effective_empty(&empty);
     for (canonical, contextual) in [
         (null_list(), None),
         (empty_list(), Some(null_list())),
@@ -261,10 +364,11 @@ fn masked_defaults_fit_exact_compiler_allowances_and_refuse_one_short() {
             .contextual_defaults
             .is_empty()
         {
-            // One field/shape contract and the complete canonical list are visited once;
-            // ordinary reference interpretation also visits the actual empty output list.
-            assert_eq!(observed.reference_work.0, PRIOR_NODES + PAYLOAD_ITEMS + 6);
-            assert_eq!(observed.reference_work.1, PRIOR_BYTES + "payload".len());
+            assert_eq!(
+                observed.reference_work.0,
+                empty.reference_work.0 + PAYLOAD_ITEMS
+            );
+            assert_eq!(observed.reference_work.1, empty.reference_work.1);
         }
         let working = observed.usage.checked_work_bytes().unwrap();
         let (nodes, bytes) = observed.reference_work;

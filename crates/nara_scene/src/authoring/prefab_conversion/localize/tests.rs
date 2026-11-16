@@ -112,9 +112,7 @@ fn query_inventory_is_finite_deduplicated_and_uses_understood_lexical_payloads()
         ),
     );
     let records = vec![retained];
-    let limits = crate::validation::reference_traversal_limits(
-        ComponentValueMaterializationLimits::default(),
-    );
+    let limits = ComponentValueMaterializationLimits::default().reference_traversal_limits();
     let maximum = nara_core::ByteLimit::new(1024 * 1024).unwrap();
     let collected =
         source::collect_source_reference_queries(&records, &id("anchor"), &basis, limits, maximum)
@@ -148,9 +146,7 @@ fn query_inventory_accumulates_source_read_nodes_and_bytes_without_input_queries
     let records = ["first", "other"].map(|name| {
         SceneEntityRecord::new(id(name)).with_component(component(), reference(&reference_target))
     });
-    let limits = crate::validation::reference_traversal_limits(
-        ComponentValueMaterializationLimits::default(),
-    );
+    let limits = ComponentValueMaterializationLimits::default().reference_traversal_limits();
     let maximum = nara_core::ByteLimit::new(1024 * 1024).unwrap();
     let first = source::collect_source_reference_queries(
         &records[..1],
@@ -785,8 +781,34 @@ fn long_declared_reference_paths_share_the_source_preparation_work_allowance() {
             ])),
         ),
     );
-    let error = session
+    let default_error = session
         .request_complete_prefab_conversion(session.revision(), &id("anchor"), Default::default())
+        .map_err(PrefabConversionError::Source)
+        .and_then(|request| {
+            request.prepare_with_loader(None, |request, work| sources.load(request, work))
+        })
+        .unwrap_err();
+    let PrefabConversionError::Source(default_report) = default_error;
+    assert!(
+        default_report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+                && diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "budget-kind"
+                        && field.value()
+                            == nara_diagnostic::DiagnosticValueRef::Identifier(
+                                "reference-work-bytes",
+                            )
+                })
+        }),
+        "{:?}",
+        default_report.diagnostics
+    );
+    let compiler = SceneCompilationOptions::default().with_limits(
+        crate::SceneCompilationLimits::default()
+            .with_reference_work_bytes(nara_core::ByteLimit::new(usize::MAX).unwrap()),
+    );
+    let error = session
+        .request_complete_prefab_conversion(session.revision(), &id("anchor"), compiler)
         .map_err(PrefabConversionError::Source)
         .and_then(|request| {
             request.prepare_with_loader(None, |request, work| sources.load(request, work))

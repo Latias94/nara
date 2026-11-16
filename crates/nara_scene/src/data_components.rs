@@ -29,7 +29,7 @@ use nara_reflect::{
 use crate::{
     CompiledSceneComponent, SceneComponentBindings, SceneComponentBindingsAuthorityError,
     SceneEntitySource, scene_component_bindings, validate_scene_component_bindings_authority,
-    validation::{reference_traversal_limits, validate_effective_local_references},
+    validation::validate_effective_local_references,
 };
 
 /// The complete data-only component group attached to one live Scene entity.
@@ -571,7 +571,7 @@ fn validate_data_value(
             source,
         }
     })?;
-    let traversal = reference_traversal_limits(limits);
+    let traversal = limits.reference_traversal_limits();
     let assets = collect_declared_asset_references_from_schema_with_limits(
         schema,
         schema.version(),

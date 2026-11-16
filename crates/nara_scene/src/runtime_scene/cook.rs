@@ -36,7 +36,7 @@ pub(super) fn cook(
     let mut claims = clone_claims(compiled, &mut work)?;
     let identifiers =
         identity::canonical_ids(compiled.source_key(), compiled.document(), false, &mut work)?;
-    let traversal = crate::validation::reference_traversal_limits(limits.value_limits());
+    let traversal = limits.value_limits().reference_traversal_limits();
     for root in &mut claims.roots {
         *root = copy_id(root, &identifiers, &mut work)?;
     }

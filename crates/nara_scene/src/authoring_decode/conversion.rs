@@ -317,7 +317,10 @@ fn classify_materialized_record(
         )
         .map_err(publication_report)?
     };
-    let limits = reference_traversal_limits(context.limits.component_materialization_limits());
+    let limits = context
+        .limits
+        .component_materialization_limits()
+        .reference_traversal_limits();
     let plan = plan_declared_entity_references_with_admission::<(), _>(
         schema,
         effective.as_ref(),

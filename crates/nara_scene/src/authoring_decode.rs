@@ -61,7 +61,7 @@ use crate::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
     },
-    validation::{reference_traversal_limits, validate_effective_local_references},
+    validation::validate_effective_local_references,
 };
 
 /// Stable project-relative or stable-asset identity of one persistent authoring document.
@@ -2378,7 +2378,10 @@ fn classify_complete_record(
                     schema,
                     &effective,
                     &context.namespace,
-                    reference_traversal_limits(context.limits.component_materialization_limits()),
+                    context
+                        .limits
+                        .component_materialization_limits()
+                        .reference_traversal_limits(),
                     &mut context.admission,
                 )?;
             } else {
@@ -2386,7 +2389,7 @@ fn classify_complete_record(
                 schema,
                 &effective,
                 |entity| context.namespace.contains(entity),
-                reference_traversal_limits(context.limits.component_materialization_limits()),
+                context.limits.component_materialization_limits().reference_traversal_limits(),
             )
             .map_err(|_| {
                 rejection(with_public_locator(
@@ -2436,7 +2439,10 @@ fn classify_complete_record(
             reclassification::validate_reference_grammar(
                 schema,
                 &effective,
-                reference_traversal_limits(context.limits.component_materialization_limits()),
+                context
+                    .limits
+                    .component_materialization_limits()
+                    .reference_traversal_limits(),
                 &mut context.admission,
             )?;
         }
@@ -2453,7 +2459,7 @@ fn classify_complete_record(
                     reference_limits.depth(),
                 )
             } else {
-                reference_traversal_limits(reference_limits)
+                reference_limits.reference_traversal_limits()
             },
             &mut context.admission,
         )?

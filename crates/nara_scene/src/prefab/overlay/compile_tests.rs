@@ -984,16 +984,15 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         )
         .unwrap();
     assert!(references.is_empty());
-    // The complete flat proof includes the source default contract, selected defaults,
-    // raw Native values, Schema shape and both
-    // reference traversals. They share one allowance even when no reference leaves are produced.
-    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
-        schema,
-        &value,
-        Default::default(),
-        &mut admit_unit,
-    )
-    .unwrap();
+    for _ in 0..2 {
+        nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
+            schema,
+            &value,
+            Default::default(),
+            &mut admit_unit,
+        )
+        .unwrap();
+    }
     assert!(unit_nodes > 0 && unit_bytes > 0);
     let document = SceneDocument::from_ordered_roots(["first", "second"].map(|name| {
         SceneEntityRecord::new(id(name)).with_component(

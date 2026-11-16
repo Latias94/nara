@@ -7,7 +7,7 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use crate::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPathError, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentSchema, ComponentValue, ComponentValueCost, EntityReference,
-    schema::MAX_SHAPE_DEPTH,
+    EntityReferenceTraversalLimits, schema::MAX_SHAPE_DEPTH,
 };
 
 /// Bounds one expanded effective value using logical value cost rather than wire size.
@@ -48,6 +48,28 @@ impl ComponentValueMaterializationLimits {
     #[must_use]
     pub const fn depth(self) -> DepthLimit {
         self.depth
+    }
+
+    /// Derives traversal ceilings for complete references in a value admitted under these limits.
+    ///
+    /// Reference paths and field IDs add logical work beyond the stored value. Callers still admit
+    /// Schema ownership, cumulative work and allocation requests through their existing owners;
+    /// this conversion neither validates a value nor grants a larger materialization allowance.
+    #[must_use]
+    pub fn reference_traversal_limits(self) -> EntityReferenceTraversalLimits {
+        let overhead = ComponentFieldId::MAX_BYTES
+            .saturating_add(self.depth.get().saturating_mul(size_of::<u32>()))
+            .saturating_add(20);
+        EntityReferenceTraversalLimits::new(
+            ItemLimit::new(self.nodes.saturating_mul(2)).unwrap_or(ItemLimit::ONE),
+            ByteLimit::new(
+                self.bytes
+                    .saturating_mul(2)
+                    .saturating_add(self.nodes.saturating_mul(overhead)),
+            )
+            .unwrap_or(ByteLimit::ONE),
+            self.depth,
+        )
     }
 
     /// Replaces the node ceiling while retaining the exact byte ceiling and depth.
@@ -1030,6 +1052,77 @@ mod budget_tests {
         ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion,
         ComponentTypeId, ComponentValueKind,
     };
+
+    #[test]
+    fn reference_discovery_reuses_the_admitted_value_allowance_and_original_work_refusal() {
+        use crate::__private::{
+            AssetReferenceCollectionError,
+            collect_declared_effective_asset_references_with_admission,
+        };
+
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("test.LargeData"),
+            "Large data",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("items"),
+            "Items",
+            ComponentFieldPath::from_fields(["items"]),
+            crate::ComponentValueShape::list(crate::ComponentValueShape::scalar(
+                ComponentValueKind::U64,
+            )),
+        )]);
+        let value = ComponentValue::map([(
+            "items",
+            ComponentValue::List(vec![ComponentValue::U64(1); 32_768]),
+        )]);
+        let value_limits = ComponentValueMaterializationLimits::default();
+        validate_value_materialization_budget(&value, value_limits).unwrap();
+        let too_small = collect_declared_effective_asset_references_with_admission(
+            &schema,
+            ComponentSchemaVersion::ONE,
+            &value,
+            EntityReferenceTraversalLimits::default(),
+            |_, _, _| Ok::<_, ()>(()),
+        );
+        assert!(matches!(
+            too_small,
+            Err(AssetReferenceCollectionError::Reference(
+                crate::DeclaredAssetReferenceError::Traversal {
+                    source: crate::ComponentEntityReferenceRewriteError::NodeLimit { .. },
+                    ..
+                }
+            ))
+        ));
+        let limits = value_limits.reference_traversal_limits();
+        let mut visited = 0usize;
+        let references = collect_declared_effective_asset_references_with_admission(
+            &schema,
+            ComponentSchemaVersion::ONE,
+            &value,
+            limits,
+            |nodes, _, _| {
+                visited += nodes;
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        assert!(references.is_empty());
+        assert!(visited > 32_768);
+        let denied = String::from("original refusal");
+        let result = collect_declared_effective_asset_references_with_admission(
+            &schema,
+            ComponentSchemaVersion::ONE,
+            &value,
+            limits,
+            |_, _, _| Err::<(), _>(&denied),
+        );
+        let Err(AssetReferenceCollectionError::Admission(actual)) = result else {
+            panic!("original refusal must survive");
+        };
+        assert!(std::ptr::eq(actual, &denied));
+    }
 
     fn defaulted(value: ComponentValue) -> ComponentSchema {
         ComponentSchema::new(

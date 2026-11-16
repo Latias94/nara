@@ -48,7 +48,6 @@ use crate::{
         error as diagnostic_error, with_codec_error, with_entity_reference_rewrite_error,
         with_public_locator, with_public_u64,
     },
-    validation::reference_traversal_limits,
 };
 
 /// Maps source identity axes to this live export's document-local IDs.
@@ -877,7 +876,7 @@ impl ExportValueContext<'_> {
         };
         let limits = self.options.value_limits;
         let bytes = limits.bytes().saturating_sub(self.retained_bytes);
-        let traversal = reference_traversal_limits(limits);
+        let traversal = limits.reference_traversal_limits();
         let assets = collect_declared_asset_references_from_schema_with_limits(
             schema,
             schema.version(),
@@ -968,7 +967,7 @@ impl ExportValueContext<'_> {
         >(
             schema,
             value,
-            reference_traversal_limits(self.options.value_limits),
+            self.options.value_limits.reference_traversal_limits(),
         )
         .map_err(|error| invalid(&error))?;
         let bytes = self

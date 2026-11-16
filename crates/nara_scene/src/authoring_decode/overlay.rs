@@ -256,7 +256,10 @@ fn classify_record(
             match reclassification::check_reference_grammar(
                 schema,
                 &effective,
-                reference_traversal_limits(context.limits.component_materialization_limits()),
+                context
+                    .limits
+                    .component_materialization_limits()
+                    .reference_traversal_limits(),
                 &mut context.admission,
             ) {
                 Ok(()) => {}

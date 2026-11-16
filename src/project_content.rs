@@ -40,7 +40,7 @@ use nara_reflect::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     },
     ComponentValueMaterializationLimits, DeclaredAssetReference, DeclaredAssetReferenceError,
-    EntityReferenceTraversalLimits, SchemaCompositionFingerprint,
+    SchemaCompositionFingerprint,
 };
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
@@ -3439,7 +3439,7 @@ fn collect_effective_asset_references(
         schema,
         record.version(),
         record.value(),
-        EntityReferenceTraversalLimits::default(),
+        ComponentValueMaterializationLimits::default().reference_traversal_limits(),
         |_, _, allocation| {
             budget
                 .add(ProjectContentBudgetKind::WorkBytes, allocation)
@@ -4143,6 +4143,9 @@ mod tests {
     mod final_reference_demand;
     mod reference_demand;
     mod source_readiness;
+    #[cfg(feature = "project-tooling")]
+    #[path = "tilemap_custody.rs"]
+    mod tilemap_custody;
 
     use std::{
         collections::BTreeMap,

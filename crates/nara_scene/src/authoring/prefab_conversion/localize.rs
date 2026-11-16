@@ -78,9 +78,9 @@ where
     };
     // Reading retained source is independent of how much selected output is materialized.
     // Preserve the actual source admission and configured reference-work ceilings.
-    let source_references = crate::validation::reference_traversal_limits(
-        source_limits.component_materialization_limits(),
-    );
+    let source_references = source_limits
+        .component_materialization_limits()
+        .reference_traversal_limits();
     let source_references = nara_reflect::EntityReferenceTraversalLimits::new(
         nara_core::ItemLimit::new(
             source_references
@@ -377,12 +377,12 @@ fn lower(
         value: None,
     }];
     let mut entities = Vec::new();
-    let reference_limits =
-        crate::validation::reference_traversal_limits(ComponentValueMaterializationLimits::new(
-            nara_core::ItemLimit::new(nodes).ok_or_else(copy_limit)?,
-            nara_core::ByteLimit::new(maximum).ok_or_else(copy_limit)?,
-            ComponentValueMaterializationLimits::default().depth(),
-        ));
+    let reference_limits = ComponentValueMaterializationLimits::new(
+        nara_core::ItemLimit::new(nodes).ok_or_else(copy_limit)?,
+        nara_core::ByteLimit::new(maximum).ok_or_else(copy_limit)?,
+        ComponentValueMaterializationLimits::default().depth(),
+    )
+    .reference_traversal_limits();
     let mut localized_placements = source::localize_placements(
         placements,
         &fragment,

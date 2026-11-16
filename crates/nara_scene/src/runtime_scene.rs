@@ -91,7 +91,7 @@ impl RuntimeSceneLimits {
     /// checks do not introduce an unrelated smaller limit than the Scene owner itself.
     #[must_use]
     pub fn reference_traversal_limits(self) -> nara_reflect::EntityReferenceTraversalLimits {
-        crate::validation::reference_traversal_limits(self.value_limits())
+        self.value_limits().reference_traversal_limits()
     }
 
     #[must_use]

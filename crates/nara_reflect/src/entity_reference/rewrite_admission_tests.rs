@@ -76,7 +76,7 @@ fn sparse_fixture() -> (ComponentSchema, ComponentValue) {
 }
 
 #[test]
-fn empty_plan_for_large_scalar_list_has_no_rewrite_debit() {
+fn empty_plan_for_large_scalar_list_has_no_path_access_debit() {
     let schema = schema(ComponentFieldSchema::required(
         ComponentFieldId::new("values"),
         "Values",
@@ -95,6 +95,72 @@ fn empty_plan_for_large_scalar_list_has_no_rewrite_debit() {
         Ok::<_, Denied>(())
     })
     .unwrap();
+    admit_declared_entity_reference_plan_visit(&plan, value.cost(), |_, _, _| {
+        panic!("an empty visit plan must not call admission");
+        #[allow(unreachable_code)]
+        Ok::<_, Denied>(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn visits_admit_long_prefixes_for_each_reference_and_refuse_one_byte_short() {
+    const NESTING: usize = 24;
+    let name = "route".repeat(1024);
+    let mut shape = ComponentValueShape::list(ComponentValueShape::EntityRef);
+    let mut payload = ComponentValue::List(vec![
+        ComponentValue::EntityReference(local("first")),
+        ComponentValue::EntityReference(local("second")),
+    ]);
+    for _ in 0..NESTING {
+        shape = ComponentValueShape::list(shape);
+        payload = ComponentValue::List(vec![payload]);
+    }
+    let schema = schema(reference_field(
+        ComponentFieldPath::from_fields([name.as_str()]),
+        shape,
+    ));
+    let value = ComponentValue::map([(name.as_str(), payload)]);
+    let plan = plan(&schema, &value);
+    let cost = value.cost();
+    let mut total = (0usize, 0usize, 0usize);
+    admit_declared_entity_reference_plan_visit(&plan, cost, |nodes, bytes, allocation| {
+        total.0 += nodes;
+        total.1 += bytes;
+        total.2 += allocation.unwrap();
+        Ok::<_, Denied>(())
+    })
+    .unwrap();
+    assert_eq!(plan.references.len(), 2);
+    assert!(total.2 >= name.len() * (NESTING + 1) * 2 * 2, "{total:?}");
+    let mut visits = 0;
+    plan.visit(&value, |_, _| {
+        visits += 1;
+        Ok::<_, Denied>(())
+    })
+    .unwrap();
+    assert_eq!(visits, 2);
+
+    let denied = Denied;
+    let mut allocated = 0usize;
+    let result = admit_declared_entity_reference_plan_visit(&plan, cost, |_, _, allocation| {
+        allocated += allocation.unwrap();
+        if allocated >= total.2 {
+            Err(&denied)
+        } else {
+            Ok(())
+        }
+    });
+    let mut denied_visits = 0;
+    if result.is_ok() {
+        plan.visit(&value, |_, _| {
+            denied_visits += 1;
+            Ok::<_, Denied>(())
+        })
+        .unwrap();
+    }
+    assert!(std::ptr::eq(result.unwrap_err(), &denied));
+    assert_eq!(denied_visits, 0);
 }
 
 #[test]
@@ -290,7 +356,7 @@ fn unrepresentable_segment_bills_forward_none_and_the_exact_refusal() {
     ] {
         let denied = Denied;
         let mut calls = 0;
-        let error = admit_reference_rewrite_segment(
+        let error = admit_reference_access_segment(
             prefixes,
             field_bytes,
             comparisons,

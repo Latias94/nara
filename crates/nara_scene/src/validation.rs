@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_core::DepthLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::__private::{
     plan_declared_entity_references, validate_native_component_value_references_with_limits,
@@ -195,7 +195,7 @@ fn validate_effective_component_values<'a, E>(
     mut admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let limits = context.materialization_limits();
-    let traversal = reference_traversal_limits(limits);
+    let traversal = limits.reference_traversal_limits();
     let mut value_budget = SceneValueBudget::new(limits);
     let mut asset_references = Vec::new();
     for record in records {
@@ -845,25 +845,6 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SceneLocalTargetMissing;
 
-pub(crate) fn reference_traversal_limits(
-    limits: ComponentValueMaterializationLimits,
-) -> EntityReferenceTraversalLimits {
-    let overhead = ComponentFieldId::MAX_BYTES
-        .saturating_add(limits.depth().get().saturating_mul(size_of::<u32>()))
-        .saturating_add(20);
-    EntityReferenceTraversalLimits::new(
-        ItemLimit::new(limits.nodes().saturating_mul(2)).unwrap_or(ItemLimit::ONE),
-        ByteLimit::new(
-            limits
-                .bytes()
-                .saturating_mul(2)
-                .saturating_add(limits.nodes().saturating_mul(overhead)),
-        )
-        .unwrap_or(ByteLimit::ONE),
-        limits.depth(),
-    )
-}
-
 pub(crate) fn validate_effective_local_references(
     schema: &ComponentSchema,
     effective: &ComponentValue,
@@ -1032,7 +1013,7 @@ fn preflight_source_values_with_context(
         .collect::<BTreeSet<_>>();
     let value_limits = context.materialization_limits();
     let mut value_budget = SceneValueBudget::new(value_limits);
-    let traversal_limits = reference_traversal_limits(value_limits);
+    let traversal_limits = value_limits.reference_traversal_limits();
     for entity in sorted_entities(entities) {
         let mut normalized_components = Vec::new();
         for (component_id, component) in &entity.components {
@@ -1915,6 +1896,7 @@ fn push_placement_diagnostic(
 #[cfg(test)]
 mod tests {
     use crate::{SceneComponentRecord, ScenePlacement};
+    use nara_core::{ByteLimit, ItemLimit};
     use nara_ecs::Component;
     use nara_reflect::{
         ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,

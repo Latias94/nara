@@ -6,13 +6,14 @@ use std::mem::size_of;
 use nara_asset::AssetRef;
 use nara_identity::AuthoredEntityReference;
 use nara_reflect::__private::{
-    DeclaredEntityReferencePlan, plan_declared_entity_references,
-    plan_declared_value_entity_references,
+    DeclaredEntityReferencePlan, EntityReferencePlanError,
+    admit_declared_entity_reference_plan_visit, plan_declared_entity_references_with_admission,
+    plan_declared_value_entity_references_with_admission,
 };
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentSchema, ComponentTypeId, ComponentValue,
-    ComponentValueMaterializationLimits, EntityReference,
+    ComponentValueCost, ComponentValueMaterializationLimits, EntityReference,
 };
 
 use super::inputs::{InputFailure, ReferenceResolution, ResolvedReference, authored_clone_bytes};
@@ -60,16 +61,34 @@ where
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<ReferenceProgram, SceneCompilationFailure> {
-        let cost = value.cost();
         let limits = self.value_program_limits();
-        self.reserve_value_reference_work(schema, cost, limits)?;
-        let plan = plan_declared_entity_references::<PrefabReferenceRemapError>(
+        let plan = plan_declared_entity_references_with_admission::<PrefabReferenceRemapError, _>(
             schema,
             value,
-            crate::validation::reference_traversal_limits(limits),
+            limits.reference_traversal_limits(),
+            |nodes, bytes, allocation| {
+                self.context
+                    .admit_terminal_work(nodes, bytes, Some(allocation))
+            },
         )
-        .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
+        .map_err(|error| self.reference_plan_failure(entity, component, error))?;
         self.scoped_reference_program(plan, value, scope, declaration, entity, component)
+    }
+
+    fn reference_plan_failure(
+        &mut self,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+        error: EntityReferencePlanError<PrefabReferenceRemapError, ()>,
+    ) -> SceneCompilationFailure {
+        match error {
+            EntityReferencePlanError::Reference(error) => self
+                .source_value_reference_error(entity, component, &error)
+                .into(),
+            EntityReferencePlanError::Admission(()) => {
+                SceneCompilationFailureKind::WorkLimit.into()
+            }
+        }
     }
 
     /// Conversion must carry hidden lexical defaults into the new source environment too.
@@ -94,19 +113,25 @@ where
                 .find(|field| field.id() == id)
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             let limits = self.value_program_limits();
-            self.reserve_value_reference_work(schema, value.cost(), limits)?;
             self.admit(
                 size_of::<ReferenceProgram>()
                     .checked_add(128)
                     .and_then(|bytes| bytes.checked_add(provenance_string_bytes(id.as_str())?)),
             )?;
-            let plan = plan_declared_value_entity_references::<PrefabReferenceRemapError>(
+            let plan = plan_declared_value_entity_references_with_admission::<
+                PrefabReferenceRemapError,
+                _,
+            >(
                 field,
                 field.shape(),
                 value,
-                crate::validation::reference_traversal_limits(limits),
+                limits.reference_traversal_limits(),
+                |nodes, bytes, allocation| {
+                    self.context
+                        .admit_terminal_work(nodes, bytes, Some(allocation))
+                },
             )
-            .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
+            .map_err(|error| self.reference_plan_failure(entity, component, error))?;
             let program =
                 self.scoped_reference_program(plan, value, scope, declaration, entity, component)?;
             programs.insert(id.clone(), program);
@@ -123,6 +148,8 @@ where
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<ReferenceProgram, SceneCompilationFailure> {
+        let cost = value.cost();
+        self.admit_reference_visit(&plan, cost)?;
         let mut bytes = Some(0usize);
         plan.visit(value, |path, reference| {
             let target_bytes = match reference {
@@ -140,6 +167,7 @@ where
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
         self.admit(bytes)?;
+        self.admit_reference_visit(&plan, cost)?;
         let mut origins = BTreeMap::new();
         plan.visit(value, |path, reference| {
             let target = match reference {
@@ -165,6 +193,17 @@ where
             origins,
             plan: Some(plan),
         })
+    }
+
+    fn admit_reference_visit(
+        &mut self,
+        plan: &DeclaredEntityReferencePlan,
+        cost: ComponentValueCost,
+    ) -> Result<(), SceneCompilationFailure> {
+        admit_declared_entity_reference_plan_visit(plan, cost, |nodes, bytes, allocation| {
+            self.context.admit_terminal_work(nodes, bytes, allocation)
+        })
+        .map_err(|()| SceneCompilationFailureKind::WorkLimit.into())
     }
 
     pub(super) fn replace_reference_origins(
@@ -235,16 +274,18 @@ where
     ) -> Result<(), SceneCompilationFailure> {
         let plan = match program.plan.take() {
             Some(plan) => plan,
-            None => {
-                self.reserve_value_reference_work(schema, value.cost(), limits)?;
-                plan_declared_entity_references::<PrefabReferenceRemapError>(
-                    schema,
-                    value,
-                    crate::validation::reference_traversal_limits(limits),
-                )
-                .map_err(|error| self.source_value_reference_error(entity, component, &error))?
-            }
+            None => plan_declared_entity_references_with_admission::<PrefabReferenceRemapError, _>(
+                schema,
+                value,
+                limits.reference_traversal_limits(),
+                |nodes, bytes, allocation| {
+                    self.context
+                        .admit_terminal_work(nodes, bytes, Some(allocation))
+                },
+            )
+            .map_err(|error| self.reference_plan_failure(entity, component, error))?,
         };
+        self.admit_reference_visit(&plan, value.cost())?;
         let mut scoped_count = 0usize;
         let mut complete = true;
         plan.visit(value, |path, reference| {

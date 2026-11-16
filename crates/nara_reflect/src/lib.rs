@@ -145,8 +145,9 @@ pub mod __private {
     };
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError,
-        admit_declared_entity_reference_plan_rewrite, plan_declared_entity_references,
-        plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
+        admit_declared_entity_reference_plan_rewrite, admit_declared_entity_reference_plan_visit,
+        plan_declared_entity_references, plan_declared_entity_references_with_admission,
+        plan_declared_value_entity_references,
         plan_declared_value_entity_references_with_admission,
     };
     pub use crate::persistent_apply::{

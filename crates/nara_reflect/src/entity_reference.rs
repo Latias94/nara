@@ -216,6 +216,31 @@ impl DeclaredEntityReferencePlan {
 pub fn admit_declared_entity_reference_plan_rewrite<E>(
     plan: &DeclaredEntityReferencePlan,
     value_cost: ComponentValueCost,
+    admit: impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
+) -> Result<(), E> {
+    admit_declared_entity_reference_plan_access(plan, value_cost, admit)
+}
+
+/// Pre-admits one [`DeclaredEntityReferencePlan::visit`] on a structurally equivalent value.
+///
+/// The caller has already admitted that value's complete `value_cost`. The shared path-access
+/// model covers both validation and read access, including eager prefix copies, cumulative
+/// scratch and possible Reflect diagnostics. It is the same conservative bound used by the
+/// rewrite entry; caller callback work and retained output require separate admission.
+/// Empty plans make no callback calls. Arithmetic overflow is reported as `None` in the
+/// allocation delta and must be rejected. Admission does not perform the later visit.
+#[doc(hidden)]
+pub fn admit_declared_entity_reference_plan_visit<E>(
+    plan: &DeclaredEntityReferencePlan,
+    value_cost: ComponentValueCost,
+    admit: impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
+) -> Result<(), E> {
+    admit_declared_entity_reference_plan_access(plan, value_cost, admit)
+}
+
+fn admit_declared_entity_reference_plan_access<E>(
+    plan: &DeclaredEntityReferencePlan,
+    value_cost: ComponentValueCost,
     mut admit: impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
 ) -> Result<(), E> {
     let lookup_levels = (usize::BITS - value_cost.nodes().max(1).leading_zeros()) as usize;
@@ -238,7 +263,7 @@ pub fn admit_declared_entity_reference_plan_rewrite<E>(
                 ComponentFieldPathSegment::Field(name) => Some(name.len()),
                 ComponentFieldPathSegment::Index(_) => None,
             };
-            admit_reference_rewrite_segment(
+            admit_reference_access_segment(
                 segments.len() - offset,
                 field_bytes,
                 lookup_comparisons,
@@ -249,7 +274,7 @@ pub fn admit_declared_entity_reference_plan_rewrite<E>(
     Ok(())
 }
 
-fn admit_reference_rewrite_segment<E>(
+fn admit_reference_access_segment<E>(
     prefixes: usize,
     field_bytes: Option<usize>,
     lookup_comparisons: usize,

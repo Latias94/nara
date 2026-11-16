@@ -136,7 +136,9 @@ pub(super) fn check_contextual_record(
             field,
             field.shape(),
             value,
-            reference_traversal_limits(limits.component_materialization_limits()),
+            limits
+                .component_materialization_limits()
+                .reference_traversal_limits(),
             |nodes, bytes, allocated| {
                 reclassification::reference_charge(
                     admission,

@@ -23,7 +23,7 @@ pub(super) fn plan_property_references(
         field,
         shape,
         payload,
-        crate::validation::reference_traversal_limits(limits),
+        limits.reference_traversal_limits(),
     )
     .map_err(reference_error)?;
     let mut references = BTreeMap::new();
