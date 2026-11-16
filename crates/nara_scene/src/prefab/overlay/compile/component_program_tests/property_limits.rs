@@ -364,3 +364,316 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
         assert_semantic_failure(report.failure().unwrap());
     }
 }
+
+fn cost_list(items: usize) -> ComponentValue {
+    ComponentValue::List(vec![ComponentValue::String("cell".into()); items])
+}
+
+fn cost_payload(items: usize) -> ComponentValue {
+    ComponentValue::map([("payload", cost_list(items))])
+}
+
+fn cost_registry(migrated: Option<ComponentValue>) -> ComponentRegistrySnapshot {
+    let version = if migrated.is_some() {
+        ComponentSchemaVersion::new(2).unwrap()
+    } else {
+        ComponentSchemaVersion::ONE
+    };
+    let schema = ComponentSchema::new(large_component(), "Value cost", version)
+        .with_capabilities([ComponentCapability::Scene])
+        .with_fields([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("payload"),
+            "Payload",
+            ComponentFieldPath::from_fields(["payload"]),
+            ComponentValueShape::list(ComponentValueKind::String.into()),
+            cost_list(16),
+        )
+        .with_capabilities([ComponentCapability::Scene])]);
+    let mut registry = nara_reflect::ComponentRegistryBuilder::from_owner_catalog_candidate(
+        ComponentSchemaOwnerId::new("game.overlay-links"),
+        ComponentSchemaCatalog::default(),
+        None,
+    )
+    .unwrap();
+    registry
+        .register_persistent_component_with_codec::<LargePropertyValue, _, _>(
+            schema,
+            |value| Ok(LargePropertyValue(value.clone())),
+            |value| Ok(value.0.clone()),
+        )
+        .unwrap();
+    if let Some(migrated) = migrated {
+        registry
+            .register_component_migration(
+                &large_component(),
+                ComponentSchemaVersion::ONE,
+                version,
+                move |_| Ok(migrated.clone()),
+            )
+            .unwrap();
+    }
+    registry.freeze().unwrap()
+}
+
+struct CostFixture {
+    registry: ComponentRegistrySnapshot,
+    document: SceneDocument,
+    sources: InMemoryPrefabSourceResolver,
+}
+
+#[derive(Debug)]
+struct CostCompilation {
+    result: Result<crate::draft::SceneDraft, SceneCompilationFailure>,
+    usage: crate::prefab::SceneCompilationUsage,
+    diagnostics: nara_diagnostic::DiagnosticReport,
+    reference_work: (usize, usize),
+    source_upgrade_required: bool,
+}
+
+impl CostFixture {
+    fn layered(initial: usize, inner: usize, outer: PrefabPropertyIntent) -> Self {
+        let properties = |base: &str, target: &str, intent| {
+            let mut overlay = PrefabOverlay::new(key(base));
+            overlay.components.push(PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(id(target)),
+                component: large_component(),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("payload")),
+                    intent,
+                }],
+            });
+            overlay
+        };
+        let mut middle = SceneEntityRecord::new(id("middle"));
+        middle.prefab = Some(PrefabInstance {
+            overrides: Some(properties(
+                "base",
+                "host",
+                PrefabPropertyIntent::Set(cost_list(inner)),
+            )),
+            ..PrefabInstance::root(
+                request("base"),
+                key("base"),
+                PrefabEntityTarget::source(id("host")),
+            )
+        });
+        let mut anchor = SceneEntityRecord::new(id("anchor"));
+        anchor.prefab = Some(PrefabInstance {
+            overrides: Some(properties("middle", "middle", outer)),
+            ..PrefabInstance::root(
+                request("middle"),
+                key("middle"),
+                PrefabEntityTarget::source(id("middle")),
+            )
+        });
+        Self {
+            registry: cost_registry(None),
+            document: SceneDocument::from_ordered_roots([anchor]),
+            sources: InMemoryPrefabSourceResolver::new()
+                .with_prefab(
+                    request("base"),
+                    key("base"),
+                    PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("host"))
+                        .with_component(
+                            large_component(),
+                            effective_record(cost_payload(initial)),
+                        )]),
+                )
+                .with_prefab(
+                    request("middle"),
+                    key("middle"),
+                    PrefabDocument::from_ordered_roots([middle]),
+                ),
+        }
+    }
+
+    fn compile(&self, limits: SceneCompilationLimits) -> CostCompilation {
+        let before = self.document.clone();
+        let sources_before = self.sources.clone();
+        let mut loader = |source: &AssetRef, _: &mut crate::prefab::SceneCompilationWorkingSet| {
+            Ok::<_, std::convert::Infallible>(self.sources.resolve_prefab(source))
+        };
+        let mut context = crate::prefab::SceneCompilationContext::new(
+            (&self.registry).into(),
+            &mut loader,
+            SceneCompilationOptions::default().with_limits(limits),
+            None,
+        );
+        let result = crate::prefab::overlay::compile::expand_source(
+            &mut context,
+            &self.document.placements,
+            &self.document.entities,
+            None,
+        );
+        if let Err(failure) = &result {
+            context.push_expansion_failure(failure);
+        }
+        assert_eq!(self.document, before);
+        assert_eq!(self.sources, sources_before);
+        CostCompilation {
+            result,
+            usage: context.usage,
+            diagnostics: context.diagnostics,
+            reference_work: context.reference_work,
+            source_upgrade_required: context.source_upgrade_required,
+        }
+    }
+}
+
+fn exact_cost_limits(items: usize) -> SceneCompilationLimits {
+    SceneCompilationLimits::default()
+        .with_materialized_value_nodes(ItemLimit::new(items + 2).unwrap())
+        .with_materialized_value_bytes(ByteLimit::new(7 + 4 * items).unwrap())
+}
+
+fn assert_cost_value(report: &CostCompilation, items: usize) {
+    let document = report
+        .result
+        .as_ref()
+        .expect("bounded compilation must fit");
+    assert!(!report.diagnostics.has_errors(), "{report:?}");
+    assert_eq!(document.roots, [id("anchor")]);
+    assert_eq!(document.entities.len(), 1);
+    assert_eq!(document.entities[0].id, id("anchor"));
+    let record = &document.entities[0].components[&large_component()];
+    assert_eq!(record.value, cost_payload(items));
+    assert_eq!(record.owner(), Some(&owner()));
+    assert_eq!(report.usage.materialized_entities, 1);
+    assert_eq!(report.usage.materialized_components, 1);
+    assert_eq!(report.usage.materialized_value_nodes, items + 2);
+    assert_eq!(report.usage.materialized_value_bytes, 7 + 4 * items);
+}
+
+fn assert_cost_budget(report: &CostCompilation, kind: &str, maximum: usize) {
+    assert_budget_failure(report.result.as_ref().unwrap_err());
+    let diagnostic = report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded")
+        .unwrap();
+    assert_eq!(
+        field(diagnostic, "budget-kind"),
+        DiagnosticValueRef::Identifier(kind),
+    );
+    assert_eq!(
+        field(diagnostic, "maximum"),
+        DiagnosticValueRef::Unsigned(maximum as u64),
+    );
+    assert!(matches!(
+        field(diagnostic, "observed"),
+        DiagnosticValueRef::Unsigned(value) if value > maximum as u64
+    ));
+}
+
+#[test]
+fn property_cost_tracks_growth_shrink_and_absent_across_root_bindings() {
+    for (initial, inner, outer, expected) in [
+        (8, 256, PrefabPropertyIntent::Set(cost_list(4)), 4),
+        (256, 4, PrefabPropertyIntent::Set(cost_list(256)), 256),
+        (8, 256, PrefabPropertyIntent::Absent, 16),
+    ] {
+        let fixture = CostFixture::layered(initial, inner, outer);
+        let limits = exact_cost_limits(expected);
+        assert_cost_value(&fixture.compile(limits), expected);
+        assert_cost_budget(
+            &fixture.compile(
+                limits.with_materialized_value_nodes(ItemLimit::new(expected + 1).unwrap()),
+            ),
+            "materialized-value-nodes",
+            expected + 1,
+        );
+        assert_cost_budget(
+            &fixture.compile(
+                limits.with_materialized_value_bytes(ByteLimit::new(6 + 4 * expected).unwrap()),
+            ),
+            "materialized-value-bytes",
+            6 + 4 * expected,
+        );
+    }
+}
+
+#[test]
+fn migration_and_defaults_replace_raw_value_cost_before_publication() {
+    for (raw, migrated, expected) in [
+        (cost_payload(4), Some(cost_payload(256)), 256),
+        (cost_payload(256), Some(cost_payload(4)), 4),
+        (cost_payload(256), Some(empty()), 16),
+        (empty(), None, 16),
+        (cost_payload(0), None, 0),
+    ] {
+        let upgrades = migrated.is_some();
+        let fixture = CostFixture {
+            registry: cost_registry(migrated),
+            document: SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("anchor"))
+                .with_component(large_component(), effective_record(raw))]),
+            sources: InMemoryPrefabSourceResolver::new(),
+        };
+        let limits = exact_cost_limits(expected);
+        let report = fixture.compile(limits);
+        assert_cost_value(&report, expected);
+        assert_eq!(report.source_upgrade_required, upgrades);
+        assert_eq!(
+            report.result.as_ref().unwrap().entities[0].components[&large_component()].version,
+            if upgrades {
+                ComponentSchemaVersion::new(2).unwrap()
+            } else {
+                ComponentSchemaVersion::ONE
+            },
+        );
+        assert_cost_budget(
+            &fixture.compile(
+                limits.with_materialized_value_nodes(ItemLimit::new(expected + 1).unwrap()),
+            ),
+            "materialized-value-nodes",
+            expected + 1,
+        );
+        assert_cost_budget(
+            &fixture.compile(
+                limits.with_materialized_value_bytes(ByteLimit::new(6 + 4 * expected).unwrap()),
+            ),
+            "materialized-value-bytes",
+            6 + 4 * expected,
+        );
+    }
+}
+
+#[test]
+fn empty_reference_plans_keep_original_work_and_exact_budget_refusals() {
+    let fixture = CostFixture::layered(8, 256, PrefabPropertyIntent::Set(cost_list(4)));
+    let limits = exact_cost_limits(4);
+    let observed = fixture.compile(limits);
+    assert_cost_value(&observed, 4);
+    let working = observed.usage.checked_work_bytes().unwrap();
+    let (nodes, bytes) = observed.reference_work;
+    assert!(nodes > 0);
+    assert!(bytes > 0);
+    let exact = limits
+        .with_working_bytes(ByteLimit::new(working).unwrap())
+        .with_reference_work_nodes(ItemLimit::new(nodes).unwrap())
+        .with_reference_work_bytes(ByteLimit::new(bytes).unwrap());
+    let fits = fixture.compile(exact);
+    assert_cost_value(&fits, 4);
+    assert_eq!(fits.result, observed.result);
+    assert_eq!(fits.usage, observed.usage);
+    assert_eq!(fits.reference_work, observed.reference_work);
+    for (limits, kind, maximum) in [
+        (
+            exact.with_working_bytes(ByteLimit::new(working - 1).unwrap()),
+            "working-bytes",
+            working - 1,
+        ),
+        (
+            exact.with_reference_work_nodes(ItemLimit::new(nodes - 1).unwrap()),
+            "reference-work-nodes",
+            nodes - 1,
+        ),
+        (
+            exact.with_reference_work_bytes(ByteLimit::new(bytes - 1).unwrap()),
+            "reference-work-bytes",
+            bytes - 1,
+        ),
+    ] {
+        assert_cost_budget(&fixture.compile(limits), kind, maximum);
+    }
+}

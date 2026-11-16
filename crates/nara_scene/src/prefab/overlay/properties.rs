@@ -9,8 +9,9 @@ use nara_reflect::__private::{
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentPropertyError, ComponentPropertyPath, ComponentPropertyStep,
-    ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueMaterializationLimits,
-    ComponentValueShape, resolve_component_property_with_limits,
+    ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueCost,
+    ComponentValueMaterializationLimits, ComponentValueShape,
+    resolve_component_property_with_limits,
 };
 
 #[cfg(test)]
@@ -38,6 +39,7 @@ pub(super) struct PropertyReferenceReplacement {
 #[derive(Debug)]
 pub(super) struct PreparedPropertyClaims {
     pub(super) value: ComponentValue,
+    pub(super) cost: ComponentValueCost,
     pub(super) replacements: Vec<PropertyReferenceReplacement>,
 }
 
@@ -255,9 +257,10 @@ pub(super) fn prepare_claims(
                 .map_err(|_| SceneCompilationFailureKind::Component)?;
         }
     }
-    validate_value(schema, &candidate, limits)?;
+    let cost = validate_value(schema, &candidate, limits)?;
     Ok(PreparedPropertyClaims {
         value: candidate,
+        cost,
         replacements,
     })
 }

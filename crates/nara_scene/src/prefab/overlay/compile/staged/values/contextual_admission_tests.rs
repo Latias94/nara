@@ -466,3 +466,53 @@ fn contextual_admission_preserves_source_output_and_semantic_failure_classes() {
             && field.value() == DiagnosticValueRef::Identifier("component")
     }));
 }
+
+#[test]
+fn opaque_cost_preserves_raw_payload_and_separate_hidden_default_admission() {
+    let mut fixture = Fixture::new(empty_list(), Some(null_list()));
+    let record = fixture.source.entities[0]
+        .components
+        .get_mut(&component())
+        .unwrap();
+    record.version = ComponentSchemaVersion::new(2).unwrap();
+    record.value = ComponentValue::String("opaque".repeat(32));
+    let original = record.clone();
+    let before = fixture.source.clone();
+    let limits = SceneCompilationLimits::default()
+        .with_materialized_value_nodes(ItemLimit::ONE)
+        .with_materialized_value_bytes(ByteLimit::new(192).unwrap());
+    let observed = fixture.compile(limits);
+    let document = observed.result.as_ref().unwrap();
+    assert!(!observed.budget_failed && !observed.diagnostics.has_errors());
+    assert_eq!(document.entities[0].components[&component()], original);
+    assert_eq!(observed.usage.materialized_value_nodes, 1);
+    assert_eq!(observed.usage.materialized_value_bytes, 192);
+    assert!(observed.usage.scratch_bytes >= PAYLOAD_ITEMS * 96);
+    let working = observed.usage.checked_work_bytes().unwrap();
+    let exact = limits.with_working_bytes(ByteLimit::new(working).unwrap());
+    let fits = fixture.compile(exact);
+    assert_eq!(fits.result, observed.result);
+    assert_eq!(fits.usage, observed.usage);
+    assert_eq!(fits.reference_work, observed.reference_work);
+    assert_budget(
+        &fixture.compile(exact.with_working_bytes(ByteLimit::new(working - 1).unwrap())),
+        "working-bytes",
+        working - 1,
+    );
+    assert_budget(
+        &fixture.compile(limits.with_materialized_value_bytes(ByteLimit::new(191).unwrap())),
+        "materialized-value-bytes",
+        191,
+    );
+    let source_limits = ComponentValueMaterializationLimits::new(
+        ItemLimit::new(2).unwrap(),
+        ByteLimit::new(192).unwrap(),
+        DepthLimit::new(4).unwrap(),
+    );
+    assert_budget(
+        &fixture.compile(limits.with_materialization_limits(source_limits)),
+        "source-value-nodes",
+        2,
+    );
+    assert_eq!(fixture.source, before);
+}

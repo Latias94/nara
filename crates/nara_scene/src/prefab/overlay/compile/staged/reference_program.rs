@@ -36,6 +36,7 @@ pub(super) struct ScopedReference {
 pub(super) type ReferenceOrigins = BTreeMap<ComponentFieldPath, ScopedReference>;
 
 pub(super) struct ReferenceProgram {
+    pub(super) cost: ComponentValueCost,
     pub(super) origins: ReferenceOrigins,
     pub(super) plan: Option<DeclaredEntityReferencePlan>,
 }
@@ -56,6 +57,7 @@ where
         &mut self,
         schema: &ComponentSchema,
         value: &ComponentValue,
+        cost: ComponentValueCost,
         scope: ScopeId,
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
         entity: &SceneEntityId,
@@ -72,7 +74,7 @@ where
             },
         )
         .map_err(|error| self.reference_plan_failure(entity, component, error))?;
-        self.scoped_reference_program(plan, value, scope, declaration, entity, component)
+        self.scoped_reference_program(plan, value, cost, scope, declaration, entity, component)
     }
 
     fn reference_plan_failure(
@@ -132,8 +134,15 @@ where
                 },
             )
             .map_err(|error| self.reference_plan_failure(entity, component, error))?;
-            let program =
-                self.scoped_reference_program(plan, value, scope, declaration, entity, component)?;
+            let program = self.scoped_reference_program(
+                plan,
+                value,
+                value.cost(),
+                scope,
+                declaration,
+                entity,
+                component,
+            )?;
             programs.insert(id.clone(), program);
         }
         Ok(programs)
@@ -143,12 +152,12 @@ where
         &mut self,
         plan: DeclaredEntityReferencePlan,
         value: &ComponentValue,
+        cost: ComponentValueCost,
         scope: ScopeId,
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<ReferenceProgram, SceneCompilationFailure> {
-        let cost = value.cost();
         self.admit_reference_visit(&plan, cost)?;
         let mut bytes = Some(0usize);
         plan.visit(value, |path, reference| {
@@ -190,6 +199,7 @@ where
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
         Ok(ReferenceProgram {
+            cost,
             origins,
             plan: Some(plan),
         })
@@ -285,7 +295,7 @@ where
             )
             .map_err(|error| self.reference_plan_failure(entity, component, error))?,
         };
-        self.admit_reference_visit(&plan, value.cost())?;
+        self.admit_reference_visit(&plan, program.cost)?;
         let mut scoped_count = 0usize;
         let mut complete = true;
         plan.visit(value, |path, reference| {

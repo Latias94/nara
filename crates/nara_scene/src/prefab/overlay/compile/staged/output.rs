@@ -224,12 +224,17 @@ where
                 }
             }
             for (component, payload) in &mut record.components {
+                let component_programs = references
+                    .get(&node)
+                    .and_then(|components| components.get(component))
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                let reference_program = &component_programs.value;
+                let cost = reference_program.cost;
                 if !self.context.authority.can_interpret(component, payload) {
                     #[cfg(feature = "serde")]
                     if self.context.capture_unavailable_declarations {
                         self.capture_unavailable_declaration(node, id, component)?;
                     }
-                    let cost = payload.value.cost();
                     let (nodes, bytes) = self
                         .context
                         .preflight_materialized_value_cost(
@@ -244,11 +249,6 @@ where
                     self.context.usage.materialized_value_bytes = bytes;
                     continue;
                 }
-                let component_programs = references
-                    .get(&node)
-                    .and_then(|components| components.get(component))
-                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
-                let reference_program = &component_programs.value;
                 let origins = &reference_program.origins;
                 let plan = reference_program
                     .plan
@@ -323,7 +323,6 @@ where
                     );
                     SceneCompilationFailureKind::Reference
                 })?;
-                let cost = payload.value.cost();
                 let nodes = cost
                     .nodes()
                     .checked_sub(old_nodes)

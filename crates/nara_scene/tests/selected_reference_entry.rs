@@ -11,6 +11,8 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::{ByteLimit, ItemLimit};
+use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::Component;
 use nara_identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
@@ -22,11 +24,12 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    AuthoringDocumentSource, AuthoringSchemaBasis, PrefabDocument, PrefabEntityOrigin,
-    PrefabInstance, PrefabInstanceHop, PrefabReferenceArguments, ResolvedPrefabSource,
-    SceneAuthoringSession, SceneCompilationFailureKind, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    AuthoringDocumentSource, AuthoringSchemaBasis, PrefabConversionError, PrefabDocument,
+    PrefabEntityOrigin, PrefabInstance, PrefabInstanceHop, PrefabProjectionStep,
+    PrefabReferenceArguments, ResolvedPrefabSource, SceneAuthoringSession,
+    SceneCompilationFailureKind, SceneCompilationLimits, SceneCompilationOptions,
+    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    SourceDocumentKey, SourceDocumentKind,
 };
 
 const OWNER: &str = "test.selected-reference-entry";
@@ -382,6 +385,177 @@ fn query_only_entry_through_two_recursive_occurrences_localizes_the_external_rou
 #[test]
 fn argument_binding_restart_distinguishes_references_with_equal_remaining_hops() {
     assert_query_only_conversion(&Fixture::new(true));
+}
+
+#[test]
+fn selected_value_reference_recomposition_keeps_exact_effective_cost_and_history() {
+    let mut fixture = Fixture::new(false);
+    fixture
+        .document
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("watcher"))
+        .unwrap()
+        .components
+        .clear();
+    Arc::make_mut(&mut fixture.selected).entities[0]
+        .components
+        .insert(
+            component(),
+            link(reference(&[], AuthoredReferenceTarget::Input(input("x")))),
+        );
+    let selected = fixture.selected.as_ref().clone();
+    let recursive = fixture.recursive.as_ref().clone();
+    let mut session = fixture.session();
+    let before = session.shared_document();
+    let before_json = before.to_json_string().unwrap();
+    let revision = session.revision();
+    let state = session.content_state();
+    let history = session.history_status();
+    let usage = session.history_usage();
+    let effective_bytes = "target".len() + "prefab_0".len();
+    let exact = SceneCompilationLimits::default()
+        .with_materialized_components(ItemLimit::ONE)
+        .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
+        .with_materialized_value_bytes(ByteLimit::new(effective_bytes).unwrap());
+    let expected_reads = [(source("S"), 1), (source("P"), 1), (source("P"), 2)];
+
+    for (limits, kind, observed, maximum) in [
+        (
+            exact.with_materialized_value_nodes(ItemLimit::ONE),
+            "materialized-value-nodes",
+            2,
+            1,
+        ),
+        (
+            exact.with_materialized_value_bytes(ByteLimit::new(effective_bytes - 1).unwrap()),
+            "materialized-value-bytes",
+            effective_bytes,
+            effective_bytes - 1,
+        ),
+    ] {
+        let mut reads = Vec::new();
+        let refused = session
+            .request_complete_prefab_conversion(
+                revision,
+                &id("A"),
+                SceneCompilationOptions::default().with_limits(limits),
+            )
+            .unwrap()
+            .prepare_with_loader(None, |request, working| {
+                reads.push((request.clone(), working.source_depth()));
+                fixture.load(request)
+            })
+            .unwrap_err();
+        assert_eq!(reads, expected_reads);
+        let PrefabConversionError::Source(report) = refused;
+        assert!(!report.applied);
+        let diagnostic = report
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+            })
+            .expect("the final selected value must retain its exact quota diagnostic");
+        for (name, value) in [
+            ("budget-kind", DiagnosticValueRef::Identifier(kind)),
+            ("observed", DiagnosticValueRef::Unsigned(observed as u64)),
+            ("maximum", DiagnosticValueRef::Unsigned(maximum as u64)),
+        ] {
+            assert!(
+                diagnostic
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == name && field.value() == value),
+                "{diagnostic:?}"
+            );
+        }
+    }
+
+    let mut reads = Vec::new();
+    let prepared = session
+        .request_complete_prefab_conversion(
+            revision,
+            &id("A"),
+            SceneCompilationOptions::default().with_limits(exact),
+        )
+        .unwrap()
+        .prepare_with_loader(None, |request, working| {
+            reads.push((request.clone(), working.source_depth()));
+            fixture.load(request)
+        })
+        .expect("the selected input must survive both reference-driven recompositions");
+    assert_eq!(
+        reads, expected_reads,
+        "without the watcher query, only the selected Link can demand both P occurrences"
+    );
+    assert!(Arc::ptr_eq(&before, &session.shared_document()));
+    assert_eq!(session.document(), before.as_ref());
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.content_state(), state);
+    assert_eq!(session.history_status(), history);
+    assert_eq!(session.history_usage(), usage);
+    assert_eq!(fixture.native_calls.load(Ordering::Relaxed), 0);
+
+    assert_eq!(prepared.entities().len(), 1);
+    let localized = &prepared.entities()[0];
+    assert_eq!(localized.provenance().local_entity_id(), &id("s-root"));
+    let path = localized.provenance().projection_path().unwrap();
+    assert_eq!(path.root_anchor(), &id("A"));
+    assert_eq!(
+        path.steps(),
+        &[PrefabProjectionStep::SourceEntity {
+            source_document: source("S"),
+            canonical_source: key("S"),
+            entity: id("s-root"),
+        }]
+    );
+    let reviewed = prepared.document().clone();
+    assert_eq!(reviewed.entities.len(), before.entities.len() + 1);
+    assert_eq!(
+        entity(&reviewed, localized.entity().as_str()),
+        &SceneEntityRecord::new(localized.entity().clone())
+            .with_component(component(), link(external_leaf()))
+    );
+    let mut converted_anchor = entity(before.as_ref(), "A").clone();
+    converted_anchor.prefab = None;
+    assert_eq!(entity(&reviewed, "A"), &converted_anchor);
+    for name in ["outside", "watcher", "unrelated"] {
+        assert_eq!(entity(&reviewed, name), entity(before.as_ref(), name));
+    }
+    let mappings = prepared.entities().to_vec();
+    let receipt = session
+        .commit_complete_prefab_conversion_with_loader(prepared, |request| fixture.load(request))
+        .unwrap();
+    assert!(
+        receipt.report().applied,
+        "{:?}",
+        receipt.report().diagnostics
+    );
+    assert_eq!(receipt.entities(), mappings.as_slice());
+    assert_eq!(session.document(), &reviewed);
+    assert_ne!(session.revision(), revision);
+    assert_eq!(session.history_status().undo_depth, history.undo_depth + 1);
+    let converted_state = session.content_state();
+    let converted_history = session.history_status();
+    assert_ne!(converted_state, state);
+
+    let undone = session.undo_authoring();
+    assert!(undone.applied, "{:?}", undone.diagnostics);
+    assert_eq!(session.document(), before.as_ref());
+    assert_eq!(session.document().to_json_string().unwrap(), before_json);
+    assert_eq!(session.content_state(), state);
+    assert_eq!(session.history_status().undo_depth, history.undo_depth);
+    assert_eq!(session.history_status().redo_depth, history.redo_depth + 1);
+    let redone = session.redo_authoring();
+    assert!(redone.applied, "{:?}", redone.diagnostics);
+    assert_eq!(session.document(), &reviewed);
+    assert_eq!(session.content_state(), converted_state);
+    assert_eq!(session.history_status(), converted_history);
+    assert_eq!(fixture.document, *before);
+    assert_eq!(fixture.selected.as_ref(), &selected);
+    assert_eq!(fixture.recursive.as_ref(), &recursive);
+    assert_eq!(fixture.native_calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]

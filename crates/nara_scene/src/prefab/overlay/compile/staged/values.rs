@@ -82,6 +82,7 @@ where
                     .try_fold(128usize, |bytes, component| {
                         bytes
                             .checked_add(256)?
+                            .checked_add(size_of::<ComponentValueCost>())?
                             .checked_add(provenance_string_bytes(component.as_str())?)
                     })
                     .and_then(|bytes| {
@@ -220,6 +221,7 @@ where
                 record,
                 ComponentReferencePrograms {
                     value: ReferenceProgram {
+                        cost,
                         origins: BTreeMap::new(),
                         plan: None,
                     },
@@ -263,7 +265,7 @@ where
         }
         let schema = authority.current_schema(component, &record)?;
         self.materialize_defaults(schema, &mut record, entity)?;
-        components::validate_value(schema, &record.value, self.value_program_limits())?;
+        let cost = components::validate_value(schema, &record.value, self.value_program_limits())?;
         let declaration = match program.record {
             Record::Source { .. } => None,
             Record::Addition { scope, index } => {
@@ -274,6 +276,7 @@ where
         let mut references = self.record_reference_origins(
             schema,
             &record.value,
+            cost,
             record_scope,
             declaration,
             entity,
@@ -297,7 +300,7 @@ where
                     SceneCompilationFailureKind::Component.into(),
                 ));
             }
-            let old_cost = record.value.cost();
+            let old_cost = references.cost;
             let limits = self.value_program_limits();
             let claim_count = claims.len();
             let claim_work = (|| {
@@ -390,6 +393,7 @@ where
                 index,
             )?;
             record.value = prepared.value;
+            references.cost = prepared.cost;
             references.plan = None;
         }
         let limits = self.value_program_limits();

@@ -2,7 +2,8 @@
 
 use nara_reflect::{
     ComponentCodecError, ComponentSchema, ComponentShapeError, ComponentShapeErrorKind,
-    ComponentValue, ComponentValueMaterializationLimits, validate_component_value_with_limits,
+    ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits,
+    validate_component_value_with_limits,
 };
 
 use super::SceneCompilationFailureKind;
@@ -21,20 +22,20 @@ pub(super) fn reserve_cost(
 pub(super) fn check_value_cost(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-) -> Result<(), SceneCompilationFailureKind> {
+) -> Result<ComponentValueCost, SceneCompilationFailureKind> {
     value
         .cost_up_to(limits.nodes(), limits.bytes())
-        .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-    Ok(())
+        .ok_or(SceneCompilationFailureKind::WorkLimit)
 }
 
 pub(super) fn validate_value(
     schema: &ComponentSchema,
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-) -> Result<(), SceneCompilationFailureKind> {
-    check_value_cost(value, limits)?;
-    validate_component_value_with_limits(schema, value, limits).map_err(codec_failure)
+) -> Result<ComponentValueCost, SceneCompilationFailureKind> {
+    let cost = check_value_cost(value, limits)?;
+    validate_component_value_with_limits(schema, value, limits).map_err(codec_failure)?;
+    Ok(cost)
 }
 
 pub(super) fn codec_failure(error: ComponentCodecError) -> SceneCompilationFailureKind {
