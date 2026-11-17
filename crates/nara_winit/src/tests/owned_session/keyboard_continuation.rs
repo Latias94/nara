@@ -2,6 +2,7 @@
 //! Input admission, focus dispatch, paused frames, and control tickets retain their real owners.
 
 use super::*;
+use crate::keyboard_continuation::physical_key;
 use nara_app::{CoreStage, RuntimeFaultKind, RuntimeTimeSettings};
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_gameplay::{GameplayCommandBatch, GameplayCommandSet};
@@ -9,6 +10,104 @@ use nara_input::{
     InputEventOrigin, InputInvalidationReason, KeyboardActionBinding, KeyboardContinuationError,
     KeyboardHold, SemanticActions,
 };
+
+#[test]
+fn physical_keyboard_inventory_roundtrips_every_supported_code() {
+    for code in [
+        WinitKeyCode::Escape,
+        WinitKeyCode::Space,
+        WinitKeyCode::Enter,
+        WinitKeyCode::ArrowUp,
+        WinitKeyCode::ArrowDown,
+        WinitKeyCode::ArrowLeft,
+        WinitKeyCode::ArrowRight,
+        WinitKeyCode::KeyA,
+        WinitKeyCode::KeyB,
+        WinitKeyCode::KeyC,
+        WinitKeyCode::KeyD,
+        WinitKeyCode::KeyE,
+        WinitKeyCode::KeyF,
+        WinitKeyCode::KeyG,
+        WinitKeyCode::KeyH,
+        WinitKeyCode::KeyI,
+        WinitKeyCode::KeyJ,
+        WinitKeyCode::KeyK,
+        WinitKeyCode::KeyL,
+        WinitKeyCode::KeyM,
+        WinitKeyCode::KeyN,
+        WinitKeyCode::KeyO,
+        WinitKeyCode::KeyP,
+        WinitKeyCode::KeyQ,
+        WinitKeyCode::KeyR,
+        WinitKeyCode::KeyS,
+        WinitKeyCode::KeyT,
+        WinitKeyCode::KeyU,
+        WinitKeyCode::KeyV,
+        WinitKeyCode::KeyW,
+        WinitKeyCode::KeyX,
+        WinitKeyCode::KeyY,
+        WinitKeyCode::KeyZ,
+        WinitKeyCode::Digit0,
+        WinitKeyCode::Digit1,
+        WinitKeyCode::Digit2,
+        WinitKeyCode::Digit3,
+        WinitKeyCode::Digit4,
+        WinitKeyCode::Digit5,
+        WinitKeyCode::Digit6,
+        WinitKeyCode::Digit7,
+        WinitKeyCode::Digit8,
+        WinitKeyCode::Digit9,
+    ] {
+        let key = convert_key_code(code).expect("the declared physical code must be supported");
+        let physical = physical_key(key).expect("the admitted key must have a physical inverse");
+        assert_eq!(physical, code, "{key:?}");
+        assert_eq!(convert_key_code(physical), Some(key));
+    }
+}
+
+#[test]
+fn physical_keyboard_inventory_rejects_unsupported_characters() {
+    for character in ('\0'..='\u{7f}')
+        .filter(|character| !character.is_ascii_lowercase() && !character.is_ascii_digit())
+    {
+        assert_eq!(
+            physical_key(KeyCode::Character(character)),
+            None,
+            "{character:?}"
+        );
+    }
+    for character in [
+        'é', 'É', 'ß', 'λ', 'Ж', '中', 'あ', 'ａ', '１', '😀', '\u{301}',
+    ] {
+        assert_eq!(
+            physical_key(KeyCode::Character(character)),
+            None,
+            "{character:?}"
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn cpu_windows_arrow_scancode_table_preserves_extended_prefix() {
+    use winit::platform::scancode::PhysicalKeyExtScancode;
+
+    for (key, scan, numpad) in [
+        (KeyCode::ArrowUp, 0xe048, WinitKeyCode::Numpad8),
+        (KeyCode::ArrowDown, 0xe050, WinitKeyCode::Numpad2),
+        (KeyCode::ArrowLeft, 0xe04b, WinitKeyCode::Numpad4),
+        (KeyCode::ArrowRight, 0xe04d, WinitKeyCode::Numpad6),
+    ] {
+        let code = physical_key(key).unwrap();
+        assert_eq!(code.to_scancode(), Some(scan));
+        let physical = PhysicalKey::from_scancode(scan);
+        assert_eq!(physical, PhysicalKey::Code(code));
+        assert_eq!(convert_physical_key(physical), Some(key));
+        let unextended = PhysicalKey::from_scancode(scan & 0xff);
+        assert_eq!(unextended, PhysicalKey::Code(numpad));
+        assert_eq!(convert_physical_key(unextended), None);
+    }
+}
 
 #[derive(Debug, Default, Resource)]
 struct Movement {

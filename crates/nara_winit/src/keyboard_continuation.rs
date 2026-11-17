@@ -603,14 +603,55 @@ impl WinitApp {
     }
 }
 
-fn physical_key(key: KeyCode) -> Option<WinitKeyCode> {
-    match key {
-        KeyCode::Character('a') => Some(WinitKeyCode::KeyA),
-        KeyCode::Character('d') => Some(WinitKeyCode::KeyD),
-        KeyCode::Character('w') => Some(WinitKeyCode::KeyW),
-        KeyCode::Character('s') => Some(WinitKeyCode::KeyS),
-        _ => None,
-    }
+pub(super) fn physical_key(key: KeyCode) -> Option<WinitKeyCode> {
+    let key = match key {
+        KeyCode::Escape => WinitKeyCode::Escape,
+        KeyCode::Space => WinitKeyCode::Space,
+        KeyCode::Enter => WinitKeyCode::Enter,
+        KeyCode::ArrowUp => WinitKeyCode::ArrowUp,
+        KeyCode::ArrowDown => WinitKeyCode::ArrowDown,
+        KeyCode::ArrowLeft => WinitKeyCode::ArrowLeft,
+        KeyCode::ArrowRight => WinitKeyCode::ArrowRight,
+        KeyCode::Character('a') => WinitKeyCode::KeyA,
+        KeyCode::Character('b') => WinitKeyCode::KeyB,
+        KeyCode::Character('c') => WinitKeyCode::KeyC,
+        KeyCode::Character('d') => WinitKeyCode::KeyD,
+        KeyCode::Character('e') => WinitKeyCode::KeyE,
+        KeyCode::Character('f') => WinitKeyCode::KeyF,
+        KeyCode::Character('g') => WinitKeyCode::KeyG,
+        KeyCode::Character('h') => WinitKeyCode::KeyH,
+        KeyCode::Character('i') => WinitKeyCode::KeyI,
+        KeyCode::Character('j') => WinitKeyCode::KeyJ,
+        KeyCode::Character('k') => WinitKeyCode::KeyK,
+        KeyCode::Character('l') => WinitKeyCode::KeyL,
+        KeyCode::Character('m') => WinitKeyCode::KeyM,
+        KeyCode::Character('n') => WinitKeyCode::KeyN,
+        KeyCode::Character('o') => WinitKeyCode::KeyO,
+        KeyCode::Character('p') => WinitKeyCode::KeyP,
+        KeyCode::Character('q') => WinitKeyCode::KeyQ,
+        KeyCode::Character('r') => WinitKeyCode::KeyR,
+        KeyCode::Character('s') => WinitKeyCode::KeyS,
+        KeyCode::Character('t') => WinitKeyCode::KeyT,
+        KeyCode::Character('u') => WinitKeyCode::KeyU,
+        KeyCode::Character('v') => WinitKeyCode::KeyV,
+        KeyCode::Character('w') => WinitKeyCode::KeyW,
+        KeyCode::Character('x') => WinitKeyCode::KeyX,
+        KeyCode::Character('y') => WinitKeyCode::KeyY,
+        KeyCode::Character('z') => WinitKeyCode::KeyZ,
+        KeyCode::Character('0') => WinitKeyCode::Digit0,
+        KeyCode::Character('1') => WinitKeyCode::Digit1,
+        KeyCode::Character('2') => WinitKeyCode::Digit2,
+        KeyCode::Character('3') => WinitKeyCode::Digit3,
+        KeyCode::Character('4') => WinitKeyCode::Digit4,
+        KeyCode::Character('5') => WinitKeyCode::Digit5,
+        KeyCode::Character('6') => WinitKeyCode::Digit6,
+        KeyCode::Character('7') => WinitKeyCode::Digit7,
+        KeyCode::Character('8') => WinitKeyCode::Digit8,
+        KeyCode::Character('9') => WinitKeyCode::Digit9,
+        _ => return None,
+    };
+
+    Some(key)
 }
 
 #[cfg(target_os = "windows")]
