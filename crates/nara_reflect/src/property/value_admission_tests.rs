@@ -58,10 +58,7 @@ fn assert_equivalent_and_refusable(
         actual,
         expected.map_err(ComponentPropertyAdmissionError::Property)
     );
-    assert!(
-        charges.first().unwrap().2 > 0,
-        "admit the initial raw stack first"
-    );
+    assert_eq!(charges.first(), Some(&(1, 0, 0)));
 
     #[derive(Debug)]
     struct Refusal<'a>(&'a str);

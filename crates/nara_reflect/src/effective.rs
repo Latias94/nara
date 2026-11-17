@@ -946,6 +946,8 @@ fn component_field_default_requires_context_impl<'admit>(
 mod context_admission_tests;
 #[cfg(test)]
 mod cost_tests;
+#[cfg(test)]
+mod cursor_tests;
 
 /// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
 /// No default plan or value copy is constructed. Caller refusals retain their exact identity.
@@ -1013,8 +1015,7 @@ fn validate_value_materialization_budget_impl<'admit>(
     })
 }
 
-enum ValueFrame<'value> {
-    Value(ComponentValueRef<'value>, usize),
+enum ValueCursor<'value> {
     List(ComponentListIter<'value>, usize),
     Map(ComponentMapIter<'value>, usize),
 }
@@ -1029,10 +1030,10 @@ impl MaterializationBudget<'_> {
         Ok(())
     }
 
-    fn push_frame<'value>(
+    fn push_cursor<'value>(
         &mut self,
-        pending: &mut Vec<ValueFrame<'value>>,
-        frame: ValueFrame<'value>,
+        pending: &mut Vec<ValueCursor<'value>>,
+        cursor: ValueCursor<'value>,
     ) -> Result<(), ComponentCodecError> {
         if let Some(admit) = self.admission.as_deref_mut()
             && pending.len() == pending.capacity()
@@ -1042,129 +1043,120 @@ impl MaterializationBudget<'_> {
                 .saturating_add(1)
                 .max(pending.capacity().saturating_mul(2))
                 .max(4);
-            admit(0, 0, capacity.saturating_mul(size_of::<ValueFrame<'_>>()))?;
+            admit(0, 0, capacity.saturating_mul(size_of::<ValueCursor<'_>>()))?;
             pending.reserve_exact(capacity - pending.len());
         }
-        pending.push(frame);
+        pending.push(cursor);
         Ok(())
     }
 
     fn observe_tree<'value>(
         &mut self,
         value: impl Into<ComponentValueRef<'value>>,
-        depth: usize,
+        mut depth: usize,
     ) -> Result<(), ComponentCodecError> {
         let mut pending = Vec::new();
-        self.push_frame(&mut pending, ValueFrame::Value(value.into(), depth))?;
-        while let Some(frame) = pending.pop() {
-            match frame {
-                ValueFrame::Value(value, depth) => {
-                    self.observe_node(depth)?;
-                    match value.as_value() {
-                        Some(ComponentValue::Null) => {}
-                        Some(ComponentValue::Bool(_)) => self.observe_bytes(1)?,
-                        Some(
-                            ComponentValue::I64(_)
-                            | ComponentValue::U64(_)
-                            | ComponentValue::F64(_),
-                        ) => {
-                            self.observe_bytes(8)?;
+        let mut value = value.into();
+        loop {
+            self.observe_node(depth)?;
+            match value.as_value() {
+                Some(ComponentValue::Null) => {}
+                Some(ComponentValue::Bool(_)) => self.observe_bytes(1)?,
+                Some(ComponentValue::I64(_) | ComponentValue::U64(_) | ComponentValue::F64(_)) => {
+                    self.observe_bytes(8)?;
+                }
+                Some(ComponentValue::String(value)) => {
+                    self.observe_bytes(value.len())?;
+                    self.observe_retained_bytes(value.len())?;
+                }
+                Some(ComponentValue::List(_) | ComponentValue::Map(_)) | None => {
+                    if let Some(values) = value.as_list() {
+                        if !values.is_empty() {
+                            self.observe_retained_bytes(
+                                values.len().saturating_mul(size_of::<ComponentValue>()),
+                            )?;
+                            self.push_cursor(
+                                &mut pending,
+                                ValueCursor::List(
+                                    values.iter(),
+                                    depth
+                                        .checked_add(1)
+                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
+                                ),
+                            )?;
                         }
-                        Some(ComponentValue::String(value)) => {
-                            self.observe_bytes(value.len())?;
-                            self.observe_retained_bytes(value.len())?;
+                    } else if let Some(values) = value.as_map() {
+                        if !values.is_empty() {
+                            self.observe_retained_bytes(values.len().saturating_mul(
+                                frozen::btree_entry_bytes::<String, ComponentValue>(),
+                            ))?;
+                            self.push_cursor(
+                                &mut pending,
+                                ValueCursor::Map(
+                                    values.iter(),
+                                    depth
+                                        .checked_add(1)
+                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
+                                ),
+                            )?;
                         }
-                        Some(ComponentValue::List(_) | ComponentValue::Map(_)) | None => {
-                            if let Some(values) = value.as_list() {
-                                if !values.is_empty() {
-                                    self.observe_retained_bytes(
-                                        values.len().saturating_mul(size_of::<ComponentValue>()),
-                                    )?;
-                                    self.push_frame(
-                                        &mut pending,
-                                        ValueFrame::List(
-                                            values.iter(),
-                                            depth.checked_add(1).ok_or_else(|| {
-                                                depth_overflow(self.maximum_depth.get())
-                                            })?,
-                                        ),
-                                    )?;
-                                }
-                            } else if let Some(values) = value.as_map() {
-                                if !values.is_empty() {
-                                    self.observe_retained_bytes(values.len().saturating_mul(
-                                        frozen::btree_entry_bytes::<String, ComponentValue>(),
-                                    ))?;
-                                    self.push_frame(
-                                        &mut pending,
-                                        ValueFrame::Map(
-                                            values.iter(),
-                                            depth.checked_add(1).ok_or_else(|| {
-                                                depth_overflow(self.maximum_depth.get())
-                                            })?,
-                                        ),
-                                    )?;
-                                }
-                            } else {
-                                return Err(materialization_error(
-                                    "frozen insertion must have a container parent",
-                                ));
-                            }
-                        }
-                        Some(ComponentValue::EntityReference(reference)) => {
-                            if matches!(self.reference_policy, ReferencePolicy::Native)
-                                && matches!(reference, EntityReference::Authored { .. })
-                            {
-                                return Err(ComponentCodecError::UnresolvedAuthoredReference);
-                            }
-                            if let ReferencePolicy::SourceContext { required } =
-                                &mut self.reference_policy
-                            {
-                                *required |= matches!(
-                                    reference,
-                                    EntityReference::SceneLocal { .. }
-                                        | EntityReference::Authored { .. }
-                                );
-                            }
-                            // The byte cost walks authored hops. Admit their O(1) logical
-                            // node count first, so an exhausted caller can stop that scan.
-                            let nodes = reference.cost_nodes();
-                            if nodes > 1 {
-                                self.observe_nodes(depth, nodes - 1)?;
-                            }
-                            let cost = reference.cost();
-                            self.observe_bytes(cost.logical_bytes())?;
-                            self.observe_retained_bytes(cost.logical_bytes())?;
-                            if let EntityReference::Authored { reference } = reference {
-                                self.observe_retained_bytes(
-                                    reference
-                                        .through
-                                        .len()
-                                        .saturating_mul(
-                                            size_of::<nara_identity::PrefabInstanceHop>(),
-                                        ),
-                                )?;
-                            }
-                        }
+                    } else {
+                        return Err(materialization_error(
+                            "frozen insertion must have a container parent",
+                        ));
                     }
                 }
-                ValueFrame::List(mut values, depth) => {
-                    if let Some(value) = values.next() {
-                        self.push_frame(&mut pending, ValueFrame::List(values, depth))?;
-                        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
+                Some(ComponentValue::EntityReference(reference)) => {
+                    if matches!(self.reference_policy, ReferencePolicy::Native)
+                        && matches!(reference, EntityReference::Authored { .. })
+                    {
+                        return Err(ComponentCodecError::UnresolvedAuthoredReference);
                     }
-                }
-                ValueFrame::Map(mut values, depth) => {
-                    if let Some((key, value)) = values.next() {
-                        self.observe_bytes(key.len())?;
-                        self.observe_retained_bytes(key.len())?;
-                        self.push_frame(&mut pending, ValueFrame::Map(values, depth))?;
-                        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
+                    if let ReferencePolicy::SourceContext { required } = &mut self.reference_policy
+                    {
+                        *required |= matches!(
+                            reference,
+                            EntityReference::SceneLocal { .. } | EntityReference::Authored { .. }
+                        );
+                    }
+                    // The byte cost walks authored hops. Admit their O(1) logical
+                    // node count first, so an exhausted caller can stop that scan.
+                    let nodes = reference.cost_nodes();
+                    if nodes > 1 {
+                        self.observe_nodes(depth, nodes - 1)?;
+                    }
+                    let cost = reference.cost();
+                    self.observe_bytes(cost.logical_bytes())?;
+                    self.observe_retained_bytes(cost.logical_bytes())?;
+                    if let EntityReference::Authored { reference } = reference {
+                        self.observe_retained_bytes(
+                            reference
+                                .through
+                                .len()
+                                .saturating_mul(size_of::<nara_identity::PrefabInstanceHop>()),
+                        )?;
                     }
                 }
             }
+            (value, depth) = loop {
+                match pending.last_mut() {
+                    Some(ValueCursor::List(values, depth)) => {
+                        if let Some(value) = values.next() {
+                            break (value, *depth);
+                        }
+                    }
+                    Some(ValueCursor::Map(values, depth)) => {
+                        if let Some((key, value)) = values.next() {
+                            self.observe_bytes(key.len())?;
+                            self.observe_retained_bytes(key.len())?;
+                            break (value, *depth);
+                        }
+                    }
+                    None => return Ok(()),
+                }
+                pending.pop();
+            };
         }
-        Ok(())
     }
 
     fn observe_node(&mut self, depth: usize) -> Result<(), ComponentCodecError> {

@@ -186,7 +186,8 @@ fn native_cost_retains_strict_limits_and_exact_caller_refusals() {
         .unwrap()
         .cost();
         assert_eq!(cost, expected);
-        assert!(matches!(requests.first(), Some((0, 0, allocated)) if *allocated > 0));
+        assert_eq!(requests.first(), Some(&(1, 0, 0)));
+        assert!(matches!(requests.get(1), Some((0, 0, allocated)) if *allocated > 0));
 
         for boundary in 0..requests.len() {
             let refusal = Box::new(std::io::Error::other("native admission refused"));

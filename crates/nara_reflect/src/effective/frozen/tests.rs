@@ -3,7 +3,7 @@ use crate::{
     ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValueKind, EntityReference,
     effective::{
-        DefaultPlan, ValueFrame, component_defaults_are_explicit_with_admission,
+        DefaultPlan, ValueCursor, component_defaults_are_explicit_with_admission,
         effective_component_value_with_default_overrides,
         validate_native_component_value_references_with_admission,
         validate_native_component_value_references_with_limits,
@@ -741,7 +741,7 @@ fn selected_authored_routes_admit_exact_retained_storage_before_cloning() {
             5 * path_bytes
                 + 4 * size_of::<(&ComponentFieldPath, &ComponentValue)>()
                 + 2 * plan_entry
-                + 8 * size_of::<ValueFrame<'_>>()
+                + 4 * size_of::<ValueCursor<'_>>()
                 + retained_bytes,
         );
         assert_eq!(frozen.read(&source).to_owned(), *expected);
