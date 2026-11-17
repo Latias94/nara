@@ -111,6 +111,14 @@ state such as pressed buttons, focused element, and pointer capture persists unt
 
 ### Fresh-Runtime Keyboard Continuation
 
+The original unpublished Input installation retains the immutable PRIMARY definition selected
+before Startup. Read-only observation of that definition does not grant another installation or
+physical-input authority. A game comparing current configuration for exact reconstruction must
+use that original selection; sampling a mutable map during Startup can misclassify a prior
+runtime replacement as authored content. Context/definition eligibility checks belong at the
+capture/restore boundary, not every simulation tick. Physical adapters decide which normalized
+keys they can reconcile; a game's semantic movement contract need not hardcode WASD.
+
 An explicitly isolated paused candidate may restore a finite declared set of keyboard Button
 contributions through the original Input owner. Validate the exact key/action/context binding,
 current mapping/context lifetime, original endpoint claim, empty pending consumer work and

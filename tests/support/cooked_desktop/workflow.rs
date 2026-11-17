@@ -236,7 +236,7 @@ impl<'a> Session<'a> {
 
     fn walk_and_mark(&mut self, level: LevelKey, score: u32, marker: u64) -> [f32; 2] {
         let basis = self.snapshot();
-        self.input.press(window::D);
+        self.input.press(window::J);
         self.wait(&basis, |record| {
             assert!(
                 evidence::number(record, "score") <= u64::from(score),
@@ -253,14 +253,14 @@ impl<'a> Session<'a> {
         evidence::progress(&released, level, score, &[], 1);
         assert_ne!(
             released["state"]["player"], basis["state"]["player"],
-            "D did not move the actual player"
+            "J did not move the actual player"
         );
         let pose = position(&released);
         self.pump_for(Duration::from_millis(250));
         assert_eq!(
             position(&self.snapshot()),
             pose,
-            "released D moved the idle player"
+            "released J moved the idle player"
         );
         let marked = self.tap(window::M, |record| record["markers"] == json!([marker]));
         evidence::progress(&marked, level, score, &[marker], 1);
@@ -284,14 +284,14 @@ impl<'a> Session<'a> {
         };
         let expected_x = inner_x - 6.0 - 9.0 - 0.01;
         assert!(position(&start)[0] < expected_x - CONTACT_TOLERANCE);
-        self.input.press(window::D);
+        self.input.press(window::J);
         let contact = self.wait(&start, |record| {
             evidence::progress(record, level, score, &[marker], 1);
             let [x, y] = position(record);
-            assert_eq!(y, 0.0, "D left the original pickup corridor");
+            assert_eq!(y, 0.0, "J left the original pickup corridor");
             assert!(
                 x <= expected_x + CONTACT_TOLERANCE,
-                "D crossed the interior wall: {record}"
+                "J crossed the interior wall: {record}"
             );
             (x - expected_x).abs() <= CONTACT_TOLERANCE
                 && record["state"]["held"] == json!([false, true, false, false])
@@ -313,18 +313,18 @@ impl<'a> Session<'a> {
             evidence::number(&blocked["state"], "logical_elapsed_nanos")
                 >= evidence::number(&contact["state"], "logical_elapsed_nanos") + 100_000_000
         );
-        self.input.press(window::D);
+        self.input.press(window::J);
         self.input.press(window::W);
         let sliding = self.wait(&blocked, |record| {
             evidence::progress(record, level, score, &[marker], 1);
             let [x, y] = position(record);
             assert!(
                 (x - expected_x).abs() <= CONTACT_TOLERANCE,
-                "W+D crossed the wall before its upper end: {record}"
+                "W+J crossed the wall before its upper end: {record}"
             );
             assert!(
                 (0.0..=28.0).contains(&y),
-                "W+D skipped the bounded wall-slide sample: {record}"
+                "W+J skipped the bounded wall-slide sample: {record}"
             );
             y >= 10.0 && record["state"]["held"] == json!([false, true, true, false])
         });
@@ -338,7 +338,7 @@ impl<'a> Session<'a> {
             if y <= 33.0 {
                 assert!(
                     (x - expected_x).abs() <= CONTACT_TOLERANCE,
-                    "W+D crossed the wall before clearing it: {record}"
+                    "W+J crossed the wall before clearing it: {record}"
                 );
             }
             y >= 33.5
@@ -530,7 +530,7 @@ pub fn run(request: &Request) {
     let scripted = scripted_controls(request);
     println!(
         "\n{REPORT}{}",
-        json!({"success": true, "ordinary_processes": 2, "finite_processes": 1,
+        json!({"success": true, "authored_key": "j", "ordinary_processes": 2, "finite_processes": 1,
         "refused_processes": 1, "refused_initial_save": refused,
         "scripted_controls": scripted,
         "collision_excursions": [meadow_collision, cavern_collision],

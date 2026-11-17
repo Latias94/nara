@@ -143,7 +143,9 @@ impl DesktopGame {
         if snapshot.tick != 0 || snapshot.restoring || snapshot.phase != GamePhase::Running {
             return Err("desktop startup did not reach a fresh initialized paused game".into());
         }
-        let holds = movement_keyboard_bindings()
+        let bindings = movement_keyboard_bindings(&self.run)
+            .map_err(|error| format!("resolve initial desktop movement bindings: {error}"))?;
+        let holds = bindings
             .into_iter()
             .map(|binding| KeyboardHold {
                 binding,
@@ -539,8 +541,10 @@ impl DesktopGame {
     fn isolate_input(&mut self, deadline: Instant) -> Result<(), String> {
         self.wait_quiescent(deadline)?;
         let before = encode_resume(&self.canonical()?).map_err(|error| error.to_string())?;
+        let bindings = movement_keyboard_bindings(&self.run)
+            .map_err(|error| format!("resolve original native movement bindings: {error}"))?;
         self.run
-            .isolate_keyboard_input(&movement_keyboard_bindings())
+            .isolate_keyboard_input(&bindings)
             .map_err(|error| format!("freeze original native keyboard ingress: {error}"))?;
         self.maintenance(deadline)?;
         if encode_resume(&self.canonical()?).map_err(|error| error.to_string())? != before {
@@ -557,7 +561,8 @@ impl DesktopGame {
             .checked_add(1)
             .and_then(GameplayCommandTick::new)
             .ok_or("desktop engine tick is exhausted")?;
-        let bindings = movement_keyboard_bindings();
+        let bindings = movement_keyboard_bindings(&self.run)
+            .map_err(|error| format!("resolve controlled desktop movement bindings: {error}"))?;
         let operations = commands
             .into_iter()
             .map(|command| match command {

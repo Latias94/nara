@@ -329,16 +329,16 @@ impl Experiment {
             .startup_timings()
             .ok_or("original desktop startup timing was not enabled")?;
         let neutral_started = Instant::now();
+        let bindings = movement_keyboard_bindings(self.run()).map_err(|error| error.to_string())?;
+        let holds = bindings
+            .into_iter()
+            .map(|binding| KeyboardHold {
+                binding,
+                held: false,
+            })
+            .collect();
         self.run()
-            .restore_keyboard_holds(
-                movement_keyboard_bindings()
-                    .into_iter()
-                    .map(|binding| KeyboardHold {
-                        binding,
-                        held: false,
-                    })
-                    .collect(),
-            )
+            .restore_keyboard_holds(holds)
             .map_err(|error| error.to_string())?;
         let baseline = self.maintenance(deadline)?;
         let neutral_hold_and_maintenance_wall = neutral_started.elapsed();

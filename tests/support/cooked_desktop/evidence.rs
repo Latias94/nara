@@ -8,6 +8,7 @@ use nara::{
     asset::RuntimeAssetCodec,
     fs::ContentDigest,
     image::{ImageExtent, ImageRuntimeCodec},
+    input::ActionMapRuntimeCodec,
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
@@ -20,6 +21,7 @@ use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
     animation::{atlas_product, clips_product},
+    input::input_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     save::Checkpoint,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
@@ -93,9 +95,13 @@ pub fn inspect_package(
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
     assert_eq!(
+        catalog.configuration().input.action_map,
+        Some(input_product())
+    );
+    assert_eq!(
         catalog.members().len(),
-        7,
-        "two processed Scenes, three Images, one shared Sound Bank and one Sprite animation set; keyboard declarations are code-first"
+        8,
+        "two processed Scenes, three Images, one shared SoundBank, one Sprite animation set and one global Input"
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -165,6 +171,20 @@ pub fn inspect_package(
                 serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap())
                     .unwrap();
             assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
+        } else if product == input_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ActionMapRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ActionMapRuntimeCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let input = ActionMapRuntimeCodec::decode_runtime(data).unwrap();
+            assert_eq!(input.product(), input_product());
+            let encoded: Value =
+                serde_json::from_slice(&ActionMapRuntimeCodec::encode_runtime(&input).unwrap())
+                    .unwrap();
+            assert_eq!(encoded["payload"], rebound_input_definition());
         } else if product == bank_product() {
             assert!(matches!(
                 member.kind(),
@@ -216,7 +236,12 @@ pub fn inspect_package(
         LevelId::ALL
             .into_iter()
             .flat_map(|level| [level.scene_product(), level.image_product()])
-            .chain([atlas_product(), bank_product(), clips_product()])
+            .chain([
+                atlas_product(),
+                bank_product(),
+                clips_product(),
+                input_product(),
+            ])
             .collect()
     );
     images
@@ -305,6 +330,14 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
     assert_eq!(record["success"], true, "{record}");
     assert_eq!(record["source_free"], true);
     assert_eq!(record["processed_runtime"], true);
+    assert_eq!(
+        record["input_proof"],
+        json!({
+            "product": input_product().to_string(),
+            "source_free": true,
+            "definition": rebound_input_definition(),
+        })
+    );
     assert_eq!(record["content_profile"], "two-level-desktop-shipping");
     for field in ["level", "score", "collected", "markers"] {
         assert_eq!(record[field], record["state"][field]);
@@ -390,6 +423,21 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         walls::scene(observed);
         assert_eq!(observed["animation_proof"], default_animation_proof());
     }
+}
+
+fn rebound_input_definition() -> Value {
+    let mut definition = serde_json::from_slice::<Value>(include_bytes!(
+        "../../../samples/two-level-game/input/explorer.actions.json"
+    ))
+    .unwrap()["payload"]
+        .clone();
+    assert_eq!(definition["bindings"][1]["action"], "two-level-game.move-d");
+    assert_eq!(
+        definition["bindings"][1]["input"],
+        json!({"Key": {"Character": "d"}})
+    );
+    definition["bindings"][1]["input"]["Key"]["Character"] = json!("j");
+    definition
 }
 
 fn default_animation_proof() -> Value {

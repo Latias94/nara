@@ -14,6 +14,7 @@ pub mod sound_bank;
 
 #[cfg(feature = "desktop")]
 pub use gameplay::cooked_desktop_recipe;
+pub use gameplay::input;
 #[cfg(feature = "desktop")]
 pub use gameplay::movement_keyboard_bindings;
 pub use gameplay::resume::{GameResumeError, capture_resume, request_resume};

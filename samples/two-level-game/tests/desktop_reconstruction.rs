@@ -13,21 +13,59 @@ use nara::project_tooling::process::{
     ProcessLogLimits, SupervisedProcessCommand, SupervisedProcessOwner, SupervisedProcessState,
 };
 
+#[allow(
+    dead_code,
+    reason = "reuse the original project-copy and cleanup owner"
+)]
+#[path = "support/resume_gameplay.rs"]
+mod support;
+
 #[test]
 #[ignore = "requires Windows native hardware, a focused desktop and physical A/D/W/S up; run serially with WGPU_BACKEND=dx12 or vulkan and NARA_WGPU_FORCE_FALLBACK=0"]
 fn public_desktop_reconstructs_complete_game_on_recovered_loop_and_reconciles_input() {
+    qualify(None);
+}
+
+#[test]
+#[ignore = "requires native Windows hardware and a focused desktop with Arrow keys Up; serial DX12 or Vulkan, fallback=0"]
+fn authored_arrow_bindings_reconstruct_and_reconcile_through_the_original_native_loop() {
+    let project = support::ProjectCopy::new();
+    let path = project.root().join(two_level_game::input::INPUT_PATH);
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for binding in value["payload"]["bindings"].as_array_mut().unwrap() {
+        let key = match binding["action"].as_str().unwrap() {
+            "two-level-game.move-a" => "ArrowLeft",
+            "two-level-game.move-d" => "ArrowRight",
+            "two-level-game.move-w" => "ArrowUp",
+            "two-level-game.move-s" => "ArrowDown",
+            _ => continue,
+        };
+        binding["input"] = serde_json::json!({"Key": key});
+    }
+    std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    let output = qualify(Some(project.root()));
+    assert!(output.contains(
+        "two_level_desktop_reconstruction_input: keys=[ArrowLeft, ArrowRight, ArrowUp, ArrowDown]"
+    ));
+}
+
+fn qualify(project: Option<&Path>) -> String {
     let backend = std::env::var("WGPU_BACKEND").expect("select exactly one native backend");
     assert!(matches!(backend.as_str(), "dx12" | "vulkan"));
     assert_eq!(
         std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref(),
         Ok("0")
     );
-    let command = SupervisedProcessCommand::new(
+    let mut command = SupervisedProcessCommand::new(
         env!("CARGO_BIN_EXE_desktop_reconstruction"),
         Path::new(env!("CARGO_MANIFEST_DIR")),
     )
     .environment("WGPU_BACKEND", backend)
     .environment("NARA_WGPU_FORCE_FALLBACK", "0");
+    if let Some(project) = project {
+        command = command.arguments(["--project".as_ref(), project.as_os_str()]);
+    }
     let mut process = SupervisedProcessOwner::spawn(
         &command,
         ProcessLogLimits::try_from_counts(512, 256 * 1024).unwrap(),
@@ -96,4 +134,5 @@ fn public_desktop_reconstructs_complete_game_on_recovered_loop_and_reconciles_in
     ] {
         assert!(output.contains(expected), "missing {expected:?}:\n{output}");
     }
+    output
 }

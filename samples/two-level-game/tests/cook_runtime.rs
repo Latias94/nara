@@ -21,7 +21,11 @@ mod output;
 mod source;
 
 use input::RuntimeKind;
-use nara::{app::PluginId, project::ProjectManifest, project_host::resolve_runtime_configuration};
+use nara::{
+    app::PluginId, input::ActionMapFileCandidate, project::ProjectManifest,
+    project_host::resolve_runtime_configuration,
+};
+use two_level_game::input::{INPUT_PATH, input_product};
 
 fn plan(runtime: RuntimeKind) -> nara::project_host::RuntimeConfigurationPlan {
     let manifest = ProjectManifest::parse_toml_bytes(include_bytes!("../nara.toml"));
@@ -34,21 +38,32 @@ fn plan(runtime: RuntimeKind) -> nara::project_host::RuntimeConfigurationPlan {
             RuntimeKind::Desktop | RuntimeKind::AudioDesktop => Some("desktop"),
         })
         .unwrap();
-    let configuration = settings.runtime_configuration().unwrap();
-    assert!(configuration.input().action_map.is_none());
+    let projection = settings.source_runtime_projection().unwrap();
+    assert_eq!(projection.input_requirement().unwrap().as_str(), INPUT_PATH);
+    let input = ActionMapFileCandidate::decode_json_bytes(
+        &std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(INPUT_PATH)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(input.product(), input_product());
+    let mut configuration = projection.runtime().to_configuration();
+    configuration.input.action_map = Some(input.product());
+    let configuration = configuration.resolve().unwrap();
+    assert_eq!(configuration.input().action_map, Some(input_product()));
     resolve_runtime_configuration(&configuration, runtime.recipe().unwrap()).unwrap()
 }
 
 #[test]
-fn headless_cooking_excludes_native_input_even_when_desktop_is_compiled() {
+fn headless_cooking_selects_authored_semantics_without_a_native_window() {
     let selected = RuntimeKind::parse("headless").unwrap();
     let plan = plan(selected);
     assert!(!plan.settings().window().enabled);
-    assert!(
+    assert_eq!(
         plan.plugin_plan()
             .entries()
             .iter()
-            .all(|entry| { entry.plugin_id() != PluginId::new("two-level-game.desktop-input") })
+            .filter(|entry| entry.plugin_id() == PluginId::new("two-level-game.input"))
+            .count(),
+        1
     );
     assert_eq!(selected.binary(), "player");
     assert_eq!(selected.features(), ["cooked-player"]);
@@ -57,7 +72,7 @@ fn headless_cooking_excludes_native_input_even_when_desktop_is_compiled() {
 
 #[cfg(feature = "desktop")]
 #[test]
-fn desktop_selection_binds_its_profile_and_compiled_game_input() {
+fn desktop_selection_binds_its_profile_and_authored_game_input() {
     let selected = RuntimeKind::parse("desktop").unwrap();
     let plan = plan(selected);
     assert!(plan.settings().window().enabled);
@@ -65,7 +80,7 @@ fn desktop_selection_binds_its_profile_and_compiled_game_input() {
         plan.plugin_plan()
             .entries()
             .iter()
-            .filter(|entry| entry.plugin_id() == PluginId::new("two-level-game.desktop-input"))
+            .filter(|entry| entry.plugin_id() == PluginId::new("two-level-game.input"))
             .count(),
         1
     );
@@ -145,8 +160,13 @@ mod atlas_content {
     use nara::{
         asset::RuntimeAssetCodec,
         asset_build::ArtifactBuildObservation,
+        input::{
+            ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec,
+            InputBinding, KeyCode,
+        },
         project_host::{HeadlessSession, HeadlessSessionClose},
         project_tooling::host_fs,
+        project_workflow::cooked_content::PreparedRuntimeContent,
         runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
@@ -176,6 +196,35 @@ mod atlas_content {
             fs::create_dir(&path).unwrap();
             Self { parent, path }
         }
+
+        fn project(&self) -> PathBuf {
+            let project = self.path.join("project");
+            let sample = Path::new(env!("CARGO_MANIFEST_DIR"));
+            for name in [
+                "nara.toml",
+                super::INPUT_PATH,
+                "schema/authoring.bundle.json",
+                "scenes/meadow.scene.json",
+                "scenes/cavern.scene.json",
+                "assets/textures/meadow.png",
+                "assets/textures/meadow.png.meta",
+                "assets/textures/cavern.png",
+                "assets/textures/cavern.png.meta",
+                "assets/textures/explorer.png",
+                "assets/textures/explorer.png.meta",
+                "assets/animations/explorer.sprite-animations.json",
+                "assets/animations/explorer.sprite-animations.json.meta",
+                "assets/audio/game.soundbank.json",
+                "assets/audio/game.soundbank.json.meta",
+                "assets/audio/pickup.wav",
+                "assets/audio/travel.wav",
+            ] {
+                let destination = project.join(name);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::copy(sample.join(name), destination).unwrap();
+            }
+            project
+        }
     }
 
     impl Drop for Cache {
@@ -203,7 +252,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 7);
+        assert_eq!(catalog.members().len(), 8);
         assert_eq!(
             catalog
                 .members()
@@ -213,7 +262,12 @@ mod atlas_content {
             LevelId::ALL
                 .into_iter()
                 .flat_map(|level| [level.scene_product(), level.image_product()])
-                .chain([atlas_product(), bank_product(), clips_product()])
+                .chain([
+                    atlas_product(),
+                    bank_product(),
+                    clips_product(),
+                    super::input_product(),
+                ])
                 .collect::<BTreeSet<_>>()
         );
         assert_eq!(
@@ -261,6 +315,19 @@ mod atlas_content {
             .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(clips_product())
             .unwrap();
         assert_eq!(acquired.product().product(), clips_product());
+        let input = catalog.member_for_product(super::input_product()).unwrap();
+        assert_eq!(input.products(), [super::input_product()]);
+        assert!(input.dependencies().is_empty());
+        assert!(matches!(
+            input.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == ActionMapRuntimeCodec::RUNTIME_KIND
+                    && version.get() == ActionMapRuntimeCodec::RUNTIME_VERSION
+        ));
+        assert_eq!(
+            catalog.configuration().input.action_map,
+            Some(super::input_product())
+        );
         let raw = observations
             .iter()
             .map(|observation| match observation {
@@ -282,31 +349,21 @@ mod atlas_content {
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
                 "assets/audio/travel.wav",
+                super::INPUT_PATH,
             ])
         );
         fence.bind_raw_inputs(&observations).unwrap();
-
-        let mut session = HeadlessSession::from_runtime_content(prepared.into_base());
-        let mut evidence = Evidence::default();
-        let observed = (|| -> Result<_, String> {
-            session.start().map_err(|error| error.to_string())?;
-            session
-                .frame(Duration::ZERO)
-                .map_err(|error| error.to_string())?;
-            evidence.observe(&session)?;
-            Ok(evidence.result(Scenario::Interactive, None, None))
-        })();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let closed = loop {
-            match session.close() {
-                HeadlessSessionClose::Pending if Instant::now() < deadline => {
-                    std::thread::yield_now();
-                }
-                outcome => break outcome,
-            }
-        };
-        assert_eq!(closed, HeadlessSessionClose::Complete);
-        let result = observed.unwrap();
+        let result = observe_startup(prepared);
+        let source: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../input/explorer.actions.json")).unwrap();
+        assert_eq!(
+            result["input_proof"],
+            serde_json::json!({
+                "product": super::input_product().to_string(),
+                "source_free": true,
+                "definition": source["payload"],
+            })
+        );
         let animation = &result["scene_receipts"][0]["animation_proof"];
         assert_eq!(animation, &default_animation_proof());
         let proofs = result["image_proofs"].as_array().unwrap();
@@ -340,6 +397,199 @@ mod atlas_content {
                 .map(|product| product.to_string())
                 .collect::<BTreeSet<_>>()
         );
+    }
+
+    #[test]
+    fn cooking_preserves_changed_authored_mapping_without_source_in_the_installed_player() {
+        let cache = Cache::new();
+        let project = cache.project();
+        let input_path = project.join(super::INPUT_PATH);
+        let original =
+            ActionMapFileCandidate::decode_json_bytes(&fs::read(&input_path).unwrap()).unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        for context in original.definition().contexts() {
+            builder
+                .declare_context(context.context.clone(), context.enabled)
+                .unwrap();
+        }
+        let mut changed = false;
+        for mut binding in original.definition().bindings().iter().cloned() {
+            if binding.action.as_str() == "two-level-game.move-w" {
+                binding.input = InputBinding::Key(KeyCode::Character('i'));
+                changed = true;
+            }
+            builder.bind(binding).unwrap();
+        }
+        assert!(changed);
+        let authored =
+            ActionMapFileCandidate::new(original.product(), builder.compile().unwrap()).unwrap();
+        let bytes = authored.to_json_string().unwrap().into_bytes();
+        fs::write(&input_path, &bytes).unwrap();
+        assert!(!project.join(format!("{}.meta", super::INPUT_PATH)).exists());
+        let mut fence = ContentFence::capture(&project).unwrap();
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let (prepared, observations) = content::prepare(
+            fence.root(),
+            &host_fs::writable_directory(&store).unwrap(),
+            "x86_64-pc-windows-msvc",
+            RuntimeKind::Headless,
+        )
+        .unwrap();
+        fence.bind_raw_inputs(&observations).unwrap();
+        let input = prepared.base().acquire_startup_input().unwrap().unwrap();
+        assert_eq!(
+            prepared.base().plan().settings().input().action_map,
+            Some(authored.product())
+        );
+        let member = prepared
+            .base()
+            .catalog()
+            .member_for_product(authored.product())
+            .unwrap();
+        assert_eq!(member.products(), [authored.product()]);
+        assert!(member.dependencies().is_empty());
+        assert_eq!(input.product(), authored.product());
+        assert_eq!(
+            input.definition().contexts(),
+            authored.definition().contexts()
+        );
+        assert_eq!(
+            input.definition().bindings(),
+            authored.definition().bindings()
+        );
+        assert_ne!(
+            input.definition().bindings(),
+            original.definition().bindings()
+        );
+        for level in LevelId::ALL {
+            assert_eq!(
+                prepared
+                    .base()
+                    .catalog()
+                    .member_for_product(level.scene_product())
+                    .unwrap()
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| dependency.product())
+                    .collect::<BTreeSet<_>>(),
+                [
+                    level.image_product(),
+                    atlas_product(),
+                    bank_product(),
+                    clips_product(),
+                ]
+                .into_iter()
+                .collect()
+            );
+        }
+        fs::write(&input_path, original.to_json_string().unwrap()).unwrap();
+        assert!(fence.verify().unwrap_err().contains(super::INPUT_PATH));
+        fs::remove_file(&input_path).unwrap();
+        assert!(!input_path.exists());
+        let result = observe_startup(prepared);
+        let expected: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            result["input_proof"],
+            serde_json::json!({
+                "product": authored.product().to_string(),
+                "source_free": true,
+                "definition": expected["payload"],
+            })
+        );
+    }
+
+    #[test]
+    fn optional_input_sidecar_must_match_the_intrinsic_identity_before_cooking() {
+        let cache = Cache::new();
+        let project = cache.project();
+        let path = project.join(format!("{}.meta", super::INPUT_PATH));
+        let metadata = serde_json::json!({
+            "kind": "asset_meta", "format_version": 1, "engine_min_version": "0.1.0",
+            "generator": {"name": "nara", "version": "0.1.0"},
+            "payload": {
+                "asset": {
+                    "stable_id": two_level_game::input::INPUT_SOURCE_ID,
+                    "path": super::INPUT_PATH,
+                    "source_kind": {"other": "input-action-map"}
+                },
+                "settings": {}
+            }
+        });
+        fs::write(&path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let root = host_fs::readable_directory(&project).unwrap();
+        let store = host_fs::writable_directory(&store).unwrap();
+        let (prepared, _) = content::prepare(
+            &root,
+            &store,
+            "x86_64-pc-windows-msvc",
+            RuntimeKind::Headless,
+        )
+        .unwrap();
+        assert_eq!(
+            prepared
+                .base()
+                .acquire_startup_input()
+                .unwrap()
+                .unwrap()
+                .product(),
+            super::input_product()
+        );
+        for (field, replacement) in [
+            (
+                "stable_id",
+                serde_json::json!("c4fd21bb-9dd3-4f7f-8e6c-9934f8686938"),
+            ),
+            ("path", serde_json::json!("input/other.actions.json")),
+            (
+                "source_kind",
+                serde_json::json!({"other": "different-kind"}),
+            ),
+        ] {
+            let mut invalid = metadata.clone();
+            invalid["payload"]["asset"][field] = replacement;
+            fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            let error = content::prepare(
+                &root,
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .err()
+            .unwrap();
+            assert!(
+                error.contains("conflicts with the intrinsic Input identity"),
+                "{field}: {error}"
+            );
+        }
+    }
+
+    fn observe_startup(prepared: PreparedRuntimeContent) -> serde_json::Value {
+        let input = prepared.base().acquire_startup_input().unwrap().unwrap();
+        let mut evidence = Evidence::default();
+        evidence.expect_input(&input).unwrap();
+        let mut session = HeadlessSession::from_runtime_content(prepared.into_base());
+        let observed = (|| -> Result<_, String> {
+            session.start().map_err(|error| error.to_string())?;
+            session
+                .frame(Duration::ZERO)
+                .map_err(|error| error.to_string())?;
+            evidence.observe(&session)?;
+            Ok(evidence.result(Scenario::Interactive, None, None))
+        })();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let closed = loop {
+            match session.close() {
+                HeadlessSessionClose::Pending if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                outcome => break outcome,
+            }
+        };
+        assert_eq!(closed, HeadlessSessionClose::Complete);
+        observed.unwrap()
     }
 
     fn default_animation_proof() -> serde_json::Value {

@@ -1,8 +1,7 @@
 mod collision;
 mod commands;
 mod content;
-#[cfg(feature = "desktop")]
-mod input;
+pub mod input;
 #[cfg(feature = "desktop")]
 pub use input::movement_keyboard_bindings;
 mod player_launch;
@@ -324,7 +323,7 @@ pub fn cooked_recipe() -> ProductRecipe {
     with_cooked_image_codec(exploration_recipe(RunOptions::default()))
 }
 
-/// The fixed desktop recipe with the game's compiled native keyboard bindings.
+/// The fixed desktop recipe with the game's authored input and semantic commands.
 #[cfg(feature = "desktop")]
 #[must_use]
 pub fn cooked_desktop_recipe() -> ProductRecipe {
@@ -341,12 +340,7 @@ fn with_cooked_image_codec(recipe: ProductRecipe) -> ProductRecipe {
 
 #[must_use]
 pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
-    let recipe = exploration_recipe(options);
-    #[cfg(feature = "desktop")]
-    let recipe = recipe
-        .add_plugin::<input::DesktopInputPlugin>()
-        .expect("static input plugin");
-    recipe
+    exploration_recipe(options)
 }
 
 fn exploration_recipe(options: RunOptions) -> ProductRecipe {
@@ -359,6 +353,10 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
     )
     .expect("static game schema and composition");
     ProductRecipe::new()
+        .add_runtime_asset_codec::<nara::input::ActionMapDomain, nara::input::ActionMapRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.input", 1),
+        )
+        .expect("the game's Input Runtime codec is valid")
         .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
         .expect("the game's Sound Bank source importer is valid")
         .add_runtime_asset_codec::<
@@ -380,6 +378,8 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
         .expect("the Sprite animation Runtime codec is valid")
         .add_contribution(contribution)
         .expect("static game recipe")
+        .add_plugin::<input::GameInputPlugin>()
+        .expect("static input plugin")
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
@@ -437,7 +437,7 @@ fn initialize(world: &mut World) {
                 world.resource_mut::<Session>().initialized = true;
                 project_animation(world);
                 println!(
-                    "two_level_game: entered Meadow instance=0; WASD move, E travel, Q instance, M marker, K save, L restore, R retry"
+                    "two_level_game: entered Meadow instance=0; using configured game controls"
                 );
             }
         }

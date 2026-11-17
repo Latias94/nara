@@ -53,6 +53,7 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             control.unsupported
         )));
     }
+    super::input_capture_eligible(world)?;
     if control.rejected {
         return Err(reject("this candidate rejected its reconstruction"));
     }
@@ -128,7 +129,8 @@ pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResu
 #[cfg(feature = "desktop")]
 pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
-    let holds = session.capture_keyboard_holds(&crate::movement_keyboard_bindings())?;
+    let bindings = crate::movement_keyboard_bindings(session)?;
+    let holds = session.capture_keyboard_holds(&bindings)?;
     let state = session.capture(|world| capture_world(world, runtime_time))??;
     if holds.iter().map(|hold| hold.held).ne(state.held) {
         return Err(GameResumeError::Ineligible(

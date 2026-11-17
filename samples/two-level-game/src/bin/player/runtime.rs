@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, RunOptions, Scenario,
     animation::{atlas_product, clips_product},
+    input::input_product,
     levels::{LevelId, LevelKey},
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
 };
@@ -39,7 +40,9 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 7
+            || base.catalog().members().len() != 8
+            || base.plan().settings().input().action_map != Some(input_product())
+            || base.member(input_product()).is_none()
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
             || base
@@ -54,6 +57,11 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
                 "compiled pack does not contain the game's exact two-level Product catalog".into(),
             );
         }
+        let input = base
+            .acquire_startup_input()
+            .map_err(|error| error.to_string())?
+            .ok_or("compiled pack has no selected global Input")?;
+        evidence.expect_input(&input)?;
         let original = session.insert(HeadlessSession::from_runtime_content(base));
         original.start().map_err(|error| error.to_string())?;
         evidence.observe(original)?;

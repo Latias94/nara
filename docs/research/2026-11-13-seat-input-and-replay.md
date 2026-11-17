@@ -139,3 +139,35 @@ intent and held input, malformed tail rejection and finite import bounds are par
 executed controls. This does not select a universal recording API, rollback model, vector dead
 zone, physical backend or cross-platform floating-point profile. Pinned Bevy/Godot findings
 above remain source evidence; Nara's seat/ownership/replay choices are its own contracts.
+
+## November 18: Physical Adapter Scope And The Actual Game
+
+The normalized seat/gamepad/replay unit is already implemented. The current Winit adapter has
+no physical controller context, startup enumeration, event sampling or device wake path. A
+read-only Windows XInput query observes no connected slots on this machine. That observation
+neither proves other controller APIs are empty nor qualifies physical execution. The current
+Runtime successor instead closes authored Input through the actual Two-Level Game, which still
+compiled its physical keys in Rust and explicitly rejected a startup Input file in its cooker.
+The [selected successor](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#authored-game-input-through-source-and-player-delivery)
+reuses existing source and processed selection rather than rebuilding the completed Input owner.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+[`bevy_gilrs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_gilrs/src/gilrs_system.rs),
+separates physical device collection from its action consumers. Pinned Godot
+`7a37606a433c0e7735525037cdf774f043146a21`,
+[`joypad_sdl.cpp`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/drivers/sdl/joypad_sdl.cpp),
+covers enumeration, mappings, hotplug, axes, buttons and device close. Those implementations
+support a future concrete Winit adapter, not a new generic Input backend interface. Keep the
+original Nara connection token at event origin, define physical button/axis meanings and account
+for focus/retirement on every associated seat. Gilrs trigger pressure can arrive as button-value
+changes; an axis-only adapter would lose it. Winit's indefinite Wait also needs an original-session
+device wake or explicit poll deadline; a maintenance wake alone does not request an App frame.
+
+Cached `gilrs 0.11.2`/`gilrs-core 0.6.8` use WGI by default on Windows. Their WGI sampling path
+includes a background thread and unbounded channel. Nara's bounded admission cannot establish
+an end-to-end queue bound for that implementation. Direct `windows-sys 0.61.2` XInput bindings
+are also cached, but cover four Windows slots rather than general controller support. Dependency
+cache observations are not resolution/build/hardware results. Defer that choice until a concrete
+controller consumer can exercise startup-before-connect, hotplug, sticks/triggers, Wait wake,
+focus loss/held recovery, Pause/Step and original-session close. Haptics, battery, sensor and
+touchpad behavior remain separate requirements.

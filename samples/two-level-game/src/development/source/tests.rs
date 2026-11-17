@@ -8,7 +8,7 @@ use std::{
 use super::*;
 
 const TEMP_PREFIX: &str = "nara-game-source-fence-";
-const FIXTURE_FILES: [(&str, &[u8]); 11] = [
+const FIXTURE_FILES: [(&str, &[u8]); 12] = [
     ("Cargo.toml", b"[package]\nname = 'fixture'\n"),
     ("Cargo.lock", b"version = 4\n"),
     ("nara.toml", b"game = 'two-level'\n"),
@@ -20,6 +20,7 @@ const FIXTURE_FILES: [(&str, &[u8]); 11] = [
     ("scenes/cavern.scene.json", b"unvisited cavern scene"),
     ("prefabs/marker.prefab.json", b"marker prefab"),
     ("schema/authoring.bundle.json", b"game schema and recipes"),
+    ("input/explorer.actions.json", b"game action map"),
 ];
 
 struct NativeTemp {
@@ -166,6 +167,7 @@ fn detects_changes_in_manifests_unvisited_levels_rust_and_all_content_trees() {
         "scenes/cavern.scene.json",
         "prefabs/marker.prefab.json",
         "schema/authoring.bundle.json",
+        "input/explorer.actions.json",
     ] {
         let fixture = Fixture::new();
         let fence = SourceFence::capture(&fixture.project).unwrap();

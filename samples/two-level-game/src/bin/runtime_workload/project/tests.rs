@@ -29,6 +29,7 @@ fn populations_preserve_sources_and_fit_default_file_limits_at_one_world_footpri
         assert_eq!(report["bounds"]["scene_file_bytes"], 16 * 1024 * 1024);
         assert_eq!(report["bounds"]["shape_nodes"], 1_000_000);
         for relative in [
+            "input/explorer.actions.json",
             "assets/animations/explorer.sprite-animations.json",
             "assets/animations/explorer.sprite-animations.json.meta",
         ] {
@@ -42,7 +43,7 @@ fn populations_preserve_sources_and_fit_default_file_limits_at_one_world_footpri
                         .filter(|file| file["path"] == relative)
                         .collect::<Vec<_>>(),
                     [&expected],
-                    "copied animation inventory: {inventory} {relative}",
+                    "copied source inventory: {inventory} {relative}",
                 );
             }
         }

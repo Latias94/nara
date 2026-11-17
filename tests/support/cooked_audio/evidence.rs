@@ -19,6 +19,7 @@ pub fn presented(record: &Value, request: &Request) {
     assert_eq!(record["success"], true, "{record}");
     assert_eq!(record["source_free"], true);
     assert_eq!(record["processed_runtime"], true);
+    package::assert_input_proof(record);
     assert_eq!(
         record["content_profile"],
         "two-level-audio-desktop-shipping"
@@ -124,6 +125,8 @@ pub fn retired(record: &Value, request: &Request) {
     assert_eq!(audio["format"], "two-level-cooked-audio/v1");
     assert_eq!(audio["bank_product"], bank_product().to_string());
     assert_eq!(audio["source_free"], true);
+    package::assert_input_proof(audio);
+    assert_eq!(audio["input_proof"], record["input_proof"]);
     for field in [
         "native_destroyed",
         "surface_retired",

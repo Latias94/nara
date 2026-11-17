@@ -5,6 +5,19 @@
 `ActionOutcomes` exposes each physical binding edge, including its route and event provenance. Gameplay command mapping remains
 game-owned through `nara_gameplay::ActionCommandMap`.
 
+The [Two-Level Game](../../samples/two-level-game/README.md) is a complete authored-keyboard
+consumer. Its source manifest selects a native action-map file; the cooker carries that file's
+complete Product into processed global startup Input. Gameplay registers semantic commands,
+independently of physical keys. Editing a source mapping requires a fresh Runtime; ordinary
+travel retains the original installed definition. Exact keyboard restoration can impose narrower
+eligibility than ordinary multi-binding play.
+
+`startup_action_map_bindings(world)` borrows the immutable PRIMARY definition captured by the
+original Input installation before Startup. It returns `None` before finalization or when no
+PRIMARY map was selected. Later map or context edits do not rewrite it. Games can use this original owner when
+checking capture/restore eligibility; the observation grants neither installation nor held-input
+authority and adds no per-tick validation.
+
 ## Code-First Definitions
 
 Build a complete finite definition, declare its contexts and install independent World state:

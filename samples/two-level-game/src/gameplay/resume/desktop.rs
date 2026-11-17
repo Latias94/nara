@@ -42,7 +42,8 @@ pub fn restore_desktop_resume(
     }
     run.capture(fresh_candidate)??;
     run.capture(|world| super::validate_current_placement(world, state))??;
-    let holds = run.capture_keyboard_holds(&movement_keyboard_bindings())?;
+    let bindings = movement_keyboard_bindings(run)?;
+    let holds = run.capture_keyboard_holds(&bindings)?;
     if holds.iter().any(|hold| hold.held) {
         return Err(refuse(
             "desktop restoration requires an empty native held inventory",
@@ -95,7 +96,8 @@ pub fn restore_desktop_resume(
         }
     }
     check_deadline(deadline)?;
-    let holds = movement_keyboard_bindings()
+    let bindings = movement_keyboard_bindings(run)?;
+    let holds = bindings
         .into_iter()
         .zip(state.held)
         .map(|(binding, held)| KeyboardHold { binding, held })

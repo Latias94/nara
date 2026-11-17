@@ -9,6 +9,7 @@ use nara::{
     asset::RuntimeAssetCodec,
     fs::ContentDigest,
     image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
+    input::ActionMapRuntimeCodec,
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
@@ -20,6 +21,7 @@ use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
     animation::{atlas_product, clips_product},
+    input::input_product,
     levels::LevelId,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
@@ -138,7 +140,11 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 7);
+    assert_eq!(catalog.members().len(), 8);
+    assert_eq!(
+        catalog.configuration().input.action_map,
+        Some(input_product())
+    );
     assert_eq!(payload["executable_name"], "player_audio.exe");
     assert_eq!(payload["pack_file"], "content.pack");
     assert_eq!(
@@ -200,6 +206,20 @@ pub fn inspect(
                 serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap())
                     .unwrap();
             assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
+        } else if product == input_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ActionMapRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ActionMapRuntimeCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let input = ActionMapRuntimeCodec::decode_runtime(&bytes[range]).unwrap();
+            assert_eq!(input.product(), input_product());
+            let encoded: Value =
+                serde_json::from_slice(&ActionMapRuntimeCodec::encode_runtime(&input).unwrap())
+                    .unwrap();
+            assert_eq!(encoded["payload"], default_input_definition());
         } else if let Some(level) = LevelId::ALL
             .into_iter()
             .find(|level| level.image_product() == product)
@@ -289,10 +309,34 @@ pub fn inspect(
         LevelId::ALL
             .into_iter()
             .flat_map(|level| [level.scene_product(), level.image_product()])
-            .chain([atlas_product(), bank_product(), clips_product()])
+            .chain([
+                atlas_product(),
+                bank_product(),
+                clips_product(),
+                input_product(),
+            ])
             .collect()
     );
     images
+}
+
+pub fn assert_input_proof(record: &Value) {
+    assert_eq!(
+        record["input_proof"],
+        json!({
+            "product": input_product().to_string(),
+            "source_free": true,
+            "definition": default_input_definition(),
+        })
+    );
+}
+
+fn default_input_definition() -> Value {
+    serde_json::from_slice::<Value>(include_bytes!(
+        "../../../samples/two-level-game/input/explorer.actions.json"
+    ))
+    .unwrap()["payload"]
+        .clone()
 }
 
 pub fn assert_animation_proof(observed: &Value) {

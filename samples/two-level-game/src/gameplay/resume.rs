@@ -119,7 +119,7 @@ fn supported_service(id: &str) -> bool {
             | "nara.tilemap.assets"
             | "nara.image"
             | "nara.startup-scene-activation"
-            | "two-level-game.desktop-input"
+            | "two-level-game.input"
             | "two-level-game.test.desktop-capture"
             | "two-level-game.development.presentation"
     )
@@ -140,6 +140,27 @@ pub(super) fn remember_current(world: &mut World) {
             .levels
             .insert(LevelId::STARTUP, stamp(LevelId::STARTUP, source));
     }
+}
+
+pub(super) fn input_capture_eligible(world: &World) -> Result<(), GameResumeError> {
+    let baseline = nara::input::startup_action_map_bindings(world)
+        .ok_or_else(|| GameResumeError::Ineligible("admitted game input is unavailable".into()))?;
+    let map = world
+        .get_resource::<nara::input::ActionMaps>()
+        .and_then(|maps| maps.get(nara::input::InputSeatId::PRIMARY))
+        .ok_or_else(|| GameResumeError::Ineligible("PRIMARY game input is unavailable".into()))?;
+    if !baseline.shares_owner_with(&map.bindings_handle())
+        || map
+            .definition()
+            .contexts()
+            .iter()
+            .any(|entry| map.is_context_enabled(&entry.context) != entry.enabled)
+    {
+        return Err(GameResumeError::Ineligible(
+            "runtime input changes are not represented by admitted source".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn required_levels(world: &World) -> Vec<LevelId> {

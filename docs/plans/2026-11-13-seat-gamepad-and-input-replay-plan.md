@@ -287,3 +287,198 @@ owners supply preparation-custody evidence without adding a recording reservatio
 Use Rust 1.95.0, `CARGO_BUILD_JOBS=1`, the original root target and one Cargo invocation at a
 time. Keep paused UI/DPI and concurrent work intact. Record actual RED/qualified results and
 unresolved choices here; do not add registry snapshots or mark all R10/R4c complete.
+
+## Authored Game Input Through Source And Player Delivery
+
+Status: implemented and qualified on Windows after authored Sprite clips at `93701c3`/`2c880a0`.
+Original selection and native-key corrections are committed at `98969c4` and `7cbdd9f`.
+The normalized seat/replay mechanism above was already qualified. The actual Two-Level Game
+previously constructed physical bindings in Rust and its cooker rejected `input.action_map`.
+This successor removes that product restriction through the existing source Input and processed startup owners,
+not another Input backend, mutable mapping ledger or serializer. Runtime capabilities remain the
+priority; UI/Dialogue and small performance experiments stay deferred.
+
+Ship a native action-map file with its intrinsic complete primary Product, selected by the game
+manifest. The game registers semantic command bindings independently of physical keys in every
+placement. Its recipe explicitly selects the existing `ActionMapDomain`/`ActionMapRuntimeCodec`;
+the original unpublished Runtime installs source/processed mapping state. Remove the displaced
+code-first physical map and its competing installation. Baking retains the actual source bytes
+and selected identity, adds one global startup Input member (eight catalog members total), and
+preserves original source freshness, publication, Player and collection ownership.
+
+Keyboard reconstruction must read the installed original PRIMARY map, rather than regenerate
+WASD as authority. The game can resolve one enabled keyboard Button binding for each of its four
+movement directions at capture/isolation/restore. Missing, ambiguous or unsupported bindings
+make exact keyboard continuation ineligible without disabling ordinary gameplay or weakening
+the Input owner's existing checks. Ordinary multi-binding semantics remain unchanged; this unit
+does not invent a mapping for reconstructing several physical holds from one logical direction.
+Semantic state and source/content compatibility remain game-owned; no OS key or mapping cursor
+is added to the resume format. Driver checks stay at operation boundaries, not every simulation tick.
+
+Complete actual game workflows with an edited action file: physical keys drive the original
+command queue, fixed movement, collision and animation; default keys stop triggering the rebound
+action. Pause/Step, context cancellation, travel/Retry, immutable source retention and fresh
+restoration keep their existing owners. A changed global source refuses future travel while the
+incumbent stays usable; a fresh Runtime loads the new mapping and incompatible old state refuses.
+Cook and decode the changed map through the actual source-free Player, retain all existing
+native gameplay/pixel/cleanup assertions, and rerun actual Rust-edit adoption because the copied
+source inventory and native binding capture change. Trust unchanged Input/codec/platform owners;
+verify changed game/adapters and relevant existing controls with serial release nextest, jobs1,
+locked offline Rust1.95 and the original target. Physical controller execution, live rebinding,
+Editor preferences, arbitrary held multi-binding migration and full R10/R12 remain open.
+
+### Implementation And First Qualification
+
+The game now loads `input/explorer.actions.json`, intrinsic primary source
+`b23d8f3a-9770-5c1a-bf4d-81fb93171257`, through the original manifest selection. Its
+unconditional game Input plugin only declares semantic commands. Source and cooked recipes
+select the original action-map codec, and the cooker joins the actual decoded Product with
+`source_runtime_projection()` before constructing processed configuration. It never clears
+the source obligation to reuse source-independent projection. The action file joins both the
+cook content fence and the development source inventory. Catalog membership is eight with one
+separate global Input root; each Scene keeps its original four Required asset dependencies.
+
+The first library check passes. Independent review catches a new continuity gap in the initial
+implementation: sampling the mutable map in game Startup could accept a definition replaced by
+an earlier Startup system as source truth. The original `InputInstallation` now retains the
+selected immutable PRIMARY handle on successful unpublished finalization. Read-only
+`startup_action_map_bindings` exposes that original owner; game capture/restore compares the
+actual map and initial context flags only at the operation boundary. No input state or key enters
+the resume wire, and no second installation or mutation owner is added.
+
+Native reconciliation no longer limits its inverse conversion to four default movement keys.
+It maps all43 codes already admitted by ordinary `convert_key_code`, including named keys,
+arrows, lowercase ASCII letters and digits. Windows still resolves each declared key's original
+physical scan code through the current keyboard layout with the original HWND/focus checks and
+`GetAsyncKeyState`. Normalized keys without a native inverse remain explicitly unsupported by
+that platform operation, while pure Input/game semantics may still use them.
+
+Run `954914ae-5caa-478d-b76a-8835c778e1d1` passes44/44,183 outside the selected scope, in
+1.637 seconds after a 4m22s affected release build. It includes original Input selection and
+keyboard continuation, actual early-Startup map replacement with the original selection still
+retained, code-first finalization and unchanged repeated-refusal behavior. Winit's existing
+isolation/held/fault/activation controls remain intact; the added inverse table and extended-arrow
+scan-code cases are CPU evidence, not physical keyboard execution. Game/cook/native/delivery
+qualification follows. Build durations are observations, not performance targets or comparisons.
+
+Initial game/cook run `8693ad7d-2548-43e7-8b4d-356a2d61b096` passes27/29 and exposes two
+new fixture assumptions. A custom First producer must cross the original First staging boundary
+before an exact Step; Step does not rerun arbitrary First systems. The corrected driver performs
+paused maintenance before stepping. A rejected travel retains its error until the game's existing
+successful command path clears it; the test now uses that actual Marker operation before proving
+continued movement. Production Input scheduling and old game recovery are unchanged.
+
+The separate adapter review catches a production mismatch: source Input validates an optional
+identity sidecar, while the first cooker integration ignored it. Cooking now checks the same
+intrinsic source UUID, kind and canonical path when metadata is present. The original content
+fence retains its presence/absence, file identity and digest and rejects later addition, mutation
+or removal. No mandatory sidecar or new identity format is introduced. Corrected run
+`d9979c00-7d33-4a1f-b19c-2fde938f55ff` passes31/31,126 outside the filter, in4.580 seconds
+after a38.58-second release build. This includes actual edited keys, old-key inactivity, fixed
+movement, collision/animation, context and focus cancellation, travel/Retry, fresh reconstruction,
+changed-global-source rejection, source-removed processed mapping and sidecar conflict controls.
+
+The complete desktop/cost/cook/Player/audio-enabled ordinary selection passes347/347,31 explicit
+native/build cases skipped, in `bbcdafee-d8b2-4e14-a8cd-ae418a0f43a6` (35.517 seconds after a
+9m53s release build). Existing collision, animated restoration, sound data, source/cooked ownership,
+finite copied inventories and CLI controls remain. A subsequent startup-console wording change
+reports configured controls instead of promising default WASD for rebound files; later native
+and delivery builds consume that same production source. The Input API change and native key
+expansion remain limited to their recorded owner/native scope.
+
+Both actual Windows/DX12 reconstruction trajectories pass2/2 without skips in
+`e710512f-dae8-46e4-8527-d570bc6859eb` (55.363 seconds after a2m20s affected release build).
+The original default-key trajectory stays intact. The new case edits only a private copied
+action file to ArrowLeft/Right/Up/Down, then launches the same ordinary main-thread executable
+against that project. It asserts the actual installed keys before repeating original held-state
+capture, fresh reconstruction, exact paused continuation and native focus/release-gap activation.
+Both retain original actual presentation associations, ten retained-input GPU replays, animation
+and collision assertions, native target retirement and physical-loop recovery. This qualifies
+the declared direction keys under the executed Windows layout/focus conditions; it does not
+claim arbitrary Unicode physical keys, other native platforms or controller hardware.
+
+The final independent consumer review requires edited definitions to survive an actual external
+Player as well as the in-process source-removed Runtime test. The original headless package
+trajectory now changes up from W to I before production cooking and compares its full processed
+definition after source/cache removal. The ordinary desktop package trajectory changes right
+from D to J and uses actual SendInput J for original wall/pickup/travel/Save/Restore operations.
+Default audio controls retain D. Both package oracles compare complete independently reconstructed
+edited definitions, rather than weakening identity/definition checks or replacing gameplay
+assertions. Their execution and actual rebuild adoption are the remaining delivery gates below.
+
+The actual relocated headless package trajectory passes1/1 in
+`4538e43b-398d-47df-9247-45050fb17262` (511.782 seconds, five controls/private workers outside
+this selection, after a4m50s outer release build). The production cooker separately compiles its
+default-free Player; that first feature-specific dependency build accounts for most elapsed time.
+Before cooking, the owned copy changes `move-w` from W to I. The complete eight-member pack and
+every source-free Player receipt must preserve that exact edited definition. Original source/cache
+removal, game progress, instance travel, save/fresh restore, damaged/missing content and environment
+refusals, executable/catalog identity and actual process cleanup assertions remain intact.
+This execution qualifies the external Player, not merely a typed closure or in-process decode;
+the observed build duration supplies no iteration or runtime performance comparison.
+
+The actual relocated desktop package passes1/1 in
+`5accfb23-cf10-463f-b556-eccf24c51019` (147.268 seconds, one private worker outside the
+selection). The ordinary and restored Players run DX12 on NVIDIA GeForce RTX4090 with right
+movement authored as J; every actual Input proof retains that binding. Original physical key
+operations exercise pickups, wall stopping/sliding, markers, Save/fresh Restore and twenty more
+interactive travels. The saved run still observes all four default animation columns. The finite
+first-presentation software control uses the Microsoft Basic Render Driver with the same J map.
+All three normal exits and the intentionally refused startup retain original HWND destruction,
+Runtime/pump return, empty containment, stopped readers and drained output without force-kill.
+Source and cache are unavailable to the relocated Player. This result does not requalify the
+unchanged physical audio service, foreign keyboard layouts or a numerical frame budget.
+
+Actual source/headless rebuild adoption passes1/1 in
+`1ac24f07-1487-41e3-9c7f-b3f6d3458df0` (136.833 seconds, two ordinary controls outside the
+ignored-only selection). The original complete Host trajectory retains its meaningful game
+basis and nonfirst animated frame across actual function-body and private-state-structure edits.
+Compiler/probe/source-drift refusals, original incumbent retention, nominal tickets, fresh adopter
+restoration, Pending-time new-game commands and physical predecessor/active cleanup remain.
+Its finite copied product and source fence now include the actual action file; no separate
+mapping restorer or serialized native key state is introduced.
+
+The original continuous desktop Rust-edit/adoption trajectory passes1/1 without skips in
+`8e6be2cd-e0ab-460d-8dd5-1acc65aa9529` (316.192 seconds after a10.36-second outer build).
+Its separate `desktop` child feature closure first recompiles native/render dependencies. Actual
+native keyboard play, pause/isolation, complete canonical capture and restored-presentation
+association still precede route exchange. Body/private-structure edits adopt through the same
+production Host, original new-active/old-retirement separation and Input activation owner;
+the new game continues under actual native key operations before eventual physical cleanup.
+The selected test requires hardware rendering and a consistent observed DX12-or-Vulkan backend;
+this run does not independently record which allowed backend its sealed child selected. It is
+not continuous Editor Play, cross-platform held-key support or a measured performance result.
+
+The affected Input/Winit ordinary CPU cohort passes297/297,23 native cases explicitly skipped,
+in `407f0c48-d822-4dc9-9a22-6755265149db` (11.034 seconds after a3m50s feature-specific
+release build). It enables the existing Input serde facet and retains original declaration/
+codec, finite membership, context lifetime, normalized gamepad, Window/session and keyboard
+continuation controls. Its skipped native cases are not recounted as new native qualification;
+the executed default/rebound reconstruction and source-free physical workflows above own this
+unit's native claims. No unrelated Editor/UI or physical controller matrix is selected.
+
+With defaults disabled and only `cooked-player`, the selected Input, animation and actual edited
+game workflows pass22/22,92 outside the filter, in
+`113efa0e-ab05-4958-9d4b-1cc4075b3736` (1.421 seconds after a2m21s feature-specific release
+build). Source-game tests use the existing CPU content loader without a development Host, Cargo
+tools, WGPU/window backend or UI. The separate relocated Players above establish actual source-free
+execution. Source/processed input reuse introduces no new dependency or lock resolution.
+
+Final all-target release correctness Clippy passes for Input/Winit with the existing serde facet
+and for the complete selected desktop/cost/cook/Player/audio game closure. Existing warnings
+outside `clippy::correctness` remain. Root and independently locked game formatting, affected
+TOML/action JSON, added document links/fragments and ordinary whitespace checks pass. The fifteen
+paused UI/Dialogue files retain their original bytes. Eight scoped research, implementation and
+independent review threads are closed; the actual Startup baseline, sidecar and edited external
+Player findings are resolved and exercised. No owned build/native child or review thread remains
+after the recorded final cleanup. Commands use Windows, Rust1.95.0, locked offline release
+dependencies, one build job, the original shared target and serial nextest; no remote publication
+or unrelated native/UI matrix is part of this unit.
+
+The actual authored-key workflow is complete through source play, cooked delivery and original
+game-owned rebuild/adoption. Existing installed mappings stay immutable across travel; changing
+the global source requires a fresh Runtime. Live rebind UI/preferences, arbitrary physical
+multi-binding continuation, controller hardware, foreign native execution, numerical runtime
+budgets and full R10/R12/Foundation remain open. Further small performance experiments and paused
+Editor/UI/Dialogue product work stay deferred. Continue from missing Runtime/game capability,
+not another Input validation or timing loop.

@@ -11,6 +11,23 @@ the current logical level at its checkpoint, or retries a failed reconstruction.
 uses normal Runtime shutdown, including pending Scene preparation and temporary-file cleanup.
 The green square marks the checkpoint; the purple square marks the destination portal.
 
+These are the default physical keys in [the authored action map](input/explorer.actions.json),
+selected by `[input] action_map` in `nara.toml`. Edit its key bindings without changing gameplay
+Rust. Stable action names identify movement directions and commands independently of their
+physical keys; the existing names ending in `move-a/d/w/s` retain their original direction meaning
+after rebinding. Source and cooked Players use the same finite definition and semantic command
+adapter. The global Input definition stays installed across Scene travel. Changes to that source
+require a fresh Runtime; the incumbent keeps its admitted mapping and refuses new travel against
+different global input rather than silently adopting the edit.
+
+Exact keyboard reconstruction reads the original Runtime's installed PRIMARY movement bindings.
+It requires one enabled keyboard Button source for each direction, with distinct keys and no key
+fanout. Ordinary valid multi-binding maps remain playable but can be ineligible for exact keyboard
+continuation. Native Windows reconciliation supports the same named keys, lowercase ASCII letters
+and digits as ordinary physical ingress. It does not guess uppercase or Unicode key positions.
+The original pre-Startup selection remains the reconstruction baseline; later runtime context or
+definition changes are not serialized by the game. The resume and checkpoint formats are unchanged.
+
 The game-owned [animation selection](src/animation.rs) uses the authored
 [explorer clips](assets/animations/explorer.sprite-animations.json) and shared
 [64x16 sRGB atlas](assets/textures/explorer.png), with nearest clamped sampling. Change frame
@@ -54,9 +71,11 @@ wall mutations are outside that format and make exact capture ineligible. The wi
 accept finite zero scale while collision admission refuses it. Placement checks happen at
 admission; the movement path does not rescan the Scene or reconstruct wall geometry each tick.
 
-Each shipped Scene has eleven authored members. The cooked catalog has seven content members:
-two Scenes, three Images, the Sound Bank and shared Sprite clips. Refresh the authoring bundle
-and recook older installations for `CollisionBox`, `ExplorerAnimation` and native binding revision 3.
+Each shipped Scene has eleven authored members. The cooked catalog has eight content members:
+two Scenes, three Images, the Sound Bank, shared Sprite clips and global startup Input. Refresh
+the authoring bundle for `CollisionBox`, `ExplorerAnimation` and native binding revision 3;
+recook older installations to include the authored Input selection. The Input successor adds
+no Schema field or binding revision.
 
 ## Build And Run
 
@@ -157,9 +176,10 @@ Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop
 Use the same explicit project/output/target/tool paths documented for the desktop Player below.
 This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
 `cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain two Scenes,
-three Images, one shared Sound Bank and one Sprite clip resource. Both Scenes require the atlas
-and clip Product. The finite content fence includes the clip/bank descriptors and metadata plus
-both raw WAVs. Cook and Check prepare CPU content without opening a device.
+three Images, one shared Sound Bank, one Sprite clip resource and global Input. Both Scenes require
+the atlas and clip Product; Input is a separate global startup root. The finite content fence
+includes the action map, clip/bank descriptors and metadata plus both raw WAVs. Cook and Check
+prepare CPU content without opening a device.
 
 The published `player_audio.exe` opens only its generated executable-relative content pack.
 There is no source-directory or embedded-WAV fallback. It accepts normal interactive play and
@@ -222,7 +242,7 @@ key or that a particular platform has passed the full interactive trajectory.
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
 Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
 domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
-publisher. Both levels, three Images, one shared Sound Bank and Sprite clips are included.
+publisher. Both levels, three Images, one shared Sound Bank, Sprite clips and startup Input are included.
 Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
 `LevelId`, separate from logical level instances.
 

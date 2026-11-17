@@ -43,6 +43,7 @@ impl Directory {
         let destination = self.0.join("project");
         for file in [
             "nara.toml",
+            "input/explorer.actions.json",
             "scenes/meadow.scene.json",
             "scenes/cavern.scene.json",
             "assets/textures/meadow.png",

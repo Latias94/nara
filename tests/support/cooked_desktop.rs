@@ -130,10 +130,38 @@ pub fn accept(cooker: &Path) {
         .unwrap()
         .resolve_profile(Some("desktop"))
         .unwrap();
-    assert!(settings.window.enabled && settings.input.action_map.is_none());
+    assert!(settings.window.enabled);
+    assert_eq!(
+        settings.input.action_map.as_ref().unwrap().as_str(),
+        two_level_game::input::INPUT_PATH
+    );
+    let mut source_input: Value =
+        serde_json::from_str(&fixture.read(two_level_game::input::INPUT_PATH)).unwrap();
+    let movement_binding = source_input["payload"]["bindings"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|binding| binding["action"] == "two-level-game.move-d")
+        .unwrap();
+    assert_eq!(
+        movement_binding["input"],
+        json!({"Key": {"Character": "d"}})
+    );
+    movement_binding["input"]["Key"]["Character"] = json!("j");
+    fixture.write(
+        two_level_game::input::INPUT_PATH,
+        &serde_json::to_string(&source_input).unwrap(),
+    );
     let title = settings.window.title.clone();
     assert!(!title.is_empty() && title.len() < 1024);
-    let configuration = settings.runtime_configuration().unwrap().to_configuration();
+    let projection = settings.source_runtime_projection().unwrap();
+    let selected = nara::input::ActionMapFileCandidate::decode_json_bytes(
+        &fixture.read(two_level_game::input::INPUT_PATH).into_bytes(),
+    )
+    .unwrap();
+    assert_eq!(selected.product(), two_level_game::input::input_product());
+    let mut configuration = projection.runtime().to_configuration();
+    configuration.input.action_map = Some(selected.product());
     let output = fixture.directory("cook-output");
     let lock = read_bounded(&fixture.project.join("Cargo.lock"), 1024 * 1024);
     assert!(fixture.project.join("build.rs").is_file());
@@ -295,6 +323,7 @@ pub fn accept(cooker: &Path) {
     let text = custody.run(NativeProcess::new(owner, None), Duration::from_secs(6 * 60));
     let report = process::record(&text, REPORT);
     assert_eq!(report["success"], true);
+    assert_eq!(report["authored_key"], "j");
     evidence::collision_excursions(&report);
     assert_eq!(report["ordinary_processes"], 2);
     assert_eq!(report["finite_processes"], 1);

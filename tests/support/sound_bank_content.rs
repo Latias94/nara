@@ -24,6 +24,7 @@ use nara::{
         CapabilityRights, DirectoryCapability, FileCapability, HostCapabilityOptions, RelativePath,
         TrustMode,
     },
+    input::{ActionMapAsset, ActionMapFileCandidate, ActionMaps, InputSeatId},
     project_host::{
         HeadlessSession, HeadlessSessionClose, ProjectContentBudgetKind,
         ProjectContentBudgetSnapshot, ProjectContentLoader, ProjectDomainAssets,
@@ -43,6 +44,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot, SoundPalette,
     animation::{CLIPS_PATH, clips_product},
+    input::{INPUT_PATH, input_product},
     levels::LevelId,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
 };
@@ -80,7 +82,7 @@ impl Fixture {
         let project = root.join("project");
         fs::create_dir(&project).unwrap();
         let sample = Path::new(env!("CARGO_MANIFEST_DIR"));
-        for name in ["assets", "scenes", "schema", "prefabs"] {
+        for name in ["assets", "scenes", "schema", "prefabs", "input"] {
             copy_tree(&sample.join(name), &project.join(name));
         }
         fs::copy(sample.join("nara.toml"), project.join("nara.toml")).unwrap();
@@ -438,11 +440,18 @@ pub fn source_and_build() {
 fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
     let root = fixture.root_capability();
     let (candidate, plan) = fixture.inputs(&root);
-    let configuration = candidate
-        .settings()
-        .runtime_configuration()
-        .unwrap()
-        .to_configuration();
+    let projection = candidate.settings().source_runtime_projection().unwrap();
+    let selected = projection.input_requirement().unwrap();
+    assert_eq!(selected.as_str(), INPUT_PATH);
+    let file = ActionMapFileCandidate::decode_json_bytes(
+        &fs::read(fixture.project.join(selected.as_str())).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(file.product(), input_product());
+    let (product, definition) = file.into_parts();
+    let input = ActionMapAsset::new(product, definition).unwrap();
+    let mut configuration = projection.runtime().to_configuration();
+    configuration.input.action_map = Some(input.product());
     let mut builder = CookedContentBuilder::new(
         CookedContentRequest {
             target: RuntimeContentTarget::new(
@@ -466,6 +475,7 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
         CookedContentLimits::default(),
     )
     .unwrap();
+    builder.add_input(&input).unwrap();
     let store = fixture.store();
     let group = build_source::<SoundBankDomain>(
         &store,
@@ -629,7 +639,19 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 7);
+    assert_eq!(prepared.base().catalog().members().len(), 8);
+    assert_eq!(
+        prepared.base().catalog().configuration().input.action_map,
+        Some(input_product())
+    );
+    let input = prepared.base().acquire_startup_input().unwrap().unwrap();
+    assert_eq!(input.product(), input_product());
+    let file = ActionMapFileCandidate::decode_json_bytes(
+        &fs::read(fixture.project.join(INPUT_PATH)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(input.definition().bindings(), file.definition().bindings());
+    assert_eq!(input.definition().contexts(), file.definition().contexts());
     let acquired = prepared
         .base()
         .acquire_asset::<SoundBankDomain, SoundBankCodec>(bank_product())
@@ -719,6 +741,18 @@ pub fn processed_and_membership() {
         .unwrap()
         .observe(|world| {
             assert!(world.resource::<GameSnapshot>().initialized);
+            let primary = world
+                .resource::<ActionMaps>()
+                .get(InputSeatId::PRIMARY)
+                .unwrap();
+            assert_eq!(
+                primary.definition().contexts(),
+                input.definition().contexts()
+            );
+            assert_eq!(
+                primary.definition().bindings(),
+                input.definition().bindings()
+            );
             let assets = world.resource::<ProjectDomainAssets>();
             assert_eq!(
                 assets

@@ -148,9 +148,20 @@ pub fn accept(cooker: &Path) {
         .unwrap()
         .resolve_profile(Some("desktop"))
         .unwrap();
-    assert!(settings.window.enabled && settings.input.action_map.is_none());
+    assert!(settings.window.enabled);
+    assert_eq!(
+        settings.input.action_map.as_ref().unwrap().as_str(),
+        two_level_game::input::INPUT_PATH
+    );
     let title = settings.window.title.clone();
-    let configuration = settings.runtime_configuration().unwrap().to_configuration();
+    let projection = settings.source_runtime_projection().unwrap();
+    let selected = nara::input::ActionMapFileCandidate::decode_json_bytes(
+        &fixture.read(two_level_game::input::INPUT_PATH).into_bytes(),
+    )
+    .unwrap();
+    assert_eq!(selected.product(), two_level_game::input::input_product());
+    let mut configuration = projection.runtime().to_configuration();
+    configuration.input.action_map = Some(selected.product());
     let source_samples = ["pickup.wav", "travel.wav"].map(|name| {
         wav::decode(&read_bounded(
             &fixture.project.join("assets/audio").join(name),

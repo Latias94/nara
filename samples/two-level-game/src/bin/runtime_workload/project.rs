@@ -146,7 +146,14 @@ impl Project {
     fn prepare(&mut self, source: &Path, side: i32) -> Result<(), String> {
         let mut budget = CopyBudget::default();
         let mut files = BTreeMap::new();
-        for name in ["assets", "scenes", "schema", "prefabs", "nara.toml"] {
+        for name in [
+            "assets",
+            "scenes",
+            "schema",
+            "prefabs",
+            "input",
+            "nara.toml",
+        ] {
             copy_source(
                 source,
                 &source.join(name),

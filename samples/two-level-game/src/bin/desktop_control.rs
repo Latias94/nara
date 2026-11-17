@@ -349,7 +349,8 @@ impl Game {
     }
 
     fn qualify_keyboard_release_gap(&mut self) -> Result<(), String> {
-        let bindings = two_level_game::movement_keyboard_bindings();
+        let bindings = two_level_game::movement_keyboard_bindings(&self.run)
+            .map_err(|error| error.to_string())?;
         let held = self.snapshot()?.held;
         assert_eq!(held, [false, true, false, false]);
         let pending = bindings

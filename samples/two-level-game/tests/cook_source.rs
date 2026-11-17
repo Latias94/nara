@@ -35,6 +35,7 @@ impl Directory {
         fs::create_dir(&path).unwrap();
         for (name, bytes) in [
             ("nara.toml", "manifest"),
+            ("input/explorer.actions.json", "input mapping"),
             ("schema/authoring.bundle.json", "schema"),
             ("scenes/meadow.scene.json", "meadow"),
             ("scenes/cavern.scene.json", "cavern"),
@@ -120,9 +121,34 @@ impl Drop for Directory {
 }
 
 #[test]
+fn optional_input_metadata_presence_and_content_stay_in_the_original_fence() {
+    let directory = Directory::new();
+    let path = directory.0.join("input/explorer.actions.json.meta");
+    let absent = source::ContentFence::capture(&directory.0).unwrap();
+    absent.verify().unwrap();
+    fs::write(&path, b"original input metadata").unwrap();
+    assert!(
+        absent
+            .verify()
+            .unwrap_err()
+            .contains("input/explorer.actions.json.meta")
+    );
+    let present = source::ContentFence::capture(&directory.0).unwrap();
+    present.verify().unwrap();
+    fs::write(&path, b"modified input metadata").unwrap();
+    assert!(present.verify().is_err());
+    fs::write(&path, b"original input metadata").unwrap();
+    present.verify().unwrap();
+    fs::remove_file(&path).unwrap();
+    assert!(present.verify().is_err());
+    absent.verify().unwrap();
+}
+
+#[test]
 fn content_fence_remains_original_when_code_is_bound_after_generation() {
     for name in [
         "scenes/cavern.scene.json",
+        "input/explorer.actions.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
         "assets/animations/explorer.sprite-animations.json",
@@ -137,8 +163,9 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
 }
 
 #[test]
-fn content_fence_requires_atlas_and_animation_sources_and_metadata() {
+fn content_fence_requires_input_atlas_and_animation_sources_and_metadata() {
     for name in [
+        "input/explorer.actions.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
         "assets/animations/explorer.sprite-animations.json",

@@ -22,6 +22,7 @@ use super::process::POLL;
 
 const KEYS: [u16; 10] = [0x1e, 0x20, 0x11, 0x1f, 0x12, 0x10, 0x32, 0x25, 0x26, 0x13];
 pub const D: u16 = 0x20;
+pub const J: u16 = 0x24;
 pub const W: u16 = 0x11;
 pub const E: u16 = 0x12;
 pub const Q: u16 = 0x10;
@@ -208,7 +209,7 @@ impl Input {
 
     pub fn press(&mut self, scan: u16) {
         self.check();
-        assert!(KEYS.contains(&scan) && !self.held.contains(&scan));
+        assert!((KEYS.contains(&scan) || scan == J) && !self.held.contains(&scan));
         let key = Self::virtual_key(scan, self.target.unwrap().thread);
         assert!(
             unsafe { GetAsyncKeyState(key) } >= 0,

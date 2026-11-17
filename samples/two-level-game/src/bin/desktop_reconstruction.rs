@@ -18,6 +18,7 @@ use std::{
     cell::RefCell,
     collections::BTreeSet,
     panic::{AssertUnwindSafe, catch_unwind},
+    path::{Path, PathBuf},
     process::ExitCode,
     rc::Rc,
     time::{Duration, Instant},
@@ -82,11 +83,16 @@ struct Capture {
 }
 
 fn main() -> ExitCode {
-    if std::env::args_os().len() != 1 {
-        eprintln!("usage: desktop_reconstruction");
-        return ExitCode::FAILURE;
-    }
-    match qualify() {
+    let mut arguments = std::env::args_os().skip(1);
+    let project = match (arguments.next(), arguments.next(), arguments.next()) {
+        (None, None, None) => None,
+        (Some(flag), Some(path), None) if flag == "--project" => Some(PathBuf::from(path)),
+        _ => {
+            eprintln!("usage: desktop_reconstruction [--project ABSOLUTE_PROJECT]");
+            return ExitCode::FAILURE;
+        }
+    };
+    match qualify(project.as_deref()) {
         Ok(()) => {
             println!(
                 "two_level_desktop_reconstruction: ok sequential_runtimes=true shared_physical_loop=true canonical_bytes=true fresh_owners=true restored_presentation=true native_cleanup=true"
@@ -100,14 +106,14 @@ fn main() -> ExitCode {
     }
 }
 
-fn qualify() -> Result<(), String> {
-    let mut original = Game::new(None)?;
+fn qualify(project: Option<&Path>) -> Result<(), String> {
+    let mut original = Game::new(project, None)?;
     let captured = catch_unwind(AssertUnwindSafe(|| original.prepare_original()))
         .unwrap_or_else(|_| Err("original trajectory panicked; retaining original cleanup".into()));
     let physical_loop = original.close("original")?;
     let (captured, animation) = captured?;
 
-    let mut plain = Game::new_with_observer(Some(physical_loop), false)?;
+    let mut plain = Game::new_with_observer(project, Some(physical_loop), false)?;
     let refused = catch_unwind(AssertUnwindSafe(|| {
         plain.refuse_observer_mismatch(&captured)
     }))
@@ -115,7 +121,7 @@ fn qualify() -> Result<(), String> {
     let physical_loop = plain.close("ordinary-recipe-control")?;
     refused?;
 
-    let mut candidate = Game::new(Some(physical_loop))?;
+    let mut candidate = Game::new(project, Some(physical_loop))?;
     let restored = catch_unwind(AssertUnwindSafe(|| candidate.reconstruct(&captured)))
         .unwrap_or_else(
             |_| Err("candidate trajectory panicked; retaining original cleanup".into()),
@@ -179,15 +185,20 @@ fn qualify() -> Result<(), String> {
 }
 
 impl Game {
-    fn new(event_loop: Option<WinitEventLoop>) -> Result<Self, String> {
-        Self::new_with_observer(event_loop, true)
+    fn new(project: Option<&Path>, event_loop: Option<WinitEventLoop>) -> Result<Self, String> {
+        Self::new_with_observer(project, event_loop, true)
     }
 
     fn new_with_observer(
+        project: Option<&Path>,
         event_loop: Option<WinitEventLoop>,
         evidence: bool,
     ) -> Result<Self, String> {
-        let root = two_level_game::open_project_root().map_err(|error| error.to_string())?;
+        let root = match project {
+            Some(path) => two_level_game::open_explicit_project_root(path),
+            None => two_level_game::open_project_root(),
+        }
+        .map_err(|error| error.to_string())?;
         let recipe = two_level_game::product_recipe();
         let recipe = if evidence {
             recipe
@@ -259,6 +270,11 @@ impl Game {
 
     fn prepare_original(&mut self) -> Result<(Capture, Vec<Capture>), String> {
         self.settle()?;
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
+        println!(
+            "two_level_desktop_reconstruction_input: keys={:?}",
+            bindings.map(|binding| binding.key)
+        );
         assert_eq!(self.run.state(), Some(RuntimeState::Paused));
         assert_eq!(
             self.run.input_activation(),
@@ -306,7 +322,8 @@ impl Game {
         }
         assert!(matches!(capture_desktop_resume(&self.run),
             Err(GameResumeError::Ineligible(reason)) if reason.contains("keyboard inventory")));
-        let holds = movement_keyboard_bindings()
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
+        let holds = bindings
             .into_iter()
             .zip(self.snapshot()?.held)
             .map(|(binding, held)| KeyboardHold { binding, held })
@@ -341,7 +358,7 @@ impl Game {
     }
 
     fn animation_samples(&mut self) -> Result<Vec<Capture>, String> {
-        let bindings = movement_keyboard_bindings();
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
         let holds = self
             .run
             .isolate_keyboard_input(&bindings)
@@ -507,7 +524,7 @@ impl Game {
     }
 
     fn collision_samples(&mut self) -> Result<Vec<Capture>, String> {
-        let bindings = movement_keyboard_bindings();
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
         let holds = self
             .run
             .isolate_keyboard_input(&bindings)
@@ -566,6 +583,7 @@ impl Game {
     }
 
     fn activate_after_release_gap(&mut self, expected: &mut ResumeState) -> Result<(), String> {
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
         self.run.reveal().map_err(|error| error.to_string())?;
         self.settle()?;
         self.run
@@ -587,11 +605,7 @@ impl Game {
             }
         }
         self.settle()?;
-        assert!(
-            self.run
-                .capture_keyboard_holds(&movement_keyboard_bindings())
-                .is_err()
-        );
+        assert!(self.run.capture_keyboard_holds(&bindings).is_err());
         assert!(capture_desktop_resume(&self.run).is_err());
         assert!(self.run.request_control(RuntimeControl::Resume).is_err());
         let stopped_at = expected.player.translation;
@@ -680,7 +694,7 @@ impl Game {
     }
 
     fn assert_input(&self, held: bool) -> Result<(), String> {
-        let bindings = movement_keyboard_bindings();
+        let bindings = movement_keyboard_bindings(&self.run).map_err(|error| error.to_string())?;
         let holds = self
             .run
             .capture_keyboard_holds(&bindings)

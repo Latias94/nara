@@ -22,6 +22,9 @@ default_scene = "meadow.scene.json"
 [content]
 scenes = ["cavern.scene.json"]
 
+[input]
+action_map = 'input/explorer.actions.json'
+
 [runtime]
 preset = "local-headless"
 fixed_timestep_seconds = 0.02

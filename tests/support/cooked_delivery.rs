@@ -138,6 +138,7 @@ pub mod native {
         asset::{AssetProductRef, RuntimeAssetCodec},
         fs::{ContentDigest, RelativePath},
         image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
+        input::ActionMapRuntimeCodec,
         project_tooling::{
             cargo_build::CargoBuildTools,
             host_fs,
@@ -156,6 +157,7 @@ pub mod native {
     use serde_json::{Value, json};
     use two_level_game::{
         animation::{atlas_product, clips_product},
+        input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         sound_bank::{SoundBankCodec, bank_product},
@@ -420,6 +422,19 @@ pub mod native {
         assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
         fixture.assert_player_feature_closure(false);
         assert!(fixture.project.join("build.rs").is_file());
+        let mut source_input: Value = serde_json::from_str(&fixture.read(INPUT_PATH)).unwrap();
+        let movement_binding = source_input["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|binding| binding["action"] == "two-level-game.move-w")
+            .unwrap();
+        assert_eq!(
+            movement_binding["input"],
+            json!({"Key": {"Character": "w"}})
+        );
+        movement_binding["input"] = json!({"Key": {"Character": "i"}});
+        fixture.write(INPUT_PATH, &serde_json::to_string(&source_input).unwrap());
         let target = fixture.repository.join("target").canonicalize().unwrap();
         let tools = CargoBuildTools::discover_in(&fixture.repository).unwrap();
         let triple = fixture.request().selection().target_triple().to_owned();
@@ -515,7 +530,11 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 7);
+        assert_eq!(pack.catalog.members().len(), 8);
+        assert_eq!(
+            pack.catalog.configuration().input.action_map,
+            Some(input_product())
+        );
         let mut products = BTreeSet::new();
         for member in pack.catalog.members() {
             assert_eq!(member.products().len(), 1);
@@ -526,7 +545,12 @@ pub mod native {
             LevelId::ALL
                 .into_iter()
                 .flat_map(|level| [level.scene_product(), level.image_product()])
-                .chain([atlas_product(), bank_product(), clips_product()])
+                .chain([
+                    atlas_product(),
+                    bank_product(),
+                    clips_product(),
+                    input_product(),
+                ])
                 .collect()
         );
         for level in LevelId::ALL {
@@ -592,6 +616,27 @@ pub mod native {
         let encoded: Value =
             serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap()).unwrap();
         assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
+        let index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [input_product()])
+            .unwrap();
+        let member = &pack.catalog.members()[index];
+        assert!(matches!(
+            member.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == ActionMapRuntimeCodec::RUNTIME_KIND
+                    && version.get() == ActionMapRuntimeCodec::RUNTIME_VERSION
+        ));
+        assert!(member.dependencies().is_empty());
+        let input = ActionMapRuntimeCodec::decode_runtime(&pack_bytes[pack.members[index].clone()])
+            .unwrap();
+        assert_eq!(input.product(), input_product());
+        let encoded: Value =
+            serde_json::from_slice(&ActionMapRuntimeCodec::encode_runtime(&input).unwrap())
+                .unwrap();
+        assert_eq!(encoded["payload"], rebound_input_definition());
         for (member, extent) in pack.catalog.members().iter().zip(&pack.members) {
             assert_eq!(
                 ContentDigest::of_bytes(&pack_bytes[extent.clone()]),
@@ -989,6 +1034,14 @@ pub mod native {
     }
 
     fn assert_runtime_receipts(result: &Value) {
+        assert_eq!(
+            result["input_proof"],
+            json!({
+                "product": input_product().to_string(),
+                "source_free": true,
+                "definition": rebound_input_definition(),
+            })
+        );
         let startup = &result["startup_receipt"];
         let current = &result["current_receipt"];
         let receipts = result["scene_receipts"]
@@ -1021,6 +1074,21 @@ pub mod native {
             walls::scene(observed);
             assert_eq!(observed["animation_proof"], default_animation_proof());
         }
+    }
+
+    fn rebound_input_definition() -> Value {
+        let mut definition = serde_json::from_slice::<Value>(include_bytes!(
+            "../../samples/two-level-game/input/explorer.actions.json"
+        ))
+        .unwrap()["payload"]
+            .clone();
+        assert_eq!(definition["bindings"][2]["action"], "two-level-game.move-w");
+        assert_eq!(
+            definition["bindings"][2]["input"],
+            json!({"Key": {"Character": "w"}})
+        );
+        definition["bindings"][2]["input"] = json!({"Key": {"Character": "i"}});
+        definition
     }
 
     fn default_animation_proof() -> Value {
@@ -1103,6 +1171,7 @@ pub mod native {
         assert!(!cache.exists());
         for member in [
             "src",
+            "input",
             "assets",
             "scenes",
             "schema",

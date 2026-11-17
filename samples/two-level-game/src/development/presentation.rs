@@ -24,7 +24,6 @@ use nara::{
 
 use crate::{
     gameplay::resume::capture_world,
-    movement_keyboard_bindings,
     resume::{ResumeState, RuntimeTimeState, encode_resume},
 };
 
@@ -115,11 +114,18 @@ fn retain_sealed_state(
     let Ok(canonical) = capture_world(world, time) else {
         return;
     };
+    let bindings = match crate::input::movement_bindings(world) {
+        Ok(bindings) => bindings,
+        Err(error) => {
+            world.resource_mut::<SealedStates>().failure = Some(error);
+            return;
+        }
+    };
     let Ok(holds) = capture_keyboard_holds(
         world,
         InputWindowId::new(window.id.get()),
         InputSeatId::PRIMARY,
-        &movement_keyboard_bindings(),
+        &bindings,
     ) else {
         return;
     };

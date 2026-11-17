@@ -1,0 +1,125 @@
+{
+  "kind": "action_map",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "two-level-game",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "product": {
+      "source": "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
+      "product": {
+        "kind": "primary"
+      }
+    },
+    "contexts": [
+      {
+        "context": "gameplay",
+        "enabled": true
+      }
+    ],
+    "bindings": [
+      {
+        "action": "two-level-game.move-a",
+        "input": {
+          "Key": {
+            "Character": "a"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-d",
+        "input": {
+          "Key": {
+            "Character": "d"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-w",
+        "input": {
+          "Key": {
+            "Character": "w"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-s",
+        "input": {
+          "Key": {
+            "Character": "s"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.e",
+        "input": {
+          "Key": {
+            "Character": "e"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.q",
+        "input": {
+          "Key": {
+            "Character": "q"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.m",
+        "input": {
+          "Key": {
+            "Character": "m"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.k",
+        "input": {
+          "Key": {
+            "Character": "k"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.l",
+        "input": {
+          "Key": {
+            "Character": "l"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.r",
+        "input": {
+          "Key": {
+            "Character": "r"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      }
+    ]
+  }
+}

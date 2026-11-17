@@ -11,9 +11,11 @@ use nara::{
     hierarchy::Parent,
     identity::{EntityLookup, SpawnedSceneInstance},
     image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat},
+    input::{ActionMapBindings, ActionMapDefinition, ActionMapDomain, ActionMaps, InputSeatId},
     material::SamplerDescriptor,
     prelude::{Color, Transform2d, Vec2},
     project_host::{HeadlessSession, ProjectDomainAssets},
+    runtime_content::RuntimeInputContent,
     scene::{SourceDocumentKind, SourceDocumentOrigin},
     sprite::{Sprite, SpriteAnchor},
 };
@@ -22,6 +24,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, Scenario,
     animation::{CLIPS_PATH, ExplorerAnimation, atlas_product, clips_product},
+    input::{INPUT_PATH, input_product},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, WALL_ENTITY_IDS},
 };
 
@@ -53,10 +56,30 @@ pub(super) struct Evidence {
     images: BTreeMap<AssetProductRef, Value>,
     resident: BTreeSet<AssetProductRef>,
     animation_frames: BTreeSet<u8>,
+    input: Option<Value>,
+    input_bindings: Option<ActionMapBindings>,
     receipts: Vec<Value>,
 }
 
 impl Evidence {
+    pub(super) fn expect_input(&mut self, input: &RuntimeInputContent) -> Result<(), String> {
+        if input.product() != input_product()
+            || input.base().plan().settings().input().action_map != Some(input.product())
+        {
+            return Err("cooked global Input has the wrong complete selected Product".into());
+        }
+        let proof = definition_proof(input.product(), input.definition());
+        if self
+            .input
+            .as_ref()
+            .is_some_and(|previous| previous != &proof)
+        {
+            return Err("cooked global Input definition changed".into());
+        }
+        self.input = Some(proof);
+        Ok(())
+    }
+
     pub(super) fn observe_world_sampled(&mut self, world: &World) -> Result<bool, String> {
         let changed = CurrentScene::get(world)
             .is_some_and(|current| self.current.as_ref() != Some(current.receipt()));
@@ -78,6 +101,27 @@ impl Evidence {
     }
 
     pub(super) fn observe_world(&mut self, world: &World) -> Result<(), String> {
+        let map = world
+            .get_resource::<ActionMaps>()
+            .and_then(|maps| maps.get(InputSeatId::PRIMARY))
+            .ok_or("cooked Player has no installed PRIMARY Input map")?;
+        let bindings = map.bindings_handle();
+        if let Some(original) = &self.input_bindings {
+            if !original.shares_owner_with(&bindings) {
+                return Err("cooked Player replaced its original global Input owner".into());
+            }
+        } else {
+            let proof = input_proof(world)?;
+            if self
+                .input
+                .as_ref()
+                .is_some_and(|previous| previous != &proof)
+            {
+                return Err("installed PRIMARY Input differs from its cooked definition".into());
+            }
+            self.input = Some(proof);
+            self.input_bindings = Some(bindings);
+        }
         self.resident = world
             .get_resource::<Assets<ImageAsset>>()
             .into_iter()
@@ -364,6 +408,7 @@ impl Evidence {
         );
         result["image_proofs"] = json!(self.images.values().collect::<Vec<_>>());
         result["animation_frames"] = json!(self.animation_frames);
+        result["input_proof"] = json!(self.input);
         result["startup_receipt"] = self.startup.as_ref().map(receipt).into();
         result["current_receipt"] = self.current.as_ref().map(receipt).into();
         result["scene_receipts"] = json!(self.receipts);
@@ -375,6 +420,44 @@ impl Evidence {
         );
         result
     }
+}
+
+pub(super) fn input_proof(world: &World) -> Result<Value, String> {
+    let map = world
+        .get_resource::<ActionMaps>()
+        .and_then(|maps| maps.get(InputSeatId::PRIMARY))
+        .ok_or("cooked Player has no installed PRIMARY Input map")?;
+    let original = nara::input::startup_action_map_bindings(world)
+        .ok_or("cooked Player has no finalized original Input selection")?;
+    if !original.shares_owner_with(&map.bindings_handle()) {
+        return Err("cooked Player changed its selected Input during Startup".into());
+    }
+    if let Some(collection) = world
+        .get_resource::<ProjectDomainAssets>()
+        .and_then(|assets| assets.collection::<ActionMapDomain>())
+        && (collection.source_records().len() != 0
+            || collection
+                .get(&AssetRef::path(INPUT_PATH).map_err(|error| error.to_string())?)
+                .is_some())
+    {
+        return Err("cooked Input retained source records or an authored path alias".into());
+    }
+    Ok(definition_proof(input_product(), map.definition()))
+}
+
+fn definition_proof(product: AssetProductRef, definition: &ActionMapDefinition) -> Value {
+    json!({
+        "product": product.to_string(),
+        "source_free": true,
+        "definition": {
+            "product": product,
+            "contexts": definition.contexts().iter().map(|entry| json!({
+                "context": entry.context.as_str(),
+                "enabled": entry.enabled,
+            })).collect::<Vec<_>>(),
+            "bindings": definition.bindings(),
+        },
+    })
 }
 
 fn selected_clips<'a>(

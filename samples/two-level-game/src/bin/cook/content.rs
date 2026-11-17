@@ -11,6 +11,7 @@ use nara::{
     core::FormatVersion,
     fs::{DirectoryCapability, RelativePath},
     image::ImageRuntimeCodec,
+    input::{ActionMapAsset, ActionMapFileCandidate, ActionMapFileLimits, ActionMapRuntimeCodec},
     project::{
         EffectiveProjectSettings, NativeDocumentIdentity, ProjectAuthoringState, ProjectManifest,
     },
@@ -29,6 +30,7 @@ use nara::{
 use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
 use two_level_game::{
     animation::{ATLAS_PATH, CLIPS_PATH, atlas_product, clips_product},
+    input::{INPUT_PATH, input_product},
     levels::LevelId,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
@@ -47,9 +49,63 @@ pub(super) fn prepare(
         return Err("audio-desktop Player requires an explicit Windows target".into());
     }
     let settings = project_settings(root, runtime)?;
-    let configuration = settings
-        .runtime_configuration()
+    let projection = settings
+        .source_runtime_projection()
         .map_err(|error| format!("nara.toml runtime configuration: {error}"))?;
+    let selected = projection
+        .input_requirement()
+        .ok_or("nara.toml: the game's Player requires an authored startup Input selection")?;
+    if selected.as_str() != INPUT_PATH {
+        return Err(format!("nara.toml: expected input.action_map={INPUT_PATH}"));
+    }
+    let input_bytes = read(
+        root,
+        selected.as_str(),
+        ActionMapFileLimits::default().encoded_bytes().get() as u64,
+    )?;
+    let input = ActionMapFileCandidate::decode_json_bytes(&input_bytes)
+        .map_err(|error| format!("{selected}: {error}"))?;
+    if input.product() != input_product() {
+        return Err(format!(
+            "{selected}: expected the game's intrinsic primary Input Product"
+        ));
+    }
+    let metadata_path = format!("{selected}.meta");
+    match root
+        .open_file_exact(&RelativePath::new(&metadata_path).map_err(|error| error.to_string())?)
+    {
+        Ok(file) => {
+            let bytes = file
+                .read_to_end_bounded(
+                    nara::asset::AssetMetaFileLimits::default()
+                        .encoded_bytes()
+                        .get() as u64,
+                )
+                .map_err(|error| error.to_string())?;
+            let identity = AssetMetaIdentityCandidate::decode_json_bytes(&bytes)
+                .map_err(|error| format!("{metadata_path}: {error}"))?
+                .into_identity();
+            if identity.stable_id() != input.product().source()
+                || identity.source_kind() != &AssetSourceKind::Other("input-action-map".into())
+                || identity.path().as_str() != selected.as_str()
+            {
+                return Err(format!(
+                    "{metadata_path}: conflicts with the intrinsic Input identity"
+                ));
+            }
+        }
+        Err(nara::fs::FsError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{metadata_path}: {error}")),
+    }
+    let (product, definition) = input.into_parts();
+    let input =
+        ActionMapAsset::new(product, definition).map_err(|error| format!("{selected}: {error}"))?;
+    let mut configuration = projection.runtime().to_configuration();
+    configuration.input.action_map = Some(input.product());
+    let configuration = configuration
+        .resolve()
+        .map_err(|error| format!("nara.toml processed runtime configuration: {error}"))?;
     let recipe = runtime.recipe()?;
     let plan = resolve_runtime_configuration(&configuration, recipe.clone())
         .map_err(|error| format!("cooked game composition: {error}"))?;
@@ -69,6 +125,9 @@ pub(super) fn prepare(
         CookedContentLimits::default(),
     )
     .map_err(|error| format!("cooked content assembly: {error}"))?;
+    builder
+        .add_input(&input)
+        .map_err(|error| format!("{selected}: Input cooking failed: {error}"))?;
 
     let scope = AssetPathScope::under(
         AssetSourcePath::new(settings.paths.assets.as_str())
@@ -84,7 +143,10 @@ pub(super) fn prepare(
     let store = ArtifactBuildStore::open(cache.share(), ArtifactBuildLimits::default())
         .map_err(|error| format!("asset import cache: {error}"))?;
     let mut database = ProjectAssetDatabase::default();
-    let mut observations = Vec::new();
+    let mut observations = vec![ArtifactBuildObservation::Raw {
+        path: AssetSourcePath::new(selected.as_str()).map_err(|error| error.to_string())?,
+        digest: Some(ArtifactContentDigest::of_bytes(&input_bytes)),
+    }];
     for (path, product) in LevelId::ALL
         .into_iter()
         .map(|level| {
@@ -270,10 +332,36 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 7 {
+    if catalog.members().len() != 8 {
         return Err(
-            "cooked content must contain exactly two Scenes, three Images, one SoundBank and one Sprite animation set"
+            "cooked content must contain exactly two Scenes, three Images, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
+        );
+    }
+    let input_member = catalog
+        .member_for_product(input_product())
+        .ok_or("missing cooked global Input")?;
+    if catalog.configuration().input.action_map != Some(input_product())
+        || prepared.base().plan().settings().input().action_map != Some(input.product())
+        || input_member.products() != [input_product()]
+        || !input_member.dependencies().is_empty()
+        || !matches!(input_member.kind(), RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == ActionMapRuntimeCodec::RUNTIME_KIND
+                && version.get() == ActionMapRuntimeCodec::RUNTIME_VERSION)
+    {
+        return Err("cooked global Input selection, identity or format changed".into());
+    }
+    let acquired_input = prepared
+        .base()
+        .acquire_startup_input()
+        .map_err(|error| format!("cooked global Input acquisition: {error}"))?
+        .ok_or("cooked content has no selected global Input")?;
+    if acquired_input.product() != input.product()
+        || acquired_input.definition().contexts() != input.definition().contexts()
+        || acquired_input.definition().bindings() != input.definition().bindings()
+    {
+        return Err(
+            "cooked global Input differs from its original authored Product or definition".into(),
         );
     }
     let bank = catalog
@@ -308,6 +396,10 @@ pub(super) fn prepare(
         );
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
+            || scene
+                .dependencies()
+                .iter()
+                .any(|dependency| dependency.product() == input_product())
             || [atlas_product(), bank_product(), clips_product()]
                 .into_iter()
                 .any(|product| {
@@ -363,9 +455,6 @@ fn project_settings(
             runtime.name(),
             runtime != RuntimeKind::Headless
         ));
-    }
-    if settings.input.action_map.is_some() {
-        return Err("nara.toml: this game's Player uses compiled keyboard bindings and requires no authored startup Input selection".into());
     }
     if settings.paths.assets.as_str() != "assets"
         || settings.paths.scenes.as_str() != "scenes"

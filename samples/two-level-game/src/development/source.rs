@@ -13,7 +13,7 @@ use nara::{
 };
 
 const ROOT_FILES: [&str; 4] = ["Cargo.toml", "Cargo.lock", "nara.toml", "build.rs"];
-const SOURCE_DIRECTORIES: [&str; 5] = ["src", "assets", "scenes", "prefabs", "schema"];
+const SOURCE_DIRECTORIES: [&str; 6] = ["src", "assets", "scenes", "prefabs", "schema", "input"];
 const MAX_FILES: usize = 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_ENTRIES: usize = MAX_FILES * MAX_DEPTH;

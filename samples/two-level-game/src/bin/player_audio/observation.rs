@@ -36,6 +36,7 @@ pub(super) struct AudioObservation {
     snapshot: Option<AudioSnapshot>,
     pcm: Option<Value>,
     native: Value,
+    input: Option<Value>,
     trajectory_completed: bool,
 }
 
@@ -54,6 +55,7 @@ impl AudioObservation {
             snapshot: None,
             pcm: None,
             native: Value::Null,
+            input: None,
             trajectory_completed: false,
         }
     }
@@ -120,6 +122,9 @@ impl PlayerExtension for AudioObservation {
 
     fn observe(&mut self, facts: &DesktopPresentationObservation<'_>) -> Result<(), String> {
         if let Some(world) = facts.world() {
+            if self.input.is_none() {
+                self.input = Some(super::evidence::input_proof(world)?);
+            }
             self.witness = self.witness.take().or_else(|| audio::witness(world));
             self.target = self
                 .target
@@ -285,6 +290,7 @@ impl PlayerExtension for AudioObservation {
             "trajectory_completed": self.trajectory_completed,
             "bank_product": bank_product().to_string(),
             "source_free": true,
+            "input_proof": self.input,
             "snapshot": self.snapshot,
             "callback_frames_drained": self.captured_frames,
             "pcm": self.pcm,

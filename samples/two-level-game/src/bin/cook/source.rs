@@ -10,8 +10,9 @@ use nara::{
     project_tooling::host_fs,
 };
 
-const CONTENT: [&str; 14] = [
+const CONTENT: [&str; 15] = [
     "nara.toml",
+    "input/explorer.actions.json",
     "schema/authoring.bundle.json",
     "scenes/meadow.scene.json",
     "scenes/cavern.scene.json",
@@ -27,12 +28,14 @@ const CONTENT: [&str; 14] = [
     "assets/audio/game.soundbank.json.meta",
 ];
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
+const INPUT_METADATA: &str = "input/explorer.actions.json.meta";
 
 pub(super) struct ContentFence {
     path: PathBuf,
     root: DirectoryCapability,
     files: BTreeMap<String, (FileIdentity, ContentDigest)>,
     code: Option<Vec<RelativePath>>,
+    input_metadata: Option<(FileIdentity, ContentDigest)>,
 }
 
 impl ContentFence {
@@ -53,11 +56,19 @@ impl ContentFence {
             }
             files.insert(name.to_owned(), (file.identity(), digest));
         }
+        let input_metadata = observe_input_metadata(&root)?;
+        if input_metadata
+            .as_ref()
+            .is_some_and(|(_, digest)| total + digest.length() > MAX_BYTES)
+        {
+            return Err("content inventory exceeds 64 MiB".into());
+        }
         Ok(Self {
             path: path.to_path_buf(),
             root,
             files,
             code: None,
+            input_metadata,
         })
     }
 
@@ -73,7 +84,11 @@ impl ContentFence {
             .files
             .values()
             .map(|(_, digest)| digest.length())
-            .sum::<u64>();
+            .sum::<u64>()
+            + self
+                .input_metadata
+                .as_ref()
+                .map_or(0, |(_, digest)| digest.length());
         for observation in observations {
             let ArtifactBuildObservation::Raw {
                 path,
@@ -138,6 +153,9 @@ impl ContentFence {
     }
 
     pub fn verify(&self) -> Result<(), String> {
+        if observe_input_metadata(&self.root)? != self.input_metadata {
+            return Err(format!("content selection changed: {INPUT_METADATA}"));
+        }
         let current = host_fs::readable_directory(&self.path).map_err(|error| error.to_string())?;
         if !self
             .root
@@ -172,6 +190,28 @@ impl ContentFence {
             return Err("original project directory changed".into());
         }
         Ok(())
+    }
+}
+
+fn observe_input_metadata(
+    root: &DirectoryCapability,
+) -> Result<Option<(FileIdentity, ContentDigest)>, String> {
+    match root.open_file_exact(&relative(INPUT_METADATA)?) {
+        Ok(file) => Ok(Some((
+            file.identity(),
+            file.digest(
+                nara::asset::AssetMetaFileLimits::default()
+                    .encoded_bytes()
+                    .get() as u64,
+            )
+            .map_err(|error| error.to_string())?,
+        ))),
+        Err(nara::fs::FsError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(format!("{INPUT_METADATA}: {error}")),
     }
 }
 

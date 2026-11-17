@@ -107,7 +107,9 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 7
+            || base.catalog().members().len() != 8
+            || base.plan().settings().input().action_map
+                != Some(two_level_game::input::input_product())
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
             || base
@@ -266,7 +268,8 @@ fn drive(
     wait_initial_pause(original, shared, first_deadline, extension)?;
     let activate_input = extension.borrow().isolate_input();
     if activate_input {
-        let bindings = two_level_game::movement_keyboard_bindings();
+        let bindings = two_level_game::movement_keyboard_bindings(original)
+            .map_err(|error| error.to_string())?;
         let holds = original
             .isolate_keyboard_input(&bindings)
             .map_err(|error| error.to_string())?;

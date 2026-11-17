@@ -122,7 +122,7 @@ impl Fixture {
             pending_cleanup: RefCell::new(Vec::new()),
         };
         fixture.host = fixture.probe_host();
-        for directory in ["src", "assets", "scenes", "prefabs", "schema"] {
+        for directory in ["src", "assets", "scenes", "prefabs", "schema", "input"] {
             copy_tree(&sample.join(directory), &fixture.project.join(directory));
         }
         for name in ["Cargo.toml", "Cargo.lock", "nara.toml", "build.rs"] {

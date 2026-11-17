@@ -1561,6 +1561,23 @@ affected Input/Gameplay/UI/winit426, alongside Source/Processed Runtime, source-
 existing game controls. It preserves original runtime/command/input owners and records complete
 per-tick and continued-state evidence in that plan. Physical controller backends, universal
 recording/rollback and broader repeatability requirements remain open.
+
+The [authored game Input successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#authored-game-input-through-source-and-player-delivery)
+removes the actual Two-Level Game's hardcoded physical mapping and cooker restriction. One
+native action file supplies source and processed PRIMARY definitions; game-owned semantic
+commands keep their original queue/fixed timing. Exact keyboard capture reads the actual
+installed bindings, while the original unpublished Input owner retains its selected definition
+before Startup so a later mutation cannot impersonate source truth. Native reconciliation covers
+all keys already supported by ordinary physical ingress. Original-selection `98969c4` and native-key
+`7cbdd9f` retain the existing owners. Final Input/Winit297, corrected game/cook31, complete ordinary347
+and minimal-feature22 pass. Default and authored-arrow native reconstruction both pass with original
+pixel, held-state and physical cleanup controls. Actual source-free headless W-to-I and desktop
+D-to-J packages pass complete definition, gameplay and cleanup checks, including physical J
+operations. Original headless and continuous desktop Rust-edit/adoption each pass. The linked unit
+owns exact runs, final correctness Clippy/format/document checks and limits. This adds no new Input backend, recording
+format, resume field or per-tick validation; physical controller work remains separate. Small
+performance experiments and paused UI/Dialogue work remain deferred in favor of Runtime capability.
+
 The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
 installed compiler's relevant changes and a passing Input/Gameplay production-library check.
 The complete unit retains its Rust 1.95 runtime qualification baseline; the bounded 1.100 probe
