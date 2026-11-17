@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-20
-**Last Revised**: 2026-11-16
+**Last Revised**: 2026-11-18
 **Supersedes**: [ADR 0019](0019-physics-strategy.md) and
 [ADR 0030](0030-audio-strategy.md)
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
@@ -168,6 +168,16 @@ owner lineage. A native solve captures and validates the original fixed tick's a
 before setting its integration step. Native library defaults cannot silently replace the
 game's configured time. Visual adapters consume original solved or Presented results without
 reimplementing collision or assigning another writeback owner.
+
+The game's concrete top-down character workflow can consume an immutable static query scene
+without a new automatic solver or Transform writer. A directly imported `nara_rapier2d` package
+owns native query preparation, affine shape construction and the original Rapier sweep/slide;
+the existing game plugin owns authored collision data, desired motion and the returned root pose.
+Source preparation and explicit placement/restore admission build or check geometry once at
+their actual change boundary. Ordinary movement does not revalidate the complete Scene. This
+selects neither a portable Physics interface nor a default Physics product. Stateless static
+queries may be reconstructed from admitted source and the game's captured pose; dynamic/contact
+history, gravity or moving platforms require a separately qualified state policy.
 
 ### Official Defaults and Ecosystem Freedom
 

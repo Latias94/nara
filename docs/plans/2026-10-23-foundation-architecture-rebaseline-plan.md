@@ -1698,6 +1698,21 @@ exact tests, corrections and final qualification. This first game-owned animatio
 not select general clips/controllers, field binding, events or skeletal animation. Numerical
 budgets, foreign execution and full R10/R12/Foundation remain open; Editor/UI/Dialogue stays paused.
 
+The [actual-game swept character unit](2026-11-04-authored-collision-derivation-plan.md#swept-character-movement-through-the-actual-game)
+implements useful Runtime collision before another performance experiment. The directly consumed
+`nara_rapier2d` package owns immutable native query scenes, affine box preparation and Rapier's
+stateless top-down sweep/slide. The game owns durable collision data, desired movement, the single
+player Transform writer and explicit placement/reconstruction eligibility. Source and cooked rooms
+gain five visible static walls without a new clock, native solver-state serializer or default Physics
+product. Implementations `d76aced` and `86eef47` pass owner16, original motion42 and full ordinary
+game326. Actual native reconstruction passes with ten retained-input pixel replays; relocated
+DX12/RTX4090 shipping play passes physical wall stops/slides, Save/Restore and twenty more travels,
+with a separate software first-presentation control. Original animation/audio/progress and cleanup
+assertions remain. Real headless body/private-structure rebuild adoption also passes through the
+original development Host. Owning correctness Clippy, formatting and document checks pass. Geometry
+preparation belongs at Scene/shape change; full-scene validation does not repeat on the movement
+path. This selects no general dynamics or physical-history restore. Full R10/R12/Foundation remains active.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;

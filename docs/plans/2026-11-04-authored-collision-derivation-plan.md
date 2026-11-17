@@ -518,3 +518,197 @@ Local commits `1532cdf` (original domain Schema/time) and `5197e64` (visible con
 their coherent ownership and qualification scopes. There is no remote publication, main/branch
 movement or change to paused UI/Dialogue work. The selected visible-runtime successor is closed;
 the full Foundation Goal and remaining R4c/R10/R12 requirements stay active.
+
+## Swept Character Movement Through The Actual Game
+
+Status: shared package/fixture reuse committed at `d76aced`, actual game integration at `86eef47`;
+source, native, delivery, actual rebuild/adoption and final checks pass. This selected unit is complete.
+Runtime capability remains the priority. Replace the game's direct coordinate update and boundary
+clamp with native shape sweep/slide against authored static walls, through a reusable concrete
+Rapier module. Finish source gameplay, Pause/Step, scene replacement, exact reconstruction,
+native presentation and source-free delivery before another cost experiment. Editor/UI/Dialogue
+work remains paused.
+
+### Selected Ownership And Interface
+
+Add `nara_rapier2d` as a directly consumed optional integration package, without adding it to
+Nara's default product or defining a portable Physics backend. It owns immutable static native
+query scenes, the native top-down character preset and affine box construction. Expose the
+underlying Rapier query interface for independently authored queries and controllers. Reuse
+Rapier0.33.0/Parry0.28.0; do not implement another sweep, broadphase or slide algorithm. Extract
+the existing fixture's fixed affine construction into this package and delete the displaced
+construction there. The fixture retains its original Schema lineage, finite bounds, dynamic
+solver/world, diagnostics and writeback contract.
+
+The game owns its durable `CollisionBox`, Scene roles, room bounds, desired velocity, player
+Transform, clock and progress. The concrete package has no World/Entity mapping, scheduler,
+native window, background worker, mutable transform authority or generic persistence service.
+Static query scenes compile from admitted root Scene data during content preparation and refresh
+once through the original collision-only pipeline. They are immutable thereafter; a replacement
+level brings another original scene. Actor shape data is prepared when its authored definition
+or restored rotation/scale changes. Moves perform only current numeric input checks and the
+native query. Full Scene, shape and provenance validation do not repeat on each slide or tick.
+
+The original game plugin writes the returned effective translation once, then evaluates pickups
+from that actual position. Marker creation keeps its existing pre-move position. Animation still
+follows held intent while blocked. Existing fixed time supplies both desired displacement and
+the native duration; no extra simulation runs during paused content preparation or restoration.
+This root-only game does not reinterpret a stale FixedInput cut after same-tick Retry. Static
+geometry comes from the admitted immutable root data, and the original game remains the actor's
+pose writer. This does not add a hierarchy traversal or change Transform completion.
+
+Keep the existing persistable player-center range `x=+-280`, `y=+-150`. Limit the desired endpoint
+to that range before the native sweep. If a finite native slide would finish outside this game
+domain, retain the original admitted pose rather than clamp the native result or degrade the game.
+This closes the small restored actor counterexample: scale0.5 at `(279,80)` must stop normally and
+remain capturable under held Right. Default18x18 geometry still stops at the actual wall margin
+before this center limit. This is a game-owned movement restriction, not a second collision solver.
+
+Four visible outer walls replace the old clamp, with inner surfaces at `x=+-289`, `y=+-159` for
+the 18x18 explorer. One visible interior wall differs between Meadow and Cavern, making stale
+collision scenes observable. Preserve the six original objects, IDs, positions and all gameplay
+facts; the default room now has eleven authored members. The catalog remains six members: two
+Scenes, three Images and the Sound Bank. Migrate exact member/pixel assumptions deliberately,
+including rectangular sprites and Tilemap witness regions. Do not mechanically replace every
+literal six or weaken score, marker, source/receipt, lifetime or clear-pixel assertions.
+
+### Placement, Restoration And Qualification
+
+Rapier's character penetration recovery is empty in this installed version. Admission must
+check spawn/checkpoint/restored poses against the prepared query scene. Reject overlapping or
+unrepresentable poses before committing their placement. Keep `ResumeState`'s bounded wire grammar;
+finite zero scale can remain format-valid while a collision operation refuses degenerate geometry.
+The selected controller retains no velocity, gravity, moving-platform, contact-history or solver
+state between moves. Reconstruct query geometry and actor shape from source plus existing TRS;
+do not serialize native handles/BVH or add an arbitrary solver-state recovery claim. New dynamic
+or historical behavior must reopen this eligibility policy.
+
+Pinned Godot `7a37606a433c0e7735525037cdf774f043146a21`, CharacterBody2D floating movement and
+PhysicsBody2D motion tests, confirms native motion results and bounded sliding. Installed Rapier
+`control/character_controller.rs`, `pipeline/query_pipeline.rs` and `collision_pipeline.rs` own
+the selected sweep, overlap and collision-only refresh APIs. Their packaged VCS metadata is dirty;
+the installed0.33.0/Parry0.28.0 source is the API evidence. Native slope/ground defaults are not
+top-down semantics: select sliding without snap/autostep and qualify all movement directions.
+Shape validity belongs at construction/change; body/query freshness and current numeric inputs
+belong at operation admission. Trust unchanged native geometry and traversal internals.
+
+Qualification covers free movement, wall stop, projected diagonal slide, corner stop and a thin
+wall crossed by a large requested displacement whose endpoint is unobstructed. Compare actual
+native results and visible wall/player pixels. Complete Pause/exact Step, travel/Retry, invalid
+placement preservation, contact-state fresh reconstruction and continued state, retained original
+scene lifetime, real Rust body/structure adoption and relocated source-free play. Preserve prior
+animation/audio/checkpoint/refusal/cleanup controls and keep speed-discrimination probes in a
+genuinely unobstructed corridor. Run Cargo serially with Rust1.95, jobs1, root target, release
+locked/offline nextest; do not run a backend/profile/workload Cartesian product or benchmarks.
+Record actual results and remaining scope here and in the existing ADR/ledger/guides. Full
+R4c/R10/R12/Foundation, dynamic Physics production selection and foreign execution remain open.
+
+### Initial Character Integration Checks
+
+The initial owning package run `ee0a449a-3fbc-4776-b34f-3151368681f1` passes15/15 without skips.
+Independent review subsequently corrects a construction-only precision gap: expected offset and
+world corners now use the original f32 inputs promoted to f64, independently of the rounded native
+geometry. A large-center/translation cancellation cannot make both sides of the budget comparison
+lose the same residual. Final owner run `ce2f83eb-0907-49f0-b613-7c229f61a75a` passes16/16, including
+that exact counterexample. No new geometry work is added to ordinary movement.
+
+Game review identifies the small restored actor/center-domain mismatch described above; the game
+now limits the requested endpoint and treats a finite out-of-domain native result as blocked. Source
+and target-room placement refusals have separate public consumers. The initial library/build checks
+also expose an invalid assumption that built-in `Transform2d` implements the derived provider trait.
+Content preparation instead reads complete finite TRS from the already-admitted current-version
+record, extending the previous translation-only inspection without a second native codec authority.
+After the import correction, the actual release headless executable builds, and its original
+`--nara-project-tool 1 schema-write` and `schema-check` operations succeed. The authoring bundle is
+generated through the real recipe with game binding revision2 and `CollisionBox`; it is not edited
+by hand. Required native dependencies are added without removing/upgrading original packages or
+rewiring their existing Windows dependency edges. Native/delivery acceptance is pending.
+
+The first actual source-game run `e9fc8163-096c-4f67-a256-3276908d4086` passes32/32 without skips:
+six collision workflows, the target-Cavern placement refusal, five prior animation workflows,
+seven prior gameplay/save/travel controls and thirteen exact-resume controls. It covers blocked
+held animation, diagonal sliding/rounding, actual room bounds, different Cavern wall data and Retry,
+contact-state fresh reconstruction/continued canonical state, mirrored/nonuniform/rotated shapes,
+same-room overlap/zero-scale early refusal and the small-actor persistent-domain boundary. The
+different-room rejection preserves the fresh candidate's original Scene/Progress/player before
+target publication. These are real public headless games, not native-window or packaged execution.
+
+Independent motion run `796ef49e-dda3-4354-a9b5-e3d4e0093227` passes42/42 with its original locked
+dependencies and default managed execution. The fixed branch now consumes the shared affine box;
+its native body receives the original world pose and its attached collider receives an identity local
+pose. Existing bounds, Schema/provider lineage, dynamic rigid-pose writeback, contacts, source/history
+and prediction controls remain. No separate native solver or transform ownership is added. The
+render consumer lock gains only this package and its dependency edge; its renderer is unchanged.
+
+### Source And Native Character Qualification
+
+The first selected desktop/cost/cook/Player/audio build exposes two test-integration omissions:
+the hand-built `Content` baseline fixture needs a valid collision scene, and the audio module's
+include alias must export `levels` for the shared member-count constant. Both are corrected without
+changing production behavior or removing their original assertions. Its ordinary run then passes
+324/326, with two copies of one new workload assertion failing. Scene declarations are canonicalized
+by ID; authored root ordering belongs to `placements`. The corrected test requires the complete
+canonical declaration vector and the complete original root-placement vector separately. No Scene
+ordering or loader change is made to satisfy the test.
+
+Final ordinary run `b49a1de2-85ab-4c79-911a-c923cd266fbd` passes **326/326**, with thirty explicit
+native/build cases skipped for separate selection. The closure is
+`desktop,cost-measurement,cook,cooked-player,audio-cpal` with ordinary development defaults. It
+includes both copies of the workload correction, the independent rectangular-wall/atlas pixel
+oracle, source and cooked content, audio CPU controls, exact lifecycle and prior game behavior.
+The optional scene-work observation feature is not selected; no new workload timing is measured.
+
+Actual Windows/DX12 hardware reconstruction passes1/1 at
+`c686900d-947e-4952-a1f0-0c71d18ab30d`. The original exact Step and keyboard reconciliation owners
+drive contact at Cavern's `x=4.99`, continued blocked intent/clock/animation and W+D sliding above
+the baffle. Existing complete-state restoration, release gap, nonfirst atlas frame and three original
+native retirement checks remain. After both game Worlds and native targets retire, ten retained
+input replays include the original six animation samples, original/restored equality and the two new
+collision samples. The new GPU comparisons require visible player and rectangular-wall pixels.
+This is independent retained-input rendering, not swapchain readback or scanout measurement.
+Relocated source-free physical delivery and real Rust-edit adoption remain pending.
+
+The first relocated delivery builds and starts the real shipping Player but fails only its new wall
+evidence expectation: a JSON array mixed one f32 and three inferred f64 color literals. Expected
+values now use explicit f32 for every channel, preserving exact comparison with the admitted
+runtime `Color`. No tolerance or production color change is introduced. Corrected actual delivery
+run `a2429d2d-0d17-45ca-8665-8e58bcd6e0e9` passes1/1 (one private worker is deliberately selected
+by its parent). Its original feature-closure control excludes development, tooling, watcher and UI.
+The source/cache is physically removed from the relocated installation. Both normal interactive
+processes, the explicit software first-presentation process, scripted controls and original refusal
+paths retain their cleanup and progress assertions.
+
+Matched physical D/W input reports Meadow contact `(-15.01010036468506,0)` and Cavern contact
+`(4.989899635314941,0)`, against expected `-15.01` and `4.99`. A 350ms matched hold preserves each
+contact while actual ticks/presentations advance. W+D then slides and clears each wall; released
+positions are approximately `(-3.69639,45.33760)` and `(16.30361,45.33760)`. Scores/markers stay
+unchanged through these excursions. Save/Restore, four atlas frames, twenty further physical travels,
+complete eleven-member receipt/shape/TRS/Sprite evidence and unchanged stored checkpoint bytes
+pass. The catalog remains six members and the original image residency bounds remain. Native
+retirement reports preserve destroyed-window, empty-containment, stopped-reader and drained-output
+facts without forced kill. The first cold build duration is not a Runtime performance measurement.
+
+Actual source/headless rebuild adoption passes1/1 at
+`c6e5e329-1a3c-405a-bd43-bd6dd8263def`. The original production Host performs real Rust body and
+private-state structure edits, actual Cargo builds and fresh process reconstruction. Probe gameplay
+is discarded before the fresh adopter restores the original basis. Changed speed executes after
+adoption; compile-error, wrong probe, source drift, exact nominal tickets, cancellation and separately
+pending predecessor retirement remain covered. The deliberate compiler failure is its original
+negative control. New direct package paths are rewritten only in the owned temporary Cargo copy.
+This retains a complete game development workflow; it adds no code-patching service or desktop
+adoption claim. Native physical/window and source-free acceptance above supply their separate scopes.
+
+The selected source-free desktop and reconstruction paths qualify Windows/DX12 hardware, with an
+explicit software first-presentation control. No foreign-platform execution, arbitrary dynamic solver
+history, moving platforms, gravity, dynamic collision authoring, new shape family, numeric performance
+budget or full R4c/R10/R12/Foundation completion follows. Editor/UI/Dialogue work remains paused.
+
+Final all-target correctness Clippy passes for `nara_rapier2d`, the original motion-physics authoring
+selection and the game's tested desktop/cost/cook/Player/audio closure. Existing non-correctness
+warnings remain; no warning-free claim is made. Root, sample and independent motion workspaces
+pass format checks. Added Markdown links/fragments, manifests/locks, Scene/schema JSON and ordinary
+Git whitespace checks pass. All twelve scoped implementation/review agents are closed. The fifteen
+paused UI/Dialogue files remain byte-identical to their original receipt and are excluded from commits.
+Verification uses Windows11/Rust1.95, serial jobs1, the original target and locked offline release builds.
+The meaningful runtime feature is delivered before further micro-optimization; no new benchmark,
+compact encoding, universal backend, worker or lifecycle authority is added. Commits remain local.

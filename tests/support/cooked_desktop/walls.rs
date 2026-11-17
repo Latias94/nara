@@ -44,7 +44,7 @@ pub fn scene(observed: &Value) {
                 "box": {"center": [0.0_f32, 0.0], "half_width": half[0], "half_height": half[1]},
                 "sprite_size": [half[0] * 2.0, half[1] * 2.0],
                 "sprite_anchor": [0.0_f32, 0.0],
-                "tint": [0.18_f32, 0.22, 0.28, 1.0],
+                "tint": [0.18_f32, 0.22_f32, 0.28_f32, 1.0_f32],
                 "textured": false,
             })
         })
