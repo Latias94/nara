@@ -215,20 +215,20 @@ fn reference_free_raw_limits_and_scratch_refusal_precede_schema_errors() {
         limits(6, 14, 4),
         |nodes, _, allocation| {
             visited += nodes;
-            assert!(
-                allocation > 0,
-                "initial scratch must be admitted before visiting"
-            );
-            Err("initial scratch refused")
+            if allocation > 0 {
+                Err("container scratch refused")
+            } else {
+                Ok(())
+            }
         },
     );
     assert_eq!(
         result,
         Err(EntityReferencePlanError::Admission(
-            "initial scratch refused"
+            "container scratch refused"
         )),
     );
-    assert_eq!(visited, 0);
+    assert_eq!(visited, 1);
 }
 
 #[test]

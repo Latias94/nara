@@ -13,6 +13,8 @@ use crate::{
 };
 
 #[cfg(test)]
+mod cursor_tests;
+#[cfg(test)]
 mod joint_tests;
 #[cfg(test)]
 mod reference_free_tests;
@@ -1392,16 +1394,10 @@ fn find_undeclared_reference_path<R, E>(
     root_path: &ComponentFieldPath,
     admission: &mut ReferenceAdmission<'_, E>,
 ) -> Result<ReferencePathScan, ReferenceTraversalError<R, E>> {
-    let mut path = Vec::new();
-    admission.reserve(&mut path, root_path.segments().len())?;
-    path.extend(root_path.segments().iter().map(|segment| match segment {
-        ComponentFieldPathSegment::Field(name) => TraversalPathSegment::Field(name),
-        ComponentFieldPathSegment::Index(index) => TraversalPathSegment::Index(*index),
-    }));
     let mut traversal = ReferencePathTraversal {
         limits,
         declared_paths,
-        path,
+        root_path,
         observed_nodes: result_nodes,
         observed_bytes: result_bytes,
         first_undeclared_path: None,
@@ -1414,6 +1410,7 @@ fn find_undeclared_reference_path<R, E>(
     })
 }
 
+#[derive(Clone, Copy)]
 enum TraversalPathSegment<'a> {
     Field(&'a str),
     Index(u32),
@@ -1428,109 +1425,131 @@ impl TraversalPathSegment<'_> {
     }
 }
 
-struct ReferencePathTraversal<'value, 'declared> {
+struct ReferencePathTraversal<'root, 'declared> {
     limits: EntityReferenceTraversalLimits,
     declared_paths: &'declared BTreeSet<ComponentFieldPath>,
-    path: Vec<TraversalPathSegment<'value>>,
+    root_path: &'root ComponentFieldPath,
     observed_nodes: usize,
     observed_bytes: usize,
     first_undeclared_path: Option<ComponentFieldPath>,
 }
 
 enum ReferenceTraversalFrame<'a> {
-    Visit {
-        value: ComponentValueRef<'a>,
-        depth: usize,
-        segment: Option<TraversalPathSegment<'a>>,
-    },
-    ContinueList {
+    List {
         items: std::iter::Enumerate<ComponentListIter<'a>>,
         depth: usize,
+        current: Option<TraversalPathSegment<'a>>,
     },
-    ContinueMap {
+    Map {
         fields: ComponentMapIter<'a>,
         depth: usize,
+        current: Option<TraversalPathSegment<'a>>,
     },
-    Exit,
 }
 
-impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
-    fn visit<R, E>(
+impl ReferenceTraversalFrame<'_> {
+    fn current(&self) -> TraversalPathSegment<'_> {
+        match self {
+            Self::List { current, .. } | Self::Map { current, .. } => {
+                current.expect("active ancestor has selected a child")
+            }
+        }
+    }
+}
+
+impl ReferencePathTraversal<'_, '_> {
+    fn visit<'value, R, E>(
         &mut self,
-        root: ComponentValueRef<'value>,
-        depth: usize,
+        mut value: ComponentValueRef<'value>,
+        mut depth: usize,
         admission: &mut ReferenceAdmission<'_, E>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
         let mut stack = Vec::new();
-        admission.reserve(&mut stack, 1)?;
-        stack.push(ReferenceTraversalFrame::Visit {
-            value: root,
-            depth,
-            segment: None,
-        });
-        while let Some(frame) = stack.pop() {
-            match frame {
-                ReferenceTraversalFrame::Visit {
-                    value,
-                    depth,
-                    segment,
-                } => self.visit_value(value, depth, segment, &mut stack, admission)?,
-                ReferenceTraversalFrame::ContinueList { mut items, depth } => {
-                    if let Some((index, item)) = items.next() {
-                        let index = u32::try_from(index)
-                            .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;
-                        admission.reserve(&mut stack, 2)?;
-                        stack.push(ReferenceTraversalFrame::ContinueList { items, depth });
-                        stack.push(ReferenceTraversalFrame::Visit {
-                            value: item,
-                            depth,
-                            segment: Some(TraversalPathSegment::Index(index)),
+        loop {
+            match self.visit_value(value, depth, &stack, admission)? {
+                ComponentValueKind::List => {
+                    let items = value.as_list().expect("List kind checked");
+                    if !items.is_empty() {
+                        admission.reserve(&mut stack, 1)?;
+                        stack.push(ReferenceTraversalFrame::List {
+                            items: items.iter().enumerate(),
+                            depth: depth.saturating_add(1),
+                            current: None,
                         });
                     }
                 }
-                ReferenceTraversalFrame::ContinueMap { mut fields, depth } => {
-                    if let Some((field, value)) = fields.next() {
-                        admission.charge(0, field.len(), 0)?;
-                        self.observed_bytes = self.observed_bytes.saturating_add(field.len());
-                        if self.observed_bytes > self.limits.bytes().get() {
-                            return Err(ComponentEntityReferenceRewriteError::ByteLimit {
-                                maximum: self.limits.bytes().get(),
-                            }
-                            .into());
-                        }
-                        admission.reserve(&mut stack, 2)?;
-                        stack.push(ReferenceTraversalFrame::ContinueMap { fields, depth });
-                        stack.push(ReferenceTraversalFrame::Visit {
-                            value,
-                            depth,
-                            segment: Some(TraversalPathSegment::Field(field)),
+                ComponentValueKind::Map => {
+                    let fields = value.as_map().expect("Map kind checked");
+                    if !fields.is_empty() {
+                        admission.reserve(&mut stack, 1)?;
+                        stack.push(ReferenceTraversalFrame::Map {
+                            fields: fields.iter(),
+                            depth: depth.saturating_add(1),
+                            current: None,
                         });
                     }
                 }
-                ReferenceTraversalFrame::Exit => {
-                    self.path.pop();
-                }
+                _ => {}
             }
+            let next = loop {
+                let Some(frame) = stack.last_mut() else {
+                    return Ok(());
+                };
+                let next = match frame {
+                    ReferenceTraversalFrame::List {
+                        items,
+                        depth,
+                        current,
+                    } => {
+                        if let Some((index, item)) = items.next() {
+                            let index = u32::try_from(index).map_err(|_| {
+                                ComponentEntityReferenceRewriteError::PathIndexOverflow
+                            })?;
+                            *current = Some(TraversalPathSegment::Index(index));
+                            Some((item, *depth))
+                        } else {
+                            None
+                        }
+                    }
+                    ReferenceTraversalFrame::Map {
+                        fields,
+                        depth,
+                        current,
+                    } => {
+                        if let Some((field, item)) = fields.next() {
+                            admission.charge(0, field.len(), 0)?;
+                            self.observed_bytes = self.observed_bytes.saturating_add(field.len());
+                            if self.observed_bytes > self.limits.bytes().get() {
+                                return Err(ComponentEntityReferenceRewriteError::ByteLimit {
+                                    maximum: self.limits.bytes().get(),
+                                }
+                                .into());
+                            }
+                            *current = Some(TraversalPathSegment::Field(field));
+                            Some((item, *depth))
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if let Some(next) = next {
+                    break next;
+                }
+                stack.pop();
+            };
+            (value, depth) = next;
         }
-        Ok(())
     }
 
     fn visit_value<R, E>(
         &mut self,
-        value: ComponentValueRef<'value>,
+        value: ComponentValueRef<'_>,
         depth: usize,
-        segment: Option<TraversalPathSegment<'value>>,
-        stack: &mut Vec<ReferenceTraversalFrame<'value>>,
+        stack: &[ReferenceTraversalFrame<'_>],
         admission: &mut ReferenceAdmission<'_, E>,
-    ) -> Result<(), ReferenceTraversalError<R, E>> {
+    ) -> Result<ComponentValueKind, ReferenceTraversalError<R, E>> {
         let (nodes, dynamic_bytes) = dynamic_value_work_cost(value);
         admission.charge(nodes, dynamic_bytes, 0)?;
-        if let Some(segment) = segment {
-            admission.reserve(&mut self.path, 1)?;
-            self.path.push(segment);
-            admission.reserve(stack, 1)?;
-            stack.push(ReferenceTraversalFrame::Exit);
-        }
         if depth > self.limits.depth().get() {
             return Err(ComponentEntityReferenceRewriteError::DepthLimit {
                 maximum: self.limits.depth().get(),
@@ -1560,49 +1579,47 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
             .into());
         }
 
-        match value.kind() {
-            ComponentValueKind::EntityRef => {
-                if self.first_undeclared_path.is_none() {
-                    let allocation_bytes = self
-                        .path
-                        .len()
-                        .checked_mul(size_of::<ComponentFieldPathSegment>())
-                        .and_then(|bytes| {
-                            self.path.iter().try_fold(bytes, |bytes, segment| {
-                                bytes.checked_add(match segment {
-                                    TraversalPathSegment::Field(name) => name.len(),
-                                    TraversalPathSegment::Index(_) => 0,
-                                })
+        let kind = value.kind();
+        if kind == ComponentValueKind::EntityRef && self.first_undeclared_path.is_none() {
+            let allocation_bytes = self
+                .root_path
+                .segments()
+                .len()
+                .checked_add(stack.len())
+                .and_then(|length| length.checked_mul(size_of::<ComponentFieldPathSegment>()))
+                .and_then(|bytes| {
+                    self.root_path
+                        .segments()
+                        .iter()
+                        .try_fold(bytes, |bytes, segment| {
+                            bytes.checked_add(match segment {
+                                ComponentFieldPathSegment::Field(name) => name.len(),
+                                ComponentFieldPathSegment::Index(_) => 0,
                             })
-                        });
-                    admission.allocation(allocation_bytes)?;
-                    let candidate = ComponentFieldPath::new(
-                        self.path.iter().map(TraversalPathSegment::to_owned),
-                    );
-                    if !self.declared_paths.contains(&candidate) {
-                        self.first_undeclared_path = Some(candidate);
-                    }
-                }
-            }
-            ComponentValueKind::List => {
-                let items = value.as_list().expect("List kind checked");
-                admission.reserve(stack, 1)?;
-                stack.push(ReferenceTraversalFrame::ContinueList {
-                    items: items.iter().enumerate(),
-                    depth: depth.saturating_add(1),
+                        })
+                })
+                .and_then(|bytes| {
+                    stack.iter().try_fold(bytes, |bytes, frame| {
+                        let segment = frame.current();
+                        bytes.checked_add(match segment {
+                            TraversalPathSegment::Field(name) => name.len(),
+                            TraversalPathSegment::Index(_) => 0,
+                        })
+                    })
                 });
+            admission.allocation(allocation_bytes)?;
+            let candidate = ComponentFieldPath::new(
+                self.root_path
+                    .segments()
+                    .iter()
+                    .cloned()
+                    .chain(stack.iter().map(|frame| frame.current().to_owned())),
+            );
+            if !self.declared_paths.contains(&candidate) {
+                self.first_undeclared_path = Some(candidate);
             }
-            ComponentValueKind::Map => {
-                let fields = value.as_map().expect("Map kind checked");
-                admission.reserve(stack, 1)?;
-                stack.push(ReferenceTraversalFrame::ContinueMap {
-                    fields: fields.iter(),
-                    depth: depth.saturating_add(1),
-                });
-            }
-            _ => {}
         }
-        Ok(())
+        Ok(kind)
     }
 }
 
