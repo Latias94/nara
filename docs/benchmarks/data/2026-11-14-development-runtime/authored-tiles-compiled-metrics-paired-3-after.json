@@ -1,0 +1,3563 @@
+{
+  "accepted": true,
+  "authored_tile_cells": 16384,
+  "failure": null,
+  "format": "two-level-active-runtime-workload-summary/v1",
+  "injected_observer_failure": false,
+  "method": {
+    "cleanup_deadline_ms": 30000,
+    "completion_scope": "original App frame start to queue completion callback observation; not GPU execution or scanout",
+    "cpu_memory_scope": "whole process with observer and telemetry enabled; CPU delta and point memory include all threads and driver work; not per-frame CPU, retained-owner bytes or a leak bound",
+    "frame_wall_scope": "exact original App frame start to matching post-Host observation; includes native, driver and submission waits, excludes the observer work after that timestamp",
+    "fresh_runtime_window_renderer_per_run": true,
+    "gameplay_deadline_ms": 60000,
+    "manual_delta_or_step": false,
+    "maximum_retained_frames": 4096,
+    "minimum_initialized_presentations": 20,
+    "native_input": "isolated; game script supplies original semantic commands",
+    "native_poll_wait_cap_ms": 2,
+    "performance_pass_threshold": null,
+    "recovered_original_physical_event_loop": true,
+    "runs": 3,
+    "runtime_phase_wall_observation": true,
+    "scenario": "ordinary Scenario::Travel semantic-command script",
+    "scene_work_scope": "existing nara::scene::work spans for compiled-component preflight/native decoding, staged expansion, content-read and Scene/Prefab candidate-decode envelopes, and original Scene preparation/publication; content-read excludes SourceReadiness reads and catalogue discovery; candidate decode excludes later composition-source admission and retained-size bookkeeping; nested wall spans overlap; feature-off reports retain a disabled record",
+    "scene_work_span_observation": true,
+    "shared_process_code_driver_filesystem_caches": true,
+    "startup_operation_observation": true,
+    "statistics_scope": "per-run finite correlated samples; descriptive nearest-rank quantiles, not a production P99, cold-start comparison or speedup"
+  },
+  "provenance": {
+    "cost_measurement": true,
+    "desktop": true,
+    "gameplay_script_source": "ContentDigest(len=7499, 190cdff0e7426f15afe2a9980010dc7034b3fb2bdcac51d2fb23b7ec96962e3a)",
+    "measurement_source": "ContentDigest(len=21998, 27497860ac8a2c6a3fe9f79ee3e8068bce304079d4052b22e50d6498c101536d)",
+    "observer_source": "ContentDigest(len=48198, 0b3e4ea0ef787adc1f91910116390db293ea4de6b79812d5aef7c1d24c378fc4)",
+    "package": "two-level-game",
+    "process_counter_source": "ContentDigest(len=2323, fd8b065aa51c066af7fa00e75476f01af553653803579c7658fe28e2480e15e1)",
+    "release_assertions_disabled": true,
+    "target_arch": "x86_64",
+    "target_os": "windows",
+    "version": "0.1.0"
+  },
+  "runs": [
+    {
+      "acceptance": {
+        "maximum_run_seconds_enforced_by_caller": 60,
+        "maximum_unique_presentations_and_completion_samples": 4096,
+        "minimum_observed_scene_instance_changes": 3,
+        "minimum_unique_initialized_presentations": 20,
+        "requires_hardware_dx12": true,
+        "requires_observed_movement_and_both_levels": true,
+        "timing_quantiles_are_descriptive": true
+      },
+      "adapter": {
+        "backend": "dx12",
+        "device": 9860,
+        "device_type": "discrete-gpu",
+        "driver": "32.0.16.2114",
+        "driver_info": "",
+        "name": "NVIDIA GeForce RTX 4090",
+        "vendor": 4318
+      },
+      "app_to_post_host_wall_distribution_ns": {
+        "count": 485,
+        "max": 644101300,
+        "min": 4911300,
+        "p50": 6771800,
+        "p95": 7585800,
+        "p99": 54232000,
+        "percentile_method": "nearest-rank"
+      },
+      "app_to_post_host_wall_scope": "matching original FrameExecutionStart.started_at through original post-Host observation.now; App/native Host/submit wall including waits and poll work; not CPU execution, GPU execution, presentation cadence, or scanout",
+      "authored_tile_cells": 16384,
+      "classification_scope": "adjacent unique presented snapshots only; moving means changed player position within the same running Scene; transitions mean observed phase/restoring/level/Scene-instance/travel/restart changes; no internal stage duration is inferred",
+      "classifications": [
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 1,
+            "max": 644101300,
+            "min": 644101300,
+            "p50": 644101300,
+            "p95": 644101300,
+            "p99": 644101300,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "initialized_baseline",
+          "count": 1
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 38,
+            "max": 14042600,
+            "min": 5363300,
+            "p50": 6711400,
+            "p95": 8636100,
+            "p99": 14042600,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "moving_gameplay",
+          "count": 38
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 357,
+            "max": 60426200,
+            "min": 4911300,
+            "p50": 6803400,
+            "p95": 7585800,
+            "p99": 54232000,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "scene_transition",
+          "count": 357
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 89,
+            "max": 14127100,
+            "min": 4997900,
+            "p50": 6515000,
+            "p95": 7539400,
+            "p99": 14127100,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "stable_gameplay",
+          "count": 89
+        }
+      ],
+      "cleanup": {
+        "native_destroyed": true,
+        "normal_exit": true,
+        "physical_event_loop_recovered": true,
+        "provider_released": true,
+        "surface_retired": true,
+        "telemetry_complete": true
+      },
+      "completion_scope": "original App frame start to original queue-completion callback observation, including CPU/queue/wait/poll delay; not GPU execution or scanout; original samples expose App/render/device identities, with Runtime/backend supplied by the original observer and window/surface only by a unique matching presentation",
+      "copied_source_preparation_wall_ns": 518914200,
+      "copied_source_removed": true,
+      "entry_scope": "from run_one entry before source root/recipe/collector construction to the original first post-Host observation; caller/native waits included; excludes process loading and later gameplay/cleanup",
+      "entry_to_first_presentation_observation_wall_ns": 1098834400,
+      "final_snapshot": {
+        "collected": 3,
+        "current_instance": 6,
+        "error": null,
+        "held": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "initialized": true,
+        "level": {
+          "instance": 0,
+          "level": "meadow"
+        },
+        "logical_elapsed_nanos": 1320000000,
+        "logical_tick": 66,
+        "markers": [
+          1
+        ],
+        "phase": "Running",
+        "player": [
+          -120.0,
+          0.0
+        ],
+        "restarts": 1,
+        "restores": 0,
+        "restoring": false,
+        "saves": 0,
+        "scene_members": 6,
+        "score": 30,
+        "tick": 188,
+        "travel_count": 4,
+        "verified": true,
+        "visible_pickups": 1
+      },
+      "first_initialized_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 644101300,
+        "backend_instance": 1,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 100000000,
+          "logical_tick": 5,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 5,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 1,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 635363500,
+          "namespace": {
+            "measured_phase_wall_ns": 607925200,
+            "other_namespace_wall_ns": 38300,
+            "phase_wall_ns": [
+              38377400,
+              27700,
+              506175000,
+              58442300,
+              4902800
+            ]
+          },
+          "other_app_frame_wall_ns": 8737800,
+          "phase_wall_ns": [
+            607963500,
+            31400,
+            263300,
+            26266600,
+            838700
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "first_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 644101300,
+        "backend_instance": 1,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 100000000,
+          "logical_tick": 5,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 5,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 1,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 635363500,
+          "namespace": {
+            "measured_phase_wall_ns": 607925200,
+            "other_namespace_wall_ns": 38300,
+            "phase_wall_ns": [
+              38377400,
+              27700,
+              506175000,
+              58442300,
+              4902800
+            ]
+          },
+          "other_app_frame_wall_ns": 8737800,
+          "phase_wall_ns": [
+            607963500,
+            31400,
+            263300,
+            26266600,
+            838700
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "frame_start_to_completion_observation_distribution_ns": {
+        "count": 485,
+        "max": 643951900,
+        "min": 4947700,
+        "p50": 11303700,
+        "p95": 12864800,
+        "p99": 60234700,
+        "percentile_method": "nearest-rank"
+      },
+      "gameplay_verified": true,
+      "initialized_presentations": 485,
+      "matched_initialized_completion_samples": 485,
+      "measured_wall_ns": 4209749300,
+      "namespace_phase_order": [
+        "instance_preparation",
+        "surface_creation",
+        "adapter_request",
+        "device_request",
+        "surface_configuration"
+      ],
+      "namespace_phase_scope": "disjoint returned native calls inside the matching namespace preparation span; Adapter/Device request spans are absent on reuse, not measured zero; contains native/driver waits; sum and other_namespace_wall_ns equal only that parent phase and must not be added to it",
+      "observed_level_instances": [
+        {
+          "instance": 0,
+          "level": "meadow"
+        },
+        {
+          "instance": 0,
+          "level": "cavern"
+        },
+        {
+          "instance": 1,
+          "level": "cavern"
+        }
+      ],
+      "observed_scene_instance_changes": 5,
+      "observed_source_views_retired": 6,
+      "observer_callbacks": 486,
+      "old_scene_receipts_checked": 5,
+      "process_cost": {
+        "counter_read_scope": "CPU and memory are read by separate native calls, not an atomic process snapshot; boundary read costs and post-Host lags are reported separately",
+        "final_private_bytes": 653467648,
+        "final_working_set_bytes": 334118912,
+        "first_boundary": {
+          "counter_read_wall_ns": 15100,
+          "post_host_to_counter_read_start_ns": 36400
+        },
+        "initial_private_bytes": 610902016,
+        "initial_working_set_bytes": 284950528,
+        "kernel_ns": 1250000000,
+        "last_boundary": {
+          "counter_read_wall_ns": 14300,
+          "post_host_to_counter_read_start_ns": 23300
+        },
+        "memory_scope": "whole-process point samples only; no peak, retained-UI allocation, per-frame allocation, GPU residency, or leak claim; sequential runs share loaded code and driver caches",
+        "observed_frame_intervals": 484,
+        "post_host_interval_wall_ns": 3565648000,
+        "scope": "whole-process CPU between counter reads at the first and last unique initialized post-Host presentations; includes observer, native polling, driver, and background threads; excludes earlier startup and later seal/native cleanup; not per-frame CPU or GPU execution",
+        "total_cpu_ns": 5171875000,
+        "user_ns": 3921875000,
+        "wall_ns": 3565634900
+      },
+      "quantile_scope": "nearest-rank empirical quantiles of correlated observations from this single run; no production P99, independent-sample, or performance improvement claim",
+      "resource_scope": "per-presentation current CPU asset counts and original backend logical GPU payloads; pending/cache grace are retained; no total content budget, full VRAM, memory plateau or leak claim",
+      "run_index": 1,
+      "runtime_phase_order": [
+        "namespace_preparation",
+        "surface_acquisition",
+        "candidate_preparation",
+        "program_execution",
+        "surface_presentation"
+      ],
+      "runtime_phase_scope": "disjoint original Runtime namespace preparation, Surface acquisition, candidate preparation, program execution and Surface presentation operations within the matching App frame; includes native/driver/error-scope waits; residual is other App work and unmeasured gaps, not CPU time or inferred wait time; observations never grant presentation authority",
+      "scenario": "travel",
+      "scene_work": {
+        "enabled": true,
+        "nested_span_wall_sum_ns": 5728957400,
+        "phases": {
+          "prefab_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 582160300,
+            "worker_thread_calls": 8
+          },
+          "project_content_read": {
+            "calls": 135,
+            "owner_thread_calls": 15,
+            "wall_ns": 108165100,
+            "worker_thread_calls": 120
+          },
+          "scene_authoring_finish": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 537400,
+            "worker_thread_calls": 0
+          },
+          "scene_bind_revalidate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 207900,
+            "worker_thread_calls": 0
+          },
+          "scene_compile_output": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 131200,
+            "worker_thread_calls": 8
+          },
+          "scene_component_materialization": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 301567600,
+            "worker_thread_calls": 8
+          },
+          "scene_decode": {
+            "calls": 15,
+            "owner_thread_calls": 7,
+            "wall_ns": 598260900,
+            "worker_thread_calls": 8
+          },
+          "scene_epoch_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 990600,
+            "worker_thread_calls": 0
+          },
+          "scene_expand": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 937977400,
+            "worker_thread_calls": 8
+          },
+          "scene_final_validate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 143600,
+            "worker_thread_calls": 0
+          },
+          "scene_flat_admission": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 331376300,
+            "worker_thread_calls": 8
+          },
+          "scene_header_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 39236000,
+            "worker_thread_calls": 16
+          },
+          "scene_hierarchy_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 87600,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_adopt": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 45700,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 37300,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_prepare": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 25200,
+            "worker_thread_calls": 0
+          },
+          "scene_native_preview": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_payload_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 709808800,
+            "worker_thread_calls": 16
+          },
+          "scene_predecessor": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 210500,
+            "worker_thread_calls": 0
+          },
+          "scene_prepare_unbound": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 237280300,
+            "worker_thread_calls": 0
+          },
+          "scene_program_composition": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 79300,
+            "worker_thread_calls": 8
+          },
+          "scene_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 1431200,
+            "worker_thread_calls": 0
+          },
+          "scene_reference_closure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 21900,
+            "worker_thread_calls": 8
+          },
+          "scene_retirement_hierarchy": {
+            "calls": 20,
+            "owner_thread_calls": 20,
+            "wall_ns": 125100,
+            "worker_thread_calls": 0
+          },
+          "scene_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 554996200,
+            "worker_thread_calls": 8
+          },
+          "scene_source_finish": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 50041400,
+            "worker_thread_calls": 16
+          },
+          "scene_structure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 635866100,
+            "worker_thread_calls": 8
+          },
+          "scene_value_admission": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 77447200,
+            "worker_thread_calls": 160
+          },
+          "scene_value_clone": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 29600,
+            "worker_thread_calls": 160
+          },
+          "scene_value_defaults": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 102734700,
+            "worker_thread_calls": 160
+          },
+          "scene_value_migration": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 39100,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_plan": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 119339300,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 16000,
+            "worker_thread_calls": 160
+          },
+          "scene_value_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 840200,
+            "worker_thread_calls": 160
+          },
+          "scene_wire_preflight": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 337700400,
+            "worker_thread_calls": 16
+          }
+        },
+        "retained_spans": 0,
+        "scope": "one original Runtime from construction through physical retirement, across owner and worker threads; excludes source-copy generation and independent GPU replay; nested wall spans overlap and are not additive CPU time",
+        "status": "complete",
+        "target": "nara::scene::work",
+        "total_calls": 1661,
+        "unfinished_entries": 0
+      },
+      "source_workload": {
+        "authored_scene_members": 6,
+        "bounds": {
+          "copy_bytes": 67108864,
+          "copy_depth": 16,
+          "copy_entries": 256,
+          "scene_file_bytes": 16777216,
+          "shape_container_items": 100000,
+          "shape_depth": 64,
+          "shape_nodes": 1000000,
+          "shape_string_bytes": 1048576,
+          "shape_total_string_bytes": 8388608
+        },
+        "cells_per_active_scene": 16384,
+        "copied_bytes": 154877,
+        "copied_entries": 22,
+        "copied_source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 106ef8bc87dd2e08c688d958c47e0576a945c061b830eb625739a6f011a16cd8)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 8f7ed50ec0eb73540332a1128d45974253bdcaeac97837a01d69712cfb1b2e74)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "document_preflight": "written Scene/Prefab decoded with default SceneFileLimits",
+        "format": "two-level-workload-source/v1",
+        "host_root_ids": [
+          "checkpoint",
+          "portal"
+        ],
+        "population": 16384,
+        "prefab_role": "root binding adds Tilemap to portal; no additional member or child",
+        "prefabs": [
+          "prefabs/workload/meadow-half.prefab.json",
+          "prefabs/workload/cavern-half.prefab.json"
+        ],
+        "source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, d19e2cf47c0f208b6a34e558a2d414ca3f19f3315ed1786132dadf0967561fea)",
+            "path": "assets/tilesets/cavern.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, fac8b6f3a8118901c2fafaad2fae3d1b95352de0fb706da0bc15ee47c93d9e28)",
+            "path": "assets/tilesets/cavern.tileset.ron.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, 8b470fcb681d5b738dca7ea0d5cf847085b53231c1d9e9cd39f86642fc62ec51)",
+            "path": "assets/tilesets/meadow.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, 2481b0ee28f0668135ca2bf3e7c49c0727c140e2e2ef7902b89d58c684cc79e0)",
+            "path": "assets/tilesets/meadow.tileset.ron.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, ec23a5a90d75caa9e99a2a84000184d8f3327fde6e03821d17906386cecabd43)",
+            "path": "prefabs/workload/cavern-half.prefab.json"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, f9bac077e658d1087f003e6616cc9664f6e290633b7d58172d173694820db4ed)",
+            "path": "prefabs/workload/meadow-half.prefab.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, a19c7454cb58ae524c7734dc4d676b423c50fae004f610f6e9df92306093a85d)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, 430883b6db948cc912d8851a60f96600ef804086d41741076a2a6a9cd4d3adce)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "source_scope": "source copy; no Runtime admission or startup-input permission",
+        "tile_size": [
+          2.0,
+          2.0
+        ],
+        "tileset_products": [
+          {
+            "level": "meadow",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "f516527c-4e94-45b3-9941-13e659ccfb07"
+            },
+            "source": "tilesets/meadow.tileset.ron"
+          },
+          {
+            "level": "cavern",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "a64c4823-8686-41a7-ae87-9a483931d91b"
+            },
+            "source": "tilesets/cavern.tileset.ron"
+          }
+        ],
+        "world_bounds": {
+          "max": [
+            136,
+            128
+          ],
+          "min": [
+            -120,
+            -128
+          ]
+        }
+      },
+      "startup": {
+        "operation_wall_ns": {
+          "content_preparation": 284271800,
+          "first_native_poll": 695908400,
+          "native_polling_to_first_presentation": 695908400,
+          "native_session_construction": 83412800,
+          "runtime_startup": 43850700
+        },
+        "scope": "original DesktopRun content/startup/session and native-poll operations; first_native_poll is included in native_polling_to_first_presentation; caller gaps excluded; spans are not additive and do not establish CPU/GPU execution or scanout"
+      },
+      "startup_frozen_after_first_presentation": true,
+      "startup_presentations": 0,
+      "startup_scope": "uninitialized original successful presentations remain in the trace and are excluded from initialized distributions and process measurement boundaries; a missing matching App start is null",
+      "telemetry_seal": {
+        "backend_instance": 1,
+        "completion": {
+          "buffered_samples": 0,
+          "completed_samples": 485,
+          "device_epoch": 1,
+          "enabled": true,
+          "lost_samples": 0,
+          "pending_samples": 0
+        },
+        "device_epoch": 1,
+        "outcome": "Complete",
+        "resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311200,
+          "peak_texture_bytes": 2306052,
+          "peak_total_bytes": 3617252,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "runtime_generation": 1,
+        "scope": "original explicit pre-retirement seal; audit samples overlap incremental batches and are not counted twice",
+        "seal_audit_samples": 1
+      },
+      "tile_replay": {
+        "accepted": true,
+        "adapter": {
+          "backend": "dx12",
+          "device": 9860,
+          "device_type": "discrete-gpu",
+          "name": "NVIDIA GeForce RTX 4090",
+          "vendor": 4318
+        },
+        "canvas_extent": [
+          320,
+          180
+        ],
+        "cleanup": {
+          "callback_abandoned": false,
+          "cleanup_fault_count": 0,
+          "observed_prefix_tokens": 12,
+          "original_host_retired": true,
+          "original_producers_retired": true,
+          "original_submission_prefixes_complete": true,
+          "retained_candidate_metadata_bytes": 0,
+          "retained_resource_bytes": 0
+        },
+        "fixed_original_png_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+        "format": "two-level-tile-original-input-replay/v1",
+        "format_and_interpretation": "Rgba8Unorm / linear / premultiplied",
+        "frames": [
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 1,
+            "original_backend_instance": 1,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 1,
+            "original_runtime_generation": 1,
+            "original_scene_instance": "SceneInstanceId(1)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 2,
+            "replay_device_epoch": 1,
+            "replay_output_version": 1,
+            "replay_producer": 2,
+            "replay_render_frame": 1,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 453bbe2d1dd685dd20364991f0a97a5ff9772914a0d0f321fc324417c074cac0)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "cavern",
+            "original_app_frame": 125,
+            "original_backend_instance": 1,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 125,
+            "original_runtime_generation": 1,
+            "original_scene_instance": "SceneInstanceId(2)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/cavern.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, e8d5569e5d671f10f55ceef2fc7f5c9e63264ce6c4475d4c4c5824f194909db4)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 2,
+            "replay_device_epoch": 1,
+            "replay_output_version": 2,
+            "replay_producer": 3,
+            "replay_render_frame": 125,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 77e3a55c13b9aa46faf71ecf5913ca9af982f3f1cff8a8ea3bc6a6bdba9c12a1)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 483,
+            "original_backend_instance": 1,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 483,
+            "original_runtime_generation": 1,
+            "original_scene_instance": "SceneInstanceId(6)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 2,
+            "replay_device_epoch": 1,
+            "replay_output_version": 3,
+            "replay_producer": 4,
+            "replay_render_frame": 483,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 767395823d7f38d851f5522e20dd912802a393b82ef9bb6328d417bda735f9da)",
+            "submitted_prefix_complete": true
+          }
+        ],
+        "gpu_poll_deadline_ms": 10000,
+        "input_order_may_be_nonmonotonic": true,
+        "memory": {
+          "candidate_metadata_byte_limit": 134217728,
+          "host_logical_resource_byte_limit": 67108864,
+          "maximum_capture_ledger_frames": 4,
+          "maximum_selected_frames": 3,
+          "maximum_single_external_readback_buffer_bytes": 2073600,
+          "observed_host_bytes_with_retained_outputs": 6223876,
+          "peak_observed_host_bytes_between_operations": 6223876,
+          "retained_baseline_rgba8_bytes": 6220800,
+          "retained_selected_frames": 3,
+          "scope": "Host-accounted logical native payload plus separately stated CPU/readback buffers; excludes driver/pipeline overhead, physical residency and process RSS; point observations are not an allocation peak or leak bound"
+        },
+        "offscreen_host_count": 1,
+        "original_world_and_sources_retired_before_replay": true,
+        "physical_extent": [
+          960,
+          540
+        ],
+        "population": 16384,
+        "producer_per_original_frame": true,
+        "retained_outputs_exact_after_later_publication_and_producer_retirement": true,
+        "same_encoder_image_copy_and_original_prefix_wait": true,
+        "scope": "independent replay of original native-presented inputs; finite selected ground pixel centers and level clears; not full rasterization, swapchain/display capture, GPU busy time or a production performance claim"
+      },
+      "unique_presentations": 485,
+      "unmatched_completion_samples": 0
+    },
+    {
+      "acceptance": {
+        "maximum_run_seconds_enforced_by_caller": 60,
+        "maximum_unique_presentations_and_completion_samples": 4096,
+        "minimum_observed_scene_instance_changes": 3,
+        "minimum_unique_initialized_presentations": 20,
+        "requires_hardware_dx12": true,
+        "requires_observed_movement_and_both_levels": true,
+        "timing_quantiles_are_descriptive": true
+      },
+      "adapter": {
+        "backend": "dx12",
+        "device": 9860,
+        "device_type": "discrete-gpu",
+        "driver": "32.0.16.2114",
+        "driver_info": "",
+        "name": "NVIDIA GeForce RTX 4090",
+        "vendor": 4318
+      },
+      "app_to_post_host_wall_distribution_ns": {
+        "count": 473,
+        "max": 610651500,
+        "min": 4877400,
+        "p50": 6795800,
+        "p95": 7378400,
+        "p99": 53394800,
+        "percentile_method": "nearest-rank"
+      },
+      "app_to_post_host_wall_scope": "matching original FrameExecutionStart.started_at through original post-Host observation.now; App/native Host/submit wall including waits and poll work; not CPU execution, GPU execution, presentation cadence, or scanout",
+      "authored_tile_cells": 16384,
+      "classification_scope": "adjacent unique presented snapshots only; moving means changed player position within the same running Scene; transitions mean observed phase/restoring/level/Scene-instance/travel/restart changes; no internal stage duration is inferred",
+      "classifications": [
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 1,
+            "max": 610651500,
+            "min": 610651500,
+            "p50": 610651500,
+            "p95": 610651500,
+            "p99": 610651500,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "initialized_baseline",
+          "count": 1
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 38,
+            "max": 14173300,
+            "min": 5315600,
+            "p50": 6682000,
+            "p95": 8082400,
+            "p99": 14173300,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "moving_gameplay",
+          "count": 38
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 340,
+            "max": 56614700,
+            "min": 4877400,
+            "p50": 6822300,
+            "p95": 7374400,
+            "p99": 53394800,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "scene_transition",
+          "count": 340
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 94,
+            "max": 7524600,
+            "min": 4906400,
+            "p50": 6652900,
+            "p95": 7296900,
+            "p99": 7524600,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "stable_gameplay",
+          "count": 94
+        }
+      ],
+      "cleanup": {
+        "native_destroyed": true,
+        "normal_exit": true,
+        "physical_event_loop_recovered": true,
+        "provider_released": true,
+        "surface_retired": true,
+        "telemetry_complete": true
+      },
+      "completion_scope": "original App frame start to original queue-completion callback observation, including CPU/queue/wait/poll delay; not GPU execution or scanout; original samples expose App/render/device identities, with Runtime/backend supplied by the original observer and window/surface only by a unique matching presentation",
+      "copied_source_preparation_wall_ns": 504759200,
+      "copied_source_removed": true,
+      "entry_scope": "from run_one entry before source root/recipe/collector construction to the original first post-Host observation; caller/native waits included; excludes process loading and later gameplay/cleanup",
+      "entry_to_first_presentation_observation_wall_ns": 982430200,
+      "final_snapshot": {
+        "collected": 3,
+        "current_instance": 6,
+        "error": null,
+        "held": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "initialized": true,
+        "level": {
+          "instance": 0,
+          "level": "meadow"
+        },
+        "logical_elapsed_nanos": 1240000000,
+        "logical_tick": 62,
+        "markers": [
+          1
+        ],
+        "phase": "Running",
+        "player": [
+          -120.0,
+          0.0
+        ],
+        "restarts": 1,
+        "restores": 0,
+        "restoring": false,
+        "saves": 0,
+        "scene_members": 6,
+        "score": 30,
+        "tick": 179,
+        "travel_count": 4,
+        "verified": true,
+        "visible_pickups": 1
+      },
+      "first_initialized_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 610651500,
+        "backend_instance": 3,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 20000000,
+          "logical_tick": 1,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 1,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 2,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 601088400,
+          "namespace": {
+            "measured_phase_wall_ns": 574243600,
+            "other_namespace_wall_ns": 16100,
+            "phase_wall_ns": [
+              47404600,
+              17300,
+              463687100,
+              58342800,
+              4791800
+            ]
+          },
+          "other_app_frame_wall_ns": 9563100,
+          "phase_wall_ns": [
+            574259700,
+            17400,
+            244100,
+            25869900,
+            697300
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "first_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 610651500,
+        "backend_instance": 3,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 20000000,
+          "logical_tick": 1,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 1,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 2,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 601088400,
+          "namespace": {
+            "measured_phase_wall_ns": 574243600,
+            "other_namespace_wall_ns": 16100,
+            "phase_wall_ns": [
+              47404600,
+              17300,
+              463687100,
+              58342800,
+              4791800
+            ]
+          },
+          "other_app_frame_wall_ns": 9563100,
+          "phase_wall_ns": [
+            574259700,
+            17400,
+            244100,
+            25869900,
+            697300
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "frame_start_to_completion_observation_distribution_ns": {
+        "count": 473,
+        "max": 610530600,
+        "min": 5107000,
+        "p50": 11356800,
+        "p95": 13022200,
+        "p99": 60006300,
+        "percentile_method": "nearest-rank"
+      },
+      "gameplay_verified": true,
+      "initialized_presentations": 473,
+      "matched_initialized_completion_samples": 473,
+      "measured_wall_ns": 4076621500,
+      "namespace_phase_order": [
+        "instance_preparation",
+        "surface_creation",
+        "adapter_request",
+        "device_request",
+        "surface_configuration"
+      ],
+      "namespace_phase_scope": "disjoint returned native calls inside the matching namespace preparation span; Adapter/Device request spans are absent on reuse, not measured zero; contains native/driver waits; sum and other_namespace_wall_ns equal only that parent phase and must not be added to it",
+      "observed_level_instances": [
+        {
+          "instance": 0,
+          "level": "meadow"
+        },
+        {
+          "instance": 0,
+          "level": "cavern"
+        },
+        {
+          "instance": 1,
+          "level": "cavern"
+        }
+      ],
+      "observed_scene_instance_changes": 5,
+      "observed_source_views_retired": 6,
+      "observer_callbacks": 474,
+      "old_scene_receipts_checked": 5,
+      "process_cost": {
+        "counter_read_scope": "CPU and memory are read by separate native calls, not an atomic process snapshot; boundary read costs and post-Host lags are reported separately",
+        "final_private_bytes": 663461888,
+        "final_working_set_bytes": 358047744,
+        "first_boundary": {
+          "counter_read_wall_ns": 15600,
+          "post_host_to_counter_read_start_ns": 24900
+        },
+        "initial_private_bytes": 738672640,
+        "initial_working_set_bytes": 436027392,
+        "kernel_ns": 968750000,
+        "last_boundary": {
+          "counter_read_wall_ns": 8200,
+          "post_host_to_counter_read_start_ns": 25800
+        },
+        "memory_scope": "whole-process point samples only; no peak, retained-UI allocation, per-frame allocation, GPU residency, or leak claim; sequential runs share loaded code and driver caches",
+        "observed_frame_intervals": 472,
+        "post_host_interval_wall_ns": 3465970000,
+        "scope": "whole-process CPU between counter reads at the first and last unique initialized post-Host presentations; includes observer, native polling, driver, and background threads; excludes earlier startup and later seal/native cleanup; not per-frame CPU or GPU execution",
+        "total_cpu_ns": 4968750000,
+        "user_ns": 4000000000,
+        "wall_ns": 3465970900
+      },
+      "quantile_scope": "nearest-rank empirical quantiles of correlated observations from this single run; no production P99, independent-sample, or performance improvement claim",
+      "resource_scope": "per-presentation current CPU asset counts and original backend logical GPU payloads; pending/cache grace are retained; no total content budget, full VRAM, memory plateau or leak claim",
+      "run_index": 2,
+      "runtime_phase_order": [
+        "namespace_preparation",
+        "surface_acquisition",
+        "candidate_preparation",
+        "program_execution",
+        "surface_presentation"
+      ],
+      "runtime_phase_scope": "disjoint original Runtime namespace preparation, Surface acquisition, candidate preparation, program execution and Surface presentation operations within the matching App frame; includes native/driver/error-scope waits; residual is other App work and unmeasured gaps, not CPU time or inferred wait time; observations never grant presentation authority",
+      "scenario": "travel",
+      "scene_work": {
+        "enabled": true,
+        "nested_span_wall_sum_ns": 5606778100,
+        "phases": {
+          "prefab_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 564254100,
+            "worker_thread_calls": 8
+          },
+          "project_content_read": {
+            "calls": 135,
+            "owner_thread_calls": 15,
+            "wall_ns": 83929900,
+            "worker_thread_calls": 120
+          },
+          "scene_authoring_finish": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 496400,
+            "worker_thread_calls": 0
+          },
+          "scene_bind_revalidate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 186600,
+            "worker_thread_calls": 0
+          },
+          "scene_compile_output": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 142100,
+            "worker_thread_calls": 8
+          },
+          "scene_component_materialization": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 299071600,
+            "worker_thread_calls": 8
+          },
+          "scene_decode": {
+            "calls": 15,
+            "owner_thread_calls": 7,
+            "wall_ns": 593498600,
+            "worker_thread_calls": 8
+          },
+          "scene_epoch_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 969700,
+            "worker_thread_calls": 0
+          },
+          "scene_expand": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 910291000,
+            "worker_thread_calls": 8
+          },
+          "scene_final_validate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 131900,
+            "worker_thread_calls": 0
+          },
+          "scene_flat_admission": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 329117900,
+            "worker_thread_calls": 8
+          },
+          "scene_header_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 38728400,
+            "worker_thread_calls": 16
+          },
+          "scene_hierarchy_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 79000,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_adopt": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 37600,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 32900,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_prepare": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 26300,
+            "worker_thread_calls": 0
+          },
+          "scene_native_preview": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_payload_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 705369900,
+            "worker_thread_calls": 16
+          },
+          "scene_predecessor": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 195500,
+            "worker_thread_calls": 0
+          },
+          "scene_prepare_unbound": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 232334400,
+            "worker_thread_calls": 0
+          },
+          "scene_program_composition": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 79800,
+            "worker_thread_calls": 8
+          },
+          "scene_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 1467100,
+            "worker_thread_calls": 0
+          },
+          "scene_reference_closure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 17400,
+            "worker_thread_calls": 8
+          },
+          "scene_retirement_hierarchy": {
+            "calls": 20,
+            "owner_thread_calls": 20,
+            "wall_ns": 114600,
+            "worker_thread_calls": 0
+          },
+          "scene_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 558873700,
+            "worker_thread_calls": 8
+          },
+          "scene_source_finish": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 49165800,
+            "worker_thread_calls": 16
+          },
+          "scene_structure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 610693100,
+            "worker_thread_calls": 8
+          },
+          "scene_value_admission": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 75802300,
+            "worker_thread_calls": 160
+          },
+          "scene_value_clone": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 30200,
+            "worker_thread_calls": 160
+          },
+          "scene_value_defaults": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 100282400,
+            "worker_thread_calls": 160
+          },
+          "scene_value_migration": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 40000,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_plan": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 121014700,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 15300,
+            "worker_thread_calls": 160
+          },
+          "scene_value_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 796500,
+            "worker_thread_calls": 160
+          },
+          "scene_wire_preflight": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 329491400,
+            "worker_thread_calls": 16
+          }
+        },
+        "retained_spans": 0,
+        "scope": "one original Runtime from construction through physical retirement, across owner and worker threads; excludes source-copy generation and independent GPU replay; nested wall spans overlap and are not additive CPU time",
+        "status": "complete",
+        "target": "nara::scene::work",
+        "total_calls": 1661,
+        "unfinished_entries": 0
+      },
+      "source_workload": {
+        "authored_scene_members": 6,
+        "bounds": {
+          "copy_bytes": 67108864,
+          "copy_depth": 16,
+          "copy_entries": 256,
+          "scene_file_bytes": 16777216,
+          "shape_container_items": 100000,
+          "shape_depth": 64,
+          "shape_nodes": 1000000,
+          "shape_string_bytes": 1048576,
+          "shape_total_string_bytes": 8388608
+        },
+        "cells_per_active_scene": 16384,
+        "copied_bytes": 154877,
+        "copied_entries": 22,
+        "copied_source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 106ef8bc87dd2e08c688d958c47e0576a945c061b830eb625739a6f011a16cd8)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 8f7ed50ec0eb73540332a1128d45974253bdcaeac97837a01d69712cfb1b2e74)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "document_preflight": "written Scene/Prefab decoded with default SceneFileLimits",
+        "format": "two-level-workload-source/v1",
+        "host_root_ids": [
+          "checkpoint",
+          "portal"
+        ],
+        "population": 16384,
+        "prefab_role": "root binding adds Tilemap to portal; no additional member or child",
+        "prefabs": [
+          "prefabs/workload/meadow-half.prefab.json",
+          "prefabs/workload/cavern-half.prefab.json"
+        ],
+        "source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, d19e2cf47c0f208b6a34e558a2d414ca3f19f3315ed1786132dadf0967561fea)",
+            "path": "assets/tilesets/cavern.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, fac8b6f3a8118901c2fafaad2fae3d1b95352de0fb706da0bc15ee47c93d9e28)",
+            "path": "assets/tilesets/cavern.tileset.ron.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, 8b470fcb681d5b738dca7ea0d5cf847085b53231c1d9e9cd39f86642fc62ec51)",
+            "path": "assets/tilesets/meadow.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, 2481b0ee28f0668135ca2bf3e7c49c0727c140e2e2ef7902b89d58c684cc79e0)",
+            "path": "assets/tilesets/meadow.tileset.ron.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, ec23a5a90d75caa9e99a2a84000184d8f3327fde6e03821d17906386cecabd43)",
+            "path": "prefabs/workload/cavern-half.prefab.json"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, f9bac077e658d1087f003e6616cc9664f6e290633b7d58172d173694820db4ed)",
+            "path": "prefabs/workload/meadow-half.prefab.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, a19c7454cb58ae524c7734dc4d676b423c50fae004f610f6e9df92306093a85d)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, 430883b6db948cc912d8851a60f96600ef804086d41741076a2a6a9cd4d3adce)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "source_scope": "source copy; no Runtime admission or startup-input permission",
+        "tile_size": [
+          2.0,
+          2.0
+        ],
+        "tileset_products": [
+          {
+            "level": "meadow",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "f516527c-4e94-45b3-9941-13e659ccfb07"
+            },
+            "source": "tilesets/meadow.tileset.ron"
+          },
+          {
+            "level": "cavern",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "a64c4823-8686-41a7-ae87-9a483931d91b"
+            },
+            "source": "tilesets/cavern.tileset.ron"
+          }
+        ],
+        "world_bounds": {
+          "max": [
+            136,
+            128
+          ],
+          "min": [
+            -120,
+            -128
+          ]
+        }
+      },
+      "startup": {
+        "operation_wall_ns": {
+          "content_preparation": 307346000,
+          "first_native_poll": 35700,
+          "native_polling_to_first_presentation": 640851700,
+          "native_session_construction": 3300,
+          "runtime_startup": 42219200
+        },
+        "scope": "original DesktopRun content/startup/session and native-poll operations; first_native_poll is included in native_polling_to_first_presentation; caller gaps excluded; spans are not additive and do not establish CPU/GPU execution or scanout"
+      },
+      "startup_frozen_after_first_presentation": true,
+      "startup_presentations": 0,
+      "startup_scope": "uninitialized original successful presentations remain in the trace and are excluded from initialized distributions and process measurement boundaries; a missing matching App start is null",
+      "telemetry_seal": {
+        "backend_instance": 3,
+        "completion": {
+          "buffered_samples": 0,
+          "completed_samples": 473,
+          "device_epoch": 1,
+          "enabled": true,
+          "lost_samples": 0,
+          "pending_samples": 0
+        },
+        "device_epoch": 1,
+        "outcome": "Complete",
+        "resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311200,
+          "peak_texture_bytes": 2306052,
+          "peak_total_bytes": 3617252,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "runtime_generation": 2,
+        "scope": "original explicit pre-retirement seal; audit samples overlap incremental batches and are not counted twice",
+        "seal_audit_samples": 1
+      },
+      "tile_replay": {
+        "accepted": true,
+        "adapter": {
+          "backend": "dx12",
+          "device": 9860,
+          "device_type": "discrete-gpu",
+          "name": "NVIDIA GeForce RTX 4090",
+          "vendor": 4318
+        },
+        "canvas_extent": [
+          320,
+          180
+        ],
+        "cleanup": {
+          "callback_abandoned": false,
+          "cleanup_fault_count": 0,
+          "observed_prefix_tokens": 12,
+          "original_host_retired": true,
+          "original_producers_retired": true,
+          "original_submission_prefixes_complete": true,
+          "retained_candidate_metadata_bytes": 0,
+          "retained_resource_bytes": 0
+        },
+        "fixed_original_png_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+        "format": "two-level-tile-original-input-replay/v1",
+        "format_and_interpretation": "Rgba8Unorm / linear / premultiplied",
+        "frames": [
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 1,
+            "original_backend_instance": 3,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 1,
+            "original_runtime_generation": 2,
+            "original_scene_instance": "SceneInstanceId(1)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 4,
+            "replay_device_epoch": 1,
+            "replay_output_version": 4,
+            "replay_producer": 6,
+            "replay_render_frame": 1,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 453bbe2d1dd685dd20364991f0a97a5ff9772914a0d0f321fc324417c074cac0)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "cavern",
+            "original_app_frame": 120,
+            "original_backend_instance": 3,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 120,
+            "original_runtime_generation": 2,
+            "original_scene_instance": "SceneInstanceId(2)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/cavern.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, e8d5569e5d671f10f55ceef2fc7f5c9e63264ce6c4475d4c4c5824f194909db4)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 4,
+            "replay_device_epoch": 1,
+            "replay_output_version": 5,
+            "replay_producer": 7,
+            "replay_render_frame": 120,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 77e3a55c13b9aa46faf71ecf5913ca9af982f3f1cff8a8ea3bc6a6bdba9c12a1)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 472,
+            "original_backend_instance": 3,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 472,
+            "original_runtime_generation": 2,
+            "original_scene_instance": "SceneInstanceId(6)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 4,
+            "replay_device_epoch": 1,
+            "replay_output_version": 6,
+            "replay_producer": 8,
+            "replay_render_frame": 472,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 767395823d7f38d851f5522e20dd912802a393b82ef9bb6328d417bda735f9da)",
+            "submitted_prefix_complete": true
+          }
+        ],
+        "gpu_poll_deadline_ms": 10000,
+        "input_order_may_be_nonmonotonic": true,
+        "memory": {
+          "candidate_metadata_byte_limit": 134217728,
+          "host_logical_resource_byte_limit": 67108864,
+          "maximum_capture_ledger_frames": 4,
+          "maximum_selected_frames": 3,
+          "maximum_single_external_readback_buffer_bytes": 2073600,
+          "observed_host_bytes_with_retained_outputs": 6223876,
+          "peak_observed_host_bytes_between_operations": 6223876,
+          "retained_baseline_rgba8_bytes": 6220800,
+          "retained_selected_frames": 3,
+          "scope": "Host-accounted logical native payload plus separately stated CPU/readback buffers; excludes driver/pipeline overhead, physical residency and process RSS; point observations are not an allocation peak or leak bound"
+        },
+        "offscreen_host_count": 1,
+        "original_world_and_sources_retired_before_replay": true,
+        "physical_extent": [
+          960,
+          540
+        ],
+        "population": 16384,
+        "producer_per_original_frame": true,
+        "retained_outputs_exact_after_later_publication_and_producer_retirement": true,
+        "same_encoder_image_copy_and_original_prefix_wait": true,
+        "scope": "independent replay of original native-presented inputs; finite selected ground pixel centers and level clears; not full rasterization, swapchain/display capture, GPU busy time or a production performance claim"
+      },
+      "unique_presentations": 473,
+      "unmatched_completion_samples": 0
+    },
+    {
+      "acceptance": {
+        "maximum_run_seconds_enforced_by_caller": 60,
+        "maximum_unique_presentations_and_completion_samples": 4096,
+        "minimum_observed_scene_instance_changes": 3,
+        "minimum_unique_initialized_presentations": 20,
+        "requires_hardware_dx12": true,
+        "requires_observed_movement_and_both_levels": true,
+        "timing_quantiles_are_descriptive": true
+      },
+      "adapter": {
+        "backend": "dx12",
+        "device": 9860,
+        "device_type": "discrete-gpu",
+        "driver": "32.0.16.2114",
+        "driver_info": "",
+        "name": "NVIDIA GeForce RTX 4090",
+        "vendor": 4318
+      },
+      "app_to_post_host_wall_distribution_ns": {
+        "count": 501,
+        "max": 665434800,
+        "min": 4877400,
+        "p50": 6795200,
+        "p95": 7354000,
+        "p99": 43576900,
+        "percentile_method": "nearest-rank"
+      },
+      "app_to_post_host_wall_scope": "matching original FrameExecutionStart.started_at through original post-Host observation.now; App/native Host/submit wall including waits and poll work; not CPU execution, GPU execution, presentation cadence, or scanout",
+      "authored_tile_cells": 16384,
+      "classification_scope": "adjacent unique presented snapshots only; moving means changed player position within the same running Scene; transitions mean observed phase/restoring/level/Scene-instance/travel/restart changes; no internal stage duration is inferred",
+      "classifications": [
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 1,
+            "max": 665434800,
+            "min": 665434800,
+            "p50": 665434800,
+            "p95": 665434800,
+            "p99": 665434800,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "initialized_baseline",
+          "count": 1
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 38,
+            "max": 8087700,
+            "min": 5003700,
+            "p50": 6726800,
+            "p95": 7262400,
+            "p99": 8087700,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "moving_gameplay",
+          "count": 38
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 366,
+            "max": 53460900,
+            "min": 4877400,
+            "p50": 6822900,
+            "p95": 7387800,
+            "p99": 52120700,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "scene_transition",
+          "count": 366
+        },
+        {
+          "app_to_post_host_wall_distribution_ns": {
+            "count": 96,
+            "max": 13924900,
+            "min": 4891600,
+            "p50": 6544600,
+            "p95": 7352800,
+            "p99": 13924900,
+            "percentile_method": "nearest-rank"
+          },
+          "classification": "stable_gameplay",
+          "count": 96
+        }
+      ],
+      "cleanup": {
+        "native_destroyed": true,
+        "normal_exit": true,
+        "physical_event_loop_recovered": true,
+        "provider_released": true,
+        "surface_retired": true,
+        "telemetry_complete": true
+      },
+      "completion_scope": "original App frame start to original queue-completion callback observation, including CPU/queue/wait/poll delay; not GPU execution or scanout; original samples expose App/render/device identities, with Runtime/backend supplied by the original observer and window/surface only by a unique matching presentation",
+      "copied_source_preparation_wall_ns": 532127800,
+      "copied_source_removed": true,
+      "entry_scope": "from run_one entry before source root/recipe/collector construction to the original first post-Host observation; caller/native waits included; excludes process loading and later gameplay/cleanup",
+      "entry_to_first_presentation_observation_wall_ns": 1060202800,
+      "final_snapshot": {
+        "collected": 3,
+        "current_instance": 6,
+        "error": null,
+        "held": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "initialized": true,
+        "level": {
+          "instance": 0,
+          "level": "meadow"
+        },
+        "logical_elapsed_nanos": 1220000000,
+        "logical_tick": 61,
+        "markers": [
+          1
+        ],
+        "phase": "Running",
+        "player": [
+          -120.0,
+          0.0
+        ],
+        "restarts": 1,
+        "restores": 0,
+        "restoring": false,
+        "saves": 0,
+        "scene_members": 6,
+        "score": 30,
+        "tick": 188,
+        "travel_count": 4,
+        "verified": true,
+        "visible_pickups": 1
+      },
+      "first_initialized_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 665434800,
+        "backend_instance": 5,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 20000000,
+          "logical_tick": 1,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 1,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 3,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 656024800,
+          "namespace": {
+            "measured_phase_wall_ns": 628432600,
+            "other_namespace_wall_ns": 17100,
+            "phase_wall_ns": [
+              50989700,
+              17000,
+              514667000,
+              58437500,
+              4321400
+            ]
+          },
+          "other_app_frame_wall_ns": 9410000,
+          "phase_wall_ns": [
+            628449700,
+            16700,
+            245100,
+            26620800,
+            692500
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "first_presentation": {
+        "app_frame": 1,
+        "app_to_post_host_wall_ns": 665434800,
+        "backend_instance": 5,
+        "classification": "initialized_baseline",
+        "content_and_render": {
+          "active_scene_entities": 6,
+          "active_scene_instances": 1,
+          "authored_tile_cells": 16384,
+          "extraction": {
+            "batches": 4,
+            "invalid_texture_regions": 0,
+            "invalid_tile_regions": 0,
+            "missing_materials": 0,
+            "missing_tilesets": 0,
+            "queued_items": 16389,
+            "sprites": 5,
+            "tile_cells": 16384,
+            "unprepared_textures": 0
+          },
+          "image_assets": 1,
+          "material_assets": 0,
+          "prepared_images": 1,
+          "render_frame": 1,
+          "sound_banks": 1,
+          "successful_drawing": {
+            "draw_calls": 6,
+            "quads": 16389
+          },
+          "tilemaps": 2,
+          "tileset_assets": 1
+        },
+        "device_epoch": 1,
+        "gameplay": {
+          "collected": 0,
+          "current_instance": 1,
+          "error": null,
+          "held": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "initialized": true,
+          "level": {
+            "instance": 0,
+            "level": "meadow"
+          },
+          "logical_elapsed_nanos": 20000000,
+          "logical_tick": 1,
+          "markers": [],
+          "phase": "Running",
+          "player": [
+            -120.0,
+            0.0
+          ],
+          "restarts": 0,
+          "restores": 0,
+          "restoring": false,
+          "saves": 0,
+          "scene_members": 6,
+          "score": 0,
+          "tick": 1,
+          "travel_count": 0,
+          "verified": false,
+          "visible_pickups": 2
+        },
+        "gpu_resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311120,
+          "peak_texture_bytes": 2305028,
+          "peak_total_bytes": 3616148,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "initialized": true,
+        "issued_native_work": {
+          "encoded_buffer_copy_bytes": 0,
+          "encoded_buffer_copy_commands": 0,
+          "encoded_texture_copy_bytes": 0,
+          "encoded_texture_copy_commands": 0,
+          "initialized_buffer_calls": 4,
+          "initialized_buffer_payload_bytes": 1311120,
+          "initialized_buffer_storage_bytes": 1311120,
+          "issued_buffer_write_bytes": 0,
+          "issued_buffer_write_calls": 0,
+          "issued_texture_write_bytes": 1028,
+          "issued_texture_write_calls": 2
+        },
+        "post_host_since_first_observation_ns": 0,
+        "render_frame": 1,
+        "runtime_generation": 3,
+        "runtime_wall": {
+          "measured_phase_wall_ns": 656024800,
+          "namespace": {
+            "measured_phase_wall_ns": 628432600,
+            "other_namespace_wall_ns": 17100,
+            "phase_wall_ns": [
+              50989700,
+              17000,
+              514667000,
+              58437500,
+              4321400
+            ]
+          },
+          "other_app_frame_wall_ns": 9410000,
+          "phase_wall_ns": [
+            628449700,
+            16700,
+            245100,
+            26620800,
+            692500
+          ]
+        },
+        "surface_extent": [
+          960,
+          540
+        ],
+        "surface_generation": 1,
+        "window": 1
+      },
+      "frame_start_to_completion_observation_distribution_ns": {
+        "count": 501,
+        "max": 665326000,
+        "min": 5029200,
+        "p50": 11261100,
+        "p95": 12416800,
+        "p99": 57808800,
+        "percentile_method": "nearest-rank"
+      },
+      "gameplay_verified": true,
+      "initialized_presentations": 501,
+      "matched_initialized_completion_samples": 501,
+      "measured_wall_ns": 4308126000,
+      "namespace_phase_order": [
+        "instance_preparation",
+        "surface_creation",
+        "adapter_request",
+        "device_request",
+        "surface_configuration"
+      ],
+      "namespace_phase_scope": "disjoint returned native calls inside the matching namespace preparation span; Adapter/Device request spans are absent on reuse, not measured zero; contains native/driver waits; sum and other_namespace_wall_ns equal only that parent phase and must not be added to it",
+      "observed_level_instances": [
+        {
+          "instance": 0,
+          "level": "meadow"
+        },
+        {
+          "instance": 0,
+          "level": "cavern"
+        },
+        {
+          "instance": 1,
+          "level": "cavern"
+        }
+      ],
+      "observed_scene_instance_changes": 5,
+      "observed_source_views_retired": 6,
+      "observer_callbacks": 502,
+      "old_scene_receipts_checked": 5,
+      "process_cost": {
+        "counter_read_scope": "CPU and memory are read by separate native calls, not an atomic process snapshot; boundary read costs and post-Host lags are reported separately",
+        "final_private_bytes": 665100288,
+        "final_working_set_bytes": 381841408,
+        "first_boundary": {
+          "counter_read_wall_ns": 12200,
+          "post_host_to_counter_read_start_ns": 26300
+        },
+        "initial_private_bytes": 799125504,
+        "initial_working_set_bytes": 505606144,
+        "kernel_ns": 937500000,
+        "last_boundary": {
+          "counter_read_wall_ns": 12900,
+          "post_host_to_counter_read_start_ns": 22600
+        },
+        "memory_scope": "whole-process point samples only; no peak, retained-UI allocation, per-frame allocation, GPU residency, or leak claim; sequential runs share loaded code and driver caches",
+        "observed_frame_intervals": 500,
+        "post_host_interval_wall_ns": 3642691200,
+        "scope": "whole-process CPU between counter reads at the first and last unique initialized post-Host presentations; includes observer, native polling, driver, and background threads; excludes earlier startup and later seal/native cleanup; not per-frame CPU or GPU execution",
+        "total_cpu_ns": 5171875000,
+        "user_ns": 4234375000,
+        "wall_ns": 3642687500
+      },
+      "quantile_scope": "nearest-rank empirical quantiles of correlated observations from this single run; no production P99, independent-sample, or performance improvement claim",
+      "resource_scope": "per-presentation current CPU asset counts and original backend logical GPU payloads; pending/cache grace are retained; no total content budget, full VRAM, memory plateau or leak claim",
+      "run_index": 3,
+      "runtime_phase_order": [
+        "namespace_preparation",
+        "surface_acquisition",
+        "candidate_preparation",
+        "program_execution",
+        "surface_presentation"
+      ],
+      "runtime_phase_scope": "disjoint original Runtime namespace preparation, Surface acquisition, candidate preparation, program execution and Surface presentation operations within the matching App frame; includes native/driver/error-scope waits; residual is other App work and unmeasured gaps, not CPU time or inferred wait time; observations never grant presentation authority",
+      "scenario": "travel",
+      "scene_work": {
+        "enabled": true,
+        "nested_span_wall_sum_ns": 6225463600,
+        "phases": {
+          "prefab_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 706609400,
+            "worker_thread_calls": 8
+          },
+          "project_content_read": {
+            "calls": 135,
+            "owner_thread_calls": 15,
+            "wall_ns": 89506200,
+            "worker_thread_calls": 120
+          },
+          "scene_authoring_finish": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 481500,
+            "worker_thread_calls": 0
+          },
+          "scene_bind_revalidate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 186500,
+            "worker_thread_calls": 0
+          },
+          "scene_compile_output": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 120400,
+            "worker_thread_calls": 8
+          },
+          "scene_component_materialization": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 292915100,
+            "worker_thread_calls": 8
+          },
+          "scene_decode": {
+            "calls": 15,
+            "owner_thread_calls": 7,
+            "wall_ns": 587009500,
+            "worker_thread_calls": 8
+          },
+          "scene_epoch_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 993900,
+            "worker_thread_calls": 0
+          },
+          "scene_expand": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 1047274400,
+            "worker_thread_calls": 8
+          },
+          "scene_final_validate": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 132900,
+            "worker_thread_calls": 0
+          },
+          "scene_flat_admission": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 330755700,
+            "worker_thread_calls": 8
+          },
+          "scene_header_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 38050400,
+            "worker_thread_calls": 16
+          },
+          "scene_hierarchy_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 76300,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_adopt": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 38700,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_bind": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 33300,
+            "worker_thread_calls": 0
+          },
+          "scene_identity_prepare": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 25500,
+            "worker_thread_calls": 0
+          },
+          "scene_native_preview": {
+            "calls": 0,
+            "owner_thread_calls": 0,
+            "wall_ns": 0,
+            "worker_thread_calls": 0
+          },
+          "scene_payload_decode": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 709804200,
+            "worker_thread_calls": 16
+          },
+          "scene_predecessor": {
+            "calls": 12,
+            "owner_thread_calls": 12,
+            "wall_ns": 197800,
+            "worker_thread_calls": 0
+          },
+          "scene_prepare_unbound": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 229379000,
+            "worker_thread_calls": 0
+          },
+          "scene_program_composition": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 59900,
+            "worker_thread_calls": 8
+          },
+          "scene_publish": {
+            "calls": 6,
+            "owner_thread_calls": 6,
+            "wall_ns": 1459900,
+            "worker_thread_calls": 0
+          },
+          "scene_reference_closure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 15100,
+            "worker_thread_calls": 8
+          },
+          "scene_retirement_hierarchy": {
+            "calls": 20,
+            "owner_thread_calls": 20,
+            "wall_ns": 115600,
+            "worker_thread_calls": 0
+          },
+          "scene_source_decode": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 593046800,
+            "worker_thread_calls": 8
+          },
+          "scene_source_finish": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 49614700,
+            "worker_thread_calls": 16
+          },
+          "scene_structure": {
+            "calls": 9,
+            "owner_thread_calls": 1,
+            "wall_ns": 753879800,
+            "worker_thread_calls": 8
+          },
+          "scene_value_admission": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 75502400,
+            "worker_thread_calls": 160
+          },
+          "scene_value_clone": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 28400,
+            "worker_thread_calls": 160
+          },
+          "scene_value_defaults": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 98357100,
+            "worker_thread_calls": 160
+          },
+          "scene_value_migration": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 38300,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_plan": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 117037900,
+            "worker_thread_calls": 160
+          },
+          "scene_value_reference_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 14700,
+            "worker_thread_calls": 160
+          },
+          "scene_value_validation": {
+            "calls": 180,
+            "owner_thread_calls": 20,
+            "wall_ns": 869700,
+            "worker_thread_calls": 160
+          },
+          "scene_wire_preflight": {
+            "calls": 18,
+            "owner_thread_calls": 2,
+            "wall_ns": 501832600,
+            "worker_thread_calls": 16
+          }
+        },
+        "retained_spans": 0,
+        "scope": "one original Runtime from construction through physical retirement, across owner and worker threads; excludes source-copy generation and independent GPU replay; nested wall spans overlap and are not additive CPU time",
+        "status": "complete",
+        "target": "nara::scene::work",
+        "total_calls": 1661,
+        "unfinished_entries": 0
+      },
+      "source_workload": {
+        "authored_scene_members": 6,
+        "bounds": {
+          "copy_bytes": 67108864,
+          "copy_depth": 16,
+          "copy_entries": 256,
+          "scene_file_bytes": 16777216,
+          "shape_container_items": 100000,
+          "shape_depth": 64,
+          "shape_nodes": 1000000,
+          "shape_string_bytes": 1048576,
+          "shape_total_string_bytes": 8388608
+        },
+        "cells_per_active_scene": 16384,
+        "copied_bytes": 154877,
+        "copied_entries": 22,
+        "copied_source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 106ef8bc87dd2e08c688d958c47e0576a945c061b830eb625739a6f011a16cd8)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 19279,
+            "content_digest": "ContentDigest(len=19279, 8f7ed50ec0eb73540332a1128d45974253bdcaeac97837a01d69712cfb1b2e74)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "document_preflight": "written Scene/Prefab decoded with default SceneFileLimits",
+        "format": "two-level-workload-source/v1",
+        "host_root_ids": [
+          "checkpoint",
+          "portal"
+        ],
+        "population": 16384,
+        "prefab_role": "root binding adds Tilemap to portal; no additional member or child",
+        "prefabs": [
+          "prefabs/workload/meadow-half.prefab.json",
+          "prefabs/workload/cavern-half.prefab.json"
+        ],
+        "source_files": [
+          {
+            "bytes": 252,
+            "content_digest": "ContentDigest(len=252, 4096ec35ba42b80c0897bf3b9647ecadb79ad908ead765626fedc30d1cfc9e51)",
+            "path": "assets/README.md"
+          },
+          {
+            "bytes": 3451,
+            "content_digest": "ContentDigest(len=3451, 2fab9e313ab2ab53b89545241f4ccf8f411f0c59b2c969766b38071340d0f13f)",
+            "path": "assets/audio/README.md"
+          },
+          {
+            "bytes": 58,
+            "content_digest": "ContentDigest(len=58, 2b0261d7f46ff089c85d784b7d412db32a5298c5977e41352e3ed54144a32e6b)",
+            "path": "assets/audio/game.soundbank.json"
+          },
+          {
+            "bytes": 370,
+            "content_digest": "ContentDigest(len=370, a150e4c39effbf83f93bb88f4909e397bf656d48a87d57d3deda151feab35752)",
+            "path": "assets/audio/game.soundbank.json.meta"
+          },
+          {
+            "bytes": 11564,
+            "content_digest": "ContentDigest(len=11564, cb57252965376116ed53cf2316c61cbf9b091c3abcdadcc3b8b272f0af9c34fa)",
+            "path": "assets/audio/pickup.wav"
+          },
+          {
+            "bytes": 23084,
+            "content_digest": "ContentDigest(len=23084, 1b41f7686fe4048ef9eae9e9ba2233ad1a55bcb9d904f9c2250a11975805a4ac)",
+            "path": "assets/audio/travel.wav"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/cavern.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 3225c412bf51fc0eb2a689c3528d0e1d7198ed1441d7f9e760ed171cd59c09de)",
+            "path": "assets/textures/cavern.png.meta"
+          },
+          {
+            "bytes": 154,
+            "content_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+            "path": "assets/textures/meadow.png"
+          },
+          {
+            "bytes": 367,
+            "content_digest": "ContentDigest(len=367, 843df9ba5201be7f7b133e3640d174e9ed9cd49a75f60557e3b8123a4b10ae56)",
+            "path": "assets/textures/meadow.png.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, d19e2cf47c0f208b6a34e558a2d414ca3f19f3315ed1786132dadf0967561fea)",
+            "path": "assets/tilesets/cavern.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, fac8b6f3a8118901c2fafaad2fae3d1b95352de0fb706da0bc15ee47c93d9e28)",
+            "path": "assets/tilesets/cavern.tileset.ron.meta"
+          },
+          {
+            "bytes": 832,
+            "content_digest": "ContentDigest(len=832, 8b470fcb681d5b738dca7ea0d5cf847085b53231c1d9e9cd39f86642fc62ec51)",
+            "path": "assets/tilesets/meadow.tileset.ron"
+          },
+          {
+            "bytes": 372,
+            "content_digest": "ContentDigest(len=372, 2481b0ee28f0668135ca2bf3e7c49c0727c140e2e2ef7902b89d58c684cc79e0)",
+            "path": "assets/tilesets/meadow.tileset.ron.meta"
+          },
+          {
+            "bytes": 1074,
+            "content_digest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+            "path": "nara.toml"
+          },
+          {
+            "bytes": 172,
+            "content_digest": "ContentDigest(len=172, bf25c19d5878fd454430b07eef9b0d2da274a18fb3b6e958d58974dcbc03f377)",
+            "path": "prefabs/README.md"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, ec23a5a90d75caa9e99a2a84000184d8f3327fde6e03821d17906386cecabd43)",
+            "path": "prefabs/workload/cavern-half.prefab.json"
+          },
+          {
+            "bytes": 2788871,
+            "content_digest": "ContentDigest(len=2788871, f9bac077e658d1087f003e6616cc9664f6e290633b7d58172d173694820db4ed)",
+            "path": "prefabs/workload/meadow-half.prefab.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, a19c7454cb58ae524c7734dc4d676b423c50fae004f610f6e9df92306093a85d)",
+            "path": "scenes/cavern.scene.json"
+          },
+          {
+            "bytes": 2785476,
+            "content_digest": "ContentDigest(len=2785476, 430883b6db948cc912d8851a60f96600ef804086d41741076a2a6a9cd4d3adce)",
+            "path": "scenes/meadow.scene.json"
+          },
+          {
+            "bytes": 232,
+            "content_digest": "ContentDigest(len=232, f11a50f69e2fa142f107fc1f7ed428c57105da6db2815de41580959e499fa39a)",
+            "path": "schema/README.md"
+          },
+          {
+            "bytes": 75020,
+            "content_digest": "ContentDigest(len=75020, 258981d30f1d0c42e956ab34f4db5ea2c10716fbcd3aec72cfcec65d7089fdbd)",
+            "path": "schema/authoring.bundle.json"
+          }
+        ],
+        "source_scope": "source copy; no Runtime admission or startup-input permission",
+        "tile_size": [
+          2.0,
+          2.0
+        ],
+        "tileset_products": [
+          {
+            "level": "meadow",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "f516527c-4e94-45b3-9941-13e659ccfb07"
+            },
+            "source": "tilesets/meadow.tileset.ron"
+          },
+          {
+            "level": "cavern",
+            "product": {
+              "product": {
+                "kind": "primary"
+              },
+              "source": "a64c4823-8686-41a7-ae87-9a483931d91b"
+            },
+            "source": "tilesets/cavern.tileset.ron"
+          }
+        ],
+        "world_bounds": {
+          "max": [
+            136,
+            128
+          ],
+          "min": [
+            -120,
+            -128
+          ]
+        }
+      },
+      "startup": {
+        "operation_wall_ns": {
+          "content_preparation": 322952600,
+          "first_native_poll": 32000,
+          "native_polling_to_first_presentation": 699673700,
+          "native_session_construction": 3400,
+          "runtime_startup": 45483800
+        },
+        "scope": "original DesktopRun content/startup/session and native-poll operations; first_native_poll is included in native_polling_to_first_presentation; caller gaps excluded; spans are not additive and do not establish CPU/GPU execution or scanout"
+      },
+      "startup_frozen_after_first_presentation": true,
+      "startup_presentations": 0,
+      "startup_scope": "uninitialized original successful presentations remain in the trace and are excluded from initialized distributions and process measurement boundaries; a missing matching App start is null",
+      "telemetry_seal": {
+        "backend_instance": 5,
+        "completion": {
+          "buffered_samples": 0,
+          "completed_samples": 501,
+          "device_epoch": 1,
+          "enabled": true,
+          "lost_samples": 0,
+          "pending_samples": 0
+        },
+        "device_epoch": 1,
+        "outcome": "Complete",
+        "resources": {
+          "current_instance_buffer_bytes": 0,
+          "current_texture_bytes": 2305028,
+          "current_total_bytes": 2305028,
+          "device_epoch": 1,
+          "lost_retirements": 0,
+          "peak_instance_buffer_bytes": 1311200,
+          "peak_texture_bytes": 2306052,
+          "peak_total_bytes": 3617252,
+          "pending_retirements": 0,
+          "scope": "original backend logical tracked payloads in this device epoch; not complete GPU residency, driver allocation size, or leak evidence",
+          "tracking_enabled": true
+        },
+        "runtime_generation": 3,
+        "scope": "original explicit pre-retirement seal; audit samples overlap incremental batches and are not counted twice",
+        "seal_audit_samples": 1
+      },
+      "tile_replay": {
+        "accepted": true,
+        "adapter": {
+          "backend": "dx12",
+          "device": 9860,
+          "device_type": "discrete-gpu",
+          "name": "NVIDIA GeForce RTX 4090",
+          "vendor": 4318
+        },
+        "canvas_extent": [
+          320,
+          180
+        ],
+        "cleanup": {
+          "callback_abandoned": false,
+          "cleanup_fault_count": 0,
+          "observed_prefix_tokens": 12,
+          "original_host_retired": true,
+          "original_producers_retired": true,
+          "original_submission_prefixes_complete": true,
+          "retained_candidate_metadata_bytes": 0,
+          "retained_resource_bytes": 0
+        },
+        "fixed_original_png_digest": "ContentDigest(len=154, 3cf5c7d4e9b2a25324dd86203b3cfbea9fd87e6be241ece5f7a584018c0c202a)",
+        "format": "two-level-tile-original-input-replay/v1",
+        "format_and_interpretation": "Rgba8Unorm / linear / premultiplied",
+        "frames": [
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 1,
+            "original_backend_instance": 5,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 1,
+            "original_runtime_generation": 3,
+            "original_scene_instance": "SceneInstanceId(1)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 6,
+            "replay_device_epoch": 1,
+            "replay_output_version": 7,
+            "replay_producer": 10,
+            "replay_render_frame": 1,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 453bbe2d1dd685dd20364991f0a97a5ff9772914a0d0f321fc324417c074cac0)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "cavern",
+            "original_app_frame": 128,
+            "original_backend_instance": 5,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 128,
+            "original_runtime_generation": 3,
+            "original_scene_instance": "SceneInstanceId(2)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/cavern.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, e8d5569e5d671f10f55ceef2fc7f5c9e63264ce6c4475d4c4c5824f194909db4)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 6,
+            "replay_device_epoch": 1,
+            "replay_output_version": 8,
+            "replay_producer": 11,
+            "replay_render_frame": 128,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 77e3a55c13b9aa46faf71ecf5913ca9af982f3f1cff8a8ea3bc6a6bdba9c12a1)",
+            "submitted_prefix_complete": true
+          },
+          {
+            "image_target_only_adaptation": true,
+            "level": "meadow",
+            "original_app_frame": 500,
+            "original_backend_instance": 5,
+            "original_capture_retained_by_arc": true,
+            "original_device_epoch": 1,
+            "original_render_frame": 500,
+            "original_runtime_generation": 3,
+            "original_scene_instance": "SceneInstanceId(6)",
+            "original_source": "SourceDocumentKey { origin: ProjectLocation { universe: SourceUniverseId(be3dea0c-93ef-5607-ab84-af715a1f98b3), path: AssetSourcePath(\"scenes/meadow.scene.json\") }, kind: Scene }",
+            "original_source_and_world_retired": true,
+            "original_source_runtime_matched": true,
+            "original_source_stamp": {
+              "content": "ContentDigest(len=5611148, 5faf8303232d3256fdb1e71a1c5dfaa191e9ba4d77ac7eecbb47de1b3994e7cc)",
+              "manifest": "ContentDigest(len=1074, 0129485fe9dfda73dd838e7bc5f35aeab16ec28980e66615d627170ce63cc3b5)",
+              "schema": "SchemaCompositionFingerprint([246, 115, 48, 104, 195, 141, 208, 239, 38, 116, 66, 158, 201, 87, 64, 211, 199, 89, 95, 145, 28, 91, 212, 195, 66, 236, 148, 146, 242, 210, 221, 47])"
+            },
+            "original_surface_generation": 1,
+            "original_window": 1,
+            "pixels": {
+              "background_pixels": 36,
+              "center_texel_pixels": 72,
+              "grey_patch_pixels": 0,
+              "ground_tile_witness_count": 8,
+              "physical_ground_pixels": 72,
+              "white_patch_pixels": 0
+            },
+            "replay_backend_instance": 6,
+            "replay_device_epoch": 1,
+            "replay_output_version": 9,
+            "replay_producer": 12,
+            "replay_render_frame": 500,
+            "replay_source_matches_original": true,
+            "replay_target_generation": 1,
+            "reread_exact_bytes_equal": true,
+            "reread_prefix_complete": true,
+            "retained_after_later_publications_and_all_producer_retirements": true,
+            "rgba8_digest": "ContentDigest(len=2073600, 767395823d7f38d851f5522e20dd912802a393b82ef9bb6328d417bda735f9da)",
+            "submitted_prefix_complete": true
+          }
+        ],
+        "gpu_poll_deadline_ms": 10000,
+        "input_order_may_be_nonmonotonic": true,
+        "memory": {
+          "candidate_metadata_byte_limit": 134217728,
+          "host_logical_resource_byte_limit": 67108864,
+          "maximum_capture_ledger_frames": 4,
+          "maximum_selected_frames": 3,
+          "maximum_single_external_readback_buffer_bytes": 2073600,
+          "observed_host_bytes_with_retained_outputs": 6223876,
+          "peak_observed_host_bytes_between_operations": 6223876,
+          "retained_baseline_rgba8_bytes": 6220800,
+          "retained_selected_frames": 3,
+          "scope": "Host-accounted logical native payload plus separately stated CPU/readback buffers; excludes driver/pipeline overhead, physical residency and process RSS; point observations are not an allocation peak or leak bound"
+        },
+        "offscreen_host_count": 1,
+        "original_world_and_sources_retired_before_replay": true,
+        "physical_extent": [
+          960,
+          540
+        ],
+        "population": 16384,
+        "producer_per_original_frame": true,
+        "retained_outputs_exact_after_later_publication_and_producer_retirement": true,
+        "same_encoder_image_copy_and_original_prefix_wait": true,
+        "scope": "independent replay of original native-presented inputs; finite selected ground pixel centers and level clears; not full rasterization, swapchain/display capture, GPU busy time or a production performance claim"
+      },
+      "unique_presentations": 501,
+      "unmatched_completion_samples": 0
+    }
+  ],
+  "original_format": "two-level-active-runtime-workload/v1",
+  "raw_report_sha256": "2f3ba9ee63939dc0325ad1a10dbbb47aa008d8f86b7968496e7d27d34a5ea765",
+  "omitted_per_run_fields": [
+    "observed_trace",
+    "original_completion_samples",
+    "app_to_post_host_wall_ns",
+    "frame_start_to_completion_observation_ns"
+  ]
+}

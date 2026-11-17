@@ -3447,6 +3447,15 @@ Check the same operation after edits or different receiving constraints rather t
 an unrelated earlier input. This rule addresses overvalidation during design, not only a later
 optimization pass over accumulated validators.
 
+Keep normal typed gameplay separate from persistent dynamic input admission. Do not route an
+ordinary native component read through a generic value tree or make each frame re-establish
+unchanged loading facts. Prefer validation in constructors, loaders, setters or changed-data
+systems, following the corresponding reference path. Keep publication-time checks specific to
+the mutable state that can actually become stale. A constant-time identity/version/bounds check
+and a complete payload traversal have different costs and purposes; name that distinction before
+adding either. Use debug assertions for internal developer invariants only when release behavior
+does not rely on accepting external malformed input.
+
 Qualify the affected Reflect/Scene and public receiving paths, then the unchanged authored game
 and original-input GPU replay/retirement trajectory. Compare balanced frozen programs against the
 qualified frozen-read executable; avoid simultaneous representation/encoding changes that obscure
@@ -3682,6 +3691,96 @@ admission before using retained facts; a bare input reference or trusted flag is
 Keep current World, namespace, product and publication checks separate from those immutable
 facts. Source decoding, remaining traversal costs and full Foundation/R9/R10/R12 remain open;
 no physical-memory or numerical runtime-tail qualification follows from these wall envelopes.
+
+#### Immutable Compiled Value Measurements
+
+Status: implemented at `9583ad7` and qualified on Windows/Rust1.95 below. Retain exact
+logical cost and maximum root-at-one depth in the existing immutable `CompiledSceneComponent`.
+The original Native walker measures both while establishing its Native reference requirement;
+these plain value facts establish neither receiving schema semantics nor resource/World authority.
+There is no separately owning validation receipt, generic cache, serialized certificate or public
+unchecked constructor. Extend the original checked result, not a second traversal mechanism.
+
+The concrete sealer collects measurements during its complete flat validation in the same sorted
+entity/component order used to construct records. Admit the finite temporary measurement storage
+before allocation and require complete correspondence before publishing. Direct data publication
+uses measurements from its own Native check. Native preparation preserves the facts with the
+unchanged private payload. Independent cooked claims establish their own measurements after their
+actual decoding/admission; source copies cannot attach stale facts to changed values.
+
+The shared receiving kernel may consume the stored complete cost and Native/depth fact only when
+that exact immutable record fits the remaining receiving node/byte and depth limits. A stricter
+or exhausted limit uses the original walker and failure classification, preserving observed
+diagnostics and whole-record charging. Required fields, numeric domains, explicit defaults,
+undeclared references, actual resources, local namespace and receiving World/publication checks
+remain. This does not implement schema/witness-wide pure validation skipping.
+
+Use `value_cost` for the original root retained-fee model and immutable data-group size checks
+instead of rescanning the value. Each independent owner still pays the complete logical fee plus
+actual record/measurement metadata. Do not deduplicate by storage identity. Validate every actual
+constructor, direct data replacement/removal, native-preparation copy, raw/frozen nested values,
+different record orders, stricter receiving policy and independently cooked input. Retain original
+public/independent workflows, release game/native trajectory and balanced frozen-program cost
+comparison. Full Foundation/R9/R10/R12 and broader definition reuse remain active.
+
+##### Implementation And Qualification
+
+Reflect's existing Native depth/reference walker now returns complete cost and observed maximum
+depth together. The concrete Scene sealer retains those facts with each immutable component in
+its existing sorted record order; its finite temporary measurement storage is admitted before
+allocation. Preparation copies the unchanged facts. Direct data mutation establishes new facts
+through the original Native check. Stored data groups and the root retained-fee model reuse them
+without another payload walk, retaining complete logical fees and actual record metadata.
+Independent cooked decoding/readmission measures its own values. No definition witness, public
+unchecked constructor, generic cache or separate lifecycle owner is introduced.
+
+All-feature Reflect/Scene production libraries compile. Complete Reflect/Scene/Tooling owner
+libraries pass 1,246/1,246 without skips at `f4ff32e9-b864-4398-8315-5fa44548a31f`, 69.385
+seconds. Public native-cost, explicit/frozen and Scene binding/export/reference/locality workflows
+pass 87/87 without skips at `4be37942-0a3b-4acf-949b-f428a8c95aa9`, 3.940 seconds, including
+all four new compiled-measurement cases. They preserve raw/frozen values through sorting,
+preparation and final-source release, exact/stricter aggregate diagnostics before codecs, changed
+schema/default refusal, direct replacement, cook reference rewriting and independently modified
+cooked input. Root project/runtime content, retained fees and startup/replacement tests pass
+162/162 at `a8dd6186-9f02-4c54-b2eb-9e957b18faa9` with 1,383 outside the filter, 13.356
+seconds. This checks complete fees and last-owner
+release after replacing recursive fee calculation with stored cost.
+
+The first public command repeats `--all-features` and is rejected before compilation; the
+corrected invocation produces the passing public result above. No production or test assertion
+failure occurs in these runs. Independent production and bounded final test review find no P1/P2;
+all three scoped agents are closed. Complete release game/library/metrics/span/probe/native
+qualification passes 148/148 without skips at `17831171-2490-434c-aa49-e6871884fc38`, 68.194
+seconds after a 10m07s serial build. It retains original baseline and authored 64/4K/16K travel,
+27 original-input GPU replays, both observer-panic cleanup controls and the complete 16K CPU
+record probe. Four further serial balanced before/after/after/before 16K processes complete twelve
+lifetimes and 36 GPU replays, with original source, compiler, phase-call and cleanup controls.
+The [paired report](../benchmarks/2026-11-14-development-runtime-costs.md#immutable-compiled-value-measurements)
+records cumulative Native decoding/preflight wall medians 746.259/590.254 ms and unbound
+preparation 295.399/230.450 ms before/after. The envelopes overlap and savings are not additive.
+Original flat admission still walks the value while measuring depth; source decode, defaults,
+compiler semantics and expansion are not optimized or credited for observed variation. Before
+process drift and correlated lifetimes prevent a statistical/general process claim. These are
+neither exclusive CPU/GPU nor physical-memory, scanout, frame-P99 or numerical tail-budget results.
+
+The independently locked Scene consumer passes 157/157 with one existing manual timing case
+skipped at `12c34905-e116-4ae4-bdc1-711eca70c97d`, 18.979 seconds after a 6m54s debug build.
+Owning all-target/all-feature and affected root-library correctness Clippy pass; existing warnings
+remain. Feature-free Reflect/Scene libraries compile. Root and sample formatting pass. The frozen
+program receipt's 147 source/control hashes still match the qualified tree, and all 15 paused
+UI/Dialogue paths retain their original bytes. Finite summary exports omit only the four prior
+raw per-frame arrays and preserve complete phase/source/acceptance/cleanup/replay facts,
+distributions and original complete-report hashes. Added document paths/fragments, summary
+digests, complete acceptance facts and Git whitespace checks pass. No dependency/lock, source-format, numerical
+capacity, UI/Dialogue or remote-publication changes belong to this unit.
+
+This closes immutable compiled-value measurement and its selected complete Windows consumer
+scope. The corresponding pinned Godot/Bevy paths motivate construction/change-boundary checks,
+not repeated generic scans of unchanged internal data. Future work must identify the specific
+invariant and mutation before adding validation. Remaining reference traversal, source decoding,
+broader receiving-definition reuse, larger named workloads and numerical runtime-tail/resource
+budgets require their own attribution. Full Foundation/R9/R10/R12 and foreign execution remain
+open; the finite wall comparison is not their completion.
 
 ### Preserve Isolated Migration Storage During Defaults
 

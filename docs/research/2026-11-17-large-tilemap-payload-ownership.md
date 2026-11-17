@@ -461,6 +461,27 @@ receiving limits and failure behavior, without making an incidental traversal co
 product requirement. Detailed accounting machinery itself needs a concrete bounded-operation
 consumer; neither reference engine makes it a prerequisite for normal game execution.
 
+The [immutable-measurement successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#immutable-compiled-value-measurements)
+at `9583ad7` keeps complete cost and maximum root-at-one depth in the original immutable component record.
+The existing Native traversal obtains both without another walk. Preparation may consume those
+facts when the record fits its actual remaining allowance; a stricter or exhausted allowance uses
+the original failure path. Root retained fees also consume the stored cost. Schema/default,
+numeric, undeclared-reference, resource, namespace and mutable World checks have separate
+responsibilities and remain. Direct data replacement and independently decoded cooked claims
+establish their own measurements. Qualification and measured results belong to that owning unit;
+this is not a new general certificate or exact-definition reuse mechanism.
+
+Apply the same source comparison before introducing future checks. Ordinary typed gameplay must
+not become a generic serialization/validation round trip. Validate external dynamic input at its
+loader and a changed domain value at its constructor, setter or changed-data system. Reuse an
+unchanged immutable value's applicable facts. Recheck the mutable identity, generation or resource
+that can change before use, rather than rescan its complete payload as a proxy. Internal debug
+assertions are suitable only for programmer invariants; public malformed input needs normal error
+handling. A proposed traversal must identify its concrete failure and changed input. Historical
+counters or hypothetical extension requirements do not establish that need. This design rule
+follows the corresponding source operations above; it does not attribute Nara's current budget
+contract to Godot or Bevy.
+
 ### Current Ownership And Escape Contracts
 
 These are the existing Nara contracts to reconcile during implementation, rather than a reason

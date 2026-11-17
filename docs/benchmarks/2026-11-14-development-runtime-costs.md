@@ -2651,6 +2651,76 @@ performance workload. Further immutable cost/depth/reference reuse and source de
 separate operations; no broader exact-definition reuse, source-format change or full
 Foundation/R9/R10/R12 completion is claimed.
 
+### Immutable Compiled Value Measurements
+
+Date: 2026-11-17. Before is the qualified single-Native-admission program with SHA256
+`0f0ff0b3ee057c6ca1c13ac2953e3e2abd2f531909ef62fcc8746f0f014fdd1b`. Both programs already
+retain frozen effective reads, separate compiler/receiving field semantics from cost/default
+admission, and obtain complete cost from the original Native walker. This successor at `9583ad7` retains
+that cost and measured maximum root-at-one depth in the existing immutable compiled component.
+Receiving aggregate admission reuses those facts when they fit its actual remaining allowance;
+stricter or exhausted policies retain the original failure path. Stored data groups and root
+retained fees consume the same measurements. Changed data and independent cooked claims obtain
+new measurements through their original owners. Schema/default, numeric, undeclared-reference,
+resource, namespace and mutable World/publication checks remain. The
+[owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#immutable-compiled-value-measurements)
+records the implementation and acceptance evidence.
+
+Four serial before/after/after/before processes pass the original 16K travel, copied-source
+removal, original-input GPU replay and physical cleanup: twelve complete lifetimes and 36 replays,
+six lifetimes per program. Rust1.95 release, manifests/locks, source generator, observation hooks,
+value-phase call counts and hardware DX12 RTX4090 adapter match. Finite summary exports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-compiled-metrics-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-compiled-metrics-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-compiled-metrics-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-compiled-metrics-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-compiled-metrics-paired-metadata.json).
+They preserve complete phase/source/acceptance/cleanup/replay facts and runtime/frame
+distributions, omitting only the same four raw per-frame arrays as the preceding comparisons.
+Complete raw reports and frozen programs remain outside target; summaries retain original
+complete-report SHA256 digests.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 79.938 ms | 76.021 ms |
+| Shared record capture | 0.032 ms | 0.030 ms |
+| Migration, including post-migration admission | 0.040 ms | 0.039 ms |
+| Default materialization | 95.205 ms | 101.509 ms |
+| Compiler semantic validation | 0.826 ms | 0.836 ms |
+| Reference planning | 116.410 ms | 118.249 ms |
+| Reference-program validation | 0.017 ms | 0.016 ms |
+| Complete component materialization | 293.752 ms | 296.975 ms |
+| Flat claim admission | 344.346 ms | 331.005 ms |
+| Native decoding and preflight | 746.259 ms | 590.254 ms |
+| Unbound preparation | 295.399 ms | 230.450 ms |
+| Expansion, including nested Prefab acquisition | 913.579 ms | 931.081 ms |
+| Source payload decode | 709.722 ms | 707.587 ms |
+
+Observed Native decoding/preflight is 20.90% lower and unbound preparation is 21.99% lower.
+Their cumulative envelopes overlap and savings are not additive exclusive CPU costs. First flat
+admission still performs its original Native traversal while also measuring depth and retaining
+the facts; its observed variation is not credited as removed work. Source decode, defaults,
+compiler semantics and expansion are not optimized by this unit. The comparison does not isolate
+the separate cost of receiving reuse from retained-fee reuse. It establishes the complete selected
+workflow rather than an independent microbenchmark of either operation.
+
+Process walls in order are 18.472, 17.849, 17.970 and 20.470 seconds. Per-process median Native
+decode/preflight is 704.006, 586.392, 593.499 and 752.628 ms; corresponding preparation medians
+are 275.907, 230.297, 232.334 and 295.791 ms. Each after observation is below both before
+observations in this sample, but the before drift, correlated lifetimes and uncontrolled
+host/driver/cache/clock state do not establish statistical confidence or a general process gain.
+Wall instrumentation and existing pacing measure neither exclusive CPU/GPU duration nor physical
+memory, scanout, frame P99 or a numerical production budget. After-program SHA256 is
+`65f1fabdd8729ee220a48fb6ae4d94a5622ec4e175b11706980c13bf99845cd4`.
+
+The identical after executable separately passes the complete release game/library/metric/span/
+probe/native selection, 148/148 without skips at `17831171-2490-434c-aa49-e6871884fc38`, 68.194
+seconds after a 10m07s serial build. It retains baseline and authored 64/4K/16K travel, 27 GPU
+replays and both observer-panic cleanup controls. Strict receiving/schema/default and independent
+cook/replacement behavior have separate public CPU controls. Stored facts do not admit a changed
+value or a different receiving definition. Broader definition-wide reuse, source decoding, larger
+named workloads and full Foundation/R9/R10/R12 remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

@@ -5669,6 +5669,33 @@ observes cumulative flat-admission wall medians 384.536/334.978 ms, Native decod
 phases remain unchanged and no general process, CPU/GPU, physical-memory or frame-tail guarantee
 follows. Broader immutable fact reuse and full Foundation/R9/R10/R12 remain open.
 
+The [immutable compiled-value measurement successor](2026-11-13-rust-state-reconstruction-plan.md#immutable-compiled-value-measurements)
+at `9583ad7` retains complete logical cost and maximum depth in the original immutable component record,
+measured by its existing Native traversal. Receiving aggregate checks, immutable data-group size
+checks and root retained fees reuse those facts without rescanning the payload. Stricter or
+exhausted receiving limits retain their original diagnostic path. Schema/default/numeric,
+undeclared-reference, resource, namespace and mutable World/publication checks remain separate.
+Direct replacement and independently decoded cooked claims establish fresh measurements; there
+is no generic certificate/cache or second lifecycle owner. Complete Reflect/Scene/Tooling
+libraries pass 1,246/1,246, public Reflect/Scene controls 87/87, Root content/retention/startup
+162/162 and the original release game/native selection 148/148. Independent Scene consumers
+pass 157/157 with one original manual timing case skipped; independent review finds no P1/P2.
+Four balanced processes add twelve 16K lifetimes and 36 original-input GPU replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#immutable-compiled-value-measurements)
+records cumulative Native decoding/preflight wall medians 746.259/590.254 ms and unbound
+preparation 295.399/230.450 ms before/after. Overlapping envelopes, before-process drift and
+correlated lifetimes do not establish exclusive CPU/GPU, physical-memory, process or frame-tail
+guarantees. Broader definition reuse and full Foundation/R9/R10/R12 remain open.
+
+Future runtime design must compare the corresponding mature-engine operation before adding
+another scan. Prefer typed construction, loader/setter/changed-data checks and facts retained by
+the unchanged owner. Identify the actual invalidated invariant and current mutable state; do not
+route ordinary native gameplay through generic serialization/validation or retain redundant work
+for historical counters or hypothetical extensions. The pinned
+[Godot/Bevy source study](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+distinguishes their real parser/property/Scene/Tilemap behavior from Nara's separate budgeting
+contract. Necessary dynamic-input errors still use ordinary release error handling.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

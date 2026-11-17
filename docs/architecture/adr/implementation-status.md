@@ -3390,6 +3390,23 @@ completes twelve further lifetimes and 36 replays, recording cumulative flat-adm
 frame-tail or general whole-process performance. Exact-definition/immutable fact reuse, source
 decoding and full Foundation/R9/R10/R12 qualification remain open.
 
+The [immutable compiled-value measurement unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#immutable-compiled-value-measurements)
+at `9583ad7` retains cost and maximum depth from the existing Native walk with each original immutable
+component. Receiving aggregate admission, stored-data size checks and root retained fees reuse
+these facts; stricter/exhausted receiving policies preserve original diagnostics. Changed data
+and independent cooked claims obtain fresh measurements, while schema/default/numeric,
+undeclared-reference, resource, namespace and World/publication checks retain their own owners.
+There is no new certificate/cache/lifecycle mechanism. Owner libraries pass 1,246/1,246, public
+controls 87/87, Root content/retention/startup 162/162, original release game/native qualification
+148/148 and independent Scene consumers 157/157 with one manual timing case skipped. Review
+finds no P1/P2. The [paired 16K comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#immutable-compiled-value-measurements)
+adds twelve lifetimes and 36 replays, observing cumulative Native decoding/preflight wall medians
+746.259/590.254 ms and unbound preparation 295.399/230.450 ms before/after. Overlapping envelopes,
+before-process drift and correlated lifetimes do not establish exclusive CPU/GPU, physical-memory,
+general process or frame-tail budgets. Broader definition-wide reuse and full Foundation/R9/R10/R12
+remain open. The owning plan also requires comparison with corresponding Godot/Bevy source paths
+before adding validation; historical counters alone do not justify scanning unchanged data again.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
