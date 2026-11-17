@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-17
+**Last Revised**: 2026-11-18
 **Refined By**: ADR 0045: Component Schema Capability Metadata; ADR 0095: Plugin-Owned Specialized
 Domains and Project Configuration
 
@@ -38,6 +38,18 @@ Rules:
   component per pose, bone, or evaluation intermediate.
 - Timeline curves, skeletal 2D/3D, and animation graphs remain candidate plugin-owned mechanisms.
 - Animation should run in deterministic-friendly schedules when it affects gameplay state; presentation-only animation may run in frame update.
+
+### First Concrete Game Workflow
+
+The Two-Level Game's explorer uses a game-owned frame API and its existing logical time and held
+movement intent. Four evaluated atlas regions are derived presentation data. They do not add a
+second clock, persistent playback cursor or universal clip/controller model. The game plugin
+projects them after its fixed simulation and after asynchronous Scene/resume reconstruction,
+before original render extraction, including paused maintenance. Source/cooked Image identity,
+Sprite sampling and retained captures remain with their existing owners. The
+[complete runtime/delivery unit](../../plans/2026-11-03-joint-motion-execution-plan.md#explorer-atlas-animation-through-runtime-and-delivery)
+owns implementation and evidence. This finite workflow does not qualify independent playback,
+frame events, generic field targets, blending or skeletal animation.
 
 ## Alternatives Considered
 
@@ -78,10 +90,10 @@ and transient evaluation ownership.
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| 2D usefulness | One concrete sprite animation workflow completes through a plugin-owned public API | Future example |
+| 2D usefulness | One concrete sprite animation workflow completes through a plugin-owned public API | [Explorer atlas workflow](../../plans/2026-11-03-joint-motion-execution-plan.md#explorer-atlas-animation-through-runtime-and-delivery) |
 | Schema integration | Persistent targets use stable component/field IDs and survive field rename | Design review |
 | Future growth | 3D/skeletal animation can add domain-owned targets without inheriting a false field-binding contract | Architecture review |
-| Schedule clarity | Gameplay-affecting animation can run in fixed update | Future tests |
+| Schedule clarity | Gameplay-affecting animation can run in fixed update | [Fixed/paused/restored game controls](../../../samples/two-level-game/tests/animation_gameplay.rs) |
 | Storage honesty | High-level controller state remains inspectable without exposing pose, blend, or GPU caches as persistent ECS data | Future animation tracer and type review |
 
 ## Risks and Mitigations

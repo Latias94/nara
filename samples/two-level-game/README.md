@@ -4,12 +4,22 @@ A small independent Rust product using Nara's public project, command, Scene and
 It owns ordinary Rust modules for gameplay and checkpoint data; the Reference Game and its wave
 CLI remain separate consumers.
 
-The blue explorer moves with WASD and automatically collects nearby gold gems. E travels between
-Meadow and Cavern. Q switches between two independently persistent instances of the current source.
+The atlas-animated explorer moves with WASD and automatically collects nearby gold gems. E travels
+between Meadow and Cavern. Q switches between two independently persistent instances of the current source.
 M places a pink dynamic marker. K saves the current checkpoint and L restores the slot. R restarts
 the current logical level at its checkpoint, or retries a failed reconstruction. Closing the window
 uses normal Runtime shutdown, including pending Scene preparation and temporary-file cleanup.
 The green square marks the checkpoint; the purple square marks the destination portal.
+
+The game-owned [animation module](src/animation.rs) selects Idle and three walking regions of one
+shared [64x16 sRGB atlas](assets/textures/explorer.png), with nearest clamped sampling. Walking
+follows net held intent, including movement against a wall; opposing keys cancel per axis.
+The existing integer game clock advances the walking phase every 100 ms. Pause leaves it frozen;
+an exact Step advances one fixed tick. Scene travel and exact Runtime reconstruction derive the
+Sprite region before presentation from the same existing clock and held directions. Checkpoints
+keep their ordinary progress semantics. No new playback cursor or resume field is serialized.
+Recook earlier installations to include the shared atlas; the existing Scene Schema and resume
+format do not change for this workflow.
 
 ## Build And Run
 
@@ -110,8 +120,9 @@ Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop
 Use the same explicit project/output/target/tool paths documented for the desktop Player below.
 This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
 `cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain two Scenes,
-two Images and one shared Sound Bank. The finite content fence includes the bank descriptor,
-metadata and both raw WAVs. Cook and Check prepare CPU content without opening a device.
+three Images and one shared Sound Bank. The shared explorer atlas is required by both Scenes.
+The finite content fence includes the bank descriptor, metadata and both raw WAVs. Cook and Check
+prepare CPU content without opening a device.
 
 The published `player_audio.exe` opens only its generated executable-relative content pack.
 There is no source-directory or embedded-WAV fallback. It accepts normal interactive play and

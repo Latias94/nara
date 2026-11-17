@@ -1686,6 +1686,18 @@ initial/corrected scope and final correctness Clippy/format/document checks. Thi
 game-owned reset workflow, not arbitrary audio-state restoration, a performance target or complete
 R10/R12/Foundation.
 
+The November 18 [explorer atlas successor](2026-11-03-joint-motion-execution-plan.md#explorer-atlas-animation-through-runtime-and-delivery)
+at `0295f01` prioritizes a complete Runtime capability over further compact-encoding or
+micro-optimization experiments. The actual game derives four Sprite regions from its existing
+clock/held intent, including paused TaskUpdate reconstruction, without another clock or resume field. Actual native
+restoration and eight retained-input GPU replays pass; relocated source-free DX12 desktop play,
+Save/Restore, all four atlas frames and twenty further travels pass. Real headless Rust-edit
+adoption preserves a nonfirst walking basis through body/private-structure rebuilds. The same nine
+pure/source-game controls pass without development, WGPU or UI features. The linked unit owns
+exact tests, corrections and final qualification. This first game-owned animation contract does
+not select general clips/controllers, field binding, events or skeletal animation. Numerical
+budgets, foreign execution and full R10/R12/Foundation remain open; Editor/UI/Dialogue stays paused.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;

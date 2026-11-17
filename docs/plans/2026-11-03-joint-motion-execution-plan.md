@@ -626,6 +626,124 @@ selection; an all-feature supervising test is not the shipping dependency graph.
 qualification is serial, jobs1, locked/offline, release, Rust1.95 on Windows with the original root
 target. The game Schema/catalog change requires regeneration and recooking of earlier installations.
 
+## Explorer Atlas Animation Through Runtime And Delivery
+
+Status: implemented at `0295f01` and qualified on Windows/Rust1.95 after the audible development
+unit. The game replaces its static explorer with finite game-owned atlas animation through the
+existing Sprite, Image, logical clock, Scene, Runtime and cooked Player owners. No general
+animation crate/controller or component-field animation protocol is selected by this first workflow.
+
+Runtime capability and complete game/delivery workflows take priority over compact encodings,
+micro-optimizations and repeated comparison runs. Fix measured regressions or clear avoidable
+work when they affect those workflows. Keep diagnostic checks in import/tooling or the owning
+acceptance consumer where possible; this slice adds no generic per-frame validation pass.
+
+The game module exposes four inspectable frame values and their exact quarter-width UVs over one
+shared 64x16 sRGB Image. Idle is frame zero. A nonzero net held direction selects walking frames
+1/2/3 at 100 ms intervals derived from integer logical elapsed nanoseconds. Opposing holds cancel
+per axis; pressing against a movement clamp still expresses walking intent. The global logical
+phase continues through Idle, travel and checkpoint loading; starting movement does not restart
+a timer. Exact rebuild restoration already carries this clock and intent, so evaluated UV is
+reconstructed without a new resume field or old playback cursor. The authored image uses nearest
+clamped sampling and is imported/cooked once for both levels.
+
+Projection follows both existing mutation owners: after fixed gameplay consumption/simulation,
+and after TaskUpdate travel/resume completion, before original render extraction. Initial Scene
+activation also projects the frame. PostUpdate alone cannot serve this contract because ordinary
+paused maintenance suspends that stage. Paused presentation reuses unchanged semantics; exact
+Step advances only the selected fixed tick. No retained image/Render input may be reinterpreted
+after a newer frame or after the original Runtime/source has retired.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`, `examples/2d/sprite_sheet.rs`, changes an
+atlas index and explicitly selects nearest filtering. Godot
+`7a37606a433c0e7735525037cdf774f043146a21`, `scene/2d/animated_sprite_2d.cpp`, owns explicit frame
+progress, processing time and playback behavior. These establish concrete index/sampling and
+clock ownership precedents, not a requirement to copy either controller or rerun its engine tests.
+This game's finite derived animation makes no promise about generic clip events, root motion,
+independent playback cursors, blending, skeletal animation or an official animation backend.
+
+Acceptance uses the actual public game, including all atlas frames, zero-change paused frames,
+exact Step, opposing/diagonal holds, travel/checkpoint reconstruction and a fresh Runtime's first
+restored presentation. Update existing source/cooked inventory and independent pixel oracles;
+retain all original pickups, markers, progress, physical cleanup and source-removal controls.
+Actual Rust development adoption must keep a meaningful animated situation. Cook and relocate
+the ordinary Player, physically remove copied source/cache, and prove the new shared Image and
+selected UVs remain available without a source fallback. Record actual native/backend limits.
+Verification stays focused; no performance comparison or new generic validation pass is added.
+
+### Initial Atlas Qualification
+
+Windows/Rust1.95 release qualification uses the original root target, one build job and locked,
+offline Cargo. The first ordinary sample run `852ec5bc-9125-4770-bd5b-16a9b612ed33` passes
+316/317 with 30 explicitly skipped native/build cases. All four pure animation controls, five
+actual game animation workflows and five independent CPU pixel controls pass. Its sole failure
+is a new test's incorrect expectation that `.meta` files appear as Raw import observations.
+Actual Raw observations are the three PNGs, the Sound Bank descriptor and two WAVs. The original
+static twelve-file content fence independently includes metadata; the two auxiliary WAVs bring
+the default bound content inventory to fourteen. No import contract or production check changes
+to satisfy the test. Corrected cooker/source controls pass 13/13 at
+`b3f42993-08ae-452c-99e4-57b3a19eb54e`.
+
+The actual native reconstruction trajectory passes 1/1 at
+`2747fbd4-8396-412e-89ad-6bdc2055eccb`. Six retained animation captures include Idle, an identical
+paused successor, all three Walk frames and released Idle. After original native Runtime/source
+retirement, these and the original/restored complete-state captures produce eight independent
+GPU replays. Original pickups, three logical level instances, markers, thirteen milliseconds of
+pending time, physical release-gap reconciliation and all three native retirement checks remain.
+The original presentation requires an observed non-CPU adapter; this run requests Vulkan with
+fallback disabled. This is retained-input replay evidence, not swapchain capture or scanout.
+
+Independent production/schedule and cooker/Player reviews report no P1/P2. Native consumer review
+finds two real test-driver mistakes: isolated keyboard bindings must be registered, and each
+admitted synthetic key must finish original paused maintenance before Step can capture its basis.
+Both are corrected through the existing DesktopRun API and the bounded rereview closes them.
+No P1/P2 remain in these selected reviews; delivery and adoption evidence follows below.
+
+The relocated, source-free desktop delivery subsequently passes 1/1 at
+`e7079477-129f-41a6-9fc6-e1bb358639bb`. Its actual interactive Save process observes frames
+`[0,1,2,3]` on DX12/NVIDIA GeForce RTX4090, with three observed Image proofs and only two
+resident Images. The fresh Restore process stays Idle, keeps the same three Image proofs, and
+completes twenty more physical travels with the original bounded sixteen-receipt history.
+The scripted Travel and Save controls independently observe all four frames; scripted Restore
+remains Idle. The explicit software first-presentation control reports DX12/Microsoft Basic
+Render Driver, two startup Image proofs and Idle. Source/cache removal, relocation, corrupt
+content refusal, checkpoint bytes and original Runtime/window/process cleanup remain checked.
+This run includes actual release cooking and a cold shipping-feature build; its total duration
+is not a frame-time or performance comparison. The shipped feature graph excludes development,
+tooling, watcher and UI dependencies.
+
+Actual source/headless Rust-edit adoption passes 1/1 at
+`42c8f620-8350-4cbb-be10-2544664f853f`. Its complete two-level basis now explicitly reaches
+WalkTwo or WalkThree before candidate preparation. Body and private-structure rebuilds retain
+that original clock/held basis, discard probe progress and execute the changed movement speed
+after adoption. Existing compile-error, wrong-probe, source-drift, nominal-ticket, cancellation,
+postcommit predecessor cleanup and original physical-close controls remain. The deliberate
+`compile_error!` is the negative build control, not an unexplained build failure. This is the
+ordinary production Host with real compiled children, not dynamic code patching or a new
+desktop adoption qualification.
+
+The same four pure and five source-game animation cases pass 9/9 with defaults disabled and
+only `cooked-player` selected at `08de3f4d-aa27-4e49-a500-9bdcc6a9374a` (89 outside the selected
+filter). Atlas evaluation therefore does not require development tooling, WGPU, a native window,
+an audio device or a UI dependency. The existing CI desktop CPU step now includes the independent
+pixel-oracle target; CI configuration was checked locally, without a remote execution claim.
+
+The final all-feature ordinary sample run passes **317/317** at
+`c7678121-d68d-4da3-a38d-d6d27714138d`, with thirty explicit native/build prerequisites skipped.
+Owning all-target/all-feature correctness Clippy, root/sample formatting, added document targets,
+Scene JSON, CI YAML and whitespace checks pass. Existing non-correctness warnings remain; no
+warning-free claim follows. All eight scoped implementation/review agents are closed. The fifteen
+paused UI/Dialogue files match their original byte receipt. No dependencies, lockfiles, game Schema,
+resume format or development protocol change. Older installations require recooking for the atlas.
+
+This closes the finite explorer animation workflow under ADR0029, not general clips/controllers,
+frame events, independent playback, generic field binding, blending, skeletal animation, numeric
+performance budgets, foreign-platform execution or full R10/R12/Foundation. Shared cooked Image/
+evidence controls pass their selected CPU coverage; the complete headless/audio cooked delivery
+trajectories are not rerun by this unit. The actual source-free native qualification is
+the desktop trajectory described above. Runtime capability remains the priority; compact encodings,
+micro-optimizations and Editor/UI/Dialogue product work remain deferred.
+
 ## Audible Development With Explicit Effect Reset
 
 Status: implemented at `6da2745` and qualified on Windows/Rust1.95 below, following the November 17
