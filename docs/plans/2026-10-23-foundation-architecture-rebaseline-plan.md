@@ -5704,6 +5704,24 @@ preparation 240.167/189.013 ms before/after. Overlapping envelopes and finite co
 do not establish exclusive CPU/GPU, physical-memory or process/frame-tail budgets. Remaining
 source/reference work, broader definition reuse and full Foundation/R9/R10/R12 stay open.
 
+The [known-tag scalar payload successor](2026-11-13-rust-state-reconstruction-plan.md#known-tag-scalar-payload-decoding)
+at `3ecb373` consumes serde's actual scalar callbacks directly for known Bool/I64/U64/F64/String tags,
+avoiding an untagged Content buffer and unrelated variant trials. The original final conversion,
+source wire, numeric/signzero rules, limits, file preflight/header and receiving owners remain.
+Value-before-type, unknown tags, Null and EntityRef keep the original fallback. Initial added
+tests and independent review expose default `visit_char` forwarding that broadens RON String
+acceptance; explicit character refusal closes it. Final owner/public controls pass 1,195/1,195,
+including all 32 wire controls. Original release game/native qualification passes 148/148 with
+64/4K/16K travel, 27 GPU replays and both panic-cleanup controls. Four balanced processes add
+twelve 16K lifetimes and 36 replays. Independent Scene consumers pass 157/157 with one original
+manual timing case skipped. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#known-tag-scalar-payload-decoding)
+records payload wall medians 713.247/297.126 ms before/after. Structure/expansion include nested
+Prefab decoding and overlap that work; unchanged wire preflight rises in the same observation.
+Process ordering is not consistently lower, and finite correlated wall samples establish no
+general process/CPU/GPU, physical-memory or numerical frame-tail guarantee. Broader file
+preflight/header work, reference traversal and full Foundation/R9/R10/R12 remain open.
+
 Future runtime design must compare the corresponding mature-engine operation before adding
 another scan. Prefer typed construction, loader/setter/changed-data checks and facts retained by
 the unchanged owner. Identify the actual invalidated invariant and current mutable state; do not

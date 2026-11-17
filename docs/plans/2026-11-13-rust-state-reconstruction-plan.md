@@ -3879,6 +3879,91 @@ cross-stage identity/state merely to reuse a check that just ran. Broader receiv
 reuse, remaining source/reference traversal, larger named workloads, numerical runtime budgets,
 foreign execution and full Foundation/R9/R10/R12 remain open.
 
+#### Known-Tag Scalar Payload Decoding
+
+Status: implemented at `3ecb373` and qualified on Windows/Rust1.95 below. The final
+same-operation codec comparison still observes about 716 ms of source payload decoding and
+337 ms of separate shape preflight per complete 16K lifetime. These cumulative wall envelopes
+are not exclusive costs. The existing known-tag List/Map decoder streams containers, but scalar
+values still pass through an untagged payload enum that buffers serde Content and attempts
+unrelated alternatives even after the outer value tag is known.
+
+For known Bool/I64/U64/F64/String tags, interpret serde's actual scalar callback once and feed
+the existing final tag/payload conversion. Preserve integer-versus-float token classification,
+signed/unsigned ranges and casts, finite float rejection and signed-zero bits. In particular,
+do not replace deserialize-any classification with target-specific numeric parsing: RON's numeric
+syntax and JSON's bare negative zero differ. Preserve UTF-8 string/byte handling and reject chars,
+options, wrong kinds and nonfinite values as before. Unknown tags, value-before-type inputs,
+EntityRef and Null retain the original untagged fallback. Existing List/Map and nested value
+visitors, duplicates, field order, serialization and parent-buffered forms remain.
+
+This changes neither source format nor parser ownership, structural preflight, mandatory header
+gates, receiving semantics, limits, retention or publication. Do not build another parser,
+general validation receipt or new decoder framework. Differential tests compare known-tag
+inputs with the original value-before-tag fallback, including numeric/byte edge cases and
+buffered enum parents. Retain the existing complete wire/format controls and public consumers,
+then the unchanged release game/native/GPU/cleanup workflow and balanced original-program
+comparison against the qualified codec-reuse executable. Full Foundation/R9/R10/R12, broader
+source/preflight work, numerical budgets and foreign execution remain open.
+
+##### Implementation And Qualification
+
+Known Bool/I64/U64/F64/String payloads now use one scalar visitor and the existing final
+tag/payload conversion. Signed values remain signed; unsigned values first use the original
+representable-I64 classification and otherwise retain U64. Finite F64 construction and the
+existing final integer casts preserve the wire policy. Strings consume serde's actual string or
+UTF-8 byte callbacks without an intermediate untagged Content buffer. Null, EntityRef, unknown
+tags and value-before-type retain the old fallback. Existing container paths are unchanged.
+
+The initial original wire selection passes 28/28 with 230 outside the filter at
+`900ce0a4-8d37-4a8b-b354-2c0dcdf36196`, 0.859 seconds. Four new differential controls then
+expose a real compatibility regression: serde's default `visit_char` forwards to `visit_str`,
+so known-tag String accepts a RON character that the old fallback rejects. The run passes 30/32
+with two character controls failing at `45822446-7dfb-4866-94c8-1daa29fb8c0b`, 1.004 seconds.
+The visitor now explicitly rejects characters without broadening String syntax. Source review
+checks the actual locked RON0.8.1/Serde1.0.228 behavior; an earlier inspection of another locally
+installed RON version is not used as contract or qualification evidence. Review finds no
+remaining P1/P2 after that correction; both scoped agents are closed.
+
+Complete Reflect/Scene libraries and selected public wire, Schema/authoring bundle, property,
+format, migration, compiled-measurement, native-codec, export and Runtime workflows pass
+1,195/1,195 without skips at `ed903f02-0cef-4f69-9836-c4434aa35ce3`, 77.073 seconds after a
+2m52s debug build. All 32 wire controls pass, including differential numeric classification and
+exact float bits, UTF-8 bytes/char refusal, options/newtypes/suffix rejection under the selected
+RON grammar and internal/adjacent parent buffering in both field orders. This retains behavior,
+not an exact syntax-error-message or parser-position guarantee. Complete release game/library/
+metrics/span/probe/native qualification passes 148/148 without skips at
+`4a5726ff-79d7-4cd4-a0d2-48ab080999a1`, 64.939 seconds after a 10m08s serial build. Original
+baseline and authored 64/4K/16K travel, 27 original-input GPU replays, both observer-panic cleanup
+controls and the full 16K CPU record probe remain.
+
+Four balanced serial 16K processes complete twelve lifetimes and 36 replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#known-tag-scalar-payload-decoding)
+records payload-decode wall medians 713.247/297.126 ms before/after, 58.34% lower in this finite
+sample. Structure and expansion include nested Prefab decoding; their lower observed values
+overlap that work and cannot be added as exclusive CPU savings. Wire preflight increases from
+332.650 to 383.826 ms despite no implementation change there. Other unchanged phases vary and
+receive no optimization credit. First-after process wall 18.116 seconds is slightly above the
+last-before 18.059 seconds, so whole-process ordering is not consistent across all observations.
+Correlated lifetimes and uncontrolled host/driver/cache/clock state prevent statistical, general
+process, CPU/GPU, physical-memory, scanout or numerical frame-tail claims. The independently
+locked Scene consumer passes 157/157 with one existing manual timing case skipped at
+`ba8b1ef6-f225-4c30-b2d0-a397d56a3287`, 20.975 seconds after a 4m59s debug build. Final owning
+all-target/all-feature correctness Clippy, feature-free Reflect/Scene compilation and root/sample
+formatting pass; pre-existing warnings remain. The qualified frozen receipt's 151 source/control
+hashes match the implementation, and all 15 paused UI/Dialogue paths remain byte-identical.
+Finite summaries retain complete source/phase/acceptance/cleanup/replay facts, distributions and
+original raw-report digests, omitting only the four prior raw per-frame arrays. Added document
+paths/fragments, summary/raw-report hashes, complete acceptance facts and Git whitespace pass.
+No dependency/lock,
+source-format, numerical-capacity or remote-publication change belongs to this unit.
+
+This closes known-tag scalar decoding and the selected complete Windows consumer scope.
+Structural file gates, header interpretation and pure semantic validation retain their own
+responsibilities; a new pass still requires a concrete changed invariant or receiving policy.
+Wire/header consolidation, remaining source/reference costs, larger named workloads, numerical
+runtime/resource budgets, foreign execution and full Foundation/R9/R10/R12 remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

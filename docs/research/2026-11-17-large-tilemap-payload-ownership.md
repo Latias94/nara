@@ -481,6 +481,15 @@ preflight when it changes. Standalone public preflight remains complete. The
 records the selected workload and limits. This keeps reuse in the current operation rather than
 adding a cross-stage identity or certificate to avoid a scan that just ran.
 
+The [known-tag scalar decode successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#known-tag-scalar-payload-decoding)
+at `3ecb373` addresses a separate parser-adapter cost. List/Map already stream known-tag payloads,
+but every scalar still used the generic untagged enum, buffering Content and attempting unrelated payload
+kinds. A scalar visitor can preserve serde's actual token classification and feed the existing
+final conversion directly. This does not remove file shape/header gates, change source wire or
+replace JSON/RON parsers. Value-before-tag and reference/null paths retain their fallback. The
+owning unit records compatibility, original-game qualification and actual measured results;
+semantic-value validation savings must not be credited for a distinct wire-decoding change.
+
 Apply the same source comparison before introducing future checks. Ordinary typed gameplay must
 not become a generic serialization/validation round trip. Validate external dynamic input at its
 loader and a changed domain value at its constructor, setter or changed-data system. Reuse an

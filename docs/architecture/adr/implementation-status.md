@@ -3422,6 +3422,21 @@ finite envelopes do not establish exclusive CPU/GPU, physical-memory, general pr
 numerical frame-tail performance. Broader cross-preparation reuse, source/reference costs,
 foreign execution and full Foundation/R9/R10/R12 remain open.
 
+The [known-tag scalar wire unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#known-tag-scalar-payload-decoding)
+at `3ecb373` uses scalar callbacks directly when the tag is already known, preserving final numeric/string
+conversion and the original unknown/value-before-tag/Null/EntityRef fallback. Wire format,
+file gates, limits and receiving/publication owners remain. Differential tests and review expose
+and close accidental RON character-to-string acceptance from serde's default visitor forwarding.
+Owner/public controls pass 1,195/1,195, including all 32 wire controls; original release game/native
+qualification passes 148/148. Independent Scene consumers pass 157/157 with one original manual
+timing case skipped. The
+[paired 16K report](../../benchmarks/2026-11-14-development-runtime-costs.md#known-tag-scalar-payload-decoding)
+adds twelve lifetimes and 36 replays, observing payload wall medians 713.247/297.126 ms. Lower
+structure/expansion overlaps nested decoding, unchanged wire preflight increases and complete
+process ordering is inconsistent. This establishes the selected payload result, not exclusive
+CPU/GPU, physical-memory, general process or numerical frame-tail performance. Broader
+preflight/header work, reference costs, foreign execution and full Foundation/R9/R10/R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

@@ -2791,6 +2791,80 @@ codec-domain refusal/retry and actual shared-limit changes. Broader cross-prepar
 reuse, remaining source/reference costs, larger named workloads and full Foundation/R9/R10/R12
 stay open.
 
+### Known-Tag Scalar Payload Decoding
+
+Date: 2026-11-17. Before is the qualified same-operation-codec executable with SHA256
+`6d842833a451972e5c6484cbb3e9e2997ae702ebfd6f8a17b5dd10d383cdf60e`. Both programs already
+retain frozen effective reads and measured cost/depth, reuse receiving facts and dispatch original
+codecs after complete receiving checks with changed-limit fallback. List/Map payloads already
+stream when their tag precedes the payload. This successor at `3ecb373` also consumes scalar callbacks
+directly for known Bool/I64/U64/F64/String tags, avoiding the untagged Content buffer and trials
+of unrelated kinds. The original final tag/payload conversion remains. Value-before-type,
+unknown tags, Null and EntityRef retain their previous fallback. Structural preflight, mandatory
+header gates, source wire, serialization, receiving limits and native/publication owners are
+unchanged. The [owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#known-tag-scalar-payload-decoding)
+records exact numeric/string compatibility and the independently found character correction.
+
+Four serial before/after/after/before processes pass the original unchanged 16K travel, copied
+source removal, retained-input GPU replay and physical cleanup: twelve complete lifetimes and
+36 replays, six lifetimes per program. Rust1.95 release, manifests/locks, source generator,
+observation hooks, original phase-call counts and hardware DX12 RTX4090 adapter match.
+Finite summaries are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-scalar-wire-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-scalar-wire-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-scalar-wire-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-scalar-wire-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-scalar-wire-paired-metadata.json).
+They preserve complete phase/source/acceptance/cleanup/replay facts and runtime/frame
+distributions, omitting only the same four raw per-frame arrays as preceding comparisons.
+Original raw-report digests remain; complete raw reports and frozen programs stay outside target.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Wire structural preflight | 332.650 ms | 383.826 ms |
+| Header decode | 40.019 ms | 37.937 ms |
+| Source payload decode | 713.247 ms | 297.126 ms |
+| Source completion/domain shape | 51.892 ms | 51.304 ms |
+| Original-value cost/capture admission | 80.190 ms | 93.659 ms |
+| Shared record capture | 0.032 ms | 0.027 ms |
+| Migration, including post-migration admission | 0.041 ms | 0.043 ms |
+| Default materialization | 103.013 ms | 111.823 ms |
+| Compiler semantic validation | 0.816 ms | 0.844 ms |
+| Reference planning | 122.712 ms | 119.982 ms |
+| Reference-program validation | 0.018 ms | 0.017 ms |
+| Complete component materialization | 307.916 ms | 326.543 ms |
+| Flat claim admission | 351.534 ms | 360.421 ms |
+| Native decoding and preflight | 481.987 ms | 469.268 ms |
+| Unbound preparation | 189.825 ms | 186.720 ms |
+| Structure, including nested Prefab work | 644.274 ms | 445.419 ms |
+| Expansion, including nested Prefab acquisition | 960.003 ms | 773.691 ms |
+
+Observed source-payload wall time is 58.34% lower. Structure and expansion include nested Prefab
+decoding, so their lower values overlap that work and are not additive exclusive CPU savings.
+Actual scalar/container populations, source omissions, compiler phases and original acceptance
+remain. Wire preflight is higher in this observation despite no implementation change there;
+header, source completion, compiler/default, reference and native-preparation variation are not
+credited to scalar dispatch. No wire budget or semantic check is removed to obtain this result.
+
+Process walls in order are 19.531, 18.116, 16.568 and 18.059 seconds. Per-process payload
+medians are 734.734, 300.390, 292.295 and 707.928 ms; expansion medians are 967.782, 804.015,
+771.671 and 922.824 ms. Both after groups have lower payload and expansion medians, but the
+first after process is slightly slower than the final before process. Thus there is no consistent
+whole-process ordering across all observations. Correlated lifetimes and uncontrolled host,
+driver, cache and clock state preclude statistical confidence or a general process gain. Existing
+wall instrumentation and pacing measure neither exclusive CPU/GPU duration, physical memory,
+scanout nor numerical frame-P99 or production-tail budgets. After-program SHA256 is
+`054573517ce2a7d6dfd716869ec54827afebe669fdd66be30fe322c1ae7a00f0`.
+
+The identical after executable separately passes the complete release game/library/metric/span/
+probe/native selection, 148/148 without skips at `4a5726ff-79d7-4cd4-a0d2-48ab080999a1`, 64.939
+seconds after a 10m08s serial build. Baseline and authored 64/4K/16K travel, 27 GPU replays and
+both observer-panic cleanup controls remain. Owner/public controls pass 1,195/1,195, including
+all 32 wire controls under the actual locked RON0.8.1/Serde1.0.228 dependencies. Wrong-kind and
+malformed data retain rejection, without an exact parser-error-text or position promise. General
+wire/header consolidation, remaining reference costs, larger named workloads and full
+Foundation/R9/R10/R12 stay open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first
