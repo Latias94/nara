@@ -440,7 +440,12 @@ The next implementation should use the following division of responsibility:
 The scoped compiler correction at `9fc9322` separates explicit-field semantics from the repeated budget
 walk after defaults; its [qualification and paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#compiler-validation-locality)
 record the actual original game and unchanged 16K workflow. Standalone and receiving admission
-keep their own paths. Broader preparation reuse remains a follow-up. Prefer Rust ownership and
+keep their own paths. The subsequent
+[receiving-locality correction](../plans/2026-11-13-rust-state-reconstruction-plan.md#receiving-field-validation-locality)
+at `f5c34ff` uses that same semantic tail with actual index/shape/diagnostic admission after the receiving
+operation's original explicit/default, aggregate cost and Native reference checks. Its original
+game/native and [paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#receiving-field-validation-locality)
+retain the complete workflow; broader preparation reuse remains a follow-up. Prefer Rust ownership and
 the existing compiler/candidate state to a public `unchecked` API, global
 address/hash cache or general validation-certificate framework. Logical size and retained
 allowances can be checked from applicable admitted facts; work counters should account for the

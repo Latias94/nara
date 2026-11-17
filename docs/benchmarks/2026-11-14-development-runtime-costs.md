@@ -2521,6 +2521,72 @@ the paired after runs is identical. Remaining source-value admission, defaults a
 planning still traverse data; source-compiled receiving reuse requires its own exact-definition
 analysis. Full Foundation/R9/R10/R12 and foreign execution remain open.
 
+### Receiving Field Validation Locality
+
+Date: 2026-11-17. The before executable is the qualified compiler-locality program with SHA256
+`1d80843f10ce3455804d28c5f5d3a6c3921ae2af5da5d6930ff46316d353403a`. Both versions already freeze
+selected defaults and avoid the compiler's immediate repeated cost walk. Implementation `f5c34ff` removes
+default planning and repeated frozen-value cost admission from the shared receiving kernel's
+field-semantics step. That step follows the same operation's explicit-default check, aggregate
+cost admission and Native depth/reference check. Actual schema-index, shape and diagnostic
+scratch admission remains; standalone dynamic-value validation still owns default/cost handling.
+The [owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#receiving-field-validation-locality)
+records the common expanded/compiled/processed/receiving paths, unchanged requirements and
+reviewed changes to obsolete internal-work oracles.
+
+All four serial before/after/after/before 16K processes complete the original three-lifetime
+game/GPU/cleanup trajectory: twelve lifetimes and 36 retained-input replays, six lifetimes per
+version. Compiler/profile, manifests/locks, authored population, source generator, observations
+and hardware DX12 RTX4090 adapter match. The original 180 calls per named value phase, eight
+worker expansion entries and six owner publications per lifetime remain. Reports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-receiving-locality-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-receiving-locality-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-receiving-locality-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-receiving-locality-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-receiving-locality-paired-metadata.json).
+The finite exports preserve complete phase, source-workload, acceptance, cleanup and replay
+facts plus runtime/frame distributions. As in the preceding comparison, only four raw per-frame
+arrays are omitted; original raw-report hashes are recorded and complete reports/programs remain
+outside target in the local frozen observation directory.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 78.016 ms | 76.809 ms |
+| Shared record capture | 0.038 ms | 0.027 ms |
+| Migration, including post-migration admission | 0.040 ms | 0.040 ms |
+| Default materialization | 98.596 ms | 94.808 ms |
+| Compiler semantic validation | 0.812 ms | 0.792 ms |
+| Reference planning | 125.538 ms | 115.800 ms |
+| Reference-program validation | 0.016 ms | 0.015 ms |
+| Complete component materialization | 308.555 ms | 292.253 ms |
+| Flat claim admission | 490.235 ms | 383.589 ms |
+| Native decoding and preflight | 932.016 ms | 776.535 ms |
+| Unbound preparation | 358.099 ms | 299.969 ms |
+| Expansion, including nested Prefab acquisition | 936.599 ms | 915.656 ms |
+| Source payload decode | 706.983 ms | 703.655 ms |
+
+Flat admission is 21.75% lower, native decoding/preflight 16.68% lower and unbound preparation
+16.23% lower in this observation. They are cumulative named wall envelopes and can overlap;
+their savings must not be added or presented as exclusive CPU time. Compiler field semantics are
+unchanged by this successor; variation in the unaffected phases is not credited to this change.
+Both versions retain the same source wire, schemas, value limits, default semantics, asset and
+World checks, retained allowances and original frame/publication/retirement owners.
+
+Process walls are 19.897, 18.794, 18.705 and 20.162 seconds in order. Each after observation is
+lower than the before observations in this finite sample, but correlated lifetimes and
+uncontrolled host/driver/cache/clock state do not establish statistical confidence or a general
+whole-process gain. Unchanged pacing and wall instrumentation do not measure exclusive CPU/GPU
+duration, physical memory, frame P99 or a numeric production budget. After-program SHA256 is
+`7265e9516d72ca6b479e90d7b5810eff752f23c63b674e6a45230c65edfd4694`.
+
+The identical after executable separately passes the complete release game/library/metric/span/
+probe/native selection, 148/148 without skips at `de56ec26-1245-45b8-a35f-23cc43605bc9`, 63.357
+seconds after a 9m39s serial build. It retains baseline and authored 64/4K/16K travel, 27 original
+GPU replays and both observer-panic cleanup controls. The [plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#receiving-field-validation-locality)
+records owner/public/independent checks and exact scope. Further native decoding, reference and
+raw-subtree traversals remain; this does not implement broader exact-definition reuse, change
+the source format or finish Foundation/R9/R10/R12.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

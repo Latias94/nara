@@ -5634,6 +5634,26 @@ These finite cumulative envelopes support removing duplicate work, not stable wh
 CPU/GPU, physical-memory or numerical tail-budget claims. Broader source-compiled receiving reuse,
 raw-subtree traversal and full Foundation/R9/R10/R12 remain open.
 
+The [receiving-field locality successor](2026-11-13-rust-state-reconstruction-plan.md#receiving-field-validation-locality)
+at `f5c34ff` uses the same explicit semantic tail with actual schema-index, field and diagnostic admission
+after the receiving kernel's original explicit-default, aggregate value-cost and Native reference
+checks. It removes repeated frozen cost traversal and raw default planning in expanded/compiled/
+processed claim and receiving paths; definitions, strict receiving limits, World/resources and
+publication remain unchanged. The full owner run passes 1,239/1,241 with only two obsolete
+internal-work oracles failing; both corrected tests pass while retaining refusal before index
+allocation and exact/one-short cumulative controls. Public Reflect semantic/frozen controls pass 11/11 and
+selected Scene workflows 74/74. Independent implementation/test review finds no P1/P2. The
+independently locked Scene consumer passes 157/157 with one existing manual timing case skipped.
+The unchanged complete release game/native selection passes 148/148, including 64/4K/16K travel,
+27 retained-input GPU replays and both panic cleanup cases. Four additional balanced 16K
+processes complete twelve lifetimes and 36 replays. The
+[paired measurement](../benchmarks/2026-11-14-development-runtime-costs.md#receiving-field-validation-locality)
+records flat-admission wall medians 490.235/383.589 ms, native decoding/preflight
+932.016/776.535 ms and unbound preparation 358.099/299.969 ms before/after. These overlapping
+cumulative envelopes are not additive CPU costs or a general process/frame-tail guarantee.
+Broader exact-definition reuse, complete traversal consolidation and full Foundation/R9/R10/R12
+remain open; ordinary typed gameplay does not acquire a generic validator at each use.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

@@ -3513,6 +3513,92 @@ product state and publication checks remain distinct. This audit is source evide
 implemented receiving fast path or qualification of that future change. Full Foundation/R9/R10/R12,
 raw-subtree costs, physical-memory and numerical runtime-tail budgets remain open.
 
+#### Receiving Field Validation Locality
+
+Status: scoped implementation at `f5c34ff` and Windows qualification complete below, following the compiler
+correction at `9fc9322`. The original shared effective-value kernel serves expanded drafts, compiled sealing,
+processed claim admission and source-compiled receiving preparation. Before field semantics it
+already checks that defaults are explicit, admits the complete aggregate value cost and checks
+Native depth/reference requirements. Calling the default-selecting full validator again repeats
+cost admission for frozen values and default-planner work for explicit raw values.
+
+Reuse the same semantic operation with the existing admission callback for schema-index,
+shape-validation and possible diagnostic allocations. Keep standalone/default-selecting validation
+as its existing entry operation, delegating only its semantic tail. The receiving kernel uses the
+explicit tail only after its original checks succeed. Preserve required fields, numeric domains,
+key uniqueness, declared coverage, opaque reference inspection, exact receiving limits and the
+original caller's refusal identity. Removed planner/traversal operations no longer charge their
+work. Update internal-work oracles to describe actual work; do not emulate obsolete observations
+or add a public trusted flag, generic receipt, cache or additional validation framework.
+
+Qualify the affected Reflect/Scene/Tooling owners, public semantic and receiving controls, and the
+independently locked Scene consumer. Preserve the unchanged original release game, authored
+64/4K/16K travel, retained-input GPU replay and panic cleanup trajectory. Compare the new program
+with the qualified compiler-locality executable using the existing balanced 16K workload and
+hooks; inspect flat admission, preparation and complete expansion envelopes separately. This
+unit does not skip the receiving pipeline, change definitions/limits, alter World/resource checks
+or claim broader exact-definition reuse. Independent review and precise local commits close only
+this selected replacement; full Foundation/R9/R10/R12 remain active.
+
+##### Implementation And Initial Qualification
+
+Reflect's full admission entry still selects/checks defaults and costs before delegating to the
+existing semantic tail. The explicit semantic tail also accepts the original admission callback
+for actual index/field/diagnostic work, without default selection or another payload-cost scan.
+The shared Scene kernel uses it only after the pre-existing complete receiving checks. All three
+Schema authorities and Draft/Compiled/Runtime roles retain the same definitions, value limits,
+reference behavior and current-state/publication paths. No source/API consumer constructs a
+new trusted receipt or cache. The component guide and ADR0045 record this division.
+
+The all-feature Reflect/Scene/Tooling libraries execute 1,241 tests at
+`d393ddf3-c28b-48dc-ad4d-44cc1b2c9c3a`, 69.337 seconds after a 1m42s debug build: 1,239 pass,
+two Scene tests fail on obsolete work expectations. The wide-optional test explicitly demanded
+1,024 observations from the removed duplicate default planner. It now retains the complete
+raw/Native prefix, index-allocation refusal, exact caller refusal and zero-codec checks without
+that count. The aggregate reference-work oracle now accounts the semantic operation actually
+performed, preserving exact/one-short cumulative node/byte refusal and unchanged input. Both
+corrected cases pass at `d44f8217-f8b9-40b9-9fee-4670f014d218`, 0.098 seconds, with the other
+799 Scene tests outside that focused selection. No production correction follows the first run.
+
+Explicit semantic/frozen-read public controls pass 11/11 without skips at
+`3b8c46e4-f491-43bf-ac16-6db935731e63`, 0.581 seconds. The three new cases cover closed raw/frozen
+semantic parity, original non-Clone refusal identity at every actual callback boundary and
+unchanged semantic work for opaque payloads containing one or 4,096 nested elements. They do not
+bind historical counters. Selected public Scene receiving/binding/data/export/reference/migration
+controls pass 74/74 without skips at `7e169f90-41e9-4ced-b542-0812e36d247c`, 3.398 seconds.
+Independent implementation and final test/oracle review find no P1/P2; both scoped agents are
+closed. Complete release game/library/metric/span/probe/native qualification passes 148/148
+without skips at `de56ec26-1245-45b8-a35f-23cc43605bc9`, 63.357 seconds after a 9m39s serial
+build. Original baseline and authored 64/4K/16K travel, 27 retained-input GPU replays, both
+observer-panic cleanup controls and the 16K CPU record probe remain unchanged.
+
+The identical executable then completes four serial before/after/after/before 16K processes,
+twelve complete lifetimes and 36 GPU replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#receiving-field-validation-locality)
+records flat-admission wall medians 490.235/383.589 ms, native decoding/preflight 932.016/776.535 ms
+and unbound preparation 358.099/299.969 ms before/after. Those cumulative envelopes overlap and
+cannot be added. Compiler semantics are unchanged; variation in unrelated phase walls is not
+credited to this change. Process walls are 19.897/18.794/18.705/20.162 seconds, an observation
+without statistical confidence, CPU/GPU-duration, physical-memory or numeric frame-tail claims.
+Original source/compiler/lock/observation hashes, workload and value-phase call counts remain;
+finite summaries retain complete phase/source/acceptance/cleanup/replay facts and raw-report hashes.
+The independently locked Scene consumer passes 157/157 with one existing manual timing case
+skipped at `74609df9-14e1-4d7e-8d10-bf652f50bc5e`, 18.732 seconds after a 5m41s debug build.
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene production compilation
+and root formatting pass; pre-existing warnings remain. Added document/report links, exact report
+hashes and Git whitespace pass. No dependency or lock changes, remote CI or publication occur.
+Paused UI/Dialogue files remain byte-identical and outside commits. The two scoped agents are
+closed; all owned Cargo/native measurement processes are terminal.
+
+This closes the receiving kernel's duplicate field-validation operation within the qualified
+Windows scope. Complete cost/depth/Native-reference walks and native codec preparation remain
+elsewhere; their consolidation or reuse requires the same source and receiving distinction.
+An applicable immutable final cost/depth summary could serve stricter limits and separate retained
+fees without new scans, but no generic receipt, blanket trusted flag or broader exact-definition
+reuse is implemented here. Evaluate that next against the actual remaining workloads and existing
+project witness. Source decoding and ordinary game/runtime delivery remain priorities; full
+Foundation/R9/R10/R12, physical-memory and numerical runtime-tail budgets remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

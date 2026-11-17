@@ -3361,6 +3361,21 @@ This establishes reduced work in those finite cumulative wall envelopes, not sta
 CPU/GPU, physical-memory or numerical production-tail performance. Source-compiled receiving
 reuse, other traversal costs and full Foundation/R9/R10/R12 qualification remain open.
 
+The [receiving-field locality successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#receiving-field-validation-locality)
+at `f5c34ff` reuses the same explicit semantics with the original actual-work/scratch callback after complete
+receiving checks. It removes default planning and frozen-value cost repetition within that
+operation; standalone/default-selecting entry behavior and current receiving World/resource
+checks remain. The owner run passes 1,239/1,241 with two obsolete internal-work expectations;
+both corrected controls pass without weakening allocation/refusal or exact/one-short behavior.
+Public Reflect controls pass 11/11, selected Scene workflows 74/74 and independently locked Scene
+consumers 157/157 with one manual timing case skipped. Original release game/native qualification
+passes 148/148. The [paired 16K comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#receiving-field-validation-locality)
+completes twelve further lifetimes/36 replays, observing cumulative flat-admission wall medians
+490.235/383.589 ms, native decoding/preflight 932.016/776.535 ms and unbound preparation
+358.099/299.969 ms before/after. Overlapping wall envelopes do not establish exclusive CPU,
+GPU, physical-memory, frame-tail or statistical whole-process performance. Review finds no P1/P2;
+broader exact-definition reuse and full Foundation/R9/R10/R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
