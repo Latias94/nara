@@ -1720,6 +1720,22 @@ This implements concrete cooked game audio without selecting an engine-wide back
 arbitrary native reconstruction, streaming/hot-switch, human audibility, hardware delivery/latency,
 other platforms, performance budgets or complete R10/R12/Foundation.
 
+The [November 18 audible development successor](../../plans/2026-11-03-joint-motion-execution-plan.md#audible-development-with-explicit-effect-reset)
+at `6da2745` connects the existing game-owned CPAL composition and development Host with explicit
+effect reset. Probes/candidates discard sound; fresh adopters restore complete canonical gameplay
+without historical playback. The sole adopted output waits for confirmed original stream/callback
+and process retirement. Completed game-close errors remain observable without permanently blocking
+an independently healthy output, preserving the existing failure/completion distinction. Strict
+normal probe qualification is unchanged. The final real Rust-edit adoption trajectory and
+failed-close control pass 2/2. Separate selections pass seven actual WASAPI/PCM cases, 222 affected
+CPU cases, four minimal-feature cases, one original silent continuous adoption and the ordinary
+35-record JSON CLI workflow in their
+separate scopes. The native normal trajectory reports hardware Vulkan. Owning all-feature/all-target
+correctness Clippy, root/game formatting and document checks pass. The linked plan records initial
+overcoupling, its correction, exact runs and Windows/Rust1.95 limits. This implements the concrete
+reset workflow under ADR0076, not general audio-state migration, hardware latency/human audibility,
+a new domain backend, foreign execution or full R10/R12/Foundation.
+
 The [November 15 transformed-collision successor](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 adds opt-in fixed-input publication to the original Hierarchy/Transform owners. Prepare's current
 deferred sources complete before Simulate without replacing Historical, completed Fixed or

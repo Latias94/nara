@@ -1,11 +1,14 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Updated: 2026-11-17. Status: qualified for the shipped Windows source/headless
+Date: 2026-11-13. Updated: 2026-11-18. Status: qualified for the shipped Windows source/headless
 workflow and explicit source/desktop reconstruction/adoption through the finite development Host.
 Continuous Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline
 R12 runtime lane.
 Editor/UI/Dialogue product work remains paused. Physical mixed-DPI testing is separately
 authorized and has bounded [Runtime drawing/picking qualification](2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor).
+The qualified functional successor joins the existing desktop development Host to the actual
+[audible game with explicit effect reset](2026-11-03-joint-motion-execution-plan.md#audible-development-with-explicit-effect-reset).
+It is not another cost-attribution or representation experiment.
 
 ## Complete Outcome
 

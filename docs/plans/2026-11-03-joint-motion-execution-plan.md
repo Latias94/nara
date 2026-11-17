@@ -374,7 +374,10 @@ Pinned references: Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
 must not be interpreted as physical completion. Actual human audibility, system-mixer output,
 device hot-switch/recovery, native prediction playback, arbitrary audio restore, foreign native
 execution and numeric latency budgets remain outside the selected qualification. The current
-game reconstruction owner must keep refusing unrepresented native audio state. Full R10/R12
+game reconstruction owner must keep refusing unrepresented native audio state. The explicit
+[audible development successor](#audible-development-with-explicit-effect-reset) selects reset
+of game effects rather than restoration of that native state; ordinary audio recipes retain
+their refusal. Full R10/R12
 and Foundation remain active; UI/Dialogue product work stays paused.
 
 ### Concrete Audio Implementation And Initial Qualification
@@ -622,6 +625,152 @@ toolkits and Cargo metadata. The cooker separately binds each actual executable'
 selection; an all-feature supervising test is not the shipping dependency graph. All Cargo
 qualification is serial, jobs1, locked/offline, release, Rust1.95 on Windows with the original root
 target. The game Schema/catalog change requires regeneration and recooking of earlier installations.
+
+## Audible Development With Explicit Effect Reset
+
+Status: implemented at `6da2745` and qualified on Windows/Rust1.95 below, following the November 17
+Runtime delivery priority. The existing audible game and source-desktop development Host now form
+one usable workflow. This
+is game-owned composition through the original Runtime/CPAL/native-process owners, not a new
+audio backend, arbitrary native-state snapshot or a performance experiment.
+
+Add an explicitly selected audible desktop placement. Every process in that placement starts
+with gameplay sound publication disabled. Probe commands change normal canonical game state
+without queuing sound or reserving future effect identities. A fresh adopter restores the same
+game state but starts with empty voices and no replay of historical pickup/travel effects. The
+composition fingerprint records this reset policy. Ordinary audible recipes keep refusing exact
+reconstruction; unknown services remain unsupported.
+
+Keep adoption committed independently of predecessor cleanup. For the audible placement only,
+activation/output enablement waits for confirmed original audio/process physical retirement;
+an incomplete retirement cannot be treated as permission to play. Completed errors remain
+observable without blocking independently safe new ownership. A prepared/cancelled
+candidate never gains publication authority. Explicit enablement applies to the sole adopted
+process; native focus and Resume retain their original independent checks. Ordinary Pause still
+allows already started one-shots to finish on the device clock. Samples already delivered to a
+device are not reversible.
+
+Use the actual develop/continuity/public Host path for body and private-structure edits. Preserve
+complete state/probe/presentation comparison, fresh-adopter construction, stale-ticket refusal
+and original game/stream/window/process cleanup. Exercise suppressed probe effects, no historical
+replay, new post-adoption sounds, compile/probe refusal and postcommit Pending behavior. Extend
+the original native audio controls for the publication gate and callback samples; do not rerun
+unrelated rendering/Editor matrices or add a new benchmark. Record actual Windows/device scope
+and distinguish callback output from human audibility. Full R10/R12/Foundation remains active.
+
+### Audible Development Qualification
+
+The game protocol is version six. The original process owner admits its exact placement and
+Runtime-bound audio diagnostics, including a final `AudioClosed` status alongside normal native
+cleanup. These flags cannot replace the actual exit/containment/readers/output receipt. The Host
+keeps actual incomplete audio retirement as a refusal to enable output. Completed game errors
+remain separate and do not replace the original stream/callback and process completion facts. Ordinary
+headless/silent packets and their existing controls retain their own variants.
+
+The first production check exposes an unconstrained startup closure error type after adding the
+audio status exchange. Its explicit `Result<(), String>` fixes inference without changing failure
+custody. The affected release selection then passes 222/222 in
+`b3897a97-09c6-4df0-976e-26b24c69ceb7`, with eleven native/actual-build cases skipped as declared.
+It includes audio mixing/admission, gate capacity/identity/PCM, recipe fingerprints, protocol and
+client caching/close, CLI parsing, complete resume/Scene semantics and ordinary watcher controls.
+The initial dependency/test build takes 12m04s after the local build cleanup; test execution takes
+18.614 seconds. This is qualification cost, not a runtime-performance observation.
+
+Independent production reviews find no P1/P2 in the reset policy, conditional service eligibility,
+original audio close, exact process diagnostics or adopted-route gate. Test review identifies one
+missing branch: physically complete but failed predecessor retirement. The added actual source
+consumer makes the original game's shutdown hook fail, retaining that actual process result and
+healthy audio retirement. Final owning-contract review corrects the initial gate's overcoupling:
+the existing close design separates failure from physical completion. The final successor must
+enable new healthy output after confirmed old stream/callback/process retirement while retaining
+the unrelated game failure. Pending or unconfirmed audio still refuses. The corrected case and
+complete trajectory are qualified again below; initial results keep their earlier source scope.
+
+The actual WASAPI selection passes 7/7 in `67c5261a-f1cf-4318-9fc0-6a7ef456d4dc` (3.452 seconds
+after a 54.06-second affected build; 171 outside the selection). It includes the four new reset
+controls and all three original native close/startup/unwind controls. The real game first collects
+and travels while callback output is entirely zero, enables without replay, then compares complete
+new pickup/travel PCM against the original independent WAV oracle with zero maximum error. A fresh
+Runtime restores canonical state with a new disabled mixer and zero accepted effects. Ordinary
+audio and unknown-service capture still refuse. Original held-callback, partial-startup and panic
+cleanup keep stream/callback release independent from playback counters. These tests use a public
+HeadlessSession with actual CPAL; the separate desktop consumer owns native presentation/adoption.
+Neither scope establishes human audibility or hardware DAC latency.
+
+The initial public Host target passes 2/2 without skips in
+`655d4dff-725c-4deb-adf1-9ef5339af213` (528.556 seconds, after a 1m33s outer release build).
+The failed-predecessor case takes 393.771 seconds including the first native-target development
+dependency build (6m08s). Its original game shutdown returns failure after actual audio retirement;
+the contained process exits unsuccessfully with empty containment and drained readers/output.
+The initial gate continues refusing after physical completion; that overbroad policy is superseded
+by the error/completion correction above. This initial green run is not final qualification of
+the corrected failed-predecessor behavior.
+
+The normal trajectory takes 134.783 seconds and performs six real rebuild attempts: intentional
+compiler failure, rejected complete-state probe, cancellation, stale-basis cancellation, movement
+body A160/B80 and private-structure C adoption. It retains meaningful cross-level progress, exact
+canonical state and the original sealed/presented witness. Initial gameplay suppresses three
+effects; the rejected probe and adopted Pending B each suppress a real pickup. No suppressed cue
+is accepted, and A/B/C each accept one new enabled event. Each original probe is physically
+discarded before a fresh adopter exists. B/C permit paused Step during Pending cleanup but refuse
+enablement/activation/Resume; after normal predecessor retirement, old cues never replay and new
+events complete. Actual native D Down/Up and continuous play then exercise the original input/
+Runtime owners. Final audio/stream/callback, game, window, containment/readers/output and source
+fixture cleanup pass.
+
+The normal trajectory reports hardware Vulkan. Its parent requested DX12, but the existing sealed
+desktop-session projection does not forward that hint; the result receives no DX12 credit. The
+presentation witness is distinct from the separate PCM oracle and from scanout. These are
+Windows/Rust1.95 correctness workflows, not latency distributions or native audio-state restoration.
+
+The ordinary `develop --placement audio-desktop` CLI also passes a real bidirectional JSON run
+with 35 validated records and actual nested dev builds. It starts disabled, discards a real travel
+cue, enables without replay, completes a new effect, prepares/probes/adopts through the production
+Host, refuses enablement during Pending predecessor cleanup, permits paused Step, then retires the
+original predecessor and enables a new event. Explicit Close exits zero. Its three final reports
+are the silent probe (zero accepted effects), predecessor (one) and active adopter (one), all with
+normal game close, actual successful contained-process receipts and original audio physical flags.
+Only the temporary diagnostic JSON/stderr files remain in its work parent. The driver stays outside
+the repository; it adds no new protocol or verification framework.
+
+Final corrected qualification passes 2/2 without skips in
+`ef68a3ed-3930-454e-bc43-e156691efb06` (184.801 seconds after a 1m25s affected release build).
+The failed-close case now passes in 50.319 seconds: actual A shutdown fails, original audio/
+callbacks/process finish, and B enables without historical replay and completes a new cue while
+the original failed result remains observable. This supersedes the initial permanent-refusal
+expectation. The complete normal A/B/C trajectory passes again in 134.482 seconds with the same
+six actual rebuild attempts and all prior state, presentation, Pending, native-input and physical
+cleanup assertions. It again reports hardware Vulkan. Audio-device/PCM implementation is unchanged
+by this Host-only permission correction, so its already passing seven native cases are not repeated.
+
+The original silent continuous-development trajectory passes 1/1 without skips in
+`3d700ea5-3353-4c93-aadd-9b3f35c6e97f` (155.611 seconds after a 7.20-second outer build). It
+still uses exactly the silent child features while the outer test compiles audio support; actual
+body/private-structure changes, native input, Pending-time play and physical cleanup remain intact.
+The four selected controls with only `development`, no desktop/audio features, pass 4/4 in
+`4689ffda-3be7-45d8-8496-fdd8eccdbfc1` (0.169 seconds, 23 outside the filter, after a first
+9m15s minimal-feature build). They retain explicit unsupported-placement refusal, sound-command
+input admission, exact feature selection and a healthy usable headless game after refusal.
+These build/execution observations establish no speedup or numerical performance target.
+
+Final all-feature/all-target release Clippy passes with `-D clippy::correctness`, followed by root
+and independently locked game workspace formatting checks. Existing non-correctness warnings
+remain. Added local document links/fragments and ordinary staged/working whitespace checks pass.
+The existing manifests and locks are unchanged by this unit, and all fifteen paused UI/Dialogue
+files retain their original bytes. Independent implementation, consumer and final close-contract
+reviews close their actionable findings. No owned Cargo, child or review agent remains active at
+delivery. Documentation closure does not require repeating the passing native workflows.
+
+All source implementation, review corrections and affected checks remain local. General audio
+playback-state migration, hot-switch/streaming, human audibility, hardware output latency, foreign
+native execution, continuous Editor Play and the full R10/R12/Foundation outcome remain open.
+Editor/UI/Dialogue work remains paused; compact Tilemap representation and further small performance
+experiments remain deferred. The next unit follows missing Runtime capability, not another timing loop.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --lib --run-ignored only -E 'test(audio::native_tests::)' --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --test audio_development --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
 
 ## Managed startup pause correction (November 13)
 

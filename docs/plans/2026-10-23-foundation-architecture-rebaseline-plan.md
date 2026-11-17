@@ -1672,6 +1672,20 @@ exact shipping dependency graphs pass. Arbitrary audio-service reconstruction, s
 hot-switch, human audibility, hardware output/latency, foreign execution, numerical budgets and
 complete R10/R12/Foundation remain open.
 
+The [audible development successor](2026-11-03-joint-motion-execution-plan.md#audible-development-with-explicit-effect-reset)
+at `6da2745` joins those existing game paths. Its explicit recipe reconstructs
+canonical gameplay while resetting effects, keeping probes silent and requiring original audio/
+process physical retirement before the adopted game can publish new sound. The final actual
+Rust-edit adoption trajectory and failed-close control pass 2/2 on Windows. Separate selections
+pass seven real WASAPI/PCM cases, 222 affected CPU cases, four minimal-feature cases, one original
+silent continuous adoption and a 35-record ordinary CLI workflow. The normal native trajectory reports hardware
+Vulkan. Final review removes an overbroad permanent refusal after an unrelated failed game close:
+confirmed stream/callback/process retirement permits new healthy output while the original error
+remains observable. Probe success qualification stays strict. The linked unit records exact runs,
+initial/corrected scope and final correctness Clippy/format/document checks. This implements the
+game-owned reset workflow, not arbitrary audio-state restoration, a performance target or complete
+R10/R12/Foundation.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;
