@@ -191,7 +191,10 @@ This does not relax existing dynamic-input rejection or adopt another engine's u
 
 Transform propagation, visibility/queueing, ECS insertion at high entity counts, physics,
 steady-frame/P99 and single-cell updates need their own equivalent workloads before numerical
-targets can be claimed. This report does not extrapolate scene timings into those modules.
+targets can be claimed. The source study's
+[further-module comparison](../research/2026-11-17-runtime-module-performance-comparison.md#further-module-targets-work-counts-before-timings)
+identifies official workloads and changed-region work counts without inventing upstream timings.
+This report does not extrapolate scene timings into those modules.
 
 ## Applying The Targets To Runtime Development
 

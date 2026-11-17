@@ -194,3 +194,75 @@ Paths are relative to the checkout roots above; every URL pins the inspected rev
 [^n-config]: Nara baseline above: [`Cargo.toml`](../../Cargo.toml), [`Cargo.lock`](../../Cargo.lock).
 [^n-tile]: Nara baseline above: [`crates/nara_tilemap/src/lib.rs`](../../crates/nara_tilemap/src/lib.rs), `TileCoord`, `TileIndex`, `TileCell`, `read_cells` (1000).
 [^n-fixture]: Nara baseline above: [`samples/two-level-game/src/bin/runtime_workload/project.rs`](../../samples/two-level-game/src/bin/runtime_workload/project.rs), population (57), two-map/Prefab construction (222–287), `tilemap_record` (390–445).
+
+## Further Module Targets: Work Counts Before Timings
+
+This follow-up reuses the frozen local comparison; no measurements were rerun. The additional
+sources use the Bevy `03ed5a27` and Godot development `7a37606a` pins above, not another executed
+engine version. **No useful checked-in, hardware-qualified timing series for these workloads was
+found in the inspected benchmark/performance paths.** Bevy supplies Criterion workload code and
+instructions for generating results; the inspected transform/ECS cases' 500 ms warmup and 4/6 s
+measurement windows are configuration, not operation times. Godot's Performance monitors expose
+counters, not published timing data; its checked-in Android macrobenchmarks exercise editor
+startup, not the runtime modules below. No additional engine latency or speedup follows. [^b-bench-method]
+[^g-perf-paths]
+
+| Module | What the pinned official sources establish | What needs a matched workload before assigning milliseconds |
+| --- | --- | --- |
+| Transforms | Bevy constructs 51,696 hierarchical transform entities from 48 roots with fanouts `[4,4,3,3,2,2]`, plus 12,000 standalone transforms. Cases mutate 1,024/4,096 movers or eight roots; a separate case reparents 4,096 of 16,000 children. Mutation and scheduled work are inside the timers. These are 3D transforms, not Nara's 2D operation. [^b-transform-bench] | Separately use 64/4K/16K **entities**, flat and parented layouts, unchanged/one/all changes, and leaf versus ancestor changes. Match worker policy and finish global-transform consumption: Godot's CanvasItem getter computes invalid globals lazily, so timing only setters misses work. [^g-transform-consume] |
+| ECS insertion | Bevy direct spawn adds 1/100/10,000 entities per iteration; batch cases each add 10,000 total, with different batch sizes. Worlds are reused. The 10,000-entity deferred insert cases include command application; later iterations replace already inserted components. These are not fresh Scene loads. [^b-insertion-bench] | Compare Nara's native insertion with its own locked `bevy_ecs` first, keeping bundle contents, allocator/world lifetime, hooks and deferred application explicit. Measure Scene identity/codec work separately. The earlier 16K-row case contains one payload entity, not 16K entities. |
+| Tile mutation | Bevy skips unchanged chunk bodies but repacks every slot of a changed chunk. Godot coalesces dirty cells and reconstructs affected rendering quadrants, including sorting and canvas-item work. TileSet/layer changes can invalidate the local case. [^b-chunk] [^g-update] | Fix occupied cells, chunk/layer counts, visibility and resources; compare unchanged, one valid cell replacement and full replacement through required deferred preparation. The measured Godot TileMapLayer had no TileSet/tree entry, so its instantiation time does not cover this update. |
+| Render preparation | Bevy's extraction benchmark marks 10–100,000 zero-payload `DummyAsset`s modified and times extraction only; the following `app.update()` is outside that timer. It does not measure sprite queueing, real upload or GPU execution. [^b-extract-bench] | Match views, visible sprites/tiles, material/order rules, resolution, backend and warmed resources. Separate extraction, visibility/queue/batching, upload submission and GPU work before allocating a module budget. |
+
+An actionable target ladder is therefore:
+
+1. **Set locality counts now.** Propose zero repeated full source-admission walks for unchanged
+   admitted payloads, and zero tile-data repacks/dirty-quadrant rebuilds in a settled unchanged
+   case without data-change signals or resource/layer changes. Query/change detection, visibility
+   and drawing may still do work. These are candidate work budgets, not claims of zero frame
+   time or measurements of today's Nara implementation.
+2. **Bound one-cell derivation by the chosen region.** In Godot's non-Y-sorted control, the
+   default rendering quadrant is 16×16: replacing one atlas cell at the same coordinate with
+   the same TileSet/configuration dirties one rendering quadrant, containing at most 256
+   occupied cells; it does not rebuild just one cell. [^g-quadrant-size] [^g-update]
+   A proposed Bevy control with 16K slots in 64 chunks of 16×16 repacks one changed chunk's
+   256 entries / 2 KiB, versus 16K entries / 128 KiB in one large changed chunk, because each
+   packed entry is eight bytes. This is **64× fewer repacked entries, not 64× faster**. These
+   are CPU image payload bytes, not measured GPU transfers. More chunks also change entity,
+   material, culling and draw overhead; this arithmetic does not select Nara's production
+   chunk size or promise the same byte layout. [^b-chunk] [^b-packed]
+3. **Measure a corresponding module before proposing its time or multiplier.** Preserve the
+   existing local source/native targets in their original scope. There is no supported new
+   sub-millisecond transform, 16K-entity insertion, one-cell update or render-preparation
+   target here. Use the small controls above when that owner changes; record the actual
+   revision, hardware, thread/build policy and completed boundary alongside timings. A
+   same-substrate comparison isolates Nara's added work without treating a development ECS
+   release as its locked dependency. No broad benchmark framework is needed.
+4. **Allocate frame budgets in the complete consumer.** The arithmetic 16.67 ms at 60 Hz or
+   8.33 ms at 120 Hz bounds the whole frame; it does not give each module a millisecond
+   allowance. Unchanged tile data do not eliminate ordinary render preparation: Bevy clears
+   and rebuilds sprite batches/instances and writes the instance buffer. Godot's
+   `frame_setup_time` stops before viewport drawing, and threaded `draw()` can enqueue work,
+   so neither is a complete rendering/GPU timer. Use actual consumer CPU and GPU observations
+   and frame-tail distributions before subdividing those budgets. [^b-sprite-prepare]
+   [^g-render-timing]
+
+Keep checks at their owning boundaries: dynamic input admission, changed domain values and
+affected aggregates retain their checks; unchanged facts remain reusable only while their
+schema/resource/context basis still applies. A cheap setter or dirty flag is not completed
+work, and dirty-region derivation is separate from validation. Godot's lazy transforms and
+Bevy's optional static-tree optimization support locality, not identical guarantees or an
+O(1) unchanged-frame claim. [^g-transform-consume] [^b-transform-locality] This section proposes
+bounded investigation targets only; it creates no validation registry, runtime authority or
+additional release gate.
+
+[^b-bench-method]: Pinned Bevy [`benches/README.md`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/benches/README.md#L5): run/save/compare generated Criterion baselines; the source files below configure observation windows, not measured latencies.
+[^g-perf-paths]: Pinned Godot [`main/performance.cpp`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/main/performance.cpp#L254): live time/object/render monitors; [`EditorBenchmarks.kt`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/platform/android/java/editor/macrobenchmark/src/main/java/org/godotengine/editor/v4/macrobenchmark/EditorBenchmarks.kt#L53): Android editor-startup workload code.
+[^b-transform-bench]: Pinned Bevy [`benches/benches/bevy_transform/propagate.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/benches/benches/bevy_transform/propagate.rs#L23): hierarchy construction (135), standalone transforms (74), reparent setup (196), timed cases (276–386). Hierarchical count is derived from the checked-in fanouts, not a timing result.
+[^g-transform-consume]: Pinned Godot [`scene/main/canvas_item.cpp`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/main/canvas_item.cpp#L201): lazy global-transform getter; dirty notification propagation (1159).
+[^b-insertion-bench]: Pinned Bevy [`world/spawn.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/benches/benches/bevy_ecs/world/spawn.rs#L12): direct/batched iteration scope; [`world/commands.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/benches/benches/bevy_ecs/world/commands.rs#L156): repeated insert and command application.
+[^b-extract-bench]: Pinned Bevy [`extract_render_asset.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/benches/benches/bevy_render/extract_render_asset.rs#L13): empty asset and prepare implementation; scales (42), event generation and extraction timer (73–98).
+[^g-quadrant-size]: Pinned Godot [`modules/tilemap/tile_map_layer.h`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/modules/tilemap/tile_map_layer.h#L399): default quadrant side; the rendering update cited above rebuilds each dirty quadrant's cells.
+[^b-sprite-prepare]: Pinned Bevy [`crates/bevy_sprite_render/src/render/mod.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_sprite_render/src/render/mod.rs#L555): batch/instance clearing (581), phase traversal (591), instance-buffer write (720).
+[^g-render-timing]: Pinned Godot [`servers/rendering/rendering_server_default.cpp`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/servers/rendering/rendering_server_default.cpp#L76): setup time ends at 100, viewport drawing at 109; threaded draw dispatch (447–456).
+[^b-transform-locality]: Pinned Bevy [`crates/bevy_transform/src/systems.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_transform/src/systems.rs#L81): configurable static optimization and dirty marking; parallel propagation subtree skipping (532, 715).
