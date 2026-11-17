@@ -294,7 +294,8 @@ The selected next implementation keeps one persistent record and the complete na
 with frozen effective reads. This selects the implementation to qualify, not a measured cost
 winner. The [owning successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#frozen-effective-reads-through-the-existing-component)
 requires complete codec, receiving, native and cook integration plus the unchanged full game
-and balanced frozen-program comparison. Its implementation and qualification are still active.
+and balanced frozen-program comparison. That scoped implementation and qualification are complete;
+validation locality remains the next optimization.
 
 The production source comparison provides concrete reasons for retaining the current domain
 composition. Native Tilemap mutations already change cells without copying configuration or
@@ -344,25 +345,127 @@ materialization and expansion show no stable end-to-end gain. This supports the 
 not a physical-memory or speedup claim; the next optimization must attribute repeated admission
 and raw-subtree read work without relaxing receiving or retained-owner contracts.
 
-## 5. Best Practices: Preserve the Existing Budgets and Escape Rules
+## 5. Validation At Owning Boundaries
 
-These are constraints on every option, grounded in Nara's Accepted ADR 0117, owner accounting
-and existing controls; neither upstream engine supplies equivalent guarantees. [^N-contract]
-[^N-retain] [^N-custody] [^N-receive]
+The following source investigation was added after the frozen-read qualification at Nara
+`c1edb21`. Both reference checkouts remain clean at the section 2 pins. It investigates runtime
+value validation, rather than the amount of testing needed for unchanged upstream code. No
+upstream build or benchmark was run, and this investigation changes no production validator.
+
+### Godot: Parsing, Resource Resolution And Property Assignment
+
+`VariantParser::_parse_array` and `_parse_dictionary` recursively parse members and check syntax,
+delimiters and premature EOF. These routines grow their containers while parsing; they do not
+carry a cumulative value-node, byte or depth allowance. The `MAX_RECURSION` checks elsewhere in
+the same file belong to the writer and must not be credited to this parser. Resource parsing
+checks declared external/internal IDs and dependency loading, with configurable missing-resource
+behavior. A cache-reuse branch deliberately keeps an existing resource without assigning its
+properties again. [^G-validation-parser] [^G-validation-loader]
+
+Scene text loading stores node properties in `SceneState`. Instantiation checks local scene
+structure, creates nodes and assigns stored properties with `Object::set`. It does not apply a
+general whole-value budget pass before every assignment. Some assignment failures and missing
+dependencies do not abort the complete load/instantiation. Consequently, successful loading is
+not proof that every stored property satisfied a strict native constraint. [^G-validation-loader]
+[^G-validation-instantiation]
+
+`Object::validate_property` accepts `PropertyInfo`, not a proposed value. It is a metadata hook,
+not the equivalent of Nara's value validator. Concrete setters own concrete constraints:
+`Timer::set_wait_time` rejects values at or below zero, independently of its Inspector range hint.
+Godot's metadata, conversion, setter and error-propagation policies should not be conflated into
+one strict validation guarantee. [^G-validation-property]
+
+### Bevy: Typed Construction, Resolved Scenes And Changed Data
+
+The supplied Bevy pin has the `Scene`/`Template`/`ResolvedScene` system. It is not the older
+`DynamicScene` file-loader implementation. Separately, its Reflect deserializer resolves a type
+registration and deserializes members using that type. `visit_struct` rejects unknown fields;
+`ListVisitor` deserializes each member with the registered element type. Custom deserializers and
+processors can own different policies. This code does not establish universal required-field,
+numeric-range or aggregate work/retention-budget enforcement. [^B-validation-deserialize]
+
+`ScenePatch::resolve` retains an `Arc<ResolvedSceneRoot>`; `spawn` requires that resolved result
+and applies its templates. Template construction can return errors for contextual requirements.
+The blanket `Template` implementation for `Clone + Unpin` simply clones the typed value.
+`ErasedTemplate::apply` builds the output and applies its scene effect; this route does not
+reserialize the value into a generic tree for another universal shape/cost pass. Reflect-based
+ECS insertion is a separate route: `from_reflect_with_fallback` tries `FromReflect`, then
+default-plus-apply and `FromWorld`-plus-apply, and can panic on invalid registrations or failed
+construction. Neither route promises validation of every domain invariant. [^B-scene]
+[^B-template] [^B-reflect] [^B-validation-apply]
+
+The stock Tilemap chunk checks data length against chunk dimensions in its insertion hook and
+in the update system filtered by `Changed<TilemapChunkTileData>`. It reports an invalid length
+and skips construction/update; valid changed data are completely repacked. This is a concrete
+check at use/change, not a generic scan of all unchanged chunks every frame. It is also not a
+general incremental-validation or memory-budget mechanism. [^B-chunk]
+
+### Nara: Separate Necessary Checks From Repeated Traversal
+
+The current compiler admits a source value, materializes defaults and then invokes
+`validate_component_value_with_limits`. The default freezer has already obtained the complete
+effective cost. For a frozen read, that validator nevertheless walks the complete value again
+through `validate_value_materialization_budget` before checking field coverage and shape.
+The semantic checks remain necessary because freezing defaults alone does not validate the
+whole component; the repeated cost traversal is a distinct operation to remove. Its raw
+no-insertion branch already trusts the caller's raw admission, so the two storage choices now
+have unnecessarily different cost behavior. [^N-validation-current]
+
+Preparation also has genuinely different contexts. A source-compiled input currently performs
+complete receiving validation. A processed Runtime candidate already reuses pure admission
+after checking its exact immutable definitions witness, while still checking receiving World
+and asset state. This existing Runtime path demonstrates a local reuse mechanism; it does not
+authorize trusting an arbitrary borrowed value or a candidate admitted against another schema.
+Reference planning also scans for undeclared reference leaves, including opaque payloads. Such
+a scan has a semantic purpose until the unchanged value's original owner retains that fact;
+it cannot be removed merely because no schema-declared reference exists. [^N-validation-current]
+
+The measured semantic-validation wall envelope increased from 1.377 to 76.514 ms in the
+[balanced frozen-program comparison](../benchmarks/2026-11-14-development-runtime-costs.md#frozen-effective-reads).
+Defaults fell from 242.509 to 94.931 ms, but complete materialization remained
+371.721/367.683 ms before/after. These are cumulative named wall envelopes, not isolated
+benchmarks of one validator. They justify investigating redundant scans and view traversal;
+they do not assign the entire regression to one call or establish a future speedup.
+
+The next implementation should use the following division of responsibility:
+
+| Situation | Required checks and reuse |
+| --- | --- |
+| File, public dynamic value or arbitrary migration/extension output | Check format, structural limits, type/field semantics and references before the receiving owner relies on the value. Known project input still needs diagnostics for ordinary mistakes. |
+| Unchanged effective value inside its original compiler operation | Reuse the default freezer's complete cost and the already admitted schema. Validate component semantics once at the point they become complete. Do not repeat a full cost walk to establish the same fact. |
+| Property edit, migration, default insertion or reference rewrite | Re-establish facts invalidated by that transformation. A callback returning arbitrary data cannot inherit the original value's admission. Do not assume a changed result is valid solely because the input was valid. |
+| Closed candidate with exact definitions at preparation | Reuse applicable pure value facts through its existing private owner. Check current World, namespace, product membership and reservations where they are actually consumed. A different definition or stricter receiving policy still requires its own admission. |
+| Commit after asynchronous preparation | Recheck mutable owner/generation/resource facts needed to publish. Do not use a complete immutable-payload traversal as a substitute for those current-state checks. |
+
+This is a direction for the next owner-local refactor, not an implemented bypass. Prefer Rust
+ownership and the existing compiler/candidate state to a public `unchecked` API, global
+address/hash cache or general validation-certificate framework. Logical size and retained
+allowances can be checked from applicable admitted facts; work counters should account for the
+operations actually performed, rather than preserve removed scans. Tests should protect the
+receiving limits and failure behavior, without making an incidental traversal count a permanent
+product requirement. Detailed accounting machinery itself needs a concrete bounded-operation
+consumer; neither reference engine makes it a prerequisite for normal game execution.
+
+### Current Ownership And Escape Contracts
+
+These are the existing Nara contracts to reconcile during implementation, rather than a reason
+to keep every current validation pass. Neither inspected upstream path supplies the same
+accounting contract. [^N-contract] [^N-retain] [^N-custody] [^N-receive]
 
 | Boundary | Required behavior |
 | --- | --- |
 | Public copies and escapes | Deep-copy public record/document values, including contextual defaults. A public clone must remain readable after original reservations refund without retaining that original allocation. A private share must not escape as an uncharged owning handle. |
 | Receiving/materialized value | Retain complete per-occurrence node/byte/depth limits, schema owner/version/shape and reference checks. A shared or typed payload cannot become a one-node exemption. Receiving a compiled value must not silently add newly declared defaults or run a new migration. |
-| Cumulative work | Keep source admission, complete effective-value validation, reference interpretation and pre-allocation scratch/copy admission. Reusing storage does not authorize raising limits or dropping work charges. Model new container/path/view overhead and any fallback flattening explicitly. |
+| Cumulative work | Admit actual traversal, reference interpretation, scratch and copying. Reuse valid facts when the original owner and its unchanged data justify it; do not require another traversal merely to charge the same logical size. Changes to accounting/refusal behavior need an explicit implementation record. |
 | Retained ownership | Source, compiled and independently prepared owners retain full logical payload allowances and backing overhead independently. Do not deduplicate charges based on Arc identity. Refunding an original reservation must never leave an independently retained share without its admitted owner. |
 | Retirement and reachability | Payloads own only their data, not their raw Prefab, resolver, snapshot or candidate. Preserve raw-Prefab release while escaped SceneSource/prepared data remain valid, existing generation capacity and final refund at the last actual owner. |
 
 Existing compiler source charges metadata and complete value work before sharing, and reserves
 default-program temporary storage before materialization. Source and compiled retention separately
-include both the full payload and backing fee. Preserve exact/one-short rejection behavior and
-the original refusal ordering unless a separately justified accounting-contract change is adopted;
-sharing alone is not that justification. Existing tests are source evidence here, not rerun results.
+include both the full payload and backing fee. A locality refactor must identify which facts remain
+valid and which checks/charges it removes. Exact/one-short receiving controls remain meaningful;
+tests tied to eliminated internal work require reviewed new expectations. This investigation
+changes no limits, counters or refusal ordering. Existing tests are source evidence here, not rerun results.
 [^N-work] [^N-retain] [^N-custody] [^N-sharing-tests]
 
 ## 6. Common Issues and What the Sources Do Not Prove
@@ -392,8 +495,9 @@ sharing alone is not that justification. Existing tests are source evidence here
 
 ## 7. Primary References
 
-All `N-*` references bind to Nara revision `2dd008301e8a8ebd05e7a6a4d8e79412d3f5ca64` unless the
-linked historical measurement names its frozen program. Local Nara paths are primary; remote
+All `N-*` references bind to Nara revision `2dd008301e8a8ebd05e7a6a4d8e79412d3f5ca64` except
+`N-validation-current`, which uses `c1edb21`, and linked measurements naming their frozen program.
+Local Nara paths are primary; remote
 Godot/Bevy links below pin the exact local source inspected. Links are not claims that a later
 release preserves these mechanisms.
 
@@ -523,3 +627,30 @@ release preserves these mechanisms.
     `queue_material2d_meshes`.
 [^B-shader]: [`tilemap_chunk/tilemap_chunk_material.wesl`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_sprite_render/src/tilemap_chunk/tilemap_chunk_material.wesl#L27),
     `get_tile_data`, `fragment`.
+
+### Validation Follow-Up References
+
+[^G-validation-parser]: [`VariantParser::_parse_array`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/variant/variant_parser.cpp#L1545)
+    and `_parse_dictionary` at line 1579; `VariantWriter::write` recursion checks at line 2048.
+[^G-validation-loader]: [`ResourceLoaderText::_parse_ext_resource`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/resource_format_text.cpp#L128),
+    `_parse_sub_resource` at line 107, node-property storage at lines 285-302,
+    cached-resource reuse at lines 567-571 and resource assignment at line 670.
+[^G-validation-instantiation]: [`SceneState::_instantiate`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/packed_scene.cpp#L226),
+    native property assignment at line 567 and deferred node-reference resolution at lines 677-719.
+[^G-validation-property]: [`Object::validate_property`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/object/object.cpp#L623)
+    and [`Timer::set_wait_time`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/main/timer.cpp#L93).
+[^B-validation-deserialize]: [`TypedReflectDeserializer::deserialize`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/serde/de/deserializer.rs#L352),
+    [`visit_struct`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/serde/de/struct_utils.rs#L91)
+    and [`ListVisitor::visit_seq`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/serde/de/lists.rs#L27).
+[^B-validation-apply]: [`ResolvedSceneRoot::{resolve, spawn, apply}`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/resolved_scene.rs#L26),
+    `ErasedTemplate::apply` at line 722 and `SceneEffect::apply` at line 752;
+    [`EntityTemplate::build_template`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_ecs/src/template.rs#L450).
+[^N-validation-current]: Nara `c1edb21`: [compiler normalization](../../crates/nara_scene/src/prefab/overlay/compile/staged/values.rs),
+    `materialize_program` source admission/defaults/validation and `materialize_defaults`;
+    [frozen defaults](../../crates/nara_reflect/src/effective/frozen.rs), `FrozenComponentDefaults::cost`;
+    [Reflect validation](../../crates/nara_reflect/src/registry.rs), `validate_component_value_with_limits`;
+    [receiving validation](../../crates/nara_scene/src/validation.rs),
+    `validate_effective_component_values` and `preflight_compiled_scene_with_context`;
+    [materialization selection](../../crates/nara_scene/src/spawn.rs), `exact_definitions_admitted`;
+    [reference planning](../../crates/nara_reflect/src/entity_reference.rs),
+    `collect_present_reference_leaves_with_admission` and `find_undeclared_reference_path`.

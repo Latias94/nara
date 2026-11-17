@@ -3404,6 +3404,47 @@ traversal against the same frozen programs and original game. Full Foundation/R9
 physical-memory and numerical runtime-tail budgets, larger named workloads and foreign execution
 remain open. No domain record split, source upgrade, new cache or lifecycle owner is introduced.
 
+#### Validation Locality After The Frozen-Read Comparison
+
+Status: pinned-source investigation complete; production simplification is next, not implemented
+by this documentation update. The [validation study](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+compares actual Godot parsing/resource/property paths with Bevy Reflect, resolved Scene and typed
+Tilemap paths. Both check construction or changed state without imposing Nara's repeated generic
+node/byte/work-budget passes on this route. Godot also allows some property/dependency errors to
+continue, while Bevy's typed construction leaves domain constraints to their owners. Neither is
+evidence that a successful load universally validates every value, nor a reason to retain every
+current Nara scan.
+
+The first correction should remove repeated cost admission of the same unchanged effective value
+inside the original compiler operation. `materialize_defaults` already returns its complete cost;
+the following `validate_component_value_with_limits` rescans a frozen read for the same budget
+before doing necessary field semantics. Reuse the original cost and admitted schema while retaining
+required-field, shape, numeric and reference checks. Preserve standalone public validators for
+unadmitted dynamic values. Do not expose a public unchecked constructor or introduce a general
+validation-receipt framework merely to connect these existing operations.
+
+Trace source-compiled receiving preparation separately from that immediate duplicate. Its current
+complete pass also checks namespace, products and the receiving definition. Only reuse pure facts
+when the existing immutable candidate owns them against the exact receiving definitions/policy.
+The processed Runtime candidate already has this distinction. Migration and arbitrary callback
+output, property edits and reference rewrites invalidate applicable old facts; current World,
+resource/reservation and asynchronous publication checks stay at their actual consuming owners.
+Reference-free schema metadata alone does not prove opaque payloads contain no undeclared reference.
+
+Existing per-occurrence logical/depth/byte and retained-owner allowances remain the contract for
+the first correction. Removing an operation should remove its actual work/scratch fee rather than
+emulate the old traversal to preserve a counter. Record revised work expectations and refusal
+ordering where affected; exact/one-short receiving limits, original diagnostics and refusal before
+callbacks or allocation remain useful behavioral controls. More elaborate accounting needs a
+named bounded-operation consumer and must not become a prerequisite for ordinary native gameplay.
+
+Qualify the affected Reflect/Scene and public receiving paths, then the unchanged authored game
+and original-input GPU replay/retirement trajectory. Compare balanced frozen programs against the
+qualified frozen-read executable; avoid simultaneous representation/encoding changes that obscure
+the cause. Do not rerun unrelated Editor or UI suites. This source investigation runs no Cargo,
+runtime or upstream benchmark and claims no new acceleration. Full Foundation/R9/R10/R12 remain
+active; this unit does not reopen UI, Dialogue or physical mixed-DPI product work.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
