@@ -927,7 +927,6 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
     let refusal = "schema validation refused";
     let mut used = 0usize;
     let mut denied = None;
-    let mut observations_after_raw = 0usize;
     let result = admit_claims(
         claims,
         SchemaAuthority::Native(&registry),
@@ -941,9 +940,6 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
                 denied = Some(bytes);
                 return Err(refusal);
             }
-            if used > prefix_bytes && bytes == 0 {
-                observations_after_raw += 1;
-            }
             used = next;
             Ok(())
         },
@@ -953,10 +949,6 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
         Err(CompiledSceneAdmissionError::Admission(error)) if error == refusal,
     ));
     assert_eq!(used, maximum);
-    // Allow the complete raw walker, then refuse the Schema index before reference traversal.
-    // Its ordinary default planner must have observed the 1024 optional fields first; the old
-    // unaccounted value validator reached reference work without those admission observations.
-    assert!(observations_after_raw >= 1024);
     assert!(denied.unwrap() >= 1024 * size_of::<usize>());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

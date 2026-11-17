@@ -153,6 +153,10 @@ An additional validation pass needs a distinct invariant, changed data or a diff
 contract. Existing traversal counters alone do not justify repeating a scan. Use the corresponding
 mature-engine loading/construction path as evidence when selecting where new checks belong;
 ordinary typed gameplay does not require re-encoding components for generic schema validation.
+The same separation applies inside a receiving operation after it has checked explicit defaults,
+complete value limits and Native reference requirements. Its semantic tail still admits actual
+index, shape and diagnostic allocations before constructing them; it does not select defaults or
+re-establish the just-checked cost. This is local reuse, not permission to skip other receiving facts.
 
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque

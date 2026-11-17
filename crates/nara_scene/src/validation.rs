@@ -343,13 +343,9 @@ fn validate_effective_component_values<'a, E>(
                 continue;
             }
         }
-        // Every authority carries an admitted immutable Schema. Reuse Reflect's admitted
-        // validator and account its Schema-sized path/index and shape scratch before it
-        // allocates; the raw value size does not bound the number of optional fields.
-        match nara_reflect::__private::validate_component_value_with_admission(
+        match nara_reflect::__private::validate_explicit_component_value_with_admission(
             schema,
             effective,
-            limits,
             &mut admit_validation_work,
         ) {
             Ok(()) => {}

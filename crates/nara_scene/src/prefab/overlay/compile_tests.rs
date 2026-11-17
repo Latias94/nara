@@ -978,10 +978,9 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         &mut admit_unit,
     )
     .unwrap();
-    nara_reflect::__private::validate_component_value_with_admission(
+    nara_reflect::__private::validate_explicit_component_value_with_admission(
         schema,
-        &value,
-        Default::default(),
+        (&value).into(),
         &mut admit_unit,
     )
     .unwrap();

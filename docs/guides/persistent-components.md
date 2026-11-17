@@ -75,7 +75,10 @@ Use the ordinary registry and Scene operations to establish their documented adm
 a borrowed read between callbacks is not a reason to run a standalone validator again. Inside
 compilation, default materialization already admits the complete effective size/depth; field
 semantics are checked separately without repeating that cost traversal. Receiving operations
-still own their definition, resource and World checks.
+still own their definition, resource and World checks. After a receiving operation has checked
+explicit defaults, complete value limits and Native references, it uses the same explicit-field
+semantics with admission of actual schema-index, shape and diagnostic scratch. It does not invoke
+default selection again merely because the data use a frozen representation.
 
 `rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
 borrowed reads and return one independent owned result. They validate the complete reference

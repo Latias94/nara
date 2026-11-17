@@ -2863,6 +2863,20 @@ pub fn validate_component_value_with_admission<'a, E>(
         (Some(source), Some(defaults)) => defaults.read(source),
         _ => value,
     };
+    validate_explicit_component_value_with_admission(schema, effective, admit)
+}
+
+/// Checks the same explicit field semantics while admitting index, shape and diagnostic scratch.
+///
+/// The original owner must already have admitted the immutable Schema, complete effective value
+/// and applicable size/depth limits. No default plan or whole-payload cost walk is performed.
+/// Deltas describe actual semantic work and scratch; caller refusals retain their exact identity.
+#[doc(hidden)]
+pub fn validate_explicit_component_value_with_admission<E>(
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
     // sort_unstable allocates no scratch beyond the collected offsets. Charge comparison
     // work against actual declaration lengths before constructing this temporary index.
     let comparisons = (usize::BITS - schema.fields.len().leading_zeros()) as usize;
@@ -2889,13 +2903,7 @@ pub fn validate_component_value_with_admission<'a, E>(
         .map_err(ComponentValueAdmissionError::Admission)?;
     }
     let index = SchemaPathIndex::from_schema(schema);
-    validate_component_value_coverage_admitted(
-        schema,
-        &index,
-        effective,
-        false,
-        &mut Some(&mut admit),
-    )
+    validate_component_value_coverage_admitted(schema, &index, value, false, &mut Some(&mut admit))
 }
 
 fn validate_component_value_coverage<'a>(

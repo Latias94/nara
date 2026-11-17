@@ -176,7 +176,7 @@ pub mod __private {
     pub use crate::registry::{
         ComponentRegistrySnapshotWitness, ComponentValueAdmissionError,
         validate_component_value_with_admission, validate_explicit_component_value,
-        validate_schema_capabilities,
+        validate_explicit_component_value_with_admission, validate_schema_capabilities,
     };
 
     use crate::{
