@@ -5687,6 +5687,23 @@ preparation 295.399/230.450 ms before/after. Overlapping envelopes, before-proce
 correlated lifetimes do not establish exclusive CPU/GPU, physical-memory, process or frame-tail
 guarantees. Broader definition reuse and full Foundation/R9/R10/R12 remain open.
 
+The [same-operation Native codec successor](2026-11-13-rust-state-reconstruction-plan.md#same-operation-native-codec-admission)
+at `6128594` removes repeated default/Native/field checks between complete Scene receiving validation and
+the following original codec. Standalone public preflight retains full dynamic-input admission.
+Dispatch compares the current shared limits with the original receiving policy and falls back to
+ordinary preflight if a codec changes them. Codec/domain construction, actual assets, bound
+`PreparedComponent`, lifecycle, World and publication/retirement retain their existing paths.
+No cross-stage witness, caller-selected skip flag, cache or new lifecycle owner is added. Final
+owner/public workflows pass 1,353/1,353 and original release game/native qualification 148/148,
+including 64/4K/16K travel, 27 GPU replays and both panic-cleanup controls. Four balanced processes
+add twelve 16K lifetimes and 36 replays. Independent Scene consumers pass 157/157 with one
+original manual timing case skipped; owning checks and scoped review corrections are complete. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#same-operation-native-codec-admission)
+records cumulative Native decoding/preflight wall medians 600.139/474.344 ms and unbound
+preparation 240.167/189.013 ms before/after. Overlapping envelopes and finite correlated samples
+do not establish exclusive CPU/GPU, physical-memory or process/frame-tail budgets. Remaining
+source/reference work, broader definition reuse and full Foundation/R9/R10/R12 stay open.
+
 Future runtime design must compare the corresponding mature-engine operation before adding
 another scan. Prefer typed construction, loader/setter/changed-data checks and facts retained by
 the unchanged owner. Identify the actual invalidated invariant and current mutable state; do not

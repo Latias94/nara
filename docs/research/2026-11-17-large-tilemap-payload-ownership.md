@@ -471,6 +471,16 @@ responsibilities and remain. Direct data replacement and independently decoded c
 establish their own measurements. Qualification and measured results belong to that owning unit;
 this is not a new general certificate or exact-definition reuse mechanism.
 
+The [same-operation codec successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#same-operation-native-codec-admission)
+at `6128594` removes another local repetition: after Scene completes every record's receiving checks,
+generic Native preflight previously selected defaults and repeated Native/field validation.
+Internal dispatch now invokes the original bound codec directly. Because an earlier codec can
+change shared context limits, dispatch compares that actual policy and falls back to ordinary
+preflight when it changes. Standalone public preflight remains complete. The
+[balanced original-game comparison](../benchmarks/2026-11-14-development-runtime-costs.md#same-operation-native-codec-admission)
+records the selected workload and limits. This keeps reuse in the current operation rather than
+adding a cross-stage identity or certificate to avoid a scan that just ran.
+
 Apply the same source comparison before introducing future checks. Ordinary typed gameplay must
 not become a generic serialization/validation round trip. Validate external dynamic input at its
 loader and a changed domain value at its constructor, setter or changed-data system. Reuse an

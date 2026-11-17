@@ -3407,6 +3407,21 @@ general process or frame-tail budgets. Broader definition-wide reuse and full Fo
 remain open. The owning plan also requires comparison with corresponding Godot/Bevy source paths
 before adding validation; historical counters alone do not justify scanning unchanged data again.
 
+The [same-operation Native codec unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#same-operation-native-codec-admission)
+at `6128594` dispatches original bound codecs after Scene's complete receiving check without repeating its
+default/Native/field admission. Standalone public preflight stays complete. An actual change to
+shared decode limits routes later values through ordinary preflight; domain/assets, native
+binding, lifecycle, World and publication owners remain. No new witness/cache/skip mode is
+introduced. Final owner/public controls pass 1,353/1,353 and original release game/native
+qualification 148/148. Independent Scene consumers pass 157/157 with one original manual timing
+case skipped; owning checks and scoped review corrections are complete. The
+[balanced 16K comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#same-operation-native-codec-admission)
+adds twelve lifetimes and 36 replays, observing cumulative Native decoding/preflight wall medians
+600.139/474.344 ms and unbound preparation 240.167/189.013 ms before/after. These overlapping
+finite envelopes do not establish exclusive CPU/GPU, physical-memory, general process or
+numerical frame-tail performance. Broader cross-preparation reuse, source/reference costs,
+foreign execution and full Foundation/R9/R10/R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

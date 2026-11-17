@@ -2721,6 +2721,76 @@ cook/replacement behavior have separate public CPU controls. Stored facts do not
 value or a different receiving definition. Broader definition-wide reuse, source decoding, larger
 named workloads and full Foundation/R9/R10/R12 remain open.
 
+### Same-Operation Native Codec Admission
+
+Date: 2026-11-17. Before is the qualified immutable-measurement executable with SHA256
+`65f1fabdd8729ee220a48fb6ae4d94a5622ec4e175b11706980c13bf99845cd4`. Both programs already
+retain frozen effective reads and measured cost/depth, reuse receiving aggregate facts and
+retained fees, and separate field semantics from default/cost admission. This successor at `6128594` removes
+the generic native preflight's repeated default, Native-reference and field checks immediately
+after Scene's complete all-record receiving admission. Internal dispatch still selects the
+original binding and invokes its codec with the original context. An earlier codec's changed
+materialization limits trigger ordinary preflight for later values. Standalone public preflight
+keeps complete dynamic-input checks. No new definition witness, caller-selected skip mode, cache
+or lifecycle owner is introduced. The
+[owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#same-operation-native-codec-admission)
+records actual source/Runtime paths and mutable-policy controls.
+
+Four serial before/after/after/before processes pass the unchanged original 16K travel, copied
+source removal, original-input GPU replay and physical cleanup: twelve complete lifetimes and
+36 replays, six lifetimes per program. Rust1.95 release, manifests/locks, source generator,
+observation hooks, phase-call counts and hardware DX12 RTX4090 adapter match. Finite summaries
+are [1 before](data/2026-11-14-development-runtime/authored-tiles-single-native-codec-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-single-native-codec-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-single-native-codec-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-single-native-codec-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-single-native-codec-paired-metadata.json).
+They retain complete phase/source/acceptance/cleanup/replay facts and runtime/frame
+distributions, omitting only the same four raw per-frame arrays as earlier comparisons. Original
+complete-report hashes remain; raw reports and programs stay outside target.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 77.225 ms | 79.579 ms |
+| Shared record capture | 0.032 ms | 0.032 ms |
+| Migration, including post-migration admission | 0.039 ms | 0.042 ms |
+| Default materialization | 104.818 ms | 101.964 ms |
+| Compiler semantic validation | 0.809 ms | 0.823 ms |
+| Reference planning | 118.642 ms | 120.833 ms |
+| Reference-program validation | 0.019 ms | 0.016 ms |
+| Complete component materialization | 303.354 ms | 304.266 ms |
+| Flat claim admission | 342.284 ms | 337.891 ms |
+| Native decoding and preflight | 600.139 ms | 474.344 ms |
+| Unbound preparation | 240.167 ms | 189.013 ms |
+| Expansion, including nested Prefab acquisition | 943.263 ms | 939.738 ms |
+| Source payload decode | 700.519 ms | 715.540 ms |
+
+Observed Native decoding/preflight is 20.96% lower and unbound preparation is 21.30% lower.
+Their cumulative wall envelopes overlap; savings are not additive exclusive CPU costs. Source
+decode, compiler/default materialization, flat sealing and expansion are not changed by this
+operation, so their variation is not credited as removed work. Actual codec/domain construction,
+asset preparation, strict receiving limits/definitions and World/publication/retirement checks
+remain. This accepted-value workload does not isolate the changed-policy fallback cost; the
+public codec-mutation control separately qualifies its refusal behavior.
+
+Process walls in order are 18.584, 18.102, 18.319 and 18.461 seconds. Per-process Native
+decode/preflight medians are 600.144, 467.618, 477.742 and 587.600 ms; corresponding preparation
+medians are 240.605, 188.226, 189.799 and 234.332 ms. Both after observations are below both
+before observations in this finite sample. Correlated lifetimes and uncontrolled host, driver,
+cache and clock state do not establish statistical confidence or a general whole-process gain.
+Unchanged wall instrumentation and pacing measure neither exclusive CPU/GPU duration, physical
+memory, scanout nor numerical frame-P99 or production-tail budgets. After-program SHA256 is
+`6d842833a451972e5c6484cbb3e9e2997ae702ebfd6f8a17b5dd10d383cdf60e`.
+
+The identical after executable separately passes the complete release game/library/metric/span/
+probe/native selection, 148/148 without skips at `fc15dda2-6df9-4ff1-bc62-048c82ef638e`, 62.612
+seconds after a 9m51s serial build. Baseline and authored 64/4K/16K travel, 27 original-input
+GPU replays and both observer-panic cleanup controls remain. Final owner/public controls pass
+1,353/1,353, including raw/frozen and independently cooked/readmitted native values, concrete
+codec-domain refusal/retry and actual shared-limit changes. Broader cross-preparation definition
+reuse, remaining source/reference costs, larger named workloads and full Foundation/R9/R10/R12
+stay open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

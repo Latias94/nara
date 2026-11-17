@@ -3782,6 +3782,103 @@ broader receiving-definition reuse, larger named workloads and numerical runtime
 budgets require their own attribution. Full Foundation/R9/R10/R12 and foreign execution remain
 open; the finite wall comparison is not their completion.
 
+#### Same-Operation Native Codec Admission
+
+Status: implemented at `6128594` and qualified on Windows/Rust1.95 below. The receiving
+Scene kernel fully checks explicit defaults, aggregate limits, Native references, field semantics,
+assets, local references and current flat definitions before its first codec. It then invokes
+Reflect's standalone native preflight, which selects defaults and repeats Native and field
+admission for the same unchanged value and registry. Remove that second pass within this exact
+operation. Existing processed Runtime preparation has already checked its exact immutable
+definition selection before entering the same dispatch loop.
+
+Keep Reflect's standalone public preflight complete for arbitrary dynamic input. Its documented
+default selection, materialization/Native and field checks must remain. Add only an engine-internal
+dispatch into the original registry binding for a value whose complete receiving admission just
+succeeded. The shared Scene loop uses it after all-record validation, including the existing
+stricter-policy and different-definition paths. Do not add a caller-controlled skip flag, a public
+unchecked constructor, another stored witness, global cache or new lifecycle owner. Broader
+cross-preparation definition reuse stays separate.
+
+The public decode context allows a codec to change the shared materialization limits. Capture
+the receiving limits at entry and compare them before dispatch. Unchanged limits can reuse the
+just-completed checks. If an earlier codec changes them, use the original standalone preflight
+for the later value so stricter-policy refusal and diagnostic precedence remain. This is a
+constant-time check of actual mutable policy, not a new payload scan on unchanged input.
+
+The original codec still constructs and checks its domain value, resolves actual assets through
+the original decode context and returns its bound `PreparedComponent`. Required components,
+native claims, lifecycle hooks, target World, resource baselines, publication and retirement keep
+their existing owners. A later invalid record must still prevent every earlier codec; domain
+codec failure must still preserve the World and allow an ordinary retry. Independent cooked
+claims obtain their existing complete admission before any Runtime reuse.
+
+Qualify raw/frozen, source/native and cooked/readmitted public workflows, concrete codec refusal
+and standalone default/Native refusal. Reuse existing exact/stricter limits, receiving-definition,
+asset/reference, lifecycle and independent consumer controls rather than invent another matrix.
+Retain the original release game, source removal, accepted GPU replay and cleanup trajectory.
+Compare balanced frozen programs against the qualified immutable-measurement executable with
+the same source/compiler/observation controls. Report overlapping wall envelopes and unchanged
+phases honestly. Full Foundation/R9/R10/R12 remains active; Editor/UI/Dialogue stays paused.
+
+##### Implementation And Qualification
+
+Reflect's internal dispatch selects the same original binding, invokes its codec with the same
+context and binds the resulting `PreparedComponent`. The standalone public preflight is unchanged.
+Scene captures its admitted limits once, completes the original all-record receiving check and
+uses internal dispatch only while those limits remain equal. A codec's changed limits route
+subsequent records through the original preflight without replacing the entry baseline. No new
+stored identity, flag selected by callers, retained allocation or lifecycle owner is introduced.
+
+Production all-feature Reflect/Scene libraries compile. The initial owner-library selection passes
+1,246/1,246 without skips at `4b67287b-89f5-48cd-8827-d368ad311f5c`, 70.880 seconds, before
+the mutable-policy guard is added. Independent source review confirms the guard and exact
+direct/Source/Runtime paths. It also catches a new test's `unwrap_err` requirement for
+`PreparedComponent: Debug`; error extraction is corrected without changing the production type.
+The in-flight compilation reports that original fixture error; the next stable-source invocation
+passes all 1,353/1,353 owner/public tests without skips at `de175f8b-6ace-423f-9194-a2dbb97a07ba`,
+75.043 seconds. This includes all 1,246 owner cases and 107 selected public controls, including
+the three new native-decoding workflows, standalone defaults/Native refusals, strict receiving
+limits, changed Schema/defaults, assets/references, export and original data publication.
+
+The new real-codec policy case tightens shared limits in the first sorted entity, requires the
+later value to refuse before its codec, compares its observed/maximum diagnostic against the
+standalone public preflight and preserves the original World/identity state. Source raw/frozen
+and independently cooked/readmitted values retain their complete defaults, context and opaque
+allocation identity through prepare and original-owner retirement. Concrete codec/domain refusal
+publishes no Scene and allows an ordinary retry under the same occurrence. Preparation checks
+actual population changes rather than assuming the World's internal resource entity count.
+Both scoped agents are closed. Complete release game/library/metrics/span/probe/native
+qualification passes 148/148 without skips at `fc15dda2-6df9-4ff1-bc62-048c82ef638e`, 62.612
+seconds after a 9m51s serial build. Original baseline and authored 64/4K/16K travel, 27 GPU
+replays, both observer-panic cleanup controls and the full 16K CPU record probe remain.
+Four balanced serial 16K processes then complete twelve lifetimes and 36 replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#same-operation-native-codec-admission)
+records cumulative Native decoding/preflight wall medians 600.139/474.344 ms and unbound
+preparation 240.167/189.013 ms before/after. The envelopes overlap and savings are not additive
+CPU costs. Source decode, compiler/default work and flat sealing are unchanged; their observed
+variation is not credited to this operation. Correlated lifetimes and uncontrolled host/driver/
+cache/clock state prevent statistical or general process/CPU/GPU/physical-memory/frame-tail
+claims.
+
+The independently locked Scene consumer passes 157/157 with one existing manual timing case
+skipped at `8c70103d-cdb8-4836-8d2f-e92207afa60f`, 18.858 seconds after a 5m11s debug build.
+Owning all-target/all-feature correctness Clippy and feature-free Reflect/Scene library compilation
+pass; pre-existing warnings remain. Root and sample formatting pass. The 148 frozen source/control
+hashes match the qualified tree and all 15 paused UI/Dialogue paths remain byte-identical. Finite
+summary exports retain complete phase/source/acceptance/cleanup/replay facts, distributions and
+original raw-report digests, omitting only the same four raw per-frame arrays as prior comparisons.
+Added local document paths/fragments, summary/raw report digests, complete acceptance facts and
+Git whitespace checks pass.
+No dependency/lock, source-format, numerical capacity or remote-publication change belongs to
+this unit.
+
+This closes same-operation codec admission and the selected complete Windows consumer scope.
+It removes locally repeated work without making arbitrary dynamic input trusted or adding
+cross-stage identity/state merely to reuse a check that just ran. Broader receiving-definition
+reuse, remaining source/reference traversal, larger named workloads, numerical runtime budgets,
+foreign execution and full Foundation/R9/R10/R12 remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
