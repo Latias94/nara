@@ -3437,6 +3437,20 @@ process ordering is inconsistent. This establishes the selected payload result, 
 CPU/GPU, physical-memory, general process or numerical frame-tail performance. Broader
 preflight/header work, reference costs, foreign execution and full Foundation/R9/R10/R12 remain open.
 
+The [borrowed preflight-key unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#borrowed-keys-in-structural-preflight)
+at `9bd3a54` keeps serde input-lifetime keys borrowed in the original per-map duplicate index, copies transient
+keys after admission and moves owned strings. Original decoded equality, duplicate rejection,
+limits, error order and file gates remain; no new owner, parser or interner is introduced.
+Core format/allocation controls pass 13/13, owner/public controls 1,148/1,148 and original release
+game/native qualification 148/148. Independent Scene consumers pass 157/157 with one original
+manual timing case skipped. Production review finds no P1/P2. The
+[balanced 16K report](../../benchmarks/2026-11-14-development-runtime-costs.md#borrowed-keys-in-structural-preflight)
+adds twelve lifetimes and 36 replays, observing structural-preflight wall medians 338.446/206.105
+ms before/after with nearly equal source payload decode. Nested structure/expansion overlaps
+the changed work and full process ordering is inconsistent. This is scoped allocation/workload
+evidence, not exclusive CPU/GPU, physical-memory or numerical frame-tail qualification. Header
+fusion, remaining source/reference work, foreign execution and full Foundation/R9/R10/R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

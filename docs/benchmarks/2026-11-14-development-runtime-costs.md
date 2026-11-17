@@ -2865,6 +2865,83 @@ malformed data retain rejection, without an exact parser-error-text or position 
 wire/header consolidation, remaining reference costs, larger named workloads and full
 Foundation/R9/R10/R12 stay open.
 
+### Borrowed Keys In Structural Preflight
+
+Date: 2026-11-17. Before is the qualified known-scalar executable with SHA256
+`054573517ce2a7d6dfd716869ec54827afebe669fdd66be30fe322c1ae7a00f0`. Both versions retain
+frozen effective reads, measured cost/depth, same-operation codec reuse and known-tag scalar
+decoding. This successor at `9bd3a54` changes only temporary key storage in the original generic structural
+preflight. Its existing per-map duplicate set borrows serde input-lifetime keys, copies transient
+keys after the original budgets and moves owned keys. Equality uses decoded string contents
+across all forms. Original nodes, depth, strings, aggregate bytes, map items, duplicate rejection,
+header gates, payload semantics, source wire and publication owners remain. The
+[owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#borrowed-keys-in-structural-preflight)
+separates this change from any proposed merger of structural preflight and header decoding.
+
+Four serial before/after/after/before processes pass original unchanged 16K travel, copied-source
+removal, retained-input GPU replay and physical cleanup: twelve complete lifetimes and 36 replays,
+six lifetimes per program. Rust1.95 release, manifests/locks, source generator, observation hooks,
+phase-call counts and hardware DX12 RTX4090 adapter match. Finite summaries are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-borrowed-shape-keys-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-borrowed-shape-keys-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-borrowed-shape-keys-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-borrowed-shape-keys-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-borrowed-shape-keys-paired-metadata.json).
+Complete phase/source/acceptance/cleanup/replay facts and distributions remain, omitting only
+the same four raw per-frame arrays as preceding comparisons. Complete raw-report digests remain;
+raw reports and frozen programs stay outside target. Core paths first changed here were absent
+from the preceding selected-source receipt. Metadata separately records their exact before Git
+blob hashes, checked equal between the before implementation and its frozen build base, rather
+than treating them as retroactively captured working-file hashes.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Wire structural preflight | 338.446 ms | 206.105 ms |
+| Header decode | 37.149 ms | 40.865 ms |
+| Source payload decode | 289.616 ms | 288.053 ms |
+| Source completion/domain shape | 48.277 ms | 48.821 ms |
+| Original-value cost/capture admission | 90.010 ms | 89.709 ms |
+| Shared record capture | 0.025 ms | 0.027 ms |
+| Migration, including post-migration admission | 0.040 ms | 0.040 ms |
+| Default materialization | 110.317 ms | 113.714 ms |
+| Compiler semantic validation | 0.853 ms | 0.795 ms |
+| Reference planning | 118.687 ms | 116.648 ms |
+| Reference-program validation | 0.018 ms | 0.015 ms |
+| Complete component materialization | 321.283 ms | 323.020 ms |
+| Flat claim admission | 349.025 ms | 348.845 ms |
+| Native decoding and preflight | 464.342 ms | 467.891 ms |
+| Unbound preparation | 184.239 ms | 187.527 ms |
+| Structure, including nested Prefab work | 416.508 ms | 358.178 ms |
+| Expansion, including nested Prefab acquisition | 741.037 ms | 689.141 ms |
+
+Observed structural-preflight wall time is 39.10% lower. Structure and expansion include nested
+Prefab decoding/preflight and overlap that work; reductions are not additive exclusive CPU
+savings. The semantic payload is unchanged, and source payload decode is nearly equal. Header,
+compiler/default/reference and Native-preparation implementations are unchanged; their variation
+receives no optimization credit. The original per-map set still allocates nodes. Parser scratch
+for escaped strings and owned key allocations made before callbacks remain. The separate Core
+allocation control proves no key-sized copy for its finite borrowed-key cases, not zero parsing
+allocation or whole-process physical-memory savings.
+
+Process walls are 16.217, 15.776, 16.037 and 16.014 seconds in order. Per-process preflight
+medians are 343.909, 202.912, 209.298 and 326.002 ms; expansion medians are 759.568, 690.013,
+688.269 and 728.634 ms. Both after groups have lower preflight medians, but the second after
+process is slightly slower than the final before process. Whole-process ordering is therefore
+inconsistent across all observations. Correlated lifetimes and uncontrolled host, driver, cache
+and clock state preclude statistical confidence or a general process gain. Wall instrumentation
+and original pacing measure neither exclusive CPU/GPU duration, physical memory, scanout nor
+numerical frame-P99 or production-tail budgets. After-program SHA256 is
+`bbad6d08dada3833ba64a134b4f142e4f52c8d24b1d9b9bf62ac2558ee9e9a0b`.
+
+The identical after executable separately passes complete release game/library/metric/span/
+probe/native qualification, 148/148 without skips at `51cedbd5-91ef-40cb-9bf1-c0598c6b9553`,
+57.311 seconds after a 10m41s serial build. Baseline and authored 64/4K/16K travel, 27 GPU
+replays and both observer-panic cleanup controls remain. Core/Reflect/Scene owner/public controls
+pass 1,148/1,148, including mixed callbacks, transient scratch reuse, escaped Unicode equality,
+nested duplicate scopes and exact budget/error precedence. No validation pass or capacity is
+removed to obtain the result. Header fusion, remaining reference/source work, larger named
+workloads and full Foundation/R9/R10/R12 remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

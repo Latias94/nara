@@ -3964,6 +3964,95 @@ responsibilities; a new pass still requires a concrete changed invariant or rece
 Wire/header consolidation, remaining source/reference costs, larger named workloads, numerical
 runtime/resource budgets, foreign execution and full Foundation/R9/R10/R12 remain open.
 
+#### Borrowed Keys In Structural Preflight
+
+Status: implemented at `9bd3a54` and qualified on Windows/Rust1.95 below. Structural file
+preflight remains about 333/384 ms before/after the separate scalar change. It validates actual
+wire nodes, depth, strings, container sizes and duplicate decoded keys before header/domain
+construction. That role is distinct from later semantic admission. The current duplicate-key
+set nevertheless copies every input-lifetime borrowed key into String, even though serde's
+borrow guarantees the key remains valid until the parse finishes.
+
+Store keys as private Cow values in the existing per-map set. Borrow only `visit_borrowed_str`;
+copy transient `visit_str` after original key budgets, and move already owned `visit_string`
+after those same checks. Equality/order must compare decoded string contents across storage
+forms. The set and every borrow remain within the original preflight call. Keep actual key-node,
+per-string/aggregate byte, map-item, duplicate and nested-scope behavior, failure ordering and
+syntax-adapter allocation limits. Escaped text may already allocate in serde; this operation
+does not claim to eliminate that allocation or the set's own bounded nodes.
+
+The existing allocation test currently requires an accepted long borrowed key to allocate its
+full byte length. Replace that obsolete implementation expectation with no-copy acceptance plus
+actual duplicate detection and all original limit-before-copy negative controls. Add public
+borrowed/owned/transient and nested/escaped-key compatibility where it discriminates lifetime
+or identity errors. Do not add another parser, validation certificate, key interner, generic
+scratch owner or format-specific fast scanner. Header compatibility still precedes domain
+payload construction even when payload appears first; no check is deleted or ceiling raised.
+
+Qualify Core and affected Reflect/Scene file/format paths, independent consumers and the complete
+unchanged original game/native/GPU/cleanup trajectory. Compare frozen programs against the
+qualified scalar-decoding executable with original sources, hooks and phase counts. Report the
+key-copy allocation observation separately from full process memory and overlapping wall costs.
+Header fusion, remaining reference/source costs, numerical budgets, foreign execution and full
+Foundation/R9/R10/R12 remain open. Paused Editor/UI/Dialogue work stays excluded.
+
+##### Implementation And Qualification
+
+The existing key seed/visitor now returns Cow. `visit_borrowed_str` checks the original string
+budget and retains the input borrow; transient strings are copied only after the same checks,
+and owned strings move. The original BTreeSet compares decoded contents across representations
+and drops all borrowed/owned keys at the same per-map boundary. It does not intern keys or retain
+them after preflight. Original key-node, item, duplicate, string/depth and aggregate ordering
+remain; domain parsing and header gates are unchanged.
+
+Core format/allocation controls pass 13/13 without skips at
+`15b2cb45-d8b3-499d-bcb1-2fa3e39bff9f`, 0.866 seconds after a 19.10-second debug build.
+Accepted 4,096-byte borrowed keys and their actual duplicate now avoid an equally large copy,
+while original 1MiB per-string/aggregate refusals still precede Nara copies. This observes the
+largest allocator request within that finite call, not all process memory or the set's own
+allocation. Owned/escaped keys retain exact charging and decoded duplicate behavior.
+
+Complete Core/Reflect/Scene libraries and selected public allocation, format, catalog/bundle,
+authored-wire, compiled-measurement, native-codec and receiving-locality controls pass
+1,148/1,148 without skips at `962e10e9-bcda-4d70-9012-8ed10dc56f50`, 65.467 seconds after a
+2m49s debug build. Three added public cases exercise borrowed/owned/transient callbacks with a
+reused scratch buffer, decoded non-ASCII/escaped equality without Unicode normalization,
+nested duplicate scopes, cumulative strings and container/budget failure precedence. Existing
+Scene/Prefab/Patch JSON/RON paths and header-before-payload controls retain their original
+assertions. Independent production review finds no P1/P2; both scoped agents are closed. No
+test failure occurs in these runs. Complete release game/library/metrics/span/probe/native
+qualification passes 148/148 without skips at `51cedbd5-91ef-40cb-9bf1-c0598c6b9553`, 57.311
+seconds after a 10m41s serial build. Baseline and authored 64/4K/16K travel, 27 GPU replays,
+both observer-panic cleanup controls and the full 16K CPU record probe remain.
+
+Four balanced serial 16K processes then complete twelve lifetimes and 36 replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#borrowed-keys-in-structural-preflight)
+records structural-preflight wall medians 338.446/206.105 ms before/after, 39.10% lower in this
+finite observation. Source payload decode is nearly equal, while nested structure/expansion
+includes this preflight work and cannot be added as exclusive CPU savings. Unchanged header,
+compiler/default/reference and native-preparation variations receive no credit. Second-after
+process wall 16.037 seconds is slightly above final-before 16.014 seconds; whole-process ordering
+is inconsistent. Correlated lifetimes and uncontrolled host/driver/cache/clock state prevent
+statistical, general process, CPU/GPU, physical-memory, scanout or numerical frame-tail claims.
+The independently locked Scene consumer passes 157/157 with one existing manual timing case
+skipped at `e1c85f65-dc00-43c3-845a-124c9a04bdd0`, 18.952 seconds after a 4m58s debug build.
+Owning all-target/all-feature correctness Clippy, feature-free Core/Reflect/Scene compilation and
+root/sample formatting pass; pre-existing warnings remain. The frozen receipt's 154 selected
+source/control hashes match the implementation and all 15 paused UI/Dialogue paths remain
+byte-identical. The additional Core before-revision blob hashes are explicitly separate from the
+preceding selected working-source receipt; they match both the qualified before implementation
+and its frozen build base. Finite summaries retain complete phase/source/acceptance/cleanup/
+replay facts, distributions and original raw-report digests, omitting only the four prior raw
+per-frame arrays. Added document paths/fragments, summary/raw report hashes, complete acceptance
+facts and Git whitespace checks pass. No dependency/lock, source-format, numerical-capacity or remote-publication
+change belongs to this unit.
+
+This closes borrowed-key storage and the selected complete Windows consumer scope. It reduces
+temporary copying within an existing required pass; it does not claim another engine uses this
+same preflight contract, remove domain checks, or qualify whole-process memory. Header fusion,
+remaining reference/source work, larger named workloads, numerical runtime/resource budgets,
+foreign execution and full Foundation/R9/R10/R12 remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

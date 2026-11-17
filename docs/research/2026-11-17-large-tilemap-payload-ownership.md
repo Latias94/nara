@@ -490,6 +490,19 @@ replace JSON/RON parsers. Value-before-tag and reference/null paths retain their
 owning unit records compatibility, original-game qualification and actual measured results;
 semantic-value validation savings must not be credited for a distinct wire-decoding change.
 
+The [borrowed preflight-key successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#borrowed-keys-in-structural-preflight)
+at `9bd3a54` addresses temporary storage in Nara's existing generic shape pass. Its per-map duplicate index
+copied even keys borrowed for the complete serde input lifetime. Cow storage now borrows those
+keys, copies transient keys after the same budget checks and moves owned keys. Decoded equality,
+duplicate refusal and all original limits remain. This is Nara's temporary-index optimization,
+not a claimed Godot or Bevy key policy: Godot's parsed key enters the returned Dictionary, while
+Bevy's `Ident(String)` feeds typed field lookup and the resulting DynamicStruct. Those result
+owners differ from a duplicate index discarded before domain decoding. Neither inspected path
+justifies an extra generic whole-file pass; Nara's existing input contract still owns that pass.
+The [paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#borrowed-keys-in-structural-preflight)
+records actual complete-game effects without claiming removal of parser scratch, set nodes or
+whole-process physical memory. [^G-validation-parser] [^B-validation-keys]
+
 Apply the same source comparison before introducing future checks. Ordinary typed gameplay must
 not become a generic serialization/validation round trip. Validate external dynamic input at its
 loader and a changed domain value at its constructor, setter or changed-data system. Reuse an
@@ -700,6 +713,9 @@ release preserves these mechanisms.
 [^B-validation-apply]: [`ResolvedSceneRoot::{resolve, spawn, apply}`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/resolved_scene.rs#L26),
     `ErasedTemplate::apply` at line 722 and `SceneEffect::apply` at line 752;
     [`EntityTemplate::build_template`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_ecs/src/template.rs#L450).
+[^B-validation-keys]: [`Ident` and its serde visitor](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/serde/de/helpers.rs#L45)
+    and [`visit_struct`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/serde/de/struct_utils.rs#L91),
+    field lookup and `DynamicStruct::insert_boxed`.
 [^N-validation-current]: Nara `c1edb21`: [compiler normalization](../../crates/nara_scene/src/prefab/overlay/compile/staged/values.rs),
     `materialize_program` source admission/defaults/validation and `materialize_defaults`;
     [frozen defaults](../../crates/nara_reflect/src/effective/frozen.rs), `FrozenComponentDefaults::cost`;

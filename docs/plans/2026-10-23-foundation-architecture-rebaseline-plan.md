@@ -5722,6 +5722,22 @@ Process ordering is not consistently lower, and finite correlated wall samples e
 general process/CPU/GPU, physical-memory or numerical frame-tail guarantee. Broader file
 preflight/header work, reference traversal and full Foundation/R9/R10/R12 remain open.
 
+The [borrowed structural-preflight key successor](2026-11-13-rust-state-reconstruction-plan.md#borrowed-keys-in-structural-preflight)
+at `9bd3a54` removes copies from the original temporary duplicate-key set. Serde input-lifetime strings stay
+borrowed; transient strings copy after original budgets and owned strings move. Decoded equality,
+node/string/aggregate/item/depth limits and duplicate failure order remain. No parser, interner,
+certificate, retained owner or higher ceiling is added. Core format/allocation controls pass
+13/13 and full Core/Reflect/Scene libraries plus selected public workflows 1,148/1,148. Production
+review finds no P1/P2. Original release game/native qualification passes 148/148 with 64/4K/16K
+travel, 27 GPU replays and both panic-cleanup controls. Four balanced processes add twelve
+16K lifetimes and 36 replays. Independent Scene consumers pass 157/157 with one original manual
+timing case skipped. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#borrowed-keys-in-structural-preflight)
+records structural-preflight wall medians 338.446/206.105 ms before/after, with source payload
+decode nearly equal. Nested structure/expansion overlaps that preflight, full process ordering
+is inconsistent and no exclusive CPU/GPU, physical-memory or numerical frame-tail guarantee
+follows. Header fusion, remaining source/reference work and full Foundation/R9/R10/R12 remain open.
+
 Future runtime design must compare the corresponding mature-engine operation before adding
 another scan. Prefer typed construction, loader/setter/changed-data checks and facts retained by
 the unchanged owner. Identify the actual invalidated invariant and current mutable state; do not
