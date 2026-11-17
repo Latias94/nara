@@ -50,6 +50,14 @@ Windows 11. No affinity, fixed clock, exclusive-machine or cold-cache controls a
 All owning Cargo commands use one build job and the original root target. Preliminary execution
 during compilation is only a correctness smoke and is excluded from final timings.
 
+The cross-engine table is a frozen historical baseline, not a measurement of the latest Nara
+revision. Subsequent joint-reference interpretation (`6295ccb`) and active-container reference
+cursors (`26c12dc`) change Nara's post-decode work. Their
+[complete-game paired observations](2026-11-14-development-runtime-costs.md#reference-paths-from-active-container-cursors)
+are qualified separately at `34d1ebd`. They contain cumulative repeated operations and cannot
+replace the single-file cells below or be divided by an engine's single instantiation time.
+No new cross-engine execution is claimed for those implementations.
+
 ## Reading The Results
 
 The runner uses three serial process rounds in orders Nara/Bevy/Godot, Godot/Bevy/Nara and
@@ -179,3 +187,31 @@ This does not relax existing dynamic-input rejection or adopt another engine's u
 Transform propagation, visibility/queueing, ECS insertion at high entity counts, physics,
 steady-frame/P99 and single-cell updates need their own equivalent workloads before numerical
 targets can be claimed. This report does not extrapolate scene timings into those modules.
+
+## Applying The Targets To Runtime Development
+
+Use three separate decisions: an empirical reference for a corresponding operation, a proposed
+budget for Nara's reference game, and measured acceptance of a particular implementation. The
+30–40 ms warm source-to-native and 5–10 ms post-decode proposals above are first milestones on
+this machine. They are neither universal load limits nor evidence of frame-time performance.
+The 1–2 ms owner-occupancy proposal concerns one bounded loading/replacement turn, not the sum
+of all runtime modules or an allowance for a new complete validation pass each frame.
+
+Keep the next comparisons small and tied to the operation being changed:
+
+| Priority and operation | Workload and completed boundary | Useful target evidence |
+| --- | --- | --- |
+| Remaining source/native value admission | Preserve the current 64/4K/16K source cases and original game's complete Scene/Prefab path. Separate cost/depth walking, defaults, reference work, native conversion and commit. | The existing post-decode milestone; count complete traversals and actual allocations alongside wall time. A private walker improvement must also benefit its complete consumer. |
+| Entity insertion and transform propagation | Use 64/4K/16K entities as a separate test, with flat and parented layouts and 0%, one and all transforms changed. Include deferred insertion and completed world transforms. | First compare Nara's composition with the same locked `bevy_ecs` substrate; then use a named Godot/Bevy transform workload as context. Do not compare a bare ECS insertion with a Scene's codec, hooks and identity work. |
+| Tile changes and render preparation | Hold visible content, chunk/layer population and resources constant; measure unchanged data, one-cell mutation and a complete replacement through the first completed update. Include required deferred work. | Changed chunks, repacked/uploaded bytes, candidates and CPU occupancy as well as latency. A cheaper setter that defers more work is not a complete update improvement. |
+| Steady gameplay and rendering | Reuse the original game with specified resolution, views, visible sprites/tiles, material/blend policy and backend. Separate gameplay, transform, extraction/queue/upload, GPU work and platform wait. | The whole 60/120 Hz frame budgets above, with measured tail distributions before allocating module budgets. A return from queue submission does not measure GPU completion or scanout. |
+
+The same-substrate ECS control follows the actual dependencies in
+[`nara_ecs`](../../crates/nara_ecs/Cargo.toml); it measures Nara's additional work rather than
+benchmarking a different ECS release against itself. The source study's
+[validation-frequency comparison](../research/2026-11-17-runtime-module-performance-comparison.md#validation-and-update-frequency)
+provides the corresponding locality control: dynamic decode and changed domain data keep their
+own checks, while unchanged admitted data should not be reparsed through a generic source tree
+as ordinary gameplay work. Different guarantees must be named and costed; they do not justify
+an unmeasured number of repeated traversals. No receiving policy or runtime contract changes
+as a consequence of these proposed performance targets.

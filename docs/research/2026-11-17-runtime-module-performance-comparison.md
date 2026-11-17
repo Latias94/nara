@@ -127,6 +127,43 @@ facts without using another full generic traversal as a proxy. Attribute repacki
 reference resolution and rendering independently from validation. This is a locality criterion
 for interpreting the measured results, not a proposal for another general validation framework.
 
+## Using Local Measurements As Engineering Targets
+
+The [measured comparison](../benchmarks/2026-11-17-runtime-module-comparison.md#optimization-targets-and-next-decisions)
+provides local optimization magnitudes with its representation and ownership limits attached.
+Its Nara production baseline is `9bd3a54`, with the measured consumer sources at `70140a3`.
+The later documented baseline, `34d1ebd`, includes joint reference interpretation (`6295ccb`)
+and active-container cursor changes (`26c12dc`). The historical table does not measure that baseline;
+its later complete-game observations have their own envelopes and cannot replace this
+single-collection comparison. A consumer's printed historical revision alone does not identify
+the production sources in a later executable.
+
+The proposed **30–40 ms warm source-to-native**, **5–10 ms compile plus prepare/commit**, and
+**1–2 ms main-thread occupancy per bounded loading/replacement turn** are initial engineering
+budgets for this machine and workload, not current Nara results, engine-equivalence claims or
+release gates. The first two concern the 16K collection before external assets and rendering;
+the occupancy proposal still needs a real consumer measurement, since fresh-World loops do not
+measure responsive owner turns. Measure a complete source-to-native envelope with its read
+boundary stated explicitly; adding separately reported phase medians does not measure it.
+
+Godot's shared metadata and packed-array COW do not establish an independently mutable native
+materialization budget. Its restricted TileMapLayer does construct native cells, while omitting
+first deferred/render work. Bevy's World decode already includes native reflected conversion;
+its subsequent write and its separately preconstructed typed Scene cannot be substituted for
+Nara's generic-to-native preparation. Use those observations to prioritize attribution, not to
+remove receiving checks merely to match a smaller timer.
+
+Keep validation local to the facts that changed: admit dynamic source at its receiving boundary,
+check changed domain values and affected aggregate invariants at their setter/update owner, and
+reuse still-applicable facts for unchanged admitted values. Recheck affected Schema, resource or
+context dependencies when they change. Locality follows the owner's granularity: Godot queues
+dirty cells, whereas Bevy repacks an entire changed chunk; neither mechanism promises constant
+work for one edited cell. Separate derivation/copying work from validation instead of rebuilding
+a generic value tree each frame.
+Preserve Nara's refusal and ownership contracts at the affected boundary, using existing focused
+checks and measurements when that boundary changes. These proposed targets add no universal
+validator, proof registry or requirement to rerun unrelated product qualification.
+
 ## Source Permalinks
 
 Paths are relative to the checkout roots above; every URL pins the inspected revision.

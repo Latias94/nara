@@ -4086,6 +4086,11 @@ with very different encoded bytes and instantiation ownership. These are operati
 not engine-speed ratios. Start with a provisional 30–40 ms comparable warm source-to-native
 target and a 5–10 ms compile-plus-preparation target, then separately measure pure native commit
 and real owner occupancy. The report keeps these proposals distinct from measured acceptance.
+Its [runtime target application](../benchmarks/2026-11-17-runtime-module-comparison.md#applying-the-targets-to-runtime-development)
+separates the frozen cross-engine baseline from later Nara improvements and orders the next
+operation-specific controls: remaining value admission, entity/transform work, changed tiles
+and steady gameplay/rendering. Each new control measures its completed work and unchanged-data
+case; no blanket per-module millisecond limit or recurring full validation pass is introduced.
 No production validator, source format, cache, native owner or dependency changes in this unit.
 Post-decode attribution and the actual domain/processed representation take priority over header
 fusion. Full Foundation/R9/R10/R12, foreign execution and numerical frame-tail budgets remain open.
