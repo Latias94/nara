@@ -4271,6 +4271,90 @@ the investigation above deliberately defers such a cache. A typed/processed Tile
 remains an alternative for actual source representation cost, not an assumed consequence of
 this private loop improvement.
 
+#### Value Admission Through Active Container Cursors
+
+Status: implemented at `240a45352e5b745923af3f33b1d6ed19367bc7e1` and qualified on Windows/Rust
+1.95.0 below. Attribute the remaining complete source and Native cost/depth walks without changing
+their receiving policies. The preceding budget walker
+pushes a Value event for every child and pops/reinserts its parent iterator. Compare a direct
+current-value loop with only active Map/List cursors, advancing each iterator in place. Scalar
+and empty-container values need no traversal allocation; nonempty container scratch still needs
+admission before growth. Removed scratch work does not retain obsolete allocation fees.
+
+Preserve complete logical node/byte cost, maximum observed depth, Map key ordering/UTF-8 bytes,
+frozen insertions, retained-default storage modeling, authored-route counts, Native rejection and
+SourceContext's complete tail scan after finding its first contextual reference. Caller refusals
+retain exact identity and stop before the refused operation. Source/native logical units,
+Schema/resource validation, error ordering among value checks, defaults and World publication
+stay with their original owners. No source metric cache, certificate, public format or new
+validation authority is selected.
+
+Freeze the qualified `26c12dc` complete-game binary as the control. Compare the small public
+Scene consumer before paying for the full release game build; retain the private algorithm only
+if the changed envelopes improve in its actual consumers. Then qualify the affected original
+Reflect/Scene consumers, complete game/native workflows and independently locked Scene module.
+Record paired complete-game observations and scope the result separately from the older
+cross-engine single-file table. Numerical frame-tail and physical-memory claims need their own
+measurements; fewer stack operations alone do not establish them.
+
+The private implementation keeps only active Map/List iterators and processes the current value
+directly. Production Reflect/Scene compilation passes. The first test compilation exposes an
+old `ValueFrame` import in a frozen-default allocation oracle. Its corrected exact fee admits
+one container-cursor allocation for the nonempty source Map and none for the selected scalar
+authored default; complete retained-reference storage assertions remain. Native caller-refusal
+controls now observe the root node before its first actual nonempty-container allocation. The
+original focused cohort passes 42/42, 1.504 seconds, with 241 outside the filter. Independent
+production review finds no P1/P2.
+
+Four exploratory public-consumer processes pass all 36 population/encoding cases and complete
+data checks. At 16K, pooled cumulative original-value admission medians are 34.005/16.076 ms
+before/after and Native admission 38.318/23.786 ms; each case includes three warmups and nine
+retained samples. These are nested CPU-consumer observations, not single-load or frame times.
+The frozen exploratory control predates a runtime-inert test-module registration; exact program
+hashes and prior source receipt remain in the local observation directory. These results justify
+continuing to the original complete game, rather than claiming its acceptance from this control.
+The new eight-case recursive-oracle cohort passes in the first full owner/public selection.
+That selection passes 1,162/1,167 at `e9af5326-4e13-439c-b63d-4d3fc10b91d8`, 64.587 seconds,
+without skips. All five failures reach one property-test helper's obsolete initial-stack
+allocation assertion. Its correction expects the root-node observation first and retains the
+same success/error comparison, every caller-refusal boundary, shape/declaration ordering and
+finite ceilings. Only that test helper changes after this run; production remains unchanged.
+The complete Reflect library rerun passes 283/283 without skips at
+`f1d5e7fe-c3bb-4528-9e8d-7df3e262fd4b`, 8.829 seconds after a 12.64-second build. All eight
+new oracle cases and the five corrected property cases pass. The other 884 owner/public cases
+passed with the same production implementation in the first run and are not rerun merely for
+this test-only correction. Independent test review finds no P1/P2. The original release
+game/library/metrics/span/native/16K-record selection passes 148/148 without skips at
+`3ae4945d-079b-4ade-a077-105e72b70a6f`, 68.382 seconds after a serial 9m10s build. Complete
+64/4K/16K travel, 27 original-input GPU replays and both observer-panic physical cleanup controls
+remain. Four additional frozen before/after/after/before processes complete twelve 16K lifetimes
+and 36 GPU replays with exact expected phase calls and complete original cleanup.
+
+The [paired report](../benchmarks/2026-11-14-development-runtime-costs.md#value-admission-through-active-container-cursors)
+retains 161 after source/control hashes, original before/after programs and four finite summaries.
+Across six lifetimes/version, cumulative original-value admission medians are 85.248/54.006 ms,
+Native admission 114.366/75.490 ms, defaults 108.043/73.455 ms and flat admission
+183.112/145.077 ms. Unbound preparation is 82.313/82.281 ms, without a demonstrated improvement.
+Parent/child envelopes overlap; no unchanged parser/planner/publication stage receives credit.
+Process walls, the initial control's different log sink, correlated lifetimes and uncontrolled
+host/cache/clock/driver state remain explicit limits. No single-load, frame-P99, GPU-time,
+physical-memory or universal speedup follows. The independently locked Scene consumer passes
+157/157 with one original manual timing skip at `32df911f-edf0-48eb-a193-1e426f13586a`,
+18.875 seconds after a serial 4m36s build. Owning all-target/all-feature correctness Clippy,
+feature-free Reflect/Scene compilation, root/sample formatting and document/whitespace checks
+pass; existing warnings remain. Exact source, raw/summary and frozen program hashes match the
+qualified implementation. Three scoped implementation/review agents are closed with no remaining
+P1/P2. All 15 paused UI/Dialogue files remain byte-identical. No dependency, format or public
+receiving policy changes; no remote publication occurs. This closes the value-cursor unit,
+not full Foundation/R9/R10/R12, numerical runtime-tail budgets or foreign execution.
+
+Continue by attributing the unchanged unbound-preparation envelope through existing Native
+construction, binding, allocation and identity owners before choosing another optimization.
+Retain the original source/processed and typed-record comparisons as representation decisions,
+not an already adopted format. Keep unchanged/single-change/full-replacement workloads separate
+from file-loading targets; cross-stage raw metrics still require reconciling mutable escapes
+and exact owning data rather than a cache keyed by source path.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

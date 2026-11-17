@@ -3112,6 +3112,87 @@ pass; existing warnings remain. Independent numeric report review finds no P1/P2
 plan records actual failures/corrections and platform limits. This closes neither full
 Foundation/R9/R10/R12 nor numerical runtime or foreign-platform qualification.
 
+### Value Admission Through Active Container Cursors
+
+The [value-walker successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#value-admission-through-active-container-cursors)
+compares the remaining complete cost/depth traversal against the qualified `26c12dc` program.
+The private Reflect budget now holds only active Map/List iterators and advances them in place.
+It processes the current value directly, removing the additional Value event and parent-iterator
+pop/reinsert for every child. Scalar and empty-container roots need no traversal allocation.
+Nonempty container scratch still needs admission before growth; removed work retains no fee.
+
+Complete logical nodes/bytes, Map key order, maximum depth, frozen effective insertions and
+retained-default storage remain unchanged. Native authored-reference rejection and SourceContext's
+complete tail scan remain with the same walker. Existing source/native reference units are not
+replaced by the reference-discovery path's different text/path accounting. No new cache, source
+format, Schema policy, receiving owner, dependency or runtime observer is introduced.
+
+Both variants already expose the same phase names and call counts. The small public Scene
+consumer supports continuing to full qualification: four before/after/after/before processes pass
+36 population/encoding cases with complete value checks. Its exploratory frozen control predates
+only a runtime-inert test-module registration; it is not presented as a new exact-source release
+comparison. The original complete game supplies the qualified program and native acceptance below.
+Nested wall envelopes include repeated operations and cannot be added to parent phases or divided
+by another engine's single-file operation. Actual allocator/RSS, GPU cost and frame-tail improvements
+require separate measurements.
+
+The original focused cohort passes 42/42. The first complete owner/public selection passes
+1,162/1,167 (`e9af5326-4e13-439c-b63d-4d3fc10b91d8`); all five failures reach one property-test
+helper's obsolete unconditional initial-stack assertion. After that test-only correction, the
+complete Reflect library passes 283/283 (`f1d5e7fe-c3bb-4528-9e8d-7df3e262fd4b`), including the
+five cases and eight new independent recursive-oracle controls. The other 884 owner/public
+cases passed with unchanged production. The original release game/library/metrics/span/native/
+16K-record selection passes 148/148 without skips (`3ae4945d-079b-4ade-a077-105e72b70a6f`),
+68.382 seconds after a serial 9m10s build. Original travel, 27 retained-input GPU replays and
+both observer-panic physical cleanup cases retain their complete assertions. Production and test
+reviews find no P1/P2.
+
+The [paired receipt](data/2026-11-14-development-runtime/authored-tiles-value-cursors-paired-metadata.json)
+retains 161 after source/control hashes, exact before/after executable hashes and four finite
+summaries. Complete phase/source/acceptance/cleanup/replay facts and distributions remain; only
+the same four named raw per-frame arrays are omitted. Raw reports/programs remain in
+`%TEMP%/nara-value-cursors-paired-20261117-1903`. The tested changes are captured relative to
+`8018603` and subsequently committed at `240a45352e5b745923af3f33b1d6ed19367bc7e1`.
+Both programs use Rust 1.95.0, hardware DX12/NVIDIA
+GeForce RTX 4090 and the same original input/observer configuration. Four serial processes in
+before/after/after/before order add twelve 16K lifetimes and 36 GPU replays, all accepted.
+
+Each row below is a median cumulative wall envelope across six lifetimes/version. A lifetime
+contains 18 mixed file decodes, nine expansions/flat admissions, six unbound preparations,
+180 original-value admissions, 180 default operations and 480 Native admissions. These are not
+single-file, single-load, exclusive CPU or frame times; parent/child envelopes overlap.
+
+| Envelope | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| Wire preflight | 222.548 ms | 210.057 ms | Unchanged; no parser credit. |
+| Header decode | 37.789 ms | 37.678 ms | Unchanged. |
+| Payload decode | 291.135 ms | 286.925 ms | Unchanged. |
+| Source finish | 47.489 ms | 46.681 ms | Unchanged. |
+| Original value admission | 85.248 ms | 54.006 ms | 36.65% lower in this observation. |
+| Defaults | 108.043 ms | 73.455 ms | Includes the changed complete preflight walker. |
+| Staged reference planner | 61.639 ms | 53.127 ms | Unchanged; no independent planner credit. |
+| Component materialization | 256.724 ms | 182.860 ms | Contains changed admission/default work. |
+| Effective Native value admission | 114.366 ms | 75.490 ms | 33.99% lower in this observation. |
+| Joint effective reference interpretation | 154.068 ms | 155.874 ms | Unchanged. |
+| Flat admission | 183.112 ms | 145.077 ms | Contains changed Native admission. |
+| Native unbound preparation | 82.313 ms | 82.281 ms | No demonstrated improvement. |
+| Expansion, including nested Prefab work | 617.271 ms | 528.508 ms | Contains changed and unchanged work. |
+| Publication | 1.434 ms | 1.389 ms | Unchanged; no commit gain claimed. |
+
+Per-process original-admission medians are 87.123/53.658/54.726/83.909 ms and Native admission
+116.491/74.642/76.021/110.007 ms. Both after groups are lower than both before groups for those
+changed envelopes. Process walls are 18.169/15.758/16.391/16.706 seconds. The first control runs
+earlier during development with PowerShell native-output redirection; the final three use Python
+binary-file redirection. The value walkers emit no log lines, but process walls remain descriptive,
+without an isolated whole-process improvement claim. Host/cache/clock/driver state is uncontrolled
+and lifetimes within each process are correlated. No confidence interval, frame-P99, GPU-time,
+physical-memory or universal speedup result follows. Final independent consumption and static
+checks are recorded in the owning plan. The independently locked Scene consumer passes 157/157
+with one original manual timing skip (`32df911f-edf0-48eb-a193-1e426f13586a`). Owning correctness
+Clippy, feature-free Reflect/Scene compilation, root/sample formatting and document/source/hash
+checks pass. Three scoped implementation/review agents are closed with no remaining P1/P2.
+Full Foundation/R9/R10/R12 and numerical runtime-tail qualification remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

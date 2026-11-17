@@ -3485,6 +3485,18 @@ remains a separate, deferred contract; no cache, producer or new validation auth
 Independent Scene consumers pass 157/157 with one original manual timing skip; correctness
 Clippy, feature-free compilation and formatting pass. Full Foundation is open.
 
+The [value-budget cursor unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#value-admission-through-active-container-cursors)
+at `240a453` retains complete source/Native cost-depth and reference policy while removing
+per-child Value events and iterator reinsertion. Actual scratch admission and frozen retained
+storage remain; scalar/empty roots need no traversal allocation. The corrected Reflect library
+passes 283/283, other owner/public cases 884/884 with unchanged production, original game/native
+148/148 and independent Scene consumers 157/157 with one manual timing skip. The
+[paired report](../../benchmarks/2026-11-14-development-runtime-costs.md#value-admission-through-active-container-cursors)
+observes lower original/Native admission envelopes without claiming an unbound-preparation,
+physical-memory, GPU or frame-tail improvement. Source/program/report hashes, correctness Clippy,
+feature-free compilation and formatting pass. No new validation owner, cache, source format or
+public receiving policy is introduced. Full Foundation remains open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

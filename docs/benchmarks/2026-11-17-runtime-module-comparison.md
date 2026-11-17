@@ -58,6 +58,11 @@ are qualified separately at `34d1ebd`. They contain cumulative repeated operatio
 replace the single-file cells below or be divided by an engine's single instantiation time.
 No new cross-engine execution is claimed for those implementations.
 
+The subsequent [value-admission cursor comparison](2026-11-14-development-runtime-costs.md#value-admission-through-active-container-cursors)
+changes complete source/Native cost-depth traversal with the same receiving rules. Its original
+game observations also remain separate from this frozen single-file table; lower cumulative
+admission envelopes do not establish that the proposed source-to-native target is already met.
+
 ## Reading The Results
 
 The runner uses three serial process rounds in orders Nara/Bevy/Godot, Godot/Bevy/Nara and

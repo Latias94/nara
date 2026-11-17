@@ -537,6 +537,15 @@ cannot substitute for current complete measurements. A same-operation contextual
 budget result could avoid its later repeated cost query, but that narrow case has not been
 attributed as the complete game's principal cost. This comparison introduces no metric cache.
 
+The later [value-admission cursor unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#value-admission-through-active-container-cursors)
+at `240a453` applies the same active-container mechanism to the existing complete cost/depth walker. It
+removes per-child Value events and iterator reinsertion without removing any value observation.
+Scalar/empty roots no longer allocate traversal scratch; selected frozen defaults retain their
+complete storage model. Native authored-reference rejection and SourceContext's complete tail
+remain. Its [game comparison](../benchmarks/2026-11-14-development-runtime-costs.md#value-admission-through-active-container-cursors)
+owns execution evidence; no identical aggregate validator or performance contract is attributed
+to Godot or Bevy.
+
 These are the existing Nara contracts to reconcile during implementation, rather than a reason
 to keep every current validation pass. Neither inspected upstream path supplies the same
 accounting contract. [^N-contract] [^N-retain] [^N-custody] [^N-receive]

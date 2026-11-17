@@ -5790,6 +5790,19 @@ facts across public writes; the existing checks cannot be skipped by source-path
 Independent Scene consumers pass 157/157 with one original manual timing skip; correctness
 Clippy, feature-free compilation and formatting pass. Full Foundation stays active.
 
+The [value-admission cursor successor](2026-11-13-rust-state-reconstruction-plan.md#value-admission-through-active-container-cursors)
+at `240a453` removes per-child Value events and parent-iterator reinsertion from the original
+complete source/Native cost-depth walker. Logical limits, reference policy, frozen default
+storage and caller-refusal behavior remain. Eight new oracle cases pass; the corrected Reflect
+library passes 283/283, with the other 884 owner/public cases already passing unchanged production.
+The original release game passes 148/148 and independent Scene consumers 157/157 with one manual
+timing skip. The [paired game report](../benchmarks/2026-11-14-development-runtime-costs.md#value-admission-through-active-container-cursors)
+observes cumulative original/Native admission medians 85.248/54.006 ms and 114.366/75.490 ms
+before/after across six lifetimes/version. Unbound preparation shows no demonstrated improvement.
+Parent/child costs, the initial log-sink difference and host variation remain explicit; no frame,
+GPU, memory or universal gain follows. Correctness Clippy, feature-free compilation and formatting
+pass. Remaining Native-preparation/representation work and full Foundation/R9/R10/R12 remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.
