@@ -163,6 +163,27 @@ source reuse, a working framework example and documentation amendments alone sel
    model. Do not call a throwaway architectural restriction an incremental implementation merely
    because its replacement is scheduled later.
 
+### November 17 Runtime Delivery Priority
+
+Complete Runtime capabilities and ordinary game workflows take priority over further performance
+experiments. Select the next unit by a concrete missing author/player capability in the existing
+game or an independently usable Runtime consumer. Finish that workflow through its real owners,
+including relevant failure and cleanup behavior, before starting another prerequisite or cost study.
+Editor/UI/Dialogue product work remains paused.
+
+Correctness failures, unusable stalls and clear large repeated work can still justify an owning
+fix. Small measured costs, speculative caches and compact wire-format experiments are deferred
+unless they block the selected workflow. The cross-engine comparisons supply scale and design
+context; their provisional targets are not mandatory gates for every Runtime feature. Do not add
+another validation pass or framework merely to prepare for a hypothetical optimization.
+
+Match verification to the changed behavior. Use focused owner and real-consumer checks; extend
+native, cooked or rebuild acceptance where their contract changes. Unchanged official mechanisms
+and unrelated qualified matrices do not need to be re-proven. This priority changes work ordering,
+not supported behavior or the existing publication, identity and physical-retirement guarantees.
+The [compact Tilemap candidate](2026-11-13-rust-state-reconstruction-plan.md#compact-inline-tilemap-source-successor)
+is deferred with no production switch or scheduled benchmark campaign. Full Foundation remains active.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

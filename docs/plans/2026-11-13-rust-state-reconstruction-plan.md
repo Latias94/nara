@@ -3081,6 +3081,11 @@ that cost belongs in the decision before implementation.
 
 #### Next Executable Consumer: Tilemap Payload Representation Decision
 
+Historical selection at this point in the investigation. The frozen-read successor below was
+implemented; remaining representation experiments are now deferred by the
+[November 17 Runtime delivery priority](2026-10-23-foundation-architecture-rebaseline-plan.md#november-17-runtime-delivery-priority).
+The candidate table preserves the original decision context, not an active execution queue.
+
 Execution direction: first compare the actual Tilemap ownership boundaries, then select one
 complete production refactor. The first named discriminator remains the original 16K Travel
 consumer, including direct and root-bound Prefab content. A generic effective-value view remains
@@ -4672,6 +4677,20 @@ document/source/report checks. Existing warnings remain. Independent source, fin
 and numeric reviews close all actionable findings; the timing report's disposition is checked
 against exact raw arrays and source/program provenance. No official engine test suite is rerun,
 and paused UI/Dialogue files remain byte-identical.
+
+#### Compact Inline Tilemap Source Successor
+
+Status: **Deferred by the November 17 execution priority.** No format, codec, schema or consumer
+switch is implemented. Complete Runtime capabilities and usable game workflows take priority
+over compact representation, small performance experiments and additional attribution loops.
+Existing correctness and admission contracts remain; ordinary gameplay needs no extra validation
+pass merely to support a prospective optimization.
+
+The [existing source study](../research/2026-11-17-large-tilemap-payload-ownership.md#8-compact-inline-domain-format-budget-and-migration-clarification)
+retains the findings for a future demonstrated need. A format change would require complete
+source/Prefab/overlay evolution, authored numeric and unknown-member preservation, and cooked
+delivery; it is not a codec-only substitution. No implementation or benchmark campaign is
+scheduled. Full Foundation remains active; Editor/UI/Dialogue work stays paused.
 
 ### Preserve Isolated Migration Storage During Defaults
 

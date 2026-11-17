@@ -827,3 +827,42 @@ release preserves these mechanisms.
     [materialization selection](../../crates/nara_scene/src/spawn.rs), `exact_definitions_admitted`;
     [reference planning](../../crates/nara_reflect/src/entity_reference.rs),
     `collect_present_reference_leaves_with_admission` and `find_undeclared_reference_path`.
+
+## 8. Compact Inline Domain Format: Budget And Migration Clarification
+
+Source follow-up: Nara `df0adef`, 2026-11-17. This additive clarification preserves the historical
+findings above. Status: **Deferred**. Completing Runtime workflows takes priority over compact
+representation and further performance investigation. This section records existing research only;
+it schedules no implementation or follow-up tasks. No new performance or memory measurement is
+established.
+
+The earlier statement, "Base64 inside an ordinary String is not sufficient", applies when the
+operation still promises the old logical Map/List tree and its admission semantics. Replacing
+that tree with text cannot silently preserve that promise. It does not rule out a new versioned
+Tilemap domain format using existing String or List<String> values. Schema, codec and migration
+remain with their explicit domain owners under
+[ADR0119](../architecture/adr/0119-schema-first-semantic-metadata-authority.md#decision);
+a new Reflect primitive or universal field-codec registry is not a prerequisite.
+
+The [logical cost walk](../../crates/nara_reflect/src/value_ref/cost.rs) charges actual represented
+nodes and full retained payload bytes. It need not charge an imaginary expanded cell tree, and a
+scalar label does not exempt its bytes. Typed decoding/storage remain separate costs. Existing
+[source limits](../../crates/nara_scene/src/format.rs) also include a per-String ceiling, so one
+packed String cannot be presumed to preserve large-map capacity. No format or block size is selected.
+
+Changing `cells` requires component/catalog evolution and explicit old-source migration semantics.
+Current [cell reads](../../crates/nara_tilemap/src/lib.rs#L1066) ignore extra Map members that source
+storage can retain. A converter must preserve them or explicitly refuse conversion; F64-to-F32
+narrowing also needs a stated policy. The current field is optional/defaulted and opaque: complete
+field Set and Absent are supported, while stable per-cell property paths are not declared.
+[Source migration](../../crates/nara_scene/src/prefab/overlay/compile/staged/values.rs) applies to
+source records before property overlays, not every old Addition/Set/Properties operation. The
+[authored field upgrade](../../crates/nara_scene/src/authoring_decode/schema_upgrade.rs) currently
+requires required fields without defaults. Consequently a production switch needs a complete
+authored-upgrade workflow; adding a decoder migration would not preserve existing overlay meaning.
+This larger functional change is deferred with the representation experiment.
+
+The pinned Godot `7a37606a433c0e7735525037cdf774f043146a21` uses versioned packed inline TileMap
+rows and Base64 text output.[^G-wire] [^G-text] This is a representation precedent, not evidence
+for Nara migration fidelity or a measured speedup. No implementation or new validation pass follows
+from recording it.
