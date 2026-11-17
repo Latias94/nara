@@ -4053,6 +4053,43 @@ same preflight contract, remove domain checks, or qualify whole-process memory. 
 remaining reference/source work, larger named workloads, numerical runtime/resource budgets,
 foreign execution and full Foundation/R9/R10/R12 remain open.
 
+#### Mature-Engine Module Timing Comparison
+
+Before selecting another validation optimization, establish local reference magnitudes with
+ordinary public Nara, Bevy and Godot consumers. Use 64, 4,096 and 16,384 records containing the
+same four integer fields in one scene-owned collection. Measure warm file reading, native scene
+decode, resolve/compile where separately exposed, and instantiation into fresh runtime storage.
+Record exact versions, source bytes, representation, entity counts, raw samples and full resulting
+data checks outside the timed phases. Godot's packed Variant and native TileMap storage are
+separate representation controls; they are not generic-scene parity. No render, steady-frame or
+whole-engine speed ranking follows from this CPU-only comparison.
+
+Defer structural/header scan fusion: preserving current shape-first errors and strict envelope
+semantics requires extra parser state, and the existing cumulative header envelope is only about
+41 ms across 18 file decodes. The reference measurements should determine whether that work is
+worth its complexity. The previous complete game's cumulative lifetime envelopes remain separate
+from these single-file operations. This comparison does not change production validation or
+resume Editor/UI/Dialogue work.
+
+The ordinary public [comparison consumers](../benchmarks/fixtures/runtime_scene_comparison/README.md)
+and [local report](../benchmarks/2026-11-17-runtime-module-comparison.md) complete this bounded
+reference unit on Windows. Nine final serial processes produce 72 case records across the three
+populations, with 648 retained iterations and complete data checks. Both Rust native row types
+use the same 16-byte i32/u32 fields. Official Bevy World RON and typed Scene are separate paths;
+Godot's actual native cell setter is separate from shared metadata instantiation. Nara's lock
+retains root versions/sources, and original file limits/refusals are reported explicitly.
+
+At 16K, Nara JSON/compact-JSON decode medians are 37.013/26.331 ms, followed by roughly 18 ms
+compile and 8 ms prepare/commit; Bevy World RON decodes in 25.897 ms and writes already decoded
+native data in 0.390 ms. Godot generic/packed/native-tile loads are 71.194/15.741/18.683 ms,
+with very different encoded bytes and instantiation ownership. These are operation magnitudes,
+not engine-speed ratios. Start with a provisional 30–40 ms comparable warm source-to-native
+target and a 5–10 ms compile-plus-preparation target, then separately measure pure native commit
+and real owner occupancy. The report keeps these proposals distinct from measured acceptance.
+No production validator, source format, cache, native owner or dependency changes in this unit.
+Post-decode attribution and the actual domain/processed representation take priority over header
+fusion. Full Foundation/R9/R10/R12, foreign execution and numerical frame-tail budgets remain open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

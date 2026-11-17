@@ -5747,6 +5747,17 @@ for historical counters or hypothetical extensions. The pinned
 distinguishes their real parser/property/Scene/Tilemap behavior from Nara's separate budgeting
 contract. Necessary dynamic-input errors still use ordinary release error handling.
 
+The [local module comparison](../benchmarks/2026-11-17-runtime-module-comparison.md) now supplies
+actual 64/4K/16K public Nara, Godot and Bevy reference operations. Nine final serial processes
+complete all 72 case records with exact state checks. At 16K, generic file decode/load is tens of
+milliseconds, while already native/prepared instantiation ranges from sub-millisecond to a few
+milliseconds under different ownership contracts. Nara's 37.013 ms JSON decode is in that range;
+its roughly 18 ms compile and 8 ms preparation/commit are stronger next attribution targets.
+The proposed 30–40 ms comparable warm pipeline and 5–10 ms post-decode target are engineering
+goals, not new release gates or qualified runtime tails. Preserve representation, feature, encoded
+size and prior-work differences; defer header fusion and do not infer whole-engine speed ratios.
+No production or paused Editor/UI/Dialogue work changes in this measurement unit.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

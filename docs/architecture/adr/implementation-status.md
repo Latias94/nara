@@ -3451,6 +3451,16 @@ the changed work and full process ordering is inconsistent. This is scoped alloc
 evidence, not exclusive CPU/GPU, physical-memory or numerical frame-tail qualification. Header
 fusion, remaining source/reference work, foreign execution and full Foundation/R9/R10/R12 remain open.
 
+The [mature-engine module comparison](../../benchmarks/2026-11-17-runtime-module-comparison.md)
+adds ordinary public 64/4K/16K consumers and nine final local processes with 72 accepted case
+records and exact data checks. Bevy typed Scene, official World RON, Godot generic/packed metadata
+and native cell construction retain their different prior work and storage guarantees. Nara's
+roughly 37 ms JSON decode, 18 ms compile and 8 ms prepare/commit at 16K establish optimization
+orientation, not a whole-engine ratio. Provisional source-to-native/post-decode targets remain
+proposals; no validator, source format, production dependency or owner changes. Header fusion
+is deferred behind larger post-decode/representation attribution. Full Foundation/R9/R10/R12
+and numerical runtime-tail budgets stay open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

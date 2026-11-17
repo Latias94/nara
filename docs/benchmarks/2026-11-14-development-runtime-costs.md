@@ -2942,6 +2942,12 @@ nested duplicate scopes and exact budget/error precedence. No validation pass or
 removed to obtain the result. Header fusion, remaining reference/source work, larger named
 workloads and full Foundation/R9/R10/R12 remain open.
 
+The subsequent [mature-engine module comparison](2026-11-17-runtime-module-comparison.md)
+adds separately scoped single-collection 64/4K/16K public Nara, Godot and Bevy timings. Use it for
+local operation magnitudes and proposed optimization targets. Its one-file decode/compile/native
+construction phases are not the cumulative 18 mixed file decodes/nine expansions above, and its
+shared metadata/native World/Scene cases retain different prior work and ownership guarantees.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

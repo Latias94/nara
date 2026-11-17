@@ -1,0 +1,24 @@
+[package]
+name = "bevy-runtime-scene-comparison"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[features]
+default = []
+native-world-ron = ["dep:bevy_world_serialization", "dep:ron", "dep:serde"]
+
+[dependencies]
+anyhow = "1"
+bevy_asset = { path = "../../../../../repo-ref/bevy/crates/bevy_asset", version = "=0.20.0-dev", default-features = false }
+bevy_ecs = { path = "../../../../../repo-ref/bevy/crates/bevy_ecs", version = "=0.20.0-dev", default-features = false, features = ["std", "bevy_reflect"] }
+bevy_reflect = { path = "../../../../../repo-ref/bevy/crates/bevy_reflect", version = "=0.20.0-dev", default-features = false, features = ["std"] }
+bevy_scene = { path = "../../../../../repo-ref/bevy/crates/bevy_scene", version = "=0.20.0-dev", default-features = false }
+bevy_world_serialization = { path = "../../../../../repo-ref/bevy/crates/bevy_world_serialization", version = "=0.20.0-dev", default-features = false, features = ["serialize"], optional = true }
+ron = { version = "0.12", default-features = false, optional = true }
+serde = { version = "1", default-features = false, features = ["std"], optional = true }
+serde_json = "=1.0.154"
