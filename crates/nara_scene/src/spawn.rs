@@ -442,16 +442,22 @@ impl SceneSpawner {
                 });
             }
         };
-        let mut preflight = component_batch.with_decode_context(asset_resolution, |context| {
-            context.set_materialization_limits(value_limits);
-            preflight_compiled_scene_with_context(
-                document,
-                registry,
-                definition.bindings(),
-                context,
-                exact_definitions_admitted,
-            )
-        });
+        let mut preflight = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_unbound_preflight")
+                    .entered();
+            component_batch.with_decode_context(asset_resolution, |context| {
+                context.set_materialization_limits(value_limits);
+                preflight_compiled_scene_with_context(
+                    document,
+                    registry,
+                    definition.bindings(),
+                    context,
+                    exact_definitions_admitted,
+                )
+            })
+        };
         if preflight.diagnostics.has_errors() {
             return Err(SceneSpawnReport {
                 instance: None,
@@ -460,6 +466,10 @@ impl SceneSpawner {
             });
         }
 
+        #[cfg(feature = "work-observation")]
+        let world_work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_unbound_world_prepare")
+                .entered();
         let mut diagnostics = std::mem::take(&mut preflight.diagnostics);
         let pending_product = match product {
             Some(product) => {
@@ -605,7 +615,16 @@ impl SceneSpawner {
                 components.push(component.prepared);
             }
         }
-        let prepared_values = match component_batch.prepare_unbound(components) {
+        #[cfg(feature = "work-observation")]
+        drop(world_work_span);
+        let prepared = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_unbound_materialize")
+                    .entered();
+            component_batch.prepare_unbound(components)
+        };
+        let prepared_values = match prepared {
             Ok(prepared) => prepared,
             Err((index, error)) => {
                 let (entity_index, component_id) = &component_locations[index];

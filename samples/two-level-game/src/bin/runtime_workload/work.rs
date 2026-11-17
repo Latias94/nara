@@ -20,7 +20,7 @@ mod observed {
         registry::LookupSpan,
     };
 
-    const PHASES: [&str; 39] = [
+    const PHASES: [&str; 46] = [
         "project_content_read",
         "scene_source_decode",
         "prefab_source_decode",
@@ -49,6 +49,13 @@ mod observed {
         "scene_effective_asset_references",
         "scene_effective_entity_references",
         "scene_prepare_unbound",
+        "scene_unbound_preflight",
+        "scene_receiving_validation",
+        "scene_component_preflight",
+        "scene_unbound_receiving_validation",
+        "scene_unbound_component_preflight",
+        "scene_unbound_world_prepare",
+        "scene_unbound_materialize",
         "scene_bind",
         "scene_bind_revalidate",
         "scene_publish",
@@ -97,10 +104,24 @@ mod observed {
             if attributes.metadata().target() != "nara::scene::work" {
                 return;
             }
-            let Some(phase) = PHASES
-                .iter()
-                .position(|name| *name == attributes.metadata().name())
-            else {
+            let name = attributes.metadata().name();
+            let name = if matches!(
+                name,
+                "scene_receiving_validation" | "scene_component_preflight"
+            ) && context.span(id).is_some_and(|span| {
+                span.scope().any(|parent| {
+                    parent.metadata().target() == "nara::scene::work"
+                        && parent.metadata().name() == "scene_unbound_preflight"
+                })
+            }) {
+                match name {
+                    "scene_receiving_validation" => "scene_unbound_receiving_validation",
+                    _ => "scene_unbound_component_preflight",
+                }
+            } else {
+                name
+            };
+            let Some(phase) = PHASES.iter().position(|candidate| *candidate == name) else {
                 return;
             };
             let active = self

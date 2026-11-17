@@ -641,6 +641,10 @@ pub(crate) fn preflight_compiled_scene_with_context(
             "Scene bindings do not select the supplied native component registry",
         ));
     } else if !exact_definitions_admitted {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_receiving_validation")
+                .entered();
         let validation =
             validate_compiled_values_with_admission(document, authority, context, |_, _, _| {
                 Ok::<_, std::convert::Infallible>(())
@@ -677,6 +681,9 @@ pub(crate) fn preflight_compiled_scene_with_context(
         };
     }
 
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_component_preflight").entered();
     let mut entities = Vec::new();
     for entity in document.entities() {
         let mut components = Vec::new();
