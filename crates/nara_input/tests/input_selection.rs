@@ -6,11 +6,11 @@ use nara_app::{
     RuntimeCandidateScope, RuntimeClosePolicy, RuntimeObligationLedger, StartupStage,
 };
 use nara_core::ByteLimit;
-use nara_ecs::{Res, ResMut, Resource, World};
+use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
     ActionMapLimits, ActionMaps, InputPlugin, InputSeatId, InputSelectionError, KeyCode,
-    MAX_SEAT_ACTION_MAPS, finalize_input_selection,
+    MAX_SEAT_ACTION_MAPS, finalize_input_selection, startup_action_map_bindings,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -139,6 +139,121 @@ fn selected_map_is_visible_in_the_first_startup_stage() {
             .shares_owner_with(&expected)
     );
     assert_startup_selection(candidate, &expected, true);
+}
+
+#[derive(Default)]
+struct StartupMapReplacement;
+
+impl Plugin for StartupMapReplacement {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.input-selection.startup-replacement"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            StartupStage::Core,
+            (|world: &mut World| {
+                world
+                    .resource_mut::<ActionMaps>()
+                    .get_mut(InputSeatId::PRIMARY)
+                    .unwrap()
+                    .replace_bindings(
+                        action_map("startup.other", KeyCode::Enter).bindings_handle(),
+                    );
+            })
+            .before(observe_startup),
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn original_selected_bindings_survive_an_actual_startup_map_replacement() {
+    let plan = PluginPlan::resolve((
+        PluginDefinition::for_default::<InputPlugin>(),
+        PluginDefinition::for_default::<StartupObserverPlugin>(),
+        PluginDefinition::for_default::<StartupMapReplacement>(),
+    ))
+    .unwrap();
+    let mut candidate = plan
+        .instantiate_runtime_candidate(
+            RuntimeAdmissionReservation::try_acquire().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    assert!(startup_action_map_bindings(candidate.world()).is_none());
+    let selection = action_map("source.jump", KeyCode::Space);
+    let original = selection.bindings_handle();
+    with_scope(&mut candidate, |scope| {
+        finalize_input_selection(scope, Some(selection))
+    })
+    .unwrap();
+    assert!(
+        startup_action_map_bindings(candidate.world())
+            .unwrap()
+            .shares_owner_with(&original)
+    );
+    let runtime = candidate.complete_startup().unwrap().promote();
+    let selected = startup_action_map_bindings(runtime.world()).unwrap();
+    assert!(selected.shares_owner_with(&original));
+    let current = runtime
+        .world()
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap();
+    assert!(!selected.shares_owner_with(&current.bindings_handle()));
+    assert_eq!(
+        selected.definition().bindings()[0].input,
+        nara_input::InputBinding::Key(KeyCode::Space)
+    );
+    assert_eq!(
+        current.bindings()[0].input,
+        nara_input::InputBinding::Key(KeyCode::Enter)
+    );
+    assert!(
+        runtime.world().resource::<StartupObservations>().0[0]
+            .0
+            .shares_owner_with(&current.bindings_handle())
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn code_first_finalization_retains_original_selection_and_refusal_preserves_it() {
+    let mut candidate = candidate(true);
+    let current = candidate
+        .world()
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .unwrap()
+        .bindings_handle();
+    with_scope(&mut candidate, |scope| {
+        finalize_input_selection(scope, None)
+    })
+    .unwrap();
+    assert!(
+        startup_action_map_bindings(candidate.world())
+            .unwrap()
+            .shares_owner_with(&current)
+    );
+    assert_eq!(
+        with_scope(&mut candidate, |scope| finalize_input_selection(
+            scope,
+            Some(action_map("late.jump", KeyCode::Space))
+        )),
+        Err(InputSelectionError::AlreadyFinalized),
+    );
+    assert!(
+        startup_action_map_bindings(candidate.world())
+            .unwrap()
+            .shares_owner_with(&current)
+    );
+    retire(candidate);
 }
 
 #[test]

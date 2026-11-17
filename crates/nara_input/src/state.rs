@@ -299,6 +299,7 @@ impl ActionMap {
 #[derive(Resource)]
 pub(crate) struct InputInstallation {
     pristine: Option<Arc<ActionMapRevision>>,
+    selected: Option<ActionMapBindings>,
     finalized: bool,
 }
 
@@ -310,6 +311,7 @@ impl InputInstallation {
                 .filter(|map| !map.explicit)
                 .map(|map| Arc::clone(&map.revision)),
             finalized: false,
+            selected: None,
         }
     }
 }
@@ -328,6 +330,16 @@ impl std::fmt::Display for InputSelectionError {
     }
 }
 impl std::error::Error for InputSelectionError {}
+
+/// Borrows the immutable PRIMARY definition selected in unpublished Host admission.
+///
+/// Returns `None` before finalization or when no PRIMARY map was selected. Later
+/// replacement of the mutable map or its contexts does not change this original selection.
+/// This observation supplies no authority to install a map or reconstruct physical held state.
+#[must_use]
+pub fn startup_action_map_bindings(world: &World) -> Option<&ActionMapBindings> {
+    world.get_resource::<InputInstallation>()?.selected.as_ref()
+}
 
 /// Finalizes the Host's PRIMARY selection once in the unpublished candidate admission phase.
 /// `None` preserves code-first configuration. The scope type prevents post-Startup installation.
@@ -381,8 +393,13 @@ fn receive_selection(
             .insert(InputSeatId::PRIMARY, map)
             .expect("the pristine PRIMARY slot is already installed");
     }
+    let selected = world
+        .resource::<ActionMaps>()
+        .get(InputSeatId::PRIMARY)
+        .map(ActionMap::bindings_handle);
     let mut installation = world.resource_mut::<InputInstallation>();
     installation.finalized = true;
     installation.pristine = None;
+    installation.selected = selected;
     Ok(())
 }

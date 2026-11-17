@@ -45,7 +45,7 @@ use semantic::{ActionStaging, StagedActionRevision};
 pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
 pub use state::{
     ActionMap, ActionMapInstallError, ActionMaps, InputSelectionError, MAX_SEAT_ACTION_MAPS,
-    finalize_input_selection,
+    finalize_input_selection, startup_action_map_bindings,
 };
 
 #[doc(hidden)]
