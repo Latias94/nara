@@ -3193,6 +3193,72 @@ Clippy, feature-free Reflect/Scene compilation, root/sample formatting and docum
 checks pass. Three scoped implementation/review agents are closed with no remaining P1/P2.
 Full Foundation/R9/R10/R12 and numerical runtime-tail qualification remain open.
 
+### Unbound Preparation Cost Attribution
+
+The [unbound attribution unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#unbound-preparation-cost-attribution)
+adds five feature-gated scopes at the original Scene boundaries, using the existing binary-local
+collector. Receiving validation and component preflight also serve loading diagnostics, so their
+actual tracing ancestor chain selects two separate unbound buckets. The original `scene_decode`
+has fifteen calls: nine diagnostic preflights and six actual unbound preparations. Bucket
+selection follows the new span's registered parent chain, including explicit parents, rather
+than the ambient current span. The synthetic collector control retains worker/reentry/live-span
+failure checks and now proves both implicit and conflicting explicit-parent attribution.
+
+Original focused Scene prepare/public admission controls pass 64/64, with 772 outside the filter,
+at `0898b259-84c0-4bd3-a599-9bd0c5d41b48`. The release game/library/metrics/span/native/record
+selection passes 148/148 without skips at `57a983b9-c093-4fe6-bf81-696c3a1e8852`, 63.608 seconds
+after a 7m23s serial build. The subsequently extended explicit-parent test passes separately
+1/1 at `b940fde0-e164-4d77-a094-6be61d3a00ae`, without rerunning unrelated game behavior.
+Production and observer reviews find no P1/P2.
+
+One further frozen hardware DX12/RTX4090 process completes three original 16K lifetimes, nine
+retained-input GPU replays and complete source/native cleanup. The
+[source/program receipt](data/2026-11-14-development-runtime/authored-tiles-unbound-attribution-metadata.json)
+retains 162 exact source/control hashes, compiler and executable identity, counts, original raw
+report hash and one finite summary. Only the same four listed raw per-frame arrays are omitted.
+The frozen program and raw report remain in `%TEMP%/nara-unbound-attribution-20261117`.
+Tested source is captured relative to `6b5dd4d` and subsequently committed at
+`aeeb79f2792635b08f71a3aa849c2b926d3bba1e`. No owning Cargo runs during this process.
+
+These are median cumulative wall envelopes across three lifetimes in one process, not per-frame,
+single-file or exclusive CPU times. Each lifetime has two 8,192-cell maps per active level and six
+unbound preparations. Child spans overlap the named parent; separately computed medians are not
+an additive decomposition.
+
+| Scope | Calls per lifetime | Median cumulative wall | Boundary |
+| --- | ---: | ---: | --- |
+| Original unbound preparation | 6 | 81.791 ms | Original complete advanced preparation, including its preflight and World work. |
+| Unbound preflight | 6 | 81.248 ms | Decode-context setup and complete compiled Scene preflight. |
+| Unbound receiving validation | 6 | 35.120 ms | Current compiled definition/value/reference admission before codec dispatch. |
+| Unbound component preflight | 6 | 46.094 ms | All native codecs and data-component preparation, not a Tilemap-only timer. |
+| Unbound World preparation | 6 | 0.501 ms | Product/baseline/topology/predecessor/identity work and component-location staging before candidate materialization. |
+| Unbound candidate materialization | 6 | 0.028 ms | Original `ComponentApplyBatch::prepare_unbound` closure execution and result handoff, excluding later error formatting. |
+| Non-unbound diagnostic receiving validation | 9 | 54.711 ms | Separate loader/diagnostic preflights; not part of the six unbound calls. |
+| Non-unbound diagnostic component preflight | 9 | 59.384 ms | Separate codec preflight with diagnostic candidates subsequently discarded. |
+
+Individual unbound cumulative walls are 80.223/81.791/83.752 ms, with receiving
+34.420/35.120/35.963 ms and component preflight 45.052/46.094/47.179 ms. The process takes
+15.831 seconds including all repeated game/verification/replay work. The new scopes and
+ancestor selection change observation overhead, so neither those walls nor the previous
+smaller-phase-set program establish an improvement. Correlated lifetimes, uncontrolled host/
+cache/clock/driver state and nested walls establish no confidence interval, GPU, physical-memory
+or frame-tail result.
+
+The next bounded implementation should first compare native Tilemap construction inside its
+existing owner. Source inspection identifies a separate coordinate BTreeSet plus temporary typed
+Vec before final BTreeMap construction, and per-cell dirty-chunk updates; the component scope
+above makes that a useful hypothesis, not proof of an individual sub-operation's cost. Preserve
+duplicate input-index errors, numeric/color conversion, dirty revision and asset failure order.
+World/identity work is not the large envelope here, and later candidate closures usually just
+move/box already prepared stock values. Generic-reference reuse remains a separate compiled-value/
+Schema ownership question; this attribution grants no exemption from hidden-reference checks.
+
+Owning Scene and sample program/observer correctness Clippy, feature-free Scene compilation,
+root/sample formatting and source/document/hash checks pass. Source tracing, production/observer
+reviews and final numeric review retain their bounded scope in the owning plan. This adds no
+dependency, public interface, runtime policy or new observation owner, and qualifies neither
+foreign execution nor full Foundation/R9/R10/R12.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

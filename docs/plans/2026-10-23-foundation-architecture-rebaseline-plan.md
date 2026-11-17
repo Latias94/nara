@@ -5803,6 +5803,18 @@ Parent/child costs, the initial log-sink difference and host variation remain ex
 GPU, memory or universal gain follows. Correctness Clippy, feature-free compilation and formatting
 pass. Remaining Native-preparation/representation work and full Foundation/R9/R10/R12 remain open.
 
+The [unbound-preparation attribution](2026-11-13-rust-state-reconstruction-plan.md#unbound-preparation-cost-attribution)
+at `aeeb79f` adds five existing-owner timing scopes and disambiguates shared loader/actual-preparation
+calls through tracing ancestry. Original Scene controls pass 64/64, release game/native 148/148
+and explicit-parent observer controls 1/1. A further three-lifetime 16K process completes nine GPU
+replays and cleanup. Its [report](../benchmarks/2026-11-14-development-runtime-costs.md#unbound-preparation-cost-attribution)
+attributes the roughly 81.791 ms cumulative unbound envelope to receiving validation 35.120 ms
+and all-component preflight 46.094 ms; World preparation/materialization are 0.501/0.028 ms.
+Shared diagnostic preflight is separately nine calls, rather than part of the six unbound calls.
+The added observation changes overhead and establishes no new speed, GPU, memory or frame-tail
+gain. Existing-owner Tilemap construction is the next measured candidate; generic reference reuse
+still needs its exact immutable value/Schema contract. Full Foundation remains active.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

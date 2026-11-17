@@ -4355,6 +4355,77 @@ not an already adopted format. Keep unchanged/single-change/full-replacement wor
 from file-loading targets; cross-stage raw metrics still require reconciling mutable escapes
 and exact owning data rather than a cache keyed by source path.
 
+#### Unbound Preparation Cost Attribution
+
+Status: implemented at `aeeb79f2792635b08f71a3aa849c2b926d3bba1e` and qualified on Windows/Rust
+1.95.0 below. The value-cursor comparison leaves original unbound preparation
+at approximately 82 ms cumulative across six calls per lifetime. Existing identity/binding spans
+are too small to explain it, and the existing native-preview span is not exercised by this game.
+Locate the remaining work before changing receiving validation or introducing another cache.
+
+Reuse the feature-gated Scene spans and original binary-local collector. Add a small fixed set
+of scopes at existing boundaries: unbound preflight, receiving value validation, component
+preflight, World preparation and candidate materialization. Keep early refusal, borrowed decode
+context, candidate disposal, asset effects and identity admission in their original order.
+Source/native/processed policies and output remain unchanged. No per-field profiler, new public
+instrumentation API, source certificate or alternative lifetime owner is selected.
+
+Qualify the observer's complete/failed collection behavior and original prepare/commit/refusal
+consumers, then run the actual authored 16K game with its original travel, retained inputs,
+GPU replay and physical cleanup. Report call counts and nested scopes separately from exclusive
+CPU work. The added observation has its own overhead; it cannot establish a new performance
+improvement against the previous collector's smaller phase set. Use a complete operation-level
+measurement to choose the next Native codec, allocation or validation change.
+
+Source tracing confirms that the stock Tilemap builds native storage during codec preflight
+when Scene supplies its scratch AssetServer. Later candidate materialization normally moves and
+boxes that already prepared value. Loading diagnostics also use the same preflight function:
+the old `scene_decode` reports fifteen calls, while unbound preparation reports six. The collector
+therefore records two fixed unbound receiving/component buckets using the actual tracing span's
+ancestor chain, leaving non-unbound diagnostic calls in separate buckets. It does not infer
+those calls from the ambient current span or change the production preparation interface.
+The original collection test covers both uses, run isolation and its existing worker/reentrant/
+retained-span refusal behavior. Production scope review finds no P1/P2; focused original
+Scene prepare/public admission controls pass 64/64 with 772 outside the filter at
+`0898b259-84c0-4bd3-a599-9bd0c5d41b48`, 3.742 seconds after a 53.49-second debug build. The
+original release game/library/metrics/span/native/record selection passes 148/148 without skips
+at `57a983b9-c093-4fe6-bf81-696c3a1e8852`, 63.608 seconds after a serial 7m23s build. Original
+64/4K/16K travel, 27 retained-input GPU replays and both observer-panic cleanup controls remain.
+The subsequently added explicit-parent/grandparent and `parent: None` controls pass separately
+1/1 at `b940fde0-e164-4d77-a094-6be61d3a00ae`; test-only additions do not trigger another full
+game run. Observer review confirms actual registry ancestry and no remaining P1/P2.
+
+One additional frozen 16K process completes three original lifetimes, nine retained-input GPU
+replays, exact old/new phase counts and complete physical cleanup. The
+[attribution report](../benchmarks/2026-11-14-development-runtime-costs.md#unbound-preparation-cost-attribution)
+retains exact source/program/report identities and nested cumulative medians: original unbound
+81.791 ms, its preflight 81.248 ms, receiving validation 35.120 ms, component preflight
+46.094 ms, World preparation 0.501 ms and candidate materialization 0.028 ms. Diagnostic-only
+receiving/component work is separately 54.711/59.384 ms across nine calls, outside the six
+unbound calls. The component scope includes all codecs/data preparation, not only Tilemap.
+This attributes cost without proving a speed improvement against the smaller old phase set.
+Nested walls, correlated lifetimes and uncontrolled host/cache/clock/driver state grant no
+exclusive CPU, GPU, physical-memory or frame-tail result.
+
+Owning Scene all-target/all-feature and sample program/observer correctness Clippy, feature-free
+Scene compilation, root/sample formatting and document/source/hash checks pass; existing warnings
+remain. Added timing scopes compile out without `work-observation`; no public interface, file
+format, dependency or receiving policy changes. Existing independent Scene evidence remains applicable
+to unchanged behavior; no unrelated public/official-engine matrix is rerun. The original paused
+UI/Dialogue work remains byte-identical. Four scoped source-tracing, production/observer and numeric
+review agents are closed with no remaining P1/P2. Final numeric review confirms all eight table
+rows, exact 9+6 attribution, 162 source hashes and raw/summary equivalence. Its minor receipt
+closure note is resolved by the explicit qualified implementation hash and tested-before-commit
+scope; no product rerun is required for that documentation closure. Full Foundation/R9/R10/R12
+and foreign execution remain open.
+
+Next compare Tilemap-native uniqueness admission directly into its final cell tree, eliminating
+the current independent coordinate set and temporary typed Vec if the complete consumer benefits.
+Preserve duplicate input indices, all numeric/color checks, deferred asset effects and ordinary
+dirty-revision semantics. The World/identity envelope is not a worthwhile first optimization here.
+Keep cross-stage reference-fact reuse as a separate exact immutable value/Schema ownership design;
+the existing cost/depth facts alone do not establish declared-reference coverage.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

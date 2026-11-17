@@ -566,6 +566,40 @@ tests tied to eliminated internal work require reviewed new expectations. This i
 changes no limits, counters or refusal ordering. Existing tests are source evidence here, not rerun results.
 [^N-work] [^N-retain] [^N-custody] [^N-sharing-tests]
 
+### Native Tilemap Construction And Unbound Preparation
+
+At `6b5dd4d`, the actual 16K game uses two stock Tilemap components with 8,192 cells each,
+one through its original root-bound Prefab. It does not select the separate record probe.
+[`register_tilemap_components`](../../crates/nara_tilemap/src/lib.rs) reads borrowed generic/frozen
+cells into native `(TileCoord, TileCell)` records. `read_cells` builds a coordinate BTreeSet for
+duplicate rejection and a temporary typed Vec; `build_prepared_tilemap` then visits that Vec,
+inserting into the final cell BTreeMap and updating dirty-chunk revisions with each `set_cell`.
+This is independently mutable native storage, not a deep clone of the generic source tree.
+
+The original Scene [`with_decode_context`](../../crates/nara_reflect/src/persistent_apply.rs)
+supplies the batch's scratch AssetServer, so this Tilemap is built during codec preflight and
+wrapped in `PreparedComponentCandidate::insert`. Later `prepare_unbound` normally moves and
+boxes it. The surrounding Scene preparation also performs receiving-value checks, World
+baseline work and identity admission. Its old single wall envelope cannot identify those costs.
+The [unbound attribution unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#unbound-preparation-cost-attribution)
+separates those original boundaries without selecting a new candidate/lifecycle owner.
+
+There is also real domain work before activation: project-content membership admission reads
+cell values, and `SceneComponentBindings::validate_compiled_scene` performs codec preflight
+with no receiving AssetServer. That route builds and discards typed cells while retaining its
+domain diagnostics; its candidate would defer final Tilemap construction until actual apply.
+Do not assign all of those separate operations to the six unbound-preparation calls. TileSet
+handle resolution does not itself decode an Image or perform GPU upload.
+
+If native construction dominates, compare uniqueness admission directly into the final cell
+tree before introducing another generic cache. Preserve duplicate input-index diagnostics,
+finite numeric conversion, negative-coordinate chunking, dirty-revision semantics, immutable
+source isolation and deferred asset failure order. The current opaque `cells` Schema does not
+replace those domain checks. If receiving reference interpretation dominates instead, any reuse
+must retain its exact immutable value and admitted Schema relationship; cost/depth metrics alone
+do not establish declared-reference coverage. These are measurement hypotheses, not changes
+already selected from static source inspection.
+
 ## 6. Common Issues and What the Sources Do Not Prove
 
 - **A faster capture is not a removed lifetime copy.** The existing report already shows the copy

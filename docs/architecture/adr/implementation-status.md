@@ -3497,6 +3497,17 @@ physical-memory, GPU or frame-tail improvement. Source/program/report hashes, co
 feature-free compilation and formatting pass. No new validation owner, cache, source format or
 public receiving policy is introduced. Full Foundation remains open.
 
+The [unbound attribution unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#unbound-preparation-cost-attribution)
+at `aeeb79f` distinguishes receiving admission, all-component codec preflight, World preparation
+and candidate materialization through five feature-gated original-owner scopes. The collector
+separates nine diagnostic preflights from six actual unbound calls using registered ancestry,
+including explicit-parent and grandparent controls. Scene/public tests pass 64/64, release
+game/native 148/148 and final observer 1/1. A further complete three-lifetime 16K process and nine
+GPU replays attribute most of the roughly 82 ms envelope to receiving/codec work, without a
+speed-improvement claim. Correctness Clippy, feature-free compilation, formatting and source/
+report checks pass. No new validation, lifecycle or observation owner is introduced; full
+Foundation and remaining runtime representation/Native-construction work stay open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
