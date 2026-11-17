@@ -3026,6 +3026,92 @@ feature-free Reflect/Scene compilation, root/sample/scoped-consumer formatting, 
 small consumer and document/source/hash checks pass. The owning plan records failures,
 corrections and platform limits. Full Foundation/R9/R10/R12 remains open.
 
+### Reference Paths From Active Container Cursors
+
+The [private-walker successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#reference-paths-from-active-container-cursors)
+compares the remaining raw-reference traversal after joint interpretation. The control is the
+qualified `6295ccb` program. Both versions already share effective asset/entity interpretation,
+use the same source/receiving checks and expose identical feature-gated phase names. The private
+candidate replaces per-node Visit/Exit events and mutable full-path maintenance with active
+container iterators. It materializes an exact owned path from the root prefix and selected
+ancestor positions when a reference needs declaration lookup or a diagnostic. No values, tail
+bytes, depths or hidden-reference checks are skipped.
+
+The [pinned source comparison](../research/2026-11-17-large-tilemap-payload-ownership.md#current-ownership-and-escape-contracts)
+separates cursor position from owned paths without attributing Nara's budget contract to another
+engine. Six focused cases compare raw scans with an independent recursive owned-value oracle,
+including frozen insertions, root prefixes, UTF-8 fields, sibling recovery, UUID/authored-route
+work, exact limits, depth 64/65 and every callback refusal. Allocation assertions observe modeled
+debits; scalar/empty cases and flat-list scratch results are not process heap measurements.
+
+The first focused run passes 22/23. The remaining test encodes the old unconditional initial
+stack allocation. It now refuses the first actual nonempty-container allocation after the root
+visit, still before children or Schema errors. A preliminary syntax error is corrected before
+production compilation. The complete focused cohort then passes 29/29
+(`f9f6cdc0-5173-446b-b11a-f4a5810c9c0d`), and full Reflect/Scene libraries plus selected public
+consumers pass 1,154/1,154 without skips (`33e9a2fc-0c87-45ff-a5a8-545eccdb6ae4`). Independent
+production and test review finds no P1/P2. Four exploratory small-consumer processes pass all
+64/4K/16K encoding/data checks and justify continuing to complete game qualification; those
+observations do not substitute for a final frozen game comparison.
+
+The complete original release game/library/metrics/span/native/16K-record selection passes
+148/148 without skips (`540dd04b-3ce7-4795-94a8-4ae0a09ebe67`), 66.510 seconds after a serial
+10m21s build. Original 64/4K/16K travel, 27 original-input GPU replays and both observer-panic
+physical cleanup cases retain their full assertions. Four additional frozen processes then
+complete twelve 16K lifetimes and 36 GPU replays in before/after/after/before order. The first
+before runs earlier while the implementation is developed; the final three run consecutively
+after native qualification. No owning Cargo overlaps those measurement processes.
+
+The [source/program/report receipt](data/2026-11-14-development-runtime/authored-tiles-reference-cursors-paired-metadata.json)
+retains 159 after source/control hashes, the exact before/after executables and four finite
+summaries. Complete phase/source/acceptance/cleanup/replay facts and distributions remain; only
+the same four named raw per-frame arrays are omitted. Raw reports/programs remain in the local
+frozen directory. Before is the qualified joint-reference implementation `6295ccb`, executable
+SHA256 `ea00e61fd17250d75e0715382c56bc8c462d6db60714b0c229b078becd28f015`; after is captured
+relative to `34c3272` and subsequently committed at `26c12dc8c991d671e8206f56d96de500b4bab07e`.
+Both programs use Rust 1.95.0, hardware
+DX12/NVIDIA GeForce RTX 4090, identical source/Prefab data and the same observer configuration.
+The only production source difference is the private raw path walker; no dependency or file
+format update belongs to this experiment.
+
+Each value below is a median cumulative wall envelope across six complete lifetimes/version,
+not one file, one frame or exclusive CPU work. The reference planner runs 180 times, joint
+effective interpretation 480 times, flat admission nine times and unbound preparation six times
+per lifetime. The broader envelopes contain some of these child spans and are not additive.
+
+| Envelope | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| Wire preflight | 209.897 ms | 210.490 ms | Unchanged. |
+| Header decode | 38.501 ms | 37.989 ms | Unchanged. |
+| Payload decode | 296.504 ms | 290.665 ms | Unchanged; no parser optimization credit. |
+| Source finish | 50.900 ms | 49.673 ms | Unchanged. |
+| Original value admission | 91.696 ms | 89.935 ms | Unchanged. |
+| Defaults | 116.259 ms | 112.945 ms | Unchanged. |
+| Staged value-reference planner | 119.518 ms | 70.918 ms | 40.66% lower in this observation. |
+| Component materialization | 327.985 ms | 276.382 ms | Includes the changed staged planner. |
+| Effective value admission | 113.806 ms | 115.626 ms | Unchanged Native cost/depth traversal. |
+| Joint effective reference interpretation | 303.569 ms | 164.408 ms | 45.84% lower; one common child shared by flat/receiving paths. |
+| Flat admission | 237.061 ms | 188.517 ms | 20.48% lower. |
+| Native unbound preparation | 127.484 ms | 83.392 ms | 34.59% lower. |
+| Expansion, including nested Prefab work | 693.165 ms | 635.735 ms | Overlaps changed and unchanged work. |
+| Publication | 1.534 ms | 1.474 ms | Unchanged; no pure-commit gain claimed. |
+
+Per-process reference-plan medians are 118.667/68.919/73.224/128.265 ms. Flat medians are
+232.602/187.900/194.416/243.911 ms; unbound medians are 118.119/83.011/83.772/134.247 ms.
+Both after groups are lower than both before groups in these changed envelopes. Process walls
+are 15.041/14.216/14.306/16.074 seconds; both after groups are lower here too. Uncontrolled host,
+cache, driver and clock state plus correlated lifetimes prevent general whole-process,
+statistical-confidence, frame-P99, exclusive CPU/GPU or physical-memory claims. Fewer events and
+modeled scratch requests do not establish process heap/VRAM reduction. No extra representation,
+retained cache, validation certificate or mutable receiving owner is introduced.
+
+Independent Scene consumers pass 157/157 with one original manual timing skip
+(`626af222-a93f-41b9-b5bb-b9dde14dec58`). Owning all-target/all-feature correctness Clippy,
+feature-free Reflect/Scene compilation, root/sample formatting and document/source/hash checks
+pass; existing warnings remain. Independent numeric report review finds no P1/P2. The owning
+plan records actual failures/corrections and platform limits. This closes neither full
+Foundation/R9/R10/R12 nor numerical runtime or foreign-platform qualification.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

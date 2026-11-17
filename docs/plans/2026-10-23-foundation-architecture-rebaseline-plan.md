@@ -5775,6 +5775,21 @@ physical-memory guarantee. Independent Scene consumers pass 157/157 with one ori
 timing skip; owning correctness Clippy, feature-free compilation and formatting pass.
 Full Foundation/R9/R10/R12 and remaining post-decode/representation work remain open.
 
+The [active-container reference cursor](2026-11-13-rust-state-reconstruction-plan.md#reference-paths-from-active-container-cursors)
+at `26c12dc` replaces per-value Visit/Exit and full-path maintenance in the same private Reflect
+walker. Container cursors retain ancestor positions; exact owned paths are constructed only
+when a reference requires declaration lookup. Complete raw-tail, node/byte/depth and hidden
+reference checks remain. Focused reference tests pass 29/29 and full owner/public tests
+1,154/1,154; the original release game cohort passes 148/148 with full travel/GPU/cleanup proof.
+The [frozen four-process report](../benchmarks/2026-11-14-development-runtime-costs.md#reference-paths-from-active-container-cursors)
+adds twelve 16K lifetimes/36 replays. Staged reference-plan cumulative medians are
+119.518/70.918 ms before/after, flat admission 237.061/188.517 ms and unbound preparation
+127.484/83.392 ms. These nested wall envelopes are not additive CPU or frame-tail savings.
+Source metric caches remain deferred because current source owners retain no complete cost/depth
+facts across public writes; the existing checks cannot be skipped by source-path equality.
+Independent Scene consumers pass 157/157 with one original manual timing skip; correctness
+Clippy, feature-free compilation and formatting pass. Full Foundation stays active.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

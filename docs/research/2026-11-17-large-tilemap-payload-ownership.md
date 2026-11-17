@@ -516,6 +516,27 @@ contract to Godot or Bevy.
 
 ### Current Ownership And Escape Contracts
 
+A subsequent private-walker comparison separates visiting values from owning diagnostic paths.
+Bevy's pinned [`ListIter`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/list.rs)
+and [`FieldIter`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/structs.rs)
+retain a borrowed container and current index. Its
+[`MapEntities`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_ecs/src/entity/map_entities.rs)
+uses typed visitation without a complete ancestor path. Godot's
+[`ResourceFormatSaverBinaryInstance::_find_resources`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/io/resource_format_binary.cpp)
+dispatches by Variant kind, recursing into reference-bearing containers while ordinary scalars
+need no path. These sources support keeping cursor position separate from path materialization;
+neither implements Nara's complete hidden-reference/budget scan or supplies permission to omit it.
+The [container-cursor unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#reference-paths-from-active-container-cursors)
+compares that private mechanism under the same existing operation.
+
+Source metric reuse remains a separate choice. The current `ComponentPayload` owns an Arc of
+the value, with no complete per-value cost/depth result. Source-file finishing aggregates costs
+but does not retain those metrics; public mutable access, migrations and default insertions
+can change the represented value. An earlier accepted input or repeated source path therefore
+cannot substitute for current complete measurements. A same-operation contextual-default
+budget result could avoid its later repeated cost query, but that narrow case has not been
+attributed as the complete game's principal cost. This comparison introduces no metric cache.
+
 These are the existing Nara contracts to reconcile during implementation, rather than a reason
 to keep every current validation pass. Neither inspected upstream path supplies the same
 accounting contract. [^N-contract] [^N-retain] [^N-custody] [^N-receive]

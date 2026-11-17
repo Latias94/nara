@@ -3474,6 +3474,17 @@ consumers pass 157/157 with one original manual timing skip; correctness Clippy,
 compilation and formatting pass. ADR0006/0049 are refined without a new
 cache, source authority, receiving owner or production dependency. Full Foundation stays active.
 
+The [container-cursor successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#reference-paths-from-active-container-cursors)
+at `26c12dc` keeps complete raw reference/limit checks while replacing per-value path/Exit events with active
+Map/List positions and exact on-demand path materialization. Reference controls pass 29/29,
+full owner/public 1,154/1,154 and original release game/native 148/148. Production/test reviews
+find no P1/P2. The [paired game report](../../benchmarks/2026-11-14-development-runtime-costs.md#reference-paths-from-active-container-cursors)
+retains twelve 16K lifetimes/36 replays and observes lower planner/flat/unbound envelopes without
+combining nested costs or claiming physical-memory, GPU or frame-tail gains. Source metric reuse
+remains a separate, deferred contract; no cache, producer or new validation authority is added.
+Independent Scene consumers pass 157/157 with one original manual timing skip; correctness
+Clippy, feature-free compilation and formatting pass. Full Foundation is open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

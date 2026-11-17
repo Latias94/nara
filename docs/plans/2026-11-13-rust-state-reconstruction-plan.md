@@ -4179,6 +4179,93 @@ this same complete game. Establish which value/Schema facts each owns before sel
 joint pass or domain/processed Tile representation. Do not convert the observed saved walk into
 a universal cache, omit current receiving checks, or reopen header fusion without new attribution.
 
+#### Reference Paths From Active Container Cursors
+
+Status: implemented at `26c12dc8c991d671e8206f56d96de500b4bab07e` and qualified on Windows/Rust
+1.95.0 below. The preceding reference interpreter maintained a borrowed full path plus an Exit
+frame for every ordinary Map/List child, although the raw
+scan needs an owned path only when it reaches an EntityReference. Compare a direct iterative
+visitor whose stack holds only active container iterators and their selected child segments.
+Reconstruct the exact root-prefix/ancestor path when an actual reference needs declaration lookup
+or a diagnostic. This changes traversal mechanics, not which values are visited or admitted.
+
+Keep full raw-tail observation after the first hidden reference, decoded Map ordering, exact
+list indices/root prefixes, frozen defaults, declared-path equality, UTF-8 byte accounting,
+nodes/bytes/depth limits and caller error identity. Actual stack/path allocation still requires
+admission before allocation; removed scratch work does not retain historical fees. Scalar and
+empty-container cases should not need a path-maintenance stack. No metadata cache, new source
+certificate, Schema exemption or receiving-context reuse is selected.
+
+Use the existing joint-reference implementation as the frozen control. Qualify public standalone
+and joint visitors, nested/late hidden references, exact/tighter limits, callback refusal and the
+original complete game/native consumers. Compare unchanged full source/receiving paths and
+complete-game envelopes before retaining the experiment; an internal loop change alone is not
+an improvement claim. A parallel read-only assessment of source metric ownership remains a
+separate future choice and cannot silently add cached facts to this walker.
+
+The private iterative implementation replaces Visit/Exit events and a per-node mutable path
+with active Map/List cursor frames. Paths are materialized from the supplied root prefix and
+selected ancestor segments only at a reference that still needs declaration lookup. The first
+production check passes after correcting a syntax error caught before compilation. Existing
+reference tests initially pass 22/23: the remaining test assumes root-path scratch must allocate
+before any node observation. Its corrected refusal control admits the root visit and refuses
+the first actual nonempty-container allocation, before children or Schema errors. No redundant
+scratch is retained solely to preserve that old fee sequence.
+
+Six new bounded cases compare exact paths/counts against an independent recursive owned-value
+oracle, including merged frozen Maps/List suffixes, explicit Null, long UTF-8 paths, persistent
+UUID text work, authored routes, root prefixes and depth 64/65. Every callback refusal checks
+the exact caller error and no later callback. Scalar/empty cases have zero modeled allocation
+debit and flat 16K scalars have bounded cursor scratch; this is not allocator/RSS evidence.
+The complete focused reference cohort passes 29/29 at
+`f9f6cdc0-5173-446b-b11a-f4a5810c9c0d`, 1.110 seconds, with 246 outside the filter. Independent
+production and test review finds no P1/P2. A four-process small public consumer comparison
+completes all population/encoding/data checks and supports continuing to the original game;
+its exploratory timing is not substituted for complete native qualification. Full owner/public
+qualification passes 1,154/1,154 without skips at
+`33e9a2fc-0c87-45ff-a5a8-545eccdb6ae4`, 66.616 seconds after a 3m35s debug build. This includes
+the original joint/standalone reference, immutable measurement, Native codec, data/native
+receiving, authored route and processed readmission controls.
+
+The complete original release game/library/metrics/span/native/16K-record selection passes
+148/148 without skips at `540dd04b-3ce7-4795-94a8-4ae0a09ebe67`, 66.510 seconds after a serial
+10m21s build. Original 64/4K/16K travel, 27 original-input GPU replays and both observer-panic
+physical cleanup controls remain. Four frozen before/after/after/before processes add twelve
+16K lifetimes and 36 GPU replays, all accepted with original copied-source/native cleanup.
+Across six lifetimes/version, staged reference-plan wall medians are 119.518/70.918 ms,
+flat admission 237.061/188.517 ms, and unbound preparation 127.484/83.392 ms before/after.
+The changed planner is contained in component materialization/expansion, and joint interpretation
+is contained in flat/receiving work; do not sum those envelopes. Unchanged parser, value-cost
+admission, defaults and publication variations receive no optimization credit.
+
+The [paired report](../benchmarks/2026-11-14-development-runtime-costs.md#reference-paths-from-active-container-cursors)
+retains exact source/program hashes, full accepted phase counts, six lifetimes/version and
+process variation. Process walls are 15.041/14.216/14.306/16.074 seconds. Both after groups have
+lower changed envelopes and process walls in this finite observation, without controlled
+host/cache/clock/driver state or independent lifetime samples. No statistical/general speedup,
+exclusive CPU/GPU, physical-memory or numerical frame-tail result follows. Both programs already
+have identical observer names/configuration.
+
+The independently locked Scene consumer passes 157/157 with one original manual timing case
+skipped at `626af222-a93f-41b9-b5bb-b9dde14dec58`, 20.848 seconds after a serial 6m03s debug build.
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene library compilation,
+root/sample formatting and document/whitespace checks pass; existing warnings remain. Source,
+raw/summary and frozen executable hashes match the qualified implementation. Six scoped agents
+cover source-metric ownership, pinned upstream iteration, cursor tests, production/test review
+and numeric report review; all are closed with no remaining P1/P2. All 15 paused UI/Dialogue
+paths remain byte-identical, reference checkouts remain unchanged and no remote publication
+occurs. No dependency, format, public author API, Schema rule or receiving policy changes.
+This closes the cursor unit and selected Windows workflows; full Foundation/R9/R10/R12,
+remaining source/representation work, numeric runtime-tail budgets and foreign execution stay open.
+
+Continue by attributing original-value and Native cost/depth walking, with their unchanged
+complete value contract, against the remaining measured envelopes. Reuse cursor mechanisms
+only where a complete consumer identifies a matching cost. Do not retain cross-stage source
+metrics without reconciling public writes, exact data ownership and tighter receiving limits;
+the investigation above deliberately defers such a cache. A typed/processed Tile comparison
+remains an alternative for actual source representation cost, not an assumed consequence of
+this private loop improvement.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
