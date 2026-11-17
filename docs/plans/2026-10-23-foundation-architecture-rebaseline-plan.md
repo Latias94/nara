@@ -5758,6 +5758,23 @@ goals, not new release gates or qualified runtime tails. Preserve representation
 size and prior-work differences; defer header fusion and do not infer whole-engine speed ratios.
 No production or paused Editor/UI/Dialogue work changes in this measurement unit.
 
+The [joint effective-reference successor](2026-11-13-rust-state-reconstruction-plan.md#joint-effective-reference-interpretation)
+at `6295ccb` removes a demonstrated duplicate at the existing Reflect/Scene owner. Effective flat and
+source-backed receiving admission interpret shared raw/Schema/hidden-reference rules once for
+assets and entities. Original product/resolver checks precede pending entity-output allocation
+and namespace closure. Standalone visitors remain complete; no cache, detached proof or mutable
+receiving fact is added. ADR0006/0049 retain the refusal and work-admission contracts.
+Owner/public tests pass 1,148/1,148, and the original release game selection 148/148 with complete
+64/4K/16K travel, 27 GPU replays and both physical panic-cleanup controls. Four additional frozen
+processes add twelve 16K lifetimes/36 replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#joint-effective-reference-interpretation)
+records flat-admission cumulative medians 365.118/242.532 ms and unbound preparation
+195.573/120.923 ms before/after. Unchanged materialization/staged planning receives no credit;
+nested wall envelopes and uncontrolled process times establish no frame-tail, CPU/GPU or
+physical-memory guarantee. Independent Scene consumers pass 157/157 with one original manual
+timing skip; owning correctness Clippy, feature-free compilation and formatting pass.
+Full Foundation/R9/R10/R12 and remaining post-decode/representation work remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

@@ -4090,6 +4090,95 @@ No production validator, source format, cache, native owner or dependency change
 Post-decode attribution and the actual domain/processed representation take priority over header
 fusion. Full Foundation/R9/R10/R12, foreign execution and numerical frame-tail budgets remain open.
 
+#### Joint Effective Reference Interpretation
+
+Status: implemented at `6295ccb1cfd8bee7be963d34d9b11211d572cba2` and qualified on Windows/Rust
+1.95.0 below. The preceding effective Scene kernel collected assets and then planned entity
+references from the same unchanged value and Schema. Both entered the same complete raw-reference
+scan and declared-shape interpreter. Attribution below justifies sharing that interpretation.
+Feature-gated Scene spans reuse the existing binary-local observer in the small public collection
+consumer and complete game; default production has no subscriber.
+
+The selected replacement is one finite joint reference interpretation returning the asset
+inventory and entity plan to their existing Scene caller. Asset existence/product checks and
+entity namespace closure remain at their original owners and in their current order. No retained
+cache, detached proof, second source owner, receiving-context reuse or new public author model
+is selected. Independently used asset/entity operations remain complete for their named use.
+
+Preserve hidden/undeclared entity refusal, actual asset decoding, admitted Schema/field shapes,
+strict versions, optional and nested paths, opaque/frozen defaults, and exact callback error
+custody. Admit actual shared traversal/output allocations before work; do not retain a redundant
+scan solely to reproduce historical work counters. Compare positive and refused joint results
+with existing independent interpretation, including namespace/asset failures, tighter receivers
+and allocation/work refusal. Qualification must include public Reflect/Scene consumers and the
+original authored 64/4K/16K game/native/GPU-replay/cleanup workflow. Use a frozen before program
+and paired complete-game observations before claiming a speedup; isolated collection timings
+alone do not qualify engine-wide or frame-tail improvement. Full Foundation remains active.
+
+The first attributed original 16K compact case completes all 12 warmup/sample iterations with
+exact data checks and no unfinished observer spans. Across compile and prepare, asset/entity
+reference phases each run 24 times and accumulate 86.787/86.823 ms. Original flat admission is
+133.341 ms over 12 calls and unbound preparation is 100.880 ms over 12 calls. This locates shared
+interpretation cost; spans are nested wall time and cannot be added to their parent envelopes.
+The separate staged value-reference planner remains 43.062 ms over 12 calls and is outside this
+replacement. A frozen original complete 16K program independently passes three lifetimes, nine
+GPU replays and physical copied-source cleanup before modification; its actual process wall is
+18.227 seconds. The existing executable/source receipt is retained for the paired comparison.
+
+The joint implementation reuses the complete asset-mode interpreter and retains only its
+already owned entity-leaf paths in operation-local pending scratch. Assets are decoded once.
+The original Scene resolver/product checks precede pending-plan output allocation and local
+namespace closure. Both standalone single-kind collectors keep their complete contracts.
+Production code and test review find no P1/P2. Initial production compilation and 15 focused
+Reflect tests pass. The first complete owner/public run has 1,143 passes and five fixture/fee
+failures: the old working-budget oracle includes the removed second traversal, new World counts
+mistakenly include Resource entities, one narrowing fixture changes an EntityRef shape without
+its capability, and the source-closure case expects flat-asset diagnostics before the earlier
+compiler reference closure. Correct the fixtures to actual public boundaries without changing
+production semantics or weakening exact/one-short limits, source/content checks and no-publication
+assertions. Five corrected controls pass at `cefd4d09-aae1-4bc9-913f-171afd883d90`; the complete
+owner/public rerun passes 1,148/1,148 without skips at
+`fd2e6d8f-23f9-417d-9430-e4008de98645`, 87.844 seconds. Corrected-test review finds no remaining
+P1/P2 and confirms that resource initialization is distinct from premature Scene publication.
+
+The original complete release game/library/metric/span/probe/native selection passes 148/148
+without skips at `ea33b63a-7f3d-4366-8f33-dc37a44c94d9`, 64.448 seconds after a serial 10m32s
+build. It preserves actual baseline and 64/4K/16K travel, 27 original-input GPU replays, both
+observer-panic physical cleanup controls and the complete 16K record/cook probe. The added three
+effective-admission spans have matching original call counts on owner/worker paths. Paired
+before/after measurements complete four serial processes in before/after/after/before order,
+each with three full 16K lifetimes and nine GPU replays. Flat-admission wall medians across six
+lifetimes/version are 365.118/242.532 ms before/after; unbound preparation is 195.573/120.923 ms.
+Component materialization and staged value-reference planning remain nearly equal. The changed
+work is not the earlier 120ms staged planner, source parser or render path. Complete process
+walls are 18.227/15.989/15.415/17.042 seconds, with both after groups lower in this observation.
+These uncontrolled, correlated samples establish no general whole-process, exclusive CPU/GPU,
+physical-memory or numerical frame-tail budget. New after-only subspans add observation overhead;
+operation-local pending leaf storage is not a memory-reduction claim.
+
+The independently locked Scene consumer passes 157/157 with one original manual timing case
+skipped at `bd7a95f1-4231-46f6-a4a5-10edd4f2a5b2`, 19.591 seconds after a serial 6m14s build.
+Owning all-target/all-feature correctness Clippy and feature-free Reflect/Scene production
+compilation pass; existing warnings remain. Root, sample and scoped small-consumer format
+checks pass. The final small observed program also passes all nine population/encoding cases
+with complete data checks and no unfinished spans. Its 16K compact case has 24 joint asset
+interpretations totalling 84.155 ms and 24 entity finalizations totalling 0.008 ms; flat/unbound
+totals are 88.449/57.928 ms over 12 calls. These unpaired diagnostic numbers confirm the relocated
+work; the frozen complete-game comparison above remains the performance evidence.
+
+Eight scoped agents cover two attribution questions, Reflect implementation, public Scene
+controls, production/test/correction reviews and numeric report review; all are closed with no
+remaining P1/P2. Added document targets/headings, raw/summary/program/source digests, TOML,
+Python syntax and whitespace checks pass. All 15 paused UI/Dialogue paths remain byte-identical,
+the reference checkouts remain unchanged, and no remote publication occurs. This closes the
+joint interpretation unit and its selected Windows consumers, not full Foundation/R9/R10/R12,
+remaining source/representation work, numerical runtime-tail budgets or foreign execution.
+
+Continue from the unchanged original-value admission and staged reference-plan envelopes in
+this same complete game. Establish which value/Schema facts each owns before selecting another
+joint pass or domain/processed Tile representation. Do not convert the observed saved walk into
+a universal cache, omit current receiving checks, or reopen header fusion without new attribution.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

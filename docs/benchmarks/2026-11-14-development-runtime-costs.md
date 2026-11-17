@@ -2942,11 +2942,89 @@ nested duplicate scopes and exact budget/error precedence. No validation pass or
 removed to obtain the result. Header fusion, remaining reference/source work, larger named
 workloads and full Foundation/R9/R10/R12 remain open.
 
-The subsequent [mature-engine module comparison](2026-11-17-runtime-module-comparison.md)
-adds separately scoped single-collection 64/4K/16K public Nara, Godot and Bevy timings. Use it for
-local operation magnitudes and proposed optimization targets. Its one-file decode/compile/native
-construction phases are not the cumulative 18 mixed file decodes/nine expansions above, and its
-shared metadata/native World/Scene cases retain different prior work and ownership guarantees.
+### Joint Effective Reference Interpretation
+
+The subsequent [local module comparison](2026-11-17-runtime-module-comparison.md) identifies
+post-decode compilation and native preparation as stronger attribution targets than another
+envelope parser. The [owning successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#joint-effective-reference-interpretation)
+replaces one concrete duplicate: effective flat/receiving admission collects assets and then
+plans entity references from the same unchanged value/Schema. Both enter the same complete raw,
+declared-shape and hidden-reference interpreter. One shared interpretation now supplies assets
+and operation-local pending entity leaves. Actual product/resolver checks remain before entity
+output allocation and namespace closure. Independent visitors remain complete; no retained cache,
+new proof owner or skipped mutable receiving fact is introduced.
+
+An instrumented original 16K compact-JSON collection executes 12 warmup/sample iterations with
+complete data checks. Before modification, effective asset/entity interpretation each runs 24
+times and accumulates 86.787/86.823 ms. Flat admission is 133.341 ms across 12 calls and native
+unbound preparation is 100.880 ms across 12 calls. The separate staged value-reference planner
+is 43.062 ms over 12 calls. These nested wall spans locate the duplicated work; they cannot be
+added to their enclosing envelopes or reused as a whole-game result.
+
+Four frozen complete-game processes then execute before/after/after/before serially on Windows
+11, Rust 1.95.0 and hardware DX12/NVIDIA GeForce RTX 4090. Each process completes three authored
+16K lifetimes, nine retained-input GPU replays and original physical/copy cleanup. The first
+before runs earlier while implementation is developed; the following three run consecutively
+after qualification. No owning Cargo overlaps these processes. The original source generator,
+Scene/Prefab encoding, gameplay, receiving/native callbacks and acceptance assertions remain.
+The after program adds three feature-gated attribution spans; their overhead is included, and
+the earlier before program has no corresponding child-span breakdown.
+
+The
+[source/program/report receipt](data/2026-11-14-development-runtime/authored-tiles-joint-references-paired-metadata.json)
+retains the exact source hashes and executable digests. Four finite summaries retain complete
+phase/source/acceptance/cleanup/replay facts and distributions; only the same four named raw
+per-frame arrays are omitted. Original raw reports/programs remain in the local frozen directory.
+The before executable is the previously qualified borrowed-key implementation `9bd3a54`; the
+tested after source is captured as uncommitted relative to `70140a3` and subsequently committed
+at `6295ccb1cfd8bee7be963d34d9b11211d572cba2`. No compiler/dependency update belongs to this
+production optimization. The optional small consumer observer reuses the game's existing
+tracing dependency versions in its own lock; root/sample production locks are unchanged.
+
+Each number below is a median cumulative wall envelope across six complete lifetimes/version,
+not one load, one frame, exclusive CPU time or additive work. Flat admission has nine calls and
+unbound preparation six per lifetime; their enclosing and value stages can overlap.
+
+| Envelope | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| Structural wire preflight | 237.734 ms | 217.136 ms | Unchanged parser; variation receives no optimization credit. |
+| Header decode | 41.172 ms | 39.040 ms | Unchanged. |
+| Payload decode | 301.548 ms | 299.968 ms | Unchanged. |
+| Source finish | 53.139 ms | 52.360 ms | Unchanged. |
+| Original value admission | 94.719 ms | 94.210 ms | Unchanged. |
+| Defaults | 121.459 ms | 119.168 ms | Unchanged. |
+| Staged value-reference planner | 120.600 ms | 122.827 ms | Outside the joint receiving/flat replacement. |
+| Complete component materialization | 338.825 ms | 339.603 ms | Nearly equal; no gain claimed. |
+| Flat admission | 365.118 ms | 242.532 ms | 33.57% lower in this finite observation. |
+| Native unbound preparation | 195.573 ms | 120.923 ms | 38.17% lower in this finite observation. |
+| Expansion, including nested Prefab work | 720.986 ms | 709.156 ms | Overlapping, mostly unchanged work; no separate speedup attribution. |
+| Publication | 1.543 ms | 1.489 ms | Unchanged; no pure-commit improvement claim. |
+
+Per-process flat medians are 362.312/241.975/243.089/373.193 ms; unbound medians are
+198.901/121.823/117.564/186.521 ms. Both after groups are lower than both before groups in these
+changed envelopes. Process walls are 18.227/15.989/15.415/17.042 seconds. Whole-process ordering
+also favors the after groups here, but uncontrolled host/cache/driver/clock state and correlated
+lifetimes prevent a general speedup, statistical confidence, frame-P99, physical-memory or
+exclusive CPU/GPU claim. The new joint asset-interpretation span includes both kinds' shared
+work; its entity span now measures final output only. Do not compare that child span as if it
+were the previous full entity planner. Pending paths/leaf scratch can coexist with asset output;
+fewer walks are not proof of lower peak heap.
+
+Qualification includes complete Reflect/Scene libraries and selected public compiled/native/data/
+reference/cook paths, 1,148/1,148 without skips (`fd2e6d8f-23f9-417d-9430-e4008de98645`), and the
+complete original release game selection, 148/148 without skips
+(`ea33b63a-7f3d-4366-8f33-dc37a44c94d9`). It preserves 64/4K/16K travel, 27 original-input GPU
+replays, both observer-panic cleanup controls and the complete 16K record probe. The first owner
+run exposes one obsolete double-walk fee oracle and new fixture assumptions about Resource
+entities, source reference closure and a narrowing Schema capability; these are corrected at
+the actual owning boundaries. Exact/one-short limits, zero early native callbacks, complete
+contents, source isolation and no premature Scene publication remain checked. Production and
+bounded test-correction and numeric-report reviews find no P1/P2. The independently locked Scene
+consumer passes 157/157 with one original manual timing skip
+(`bd7a95f1-4231-46f6-a4a5-10edd4f2a5b2`). Owning all-target/all-feature correctness Clippy,
+feature-free Reflect/Scene compilation, root/sample/scoped-consumer formatting, final observed
+small consumer and document/source/hash checks pass. The owning plan records failures,
+corrections and platform limits. Full Foundation/R9/R10/R12 remains open.
 
 ### Retained Original Inputs And Qualification
 

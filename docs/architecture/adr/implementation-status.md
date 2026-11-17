@@ -3461,6 +3461,19 @@ proposals; no validator, source format, production dependency or owner changes. 
 is deferred behind larger post-decode/representation attribution. Full Foundation/R9/R10/R12
 and numerical runtime-tail budgets stay open.
 
+The [joint effective-reference interpretation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#joint-effective-reference-interpretation)
+at `6295ccb` implements one shared Reflect interpretation for Scene flat/source-backed receiving admission,
+keeping existing asset product/resolver checks before entity-plan finalization and namespace
+closure. Complete single-kind visitors, hidden-reference refusal and actual work/allocation
+admission remain. Owner/public tests pass 1,148/1,148 and original release game/native acceptance
+148/148; independent production/test reviews close without P1/P2. The
+[four-process comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#joint-effective-reference-interpretation)
+retains twelve 16K lifetimes/36 GPU replays and observes lower flat/unbound envelopes, without
+crediting unchanged stages or claiming memory/frame-tail/general speedup. Independent Scene
+consumers pass 157/157 with one original manual timing skip; correctness Clippy, feature-free
+compilation and formatting pass. ADR0006/0049 are refined without a new
+cache, source authority, receiving owner or production dependency. Full Foundation stays active.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
