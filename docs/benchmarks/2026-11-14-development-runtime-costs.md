@@ -2587,6 +2587,70 @@ records owner/public/independent checks and exact scope. Further native decoding
 raw-subtree traversals remain; this does not implement broader exact-definition reuse, change
 the source format or finish Foundation/R9/R10/R12.
 
+### Single Native Value Admission
+
+Date: 2026-11-17. Before is the qualified receiving-field-locality program with SHA256
+`7265e9516d72ca6b479e90d7b5810eff752f23c63b674e6a45230c65edfd4694`. Both versions already freeze
+defaults and separate field semantics from repeated cost/default admission. This successor
+at `ab19dc9` returns the exact cost already computed by the existing admitted Native walker. Scene consumes
+that cost against its remaining aggregate allowance, removing the preceding cost-only scan for
+accepted values. Native failures still classify the complete record through the original
+cost-only operation and retain its full charge when the aggregate cost fits; caller admission
+refusal stops immediately. Source/default semantics,
+receiving limits, current-state and publication checks remain. The
+[owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#single-native-value-admission)
+records source/Native cost controls and the rejected-value policy.
+
+Four serial before/after/after/before processes pass the unchanged original 16K travel workload,
+copied-source removal, GPU replays and physical cleanup: twelve complete lifetimes and 36 replays,
+six lifetimes per version. Rust 1.95 release, manifests/locks, source generator, observation hooks,
+value-phase call counts and hardware DX12 RTX4090 adapter match. Finite summary exports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-native-value-cost-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-native-value-cost-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-native-value-cost-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-native-value-cost-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-native-value-cost-paired-metadata.json).
+They retain complete phase/source/acceptance/cleanup/replay facts and runtime/frame distributions,
+omitting only the same four raw per-frame arrays as prior comparisons. Complete raw reports and
+programs remain in the local frozen directory, with original raw-report SHA256 digests recorded.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 78.173 ms | 78.682 ms |
+| Shared record capture | 0.027 ms | 0.035 ms |
+| Migration, including post-migration admission | 0.038 ms | 0.039 ms |
+| Default materialization | 94.667 ms | 96.518 ms |
+| Compiler semantic validation | 0.795 ms | 0.826 ms |
+| Reference planning | 119.418 ms | 118.221 ms |
+| Reference-program validation | 0.016 ms | 0.015 ms |
+| Complete component materialization | 296.435 ms | 296.777 ms |
+| Flat claim admission | 384.536 ms | 334.978 ms |
+| Native decoding and preflight | 788.297 ms | 711.898 ms |
+| Unbound preparation | 303.411 ms | 280.802 ms |
+| Expansion, including nested Prefab acquisition | 924.321 ms | 927.946 ms |
+| Source payload decode | 701.901 ms | 706.479 ms |
+
+Observed flat admission is 12.89% lower, native decoding/preflight 9.69% lower and unbound
+preparation 7.45% lower. These cumulative envelopes overlap and their savings are not additive
+exclusive CPU costs. Source decoding, compiler defaults/semantics and expansion are unchanged by
+this operation; variation there is not credited to the change. Original 180 calls per named value
+phase, eight worker expansion entries and six owner publications per lifetime remain.
+
+Process walls in order are 18.715, 18.648, 18.477 and 19.139 seconds. This finite observation,
+with correlated lifetimes and uncontrolled host/driver/cache/clock state, does not establish
+statistical confidence or a general whole-process speedup. Unchanged pacing and wall instrumentation
+do not measure exclusive CPU/GPU duration, physical memory, frame P99 or production tail budgets.
+After-program SHA256 is `0f0ff0b3ee057c6ca1c13ac2953e3e2abd2f531909ef62fcc8746f0f014fdd1b`.
+
+The identical after executable separately passes the original complete release game/library/
+metrics/span/probe/native selection, 148/148 without skips at
+`becaacb3-a0e5-488e-b930-e756009d455e`, 64.198 seconds after a 9m31s serial build. Baseline and
+authored 64/4K/16K travel, 27 retained-input GPU replays and both observer-panic cleanup controls
+remain. Failed-value cost classification has CPU controls but is not isolated by this accepted-value
+performance workload. Further immutable cost/depth/reference reuse and source decoding work are
+separate operations; no broader exact-definition reuse, source-format change or full
+Foundation/R9/R10/R12 completion is claimed.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

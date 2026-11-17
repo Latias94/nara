@@ -3599,6 +3599,90 @@ reuse is implemented here. Evaluate that next against the actual remaining workl
 project witness. Source decoding and ordinary game/runtime delivery remain priorities; full
 Foundation/R9/R10/R12, physical-memory and numerical runtime-tail budgets remain open.
 
+#### Single Native Value Admission
+
+Status: scoped implementation at `ab19dc9` and Windows qualification complete below after receiving-field
+locality. The original Reflect Native materialization walker already computes complete node/byte cost while checking
+depth and Native references, but its admitted entry discards that result. Scene first performs a
+separate complete cost walk, then invokes the Native walker. Return the existing exact cost and
+let the receiving owner's aggregate allowance consume it after one accepted traversal. Keep the
+original walker, scratch admission and source/native policies; do not create a generic summary,
+certificate, cache or new traversal framework merely to carry an existing result.
+
+Refused values have a distinct existing contract: complete aggregate cost is classified before
+Native/depth diagnostics, and a value that fits the aggregate cost remains charged even after
+Native failure. On a Native value error only, retain the cost-only classification in the original
+Scene budget owner to preserve that whole-record charge and node-before-byte aggregate errors.
+Caller admission refusal immediately returns its exact error without retry. This failure path
+does not justify a second scan for accepted values. Scratch/work admission follows actual
+operations; removing the success-path cost scan also removes its allocation/work fee.
+
+Acceptance includes returned exact raw/frozen Native cost, complete nested/reference cost,
+strict receiving node/byte/depth errors, original refusal identity, no source mutation and one
+Native callback envelope for accepted values. Failed early Authored/depth checks must still
+account for later unvisited siblings before accepting another record; zero-byte remaining space
+can admit Null, while zero nodes rejects any value. Both Native and failure-classification
+admission refusals must stop immediately. Preserve complete public Scene, independent consumer,
+original release game/native and balanced frozen-program workflows. Keep exact definitions,
+current World/resource checks and publication unchanged. Full Foundation/R9/R10/R12 remain active.
+
+##### Implementation And Initial Qualification
+
+The existing admitted Native entry returns its complete `ComponentValueCost` instead of discarding
+it. Scene consumes that cost under its actual remaining aggregate limits. Accepted values execute
+one Native callback envelope; rejected Native values use cost classification only to preserve the
+complete charge and aggregate diagnostic contract. Caller admission errors bypass classification
+and return immediately. Source/default admission retains its existing unit result and semantics.
+No new walker, summary owner or cache is introduced. Production all-feature Reflect/Scene compile.
+
+All-feature Reflect/Scene/Tooling libraries pass 1,244/1,244 without skips at
+`466371ef-aa07-4137-95e9-c5523cf8dc04`, 70.923 seconds after a 1m44s debug build. New Scene controls
+check one accepted Native work envelope, complete cost after early depth/Authored failure with
+unvisited siblings, subsequent-record allowance, node/byte diagnostic precedence, zero-byte Null
+admission and exact refusal identity in both Native and failure-classification callbacks. The
+wide-optional scratch oracle removes its obsolete success-path cost scan, retaining index refusal
+before allocation and zero-codec assertions. No production or test failure occurs in this run.
+
+Public Reflect native-cost/explicit/frozen controls pass 14/14 at
+`91a76783-5d3b-4403-952a-c9197403b6a9`, 0.728 seconds, and selected public Scene workflows pass
+74/74 at `21958154-8edb-4ef2-8853-c1b87e96e395`, 3.379 seconds, without skips. Raw and frozen
+Native values return the same complete 15-node/89-byte fixture cost, strict limits still reject
+and every actual callback boundary preserves the original non-Clone refusal object. Source
+cost accepts the Authored-reference fixture while Native admission rejects it. Independent
+implementation and final test review find no P1/P2; both scoped agents are closed. Complete release
+game/library/metrics/span/probe/native qualification passes 148/148 without skips at
+`becaacb3-a0e5-488e-b930-e756009d455e`, 64.198 seconds after a 9m31s serial build. Original
+baseline and authored 64/4K/16K travel, 27 retained-input GPU replays, both observer-panic cleanup
+controls and the 16K CPU record probe remain.
+
+The same after executable then completes four serial balanced 16K processes, twelve lifetimes
+and 36 replays. The [paired report](../benchmarks/2026-11-14-development-runtime-costs.md#single-native-value-admission)
+records flat-admission wall medians 384.536/334.978 ms, Native decoding/preflight
+788.297/711.898 ms and unbound preparation 303.411/280.802 ms before/after. Overlapping cumulative
+envelopes are not additive CPU costs. Compiler semantics, defaults and source decoding are
+unchanged; their variation is not credited to this operation. Process walls
+18.715/18.648/18.477/19.139 seconds are a finite observation without statistical, CPU/GPU-duration,
+physical-memory or numerical frame-tail claims. Source/compiler/lock/observation controls and
+phase call counts remain. Summary exports preserve complete phase/source/acceptance/cleanup/
+replay facts and original raw-report hashes; complete raw programs/reports remain outside target.
+The independently locked Scene consumer passes 157/157 with one existing manual timing case
+skipped at `f044f58d-f993-4eea-8564-a566a2e80ab2`, 19.674 seconds after a 4m57s debug build.
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene production compilation
+and root formatting pass; pre-existing warnings remain. New document/report links, report hashes
+and Git whitespace pass. No dependency/lock, source-format, numerical capacity, UI/Dialogue or
+remote-publication changes accompany this unit. All owned Cargo/native measurement processes
+are terminal and both scoped agents are closed.
+
+This closes the selected receiving success-path consolidation. A cost is a value result from the
+existing check, not an independent lifecycle or generic certificate. It does not authorize a
+different receiving definition or mutable World state. The next reuse decision should start from
+the existing immutable `CompiledSceneComponent`, final cost/depth facts and project definition
+witness. Cover every actual constructor, native-preparation copy, direct data value and processed
+admission before using retained facts; a bare input reference or trusted flag is insufficient.
+Keep current World, namespace, product and publication checks separate from those immutable
+facts. Source decoding, remaining traversal costs and full Foundation/R9/R10/R12 remain open;
+no physical-memory or numerical runtime-tail qualification follows from these wall envelopes.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

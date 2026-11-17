@@ -3376,6 +3376,20 @@ completes twelve further lifetimes/36 replays, observing cumulative flat-admissi
 GPU, physical-memory, frame-tail or statistical whole-process performance. Review finds no P1/P2;
 broader exact-definition reuse and full Foundation/R9/R10/R12 remain open.
 
+The [single Native-value admission unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#single-native-value-admission)
+at `ab19dc9` returns the cost already computed by the Native depth/reference walker and consumes it under
+Scene's remaining aggregate allowance. Accepted values avoid a separate cost scan. Failed Native
+values preserve complete cost classification/charges; caller refusal returns immediately. Full
+owner libraries pass 1,244/1,244, public Reflect/Scene controls 14/14 and 74/74, and original release
+game/native qualification 148/148. Independent Scene consumers pass 157/157 with one manual timing
+case skipped. Independent review finds no P1/P2. Its
+[paired 16K comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#single-native-value-admission)
+completes twelve further lifetimes and 36 replays, recording cumulative flat-admission wall medians
+384.536/334.978 ms, Native decoding/preflight 788.297/711.898 ms and unbound preparation
+303.411/280.802 ms. These overlapping envelopes do not establish exclusive CPU/GPU, physical-memory,
+frame-tail or general whole-process performance. Exact-definition/immutable fact reuse, source
+decoding and full Foundation/R9/R10/R12 qualification remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

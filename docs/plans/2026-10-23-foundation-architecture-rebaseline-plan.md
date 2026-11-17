@@ -5654,6 +5654,21 @@ cumulative envelopes are not additive CPU costs or a general process/frame-tail 
 Broader exact-definition reuse, complete traversal consolidation and full Foundation/R9/R10/R12
 remain open; ordinary typed gameplay does not acquire a generic validator at each use.
 
+The [single Native-value admission successor](2026-11-13-rust-state-reconstruction-plan.md#single-native-value-admission)
+at `ab19dc9` returns the existing depth/reference walk's complete cost and consumes it for the receiving
+aggregate allowance. Accepted values no longer need a preceding cost-only scan; rejected Native
+values retain complete cost classification/charges, and caller admission refusal stops immediately.
+Full Reflect/Scene/Tooling libraries pass 1,244/1,244, public Reflect controls 14/14 and selected
+Scene workflows 74/74. The independently locked Scene consumer passes 157/157 with one manual
+timing case skipped. Independent review finds no P1/P2. Original release game/native qualification
+passes 148/148 with 64/4K/16K travel, 27 retained-input GPU replays and both panic cleanup cases.
+Four balanced processes add twelve 16K lifetimes and 36 replays. The
+[paired report](../benchmarks/2026-11-14-development-runtime-costs.md#single-native-value-admission)
+observes cumulative flat-admission wall medians 384.536/334.978 ms, Native decoding/preflight
+788.297/711.898 ms and unbound preparation 303.411/280.802 ms before/after. Compiler/source
+phases remain unchanged and no general process, CPU/GPU, physical-memory or frame-tail guarantee
+follows. Broader immutable fact reuse and full Foundation/R9/R10/R12 remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

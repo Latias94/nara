@@ -445,7 +445,14 @@ keep their own paths. The subsequent
 at `f5c34ff` uses that same semantic tail with actual index/shape/diagnostic admission after the receiving
 operation's original explicit/default, aggregate cost and Native reference checks. Its original
 game/native and [paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#receiving-field-validation-locality)
-retain the complete workflow; broader preparation reuse remains a follow-up. Prefer Rust ownership and
+retain the complete workflow. The subsequent
+[single Native-admission unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#single-native-value-admission)
+at `ab19dc9` returns the complete cost already computed by the existing Native depth/reference walker and
+consumes it under the receiving aggregate allowance. Accepted values avoid their preceding cost
+scan; rejected Native values retain complete cost classification and charges in that original
+owner. Its [paired measurement](../benchmarks/2026-11-14-development-runtime-costs.md#single-native-value-admission)
+retains the original accepted-value game/GPU/cleanup path; failed-value behavior has separate CPU
+controls. Broader preparation reuse remains a follow-up. Prefer Rust ownership and
 the existing compiler/candidate state to a public `unchecked` API, global
 address/hash cache or general validation-certificate framework. Logical size and retained
 allowances can be checked from applicable admitted facts; work counters should account for the
