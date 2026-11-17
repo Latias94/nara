@@ -28,6 +28,24 @@ fn populations_preserve_sources_and_fit_default_file_limits_at_one_world_footpri
         );
         assert_eq!(report["bounds"]["scene_file_bytes"], 16 * 1024 * 1024);
         assert_eq!(report["bounds"]["shape_nodes"], 1_000_000);
+        for relative in [
+            "assets/animations/explorer.sprite-animations.json",
+            "assets/animations/explorer.sprite-animations.json.meta",
+        ] {
+            let expected = file_report(relative, &fs::read(original.join(relative)).unwrap());
+            for inventory in ["copied_source_files", "source_files"] {
+                assert_eq!(
+                    report[inventory]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|file| file["path"] == relative)
+                        .collect::<Vec<_>>(),
+                    [&expected],
+                    "copied animation inventory: {inventory} {relative}",
+                );
+            }
+        }
         for file in report["copied_source_files"].as_array().unwrap() {
             let relative = file["path"].as_str().unwrap();
             let bytes = fs::read(original.join(relative)).unwrap();

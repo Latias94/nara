@@ -4,11 +4,13 @@ use nara::{
     asset::AssetRef,
     identity::SceneEntityId,
     prelude::{Component, PersistentComponent, PersistentComponentProvider, Transform2d, Vec2},
+    project_host::ProjectDomainAssets,
     reflect::ComponentTypeId,
     scene::{CompiledSceneDocument, CompiledSceneEntity},
 };
 
 use super::collision::{CollisionBox, RoomCollision, Wall};
+use crate::animation::{ExplorerAnimation, PreparedAnimation};
 use crate::{levels::LevelId, save::Checkpoint};
 
 pub const PLAYER: u32 = 1;
@@ -58,10 +60,14 @@ pub(super) struct Content {
     pub pickups: BTreeMap<SceneEntityId, Vec2>,
     pub bank: AssetRef,
     pub collision: RoomCollision,
+    pub animation: PreparedAnimation,
 }
 
 impl Content {
-    pub fn read(scene: &CompiledSceneDocument) -> Result<Self, String> {
+    pub fn read(
+        scene: &CompiledSceneDocument,
+        assets: &ProjectDomainAssets,
+    ) -> Result<Self, String> {
         if scene.entities().len() > 32 {
             return Err("level has too many authored entities".into());
         }
@@ -113,7 +119,9 @@ impl Content {
                 PLAYER if player.is_none() => {
                     let definition =
                         decode::<CollisionBox>(entity)?.ok_or("explorer lacks its CollisionBox")?;
-                    player = Some((entity.id().clone(), transform, definition));
+                    let animation = decode::<ExplorerAnimation>(entity)?
+                        .ok_or("explorer lacks its authored animation resource")?;
+                    player = Some((entity.id().clone(), transform, definition, animation));
                 }
                 CHECKPOINT if checkpoint.is_none() => {
                     checkpoint = Some((entity.id().clone(), position))
@@ -136,11 +144,12 @@ impl Content {
         if portals != 1 || cameras != 1 || pickups.len() != 2 {
             return Err("level requires one camera, one portal and two authored pickups".into());
         }
-        let (player, mut player_transform, definition) =
+        let (player, mut player_transform, definition, animation) =
             player.ok_or("level lacks a unique explorer")?;
         player_transform.translation = checkpoint_position;
         walls.sort_by(|first, second| first.id.cmp(&second.id));
         let collision = RoomCollision::prepare(definition, walls, player_transform)?;
+        let animation = PreparedAnimation::acquire(assets, animation.clips)?;
         Ok(Self {
             player,
             checkpoint,
@@ -148,6 +157,7 @@ impl Content {
             pickups,
             bank: bank.ok_or("level lacks its camera SoundPalette")?,
             collision,
+            animation,
         })
     }
 

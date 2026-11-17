@@ -38,9 +38,11 @@ use nara::{
         RuntimeContentLimits, RuntimeContentMember, RuntimeContentTarget,
     },
 };
+use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot, SoundPalette,
+    animation::{CLIPS_PATH, clips_product},
     levels::LevelId,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
 };
@@ -300,6 +302,29 @@ fn exact_samples(bank: &Bank, expected: &[Vec<f32>; 2]) {
     assert_eq!(bank.samples(SoundCue::Travel), expected[1]);
 }
 
+fn exact_clips(clips: &SpriteAnimationSet) {
+    assert_eq!(clips.product(), clips_product());
+    let encoded: Value =
+        serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(clips).unwrap()).unwrap();
+    assert_eq!(
+        encoded,
+        json!({
+            "format_version": 1,
+            "product": clips_product(),
+            "clips": [
+                {"name": "idle", "mode": "once", "frames": [
+                    {"min": [0.0_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+                {"name": "walk", "mode": "loop", "frames": [
+                    {"min": [0.25_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.5_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.75_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+            ],
+        })
+    );
+}
+
 fn decode_group(group: &VerifiedArtifactGroup) -> Bank {
     assert_eq!(group.members().len(), 1);
     let member = &group.members()[0];
@@ -450,6 +475,31 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
     .unwrap()
     .into_group();
     builder.add_group(&group).unwrap();
+    let group = build_source::<SpriteAnimationDomain>(
+        &store,
+        &fixture.request(
+            CLIPS_PATH,
+            ArtifactBuildDefinition {
+                id: SpriteAnimationDomain::BUILD_ID.to_owned(),
+                revision: FormatVersion::new(SpriteAnimationDomain::BUILD_REVISION).unwrap(),
+                implementation: implementation(),
+            },
+        ),
+        |_| Ok(()),
+    )
+    .unwrap()
+    .into_group();
+    assert_eq!(group.members().len(), 1);
+    assert_eq!(group.members()[0].products, [clips_product()]);
+    assert_eq!(
+        group.members()[0].format.as_str(),
+        SpriteAnimationCodec::RUNTIME_KIND
+    );
+    assert_eq!(
+        group.members()[0].format_version.get(),
+        SpriteAnimationCodec::RUNTIME_VERSION
+    );
+    builder.add_group(&group).unwrap();
     for path in [
         "textures/meadow.png",
         "textures/cavern.png",
@@ -579,7 +629,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 6);
+    assert_eq!(prepared.base().catalog().members().len(), 7);
     let acquired = prepared
         .base()
         .acquire_asset::<SoundBankDomain, SoundBankCodec>(bank_product())
@@ -625,8 +675,35 @@ pub fn processed_and_membership() {
     assert_eq!(&bytes[..8], b"NARASBNK");
     bytes[12..28].copy_from_slice(foreign.source().as_uuid().as_bytes());
     assert!(SoundBankCodec::decode_runtime(&bytes).is_err());
+    let acquired_clips = prepared
+        .base()
+        .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(clips_product())
+        .unwrap();
+    exact_clips(acquired_clips.product());
+    assert!(SpriteAnimationCodec::contains_runtime_product(
+        acquired_clips.product(),
+        clips_product()
+    ));
+    let absent_clip = AssetProductRef::new(clips_product().source(), absent.product()).unwrap();
+    for reference in [foreign, absent_clip] {
+        assert!(!SpriteAnimationCodec::contains_runtime_product(
+            acquired_clips.product(),
+            reference
+        ));
+        assert!(
+            prepared
+                .base()
+                .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(reference)
+                .is_err()
+        );
+    }
     fixture.retire_source();
     exact_samples(acquired.product(), &expected);
+    let decoded_clips = prepared
+        .base()
+        .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(clips_product())
+        .unwrap();
+    exact_clips(decoded_clips.product());
     let mut fixture = fixture;
     fixture.session = Some(HeadlessSession::from_runtime_content(prepared.into_base()));
     fixture.session.as_mut().unwrap().start().unwrap();
@@ -659,11 +736,24 @@ pub fn processed_and_membership() {
                     .is_none()
             );
             exact_samples(bank(assets), &expected);
+            let clips = assets.collection::<SpriteAnimationDomain>().unwrap();
+            assert_eq!(clips.iter().len(), 1);
+            assert_eq!(clips.source_records().len(), 0);
+            assert!(clips.get(&AssetRef::path(CLIPS_PATH).unwrap()).is_none());
+            exact_clips(clips.get(&AssetRef::Product(clips_product())).unwrap());
             assets.clone()
         })
         .unwrap();
     assert!(fixture.close());
     exact_samples(bank(&retained), &expected);
+    exact_clips(acquired_clips.product());
+    exact_clips(
+        retained
+            .collection::<SpriteAnimationDomain>()
+            .unwrap()
+            .get(&AssetRef::Product(clips_product()))
+            .unwrap(),
+    );
 }
 
 pub fn world_retirement() {

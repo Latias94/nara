@@ -17,7 +17,11 @@ use nara::{
     runtime_content::{RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget},
 };
 use serde_json::{Value, json};
-use two_level_game::{Scenario, animation::atlas_product, levels::LevelId};
+use two_level_game::{
+    Scenario,
+    animation::{atlas_product, clips_product},
+    levels::LevelId,
+};
 
 use super::{
     arguments::Options,
@@ -103,8 +107,9 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 6
+            || base.catalog().members().len() != 7
             || base.member(atlas_product()).is_none()
+            || base.member(clips_product()).is_none()
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()

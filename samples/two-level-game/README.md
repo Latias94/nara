@@ -11,15 +11,20 @@ the current logical level at its checkpoint, or retries a failed reconstruction.
 uses normal Runtime shutdown, including pending Scene preparation and temporary-file cleanup.
 The green square marks the checkpoint; the purple square marks the destination portal.
 
-The game-owned [animation module](src/animation.rs) selects Idle and three walking regions of one
-shared [64x16 sRGB atlas](assets/textures/explorer.png), with nearest clamped sampling. Walking
-follows net held intent, including movement against a wall; opposing keys cancel per axis.
-The existing integer game clock advances the walking phase every 100 ms. Pause leaves it frozen;
-an exact Step advances one fixed tick. Scene travel and exact Runtime reconstruction derive the
-Sprite region before presentation from the same existing clock and held directions. Checkpoints
-keep their ordinary progress semantics. No new playback cursor or resume field is serialized.
-Recook earlier installations to include the shared atlas; the existing Scene Schema and resume
-format do not change for this workflow.
+The game-owned [animation selection](src/animation.rs) uses the authored
+[explorer clips](assets/animations/explorer.sprite-animations.json) and shared
+[64x16 sRGB atlas](assets/textures/explorer.png), with nearest clamped sampling. Change frame
+order, normalized UV regions, durations and `once`/`loop` mode in the descriptor without editing
+Rust. Default data contains one Idle frame and three 100 ms Walk frames. Walking follows net held
+intent, including movement against a wall; opposing keys cancel per axis.
+
+The directly consumed [Sprite animation module](../../crates/nara_sprite_animation/README.md)
+loads immutable named clips through the existing source/cooked Asset owners. The original integer
+game clock supplies elapsed time. Pause leaves it frozen; an exact Step advances one fixed tick.
+Travel and exact Runtime reconstruction derive the Sprite region before presentation, including
+paused maintenance. Clip changes participate in the existing content compatibility stamp. There
+is no hardcoded production fallback, additional playback cursor or resume wire field. Independent
+playback state, events and blending remain outside this game workflow.
 
 ## Swept Character Collision
 
@@ -49,9 +54,9 @@ wall mutations are outside that format and make exact capture ineligible. The wi
 accept finite zero scale while collision admission refuses it. Placement checks happen at
 admission; the movement path does not rescan the Scene or reconstruct wall geometry each tick.
 
-Each shipped Scene now has eleven authored members. The cooked catalog still has six content
-members: two Scenes, three Images and the Sound Bank. Refresh the authoring bundle and recook
-older installations for the new game-owned `CollisionBox` Schema and native binding revision.
+Each shipped Scene has eleven authored members. The cooked catalog has seven content members:
+two Scenes, three Images, the Sound Bank and shared Sprite clips. Refresh the authoring bundle
+and recook older installations for `CollisionBox`, `ExplorerAnimation` and native binding revision 3.
 
 ## Build And Run
 
@@ -97,8 +102,8 @@ cargo tree --locked --no-default-features --features cooked-player --edges norma
 cargo tree --locked --no-default-features --features cooked-player,desktop --edges normal,build
 ```
 
-Every selection includes the game's CPU Sound Bank importer/codec and Hound for WAV admission;
-headless and silent selections exclude CPAL and rtrb and never open an audio device.
+Every selection includes the Sprite clip importer/codec, CPU Sound Bank importer/codec and Hound
+for WAV admission; headless and silent selections exclude CPAL and rtrb and never open an audio device.
 The shared root Runtime still includes project/schema, CPU Image and Material support, including
 Naga. This split does not claim to remove every source-oriented implementation or provide a
 complete dedicated-server product. The delivery tests check these selected dependency/features
@@ -152,9 +157,9 @@ Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop
 Use the same explicit project/output/target/tool paths documented for the desktop Player below.
 This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
 `cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain two Scenes,
-three Images and one shared Sound Bank. The shared explorer atlas is required by both Scenes.
-The finite content fence includes the bank descriptor, metadata and both raw WAVs. Cook and Check
-prepare CPU content without opening a device.
+three Images, one shared Sound Bank and one Sprite clip resource. Both Scenes require the atlas
+and clip Product. The finite content fence includes the clip/bank descriptors and metadata plus
+both raw WAVs. Cook and Check prepare CPU content without opening a device.
 
 The published `player_audio.exe` opens only its generated executable-relative content pack.
 There is no source-directory or embedded-WAV fallback. It accepts normal interactive play and
@@ -215,11 +220,11 @@ key or that a particular platform has passed the full interactive trajectory.
 ## Source-Free Cooked Player
 
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
-Player. It uses Nara's existing Image importer, the game's Sound Bank domain, Scene compiler,
-cooked-content assembler, captured Cargo executable and whole-directory publisher. Both levels,
-their two original Images and one shared Sound Bank are included. Authoring retains
-`ProjectLocation` identities; shipping Scene Products
-are explicit entries in `LevelId`, separate from logical level instances.
+Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
+domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
+publisher. Both levels, three Images, one shared Sound Bank and Sprite clips are included.
+Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
+`LevelId`, separate from logical level instances.
 
 Run with Rust 1.95, one Cargo job, the shared absolute engine target and cached dependencies.
 Create the output parent outside this source package first. Supply the actual native target
@@ -243,7 +248,7 @@ no source, metadata, import cache, Cargo or rustc available. The cooker keeps it
 `two-level-cook-cache` separately under the output parent; that cache is not an installation
 member. Publication refuses an existing destination rather than replacing it.
 
-The source fence keeps the actual verified Image/Sound Bank import observations through code
+The source fence keeps the actual verified Image/Sound Bank/Sprite clip import observations through code
 generation, Cargo build and publication. Renaming a raw WAV and changing its bank descriptor is
 valid; no hardcoded old filename is required. A later change to the actual observed dependency
 refuses publication instead of silently relabeling the previously prepared PCM.

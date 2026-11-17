@@ -2120,6 +2120,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_sprite_animation"
+version = "0.1.0"
+dependencies = [
+ "nara_asset",
+ "nara_core",
+ "nara_diagnostic",
+ "nara_sprite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "nara_sprite_render"
 version = "0.1.0"
 dependencies = [
@@ -3771,6 +3784,7 @@ dependencies = [
  "hound",
  "nara",
  "nara_rapier2d",
+ "nara_sprite_animation",
  "notify",
  "rtrb",
  "serde",

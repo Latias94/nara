@@ -58,6 +58,7 @@ pub fn presented(record: &Value, request: &Request) {
     assert!(!receipts.is_empty() && receipts.len() <= 16);
     for observed in receipts {
         walls::scene(observed);
+        package::assert_animation_proof(observed);
     }
     let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
     let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]

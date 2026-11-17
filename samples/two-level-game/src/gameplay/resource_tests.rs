@@ -1,6 +1,19 @@
-use std::collections::BTreeMap;
-
 use super::*;
+
+#[allow(
+    dead_code,
+    reason = "reuse the original public game and physical cleanup helper"
+)]
+mod support {
+    mod two_level_game {
+        pub use crate::{
+            GamePhase, GameSnapshot, capture_resume, levels, open_explicit_project_root,
+            open_project_root, product_recipe, resume,
+        };
+    }
+
+    include!("../../tests/support/resume_gameplay.rs");
+}
 
 fn checkpoint() -> Checkpoint {
     Checkpoint::new(CheckpointLocation {
@@ -10,31 +23,13 @@ fn checkpoint() -> Checkpoint {
 }
 
 fn content() -> Content {
-    let definition = collision::CollisionBox {
-        center: Vec2::ZERO,
-        half_width: 1.0,
-        half_height: 1.0,
-    };
-    Content {
-        player: SceneEntityId::new("player").unwrap(),
-        checkpoint: SceneEntityId::new("checkpoint").unwrap(),
-        checkpoint_position: Vec2::ZERO,
-        bank: nara::asset::AssetRef::Product(crate::sound_bank::bank_product()),
-        pickups: BTreeMap::from([
-            (SceneEntityId::new("first-pickup").unwrap(), Vec2::X),
-            (SceneEntityId::new("second-pickup").unwrap(), Vec2::Y),
-        ]),
-        collision: collision::RoomCollision::prepare(
-            definition,
-            vec![collision::Wall {
-                id: SceneEntityId::new("wall").unwrap(),
-                transform: Transform2d::from_translation(Vec2::new(100.0, 0.0)),
-                definition,
-            }],
-            Transform2d::default(),
-        )
-        .unwrap(),
-    }
+    let mut game = support::Game::source();
+    let content = game
+        .session
+        .observe(|world| world.resource::<ActiveLevel>().content().unwrap().clone())
+        .unwrap();
+    game.close();
+    content
 }
 
 #[test]

@@ -16,9 +16,10 @@ use nara::{
         RuntimeContentMemberKind,
     },
 };
+use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
-    animation::atlas_product,
+    animation::{atlas_product, clips_product},
     levels::LevelId,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
@@ -137,7 +138,7 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 6);
+    assert_eq!(catalog.members().len(), 7);
     assert_eq!(payload["executable_name"], "player_audio.exe");
     assert_eq!(payload["pack_file"], "content.pack");
     assert_eq!(
@@ -185,6 +186,20 @@ pub fn inspect(
             assert_eq!(bank.product(), bank_product());
             assert_eq!(bank.samples(SoundCue::Pickup), expected[0]);
             assert_eq!(bank.samples(SoundCue::Travel), expected[1]);
+        } else if product == clips_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == SpriteAnimationCodec::RUNTIME_KIND
+                        && version.get() == SpriteAnimationCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let clips = SpriteAnimationCodec::decode_runtime(&bytes[range]).unwrap();
+            assert_eq!(clips.product(), product);
+            let encoded: Value =
+                serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap())
+                    .unwrap();
+            assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
         } else if let Some(level) = LevelId::ALL
             .into_iter()
             .find(|level| level.image_product() == product)
@@ -245,16 +260,21 @@ pub fn inspect(
                     .iter()
                     .any(|dependency| dependency.product() == bank_product())
             );
-            assert_eq!(member.dependencies().len(), 3);
+            assert_eq!(member.dependencies().len(), 4);
             assert_eq!(
                 member
                     .dependencies()
                     .iter()
                     .map(|dependency| dependency.product())
                     .collect::<BTreeSet<_>>(),
-                [level.image_product(), atlas_product(), bank_product()]
-                    .into_iter()
-                    .collect()
+                [
+                    level.image_product(),
+                    atlas_product(),
+                    bank_product(),
+                    clips_product()
+                ]
+                .into_iter()
+                .collect()
             );
             assert!(
                 member.dependencies().iter().all(|dependency| {
@@ -269,10 +289,31 @@ pub fn inspect(
         LevelId::ALL
             .into_iter()
             .flat_map(|level| [level.scene_product(), level.image_product()])
-            .chain([atlas_product(), bank_product()])
+            .chain([atlas_product(), bank_product(), clips_product()])
             .collect()
     );
     images
+}
+
+pub fn assert_animation_proof(observed: &Value) {
+    assert_eq!(observed["animation_proof"], default_animation_proof());
+}
+
+fn default_animation_proof() -> Value {
+    json!({
+        "product": clips_product().to_string(),
+        "source_free": true,
+        "clips": [
+            {"name": "idle", "mode": "once", "frames": [
+                {"min": [0.0_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+            ]},
+            {"name": "walk", "mode": "loop", "frames": [
+                {"min": [0.25_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                {"min": [0.5_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                {"min": [0.75_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+            ]},
+        ],
+    })
 }
 
 pub fn copy_package(source: &Path, destination: &Path) {

@@ -289,6 +289,15 @@
                 "half_height": { "type": "f64", "value": 9 }
               }
             }
+          },
+          "two-level-game.ExplorerAnimation": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "clips": { "type": "map", "value": { "kind": { "type": "string", "value": "stable_id" }, "value": { "type": "string", "value": "e4c107a3-2acd-57b5-b394-7d64443ccce6" } } }
+              }
+            }
           }
         }
       },

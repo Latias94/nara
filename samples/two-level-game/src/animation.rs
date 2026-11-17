@@ -1,10 +1,13 @@
-//! Game-owned explorer atlas and pure animation derived from logical time and held directions.
+//! Game-owned atlas identity and clip selection over an admitted immutable animation resource.
 
 use nara::{
-    asset::{AssetProductRef, ImportedProductId, StableAssetId},
+    asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId},
     core::Vec2,
+    prelude::{Component, PersistentComponent},
+    project_host::ProjectDomainAssets,
     sprite::TextureRegion,
 };
+use nara_sprite_animation::SpriteAnimationDomain;
 use serde::Serialize;
 
 use crate::resume::GameClock;
@@ -13,6 +16,38 @@ use crate::resume::GameClock;
 pub const ATLAS_PATH: &str = "textures/explorer.png";
 /// Stable source identity declared by the explorer Image metadata.
 pub const ATLAS_SOURCE_ID: &str = "2eece9cd-6332-4868-b0d2-289879df9de8";
+/// Assets-relative path to the immutable named explorer clips.
+pub const CLIPS_PATH: &str = "animations/explorer.sprite-animations.json";
+/// Stable source identity declared by the clip descriptor's metadata.
+pub const CLIPS_SOURCE_ID: &str = "e4c107a3-2acd-57b5-b394-7d64443ccce6";
+
+/// Authored animation selection; the Sprite independently retains its Image and sampler.
+#[derive(Debug, Clone, PartialEq, Component, PersistentComponent)]
+#[nara(
+    id = "two-level-game.ExplorerAnimation",
+    version = 1,
+    alias = "Explorer animation",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub struct ExplorerAnimation {
+    #[nara(
+        id = "clips",
+        alias = "Clips",
+        capabilities(scene, inspect, edit, asset_ref)
+    )]
+    pub clips: AssetRef,
+}
+
+/// Complete primary clip Product shared by both levels.
+#[must_use]
+pub fn clips_product() -> AssetProductRef {
+    AssetProductRef::new(
+        StableAssetId::parse_str(CLIPS_SOURCE_ID).expect("fixed valid explorer clips identity"),
+        ImportedProductId::PRIMARY,
+    )
+    .expect("fixed non-nil primary explorer clips Product")
+}
 
 /// Complete primary Image Product shared by both levels.
 #[must_use]
@@ -56,20 +91,55 @@ impl ExplorerFrame {
     }
 }
 
-/// Selects a frame from elapsed logical nanoseconds and held left/right/up/down directions.
-///
-/// Opposing holds cancel independently on each axis. Any remaining direction walks, including
-/// when the player's position is clamped at a wall. Walking cycles through frames 1, 2 and 3
-/// every 100 ms on the existing clock; changing holds does not restart its phase.
-#[must_use]
-pub fn explorer_frame(clock: GameClock, held: [bool; 4]) -> ExplorerFrame {
+fn clip_name(held: [bool; 4]) -> &'static str {
     if held[0] == held[1] && held[2] == held[3] {
-        return ExplorerFrame::Idle;
+        "idle"
+    } else {
+        "walk"
     }
-    match (clock.elapsed_nanos / 100_000_000) % 3 {
-        0 => ExplorerFrame::WalkOne,
-        1 => ExplorerFrame::WalkTwo,
-        _ => ExplorerFrame::WalkThree,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedAnimation {
+    assets: ProjectDomainAssets,
+    reference: AssetRef,
+}
+
+impl PreparedAnimation {
+    pub(crate) fn acquire(
+        assets: &ProjectDomainAssets,
+        reference: AssetRef,
+    ) -> Result<Self, String> {
+        let set = assets
+            .collection::<SpriteAnimationDomain>()
+            .and_then(|collection| collection.get(&reference))
+            .ok_or("the explorer animation resource was not acquired")?;
+        if set.product() != clips_product()
+            || set.get("idle").is_none()
+            || set.get("walk").is_none()
+        {
+            return Err(
+                "the explorer requires its original clip Product with idle and walk clips".into(),
+            );
+        }
+        Ok(Self {
+            assets: assets.clone(),
+            reference,
+        })
+    }
+
+    pub(crate) fn sample(&self, clock: GameClock, held: [bool; 4]) -> TextureRegion {
+        self.assets
+            .collection::<SpriteAnimationDomain>()
+            .and_then(|collection| collection.get(&self.reference))
+            .and_then(|set| set.get(clip_name(held)))
+            .expect("the retained immutable explorer clip was admitted")
+            .sample(std::time::Duration::from_nanos(clock.elapsed_nanos))
+            .region
+    }
+
+    pub(crate) fn matches(&self, component: &ExplorerAnimation) -> bool {
+        self.reference == component.clips
     }
 }
 

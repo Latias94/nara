@@ -44,6 +44,11 @@ impl Directory {
             ("assets/textures/cavern.png.meta", "meta B"),
             ("assets/textures/explorer.png", "explorer atlas"),
             ("assets/textures/explorer.png.meta", "explorer metadata"),
+            ("assets/animations/explorer.sprite-animations.json", "clips"),
+            (
+                "assets/animations/explorer.sprite-animations.json.meta",
+                "clips meta",
+            ),
             ("assets/audio/game.soundbank.json", "bank"),
             ("assets/audio/game.soundbank.json.meta", "bank meta"),
             ("assets/audio/pickup.wav", "pickup"),
@@ -120,6 +125,8 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "scenes/cavern.scene.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
+        "assets/animations/explorer.sprite-animations.json",
+        "assets/animations/explorer.sprite-animations.json.meta",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();
@@ -130,10 +137,12 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
 }
 
 #[test]
-fn content_fence_requires_both_atlas_source_and_metadata() {
+fn content_fence_requires_atlas_and_animation_sources_and_metadata() {
     for name in [
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
+        "assets/animations/explorer.sprite-animations.json",
+        "assets/animations/explorer.sprite-animations.json.meta",
     ] {
         let directory = Directory::new();
         fs::remove_file(directory.0.join(name)).unwrap();

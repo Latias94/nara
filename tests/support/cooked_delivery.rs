@@ -151,10 +151,11 @@ pub mod native {
         runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
         scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
     };
+    use nara_sprite_animation::SpriteAnimationCodec;
     use serde::{Deserialize, Serialize};
     use serde_json::{Value, json};
     use two_level_game::{
-        animation::atlas_product,
+        animation::{atlas_product, clips_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         sound_bank::{SoundBankCodec, bank_product},
@@ -514,7 +515,7 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 6);
+        assert_eq!(pack.catalog.members().len(), 7);
         let mut products = BTreeSet::new();
         for member in pack.catalog.members() {
             assert_eq!(member.products().len(), 1);
@@ -525,7 +526,7 @@ pub mod native {
             LevelId::ALL
                 .into_iter()
                 .flat_map(|level| [level.scene_product(), level.image_product()])
-                .chain([atlas_product(), bank_product()])
+                .chain([atlas_product(), bank_product(), clips_product()])
                 .collect()
         );
         for level in LevelId::ALL {
@@ -542,16 +543,21 @@ pub mod native {
                 scene.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
-            assert_eq!(scene.dependencies().len(), 3);
+            assert_eq!(scene.dependencies().len(), 4);
             assert_eq!(
                 scene
                     .dependencies()
                     .iter()
                     .map(|dependency| dependency.product())
                     .collect::<BTreeSet<_>>(),
-                [level.image_product(), atlas_product(), bank_product()]
-                    .into_iter()
-                    .collect()
+                [
+                    level.image_product(),
+                    atlas_product(),
+                    bank_product(),
+                    clips_product()
+                ]
+                .into_iter()
+                .collect()
             );
             assert!(
                 scene.dependencies().iter().all(|dependency| {
@@ -566,6 +572,26 @@ pub mod native {
                 if format.as_str() == SoundBankCodec::RUNTIME_KIND
                     && version.get() == SoundBankCodec::RUNTIME_VERSION
         ));
+        let index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [clips_product()])
+            .unwrap();
+        let member = &pack.catalog.members()[index];
+        assert!(matches!(
+            member.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == SpriteAnimationCodec::RUNTIME_KIND
+                    && version.get() == SpriteAnimationCodec::RUNTIME_VERSION
+        ));
+        assert!(member.dependencies().is_empty());
+        let clips =
+            SpriteAnimationCodec::decode_runtime(&pack_bytes[pack.members[index].clone()]).unwrap();
+        assert_eq!(clips.product(), clips_product());
+        let encoded: Value =
+            serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap()).unwrap();
+        assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
         for (member, extent) in pack.catalog.members().iter().zip(&pack.members) {
             assert_eq!(
                 ContentDigest::of_bytes(&pack_bytes[extent.clone()]),
@@ -993,7 +1019,25 @@ pub mod native {
             let instance = receipt["instance_id"].as_u64().unwrap();
             assert!(instance > 0 && instances.insert(instance));
             walls::scene(observed);
+            assert_eq!(observed["animation_proof"], default_animation_proof());
         }
+    }
+
+    fn default_animation_proof() -> Value {
+        json!({
+            "product": clips_product().to_string(),
+            "source_free": true,
+            "clips": [
+                {"name": "idle", "mode": "once", "frames": [
+                    {"min": [0.0_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+                {"name": "walk", "mode": "loop", "frames": [
+                    {"min": [0.25_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.5_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.75_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+            ],
+        })
     }
 
     fn assert_scene_sequence(result: &Value, expected: &[LevelId]) {

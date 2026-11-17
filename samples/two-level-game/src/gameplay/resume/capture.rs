@@ -169,6 +169,18 @@ pub(crate) fn capture_world(
         return Err(reject("current dynamic marker state is inconsistent"));
     }
     let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
+    let content = world
+        .resource::<ActiveLevel>()
+        .content()
+        .ok_or_else(|| reject("active animation content is unavailable"))?;
+    if !world
+        .get::<crate::animation::ExplorerAnimation>(entity)
+        .is_some_and(|component| content.animation.matches(component))
+    {
+        return Err(reject(
+            "runtime animation configuration is not represented by admitted source",
+        ));
+    }
     crate::gameplay::collision::capture_eligible(world, entity)
         .map_err(GameResumeError::Ineligible)?;
     let player = Some(entity)

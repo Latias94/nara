@@ -8,9 +8,11 @@ use nara::{
         backend::{BackendWindowHandles, WindowTargetPhase},
     },
 };
+use nara_sprite_animation::SpriteAnimationDomain;
 use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot,
+    animation::clips_product,
     audio::{self, AudioSnapshot, AudioWitness},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelKey},
     sound_bank::{SoundBankDomain, SoundCue, bank_product},
@@ -127,9 +129,17 @@ impl PlayerExtension for AudioObservation {
                 && let Some(assets) = world.get_resource::<ProjectDomainAssets>()
                 && let Some(banks) = assets.collection::<SoundBankDomain>()
                 && banks.get(&AssetRef::Product(bank_product())).is_some()
+                && let Some(animations) = assets.collection::<SpriteAnimationDomain>()
+                && let Some(clips) = animations.get(&AssetRef::Product(clips_product()))
             {
                 if banks.iter().len() != 1 || banks.source_records().len() != 0 {
                     return Err("cooked SoundBank retained source records or extra banks".into());
+                }
+                if clips.product() != clips_product()
+                    || animations.iter().len() != 1
+                    || animations.source_records().len() != 0
+                {
+                    return Err("cooked Sprite animation changed Product, retained source records or extra sets".into());
                 }
                 self.assets = Some(assets.clone());
             }

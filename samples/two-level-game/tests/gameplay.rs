@@ -51,6 +51,8 @@ impl Directory {
             "assets/textures/cavern.png.meta",
             "assets/textures/explorer.png",
             "assets/textures/explorer.png.meta",
+            "assets/animations/explorer.sprite-animations.json",
+            "assets/animations/explorer.sprite-animations.json.meta",
             "assets/audio/game.soundbank.json",
             "assets/audio/game.soundbank.json.meta",
             "assets/audio/pickup.wav",

@@ -1713,6 +1713,21 @@ original development Host. Owning correctness Clippy, formatting and document ch
 preparation belongs at Scene/shape change; full-scene validation does not repeat on the movement
 path. This selects no general dynamics or physical-history restore. Full R10/R12/Foundation remains active.
 
+The [authored Sprite clip successor](2026-11-03-joint-motion-execution-plan.md#authored-sprite-clips-through-runtime-and-delivery)
+replaces the game's hardcoded frame selector with directly consumed immutable named resources.
+`nara_sprite_animation` at `93701c3` owns normalized frame regions, unequal positive durations, loop/one-shot
+sampling and source/Runtime codecs; the game supplies its existing clock and clip selection while
+Sprite retains Image and sampler ownership. Construction/decode admit invariants once; sampling
+allocates no storage and does not repeat resource validation. Actual edited descriptors pass five game
+workflows, and the complete ordinary selection passes330/330. Original native reconstruction
+retains ten pixel replays. Relocated source-free DX12 desktop play, all four default atlas frames,
+Save/Restore and twenty more travels pass with the new seventh catalog member. Real headless
+body/private-structure rebuild adoption and thirteen minimal-feature controls also pass. The native Schema
+binding advances to revision3; older installations need a regenerated bundle and recook. No new
+resume field, clock, player/controller framework or render owner is introduced. The linked unit
+owns exact runs, final checks and limits. Further small performance experiments stay
+deferred in favor of useful Runtime capabilities; full R10/R12/Foundation remains active.
+
 The [fixed-input/transformed-collision successor](2026-11-04-authored-collision-derivation-plan.md#fixed-spatial-inputs-and-transformed-collision-successor)
 replaces the translation-only assumption through the same concrete domain. Opt-in same-tick
 spatial input after Prepare and before Simulate reuses the original Hierarchy/Transform owners;

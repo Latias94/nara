@@ -12,7 +12,7 @@ use nara::{
     project_tooling::cargo_build::CargoBuildFailure, project_workflow::cargo::CargoBuildError,
 };
 use two_level_game::{
-    animation::{ExplorerFrame, explorer_frame},
+    animation::ExplorerFrame,
     development::{
         DevelopmentHost, DevelopmentStage, ProbeStep, RetirementRole, RetirementStatus, protocol,
     },
@@ -25,6 +25,10 @@ mod acceptance;
 #[path = "../../../tests/support/continuity.rs"]
 #[allow(dead_code)]
 mod support;
+
+#[path = "support/default_animation.rs"]
+mod animation_reference;
+use animation_reference::expected_default_frame;
 
 use acceptance::{
     WorkParent, assert_clean_retirement, assert_observation, assert_preserved,
@@ -125,7 +129,7 @@ fn production_host_adopts_real_body_and_structure_edits_without_probe_state_leak
         for _ in 0..5 {
             let state = host.capture().unwrap();
             if matches!(
-                explorer_frame(state.clock, state.held),
+                expected_default_frame(state.clock, state.held),
                 ExplorerFrame::WalkTwo | ExplorerFrame::WalkThree
             ) {
                 break;
@@ -134,7 +138,7 @@ fn production_host_adopts_real_body_and_structure_edits_without_probe_state_leak
         }
         let baseline = host.capture().unwrap();
         assert!(matches!(
-            explorer_frame(baseline.clock, baseline.held),
+            expected_default_frame(baseline.clock, baseline.held),
             ExplorerFrame::WalkTwo | ExplorerFrame::WalkThree
         ));
         assert_meaningful(&baseline);

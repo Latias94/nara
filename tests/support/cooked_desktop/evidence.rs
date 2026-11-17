@@ -16,9 +16,10 @@ use nara::{
     },
     scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
 };
+use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
-    animation::atlas_product,
+    animation::{atlas_product, clips_product},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     save::Checkpoint,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
@@ -93,8 +94,8 @@ pub fn inspect_package(
     assert!(catalog.addressable_roots().is_empty());
     assert_eq!(
         catalog.members().len(),
-        6,
-        "two processed Scenes, three Images and one shared Sound Bank; keyboard declarations are code-first"
+        7,
+        "two processed Scenes, three Images, one shared Sound Bank and one Sprite animation set; keyboard declarations are code-first"
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -150,6 +151,20 @@ pub fn inspect_package(
                 RuntimeContentMemberKind::Asset { .. }
             ));
             images::atlas_proof(&ImageRuntimeCodec::decode_runtime(data).unwrap());
+        } else if product == clips_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == SpriteAnimationCodec::RUNTIME_KIND
+                        && version.get() == SpriteAnimationCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let clips = SpriteAnimationCodec::decode_runtime(data).unwrap();
+            assert_eq!(clips.product(), product);
+            let encoded: Value =
+                serde_json::from_slice(&SpriteAnimationCodec::encode_runtime(&clips).unwrap())
+                    .unwrap();
+            assert_eq!(encoded["clips"], default_animation_proof()["clips"]);
         } else if product == bank_product() {
             assert!(matches!(
                 member.kind(),
@@ -182,9 +197,14 @@ pub fn inspect_package(
                         dependency.product()
                     })
                     .collect::<BTreeSet<_>>(),
-                [level.image_product(), atlas_product(), bank_product()]
-                    .into_iter()
-                    .collect()
+                [
+                    level.image_product(),
+                    atlas_product(),
+                    bank_product(),
+                    clips_product()
+                ]
+                .into_iter()
+                .collect()
             );
         }
         offset = end;
@@ -196,7 +216,7 @@ pub fn inspect_package(
         LevelId::ALL
             .into_iter()
             .flat_map(|level| [level.scene_product(), level.image_product()])
-            .chain([atlas_product(), bank_product()])
+            .chain([atlas_product(), bank_product(), clips_product()])
             .collect()
     );
     images
@@ -368,7 +388,25 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
             number(receipt, "instance_id") > 0 && instances.insert(number(receipt, "instance_id"))
         );
         walls::scene(observed);
+        assert_eq!(observed["animation_proof"], default_animation_proof());
     }
+}
+
+fn default_animation_proof() -> Value {
+    json!({
+        "product": clips_product().to_string(),
+        "source_free": true,
+        "clips": [
+            {"name": "idle", "mode": "once", "frames": [
+                {"min": [0.0_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+            ]},
+            {"name": "walk", "mode": "loop", "frames": [
+                {"min": [0.25_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                {"min": [0.5_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                {"min": [0.75_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+            ]},
+        ],
+    })
 }
 
 pub fn scene_sequence(record: &Value, expected: &[LevelId]) {

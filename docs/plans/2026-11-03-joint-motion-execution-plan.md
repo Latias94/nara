@@ -994,3 +994,165 @@ format checks, added document links/fragments and staged whitespace checks pass.
 non-correctness warnings remain. This qualifies the bounded Headless entry replacement on
 Windows CPU execution; it supplies no native presentation, other-platform, seat/gamepad,
 asynchronous-initialization completion or whole-R10 qualification.
+
+## Authored Sprite Clips Through Runtime And Delivery
+
+Status: implemented and qualified on Windows, with the reusable clip owner at `93701c3`.
+This follows the actual-game swept collision unit `d76aced`/`86eef47`/`a58f36b`. Authors can now
+change Sprite frame sequences and durations without editing gameplay Rust, through the actual game,
+its source/cooked asset owners, Pause/Step/restoration, native pixels and source-free Player.
+Runtime functionality remains the priority; Editor/UI/Dialogue and micro-optimization stay paused.
+
+Qualification follows the changed resource, game and delivery boundaries. Further timing loops,
+compact formats and small cache/lookup optimizations are not acceptance gates for this capability.
+Address a measured frame-budget miss or a visibly disrupted game workflow when one occurs; use
+the corresponding mature-engine mechanism to judge that work before adding a new optimization.
+
+### Selected Concrete Ownership
+
+Add directly consumed `nara_sprite_animation` for immutable named Sprite clips, source import,
+tracked build and explicit Runtime decode. It does not install an App, clock, ECS player,
+transform writer, Image owner, universal animation graph or component-field binding Interface.
+Clips contain normalized `TextureRegion` values and positive per-frame durations. The original
+Sprite retains its Image and sampling policy; one clip resource can therefore describe a layout
+without copying Image bytes or implying a new cross-domain prepared-product dependency API.
+The concrete source and Runtime codecs use the original Asset owner and validate data on
+construction/decode, not every sample. Reuse strict bounded JSON and original limits rather
+than introduce another compact encoding experiment.
+
+Support looping and one-shot clips with explicit integer-nanosecond duration boundaries,
+unequal frame times, held final one-shot frames and a completion observation. The supplied
+elapsed time belongs to the caller. Sampling allocates no owner state, advances no hidden
+clock and validates no whole clip set. The finite first format admits at most32 names,
+256 frames per clip and4096 total frames; names have at most64 ASCII bytes and each frame
+rectangle stays within the normalized image. These are source/operation admission limits,
+not performance measurements or a general animation-capacity claim.
+
+The game owns a persistent explorer-animation AssetRef and chooses `idle` or `walk` from its
+existing held intent. Default data preserves the original Idle and three100ms walking frames.
+Its already captured logical clock supplies elapsed time, including paused reconstruction;
+there is no new resume cursor or wire field. Remove the displaced production hardcoded
+selector. Independent expectations may retain the known default sequence as test/oracle data,
+but neither production loading nor rendering may fall back to those expectations. A missing,
+malformed or incompatible selected resource refuses through the original source/Runtime path.
+The immutable domain collection remains the resource/allocation owner across Scene replacement.
+
+### Complete Consumer And Qualification
+
+Author the default clip descriptor and identity sidecar, reference it from both shipped Scenes
+and regenerate the authoring bundle through the real recipe. Add a seventh cooked member,
+without changing the existing eleven Scene members, three Images, Sound Bank, source-free
+identity or native owner count. Update finite source inventories and expected Raw observations
+deliberately. Prove exact full-Product Runtime membership and malformed/version/limit refusal.
+No Image is owned or loaded by the clip sampler itself.
+
+Use actual edited clip data in an owned project copy to reverse/reorder walking frames and
+change durations without changing Rust, and compare the actual Sprite at exact boundaries.
+Exercise once/loop completion, Pause/exact Step, blocked walking, travel/Retry, fresh-state
+reconstruction and incompatible changed-content rejection. Preserve canonical state, original
+collision/audio/pickup/marker behavior and cleanup. Native and relocated source-free consumers
+must use the admitted resource while preserving their original pixel, receipt and physical
+retirement assertions. The shipping feature closure must remain free of development tools/UI.
+Trust unchanged engine/native mechanisms; run only affected owner/game/delivery checks, serial
+Rust1.95, jobs1, root target and release locked/offline. Record actual results and limits here,
+in ADR0029 and the implementation ledger before local Conventional Commits. Full R10/R12 and
+Foundation, general animation events/blending/skeletal/field-target workflows remain open.
+
+### Pinned Source Comparison And Initial Checks
+
+Godot `7a37606a433c0e7735525037cdf774f043146a21` separates
+[`SpriteFrames`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/sprite_frames.cpp)
+data from `AnimatedSprite2D` playback. It admits per-frame relative durations during resource
+mutation/deserialization and keeps the final non-looping frame when playback finishes. Nara
+uses that ownership distinction, while its caller-owned elapsed time, integer nanosecond durations
+and explicit `Loop`/`Once` result are selected contracts rather than copied Godot FPS or minimum-time
+policies. Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`
+[`sprite_animation.rs`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/examples/2d/sprite_animation.rs)
+and `sprite_sheet.rs` author Timer/index behavior in the example; `Sprite` retains Image while the
+atlas selects layout/index. Those examples do not define Nara's large-delta or one-shot semantics.
+The existing `TextureRegion::is_valid_uv` remains the normalized-region owner. No renderer,
+native clock or broad animation framework is imported or rewritten for this unit.
+
+Initial public module run `1c266cca-6122-44e3-915a-0197219aaa11` passes28/28 with no skips:
+thirteen pure clip/ownership controls and fifteen source/build/Runtime controls. It covers unequal
+durations, exact ends, large u128 elapsed times, strict source/settings/records, complete primary and
+auxiliary Product membership, all declared finite bounds and source/cooked equivalence. Independent
+module and game/cook production reviews report no concrete P1/P2; native execution and RSS are
+outside those source reviews. The release headless product builds, generates/checks its actual new
+Schema and completes the original Travel script. First affected ordinary game run passes169/169,
+including prior animation/collision/resume, source-free clip decode and retained collection after
+original Host/source retirement, in `b3bc24ad-24b3-427b-904b-83008efb37b5`.
+
+Edited-resource run `d86d8a6f-d822-4591-99ae-0144eb756b3b` passes5/5 without skips. Owned
+project copies change walking order, unequal durations, the Idle region and one-shot mode without
+changing Rust. Actual Sprite UVs agree at exact boundaries, Pause holds and Step advances exactly
+one original fixed tick. Fresh restoration projects a nonfirst unequal frame before continuing
+collision, progress, travel and Retry. Valid changed clips reject an old content basis while its
+already loaded immutable resource remains usable. Malformed or missing selected clips refuse
+future travel while preserving the old live game. These CPU cases establish no native pixel or
+numerical performance claim; desktop and packaged execution follow below.
+
+### Runtime And Native Qualification
+
+The complete ordinary game selection passes330/330, with thirty explicitly skipped native/build
+cases, in `1d5bc577-6cb4-4ab4-97ac-61cb3be791b7` (31.243 seconds after a 7m16s affected
+release build). This includes the five new edited-resource cases, original collision, progress,
+audio-data, resume, source/cooked membership, finite inventories and CLI controls. The selection
+uses `desktop,cost-measurement,cook,cooked-player,audio-cpal`; compiling those features does not
+open an audio device or qualify physical audio output.
+
+The original real DX12 desktop reconstruction passes1/1 without skips in
+`b7cec42a-33e3-4eb4-8d1e-053963f7fce3` (28.517 seconds). Both native Runtimes retire through
+their original owners and recover the shared physical loop. Restored first-frame pixels, Idle
+and all three default walking frames, paused equality, blocked walking, wall stopping/sliding
+and ten retained-input GPU replays remain asserted. The production sampler now reads the admitted
+resource; the known default sequence survives only as an independent test expectation. These
+executed pixel cases cover the committed default atlas; edited frame order and unequal durations
+are separately exercised against actual Sprite UVs by the five CPU game cases above.
+
+Relocated source-free desktop delivery passes1/1 in
+`78912ab9-f48f-494b-9fea-879aa1a92c50` (69.000 seconds, one private worker outside the
+selection). The production cooker builds the original no-default-feature shipping Player and
+publishes exactly seven catalog members. Physical play and fresh Save/Restore run on DX12/
+NVIDIA GeForce RTX4090 after moving source out of reach. The saved run observes all four default
+atlas columns; every recorded Scene receipt carries the actual admitted animation Product and
+complete clip data. Twenty additional interactive travels preserve the original collision,
+markers, checkpoint bytes and source-free collection. A separate finite first-presentation
+control uses the Microsoft Basic Render Driver. Three normal child exits and one intentionally
+refused startup all retain original destroyed-window, empty-containment, stopped-reader and
+drained-output facts, without forced termination. This does not requalify the unchanged physical
+audio device, foreign platforms, human perception or a numerical frame-time budget.
+
+The original production development Host's actual body/private-structure rebuild trajectory
+passes1/1 in `b20f0a5b-2a16-4f0d-9fce-3c2540a46db0` (84.577 seconds, two ordinary controls
+outside the ignored-only selection). Its basis still contains a nonfirst walking frame and
+meaningful movement, pickups, markers and held intent. Typed compiler failure, failed probes,
+source drift and foreign/stale tickets preserve the incumbent; fresh candidates discard probe
+state. Committed B/C adoption retains exact canonical game state, allows the new active game to
+step before predecessor cleanup, and physically closes the original owners. The new clip source,
+metadata, dependency and Schema are now part of that actual copied/built product. This remains
+game-owned headless development, not continuous Editor Play or physical desktop adoption.
+
+With defaults disabled and only `cooked-player`, the three pure selection/atlas controls and ten
+actual default/edited-resource game workflows pass13/13 in
+`0ddf1621-7181-4474-a411-341440ad5bc4` (1.244 seconds after a 2m38s feature-specific release
+build,89 outside the filter). This uses no development Host, Cargo tools, WGPU/window backend or
+UI feature. It preserves the source-game control path and does not turn that source-based test
+driver into shipping content; the separately relocated Player above proves actual source-free
+execution. Dependency versions and sources are unchanged in both locks apart from the new local
+package and its direct edge. These build/test durations establish no performance comparison.
+
+Final all-target release Clippy passes with `-D clippy::correctness` for the new module and the
+game's selected desktop/cook/Player/audio feature closure. Existing non-correctness warnings remain.
+Root and independently locked game workspace format checks pass. Added document links/fragments,
+affected TOML/JSON/lock parsing and whitespace checks pass; the fifteen paused UI/Dialogue files
+retain their original bytes. Six scoped implementation/research/review agents are closed, including
+the independent production review with no confirmed P1/P2. Verification uses Windows, Rust1.95.0,
+locked offline release dependencies, one build job, the existing root target and serial nextest.
+All changed resource/game/delivery gates pass; no additional unchanged native audio or broad
+Editor/platform matrix is required for this unit's closure.
+
+This completes authored Sprite clips through the selected game and delivery workflow. General
+playback cursors, events, blending, field/skeletal targets, numeric performance budgets, foreign
+execution and full R10/R12/Foundation remain open. Editor/UI/Dialogue and further micro-optimization
+stay deferred. The next unit follows a missing Runtime/game capability, not another timing loop.

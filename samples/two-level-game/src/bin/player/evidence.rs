@@ -1,8 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use nara::{
     advanced_prelude::CurrentScene,
-    asset::{AssetProductRef, Assets},
+    asset::{AssetProductRef, AssetRef, Assets},
     ecs::World,
     fs::ContentDigest,
     hierarchy::Parent,
@@ -10,14 +13,15 @@ use nara::{
     image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat},
     material::SamplerDescriptor,
     prelude::{Color, Transform2d, Vec2},
-    project_host::HeadlessSession,
+    project_host::{HeadlessSession, ProjectDomainAssets},
     scene::{SourceDocumentKind, SourceDocumentOrigin},
-    sprite::{Sprite, SpriteAnchor, TextureRegion},
+    sprite::{Sprite, SpriteAnchor},
 };
+use nara_sprite_animation::{SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
 use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, Scenario,
-    animation::atlas_product,
+    animation::{CLIPS_PATH, ExplorerAnimation, atlas_product, clips_product},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, WALL_ENTITY_IDS},
 };
 
@@ -116,22 +120,26 @@ impl Evidence {
             let sprite = world
                 .get::<Sprite>(entity)
                 .ok_or("current receipt-resolved explorer has no Sprite")?;
-            let frame =
+            let animation = world
+                .get::<ExplorerAnimation>(entity)
+                .ok_or("current receipt-resolved explorer has no authored animation reference")?;
+            let clips = selected_clips(world, &animation.clips)?;
+            let name =
                 if snapshot.held[0] == snapshot.held[1] && snapshot.held[2] == snapshot.held[3] {
-                    0_u8
+                    "idle"
                 } else {
-                    1 + ((snapshot.logical_elapsed_nanos / 100_000_000) % 3) as u8
+                    "walk"
                 };
-            let region = TextureRegion::new(
-                Vec2::new(f32::from(frame) * 0.25, 0.0),
-                Vec2::new(0.25, 1.0),
-            );
-            if sprite.texture_region != Some(region)
+            let sample = clips
+                .get(name)
+                .ok_or_else(|| format!("admitted explorer animation has no {name} clip"))?
+                .sample(Duration::from_nanos(snapshot.logical_elapsed_nanos));
+            if sprite.texture_region != Some(sample.region)
                 || sprite.material.sampler != SamplerDescriptor::NEAREST_CLAMP
                 || sprite.material.tint != Color::WHITE
             {
                 return Err(format!(
-                    "current explorer Sprite disagrees with logical atlas frame {frame}, nearest sampling or white tint"
+                    "current explorer Sprite disagrees with its admitted {name} clip sample, nearest sampling or white tint"
                 ));
             }
             let image = sprite
@@ -145,7 +153,8 @@ impl Evidence {
                         .into(),
                 );
             }
-            self.animation_frames.insert(frame);
+            self.animation_frames
+                .insert((sample.region.min.x * 4.0) as u8);
         }
         if !changed
             && self
@@ -207,6 +216,7 @@ impl Evidence {
             return Err("Player did not activate the actual Meadow startup Scene".into());
         }
         let walls = wall_proofs(world, current.receipt(), level)?;
+        let animation = animation_proof(world, current.receipt())?;
         let product = level.image_product();
         let assets = world
             .get_resource::<Assets<ImageAsset>>()
@@ -295,6 +305,7 @@ impl Evidence {
             "representation": "runtime_scene",
             "receipt": receipt(current.receipt()),
             "wall_proofs": walls,
+            "animation_proof": animation,
         }));
         Ok(())
     }
@@ -364,6 +375,66 @@ impl Evidence {
         );
         result
     }
+}
+
+fn selected_clips<'a>(
+    world: &'a World,
+    reference: &AssetRef,
+) -> Result<&'a SpriteAnimationSet, String> {
+    let clips = world
+        .get_resource::<ProjectDomainAssets>()
+        .and_then(|assets| assets.collection::<SpriteAnimationDomain>())
+        .and_then(|collection| collection.get(reference))
+        .ok_or("current explorer animation has no admitted Sprite animation Product")?;
+    if clips.product() != clips_product() {
+        return Err("current explorer animation has the wrong complete Product identity".into());
+    }
+    Ok(clips)
+}
+
+fn animation_proof(world: &World, receipt: &SpawnedSceneInstance) -> Result<Value, String> {
+    let id = receipt
+        .entity_ids()
+        .iter()
+        .find(|id| id.as_str() == "explorer")
+        .ok_or("current Scene receipt has no explorer identity")?;
+    let EntityLookup::Resolved(entity) = receipt.resolve(world, id) else {
+        return Err("current Scene receipt does not resolve its live explorer animation".into());
+    };
+    let animation = world
+        .get::<ExplorerAnimation>(entity)
+        .ok_or("current receipt-resolved explorer has no authored animation reference")?;
+    let clips = selected_clips(world, &animation.clips)?;
+    let collection = world
+        .get_resource::<ProjectDomainAssets>()
+        .and_then(|assets| assets.collection::<SpriteAnimationDomain>())
+        .ok_or("current World has no Sprite animation collection")?;
+    if collection.iter().len() != 1
+        || collection.source_records().len() != 0
+        || collection
+            .get(&AssetRef::path(CLIPS_PATH).map_err(|error| error.to_string())?)
+            .is_some()
+    {
+        return Err(
+            "cooked Sprite animation retained source aliases, records or extra Products".into(),
+        );
+    }
+    Ok(json!({
+        "product": clips.product().to_string(),
+        "source_free": true,
+        "clips": clips.clips().map(|(name, clip)| json!({
+            "name": name,
+            "mode": clip.mode(),
+            "frames": clip.frames().iter().map(|frame| {
+                let region = frame.region();
+                json!({
+                    "min": region.min.to_array(),
+                    "size": region.size.to_array(),
+                    "duration_nanos": frame.duration().as_nanos() as u64,
+                })
+            }).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 fn receipt(receipt: &SpawnedSceneInstance) -> Value {

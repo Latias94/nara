@@ -10,6 +10,10 @@
 #[path = "../../tests/support/desktop_capture.rs"]
 mod desktop_capture;
 
+#[path = "../../tests/support/default_animation.rs"]
+mod animation_reference;
+use animation_reference::expected_default_frame;
+
 use std::{
     cell::RefCell,
     collections::BTreeSet,
@@ -45,7 +49,7 @@ use nara::{
 };
 use two_level_game::{
     GamePhase, GameResumeError, GameSnapshot,
-    animation::{ExplorerFrame, explorer_frame},
+    animation::ExplorerFrame,
     capture_desktop_resume,
     levels::{LevelId, LevelKey},
     movement_keyboard_bindings, restore_desktop_resume,
@@ -352,7 +356,7 @@ impl Game {
         self.step(None)?;
         let mut samples = vec![self.full_capture()?];
         assert_eq!(
-            explorer_frame(samples[0].state.clock, samples[0].state.held),
+            expected_default_frame(samples[0].state.clock, samples[0].state.held),
             ExplorerFrame::Idle
         );
         self.run
@@ -373,7 +377,7 @@ impl Game {
             }
             let sample = self.full_capture()?;
             assert_eq!(
-                explorer_frame(sample.state.clock, sample.state.held),
+                expected_default_frame(sample.state.clock, sample.state.held),
                 expected
             );
             samples.push(sample);
@@ -382,7 +386,7 @@ impl Game {
         self.step(None)?;
         let idle = self.full_capture()?;
         assert_eq!(
-            explorer_frame(idle.state.clock, idle.state.held),
+            expected_default_frame(idle.state.clock, idle.state.held),
             ExplorerFrame::Idle
         );
         samples.push(idle);
@@ -529,7 +533,7 @@ impl Game {
         );
         assert_eq!(contact.state.held, [false, true, false, false]);
         assert_ne!(
-            explorer_frame(contact.state.clock, contact.state.held),
+            expected_default_frame(contact.state.clock, contact.state.held),
             ExplorerFrame::Idle
         );
         for _ in 0..6 {

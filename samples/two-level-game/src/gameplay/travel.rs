@@ -160,7 +160,10 @@ fn retry_current(world: &mut World) -> Result<(), String> {
     let progress = world.resource::<Progress>().checkpoint().clone();
     let (expected, content) = {
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
-        let content = Content::read(current.source())?;
+        let assets = world
+            .get_resource::<nara::project_host::ProjectDomainAssets>()
+            .ok_or("active animation content is unavailable")?;
+        let content = Content::read(current.source(), assets)?;
         content.validate_progress(key.level(), &progress)?;
         (current.receipt().clone(), content)
     };
@@ -270,7 +273,7 @@ pub(super) fn advance(world: &mut World) {
     let audio_bank = crate::audio::bank_guard(world);
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
-            let content = Content::read(view.scene())?;
+            let content = Content::read(view.scene(), view.domain_assets())?;
             #[cfg(all(windows, feature = "audio-cpal"))]
             if let Some(bank) = &audio_bank {
                 bank.validate(view.domain_assets(), &content.bank)?;

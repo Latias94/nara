@@ -2572,6 +2572,44 @@
               "field_tombstones": []
             },
             {
+              "id": "two-level-game.ExplorerAnimation",
+              "aliases": [
+                "Explorer animation"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "clips",
+                  "aliases": [
+                    "Clips"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "clips"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "asset_ref",
+                    "demand": "immediate"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
               "id": "two-level-game.ObjectRole",
               "aliases": [
                 "Object role"

@@ -143,13 +143,18 @@ mod atlas_content {
     };
 
     use nara::{
+        asset::RuntimeAssetCodec,
         asset_build::ArtifactBuildObservation,
         project_host::{HeadlessSession, HeadlessSessionClose},
         project_tooling::host_fs,
         runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
     };
+    use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
-        Scenario, animation::atlas_product, levels::LevelId, sound_bank::bank_product,
+        Scenario,
+        animation::{atlas_product, clips_product},
+        levels::LevelId,
+        sound_bank::bank_product,
     };
 
     use super::{RuntimeKind, content, evidence::Evidence, source::ContentFence};
@@ -185,7 +190,8 @@ mod atlas_content {
     }
 
     #[test]
-    fn cooking_shares_one_atlas_preserves_raw_inputs_and_decodes_source_free_player_evidence() {
+    fn cooking_shares_atlas_and_clips_preserves_raw_inputs_and_decodes_source_free_player_evidence()
+    {
         let project = Path::new(env!("CARGO_MANIFEST_DIR"));
         let cache = Cache::new();
         let mut fence = ContentFence::capture(project).unwrap();
@@ -197,7 +203,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 6);
+        assert_eq!(catalog.members().len(), 7);
         assert_eq!(
             catalog
                 .members()
@@ -207,7 +213,7 @@ mod atlas_content {
             LevelId::ALL
                 .into_iter()
                 .flat_map(|level| [level.scene_product(), level.image_product()])
-                .chain([atlas_product(), bank_product()])
+                .chain([atlas_product(), bank_product(), clips_product()])
                 .collect::<BTreeSet<_>>()
         );
         assert_eq!(
@@ -230,12 +236,31 @@ mod atlas_content {
                     .iter()
                     .map(|dependency| (dependency.product(), dependency.role()))
                     .collect::<BTreeSet<_>>(),
-                [level.image_product(), atlas_product(), bank_product()]
-                    .into_iter()
-                    .map(|product| (product, RuntimeContentDependencyRole::Required))
-                    .collect::<BTreeSet<_>>()
+                [
+                    level.image_product(),
+                    atlas_product(),
+                    bank_product(),
+                    clips_product()
+                ]
+                .into_iter()
+                .map(|product| (product, RuntimeContentDependencyRole::Required))
+                .collect::<BTreeSet<_>>()
             );
         }
+        let clips = catalog.member_for_product(clips_product()).unwrap();
+        assert_eq!(clips.products(), [clips_product()]);
+        assert!(clips.dependencies().is_empty());
+        assert!(matches!(
+            clips.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == SpriteAnimationCodec::RUNTIME_KIND
+                    && version.get() == SpriteAnimationCodec::RUNTIME_VERSION
+        ));
+        let acquired = prepared
+            .base()
+            .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(clips_product())
+            .unwrap();
+        assert_eq!(acquired.product().product(), clips_product());
         let raw = observations
             .iter()
             .map(|observation| match observation {
@@ -253,6 +278,7 @@ mod atlas_content {
                 "assets/textures/meadow.png",
                 "assets/textures/cavern.png",
                 "assets/textures/explorer.png",
+                "assets/animations/explorer.sprite-animations.json",
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
                 "assets/audio/travel.wav",
@@ -281,6 +307,8 @@ mod atlas_content {
         };
         assert_eq!(closed, HeadlessSessionClose::Complete);
         let result = observed.unwrap();
+        let animation = &result["scene_receipts"][0]["animation_proof"];
+        assert_eq!(animation, &default_animation_proof());
         let proofs = result["image_proofs"].as_array().unwrap();
         assert_eq!(proofs.len(), 2);
         let atlas = proofs
@@ -312,5 +340,22 @@ mod atlas_content {
                 .map(|product| product.to_string())
                 .collect::<BTreeSet<_>>()
         );
+    }
+
+    fn default_animation_proof() -> serde_json::Value {
+        serde_json::json!({
+            "product": clips_product().to_string(),
+            "source_free": true,
+            "clips": [
+                {"name": "idle", "mode": "once", "frames": [
+                    {"min": [0.0_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+                {"name": "walk", "mode": "loop", "frames": [
+                    {"min": [0.25_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.5_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                    {"min": [0.75_f32, 0.0_f32], "size": [0.25_f32, 1.0_f32], "duration_nanos": 100_000_000_u64},
+                ]},
+            ],
+        })
     }
 }

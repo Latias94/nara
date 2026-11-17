@@ -41,15 +41,30 @@ Rules:
 
 ### First Concrete Game Workflow
 
-The Two-Level Game's explorer uses a game-owned frame API and its existing logical time and held
-movement intent. Four evaluated atlas regions are derived presentation data. They do not add a
-second clock, persistent playback cursor or universal clip/controller model. The game plugin
-projects them after its fixed simulation and after asynchronous Scene/resume reconstruction,
+The Two-Level Game's first animation workflow introduced a game-owned frame API over its existing
+logical time and held movement intent. Four evaluated atlas regions are derived presentation data.
+They do not add a second clock, persistent playback cursor or universal clip/controller model.
+The game plugin projects them after its fixed simulation and after asynchronous Scene/resume reconstruction,
 before original render extraction, including paused maintenance. Source/cooked Image identity,
 Sprite sampling and retained captures remain with their existing owners. The
 [complete runtime/delivery unit](../../plans/2026-11-03-joint-motion-execution-plan.md#explorer-atlas-animation-through-runtime-and-delivery)
 owns implementation and evidence. This finite workflow does not qualify independent playback,
 frame events, generic field targets, blending or skeletal animation.
+
+### Authored Sprite Clip Resources
+
+The directly consumed `nara_sprite_animation` module owns immutable named clips,
+normalized Sprite regions, positive per-frame durations and explicit loop/one-shot sampling.
+The selected game workflow supplies its existing logical clock and owns clip selection; the
+module does not install another clock, player/controller state, ECS writer or universal binding
+interface. The original Sprite retains Image and sampler ownership. Normalized clip geometry
+does not imply a cross-domain prepared Image dependency or certify arbitrary atlas content.
+Source import, tracked build and explicitly selected Runtime decode share the same admitted
+clip invariants. Sampling reads immutable data without repeating complete resource validation.
+The [authored resource unit](../../plans/2026-11-03-joint-motion-execution-plan.md#authored-sprite-clips-through-runtime-and-delivery)
+owns implementation and qualification. Game-clock-derived projection remains reconstructible
+from existing captured semantics and compatible immutable content; independent playback cursors,
+events, blends and other animation domains require their own selected state policy.
 
 ## Alternatives Considered
 

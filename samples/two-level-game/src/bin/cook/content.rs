@@ -26,8 +26,9 @@ use nara::{
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
+use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
 use two_level_game::{
-    animation::{ATLAS_PATH, atlas_product},
+    animation::{ATLAS_PATH, CLIPS_PATH, atlas_product, clips_product},
     levels::LevelId,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
@@ -175,6 +176,52 @@ pub(super) fn prepare(
         .map_err(|error| format!("{source}: {error}"))?;
     observations.extend_from_slice(imported.observations());
 
+    let path = AssetPath::new(CLIPS_PATH)
+        .map_err(|error| format!("Sprite animation source path: {error}"))?;
+    let source = scope.resolve(&path);
+    let metadata_path = source.meta_path();
+    let metadata = read(root, &metadata_path, METADATA_BYTES)?;
+    let identity = AssetMetaIdentityCandidate::decode_json_bytes(&metadata)
+        .map_err(|error| format!("{metadata_path}: {error}"))?
+        .into_identity();
+    if identity.path() != &path
+        || identity.source_kind()
+            != &AssetSourceKind::Other(SpriteAnimationDomain::SOURCE_KIND.into())
+        || identity.stable_id() != clips_product().source()
+    {
+        return Err(format!(
+            "{metadata_path}: expected the game's Sprite animation identity and path"
+        ));
+    }
+    database
+        .insert_identity(&scope, path.clone(), identity)
+        .map_err(|error| format!("{metadata_path}: {error}"))?;
+    let definition = import_definition(
+        SpriteAnimationDomain::BUILD_ID,
+        FormatVersion::new(SpriteAnimationDomain::BUILD_REVISION)
+            .ok_or("Sprite animation build revision must be nonzero")?,
+    )?;
+    let request = ArtifactSourceRequest::new(assets.share(), scope.clone(), path, definition);
+    let imported = build_source::<SpriteAnimationDomain>(&store, &request, |_| Ok(()))
+        .map_err(|error| format!("{source}: Sprite animation import failed: {error}"))?
+        .into_group();
+    if imported.seed().source != clips_product()
+        || imported.seed().location.as_ref() != Some(&source)
+        || imported.members().len() != 1
+        || imported.members()[0].products.as_slice() != [clips_product()]
+        || imported.members()[0].format.as_str() != SpriteAnimationCodec::RUNTIME_KIND
+        || imported.members()[0].format_version.get() != SpriteAnimationCodec::RUNTIME_VERSION
+        || !imported.members()[0].dependencies.is_empty()
+    {
+        return Err(format!(
+            "{source}: imported group must supply only the game's Sprite animation Product and format"
+        ));
+    }
+    builder
+        .add_group(&imported)
+        .map_err(|error| format!("{source}: {error}"))?;
+    observations.extend_from_slice(imported.observations());
+
     for level in LevelId::ALL {
         let source = scene_source(&settings, level)?;
         let bytes = read(root, source.as_str(), DOCUMENT_BYTES)?;
@@ -223,9 +270,9 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 6 {
+    if catalog.members().len() != 7 {
         return Err(
-            "cooked content must contain exactly two Scenes, three Images and one SoundBank"
+            "cooked content must contain exactly two Scenes, three Images, one SoundBank and one Sprite animation set"
                 .to_owned(),
         );
     }
@@ -239,6 +286,17 @@ pub(super) fn prepare(
     {
         return Err("cooked SoundBank identity or format changed".into());
     }
+    let clips = catalog
+        .member_for_product(clips_product())
+        .ok_or("missing cooked explorer Sprite animation set")?;
+    if clips.products() != [clips_product()]
+        || !clips.dependencies().is_empty()
+        || !matches!(clips.kind(), RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == SpriteAnimationCodec::RUNTIME_KIND
+                && version.get() == SpriteAnimationCodec::RUNTIME_VERSION)
+    {
+        return Err("cooked Sprite animation identity or format changed".into());
+    }
     for level in LevelId::ALL {
         let scene = catalog
             .member_for_product(level.scene_product())
@@ -250,13 +308,17 @@ pub(super) fn prepare(
         );
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
-            || !scene.dependencies().iter().any(|dependency| {
-                dependency.product() == atlas_product()
-                    && dependency.role() == RuntimeContentDependencyRole::Required
-            })
+            || [atlas_product(), bank_product(), clips_product()]
+                .into_iter()
+                .any(|product| {
+                    !scene.dependencies().iter().any(|dependency| {
+                        dependency.product() == product
+                            && dependency.role() == RuntimeContentDependencyRole::Required
+                    })
+                })
         {
             return Err(format!(
-                "cooked {level:?} Scene identity or required shared explorer atlas changed"
+                "cooked {level:?} Scene identity or required shared atlas, SoundBank or Sprite animation changed"
             ));
         }
     }

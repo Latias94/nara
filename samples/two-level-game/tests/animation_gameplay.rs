@@ -7,6 +7,10 @@
 #[path = "support/resume_gameplay.rs"]
 mod support;
 
+#[path = "support/default_animation.rs"]
+mod animation_reference;
+use animation_reference::expected_default_frame;
+
 use std::time::Duration;
 
 use nara::{
@@ -20,7 +24,7 @@ use nara::{
 };
 use support::{Game, MARKER, TRAVEL, action, movement};
 use two_level_game::{
-    animation::{ExplorerFrame, atlas_product, explorer_frame},
+    animation::{ExplorerFrame, atlas_product},
     levels::{LevelId, LevelKey},
     request_resume,
 };
@@ -29,7 +33,7 @@ const TIMESTEP_NANOS: u64 = 20_000_000;
 
 fn assert_frame(game: &Game, expected: ExplorerFrame) -> Sprite {
     let state = game.capture();
-    assert_eq!(explorer_frame(state.clock, state.held), expected);
+    assert_eq!(expected_default_frame(state.clock, state.held), expected);
     let snapshot = game.snapshot();
     let sprite = game
         .session

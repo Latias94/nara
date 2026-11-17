@@ -47,7 +47,7 @@ const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-lev
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("two-level-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("two-level-game.native", 2),
+    ComponentSchemaProviderBindingId::new("two-level-game.native", 3),
     catalog,
     register,
 );
@@ -369,6 +369,15 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
             1,
         ))
         .expect("the game's Sound Bank Runtime codec is valid")
+        .add_asset_domain::<nara_sprite_animation::SpriteAnimationDomain>()
+        .expect("the Sprite animation source importer is valid")
+        .add_runtime_asset_codec::<
+            nara_sprite_animation::SpriteAnimationDomain,
+            nara_sprite_animation::SpriteAnimationCodec,
+        >(nara::runtime_content::RuntimeCodecDefinitionId::new(
+            "two-level-game.sprite-animation", 1,
+        ))
+        .expect("the Sprite animation Runtime codec is valid")
         .add_contribution(contribution)
         .expect("static game recipe")
 }
@@ -379,6 +388,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
             content::ObjectRole::persistent_component_schema(),
             content::SoundPalette::persistent_component_schema(),
             collision::CollisionBox::persistent_component_schema(),
+            crate::animation::ExplorerAnimation::persistent_component_schema(),
         ],
         ..Default::default()
     })
@@ -387,7 +397,8 @@ fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegi
     registry
         .register_persistent_component::<content::ObjectRole>()?
         .register_persistent_component::<content::SoundPalette>()?
-        .register_persistent_component::<collision::CollisionBox>()
+        .register_persistent_component::<collision::CollisionBox>()?
+        .register_persistent_component::<crate::animation::ExplorerAnimation>()
         .map(|_| ())
 }
 
@@ -408,7 +419,12 @@ fn initialize(world: &mut World) {
     resume::remember_current(world);
     let content = CurrentScene::get(world)
         .ok_or_else(|| "current Scene is unavailable".to_owned())
-        .and_then(|current| Content::read(current.source()));
+        .and_then(|current| {
+            let assets = world
+                .get_resource::<nara::project_host::ProjectDomainAssets>()
+                .ok_or("initial animation content is unavailable")?;
+            Content::read(current.source(), assets)
+        });
     match content {
         Ok(content) => {
             world
@@ -521,7 +537,11 @@ fn project_animation(world: &mut World) {
     if !session.initialized || session.phase != GamePhase::Running {
         return;
     }
-    let region = crate::animation::explorer_frame(session.clock, session.held).texture_region();
+    let Some(content) = world.resource::<ActiveLevel>().content() else {
+        fail(world, "the animated explorer content is unavailable".into());
+        return;
+    };
+    let region = content.animation.sample(session.clock, session.held);
     let Some(entity) = player(world) else {
         fail(
             world,

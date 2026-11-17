@@ -1,55 +1,26 @@
 use super::*;
 
 #[test]
-fn walking_uses_elapsed_nanoseconds_at_exact_frame_boundaries() {
-    for (elapsed_nanos, expected) in [
-        (0, ExplorerFrame::WalkOne),
-        (99_999_999, ExplorerFrame::WalkOne),
-        (100_000_000, ExplorerFrame::WalkTwo),
-        (199_999_999, ExplorerFrame::WalkTwo),
-        (200_000_000, ExplorerFrame::WalkThree),
-        (299_999_999, ExplorerFrame::WalkThree),
-        (300_000_000, ExplorerFrame::WalkOne),
-        (u64::MAX, ExplorerFrame::WalkTwo),
-    ] {
-        let clock = GameClock {
-            elapsed_nanos,
-            ..GameClock::default()
-        };
-        assert_eq!(
-            explorer_frame(clock, [false, true, false, false]),
-            expected,
-            "elapsed_nanos={elapsed_nanos}",
-        );
-        assert_eq!(explorer_frame(clock, [false; 4]), ExplorerFrame::Idle);
-    }
-}
-
-#[test]
 fn held_direction_truth_table_covers_opposition_and_diagonals() {
-    let clock = GameClock {
-        elapsed_nanos: 100_000_000,
-        ..GameClock::default()
-    };
     for (held, expected) in [
-        ([false, false, false, false], ExplorerFrame::Idle),
-        ([true, false, false, false], ExplorerFrame::WalkTwo),
-        ([false, true, false, false], ExplorerFrame::WalkTwo),
-        ([true, true, false, false], ExplorerFrame::Idle),
-        ([false, false, true, false], ExplorerFrame::WalkTwo),
-        ([true, false, true, false], ExplorerFrame::WalkTwo),
-        ([false, true, true, false], ExplorerFrame::WalkTwo),
-        ([true, true, true, false], ExplorerFrame::WalkTwo),
-        ([false, false, false, true], ExplorerFrame::WalkTwo),
-        ([true, false, false, true], ExplorerFrame::WalkTwo),
-        ([false, true, false, true], ExplorerFrame::WalkTwo),
-        ([true, true, false, true], ExplorerFrame::WalkTwo),
-        ([false, false, true, true], ExplorerFrame::Idle),
-        ([true, false, true, true], ExplorerFrame::WalkTwo),
-        ([false, true, true, true], ExplorerFrame::WalkTwo),
-        ([true, true, true, true], ExplorerFrame::Idle),
+        ([false, false, false, false], "idle"),
+        ([true, false, false, false], "walk"),
+        ([false, true, false, false], "walk"),
+        ([true, true, false, false], "idle"),
+        ([false, false, true, false], "walk"),
+        ([true, false, true, false], "walk"),
+        ([false, true, true, false], "walk"),
+        ([true, true, true, false], "walk"),
+        ([false, false, false, true], "walk"),
+        ([true, false, false, true], "walk"),
+        ([false, true, false, true], "walk"),
+        ([true, true, false, true], "walk"),
+        ([false, false, true, true], "idle"),
+        ([true, false, true, true], "walk"),
+        ([false, true, true, true], "walk"),
+        ([true, true, true, true], "idle"),
     ] {
-        assert_eq!(explorer_frame(clock, held), expected, "held={held:?}");
+        assert_eq!(clip_name(held), expected, "held={held:?}");
     }
 }
 
