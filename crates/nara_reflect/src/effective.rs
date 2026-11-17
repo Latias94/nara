@@ -817,12 +817,15 @@ pub fn validate_native_component_value_references_with_limits<'value>(
         .map(|_| ())
 }
 
-/// Checks the same complete Native value while admitting traversal scratch before allocation.
+/// Checks the same complete Native value and returns its exact cost from that traversal.
+///
+/// Traversal scratch is admitted before allocation. An accepted result supplies the complete
+/// node/byte cost to the original receiving owner; no separate cost walk is required.
 pub fn validate_native_component_value_references_with_admission<'value, E>(
     value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<(), EffectiveValueAdmissionError<E>> {
+) -> Result<ComponentValueCost, EffectiveValueAdmissionError<E>> {
     validate_value_materialization_budget_with_policy_and_admission(
         value.into(),
         limits,
@@ -930,6 +933,7 @@ pub(crate) fn validate_value_materialization_budget_with_admission<'value, E>(
         ReferencePolicy::Source,
         admit,
     )
+    .map(|_| ())
 }
 
 fn validate_value_materialization_budget_with_policy_and_admission<E>(
@@ -937,7 +941,7 @@ fn validate_value_materialization_budget_with_policy_and_admission<E>(
     limits: ComponentValueMaterializationLimits,
     policy: ReferencePolicy,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<(), EffectiveValueAdmissionError<E>> {
+) -> Result<ComponentValueCost, EffectiveValueAdmissionError<E>> {
     let mut refusal = None;
     let result = {
         let mut callback = |nodes, bytes, allocated| {
@@ -954,9 +958,7 @@ fn validate_value_materialization_budget_with_policy_and_admission<E>(
     };
     match refusal {
         Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
-        None => result
-            .map(|_| ())
-            .map_err(EffectiveValueAdmissionError::Value),
+        None => result.map_err(EffectiveValueAdmissionError::Value),
     }
 }
 

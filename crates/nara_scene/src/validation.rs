@@ -318,8 +318,7 @@ fn validate_effective_component_values<'a, E>(
                 }
             }
         }
-        let effective = match value_budget.admit_explicit(record.value, &mut admit_validation_work)
-        {
+        let effective = match value_budget.admit_native(record.value, &mut admit_validation_work) {
             Ok(()) => record.value,
             Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
                 return Err(error);
@@ -329,20 +328,6 @@ fn validate_effective_component_values<'a, E>(
                 continue;
             }
         };
-        match nara_reflect::__private::validate_native_component_value_references_with_admission(
-            effective,
-            limits,
-            &mut admit_validation_work,
-        ) {
-            Ok(()) => {}
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
-                return Err(error);
-            }
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
-                diagnostics.push(invalid(&error));
-                continue;
-            }
-        }
         match nara_reflect::__private::validate_explicit_component_value_with_admission(
             schema,
             effective,
@@ -1398,7 +1383,34 @@ impl SceneValueBudget {
         }
     }
 
-    fn admit_explicit<E>(
+    /// Reuses the complete Native walk's cost; failed values retain aggregate cost classification.
+    fn admit_native<E>(
+        &mut self,
+        value: ComponentValueRef<'_>,
+        admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+        use nara_reflect::__private::EffectiveValueAdmissionError;
+        let cost =
+            match nara_reflect::__private::validate_native_component_value_references_with_admission(
+                value,
+                self.remaining_limits(),
+                &mut *admit,
+            ) {
+                Ok(cost) => cost,
+                Err(EffectiveValueAdmissionError::Admission(error)) => {
+                    return Err(EffectiveValueAdmissionError::Admission(error));
+                }
+                Err(EffectiveValueAdmissionError::Value(error)) => {
+                    self.admit_rejected_value_cost(value, admit)?;
+                    return Err(EffectiveValueAdmissionError::Value(error));
+                }
+            };
+        self.nodes -= cost.nodes();
+        self.bytes -= cost.logical_bytes();
+        Ok(())
+    }
+
+    fn admit_rejected_value_cost<E>(
         &mut self,
         value: ComponentValueRef<'_>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
@@ -1428,8 +1440,6 @@ impl SceneValueBudget {
                 }
             }));
         };
-        // The shared admitted Native walker immediately checks depth and complete reference
-        // flatness below. Do not allocate a second unadmitted depth stack for this cost check.
         self.nodes -= cost.nodes();
         self.bytes -= cost.logical_bytes();
         Ok(())
@@ -1958,6 +1968,9 @@ fn push_placement_diagnostic(
     };
     push_with_operation_index(diagnostics, diagnostic, operation_index);
 }
+
+#[cfg(test)]
+mod native_cost_tests;
 
 #[cfg(test)]
 mod tests {

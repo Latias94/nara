@@ -905,15 +905,6 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
             .unwrap();
     }
     let mut raw_bytes = 0usize;
-    claims.entities[0].components[&component()]
-        .value
-        .read()
-        .cost_up_to_with_admission(limits.nodes(), limits.bytes(), |bytes| {
-            raw_bytes = raw_bytes.checked_add(bytes.unwrap()).unwrap();
-            Ok::<_, Infallible>(())
-        })
-        .unwrap()
-        .unwrap();
     nara_reflect::__private::validate_native_component_value_references_with_admission(
         claims.entities[0].components[&component()].value.read(),
         limits,

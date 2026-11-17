@@ -157,6 +157,10 @@ The same separation applies inside a receiving operation after it has checked ex
 complete value limits and Native reference requirements. Its semantic tail still admits actual
 index, shape and diagnostic allocations before constructing them; it does not select defaults or
 re-establish the just-checked cost. This is local reuse, not permission to skip other receiving facts.
+Complete Native value admission may return the logical cost computed by its existing depth/reference
+walk. The receiving owner consumes that accepted cost directly for aggregate limits. A failed
+Native value still requires the original whole-record cost classification and charge before
+continuing diagnostics; caller work/allocation refusal returns immediately without retry.
 
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque

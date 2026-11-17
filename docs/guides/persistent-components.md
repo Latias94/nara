@@ -79,6 +79,9 @@ still own their definition, resource and World checks. After a receiving operati
 explicit defaults, complete value limits and Native references, it uses the same explicit-field
 semantics with admission of actual schema-index, shape and diagnostic scratch. It does not invoke
 default selection again merely because the data use a frozen representation.
+Complete Native admission also supplies its existing traversal's exact logical cost to Scene's
+aggregate allowance. Accepted values need one such traversal; failed values retain complete cost
+classification before further diagnostics. Caller work/allocation refusal stops the operation.
 
 `rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
 borrowed reads and return one independent owned result. They validate the complete reference
