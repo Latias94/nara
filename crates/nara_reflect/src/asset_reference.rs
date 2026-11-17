@@ -16,7 +16,8 @@ use crate::{
     ComponentValueShape, EntityReferenceTraversalLimits,
     effective::{freeze_component_defaults, validate_value_materialization_budget},
     entity_reference::{
-        PresentReferenceLeaf, ReferenceTraversalError, collect_present_field_reference_leaves,
+        PendingDeclaredEntityReferences, PresentReferenceLeaf, ReferenceTraversalError,
+        collect_effective_reference_leaves_with_admission, collect_present_field_reference_leaves,
         collect_present_field_reference_leaves_with_admission, collect_present_reference_leaves,
         collect_present_reference_leaves_with_admission, collect_present_value_reference_leaves,
         collect_present_value_reference_leaves_with_admission,
@@ -208,8 +209,59 @@ pub fn collect_declared_effective_asset_references_with_admission<'a, E>(
     limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
-    let component = schema.id();
+    validate_schema_version_with_admission(schema, version, &mut admit)?;
+    let leaves = collect_present_reference_leaves_with_admission::<(), E>(
+        schema,
+        value,
+        limits,
+        ComponentValueKind::AssetRef,
+        true,
+        &mut admit,
+    );
+    materialize_asset_references_with_admission(schema.id(), leaves, &mut admit)
+}
+
+/// Interprets effective asset and entity references together under an admitted current Schema.
+///
+/// The caller owns Schema admission and default materialization. This uses the complete asset
+/// traversal, including raw/shape validation, declaration checks and combined raw/result limits.
+/// Asset decoding follows traversal and happens once. Entity leaves borrow the unchanged Schema
+/// and value, including frozen insertions; no complete tree is retained or cloned.
+///
+/// Admission covers the ordinary asset collector's actual work and allocations, plus pending
+/// entity-leaf Vec growth. The original owned entity paths move into that scratch. Entity-plan
+/// output allocation is deferred to `PendingDeclaredEntityReferences::finish_with_admission`,
+/// which the caller invokes after consuming the assets and checking their products/resolution.
+/// Thus an asset diagnostic precedes a later entity-plan output refusal. Callback errors are
+/// returned unchanged, and discarded scratch is never refunded.
+pub fn collect_effective_references_with_admission<'schema, 'value, E>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: impl Into<ComponentValueRef<'value>>,
+    limits: EntityReferenceTraversalLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<
+    (
+        Vec<DeclaredAssetReference>,
+        PendingDeclaredEntityReferences<'schema, 'value>,
+    ),
+    AssetReferenceCollectionError<E>,
+> {
+    validate_schema_version_with_admission(schema, version, &mut admit)?;
+    let (leaves, pending) =
+        collect_effective_reference_leaves_with_admission(schema, value, limits, &mut admit)
+            .map_err(|error| reference_collection_error(schema.id(), error, &mut admit))?;
+    let assets = materialize_asset_references_with_admission(schema.id(), Ok(leaves), &mut admit)?;
+    Ok((assets, pending))
+}
+
+fn validate_schema_version_with_admission<E>(
+    schema: &ComponentSchema,
+    version: ComponentSchemaVersion,
+    admit: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), AssetReferenceCollectionError<E>> {
     if version != schema.version() {
+        let component = schema.id();
         admit(0, 0, component.as_str().len()).map_err(AssetReferenceCollectionError::Admission)?;
         return Err(AssetReferenceCollectionError::Reference(
             DeclaredAssetReferenceError::SchemaVersionMismatch {
@@ -219,15 +271,28 @@ pub fn collect_declared_effective_asset_references_with_admission<'a, E>(
             },
         ));
     }
-    let leaves = collect_present_reference_leaves_with_admission::<(), E>(
-        schema,
-        value,
-        limits,
-        ComponentValueKind::AssetRef,
-        true,
-        &mut admit,
-    );
-    materialize_asset_references_with_admission(component, leaves, &mut admit)
+    Ok(())
+}
+
+fn reference_collection_error<E>(
+    component: &ComponentTypeId,
+    error: ReferenceTraversalError<(), E>,
+    admit: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> AssetReferenceCollectionError<E> {
+    match error {
+        ReferenceTraversalError::Admission(error) => {
+            AssetReferenceCollectionError::Admission(error)
+        }
+        ReferenceTraversalError::Reference(source) => {
+            if let Err(error) = admit(0, 0, component.as_str().len()) {
+                return AssetReferenceCollectionError::Admission(error);
+            }
+            AssetReferenceCollectionError::Reference(DeclaredAssetReferenceError::Traversal {
+                component: component.clone(),
+                source,
+            })
+        }
+    }
 }
 
 fn materialize_asset_references_with_admission<E>(
@@ -235,22 +300,7 @@ fn materialize_asset_references_with_admission<E>(
     leaves: Result<Vec<PresentReferenceLeaf<'_, '_>>, ReferenceTraversalError<(), E>>,
     admit: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
-    let leaves = match leaves {
-        Ok(leaves) => leaves,
-        Err(ReferenceTraversalError::Admission(error)) => {
-            return Err(AssetReferenceCollectionError::Admission(error));
-        }
-        Err(ReferenceTraversalError::Reference(source)) => {
-            admit(0, 0, component.as_str().len())
-                .map_err(AssetReferenceCollectionError::Admission)?;
-            return Err(AssetReferenceCollectionError::Reference(
-                DeclaredAssetReferenceError::Traversal {
-                    component: component.clone(),
-                    source,
-                },
-            ));
-        }
-    };
+    let leaves = leaves.map_err(|error| reference_collection_error(component, error, admit))?;
     // Each slot, field ID and parsed path was admitted at the borrowed record boundary.
     let mut references = Vec::with_capacity(leaves.len());
     for leaf in leaves {

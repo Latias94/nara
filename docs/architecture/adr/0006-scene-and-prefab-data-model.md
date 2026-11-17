@@ -105,6 +105,13 @@ declared-reference rules. One aggregate retained logical value allowance applies
 and both families before engine-owned copies/default materialization. Trusted codec and migration
 internals keep their ordinary allocation and failure semantics.
 
+Effective flat admission and source-backed native receiving share one joint interpretation of
+the same value's declared asset/entity references. Schema/shape and hidden-reference scans need
+not repeat merely to obtain a second output inventory. The existing Scene owner checks runtime
+product policy and actual asset resolution before entity-plan finalization and namespace closure.
+No native business codec, mutable World, product existence or publication fact is inferred from
+the shared traversal. Processed exact-definition reuse retains its separate existing contract.
+
 Complete data groups are staged with native prepared values and installed through the existing
 exclusive, lifecycle-free Scene publication tail. A carrier contains only current records and
 their owner-local data snapshots, with exact World/entity-incarnation custody; it does not retain

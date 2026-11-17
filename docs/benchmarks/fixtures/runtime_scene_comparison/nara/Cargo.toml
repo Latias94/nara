@@ -6,6 +6,10 @@ publish = false
 
 [workspace]
 
+[features]
+default = []
+scene-work-observation = ["nara_scene/work-observation", "dep:tracing", "dep:tracing-subscriber"]
+
 [dependencies]
 nara_core = { path = "../../../../../crates/nara_core" }
 nara_ecs = { path = "../../../../../crates/nara_ecs" }
@@ -13,3 +17,5 @@ nara_identity = { path = "../../../../../crates/nara_identity", features = ["run
 nara_reflect = { path = "../../../../../crates/nara_reflect", features = ["serde"] }
 nara_scene = { path = "../../../../../crates/nara_scene", features = ["serde"] }
 serde_json = "1"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }

@@ -65,6 +65,15 @@ needs a concrete invariant, data-origin/change or receiving-policy reason, suppo
 corresponding mature-engine flow where available. This policy does not require normal typed
 gameplay to pass through a generic serialized-value validator on each use.
 
+When one admission consumes both asset and entity references from the same unchanged effective
+value and admitted Schema, interpret their shared raw/shape/reference rules once. Keep the
+temporary inventories within that original operation. Actual asset resolution and entity
+namespace closure remain receiving-owner checks; finalize entity output after the asset checks
+when that order determines refusal precedence. Joint interpretation must retain hidden-reference
+rejection, both kinds' combined result limits, and admission before retained scratch/output
+allocation. Independently called single-kind operations remain complete. This does not authorize
+carrying a detached validation result across value changes or arbitrary receiving definitions.
+
 ### Implemented RGF-U1 Slice
 
 Scene, prefab, standalone patch, and component-schema-catalog decoders accept already acquired

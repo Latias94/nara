@@ -13,6 +13,8 @@ use crate::{
 };
 
 #[cfg(test)]
+mod joint_tests;
+#[cfg(test)]
 mod reference_free_tests;
 #[cfg(test)]
 mod rewrite_admission_tests;
@@ -131,6 +133,30 @@ struct PlannedEntityReference {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredEntityReferencePlan {
     references: Vec<PlannedEntityReference>,
+}
+
+/// Borrowed entity leaves from the joint effective-reference interpretation.
+///
+/// This is temporary scratch for the original immutable Schema and value, including frozen
+/// default insertions. It retains no complete tree or independent interpretation authority.
+/// Finish only after the caller has consumed and checked the collected asset references.
+#[derive(Debug)]
+pub struct PendingDeclaredEntityReferences<'schema, 'value> {
+    leaves: Vec<PresentReferenceLeaf<'schema, 'value>>,
+    maximum_bytes: usize,
+}
+
+impl PendingDeclaredEntityReferences<'_, '_> {
+    /// Admits and materializes the entity plan without traversing the Schema or value again.
+    ///
+    /// The callback covers output Vec growth and field ID copies. Paths move from the already
+    /// admitted leaf scratch. A refusal returns the exact caller error before that allocation.
+    pub fn finish_with_admission<R, E>(
+        self,
+        admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
+        materialize_entity_references_with_admission(self.leaves, self.maximum_bytes, admit)
+    }
 }
 
 impl DeclaredEntityReferencePlan {
@@ -380,21 +406,7 @@ pub fn plan_declared_entity_references_with_admission<'a, R, E>(
         true,
         &mut admit,
     )?;
-    let mut admission = ReferenceAdmission {
-        callback: &mut admit,
-        maximum_bytes: limits.bytes().get(),
-    };
-    let mut references = Vec::new();
-    admission.reserve(&mut references, leaves.len())?;
-    for leaf in leaves {
-        admission.allocation(Some(leaf.field.id().as_str().len()))?;
-        references.push(PlannedEntityReference {
-            field_id: leaf.field.id().clone(),
-            path: leaf.path,
-            required: leaf.required,
-        });
-    }
-    Ok(DeclaredEntityReferencePlan { references })
+    materialize_entity_references_with_admission(leaves, limits.bytes().get(), admit)
 }
 
 /// Plans references relative to one complete replacement payload for a resolved value shape.
@@ -446,9 +458,17 @@ pub fn plan_declared_value_entity_references_with_admission<'a, R, E>(
         true,
         &mut admit,
     )?;
+    materialize_entity_references_with_admission(leaves, limits.bytes().get(), admit)
+}
+
+fn materialize_entity_references_with_admission<R, E>(
+    leaves: Vec<PresentReferenceLeaf<'_, '_>>,
+    maximum_bytes: usize,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
     let mut admission = ReferenceAdmission {
         callback: &mut admit,
-        maximum_bytes: limits.bytes().get(),
+        maximum_bytes,
     };
     let mut references = Vec::new();
     admission.reserve(&mut references, leaves.len())?;
@@ -635,6 +655,7 @@ fn path_allocation_bytes(segments: &[ComponentFieldPathSegment]) -> Option<usize
     )
 }
 
+#[derive(Debug)]
 pub(crate) struct PresentReferenceLeaf<'schema, 'value> {
     pub(crate) field: &'schema ComponentFieldSchema,
     // Preserve the actual leaf authority, including demand, even for selected subtrees.
@@ -668,67 +689,43 @@ pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R
     admitted_schema: bool,
     callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
-    let value = value.into();
-    let mut admission = ReferenceAdmission {
+    let admission = ReferenceAdmission {
         callback,
         maximum_bytes: limits.bytes().get(),
     };
-    let reference_free_usage = find_undeclared_reference_path(
-        value,
-        limits,
-        &BTreeSet::new(),
-        0,
-        0,
-        &ComponentFieldPath::empty(),
-        &mut admission,
-    )?
-    .reference_free_usage();
-    if schema.fields.len() > limits.nodes().get() {
-        return Err(ComponentEntityReferenceRewriteError::NodeLimit {
-            maximum: limits.nodes().get(),
-        }
-        .into());
-    }
-    let mut fields: Vec<&ComponentFieldSchema> = Vec::new();
-    admission.reserve(&mut fields, schema.fields.len())?;
-    fields.extend(&schema.fields);
-    fields.sort_unstable_by(|left, right| left.path.cmp(&right.path));
-    if let Some(duplicate) = fields.windows(2).find(|pair| pair[0].path == pair[1].path) {
-        let path = admission.path(duplicate[0].path.segments())?;
-        return Err(ComponentEntityReferenceRewriteError::DuplicateDeclaredPath { path }.into());
-    }
-
     let mut traversal =
         PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
-    for field in fields {
-        traversal.admission.charge(
-            1,
-            field
-                .id()
-                .as_str()
-                .len()
-                .saturating_add(path_logical_bytes(field.path.segments())),
-            0,
-        )?;
-        if !admitted_schema
-            && !field.shape.contains_kind(ComponentValueKind::EntityRef)
-            && !field.shape.contains_kind(ComponentValueKind::AssetRef)
-            && !field.has_capability(ComponentCapability::EntityRef)
-            && !field.has_capability(ComponentCapability::AssetRef)
-        {
-            continue;
-        }
-        let Some(field_value) = traversal.field_value(value, field)? else {
-            continue;
-        };
-        traversal.visit_field(field, field_value)?;
-    }
-    traversal.validate_undeclared_references(
-        value,
-        &ComponentFieldPath::empty(),
-        reference_free_usage,
-    )?;
+    traversal.collect_component(schema, value.into())?;
     Ok(traversal.references)
+}
+
+pub(crate) fn collect_effective_reference_leaves_with_admission<'schema, 'value, E>(
+    schema: &'schema ComponentSchema,
+    value: impl Into<ComponentValueRef<'value>>,
+    limits: EntityReferenceTraversalLimits,
+    callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<
+    (
+        Vec<PresentReferenceLeaf<'schema, 'value>>,
+        PendingDeclaredEntityReferences<'schema, 'value>,
+    ),
+    ReferenceTraversalError<(), E>,
+> {
+    let admission = ReferenceAdmission {
+        callback,
+        maximum_bytes: limits.bytes().get(),
+    };
+    let mut traversal =
+        PresentReferenceTraversal::new(limits, ComponentValueKind::AssetRef, true, admission);
+    traversal.retain_entity_leaves = true;
+    traversal.collect_component(schema, value.into())?;
+    Ok((
+        traversal.references,
+        PendingDeclaredEntityReferences {
+            leaves: traversal.entity_leaves,
+            maximum_bytes: limits.bytes().get(),
+        },
+    ))
 }
 
 pub(crate) fn collect_present_field_reference_leaves<'schema, 'value, R>(
@@ -841,6 +838,8 @@ struct PresentReferenceTraversal<'schema, 'value, 'admission, E> {
     result_bytes: usize,
     entity_paths: BTreeSet<ComponentFieldPath>,
     references: Vec<PresentReferenceLeaf<'schema, 'value>>,
+    retain_entity_leaves: bool,
+    entity_leaves: Vec<PresentReferenceLeaf<'schema, 'value>>,
     admitted_schema: bool,
     admission: ReferenceAdmission<'admission, E>,
 }
@@ -860,9 +859,70 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             result_bytes: 0,
             entity_paths: BTreeSet::new(),
             references: Vec::new(),
+            retain_entity_leaves: false,
+            entity_leaves: Vec::new(),
             admitted_schema,
             admission,
         }
+    }
+
+    fn collect_component<R>(
+        &mut self,
+        schema: &'schema ComponentSchema,
+        value: ComponentValueRef<'value>,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        let root = ComponentFieldPath::empty();
+        let reference_free_usage = find_undeclared_reference_path(
+            value,
+            self.limits,
+            &BTreeSet::new(),
+            0,
+            0,
+            &root,
+            &mut self.admission,
+        )?
+        .reference_free_usage();
+        if schema.fields.len() > self.limits.nodes().get() {
+            return Err(ComponentEntityReferenceRewriteError::NodeLimit {
+                maximum: self.limits.nodes().get(),
+            }
+            .into());
+        }
+        let mut fields: Vec<&ComponentFieldSchema> = Vec::new();
+        self.admission.reserve(&mut fields, schema.fields.len())?;
+        fields.extend(&schema.fields);
+        fields.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+        if let Some(duplicate) = fields.windows(2).find(|pair| pair[0].path == pair[1].path) {
+            let path = self.admission.path(duplicate[0].path.segments())?;
+            return Err(
+                ComponentEntityReferenceRewriteError::DuplicateDeclaredPath { path }.into(),
+            );
+        }
+
+        for field in fields {
+            self.admission.charge(
+                1,
+                field
+                    .id()
+                    .as_str()
+                    .len()
+                    .saturating_add(path_logical_bytes(field.path.segments())),
+                0,
+            )?;
+            if !self.admitted_schema
+                && !field.shape.contains_kind(ComponentValueKind::EntityRef)
+                && !field.shape.contains_kind(ComponentValueKind::AssetRef)
+                && !field.has_capability(ComponentCapability::EntityRef)
+                && !field.has_capability(ComponentCapability::AssetRef)
+            {
+                continue;
+            }
+            let Some(field_value) = self.field_value(value, field)? else {
+                continue;
+            };
+            self.visit_field(field, field_value)?;
+        }
+        self.validate_undeclared_references(value, &root, reference_free_usage)
     }
 
     fn validate_undeclared_references<R>(
@@ -1289,6 +1349,15 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         if kind == self.reference_kind {
             self.admission.reserve(&mut self.references, 1)?;
             self.references.push(PresentReferenceLeaf {
+                field,
+                shape,
+                path,
+                value,
+                required: true,
+            });
+        } else if self.retain_entity_leaves && kind == ComponentValueKind::EntityRef {
+            self.admission.reserve(&mut self.entity_leaves, 1)?;
+            self.entity_leaves.push(PresentReferenceLeaf {
                 field,
                 shape,
                 path,

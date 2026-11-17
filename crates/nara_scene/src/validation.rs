@@ -323,11 +323,18 @@ fn validate_effective_component_values<'a, E>(
                 }
             }
         }
-        let native_metrics = match value_budget.admit_value(
-            record.value,
-            record.native_metrics,
-            &mut admit_validation_work,
-        ) {
+        let native_admission = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_effective_value_admission")
+                    .entered();
+            value_budget.admit_value(
+                record.value,
+                record.native_metrics,
+                &mut admit_validation_work,
+            )
+        };
+        let native_metrics = match native_admission {
             Ok(metrics) => metrics,
             Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
                 return Err(error);
@@ -352,17 +359,29 @@ fn validate_effective_component_values<'a, E>(
                 continue;
             }
         }
-        let references = match nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
-                schema, record.version, effective, traversal, &mut admit_validation_work,
-            ) {
-                Ok(references) => references,
-                Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(error)) =>
-                    return Err(error),
-                Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(_)) => {
-                    diagnostics.push(invalid(&ComponentCodecError::Message("Schema-declared asset reference traversal failed".into())));
-                    continue;
-                }
-            };
+        let references_result = {
+            #[cfg(feature = "work-observation")]
+            let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_effective_asset_references").entered();
+            nara_reflect::__private::collect_effective_references_with_admission(
+                schema,
+                record.version,
+                effective,
+                traversal,
+                &mut admit_validation_work,
+            )
+        };
+        let (references, pending_entities) = match references_result {
+            Ok(references) => references,
+            Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(error)) => {
+                return Err(error);
+            }
+            Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(_)) => {
+                diagnostics.push(invalid(&ComponentCodecError::Message(
+                    "Schema-declared asset reference traversal failed".into(),
+                )));
+                continue;
+            }
+        };
         if role == EffectiveValueRole::Runtime
             && let Some(reference) = references.iter().find(|reference| {
                 !matches!(reference.asset_ref(), nara_asset::AssetRef::Product(_))
@@ -405,11 +424,12 @@ fn validate_effective_component_values<'a, E>(
                 continue;
             }
         }
-        let local_references =
-            nara_reflect::__private::plan_declared_entity_references_with_admission::<
-                SceneLocalTargetMissing,
-                _,
-            >(schema, effective, traversal, &mut admit_validation_work);
+        let local_references = {
+            #[cfg(feature = "work-observation")]
+            let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_effective_entity_references").entered();
+            pending_entities
+                .finish_with_admission::<SceneLocalTargetMissing, _>(&mut admit_validation_work)
+        };
         let local_references = match local_references {
             Ok(plan) => plan.visit(effective, |_, reference| match reference {
                 EntityReference::SceneLocal { entity } => contains_entity(entity)

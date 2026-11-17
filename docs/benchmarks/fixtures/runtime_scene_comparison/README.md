@@ -61,6 +61,15 @@ Cleanup, validation and process startup are outside module timers. Process wall 
 only diagnostic and includes generation, verification and repeated samples.
 No cold-cache, exclusive CPU, memory, GPU, steady-frame or engine-ranking claim follows.
 
+For a subsequent Nara-only attribution, enable `scene-work-observation`. The consumer reuses
+the original game's binary-local observer rather than adding another profiler. Each case's
+`work_observation` covers its three warmups and nine samples, and distinguishes effective value
+admission, asset interpretation and entity-plan finalization. These nested wall spans overlap;
+they cannot be added to their containing compile/preparation envelopes. The option is disabled
+by default. Capture exact build sources/executables separately when comparing frozen variants;
+the printed baseline implementation revision is historical context, not a claim about a later
+build. The published cross-engine observations use the exact fixture version at `70140a3`.
+
 The [source-boundary study](../../../research/2026-11-17-runtime-module-performance-comparison.md)
 owns the official implementation findings. Actual observations and proposed budgets
 belong in the [benchmark report](../../2026-11-17-runtime-module-comparison.md) rather than these reusable consumers.

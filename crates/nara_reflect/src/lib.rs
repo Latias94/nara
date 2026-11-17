@@ -135,6 +135,7 @@ pub mod __private {
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
         collect_declared_field_asset_references_with_admission,
         collect_declared_value_asset_references_with_admission,
+        collect_effective_references_with_admission,
     };
     pub use crate::effective::{
         EffectiveValueAdmissionError, FrozenComponentDefaults, NativeValueMetrics,
@@ -152,7 +153,7 @@ pub mod __private {
         validate_value_materialization_budget,
     };
     pub use crate::entity_reference::{
-        DeclaredEntityReferencePlan, EntityReferencePlanError,
+        DeclaredEntityReferencePlan, EntityReferencePlanError, PendingDeclaredEntityReferences,
         admit_declared_entity_reference_plan_rewrite, admit_declared_entity_reference_plan_visit,
         plan_declared_entity_references, plan_declared_entity_references_with_admission,
         plan_declared_value_entity_references,

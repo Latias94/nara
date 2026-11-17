@@ -20,7 +20,7 @@ mod observed {
         registry::LookupSpan,
     };
 
-    const PHASES: [&str; 36] = [
+    const PHASES: [&str; 39] = [
         "project_content_read",
         "scene_source_decode",
         "prefab_source_decode",
@@ -45,6 +45,9 @@ mod observed {
         "scene_authoring_finish",
         "scene_native_preview",
         "scene_flat_admission",
+        "scene_effective_value_admission",
+        "scene_effective_asset_references",
+        "scene_effective_entity_references",
         "scene_prepare_unbound",
         "scene_bind",
         "scene_bind_revalidate",

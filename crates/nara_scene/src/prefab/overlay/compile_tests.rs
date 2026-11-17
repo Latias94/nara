@@ -984,8 +984,8 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         &mut admit_unit,
     )
     .unwrap();
-    let references =
-        nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
+    let (references, pending_entities) =
+        nara_reflect::__private::collect_effective_references_with_admission(
             schema,
             ComponentSchemaVersion::ONE,
             &value,
@@ -994,15 +994,16 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         )
         .unwrap();
     assert!(references.is_empty());
-    for _ in 0..2 {
-        nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
-            schema,
-            &value,
-            Default::default(),
-            &mut admit_unit,
-        )
+    pending_entities
+        .finish_with_admission::<(), Infallible>(&mut admit_unit)
         .unwrap();
-    }
+    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
+        schema,
+        &value,
+        Default::default(),
+        &mut admit_unit,
+    )
+    .unwrap();
     assert!(unit_nodes > 0 && unit_bytes > 0);
     let document = SceneDocument::from_ordered_roots(["first", "second"].map(|name| {
         SceneEntityRecord::new(id(name)).with_component(

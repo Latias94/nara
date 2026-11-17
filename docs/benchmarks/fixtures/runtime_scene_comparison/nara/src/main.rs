@@ -1,5 +1,9 @@
 //! Warm, CPU-only public Scene measurements with explicit phase and ownership boundaries.
 
+#[path = "../../../../../../samples/two-level-game/src/bin/runtime_workload/work.rs"]
+#[allow(dead_code)]
+mod work;
+
 use std::{fs, hint::black_box, path::Path, time::Instant};
 
 use nara_core::{ByteLimit, SourceUniverseId};
@@ -117,7 +121,7 @@ fn bindings() -> SceneComponentBindings {
     SceneComponentBindings::new(registry.freeze().unwrap(), []).unwrap()
 }
 
-fn run(directory: &Path, population: usize, encoding: &str) {
+fn run(directory: &Path, population: usize, encoding: &str, collector: &work::Collector) {
     let ron = encoding == "ron";
     let side = (population as f64).sqrt() as usize;
     assert_eq!(side * side, population);
@@ -175,6 +179,7 @@ fn run(directory: &Path, population: usize, encoding: &str) {
     let mut compiles = Vec::new();
     let mut instantiates = Vec::new();
     let mut native_counts = None;
+    let observation = collector.begin().unwrap();
     for sample in 0..WARMUP + SAMPLES {
         let start = Instant::now();
         let bytes = fs::read(&path).unwrap();
@@ -230,11 +235,16 @@ fn run(directory: &Path, population: usize, encoding: &str) {
         }
         black_box(&world);
     }
+    let mut work_observation = observation.finish().unwrap();
+    work_observation["scope"] = json!(
+        "one collection case including three warmups and nine samples of decode, compile and prepare/commit; no Runtime or GPU execution; nested wall spans overlap"
+    );
     println!(
         "{}",
         json!({
             "engine":"nara", "format": extension, "mode":"generic_rows_one_entity",
-            "revision":"9bd3a54f016992c10cb42d105ea338f4e35e64b0", "rows":population,
+        "baseline_implementation_revision":"9bd3a54f016992c10cb42d105ea338f4e35e64b0",
+        "source_scope":"current build; exact source/executable hashes belong to the external measurement receipt", "rows":population,
             "entities":1, "components":1, "source_bytes":text.len(), "source_file":path,
             "runtime_world_entities":native_counts.unwrap().0, "runtime_world_components":native_counts.unwrap().1,
             "logical_payload_bytes":population * 16, "checksum":expected_checksum,
@@ -245,6 +255,7 @@ fn run(directory: &Path, population: usize, encoding: &str) {
             "compile_ns":compiles, "instantiate_ns":instantiates,
             "decode_scope":"structural preflight + strict envelope + typed generic payload + source finish",
             "writer_scope":if encoding == "json_compact" { "public JSON wire, externally minified outside timing; not the default writer" } else { "unchanged public pretty writer" },
+        "work_observation": work_observation,
             "instantiate_scope":"fresh World + native preparation + original commit; no rendering/assets/Prefab",
             "state_verified":true
         })
@@ -252,6 +263,7 @@ fn run(directory: &Path, population: usize, encoding: &str) {
 }
 
 fn main() {
+    let collector = work::Collector::install().unwrap();
     let directory = std::env::args_os()
         .nth(1)
         .expect("supply an existing owned output directory");
@@ -259,7 +271,7 @@ fn main() {
     assert!(directory.is_dir());
     for population in [64, 4096, 16384] {
         for encoding in ["json", "json_compact", "ron"] {
-            run(directory, population, encoding);
+            run(directory, population, encoding, &collector);
         }
     }
 }

@@ -42,6 +42,13 @@ Scalar accessors, `field`, `get` and `get_path` read that exact effective value.
 an effective owning tree first. The complete receiving Schema, value limits and reference checks
 still run before native publication; a read grants no independent Scene or asset authority.
 
+Scene's effective-value admission interprets asset and entity declarations together for the
+same unchanged value and Schema. It retains temporary entity leaves while the original owner
+checks assets, then finishes the entity plan and checks namespace closure. This avoids a second
+complete reference interpretation; it does not skip hidden-reference checks or cache mutable
+asset/World state. Public standalone reference visitors still perform their own complete named
+operation. Native codec callbacks continue receiving the same borrowed value and context.
+
 ```rust
 use nara::reflect::{ComponentCodecError, ComponentValueRef};
 

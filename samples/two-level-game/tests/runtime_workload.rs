@@ -208,6 +208,9 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                     "scene_component_materialization",
                     "scene_reference_closure",
                     "scene_flat_admission",
+                    "scene_effective_value_admission",
+                    "scene_effective_asset_references",
+                    "scene_effective_entity_references",
                     "scene_prepare_unbound",
                     "scene_bind",
                     "scene_publish",
@@ -217,6 +220,17 @@ fn execute(fail_observer: bool, population: Option<usize>) {
                         "missing Scene work span {phase}: {work}"
                     );
                 }
+                let effective_calls = work["phases"]["scene_effective_value_admission"]["calls"]
+                    .as_u64()
+                    .unwrap();
+                assert_eq!(
+                    work["phases"]["scene_effective_asset_references"]["calls"],
+                    effective_calls
+                );
+                assert_eq!(
+                    work["phases"]["scene_effective_entity_references"]["calls"],
+                    effective_calls
+                );
                 for phase in ["project_content_read", "scene_source_decode"] {
                     for thread in ["owner_thread_calls", "worker_thread_calls"] {
                         assert!(
