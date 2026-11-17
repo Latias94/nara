@@ -6,7 +6,8 @@ use std::{
 use nara_core::DepthLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::__private::{
-    plan_declared_entity_references, validate_native_component_value_references_with_limits,
+    NativeValueMetrics, plan_declared_entity_references,
+    validate_native_component_value_references_with_limits,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext,
@@ -129,6 +130,7 @@ struct FlatSceneComponentRef<'a> {
     version: nara_reflect::ComponentSchemaVersion,
     value: ComponentValueRef<'a>,
     authored_metadata: bool,
+    native_metrics: Option<NativeValueMetrics>,
 }
 
 /// Admits a complete expanded value graph before asset realization or native decoding.
@@ -192,6 +194,7 @@ fn validate_effective_values<E>(
                 version: record.version,
                 value: record.value(),
                 authored_metadata: !record.contextual_defaults.is_empty(),
+                native_metrics: None,
             })
     });
     validate_effective_component_values(
@@ -201,6 +204,7 @@ fn validate_effective_values<E>(
         context,
         EffectiveValueRole::Draft,
         diagnostics,
+        None,
         admit_validation_work,
     )
 }
@@ -212,6 +216,7 @@ fn validate_effective_component_values<'a, E>(
     context: &mut ComponentDecodeContext<'_>,
     role: EffectiveValueRole,
     mut diagnostics: DiagnosticReport,
+    mut measured_values: Option<&mut Vec<NativeValueMetrics>>,
     mut admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let limits = context.materialization_limits();
@@ -318,8 +323,12 @@ fn validate_effective_component_values<'a, E>(
                 }
             }
         }
-        let effective = match value_budget.admit_native(record.value, &mut admit_validation_work) {
-            Ok(()) => record.value,
+        let native_metrics = match value_budget.admit_value(
+            record.value,
+            record.native_metrics,
+            &mut admit_validation_work,
+        ) {
+            Ok(metrics) => metrics,
             Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
                 return Err(error);
             }
@@ -328,6 +337,7 @@ fn validate_effective_component_values<'a, E>(
                 continue;
             }
         };
+        let effective = record.value;
         match nara_reflect::__private::validate_explicit_component_value_with_admission(
             schema,
             effective,
@@ -436,6 +446,22 @@ fn validate_effective_component_values<'a, E>(
             asset_references.reserve_exact(capacity - asset_references.len());
         }
         asset_references.extend(references);
+        if let Some(values) = measured_values.as_deref_mut() {
+            if values.len() == values.capacity() {
+                let capacity = values
+                    .len()
+                    .saturating_add(1)
+                    .max(values.capacity().saturating_mul(2))
+                    .max(4);
+                admit_validation_work(
+                    0,
+                    0,
+                    capacity.saturating_mul(size_of::<NativeValueMetrics>()),
+                )?;
+                values.reserve_exact(capacity - values.len());
+            }
+            values.push(native_metrics);
+        }
     }
     Ok(EffectiveSceneValidation {
         diagnostics,
@@ -450,7 +476,7 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
     context: &mut ComponentDecodeContext<'_>,
     require_runtime_products: bool,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<EffectiveSceneValidation, E> {
+) -> Result<(EffectiveSceneValidation, Vec<NativeValueMetrics>), E> {
     let mut diagnostics = DiagnosticReport::default();
     let placement = validate_scene_placement(
         &claims.roots,
@@ -504,9 +530,11 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
                 version: record.version,
                 value: record.value.read(),
                 authored_metadata: false,
+                native_metrics: None,
             })
     });
-    validate_effective_component_values(
+    let mut native_metrics = Vec::new();
+    let validation = validate_effective_component_values(
         records,
         |entity| namespace.contains(entity),
         authority,
@@ -517,8 +545,10 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
             EffectiveValueRole::Compiled
         },
         diagnostics,
+        Some(&mut native_metrics),
         admit,
-    )
+    )?;
+    Ok((validation, native_metrics))
 }
 
 fn validate_compiled_values_with_admission<E>(
@@ -551,6 +581,7 @@ fn validate_compiled_values_with_admission<E>(
                 version: record.version(),
                 value: record.value(),
                 authored_metadata: false,
+                native_metrics: Some(record.native_metrics()),
             })
     });
     validate_effective_component_values(
@@ -565,6 +596,7 @@ fn validate_compiled_values_with_admission<E>(
         context,
         EffectiveValueRole::Compiled,
         diagnostics,
+        None,
         admit,
     )
 }
@@ -1383,12 +1415,34 @@ impl SceneValueBudget {
         }
     }
 
+    fn admit_value<E>(
+        &mut self,
+        value: ComponentValueRef<'_>,
+        measured: Option<NativeValueMetrics>,
+        admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<NativeValueMetrics, nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+        if let Some(measured) = measured {
+            let cost = measured.cost();
+            if cost.nodes() <= self.nodes
+                && cost.logical_bytes() <= self.bytes
+                && measured.depth() <= self.depth.get()
+            {
+                admit(1, 0, 0)
+                    .map_err(nara_reflect::__private::EffectiveValueAdmissionError::Admission)?;
+                self.nodes -= cost.nodes();
+                self.bytes -= cost.logical_bytes();
+                return Ok(measured);
+            }
+        }
+        self.admit_native(value, admit)
+    }
+
     /// Reuses the complete Native walk's cost; failed values retain aggregate cost classification.
     fn admit_native<E>(
         &mut self,
         value: ComponentValueRef<'_>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+    ) -> Result<NativeValueMetrics, nara_reflect::__private::EffectiveValueAdmissionError<E>> {
         use nara_reflect::__private::EffectiveValueAdmissionError;
         let cost =
             match nara_reflect::__private::validate_native_component_value_references_with_admission(
@@ -1405,9 +1459,9 @@ impl SceneValueBudget {
                     return Err(EffectiveValueAdmissionError::Value(error));
                 }
             };
-        self.nodes -= cost.nodes();
-        self.bytes -= cost.logical_bytes();
-        Ok(())
+        self.nodes -= cost.cost().nodes();
+        self.bytes -= cost.cost().logical_bytes();
+        Ok(cost)
     }
 
     fn admit_rejected_value_cost<E>(

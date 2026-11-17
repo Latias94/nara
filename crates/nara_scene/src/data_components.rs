@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, convert::Infallible};
 
 use nara_asset::{AssetDatabaseError, AssetReferenceResolver};
 use nara_ecs::{
@@ -15,8 +15,10 @@ use nara_identity::{
 };
 use nara_reflect::{
     __private::{
+        EffectiveValueAdmissionError, NativeValueMetrics,
         effective_component_value_in_place_with_default_overrides,
-        validate_native_component_value_references_with_limits,
+        validate_explicit_component_value,
+        validate_native_component_value_references_with_admission,
         validate_value_materialization_budget,
     },
     ComponentCapability, ComponentCodecError, ComponentRegistryAuthorityError, ComponentSchema,
@@ -24,7 +26,6 @@ use nara_reflect::{
     ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
     DeclaredAssetReferenceError, collect_declared_asset_references_from_schema_with_limits,
     component_registry, component_registry_is_installed, validate_component_registry_authority,
-    validate_component_value_with_limits,
 };
 
 use crate::{
@@ -299,7 +300,7 @@ impl SceneComponentBindings {
                 source,
             }
         })?;
-        validate_data_value(
+        let native_metrics = validate_data_value(
             world,
             instance,
             schema,
@@ -318,6 +319,7 @@ impl SceneComponentBindings {
                 owner.owner_id().clone(),
                 schema.version(),
                 value,
+                native_metrics,
             ),
         };
         if let Some(mut group) = world.get_mut::<SceneDataComponents>(entity) {
@@ -497,32 +499,23 @@ impl SceneComponentBindings {
                 });
             }
             let removed = replaced == Some(component);
-            let admission = if removed {
+            let remaining = if removed {
                 ComponentValueMaterializationLimits::default()
             } else {
-                limits
+                limits.remaining(retained.nodes(), retained.logical_bytes())
             };
-            let (nodes, bytes) = if removed {
-                (admission.nodes(), admission.bytes())
-            } else {
-                (
-                    limits.nodes() - retained.nodes(),
-                    limits.bytes() - retained.logical_bytes(),
-                )
-            };
-            let cost = validate_value_materialization_budget(
-                record.value(),
-                admission.remaining(admission.nodes() - nodes, admission.bytes() - bytes),
-            )
-            .map_err(|source| SceneDataComponentError::InvalidValue {
-                component: component.clone(),
-                source,
-            })?;
-            validate_native_component_value_references_with_limits(record.value(), admission)
-                .map_err(|source| SceneDataComponentError::InvalidValue {
-                    component: component.clone(),
-                    source,
-                })?;
+            let cost = record.value_cost();
+            if cost.nodes() > remaining.nodes()
+                || cost.logical_bytes() > remaining.bytes()
+                || record.value_depth() > remaining.depth().get()
+            {
+                validate_value_materialization_budget(record.value(), remaining).map_err(
+                    |source| SceneDataComponentError::InvalidValue {
+                        component: component.clone(),
+                        source,
+                    },
+                )?;
+            }
             if !removed {
                 retained = retained.saturating_add(cost);
             }
@@ -534,7 +527,7 @@ impl SceneComponentBindings {
             } else {
                 limits
             };
-            validate_data_value(
+            validate_data_value_semantics(
                 world,
                 instance,
                 self.data_schema(component)?,
@@ -554,15 +547,33 @@ fn validate_data_value(
     value: ComponentValueRef<'_>,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     limits: ComponentValueMaterializationLimits,
+) -> Result<NativeValueMetrics, SceneDataComponentError> {
+    let component = schema.id();
+    let native_metrics =
+        validate_native_component_value_references_with_admission(value, limits, |_, _, _| {
+            Ok::<(), Infallible>(())
+        })
+        .map_err(|error| match error {
+            EffectiveValueAdmissionError::Value(source) => SceneDataComponentError::InvalidValue {
+                component: component.clone(),
+                source,
+            },
+            EffectiveValueAdmissionError::Admission(never) => match never {},
+        })?;
+    validate_data_value_semantics(world, instance, schema, value, asset_resolution, limits)?;
+    Ok(native_metrics)
+}
+
+fn validate_data_value_semantics(
+    world: &World,
+    instance: SceneInstanceId,
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
+    limits: ComponentValueMaterializationLimits,
 ) -> Result<(), SceneDataComponentError> {
     let component = schema.id();
-    validate_native_component_value_references_with_limits(value, limits).map_err(|source| {
-        SceneDataComponentError::InvalidValue {
-            component: component.clone(),
-            source,
-        }
-    })?;
-    validate_component_value_with_limits(schema, value, limits).map_err(|source| {
+    validate_explicit_component_value(schema, value).map_err(|source| {
         SceneDataComponentError::InvalidValue {
             component: component.clone(),
             source,
@@ -670,10 +681,12 @@ fn validate_carrier_lifecycle(
 
 #[cfg(test)]
 mod tests {
+    use nara_core::{ByteLimit, DepthLimit, ItemLimit};
     use nara_identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
     use nara_reflect::{
         ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
-        ComponentSchemaCatalog, ComponentValueKind, PersistentComponentSchemaOwnerId,
+        ComponentSchemaCatalog, ComponentValueKind, ComponentValueShape,
+        PersistentComponentSchemaOwnerId,
     };
 
     use super::*;
@@ -836,5 +849,149 @@ mod tests {
                 .is_none()
         );
         assert!(world.get::<SceneDataComponents>(entity).is_none());
+    }
+
+    #[test]
+    fn stored_metrics_preserve_first_limit_failure_after_direct_publication() {
+        let component = ComponentTypeId::new("game.Payload");
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            PersistentComponentSchemaOwnerId::try_new("game.payloads").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![
+                    ComponentSchema::new(component.clone(), "Payload", ComponentSchemaVersion::ONE)
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                        .with_fields([ComponentFieldSchema::required(
+                            ComponentFieldId::new("value"),
+                            "Value",
+                            ComponentFieldPath::empty(),
+                            ComponentValueShape::opaque(ComponentValueKind::List),
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let bindings =
+            SceneComponentBindings::new(ComponentRegistryBuilder::new().freeze().unwrap(), [owner])
+                .unwrap();
+        let id = SceneEntityId::new("local").unwrap();
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
+        let candidate = bindings
+            .compile_scene(&document, &InMemoryPrefabSourceResolver::new())
+            .candidate
+            .unwrap()
+            .bind_source(
+                SourceDocumentKey::named(
+                    "ed1f3775-cf52-41dd-a2ed-f3268b5656fd".parse().unwrap(),
+                    "payloads.scene",
+                    SourceDocumentKind::Scene,
+                )
+                .unwrap(),
+            );
+        let mut world = World::new();
+        let spawned = bindings
+            .prepare_scene(
+                &mut world,
+                &candidate,
+                &SceneOccurrenceKey::new("game.payloads", "main").unwrap(),
+                None,
+            )
+            .unwrap()
+            .commit(&mut world);
+        assert!(!spawned.diagnostics.has_errors(), "{spawned:?}");
+        let EntityLookup::Resolved(entity) = spawned.instance.unwrap().resolve(&world, &id) else {
+            panic!("the admitted data entity must be live");
+        };
+        let limits = |nodes, bytes, depth| {
+            ComponentValueMaterializationLimits::new(
+                ItemLimit::new(nodes).unwrap(),
+                ByteLimit::new(bytes).unwrap(),
+                DepthLimit::new(depth).unwrap(),
+            )
+        };
+        let value = ComponentValue::List(vec![
+            ComponentValue::String("ab".into()),
+            ComponentValue::List(vec![
+                ComponentValue::String("cde".into()),
+                ComponentValue::List(vec![ComponentValue::String("fghi".into())]),
+            ]),
+        ]);
+        bindings
+            .set_data_component(
+                &mut world,
+                entity,
+                &component,
+                value.clone(),
+                None,
+                limits(6, 9, 4),
+            )
+            .unwrap();
+        let record = bindings
+            .data_component(&world, entity, &component)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.value(), &value);
+        assert_eq!(record.value_cost().nodes(), 6);
+        assert_eq!(record.value_cost().logical_bytes(), 9);
+        assert_eq!(record.value_depth(), 4);
+        assert_eq!(
+            bindings
+                .validate_data_group(&world, entity, None, limits(6, 9, 4), None)
+                .unwrap(),
+            record.value_cost(),
+        );
+        for (allowance, expected) in [
+            (
+                limits(2, 9, 4),
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 3,
+                    maximum: 2,
+                },
+            ),
+            (
+                limits(6, 4, 4),
+                ComponentCodecError::MaterializationByteLimit {
+                    observed: 5,
+                    maximum: 4,
+                },
+            ),
+            (
+                limits(6, 9, 2),
+                ComponentCodecError::MaterializationDepthLimit {
+                    observed: 3,
+                    maximum: 2,
+                },
+            ),
+            (
+                limits(6, 9, 4).remaining(6, 0),
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 1,
+                    maximum: 0,
+                },
+            ),
+        ] {
+            let error = bindings
+                .validate_data_group(&world, entity, None, allowance, None)
+                .unwrap_err();
+            let SceneDataComponentError::InvalidValue {
+                component: actual,
+                source,
+            } = error
+            else {
+                panic!("expected a materialization limit error: {error:?}");
+            };
+            assert_eq!(actual, component);
+            assert_eq!(source, expected);
+        }
+        assert_eq!(
+            bindings
+                .data_component(&world, entity, &component)
+                .unwrap()
+                .unwrap()
+                .value(),
+            &value,
+        );
     }
 }

@@ -110,7 +110,7 @@ fn accepted_native_values_return_complete_ordinary_cost() {
         let mut nodes = 0;
         let mut bytes = 0;
         let mut allocations = 0;
-        let cost: ComponentValueCost = validate_native_component_value_references_with_admission(
+        let metrics = validate_native_component_value_references_with_admission(
             value,
             exact,
             |delta_nodes, delta_bytes, allocated| {
@@ -121,7 +121,9 @@ fn accepted_native_values_return_complete_ordinary_cost() {
             },
         )
         .unwrap();
+        let cost: ComponentValueCost = metrics.cost();
         assert_eq!(cost, expected);
+        assert_eq!(metrics.depth(), 4);
         assert_eq!(cost.nodes(), nodes);
         assert_eq!(cost.logical_bytes(), bytes);
         assert!(allocations > 0);
@@ -181,7 +183,8 @@ fn native_cost_retains_strict_limits_and_exact_caller_refusals() {
                 Ok::<(), Infallible>(())
             },
         )
-        .unwrap();
+        .unwrap()
+        .cost();
         assert_eq!(cost, expected);
         assert!(matches!(requests.first(), Some((0, 0, allocated)) if *allocated > 0));
 

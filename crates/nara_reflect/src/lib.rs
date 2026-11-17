@@ -137,7 +137,7 @@ pub mod __private {
         collect_declared_value_asset_references_with_admission,
     };
     pub use crate::effective::{
-        EffectiveValueAdmissionError, FrozenComponentDefaults,
+        EffectiveValueAdmissionError, FrozenComponentDefaults, NativeValueMetrics,
         component_defaults_are_explicit_with_admission, component_field_default_requires_context,
         component_field_default_requires_context_with_admission,
         effective_component_value_in_place_with_default_overrides,

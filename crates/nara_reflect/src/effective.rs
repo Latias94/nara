@@ -411,6 +411,7 @@ fn effective_component_value_with_budget_impl<'value>(
         maximum_depth,
         nodes: 0,
         bytes: 0,
+        observed_depth: 0,
         admission: None,
         reference_policy: ReferencePolicy::Source,
         retained_bytes: None,
@@ -595,6 +596,7 @@ fn preflight_materialization_cost<'admit>(
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
+        observed_depth: 0,
         admission,
         reference_policy: ReferencePolicy::Source,
         retained_bytes: None,
@@ -791,9 +793,32 @@ struct MaterializationBudget<'a> {
     maximum_depth: DepthLimit,
     nodes: usize,
     bytes: usize,
+    observed_depth: usize,
     admission: Option<&'a mut MaterializationAdmission<'a>>,
     reference_policy: ReferencePolicy,
     retained_bytes: Option<usize>,
+}
+
+/// Complete value measurements returned by the original Native depth/reference traversal.
+///
+/// These describe the exact immutable input; they do not establish schema semantics, resource
+/// existence or World admission. They contain no owning storage or receiving-definition witness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeValueMetrics {
+    cost: ComponentValueCost,
+    depth: usize,
+}
+
+impl NativeValueMetrics {
+    #[must_use]
+    pub const fn cost(self) -> ComponentValueCost {
+        self.cost
+    }
+
+    #[must_use]
+    pub const fn depth(self) -> usize {
+        self.depth
+    }
 }
 
 #[doc(hidden)]
@@ -803,6 +828,7 @@ pub fn validate_value_materialization_budget<'value>(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<ComponentValueCost, ComponentCodecError> {
     validate_value_materialization_budget_impl(value.into(), limits, None, ReferencePolicy::Source)
+        .map(NativeValueMetrics::cost)
 }
 
 /// Rejects unresolved authored references throughout an already effective Native value.
@@ -825,7 +851,7 @@ pub fn validate_native_component_value_references_with_admission<'value, E>(
     value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<ComponentValueCost, EffectiveValueAdmissionError<E>> {
+) -> Result<NativeValueMetrics, EffectiveValueAdmissionError<E>> {
     validate_value_materialization_budget_with_policy_and_admission(
         value.into(),
         limits,
@@ -903,6 +929,7 @@ fn component_field_default_requires_context_impl<'admit>(
             .expect("schema default depth limit is non-zero"),
         nodes: 0,
         bytes: 0,
+        observed_depth: 0,
         admission,
         reference_policy: ReferencePolicy::SourceContext { required: false },
         retained_bytes: None,
@@ -941,7 +968,7 @@ fn validate_value_materialization_budget_with_policy_and_admission<E>(
     limits: ComponentValueMaterializationLimits,
     policy: ReferencePolicy,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<ComponentValueCost, EffectiveValueAdmissionError<E>> {
+) -> Result<NativeValueMetrics, EffectiveValueAdmissionError<E>> {
     let mut refusal = None;
     let result = {
         let mut callback = |nodes, bytes, allocated| {
@@ -967,19 +994,23 @@ fn validate_value_materialization_budget_impl<'admit>(
     limits: ComponentValueMaterializationLimits,
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
     reference_policy: ReferencePolicy,
-) -> Result<ComponentValueCost, ComponentCodecError> {
+) -> Result<NativeValueMetrics, ComponentCodecError> {
     let mut budget = MaterializationBudget {
         maximum_nodes: limits.nodes(),
         maximum_bytes: limits.bytes(),
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
+        observed_depth: 0,
         admission,
         reference_policy,
         retained_bytes: None,
     };
     budget.observe_tree(value, 1)?;
-    Ok(ComponentValueCost::from_parts(budget.nodes, budget.bytes))
+    Ok(NativeValueMetrics {
+        cost: ComponentValueCost::from_parts(budget.nodes, budget.bytes),
+        depth: budget.observed_depth,
+    })
 }
 
 enum ValueFrame<'value> {
@@ -1150,6 +1181,7 @@ impl MaterializationBudget<'_> {
                 maximum: self.maximum_depth.get(),
             });
         }
+        self.observed_depth = self.observed_depth.max(depth);
         self.nodes =
             self.nodes
                 .checked_add(nodes)

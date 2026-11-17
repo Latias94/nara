@@ -107,7 +107,7 @@ pub(crate) fn compiled_scene_retained_bytes(
                     record
                         .schema_owner()
                         .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-                    component_value_retained_bytes(record.value())?,
+                    component_value_retained_bytes_from_cost(record.value_cost())?,
                     record.value_storage_retained_bytes(),
                 ])?,
             )?;
@@ -797,7 +797,12 @@ fn asset_ref_retained_bytes(reference: &AssetRef) -> Result<usize, SceneRetentio
 fn component_value_retained_bytes<'a>(
     value: impl Into<nara_reflect::ComponentValueRef<'a>>,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let cost = value.into().cost();
+    component_value_retained_bytes_from_cost(value.into().cost())
+}
+
+fn component_value_retained_bytes_from_cost(
+    cost: nara_reflect::ComponentValueCost,
+) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
         cost.logical_bytes(),
         checked_product(cost.nodes(), VALUE_NODE_ALLOCATION_BYTES)?,

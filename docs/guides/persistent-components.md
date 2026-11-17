@@ -79,9 +79,17 @@ still own their definition, resource and World checks. After a receiving operati
 explicit defaults, complete value limits and Native references, it uses the same explicit-field
 semantics with admission of actual schema-index, shape and diagnostic scratch. It does not invoke
 default selection again merely because the data use a frozen representation.
-Complete Native admission also supplies its existing traversal's exact logical cost to Scene's
-aggregate allowance. Accepted values need one such traversal; failed values retain complete cost
-classification before further diagnostics. Caller work/allocation refusal stops the operation.
+When Native admission needs to walk a value, that same traversal supplies its exact logical cost
+to Scene's aggregate allowance. There is no preceding accepted-value cost-only walk; failed values
+retain complete cost classification before further diagnostics. Caller work/allocation refusal
+stops the operation.
+
+`CompiledSceneComponent::value_cost()` and `value_depth()` expose measurements retained with
+its immutable value. Receiving size/depth checks can reuse them when they fit the current
+allowance; a stricter policy retains ordinary diagnostics. These measurements do not validate a
+different schema, asset database or World. Replacing a live data component establishes new
+measurements, and independent cooked data are checked again on admission. A prepared read-only
+copy preserves the facts for its unchanged value; each owner still pays its full retained fee.
 
 `rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
 borrowed reads and return one independent owned result. They validate the complete reference

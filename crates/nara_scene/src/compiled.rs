@@ -13,9 +13,9 @@ use std::{
 use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits, ComponentValueRef,
-    PersistentComponentSchemaOwnerId,
+    __private::NativeValueMetrics, ComponentCodecError, ComponentDecodeContext, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
+    ComponentValueMaterializationLimits, ComponentValueRef, PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
@@ -33,12 +33,14 @@ use crate::{
 ///
 /// A missing owner means that compilation selected an unowned native definition. It is not a
 /// source omission or permission to reinterpret this value under an arbitrary receiving owner.
-/// Receiving definitions and native codecs still require their ordinary complete admission.
+/// Cost and depth measurements stay paired with this immutable value. Receiving definitions,
+/// native codecs, resources and World state retain their own admission.
 #[derive(Debug, PartialEq)]
 pub struct CompiledSceneComponent {
     schema_owner: Option<PersistentComponentSchemaOwnerId>,
     version: ComponentSchemaVersion,
     value: EffectiveComponentPayload,
+    native_metrics: NativeValueMetrics,
 }
 
 impl CompiledSceneComponent {
@@ -47,11 +49,13 @@ impl CompiledSceneComponent {
         owner: PersistentComponentSchemaOwnerId,
         version: ComponentSchemaVersion,
         value: ComponentValue,
+        native_metrics: NativeValueMetrics,
     ) -> Self {
         Self {
             schema_owner: Some(owner),
             version,
             value: value.into(),
+            native_metrics,
         }
     }
 
@@ -63,6 +67,7 @@ impl CompiledSceneComponent {
             schema_owner: self.schema_owner.clone(),
             version: self.version,
             value: self.value.clone(),
+            native_metrics: self.native_metrics,
         }
     }
 
@@ -79,6 +84,22 @@ impl CompiledSceneComponent {
     #[must_use]
     pub fn value(&self) -> ComponentValueRef<'_> {
         self.value.read()
+    }
+
+    /// Complete logical cost measured when this immutable value was admitted.
+    #[must_use]
+    pub const fn value_cost(&self) -> ComponentValueCost {
+        self.native_metrics.cost()
+    }
+
+    /// Maximum value depth measured at admission, with the root at depth one.
+    #[must_use]
+    pub const fn value_depth(&self) -> usize {
+        self.native_metrics.depth()
+    }
+
+    pub(crate) const fn native_metrics(&self) -> NativeValueMetrics {
+        self.native_metrics
     }
 
     /// Models raw root backing, frozen insertion storage and their allocation overhead.
@@ -121,7 +142,8 @@ impl CompiledSceneEntity {
 /// declaration correspondence nor an exact receiving-definition or World admission witness.
 /// Entity records have unique IDs in sorted order; roots and ordered children form a complete
 /// rooted forest. Shared access preserves these admitted structural facts independently of
-/// receiving value, definition, asset and World checks.
+/// receiving value, definition, asset and World checks. Component records also retain their
+/// exact value-cost/depth measurements; these never stand in for a receiving definition.
 ///
 /// Callers cannot turn source records into compiled data by wrapping them:
 ///
@@ -358,7 +380,7 @@ pub(crate) fn admit_claims<E>(
     if let Some(resolver) = asset_resolution {
         context = context.with_asset_resolution(resolver);
     }
-    let validation = crate::validation::validate_flat_claims_with_admission(
+    let (validation, native_metrics) = crate::validation::validate_flat_claims_with_admission(
         &claims,
         authority,
         &mut context,
@@ -371,6 +393,19 @@ pub(crate) fn admit_claims<E>(
             validation.diagnostics,
         ));
     }
+    if native_metrics.len()
+        != claims
+            .entities
+            .iter()
+            .map(|entity| entity.components.len())
+            .sum::<usize>()
+    {
+        return Err(refused(
+            "scene.compiled-value-metrics-mismatch",
+            "Compiled values require complete admission measurements",
+        ));
+    }
+    let mut native_metrics = native_metrics.into_iter();
     for entity in &claims.entities {
         for (component, record) in &entity.components {
             if authority
@@ -429,25 +464,33 @@ pub(crate) fn admit_claims<E>(
     let entities = claims
         .entities
         .into_iter()
-        .map(|entity| CompiledSceneEntity {
-            id: entity.id,
-            children: entity.children.into_boxed_slice(),
-            components: entity
-                .components
-                .into_iter()
-                .map(|(component, claim)| {
-                    (
-                        component,
-                        CompiledSceneComponent {
-                            schema_owner: claim.schema_owner,
-                            version: claim.version,
-                            value: claim.value,
-                        },
-                    )
-                })
-                .collect(),
+        .map(|entity| {
+            Ok(CompiledSceneEntity {
+                id: entity.id,
+                children: entity.children.into_boxed_slice(),
+                components: entity
+                    .components
+                    .into_iter()
+                    .map(|(component, claim)| {
+                        Ok((
+                            component,
+                            CompiledSceneComponent {
+                                schema_owner: claim.schema_owner,
+                                version: claim.version,
+                                value: claim.value,
+                                native_metrics: native_metrics.next().ok_or_else(|| {
+                                    refused(
+                                        "scene.compiled-value-metrics-mismatch",
+                                        "Compiled values require complete admission measurements",
+                                    )
+                                })?,
+                            },
+                        ))
+                    })
+                    .collect::<Result<_, CompiledSceneAdmissionError<E>>>()?,
+            })
         })
-        .collect::<Box<[_]>>();
+        .collect::<Result<Box<[_]>, CompiledSceneAdmissionError<E>>>()?;
     Ok(CompiledSceneDocument {
         roots: claims.roots.into_boxed_slice(),
         entities,

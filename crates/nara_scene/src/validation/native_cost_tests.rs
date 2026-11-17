@@ -55,7 +55,8 @@ fn accepted_frozen_values_use_only_the_native_walk_and_consume_its_complete_cost
                 Ok::<(), Infallible>(())
             },
         )
-        .unwrap(),
+        .unwrap()
+        .cost(),
         cost,
     );
     let mut budget = SceneValueBudget::new(exact);
@@ -73,6 +74,74 @@ fn accepted_frozen_values_use_only_the_native_walk_and_consume_its_complete_cost
         source.get("cells").unwrap(),
     ));
     assert!(source.get("visible").is_none());
+}
+
+#[test]
+fn unchanged_compiled_measurements_admit_without_revisiting_descendants() {
+    let value = ComponentValue::map([(
+        "payload",
+        ComponentValue::List(vec![ComponentValue::Bool(true); 4096]),
+    )]);
+    let measured = validate_native_component_value_references_with_admission(
+        &value,
+        Default::default(),
+        |_, _, _| Ok::<(), Infallible>(()),
+    )
+    .unwrap();
+    let cost = measured.cost();
+    let exact = limits(cost.nodes(), cost.logical_bytes(), measured.depth());
+    let mut budget = SceneValueBudget::new(exact);
+    let mut work = Vec::new();
+    assert_eq!(
+        budget
+            .admit_value(
+                (&value).into(),
+                Some(measured),
+                &mut |nodes, bytes, scratch| {
+                    work.push((nodes, bytes, scratch));
+                    Ok::<(), Infallible>(())
+                }
+            )
+            .unwrap(),
+        measured
+    );
+    assert_eq!(work, [(1, 0, 0)]);
+    assert_eq!((budget.nodes, budget.bytes), (0, 0));
+
+    for allowance in [
+        limits(cost.nodes() - 1, cost.logical_bytes(), measured.depth()),
+        limits(cost.nodes(), cost.logical_bytes() - 1, measured.depth()),
+        limits(cost.nodes(), cost.logical_bytes(), measured.depth() - 1),
+    ] {
+        let mut expected = SceneValueBudget::new(allowance);
+        let mut actual = SceneValueBudget::new(allowance);
+        assert_eq!(
+            actual.admit_value((&value).into(), Some(measured), &mut |_, _, _| Ok::<
+                (),
+                Infallible,
+            >(
+                ()
+            )),
+            expected.admit_native((&value).into(), &mut |_, _, _| Ok::<(), Infallible>(()))
+        );
+        assert_eq!(
+            (actual.nodes, actual.bytes),
+            (expected.nodes, expected.bytes)
+        );
+    }
+    let refusal = String::from("compiled metrics owner refusal");
+    let mut budget = SceneValueBudget::new(exact);
+    let result = budget.admit_value((&value).into(), Some(measured), &mut |_, _, _| {
+        Err(&refusal)
+    });
+    let Err(EffectiveValueAdmissionError::Admission(actual)) = result else {
+        panic!("caller refusal must prevent charging");
+    };
+    assert!(std::ptr::eq(actual, &refusal));
+    assert_eq!(
+        (budget.nodes, budget.bytes),
+        (cost.nodes(), cost.logical_bytes())
+    );
 }
 
 fn rejected_value() -> ComponentValue {

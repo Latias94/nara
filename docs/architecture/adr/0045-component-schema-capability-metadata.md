@@ -161,6 +161,11 @@ Complete Native value admission may return the logical cost computed by its exis
 walk. The receiving owner consumes that accepted cost directly for aggregate limits. A failed
 Native value still requires the original whole-record cost classification and charge before
 continuing diagnostics; caller work/allocation refusal returns immediately without retry.
+Immutable compiled records may retain that cost and measured maximum depth alongside the exact
+value. These are data measurements, not receiving schema or World authority. Applicable limits
+can consume them directly; stricter limits retain the original value checks and diagnostics.
+Changing a value requires new measurements through its concrete publication owner. Separate
+cooked output cannot inherit source measurements without its own admission.
 
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque
