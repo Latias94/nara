@@ -6,7 +6,7 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponent,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef, PersistentComponent,
     PersistentComponentProvider, validate_component_value,
 };
 
@@ -132,7 +132,7 @@ fn creation_float_finiteness_uses_the_actual_rust_type_instead_of_its_alias_name
     let schema = CreationFloatAlias::persistent_component_schema();
     let value = schema.authoring_initial_value().unwrap();
     assert_eq!(value.field("value").unwrap().as_f64(), Some(1e100));
-    CreationFloatAlias::__decode_persistent_component(value).unwrap();
+    CreationFloatAlias::__decode_persistent_component(value.into()).unwrap();
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn generated_scalar_creation_template_is_typed_complete_data_and_not_decode_defa
     let value = schema.authoring_initial_value().unwrap();
     validate_component_value(&schema, value).unwrap();
     assert_eq!(
-        CreationProbe::__decode_persistent_component(value).unwrap(),
+        CreationProbe::__decode_persistent_component(value.into()).unwrap(),
         CreationProbe {
             enabled: true,
             label: "New player".into(),
@@ -156,13 +156,8 @@ fn generated_scalar_creation_template_is_typed_complete_data_and_not_decode_defa
             .iter()
             .all(|field| field.default_value.is_none())
     );
-    assert!(
-        CreationProbe::__decode_persistent_component(&ComponentValue::map([(
-            "enabled",
-            ComponentValue::Bool(true)
-        )]))
-        .is_err()
-    );
+    let incomplete = ComponentValue::map([("enabled", ComponentValue::Bool(true))]);
+    assert!(CreationProbe::__decode_persistent_component((&incomplete).into()).is_err());
     let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<CreationProbe>()
@@ -290,7 +285,7 @@ fn generated_scalar_codecs_reject_wrong_kinds_and_narrowing_overflow() {
             .replace_path(&ComponentFieldPath::from_fields([field]), invalid)
             .unwrap();
         assert!(
-            ScalarProbe::__decode_persistent_component(&value).is_err(),
+            ScalarProbe::__decode_persistent_component((&value).into()).is_err(),
             "native codec accepted {field}: {value:?}"
         );
         assert!(
@@ -330,7 +325,7 @@ fn generated_numeric_codecs_accept_edges_and_normal_float_rounding() {
             .replace_path(&ComponentFieldPath::from_fields([field]), valid)
             .unwrap();
         validate_component_value(&schema, &value).unwrap();
-        ScalarProbe::__decode_persistent_component(&value).unwrap();
+        ScalarProbe::__decode_persistent_component((&value).into()).unwrap();
     }
     value
         .replace_path(
@@ -339,7 +334,7 @@ fn generated_numeric_codecs_accept_edges_and_normal_float_rounding() {
         )
         .unwrap();
     assert_eq!(
-        ScalarProbe::__decode_persistent_component(&value)
+        ScalarProbe::__decode_persistent_component((&value).into())
             .unwrap()
             .speed,
         0.1_f32
@@ -439,7 +434,9 @@ impl PersistentComponentProvider for InvalidProviderSchema {
         )
     }
 
-    fn __decode_persistent_component(_value: &ComponentValue) -> Result<Self, ComponentCodecError> {
+    fn __decode_persistent_component(
+        _value: ComponentValueRef<'_>,
+    ) -> Result<Self, ComponentCodecError> {
         Ok(Self)
     }
 

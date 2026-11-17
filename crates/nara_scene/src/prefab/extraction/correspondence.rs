@@ -21,8 +21,8 @@ use super::{
     relocation::BranchRelocation,
 };
 use crate::{
-    AuthoringSchemaBasis, ExpandedSceneDocument, ExpandedSceneEntity, PrefabProjectionStep,
-    SceneComponentRecord, SceneEntityId, SceneEntityProvenance, SourceDocumentKey,
+    AuthoringSchemaBasis, ExpandedSceneComponent, ExpandedSceneDocument, ExpandedSceneEntity,
+    PrefabProjectionStep, SceneEntityId, SceneEntityProvenance, SourceDocumentKey,
     provenance::{CanonicalSceneEntityAddress, provenance_string_bytes},
 };
 
@@ -408,8 +408,8 @@ fn verify_components(
 
 fn verify_value(
     schema: &ComponentSchema,
-    before: &SceneComponentRecord,
-    after: &SceneComponentRecord,
+    before: &ExpandedSceneComponent,
+    after: &ExpandedSceneComponent,
     matched: &[MatchedOccurrence<'_, '_>],
     max_old_id_bytes: usize,
     work: &mut ExtractionWork,
@@ -447,7 +447,7 @@ fn verify_value(
             .checked_mul(96)
             .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
     )?;
-    let mut expected = before.value().clone();
+    let mut expected = before.value().to_owned();
     admit_declared_entity_reference_plan_rewrite(&plan, cost, |nodes, bytes, allocated| {
         work.visit(nodes, bytes, allocated.ok_or(ExtractionError::Capacity)?)
     })?;
@@ -473,7 +473,7 @@ fn verify_value(
     // complete comparison. Persistent values participate unchanged in ordinary value equality.
     work.value(&expected)?;
     work.value(after.value())?;
-    if &expected != after.value() {
+    if expected != after.value() {
         return Err(ExtractionError::InvalidSource);
     }
     Ok(())

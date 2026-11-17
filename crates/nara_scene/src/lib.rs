@@ -15,6 +15,7 @@ mod data_components;
 mod diagnostics;
 mod document;
 mod draft;
+mod effective_component_payload;
 mod export;
 #[cfg(feature = "serde")]
 mod format;
@@ -94,7 +95,7 @@ pub use component_bindings::{
 };
 pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
-pub use draft::ExpandedSceneEntity;
+pub use draft::{ExpandedSceneComponent, ExpandedSceneEntity};
 pub use export::{
     LiveSceneExportOptions, LiveSceneExportOutput, LiveSceneExportRemap, LiveSceneExportReport,
     export_live_scene, export_live_scene_with_options,

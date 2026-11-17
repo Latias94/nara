@@ -78,7 +78,7 @@ fn assert_tilemaps(
             .unwrap();
         assert_eq!(component.version(), expected.version);
         assert_eq!(component.value(), expected.value());
-        let ComponentValue::List(cells) = component.value().field("cells").unwrap() else {
+        let Some(cells) = component.value().field("cells").unwrap().as_list() else {
             panic!("the original Tilemap codec must emit a cell list");
         };
         assert_eq!(cells.len(), 4_096);
@@ -226,7 +226,7 @@ fn large_root_bound_tilemaps_release_original_documents_and_budget_at_their_last
             .components()[&component_id]
             .value();
         assert!(
-            std::ptr::eq(source, compiled),
+            std::ptr::eq(source, compiled.as_value().unwrap()),
             "{name} must share its original admitted payload"
         );
     }

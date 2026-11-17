@@ -809,7 +809,9 @@ impl EditorProjectSession {
                         &property,
                     )
                     .map_err(|_| EditorSourceToolError::Schema)?
-                    .value,
+                    .value
+                    .as_value()
+                    .ok_or(EditorSourceToolError::Schema)?,
                 ),
             };
             let cost = value

@@ -127,6 +127,16 @@ fn prefab(record: SceneComponentRecord) -> PrefabDocument {
     )
 }
 
+fn assert_expanded_record(
+    actual: &nara_scene::ExpandedSceneComponent,
+    expected: SceneComponentRecord,
+) {
+    assert_eq!(actual.owner, expected.owner);
+    assert_eq!(actual.version, expected.version);
+    assert_eq!(actual.value(), expected.value());
+    assert_eq!(actual.contextual_defaults, expected.contextual_defaults);
+}
+
 fn publish_prefab(
     document: &PrefabDocument,
     basis: &AuthoringSchemaBasis,
@@ -251,9 +261,9 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     assert_ne!(target, id("target"));
     let root_record = entity(candidate, &root);
     assert_eq!(root_record.components().len(), 1);
-    assert_eq!(
-        root_record.components()[&component()],
-        record(target.clone())
+    assert_expanded_record(
+        &root_record.components()[&component()],
+        record(target.clone()),
     );
     assert_eq!(root_record.children(), [target]);
     let references = report.effective_asset_references();
@@ -339,8 +349,8 @@ fn consuming_semantic_parts_preserves_data_omissions_and_effective_asset_referen
         .candidate
         .expect("the semantic candidate moves into its parts");
     assert_eq!(candidate.entities().as_ptr(), document_allocation);
-    assert_eq!(
-        entity(&candidate, &root).components()[&component()],
+    assert_expanded_record(
+        &entity(&candidate, &root).components()[&component()],
         record(target),
     );
     assert_eq!(parts.omissions, omissions);
@@ -456,9 +466,9 @@ fn unrelated_missing_dependency_blocks_whole_document_compilation_with_a_healthy
         .expect("selected anchor must be healthy");
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
-    assert_eq!(
-        entity(candidate, &root).components()[&component()],
-        record(target)
+    assert_expanded_record(
+        &entity(candidate, &root).components()[&component()],
+        record(target),
     );
 
     // Whole-document failure is expected; conversion selection needs its own scope decision.

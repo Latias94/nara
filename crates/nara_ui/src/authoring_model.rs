@@ -1074,7 +1074,7 @@ impl UiAuthoringProjection {
                 .replace_path(&field.path, value.clone())
                 .map_err(|_| UiAuthoringEditError::DescriptorMismatch)?;
         }
-        codec::validate_ui_component_value(&key.component, &candidate)
+        codec::validate_ui_component_value(&key.component, (&candidate).into())
             .map_err(|_| UiAuthoringEditError::InvalidComponentValue)
     }
 

@@ -55,7 +55,7 @@ pub(super) fn cook(
             let references = collect_declared_effective_asset_references_with_admission(
                 schema,
                 record.version,
-                &record.value,
+                record.value.read(),
                 traversal,
                 |nodes, bytes, allocated| work.admit(nodes, bytes, Some(allocated)),
             )
@@ -69,7 +69,7 @@ pub(super) fn cook(
                 work.reserve(asset_resolution.resolution_work_bytes(reference.asset_ref()))?;
             }
             rewrite_declared_asset_references_with_admission(
-                record.value.make_mut(),
+                record.value.materialize_mut(),
                 &references,
                 asset_rewrite_limits(limits.value_limits(), &references),
                 |reference| canonical_product(reference.asset_ref(), asset_resolution),
@@ -82,7 +82,7 @@ pub(super) fn cook(
             })?;
             let plan = plan_declared_entity_references_with_admission::<(), RuntimeSceneError>(
                 schema,
-                &record.value,
+                record.value.read(),
                 traversal,
                 |nodes, bytes, allocated| work.admit(nodes, bytes, Some(allocated)),
             )
@@ -90,7 +90,7 @@ pub(super) fn cook(
                 EntityReferencePlanError::Admission(error) => error,
                 EntityReferencePlanError::Reference(_) => reference_error(),
             })?;
-            plan.rewrite_in_place(record.value.make_mut(), |_, reference| {
+            plan.rewrite_in_place(record.value.materialize_mut(), |_, reference| {
                 match reference {
                     EntityReference::SceneLocal { entity } => Ok(EntityReference::SceneLocal {
                         entity: copy_id(entity, &identifiers, &mut work)?,
@@ -167,7 +167,7 @@ pub(super) fn clone_claims(
                             FlatSceneComponentClaim {
                                 schema_owner: record.schema_owner().cloned(),
                                 version: record.version(),
-                                value: record.value().clone().into(),
+                                value: record.value().to_owned().into(),
                             },
                         )
                     })

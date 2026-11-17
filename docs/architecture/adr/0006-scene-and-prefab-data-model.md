@@ -184,6 +184,14 @@ source-backed Scenes through a private closed input selection. It does not creat
 transaction or public generic provider interface. Runtime prepare and commit retain the existing
 receiving-World/definition/native-claim checks and last-good replacement behavior.
 
+The closed component value may retain immutable raw backing plus Reflect-frozen explicit default
+insertions rather than copying every unchanged descendant. Borrowed reads carry no independent
+owning allocation and never consult a receiving Schema to supply defaults. Complete native/data
+and processed admission still traverse the exact effective value before codecs. Property and
+reference writes, public deep copies and independent cooked output explicitly materialize under
+their original owner allowances; the storage choice does not add a second Scene publication or
+relax per-occurrence payload/backing accounting.
+
 The root retained current-Scene owner accepts source-bound `CompiledSceneCandidate` values and
 processed Runtime candidates through one private closed input selection. Startup activation,
 replacement, restart, native claims and publication keep the same lifecycle. A Runtime input retains

@@ -4,7 +4,8 @@ use std::{
 };
 
 use nara_reflect::{
-    ComponentTypeId, ComponentValue, ComponentValueCost, PersistentComponentSchemaOwnerId,
+    ComponentListIter, ComponentMapIter, ComponentTypeId, ComponentValueCost, ComponentValueRef,
+    PersistentComponentSchemaOwnerId,
 };
 
 use super::{RuntimeSceneError, RuntimeSceneLimits};
@@ -160,7 +161,12 @@ impl WorkBudget {
         for entity in &claims.entities {
             counts.entity(&entity.id, &entity.children, entity.components.len(), self)?;
             for (component, record) in &entity.components {
-                counts.component(component, record.schema_owner.as_ref(), &record.value, self)?;
+                counts.component(
+                    component,
+                    record.schema_owner.as_ref(),
+                    record.value.read(),
+                    self,
+                )?;
             }
         }
         placement_depth(
@@ -175,13 +181,10 @@ impl WorkBudget {
         )
     }
 
-    fn value_shape(&mut self, value: &ComponentValue) -> Result<(), RuntimeSceneError> {
+    fn value_shape(&mut self, value: ComponentValueRef<'_>) -> Result<(), RuntimeSceneError> {
         enum Frame<'a> {
-            List(std::slice::Iter<'a, ComponentValue>, usize),
-            Map(
-                std::collections::btree_map::Iter<'a, String, ComponentValue>,
-                usize,
-            ),
+            List(ComponentListIter<'a>, usize),
+            Map(ComponentMapIter<'a>, usize),
         }
         let mut pending = Vec::new();
         let mut current = Some((value, 1usize));
@@ -191,30 +194,25 @@ impl WorkBudget {
                 depth,
                 self.limits.value_limits().depth().get(),
             )?;
-            let frame = match value {
-                ComponentValue::List(values) if !values.is_empty() => {
-                    Some(Frame::List(values.iter(), depth.saturating_add(1)))
-                }
-                ComponentValue::Map(values) if !values.is_empty() => {
-                    Some(Frame::Map(values.iter(), depth.saturating_add(1)))
-                }
-                ComponentValue::String(text) => {
-                    check_string(text, self.limits)?;
-                    None
-                }
-                ComponentValue::EntityReference(nara_reflect::EntityReference::SceneLocal {
-                    entity,
-                }) => {
-                    check_string(entity.as_str(), self.limits)?;
-                    None
-                }
-                ComponentValue::EntityReference(nara_reflect::EntityReference::Persistent {
-                    entity,
-                }) => {
-                    check_string(entity.namespace.as_str(), self.limits)?;
-                    None
-                }
-                _ => None,
+            let frame = if let Some(values) = value.as_list().filter(|values| !values.is_empty()) {
+                Some(Frame::List(values.iter(), depth.saturating_add(1)))
+            } else if let Some(values) = value.as_map().filter(|values| !values.is_empty()) {
+                Some(Frame::Map(values.iter(), depth.saturating_add(1)))
+            } else if let Some(text) = value.as_str() {
+                check_string(text, self.limits)?;
+                None
+            } else if let Some(nara_reflect::EntityReference::SceneLocal { entity }) =
+                value.as_entity_reference()
+            {
+                check_string(entity.as_str(), self.limits)?;
+                None
+            } else if let Some(nara_reflect::EntityReference::Persistent { entity }) =
+                value.as_entity_reference()
+            {
+                check_string(entity.namespace.as_str(), self.limits)?;
+                None
+            } else {
+                None
             };
             if let Some(frame) = frame {
                 if pending.len() == pending.capacity() {
@@ -308,7 +306,7 @@ impl FlatBudget {
         &mut self,
         component: &ComponentTypeId,
         owner: Option<&PersistentComponentSchemaOwnerId>,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         work: &mut WorkBudget,
     ) -> Result<ComponentValueCost, RuntimeSceneError> {
         self.string(component.as_str(), work.limits)?;
@@ -412,7 +410,7 @@ fn source_strings(
 }
 
 pub(super) fn value_cost(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     used_nodes: usize,
     used_bytes: usize,
     work: &mut WorkBudget,

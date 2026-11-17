@@ -214,7 +214,7 @@ fn primitive_materializes_defaults_without_validating_unrelated_fields() {
     assert!(raw.get("required").is_none());
     assert!(effective.get("missing").is_none());
     assert!(effective.get("absent").is_none());
-    assert!(validate_component_value(&schema, &effective).is_err());
+    assert!(validate_component_value(&schema, effective.as_ref()).is_err());
 }
 
 #[test]

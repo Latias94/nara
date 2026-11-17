@@ -99,7 +99,7 @@ fn product_asset_leaf_codec_preserves_primary_and_subproduct_wire() {
         let expected = wire(SOURCE, id);
         assert_eq!(encode_persistent_field(&reference).unwrap(), expected);
         assert_eq!(
-            <AssetRef as PersistentFieldCodec>::decode(&expected, "caption").unwrap(),
+            <AssetRef as PersistentFieldCodec>::decode((&expected).into(), "caption").unwrap(),
             reference
         );
         assert!(
@@ -347,7 +347,7 @@ fn product_references_reject_missing_null_wrong_shapes_and_unknown_fields() {
         assert!(
             !ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate).accepts_value(&value)
         );
-        assert!(<AssetRef as PersistentFieldCodec>::decode(&value, "caption").is_err());
+        assert!(<AssetRef as PersistentFieldCodec>::decode((&value).into(), "caption").is_err());
         let expected = collect(&value).unwrap_err();
         let field = field(ComponentValueShape::asset_ref(
             AssetReferenceDemand::Immediate,

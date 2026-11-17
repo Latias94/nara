@@ -4,14 +4,17 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
     __private::{
-        ComponentPropertyAdmissionError, resolve_component_property_storage_path_with_admission,
+        ComponentPropertyAdmissionError, freeze_component_defaults,
+        resolve_component_property_storage_path_with_admission,
+        validate_component_property_value_with_admission,
     },
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
-    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentSchema,
-    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
-    replace_component_property, resolve_component_property_with_limits,
+    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
+    ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion, ComponentShapeMember,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
+    ComponentValueShape, replace_component_property, resolve_component_property,
+    resolve_component_property_in_root, resolve_component_property_with_limits,
 };
 
 fn id(name: &str) -> ComponentFieldId {
@@ -73,13 +76,13 @@ fn assert_storage_matches_replacement(
             .unwrap();
     assert!(std::ptr::eq(
         value.get_path(&storage).unwrap(),
-        resolved.value,
+        resolved.value.as_value().unwrap(),
     ));
 
     let replacement = ComponentValue::U64(42);
     let mut direct = value.clone();
     let previous = direct.replace_path(&storage, replacement.clone()).unwrap();
-    assert_eq!(&previous, resolved.value);
+    assert_eq!(&previous, resolved.value.as_value().unwrap());
     let owned = path
         .replace_in_owned_value_with_limits(
             schema,
@@ -257,6 +260,142 @@ fn storage_path_maps_a_stable_key_to_the_actual_index_and_keeps_map_keys_literal
             ]),
         );
     }
+}
+
+#[test]
+fn frozen_nested_selectors_borrow_insertions_and_preserve_exact_lookup_budgets() {
+    let schema = keyed_schema();
+    let raw = payload(ComponentValue::List(vec![
+        row("a"),
+        ComponentValue::map([
+            ("wire_key", ComponentValue::String("b".into())),
+            (
+                "wire_settings",
+                ComponentValue::map([(
+                    "slot.with[syntax]",
+                    ComponentValue::Map(Default::default()),
+                )]),
+            ),
+        ]),
+    ]));
+    let original = raw.clone();
+    let path = selected();
+    let expected_storage = storage_path([
+        ComponentFieldPathSegment::index(1),
+        ComponentFieldPathSegment::field("wire_settings"),
+        ComponentFieldPathSegment::field("slot.with[syntax]"),
+        ComponentFieldPathSegment::field("wire_value"),
+    ]);
+    let mut defaults_schema = ComponentSchema::new(
+        ComponentTypeId::new("test.PropertyFrozenDefaults"),
+        "Property frozen defaults",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_fields([ComponentFieldSchema::required(
+        id("amount"),
+        "Amount",
+        expected_storage.clone(),
+        ComponentValueKind::U64,
+    )]);
+    defaults_schema.fields[0].default_value = Some(ComponentValue::U64(7));
+    let limits = ComponentValueMaterializationLimits::default();
+    let frozen = freeze_component_defaults(&defaults_schema, &raw, &Default::default(), limits)
+        .unwrap()
+        .unwrap();
+    drop(defaults_schema);
+    let read = frozen.read(&raw);
+    let root = read.get_path(schema.fields[0].path()).unwrap();
+    let rows = root.as_list().unwrap();
+    assert!(read.as_value().is_none());
+    assert!(root.as_value().is_none());
+    assert!(rows.get(1).unwrap().as_value().is_none());
+    assert!(std::ptr::eq(
+        rows.get(0).unwrap().as_value().unwrap(),
+        raw.get_path(&storage_path([ComponentFieldPathSegment::index(0)]))
+            .unwrap(),
+    ));
+
+    let mut budget =
+        ComponentPropertyReadBudget::new(ItemLimit::new(12).unwrap(), ByteLimit::new(114).unwrap());
+    let resolved =
+        resolve_component_property_in_root(&schema.fields[0], root, &path, &mut budget).unwrap();
+    assert_eq!(resolved.value.as_u64(), Some(7));
+    assert_eq!(budget.scanned_entries(), 12);
+    assert_eq!(budget.scanned_logical_bytes(), 114);
+    assert!(std::ptr::eq(
+        resolved.value.as_value().unwrap(),
+        read.get_path(&expected_storage)
+            .unwrap()
+            .as_value()
+            .unwrap(),
+    ));
+    assert_eq!(
+        resolve_component_property(&schema, schema.version(), read, &path)
+            .unwrap()
+            .value,
+        resolved.value,
+    );
+    assert_eq!(
+        resolve_component_property_with_limits(&schema, schema.version(), read, &path, limits)
+            .unwrap()
+            .value,
+        resolved.value,
+    );
+    assert_eq!(
+        resolve_component_property_storage_path_with_admission(
+            &schema,
+            schema.version(),
+            read,
+            &path,
+            limits,
+            |_| Ok::<_, ()>(()),
+        ),
+        Ok(expected_storage.clone()),
+    );
+    validate_component_property_value_with_admission(
+        &schema.fields[0].shape,
+        &ComponentPropertyPath::new(id("root")),
+        root,
+        limits,
+        |_, _, _| Ok::<_, ()>(()),
+    )
+    .unwrap();
+    assert_eq!(
+        ComponentPropertyKey::from_value(rows.get(1).unwrap().get("wire_key").unwrap()),
+        Some(ComponentPropertyKey::String("b".into())),
+    );
+    for (entries, bytes) in [(11, 114), (12, 113)] {
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(entries).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+        );
+        assert_eq!(
+            resolve_component_property_in_root(&schema.fields[0], root, &path, &mut budget)
+                .unwrap_err(),
+            ComponentPropertyError::ReadBudgetExceeded,
+        );
+    }
+    let mut owned = read.to_owned();
+    assert_eq!(
+        replace_component_property(
+            &schema,
+            schema.version(),
+            &mut owned,
+            &path,
+            ComponentValue::U64(42),
+        )
+        .unwrap(),
+        ComponentValue::U64(7),
+    );
+    assert_eq!(
+        read.get_path(&expected_storage).unwrap(),
+        ComponentValue::U64(7),
+    );
+    assert_eq!(
+        owned.get_path(&expected_storage).unwrap(),
+        &ComponentValue::U64(42),
+    );
+    assert_eq!(raw, original);
 }
 
 #[test]

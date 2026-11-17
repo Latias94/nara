@@ -246,7 +246,7 @@ fn unfinished_owner_rejects_actual_data_access_and_preserves_records_through_adm
                 .unwrap()
                 .unwrap()
                 .value()
-                .clone(),
+                .to_owned(),
             ComponentValue::U64(7)
         );
         install_unfinished_owner(&mut app, preloaded, &registry);
@@ -292,7 +292,7 @@ fn unfinished_owner_rejects_actual_data_access_and_preserves_records_through_adm
                 .unwrap()
                 .unwrap()
                 .value()
-                .clone(),
+                .to_owned(),
             ComponentValue::U64(7)
         );
     }

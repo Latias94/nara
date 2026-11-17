@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use nara_asset::{AssetRef, ImportedProductId};
 use nara_reflect::{
-    ComponentCodecError, ComponentValue, ComponentValueMaterializationLimits,
-    decode_asset_reference_value, encode_asset_reference_value,
+    ComponentCodecError, ComponentMapRef, ComponentValue, ComponentValueMaterializationLimits,
+    ComponentValueRef, decode_asset_reference_value, encode_asset_reference_value,
 };
 
 use crate::{
@@ -156,7 +156,9 @@ impl Material2dRecord {
     }
 
     /// Parses an exact record without looking up its material asset.
-    pub fn from_component_value(value: &ComponentValue) -> Result<Self, ComponentCodecError> {
+    pub fn from_component_value<'a>(
+        value: impl Into<ComponentValueRef<'a>>,
+    ) -> Result<Self, ComponentCodecError> {
         Self::from_component_value_with_limits(
             value,
             ComponentValueMaterializationLimits::default(),
@@ -164,10 +166,11 @@ impl Material2dRecord {
     }
 
     /// Admits the complete tree before allocating owned IDs, values or asset references.
-    pub fn from_component_value_with_limits(
-        value: &ComponentValue,
+    pub fn from_component_value_with_limits<'a>(
+        value: impl Into<ComponentValueRef<'a>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<Self, ComponentCodecError> {
+        let value = value.into();
         nara_reflect::__private::validate_value_materialization_budget(value, limits)?;
         let fields = read_map(value, "<material2d>")?;
         let expected = [
@@ -177,9 +180,7 @@ impl Material2dRecord {
             "parameters",
             "texture_overrides",
         ];
-        if fields.len() != expected.len()
-            || fields.keys().any(|key| !expected.contains(&key.as_str()))
-        {
+        if fields.len() != expected.len() || fields.keys().any(|key| !expected.contains(&key)) {
             return Err(ComponentCodecError::invalid_field(
                 "<material2d>",
                 "exactly material, declaration_id, declaration_version, parameters and texture_overrides",
@@ -195,7 +196,7 @@ impl Material2dRecord {
         if parameter_fields.len() != PARAMETER_TAGS.len()
             || parameter_fields
                 .keys()
-                .any(|tag| !PARAMETER_TAGS.contains(&tag.as_str()))
+                .any(|tag| !PARAMETER_TAGS.contains(&tag))
         {
             return Err(ComponentCodecError::invalid_field(
                 "parameters",
@@ -218,7 +219,7 @@ impl Material2dRecord {
                 validate_field_id(id, "parameters")?;
                 if parameters
                     .insert(
-                        id.clone(),
+                        id.to_owned(),
                         read_parameter(tag, value, &format!("parameters.{tag}.{id}"))?,
                     )
                     .is_some()
@@ -240,7 +241,7 @@ impl Material2dRecord {
         let mut texture_overrides = BTreeMap::new();
         for (id, value) in texture_fields {
             validate_field_id(id, "texture_overrides")?;
-            texture_overrides.insert(id.clone(), decode_asset_reference_value(value)?);
+            texture_overrides.insert(id.to_owned(), decode_asset_reference_value(value)?);
         }
         validate_authored_values(
             declaration_id,
@@ -281,18 +282,17 @@ fn vector_value<const N: usize>(value: [f32; N]) -> Result<ComponentValue, Compo
 }
 
 fn read_map<'a>(
-    value: &'a ComponentValue,
+    value: ComponentValueRef<'a>,
     field: &str,
-) -> Result<&'a BTreeMap<String, ComponentValue>, ComponentCodecError> {
-    match value {
-        ComponentValue::Map(fields) => Ok(fields),
-        _ => Err(ComponentCodecError::invalid_field(field, "a map")),
-    }
+) -> Result<ComponentMapRef<'a>, ComponentCodecError> {
+    value
+        .as_map()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "a map"))
 }
 
 fn read_parameter(
     kind: &str,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
 ) -> Result<MaterialParameterValue, ComponentCodecError> {
     match kind {
@@ -313,14 +313,14 @@ fn read_parameter(
     }
 }
 
-fn read_u32(value: &ComponentValue, field: &str) -> Result<u32, ComponentCodecError> {
+fn read_u32(value: ComponentValueRef<'_>, field: &str) -> Result<u32, ComponentCodecError> {
     value
         .as_u64()
         .and_then(|value| u32::try_from(value).ok())
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "a u32"))
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "a finite f32"))?;
@@ -331,10 +331,10 @@ fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecEr
 }
 
 fn read_vector<const N: usize>(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
 ) -> Result<[f32; N], ComponentCodecError> {
-    let ComponentValue::List(values) = value else {
+    let Some(values) = value.as_list() else {
         return Err(ComponentCodecError::invalid_field(
             field,
             format!("a list of {N} finite f32 values"),

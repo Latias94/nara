@@ -25,7 +25,7 @@ use nara_identity::{
 };
 use nara_reflect::__private::{
     component_snapshot_matches_runtime_type, effective_component_value_with_budget,
-    validate_persistent_export_coverage,
+    validate_persistent_export_coverage, validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext,
@@ -823,38 +823,31 @@ impl ExportValueContext<'_> {
         let remaining = limits.remaining(self.retained_nodes, self.retained_bytes);
         // Raw ceilings preserve an exact zero remainder. The helper admits all source nodes,
         // default containers and keys before any owning materialization or output copy.
-        let (effective, cost) = effective_component_value_with_budget(
-            schema,
-            record.value(),
-            remaining.nodes(),
-            remaining.bytes(),
-            limits.depth(),
-        )
-        .map_err(|error| {
+        let effective = record.value();
+        let cost =
+            validate_value_materialization_budget(effective, remaining).map_err(|error| {
+                with_codec_error(
+                    locate(diagnostic_error(
+                        "scene.export-value-budget-exceeded",
+                        "Scene data export default materialization was refused",
+                    )),
+                    &error,
+                    Some(schema),
+                )
+            })?;
+        // Defaults are complete, so these existing validators and walkers borrow the admitted
+        // effective tree; they do not materialize another value using the typed limits.
+        validate_component_value_with_limits(schema, effective, limits).map_err(|error| {
             with_codec_error(
                 locate(diagnostic_error(
-                    "scene.export-value-budget-exceeded",
-                    "Scene data export default materialization was refused",
+                    "scene.export-data-value-invalid",
+                    "Scene data component payload is invalid",
                 )),
                 &error,
                 Some(schema),
             )
         })?;
-        // Defaults are complete, so these existing validators and walkers borrow the admitted
-        // effective tree; they do not materialize another value using the typed limits.
-        validate_component_value_with_limits(schema, effective.as_ref(), limits).map_err(
-            |error| {
-                with_codec_error(
-                    locate(diagnostic_error(
-                        "scene.export-data-value-invalid",
-                        "Scene data component payload is invalid",
-                    )),
-                    &error,
-                    Some(schema),
-                )
-            },
-        )?;
-        let mut value = effective.into_owned();
+        let mut value = effective.to_owned();
         self.lower_references(schema, &mut value, cost.logical_bytes(), entity)?;
         let cost = value.cost();
         self.source_record(schema, value, cost.nodes(), cost.logical_bytes(), entity)
@@ -883,7 +876,7 @@ impl ExportValueContext<'_> {
         let assets = collect_declared_asset_references_from_schema_with_limits(
             schema,
             schema.version(),
-            value,
+            &*value,
             limits,
             traversal,
         )
@@ -969,7 +962,7 @@ impl ExportValueContext<'_> {
             ExportReferenceResolutionError,
         >(
             schema,
-            value,
+            &*value,
             self.options.value_limits.reference_traversal_limits(),
         )
         .map_err(|error| invalid(&error))?;

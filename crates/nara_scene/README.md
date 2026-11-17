@@ -43,6 +43,17 @@ constructor or mutable public fields. Native reception checks the complete batch
 and does not migrate these values or insert defaults. `ExpandedSceneDocument` remains an
 authoring observation; it cannot be passed to materialization.
 
+`ExpandedSceneEntity::components()` borrows `ExpandedSceneComponent` records, distinct from
+raw `SceneComponentRecord` source records. Expanded and compiled `value()` reads return
+`ComponentValueRef`, including scalar access and borrowed Map/List iteration. Current-version
+values can retain their immutable raw backing with only the selected default insertions frozen.
+The read never consults receiving defaults and cannot retain ownership independently. Use
+`to_owned()` for an explicitly admitted deep copy; `as_value()` borrows only an untouched owning
+subtree. Public source `value()`, mutable access, deep `Clone` and serialized omissions retain
+their original contracts. Prepared data preserves the same borrowed reads, while cook admits and
+copies independent actual values for processed wire output. Each retained owner pays the complete
+logical value and its raw backing plus frozen storage independently.
+
 Materialize with `spawn_scene(world, registry, &candidate, &occurrence, database)`. The occurrence
 is an explicit `SceneOccurrenceKey::new(namespace, slot)` selected by the instantiating consumer.
 Source identity says which document; occurrence says where that document is logically placed.

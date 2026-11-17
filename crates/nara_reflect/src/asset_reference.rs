@@ -12,8 +12,9 @@ use crate::{
     AssetReferenceDemand, ComponentCodecError, ComponentEntityReferenceRewriteError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
-    EntityReferenceTraversalLimits, effective_component_value,
+    ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueRef,
+    ComponentValueShape, EntityReferenceTraversalLimits,
+    effective::{freeze_component_defaults, validate_value_materialization_budget},
     entity_reference::{
         PresentReferenceLeaf, ReferenceTraversalError, collect_present_field_reference_leaves,
         collect_present_field_reference_leaves_with_admission, collect_present_reference_leaves,
@@ -200,10 +201,10 @@ pub enum AssetReferenceCollectionError<E> {
 ///
 /// A denied callback returns its exact error without allocating an error path. No callback
 /// reservation is made from the configured worst-case limits.
-pub fn collect_declared_effective_asset_references_with_admission<E>(
+pub fn collect_declared_effective_asset_references_with_admission<'a, E>(
     schema: &ComponentSchema,
     version: ComponentSchemaVersion,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
@@ -256,7 +257,7 @@ fn materialize_asset_references_with_admission<E>(
         let ComponentValueShape::AssetRef { demand } = leaf.shape else {
             unreachable!("asset reference collection only returns actual asset leaves");
         };
-        if matches!(leaf.value, ComponentValue::Null) {
+        if leaf.value.kind() == ComponentValueKind::Null {
             admit(0, 0, component.as_str().len())
                 .map_err(AssetReferenceCollectionError::Admission)?;
             return Err(AssetReferenceCollectionError::Reference(
@@ -332,11 +333,11 @@ fn materialize_asset_references_with_admission<E>(
 }
 
 /// Collects schema-declared effective asset values using the convenience interpretation limits.
-pub fn collect_declared_asset_references(
+pub fn collect_declared_asset_references<'a>(
     registry: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     version: ComponentSchemaVersion,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     collect_declared_asset_references_with_limits(
         registry,
@@ -349,11 +350,11 @@ pub fn collect_declared_asset_references(
 }
 
 /// Collects effective asset values with explicit expansion and reference-work budgets.
-pub fn collect_declared_asset_references_with_limits(
+pub fn collect_declared_asset_references_with_limits<'a>(
     registry: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     version: ComponentSchemaVersion,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     materialization_limits: ComponentValueMaterializationLimits,
     traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
@@ -384,10 +385,10 @@ pub fn collect_declared_asset_references_with_limits(
 /// The caller must already own an immutable, authenticated schema catalog. This function only
 /// interprets the supplied data schema and generic component value; it does not grant native codec,
 /// migration, provider, or Runtime authority.
-pub fn collect_declared_asset_references_from_schema(
+pub fn collect_declared_asset_references_from_schema<'a>(
     schema: &ComponentSchema,
     version: ComponentSchemaVersion,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     collect_declared_asset_references_from_schema_with_limits(
         schema,
@@ -400,12 +401,14 @@ pub fn collect_declared_asset_references_from_schema(
 
 /// Interprets an authenticated current schema using separate expansion and reference-work limits.
 ///
-/// This fills defaults but does not validate unrelated required fields or grant native authority.
-/// Returned references own their values; the caller's authored tree remains unchanged.
-pub fn collect_declared_asset_references_from_schema_with_limits(
+/// Raw values freeze missing defaults without copying their existing subtrees. Frozen reads use
+/// their selected defaults and check the complete value against the receiving limits. This does
+/// not validate unrelated required fields or grant native authority. Returned references own their
+/// values; the caller's authored tree remains unchanged.
+pub fn collect_declared_asset_references_from_schema_with_limits<'a>(
     schema: &ComponentSchema,
     version: ComponentSchemaVersion,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     materialization_limits: ComponentValueMaterializationLimits,
     traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
@@ -418,16 +421,28 @@ pub fn collect_declared_asset_references_from_schema_with_limits(
         });
     }
 
-    let effective =
-        effective_component_value(schema, value, materialization_limits).map_err(|source| {
-            DeclaredAssetReferenceError::Materialization {
-                component: component.clone(),
-                source,
-            }
-        })?;
+    let value = value.into();
+    let source = value.as_value();
+    let defaults = match source {
+        Some(source) => freeze_component_defaults(
+            schema,
+            source,
+            &std::collections::BTreeMap::new(),
+            materialization_limits,
+        ),
+        None => validate_value_materialization_budget(value, materialization_limits).map(|_| None),
+    }
+    .map_err(|source| DeclaredAssetReferenceError::Materialization {
+        component: component.clone(),
+        source,
+    })?;
+    let effective = match (source, &defaults) {
+        (Some(source), Some(defaults)) => defaults.read(source),
+        _ => value,
+    };
     let leaves = collect_present_reference_leaves::<()>(
         schema,
-        effective.as_ref(),
+        effective,
         traversal_limits,
         ComponentValueKind::AssetRef,
     )
@@ -435,17 +450,17 @@ pub fn collect_declared_asset_references_from_schema_with_limits(
         component: component.clone(),
         source,
     })?;
-    materialize_asset_references(component, effective.as_ref(), leaves, 0)
+    materialize_asset_references(component, effective, leaves, 0)
 }
 
 /// Collects references from an already selected field value, retaining component-relative paths.
 ///
 /// The caller supplies the actual field subtree, as a SetField operation does. Missing defaults
 /// and reference target existence remain the owning transaction's responsibility.
-pub fn collect_declared_field_asset_references(
+pub fn collect_declared_field_asset_references<'a>(
     component: &ComponentTypeId,
     field: &ComponentFieldSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     collect_declared_field_asset_references_with_limits(
         component,
@@ -459,12 +474,13 @@ pub fn collect_declared_field_asset_references(
 ///
 /// Paths remain component-relative. This does not fill defaults or grant native authority;
 /// reference target existence remains the owning transaction's responsibility.
-pub fn collect_declared_field_asset_references_with_limits(
+pub fn collect_declared_field_asset_references_with_limits<'a>(
     component: &ComponentTypeId,
     field: &ComponentFieldSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let value = value.into();
     let leaves = collect_present_field_reference_leaves::<()>(
         field,
         value,
@@ -485,10 +501,10 @@ pub fn collect_declared_field_asset_references_with_limits(
 /// allocation bytes) at the same pre-growth and pre-copy boundaries as the effective collector.
 /// Output slots, field IDs and parsed asset paths are admitted before materialization. A refusal
 /// returns the exact caller error without allocating an error path or cloning the input.
-pub fn collect_declared_field_asset_references_with_admission<E>(
+pub fn collect_declared_field_asset_references_with_admission<'a, E>(
     component: &ComponentTypeId,
     field: &ComponentFieldSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     traversal_limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
@@ -513,13 +529,14 @@ pub fn collect_declared_field_asset_references_with_admission<E>(
 /// This does not resolve a target, prove that a selected value exists, infer dependencies from
 /// undeclared wire values, fill defaults or construct a complete component value. Shape affinity,
 /// binding, edit and native admission remain the caller's responsibility.
-pub fn collect_declared_value_asset_references_with_limits(
+pub fn collect_declared_value_asset_references_with_limits<'a>(
     component: &ComponentTypeId,
     field: &ComponentFieldSchema,
     shape: &ComponentValueShape,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let value = value.into();
     let leaves = collect_present_value_reference_leaves::<()>(
         field,
         shape,
@@ -540,11 +557,11 @@ pub fn collect_declared_value_asset_references_with_limits(
 /// to the payload, including the empty path for a scalar asset. This shares the field collector's
 /// pre-allocation admission and exact caller-error propagation without copying the shape, filling
 /// defaults, constructing a component tree or reserving from configured worst-case limits.
-pub fn collect_declared_value_asset_references_with_admission<E>(
+pub fn collect_declared_value_asset_references_with_admission<'a, E>(
     component: &ComponentTypeId,
     field: &ComponentFieldSchema,
     shape: &ComponentValueShape,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     traversal_limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
@@ -562,7 +579,7 @@ pub fn collect_declared_value_asset_references_with_admission<E>(
 
 fn materialize_asset_references(
     component: &ComponentTypeId,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     leaves: Vec<PresentReferenceLeaf<'_, '_>>,
     root_segments: usize,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
@@ -581,7 +598,7 @@ fn materialize_asset_references(
                     field: leaf.field.id().clone(),
                     source,
                 })?;
-        if matches!(field_value, ComponentValue::Null) {
+        if field_value.kind() == ComponentValueKind::Null {
             return Err(DeclaredAssetReferenceError::RequiredFieldIsNull {
                 component: component.clone(),
                 field: leaf.field.id().clone(),
@@ -602,7 +619,7 @@ fn parse_asset_reference(
     component: &ComponentTypeId,
     field: &ComponentFieldId,
     path: &ComponentFieldPath,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> Result<AssetRef, DeclaredAssetReferenceError> {
     decode_asset_reference(value).map_err(|error| match error {
         AssetReferenceValueError::Shape => DeclaredAssetReferenceError::InvalidValueShape {
@@ -657,8 +674,10 @@ enum AssetReferenceValueError {
     ProductIdentity(AssetProductIdentityError),
 }
 
-fn decode_asset_reference(value: &ComponentValue) -> Result<AssetRef, AssetReferenceValueError> {
-    match asset_reference_parts(value)? {
+fn decode_asset_reference<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
+) -> Result<AssetRef, AssetReferenceValueError> {
+    match asset_reference_parts(value.into())? {
         AssetReferenceParts::Path(payload) => {
             AssetRef::path(payload).map_err(AssetReferenceValueError::Path)
         }
@@ -692,8 +711,8 @@ fn decode_asset_reference(value: &ComponentValue) -> Result<AssetRef, AssetRefer
 ///
 /// This checks reference syntax only. The caller owns value-size admission, source resolution
 /// and product existence. Budgeted Schema consumers should use the reference collectors.
-pub fn decode_asset_reference_value(
-    value: &ComponentValue,
+pub fn decode_asset_reference_value<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<AssetRef, ComponentCodecError> {
     decode_asset_reference(value).map_err(|_| {
         ComponentCodecError::invalid_field("<asset-ref>", "a canonical admitted asset reference")
@@ -707,7 +726,9 @@ pub fn decode_asset_reference_value(
 /// diagnostics. `None` means the wire shape refuses before payload decoding. A returned bound
 /// does not validate reference syntax, resolve a source or prove product existence.
 #[must_use]
-pub fn asset_reference_decode_work_bytes(value: &ComponentValue) -> Option<usize> {
+pub fn asset_reference_decode_work_bytes<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
+) -> Option<usize> {
     asset_reference_value_work(value).map(|work| work.decode_allocation_bytes)
 }
 
@@ -749,7 +770,7 @@ pub fn encode_asset_reference_value(reference: &AssetRef) -> ComponentValue {
     ])
 }
 
-pub(crate) fn is_asset_reference_value(value: &ComponentValue) -> bool {
+pub(crate) fn is_asset_reference_value<'a>(value: impl Into<ComponentValueRef<'a>>) -> bool {
     decode_asset_reference(value).is_ok()
 }
 
@@ -762,48 +783,55 @@ enum AssetReferenceParts<'a> {
     },
 }
 
-fn asset_reference_parts(
-    value: &ComponentValue,
-) -> Result<AssetReferenceParts<'_>, AssetReferenceValueError> {
-    let ComponentValue::Map(fields) = value else {
-        return Err(AssetReferenceValueError::Shape);
-    };
+fn asset_reference_parts<'a>(
+    value: ComponentValueRef<'a>,
+) -> Result<AssetReferenceParts<'a>, AssetReferenceValueError> {
+    let fields = value.as_map().ok_or(AssetReferenceValueError::Shape)?;
     if fields.len() != 2 {
         return Err(AssetReferenceValueError::Shape);
     }
-    let (Some(ComponentValue::String(kind)), Some(value)) =
-        (fields.get("kind"), fields.get("value"))
-    else {
+    let (Some(kind), Some(value)) = (
+        fields.get("kind").and_then(ComponentValueRef::as_str),
+        fields.get("value"),
+    ) else {
         return Err(AssetReferenceValueError::Shape);
     };
-    match (kind.as_str(), value) {
-        ("path", ComponentValue::String(payload)) => Ok(AssetReferenceParts::Path(payload)),
-        ("stable_id", ComponentValue::String(payload)) => {
-            Ok(AssetReferenceParts::StableId(payload))
-        }
-        ("product", ComponentValue::Map(payload)) if payload.len() == 2 => {
-            let (Some(ComponentValue::String(source)), Some(ComponentValue::Map(product))) =
-                (payload.get("source"), payload.get("product"))
-            else {
+    match kind {
+        "path" => value
+            .as_str()
+            .map(AssetReferenceParts::Path)
+            .ok_or(AssetReferenceValueError::Shape),
+        "stable_id" => value
+            .as_str()
+            .map(AssetReferenceParts::StableId)
+            .ok_or(AssetReferenceValueError::Shape),
+        "product" => {
+            let payload = value.as_map().ok_or(AssetReferenceValueError::Shape)?;
+            if payload.len() != 2 {
+                return Err(AssetReferenceValueError::Shape);
+            }
+            let (Some(source), Some(product)) = (
+                payload.get("source").and_then(ComponentValueRef::as_str),
+                payload.get("product").and_then(ComponentValueRef::as_map),
+            ) else {
                 return Err(AssetReferenceValueError::Shape);
             };
-            let Some(ComponentValue::String(kind)) = product.get("kind") else {
+            let Some(kind) = product.get("kind").and_then(ComponentValueRef::as_str) else {
                 return Err(AssetReferenceValueError::Shape);
             };
-            let subproduct = match kind.as_str() {
+            let subproduct = match kind {
                 "primary" if product.len() == 1 => None,
                 "subproduct" if product.len() == 2 => {
-                    let Some(ComponentValue::String(id)) = product.get("id") else {
+                    let Some(id) = product.get("id").and_then(ComponentValueRef::as_str) else {
                         return Err(AssetReferenceValueError::Shape);
                     };
-                    Some(id.as_str())
+                    Some(id)
                 }
                 "primary" | "subproduct" => return Err(AssetReferenceValueError::Shape),
                 _ => return Err(AssetReferenceValueError::Kind),
             };
             Ok(AssetReferenceParts::Product { source, subproduct })
         }
-        ("path" | "stable_id" | "product", _) => Err(AssetReferenceValueError::Shape),
         _ => Err(AssetReferenceValueError::Kind),
     }
 }
@@ -856,10 +884,10 @@ impl AssetReferenceValueWork {
     }
 }
 
-pub(crate) fn asset_reference_value_work(
-    value: &ComponentValue,
+pub(crate) fn asset_reference_value_work<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Option<AssetReferenceValueWork> {
-    Some(match asset_reference_parts(value).ok()? {
+    Some(match asset_reference_parts(value.into()).ok()? {
         AssetReferenceParts::Path(payload) => AssetReferenceValueWork::text(4, payload.len()),
         AssetReferenceParts::StableId(payload) => AssetReferenceValueWork::text(9, payload.len()),
         AssetReferenceParts::Product { source, subproduct } => {

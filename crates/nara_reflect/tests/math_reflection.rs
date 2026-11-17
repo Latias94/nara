@@ -146,7 +146,7 @@ fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_membe
                 .replace_path(&ComponentFieldPath::from_fields([field]), replacement)
                 .unwrap();
             assert!(validate_component_value(&schema, &candidate).is_err());
-            assert!(MotionPath::__decode_persistent_component(&candidate).is_err());
+            assert!(MotionPath::__decode_persistent_component((&candidate).into()).is_err());
         }
     }
 }

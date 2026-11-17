@@ -293,7 +293,7 @@ fn observe(
             let value = entity.components().get(&component()).map(|record| {
                 assert_eq!(record.owner(), Some(&owner()));
                 assert_eq!(record.version, ComponentSchemaVersion::ONE);
-                let ComponentValue::Map(mut fields) = record.value().clone() else {
+                let ComponentValue::Map(mut fields) = record.value().to_owned() else {
                     panic!("schema map")
                 };
                 for field in ["target", "external"] {

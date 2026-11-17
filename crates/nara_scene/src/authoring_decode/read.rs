@@ -498,7 +498,10 @@ impl<'a> AuthoringComponentView<'a> {
             },
             Err(_) => return Err(AuthoringReadError::InvalidFieldPath),
         };
-        let selected = resolve_component_property_in_root(field, value, property, budget)?.value;
+        let selected = resolve_component_property_in_root(field, value, property, budget)?
+            .value
+            .as_value()
+            .ok_or(AuthoringReadError::InvalidFieldPath)?;
         Ok(if defaulted {
             AuthoringPropertyValue::Defaulted(selected)
         } else {

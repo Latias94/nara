@@ -55,7 +55,7 @@ fn registry(
             move |value, _| {
                 let value = value
                     .get("value")
-                    .and_then(ComponentValue::as_i64)
+                    .and_then(|value| value.as_i64())
                     .ok_or_else(|| ComponentCodecError::invalid_field("value", "i64"))?;
                 let runs = Arc::clone(&runs);
                 let drops = Arc::clone(&drops);

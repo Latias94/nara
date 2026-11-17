@@ -623,8 +623,11 @@ fn assert_references_and_hierarchy(document: &ExpandedSceneDocument) {
         assert!(x.children().is_empty());
         for (record, target) in [(b, x), (x, b)] {
             assert_eq!(
-                record.components()[&component()].value().get("target"),
-                Some(&ComponentValue::EntityReference(
+                record.components()[&component()]
+                    .value()
+                    .get("target")
+                    .map(|value| value.to_owned()),
+                Some(ComponentValue::EntityReference(
                     EntityReference::SceneLocal {
                         entity: target.id().clone(),
                     }
@@ -638,8 +641,11 @@ fn assert_references_and_hierarchy(document: &ExpandedSceneDocument) {
         .find(|entity| entity.id() == &id("watcher"))
         .unwrap();
     assert_eq!(
-        watcher.components()[&component()].value().get("target"),
-        Some(&ComponentValue::EntityReference(
+        watcher.components()[&component()]
+            .value()
+            .get("target")
+            .map(|value| value.to_owned()),
+        Some(ComponentValue::EntityReference(
             EntityReference::SceneLocal {
                 entity: projected(document, "left", "b").id().clone(),
             }

@@ -357,14 +357,18 @@ fn empty_frozen_native_registry_allows_code_authored_data_and_defaults() {
     let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
     let node = entity(expanded(&report), &id("node"));
     assert_eq!(
-        node.components()[&component("game.Mover")].value().clone(),
+        node.components()[&component("game.Mover")]
+            .value()
+            .to_owned(),
         ComponentValue::map([
             ("target", local("socket")),
             ("speed", ComponentValue::U64(7))
         ])
     );
     assert_eq!(
-        node.components()[&component("game.Sensor")].value().clone(),
+        node.components()[&component("game.Sensor")]
+            .value()
+            .to_owned(),
         ComponentValue::map([
             ("target", local("socket")),
             ("enabled", ComponentValue::Bool(true))
@@ -444,7 +448,7 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
             assert_eq!(sensor.schema_owner(), Some(&owner_id("game.sensing")));
             assert_eq!(sensor.version(), ComponentSchemaVersion::ONE);
             assert_eq!(
-                sensor.value().clone(),
+                sensor.value().to_owned(),
                 ComponentValue::map([
                     (
                         "target",
@@ -456,7 +460,7 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
                 ])
             );
             assert_eq!(
-                records[&component("nara.scene.Name")].value().clone(),
+                records[&component("nara.scene.Name")].value().to_owned(),
                 ComponentValue::String("native node".into())
             );
             assert_eq!(
@@ -551,7 +555,7 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
     assert_eq!(
         entity(expanded(&report), &node).components()[&component("game.Mover")]
             .value()
-            .clone()
+            .to_owned()
             .field_entity_reference("target")
             .unwrap(),
         &EntityReference::SceneLocal { entity: socket }

@@ -1654,9 +1654,7 @@ fn catalog_reference_inventory_uses_the_admitted_scene_value_limits() {
         .value()
         .get("samples")
         .unwrap();
-    assert!(
-        matches!(samples, nara::reflect::ComponentValue::List(values) if values.len() == 20_000)
-    );
+    assert!(matches!(samples.as_list(), Some(values) if values.len() == 20_000));
     fixture.rewrite_catalog(|definition| {
         let member = definition
             .members

@@ -141,7 +141,18 @@ pub(crate) fn authoring_scene_observation_retained_bytes(
         for (component, record) in entity.components() {
             checked_add_to(
                 &mut total,
-                component_record_retained_bytes(component, record)?,
+                checked_sum([
+                    size_of_val(component),
+                    size_of_val(record),
+                    BTREE_ENTRY_OVERHEAD,
+                    string_retained_bytes(component.as_str())?,
+                    record
+                        .owner()
+                        .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
+                    component_value_retained_bytes(record.value())?,
+                    record.value_storage_retained_bytes(),
+                    contextual_defaults_retained_bytes(&record.contextual_defaults)?,
+                ])?,
             )?;
         }
     }
@@ -783,10 +794,10 @@ fn asset_ref_retained_bytes(reference: &AssetRef) -> Result<usize, SceneRetentio
     }
 }
 
-fn component_value_retained_bytes(
-    value: &nara_reflect::ComponentValue,
+fn component_value_retained_bytes<'a>(
+    value: impl Into<nara_reflect::ComponentValueRef<'a>>,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let cost = value.cost();
+    let cost = value.into().cost();
     checked_sum([
         cost.logical_bytes(),
         checked_product(cost.nodes(), VALUE_NODE_ALLOCATION_BYTES)?,
@@ -891,7 +902,10 @@ mod tests {
         let empty_compiled = empty.compile(&registry, &resolver).candidate.unwrap();
         assert!(std::ptr::eq(
             source.entities[0].components[&component].value(),
-            compiled.entities()[0].components()[&component].value()
+            compiled.entities()[0].components()[&component]
+                .value()
+                .as_value()
+                .unwrap()
         ));
         assert_eq!(
             compiled_scene_retained_bytes(&compiled).unwrap()

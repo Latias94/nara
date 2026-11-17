@@ -6,8 +6,14 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPathError, ComponentFieldPathSegment,
-    ComponentFieldSchema, ComponentSchema, ComponentValue, ComponentValueCost, EntityReference,
-    EntityReferenceTraversalLimits, schema::MAX_SHAPE_DEPTH,
+    ComponentFieldSchema, ComponentListIter, ComponentMapIter, ComponentSchema, ComponentValue,
+    ComponentValueCost, ComponentValueRef, EntityReference, EntityReferenceTraversalLimits,
+    schema::MAX_SHAPE_DEPTH,
+};
+
+pub(crate) mod frozen;
+pub use frozen::{
+    FrozenComponentDefaults, freeze_component_defaults, freeze_component_defaults_with_admission,
 };
 
 /// Bounds one expanded effective value using logical value cost rather than wire size.
@@ -120,10 +126,10 @@ pub fn effective_component_value<'value>(
     value: &'value ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<Cow<'value, ComponentValue>, ComponentCodecError> {
-    let Some(plan) = plan_defaults(schema, value, DefaultSelection::Canonical)? else {
+    let Some(mut plan) = plan_defaults(schema, value, DefaultSelection::Canonical)? else {
         return Ok(Cow::Borrowed(value));
     };
-    preflight_materialization(&plan, value, limits)?;
+    preflight_materialization(&mut plan, value, limits)?;
     let mut effective = value.clone();
     apply_plan(&plan, &mut effective)?;
     Ok(Cow::Owned(effective))
@@ -165,12 +171,12 @@ pub fn effective_component_value_with_admission<'value, E>(
 
 /// Checks whether every declared default already has an explicit value, without copying values.
 ///
-/// The caller admits the raw value graph separately. This reuses the ordinary canonical default
-/// planner, including its bounded path interpretation and admission before scratch allocation.
-/// A missing default returns `false`; it is never materialized just to test completeness.
-pub fn component_defaults_are_explicit_with_admission<E>(
+/// The caller admits the complete value separately. This reuses the ordinary canonical default
+/// planner over raw values or closed frozen reads, including bounded paths and admission before
+/// scratch allocation. A missing default returns `false`; no default is materialized here.
+pub fn component_defaults_are_explicit_with_admission<'value, E>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<bool, EffectiveValueAdmissionError<E>> {
     plan_defaults_with_admission(schema, value, DefaultSelection::Canonical, true, &mut admit)
@@ -207,28 +213,11 @@ fn effective_component_value_with_admission_impl<'value, E>(
     limits: ComponentValueMaterializationLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Cow<'value, ComponentValue>, EffectiveValueAdmissionError<E>> {
-    let Some(plan) = plan_defaults_with_admission(schema, value, defaults, true, &mut admit)?
+    let Some(mut plan) = plan_defaults_with_admission(schema, value, defaults, true, &mut admit)?
     else {
         return Ok(Cow::Borrowed(value));
     };
-    let mut refusal = None;
-    let cost = {
-        let mut callback = |nodes, bytes, allocated| {
-            admit(nodes, bytes, allocated).map_err(|error| {
-                refusal = Some(error);
-                // Allocation-free carrier; the exact caller error is returned below.
-                ComponentCodecError::MaterializationNodeLimit {
-                    observed: 0,
-                    maximum: 0,
-                }
-            })
-        };
-        preflight_materialization_cost(&plan, value, limits, Some(&mut callback))
-    };
-    if let Some(error) = refusal {
-        return Err(EffectiveValueAdmissionError::Admission(error));
-    }
-    let cost = cost?;
+    let cost = preflight_materialization_cost_with_admission(&mut plan, value, limits, &mut admit)?;
     admit(
         0,
         0,
@@ -353,10 +342,10 @@ fn prepare_default_materialization<'defaults>(
     defaults: DefaultSelection<'defaults>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<Option<(DefaultPlan<'defaults>, ComponentValueCost)>, ComponentCodecError> {
-    let Some(plan) = plan_defaults(schema, value, defaults)? else {
+    let Some(mut plan) = plan_defaults(schema, value, defaults)? else {
         return Ok(None);
     };
-    let cost = preflight_materialization_cost(&plan, value, limits, None)?;
+    let cost = preflight_materialization_cost(&mut plan, value, limits, None)?;
     Ok(Some((plan, cost)))
 }
 
@@ -424,10 +413,11 @@ fn effective_component_value_with_budget_impl<'value>(
         bytes: 0,
         admission: None,
         reference_policy: ReferencePolicy::Source,
+        retained_bytes: None,
     };
     budget.observe_tree(value, 1)?;
-    let plan = plan_defaults(schema, value, defaults)?;
-    if let Some(plan) = &plan {
+    let mut plan = plan_defaults(schema, value, defaults)?;
+    if let Some(plan) = &mut plan {
         preflight_plan(plan, Some(value), 1, &mut budget)?;
     }
     let cost = ComponentValueCost::from_parts(budget.nodes, budget.bytes);
@@ -463,6 +453,9 @@ impl<'defaults> DefaultSelection<'defaults> {
 struct DefaultPlan<'defaults> {
     value: Option<&'defaults ComponentValue>,
     children: BTreeMap<&'defaults ComponentFieldPathSegment, Self>,
+    value_cost: ComponentValueCost,
+    value_retained_bytes: usize,
+    len: usize,
 }
 
 fn plan_defaults<'defaults>(
@@ -479,13 +472,14 @@ fn plan_defaults<'defaults>(
     }
 }
 
-fn plan_defaults_with_admission<'defaults, E>(
+fn plan_defaults_with_admission<'defaults, 'value, E>(
     schema: &'defaults ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     defaults: DefaultSelection<'defaults>,
     account: bool,
     admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Option<DefaultPlan<'defaults>>, EffectiveValueAdmissionError<E>> {
+    let value = value.into();
     let mut missing = Vec::new();
     for field in schema.fields() {
         if account {
@@ -582,7 +576,7 @@ fn plan_defaults_with_admission<'defaults, E>(
 }
 
 fn preflight_materialization(
-    plan: &DefaultPlan<'_>,
+    plan: &mut DefaultPlan<'_>,
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
@@ -590,7 +584,7 @@ fn preflight_materialization(
 }
 
 fn preflight_materialization_cost<'admit>(
-    plan: &DefaultPlan<'_>,
+    plan: &mut DefaultPlan<'_>,
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
@@ -603,14 +597,40 @@ fn preflight_materialization_cost<'admit>(
         bytes: 0,
         admission,
         reference_policy: ReferencePolicy::Source,
+        retained_bytes: None,
     };
     budget.observe_tree(value, 1)?;
     preflight_plan(plan, Some(value), 1, &mut budget)?;
     Ok(ComponentValueCost::from_parts(budget.nodes, budget.bytes))
 }
 
+fn preflight_materialization_cost_with_admission<E>(
+    plan: &mut DefaultPlan<'_>,
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<ComponentValueCost, EffectiveValueAdmissionError<E>> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |nodes, bytes, allocated| {
+            admit(nodes, bytes, allocated).map_err(|error| {
+                refusal = Some(error);
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 0,
+                    maximum: 0,
+                }
+            })
+        };
+        preflight_materialization_cost(plan, value, limits, Some(&mut callback))
+    };
+    match refusal {
+        Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
+        None => result.map_err(EffectiveValueAdmissionError::Value),
+    }
+}
+
 fn preflight_plan(
-    plan: &DefaultPlan<'_>,
+    plan: &mut DefaultPlan<'_>,
     existing: Option<&ComponentValue>,
     depth: usize,
     budget: &mut MaterializationBudget<'_>,
@@ -621,7 +641,16 @@ fn preflight_plan(
                 "default would replace an explicit value",
             ));
         }
-        return budget.observe_tree(default, depth);
+        let nodes = budget.nodes;
+        let bytes = budget.bytes;
+        let retained_bytes = budget.retained_bytes.replace(0);
+        let result = budget.observe_tree(default, depth);
+        plan.value_retained_bytes = budget.retained_bytes.unwrap_or(0);
+        budget.retained_bytes = retained_bytes;
+        result?;
+        plan.value_cost =
+            ComponentValueCost::from_parts(budget.nodes - nodes, budget.bytes - bytes);
+        return Ok(());
     }
     let Some((first, _)) = plan.children.first_key_value() else {
         return Ok(());
@@ -639,7 +668,8 @@ fn preflight_plan(
                 None => None,
                 Some(_) => return Err(materialization_error("default parent must be a Map")),
             };
-            for (segment, child) in &plan.children {
+            let mut len = fields.map_or(0, BTreeMap::len);
+            for (segment, child) in &mut plan.children {
                 let ComponentFieldPathSegment::Field(name) = segment else {
                     return Err(materialization_error(
                         "default parent has incompatible locators",
@@ -648,9 +678,13 @@ fn preflight_plan(
                 let existing = fields.and_then(|fields| fields.get(name));
                 if existing.is_none() {
                     budget.observe_bytes(name.len())?;
+                    len = len
+                        .checked_add(1)
+                        .ok_or_else(|| materialization_error("default Map length overflow"))?;
                 }
                 preflight_plan(child, existing, child_depth, budget)?;
             }
+            plan.len = len;
         }
         ComponentFieldPathSegment::Index(_) => {
             let items = match existing {
@@ -659,7 +693,7 @@ fn preflight_plan(
                 Some(_) => return Err(materialization_error("default parent must be a List")),
             };
             let mut next_index = items.map_or(0, Vec::len);
-            for (segment, child) in &plan.children {
+            for (segment, child) in &mut plan.children {
                 let ComponentFieldPathSegment::Index(index) = segment else {
                     return Err(materialization_error(
                         "default parent has incompatible locators",
@@ -681,6 +715,7 @@ fn preflight_plan(
                 }
                 preflight_plan(child, existing, child_depth, budget)?;
             }
+            plan.len = next_index;
         }
     }
     Ok(())
@@ -758,37 +793,38 @@ struct MaterializationBudget<'a> {
     bytes: usize,
     admission: Option<&'a mut MaterializationAdmission<'a>>,
     reference_policy: ReferencePolicy,
+    retained_bytes: Option<usize>,
 }
 
 #[doc(hidden)]
 /// Checks the complete source value and returns its exact logical cost from the same traversal.
-pub fn validate_value_materialization_budget(
-    value: &ComponentValue,
+pub fn validate_value_materialization_budget<'value>(
+    value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<ComponentValueCost, ComponentCodecError> {
-    validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Source)
+    validate_value_materialization_budget_impl(value.into(), limits, None, ReferencePolicy::Source)
 }
 
 /// Rejects unresolved authored references throughout an already effective Native value.
 ///
-/// Uses the raw materialization walker and its finite limits, including opaque contents and
-/// undeclared fields. Defaults must be supplied by the caller before invoking this check.
-pub fn validate_native_component_value_references_with_limits(
-    value: &ComponentValue,
+/// Uses the shared borrowed materialization walker and its finite limits, including opaque
+/// contents and undeclared fields. Defaults must be supplied before invoking this check.
+pub fn validate_native_component_value_references_with_limits<'value>(
+    value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
-    validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Native)
+    validate_value_materialization_budget_impl(value.into(), limits, None, ReferencePolicy::Native)
         .map(|_| ())
 }
 
 /// Checks the same complete Native value while admitting traversal scratch before allocation.
-pub fn validate_native_component_value_references_with_admission<E>(
-    value: &ComponentValue,
+pub fn validate_native_component_value_references_with_admission<'value, E>(
+    value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), EffectiveValueAdmissionError<E>> {
     validate_value_materialization_budget_with_policy_and_admission(
-        value,
+        value.into(),
         limits,
         ReferencePolicy::Native,
         admit,
@@ -866,6 +902,7 @@ fn component_field_default_requires_context_impl<'admit>(
         bytes: 0,
         admission,
         reference_policy: ReferencePolicy::SourceContext { required: false },
+        retained_bytes: None,
     };
     // Schema default admission starts at depth zero; ordinary document checks start at one.
     budget.observe_tree(default, 0)?;
@@ -882,13 +919,13 @@ mod cost_tests;
 
 /// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
 /// No default plan or value copy is constructed. Caller refusals retain their exact identity.
-pub(crate) fn validate_value_materialization_budget_with_admission<E>(
-    value: &ComponentValue,
+pub(crate) fn validate_value_materialization_budget_with_admission<'value, E>(
+    value: impl Into<ComponentValueRef<'value>>,
     limits: ComponentValueMaterializationLimits,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), EffectiveValueAdmissionError<E>> {
     validate_value_materialization_budget_with_policy_and_admission(
-        value,
+        value.into(),
         limits,
         ReferencePolicy::Source,
         admit,
@@ -896,7 +933,7 @@ pub(crate) fn validate_value_materialization_budget_with_admission<E>(
 }
 
 fn validate_value_materialization_budget_with_policy_and_admission<E>(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     limits: ComponentValueMaterializationLimits,
     policy: ReferencePolicy,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
@@ -924,7 +961,7 @@ fn validate_value_materialization_budget_with_policy_and_admission<E>(
 }
 
 fn validate_value_materialization_budget_impl<'admit>(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     limits: ComponentValueMaterializationLimits,
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
     reference_policy: ReferencePolicy,
@@ -937,21 +974,28 @@ fn validate_value_materialization_budget_impl<'admit>(
         bytes: 0,
         admission,
         reference_policy,
+        retained_bytes: None,
     };
     budget.observe_tree(value, 1)?;
     Ok(ComponentValueCost::from_parts(budget.nodes, budget.bytes))
 }
 
 enum ValueFrame<'value> {
-    Value(&'value ComponentValue, usize),
-    List(std::slice::Iter<'value, ComponentValue>, usize),
-    Map(
-        std::collections::btree_map::Iter<'value, String, ComponentValue>,
-        usize,
-    ),
+    Value(ComponentValueRef<'value>, usize),
+    List(ComponentListIter<'value>, usize),
+    Map(ComponentMapIter<'value>, usize),
 }
 
 impl MaterializationBudget<'_> {
+    fn observe_retained_bytes(&mut self, bytes: usize) -> Result<(), ComponentCodecError> {
+        if let Some(retained) = &mut self.retained_bytes {
+            *retained = retained
+                .checked_add(bytes)
+                .ok_or_else(|| materialization_error("frozen default storage overflow"))?;
+        }
+        Ok(())
+    }
+
     fn push_frame<'value>(
         &mut self,
         pending: &mut Vec<ValueFrame<'value>>,
@@ -972,50 +1016,69 @@ impl MaterializationBudget<'_> {
         Ok(())
     }
 
-    fn observe_tree(
+    fn observe_tree<'value>(
         &mut self,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'value>>,
         depth: usize,
     ) -> Result<(), ComponentCodecError> {
         let mut pending = Vec::new();
-        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
+        self.push_frame(&mut pending, ValueFrame::Value(value.into(), depth))?;
         while let Some(frame) = pending.pop() {
             match frame {
                 ValueFrame::Value(value, depth) => {
                     self.observe_node(depth)?;
-                    match value {
-                        ComponentValue::Null => {}
-                        ComponentValue::Bool(_) => self.observe_bytes(1)?,
-                        ComponentValue::I64(_)
-                        | ComponentValue::U64(_)
-                        | ComponentValue::F64(_) => {
+                    match value.as_value() {
+                        Some(ComponentValue::Null) => {}
+                        Some(ComponentValue::Bool(_)) => self.observe_bytes(1)?,
+                        Some(
+                            ComponentValue::I64(_)
+                            | ComponentValue::U64(_)
+                            | ComponentValue::F64(_),
+                        ) => {
                             self.observe_bytes(8)?;
                         }
-                        ComponentValue::String(value) => self.observe_bytes(value.len())?,
-                        ComponentValue::List(values) if !values.is_empty() => {
-                            self.push_frame(
-                                &mut pending,
-                                ValueFrame::List(
-                                    values.iter(),
-                                    depth
-                                        .checked_add(1)
-                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
-                                ),
-                            )?;
+                        Some(ComponentValue::String(value)) => {
+                            self.observe_bytes(value.len())?;
+                            self.observe_retained_bytes(value.len())?;
                         }
-                        ComponentValue::Map(values) if !values.is_empty() => {
-                            self.push_frame(
-                                &mut pending,
-                                ValueFrame::Map(
-                                    values.iter(),
-                                    depth
-                                        .checked_add(1)
-                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
-                                ),
-                            )?;
+                        Some(ComponentValue::List(_) | ComponentValue::Map(_)) | None => {
+                            if let Some(values) = value.as_list() {
+                                if !values.is_empty() {
+                                    self.observe_retained_bytes(
+                                        values.len().saturating_mul(size_of::<ComponentValue>()),
+                                    )?;
+                                    self.push_frame(
+                                        &mut pending,
+                                        ValueFrame::List(
+                                            values.iter(),
+                                            depth.checked_add(1).ok_or_else(|| {
+                                                depth_overflow(self.maximum_depth.get())
+                                            })?,
+                                        ),
+                                    )?;
+                                }
+                            } else if let Some(values) = value.as_map() {
+                                if !values.is_empty() {
+                                    self.observe_retained_bytes(values.len().saturating_mul(
+                                        frozen::btree_entry_bytes::<String, ComponentValue>(),
+                                    ))?;
+                                    self.push_frame(
+                                        &mut pending,
+                                        ValueFrame::Map(
+                                            values.iter(),
+                                            depth.checked_add(1).ok_or_else(|| {
+                                                depth_overflow(self.maximum_depth.get())
+                                            })?,
+                                        ),
+                                    )?;
+                                }
+                            } else {
+                                return Err(materialization_error(
+                                    "frozen insertion must have a container parent",
+                                ));
+                            }
                         }
-                        ComponentValue::List(_) | ComponentValue::Map(_) => {}
-                        ComponentValue::EntityReference(reference) => {
+                        Some(ComponentValue::EntityReference(reference)) => {
                             if matches!(self.reference_policy, ReferencePolicy::Native)
                                 && matches!(reference, EntityReference::Authored { .. })
                             {
@@ -1038,6 +1101,17 @@ impl MaterializationBudget<'_> {
                             }
                             let cost = reference.cost();
                             self.observe_bytes(cost.logical_bytes())?;
+                            self.observe_retained_bytes(cost.logical_bytes())?;
+                            if let EntityReference::Authored { reference } = reference {
+                                self.observe_retained_bytes(
+                                    reference
+                                        .through
+                                        .len()
+                                        .saturating_mul(
+                                            size_of::<nara_identity::PrefabInstanceHop>(),
+                                        ),
+                                )?;
+                            }
                         }
                     }
                 }
@@ -1050,6 +1124,7 @@ impl MaterializationBudget<'_> {
                 ValueFrame::Map(mut values, depth) => {
                     if let Some((key, value)) = values.next() {
                         self.observe_bytes(key.len())?;
+                        self.observe_retained_bytes(key.len())?;
                         self.push_frame(&mut pending, ValueFrame::Map(values, depth))?;
                         self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
                     }

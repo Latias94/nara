@@ -286,7 +286,7 @@ fn validate_exact_component_record(
         })?;
     validate_component_value_with_limits(
         schema,
-        &effective,
+        effective.as_ref(),
         budget.limits.component_materialization_limits(),
     )
     .map_err(|error| {

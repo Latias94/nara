@@ -13,6 +13,7 @@ use crate::{
     schema_authority::SchemaAuthority,
 };
 
+mod frozen;
 #[cfg(feature = "serde")]
 mod wire;
 
@@ -104,7 +105,7 @@ fn public_record_and_document_clones_do_not_retain_original_storage() {
         );
     }
     let (_, _, shared) = original.clone_for_compilation().into_compiled_parts();
-    let original_root = Arc::downgrade(&shared.0);
+    let original_root = Arc::downgrade(&shared.raw().unwrap().0);
     drop(shared);
     drop(document);
     assert!(original_root.upgrade().is_none());
@@ -119,8 +120,11 @@ fn public_record_and_document_clones_do_not_retain_original_storage() {
 fn compiler_copy_shares_only_the_main_payload_and_isolates_source_edits() {
     let mut source = record();
     let draft = source.clone_for_compilation();
-    assert!(ptr::eq(source.value(), draft.value()));
-    assert_eq!(source, draft);
+    assert!(ptr::eq(source.value(), draft.value().as_value().unwrap()));
+    assert_eq!(source.value(), draft.value().as_value().unwrap());
+    assert_eq!(source.owner, draft.owner);
+    assert_eq!(source.version, draft.version);
+    assert_eq!(source.contextual_defaults, draft.contextual_defaults);
     assert_ne!(
         source.owner().unwrap().as_str().as_ptr(),
         draft.owner().unwrap().as_str().as_ptr(),
@@ -141,8 +145,12 @@ fn compiler_copy_shares_only_the_main_payload_and_isolates_source_edits() {
     source
         .contextual_defaults
         .insert(field, ComponentValue::Null);
-    assert!(!ptr::eq(source.value(), draft.value()));
-    assert_eq!(draft, record());
+    assert!(!ptr::eq(source.value(), draft.value().as_value().unwrap()));
+    let expected = record();
+    assert_eq!(draft.value(), expected.value());
+    assert_eq!(draft.owner, expected.owner);
+    assert_eq!(draft.version, expected.version);
+    assert_eq!(draft.contextual_defaults, expected.contextual_defaults);
     source.set_value(ComponentValue::Null);
     assert_eq!(source.value(), &ComponentValue::Null);
     assert_eq!(draft.value(), &value());
@@ -160,7 +168,10 @@ fn owned_extraction_moves_unique_values_and_copies_shared_values() {
         assert_eq!(text(&taken).as_ptr() == original_text, !shared);
         if let Some(observer) = observer {
             assert_eq!(observer.value(), &value());
-            assert_eq!(text(observer.value()).as_ptr(), original_text);
+            assert_eq!(
+                text(observer.value().as_value().unwrap()).as_ptr(),
+                original_text
+            );
         }
 
         source.set_value(taken);
@@ -210,15 +221,24 @@ fn sealed_and_prepared_storage_survives_source_edits_and_owner_retirement() {
     )
     .unwrap();
     let compiled = &document.entities()[0].components()[&component];
-    assert!(ptr::eq(source.value(), compiled.value()));
+    assert!(ptr::eq(
+        source.value(),
+        compiled.value().as_value().unwrap()
+    ));
     let prepared = compiled.copy_for_native_preparation();
-    assert!(ptr::eq(compiled.value(), prepared.value()));
+    assert!(ptr::eq(
+        compiled.value().as_value().unwrap(),
+        prepared.value().as_value().unwrap(),
+    ));
     let backing = source.value_storage_retained_bytes();
     assert_eq!(compiled.value_storage_retained_bytes(), backing);
     assert_eq!(prepared.value_storage_retained_bytes(), backing);
 
     *source.value_mut() = ComponentValue::String("edited".to_owned());
-    assert!(!ptr::eq(source.value(), compiled.value()));
+    assert!(!ptr::eq(
+        source.value(),
+        compiled.value().as_value().unwrap()
+    ));
     assert_eq!(compiled.value(), &original);
     drop(source);
     drop(document);

@@ -73,7 +73,7 @@ pub fn durable_links_registry(
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)
             .with_fields([links]),
-            |value| Ok(DurableLinks(value.field("links")?.clone())),
+            |value| Ok(DurableLinks(value.field("links")?.to_owned())),
             |links| Ok(ComponentValue::map([("links", links.0.clone())])),
         )
         .unwrap();

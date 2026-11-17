@@ -13,7 +13,8 @@ use super::{
     decode_asset_reference, encode_asset_reference_value,
 };
 use crate::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, EntityReferenceTraversalLimits,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, ComponentValueRef,
+    EntityReferenceTraversalLimits,
 };
 
 const MODELED_VALUE_NODE_BYTES: usize = 96;
@@ -173,7 +174,8 @@ pub fn rewrite_declared_asset_references_with_admission<R, A>(
     validate_paths(references, &mut work)?;
     for reference in references {
         work.path(reference.path())?;
-        let Some(original) = value_at_path(value, reference.path()) else {
+        let Some(original) = value_at_path(ComponentValueRef::from(&*value), reference.path())
+        else {
             return Err(AssetReferenceRewriteError::InvalidPath {
                 path: work.copy_path(reference.path())?,
             });
@@ -272,18 +274,15 @@ fn validate_paths<R, A>(
 // ComponentValue::get_path/get_path_mut allocate path scratch even on success. These borrowed
 // lookups interpret only the existing Field/Index segments and keep error allocation explicit.
 fn value_at_path<'a>(
-    mut value: &'a ComponentValue,
+    mut value: ComponentValueRef<'a>,
     path: &ComponentFieldPath,
-) -> Option<&'a ComponentValue> {
+) -> Option<ComponentValueRef<'a>> {
     for segment in path.segments() {
-        value = match (segment, value) {
-            (ComponentFieldPathSegment::Field(name), ComponentValue::Map(fields)) => {
-                fields.get(name)?
+        value = match segment {
+            ComponentFieldPathSegment::Field(name) => value.get(name)?,
+            ComponentFieldPathSegment::Index(index) => {
+                value.as_list()?.get(usize::try_from(*index).ok()?)?
             }
-            (ComponentFieldPathSegment::Index(index), ComponentValue::List(items)) => {
-                items.get(usize::try_from(*index).ok()?)?
-            }
-            _ => return None,
         };
     }
     Some(value)

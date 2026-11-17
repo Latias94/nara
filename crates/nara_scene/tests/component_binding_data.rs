@@ -208,7 +208,7 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
             .unwrap()
             .unwrap()
             .value()
-            .clone(),
+            .to_owned(),
         ComponentValue::U64(7)
     );
     assert!(
@@ -237,7 +237,7 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
             .unwrap()
             .unwrap()
             .value()
-            .clone(),
+            .to_owned(),
         ComponentValue::Bool(true)
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
@@ -339,7 +339,7 @@ fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes(
             .unwrap()
             .unwrap()
             .value()
-            .clone(),
+            .to_owned(),
         ComponentValue::map([("text", ComponentValue::String("abc".into()))])
     );
 }
@@ -458,7 +458,11 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
             stored_link.version(),
             stored_link.value()
         ),
-        (link.owner(), link.version, link.value()),
+        (
+            link.owner(),
+            link.version,
+            nara_reflect::ComponentValueRef::from(link.value())
+        ),
     );
     let stored_score = bindings
         .data_component(&world, entity, &component("game.Score"))
@@ -474,7 +478,7 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
         (
             expected_score.owner(),
             expected_score.version,
-            expected_score.value()
+            nara_reflect::ComponentValueRef::from(expected_score.value())
         ),
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
@@ -543,7 +547,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
             .unwrap()
             .unwrap()
             .value()
-            .clone(),
+            .to_owned(),
         ComponentValue::U64(7)
     );
 }
@@ -747,7 +751,7 @@ fn update(world: &mut World) {
                     .unwrap()
                     .unwrap()
                     .value()
-                    .clone(),
+                    .to_owned(),
                 ComponentValue::U64(7)
             );
             bindings
@@ -766,7 +770,7 @@ fn update(world: &mut World) {
                     .unwrap()
                     .unwrap()
                     .value()
-                    .clone(),
+                    .to_owned(),
                 ComponentValue::Bool(true)
             );
             assert_eq!(bindings.data_components(world, entity).unwrap().count(), 2);
@@ -826,7 +830,7 @@ fn update(world: &mut World) {
                     .unwrap()
                     .unwrap()
                     .value()
-                    .clone(),
+                    .to_owned(),
                 ComponentValue::U64(7)
             );
             consumer.entity = Some(current);
@@ -837,7 +841,7 @@ fn update(world: &mut World) {
         assert_eq!(
             consumer.source.document().entities()[0].components()[&component("game.Score")]
                 .value()
-                .clone(),
+                .to_owned(),
             ComponentValue::U64(7)
         );
         consumer.updates += 1;

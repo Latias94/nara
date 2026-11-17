@@ -534,6 +534,103 @@ fn record_uses_exact_shared_materialization_node_byte_and_depth_limits() {
 }
 
 #[test]
+fn frozen_record_decode_preserves_parameters_references_and_exact_admission() {
+    let original = Material2dRecord::new(
+        AssetRef::Product(material_product()),
+        &declaration("test.surface", 2),
+        values(),
+        BTreeMap::from([(
+            "image.detail".to_owned(),
+            AssetRef::Product(image_product()),
+        )]),
+    )
+    .unwrap();
+    let expected = original.to_component_value().unwrap();
+    let mut source = expected.clone();
+    for name in ["declaration_id", "declaration_version", "parameters"] {
+        source
+            .remove_path(&ComponentFieldPath::from_fields([name]))
+            .unwrap();
+    }
+    let before = source.clone();
+    let schema = declaration("test.surface", 2)
+        .binding_schema(&values())
+        .unwrap();
+    let frozen = nara_reflect::__private::freeze_component_defaults(
+        &schema,
+        &source,
+        &BTreeMap::new(),
+        ComponentValueMaterializationLimits::default(),
+    )
+    .unwrap()
+    .unwrap();
+    let value = frozen.read(&source);
+    assert!(value.as_value().is_none());
+    assert!(value.field("parameters").unwrap().as_value().is_none());
+    assert!(std::ptr::eq(
+        value.field("material").unwrap().as_value().unwrap(),
+        source.field("material").unwrap(),
+    ));
+    let cost = expected.cost();
+    let exact = ComponentValueMaterializationLimits::new(
+        ItemLimit::new(cost.nodes()).unwrap(),
+        ByteLimit::new(cost.logical_bytes()).unwrap(),
+        DepthLimit::new(6).unwrap(),
+    );
+    assert_eq!(
+        Material2dRecord::from_component_value_with_limits(&expected, exact).unwrap(),
+        original
+    );
+    assert_eq!(
+        Material2dRecord::from_component_value_with_limits(value, exact).unwrap(),
+        original
+    );
+    for limits in [
+        exact.remaining(1, 0),
+        exact.remaining(0, 1),
+        ComponentValueMaterializationLimits::new(
+            ItemLimit::new(cost.nodes()).unwrap(),
+            ByteLimit::new(cost.logical_bytes()).unwrap(),
+            DepthLimit::new(5).unwrap(),
+        ),
+    ] {
+        assert_eq!(
+            Material2dRecord::from_component_value_with_limits(value, limits).unwrap_err(),
+            Material2dRecord::from_component_value_with_limits(&expected, limits).unwrap_err(),
+        );
+    }
+    let registry = registry();
+    let mut server = AssetServer::new();
+    let handle = server
+        .reserve_product::<Material2dAsset>(material_product())
+        .unwrap();
+    let image = server
+        .reserve_product::<ImageAsset>(image_product())
+        .unwrap();
+    let prepared = registry
+        .preflight_component_with_context(
+            &ComponentTypeId::new("nara.material2d"),
+            value,
+            &mut ComponentDecodeContext::with_asset_server(&mut server),
+        )
+        .unwrap();
+    let mut world = World::new();
+    world.insert_resource(server);
+    let entity = world.spawn_empty().id();
+    prepared.apply(&mut world, entity).unwrap();
+    let material = world.get::<Material2d>(entity).unwrap();
+    assert_eq!(material.handle(), handle);
+    assert_eq!(material.declaration_id(), original.declaration_id());
+    assert_eq!(
+        material.declaration_version(),
+        original.declaration_version()
+    );
+    assert_eq!(material.parameters(), original.parameters());
+    assert_eq!(material.texture_overrides()["image.detail"], image);
+    assert_eq!(source, before);
+}
+
+#[test]
 fn generated_field_ids_preserve_full_semantic_keys_and_refuse_invalid_identity() {
     let layout = MaterialParameterLayout::new(
         vec![

@@ -606,7 +606,7 @@ fn superseded_complete_and_property_references_do_not_request_a_nested_source() 
         assert_eq!(
             entity(&report, &root).components()[&link_type()]
                 .value()
-                .clone()
+                .to_owned()
                 .field_entity_reference("target")
                 .unwrap(),
             &expected

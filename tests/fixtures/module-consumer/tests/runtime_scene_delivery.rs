@@ -415,8 +415,8 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
             .data_component(&world, entity, &component(LINK))
             .unwrap()
         {
-            let ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target }) =
-                link.value()
+            let Some(EntityReference::SceneLocal { entity: target }) =
+                link.value().as_entity_reference()
             else {
                 panic!("expected a remapped local reference")
             };
@@ -429,15 +429,15 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
             .data_component(&world, entity, &component(ASSETS))
             .unwrap()
         {
-            let ComponentValue::List(images) = assets.value().get("images").unwrap() else {
+            let Some(images) = assets.value().get("images").unwrap().as_list() else {
                 panic!("expected asset list")
             };
             assert_eq!(
-                decode_asset_reference_value(&images[0]).unwrap(),
+                decode_asset_reference_value(images.get(0).unwrap()).unwrap(),
                 product(ImportedProductId::PRIMARY)
             );
             assert_eq!(
-                decode_asset_reference_value(&images[1]).unwrap(),
+                decode_asset_reference_value(images.get(1).unwrap()).unwrap(),
                 product(auxiliary())
             );
         }
@@ -702,8 +702,9 @@ fn exercise_managed_runtime_scene(world: &mut World) {
             .unwrap()
             .unwrap()
             .value()
-            .get("label"),
-        Some(&ComponentValue::String("prefabs/ordinary-text.ron".into()))
+            .get("label")
+            .and_then(|value| value.as_str()),
+        Some("prefabs/ordinary-text.ron")
     );
     let foreign = SceneComponentBindings::new(
         selected.native_snapshot().clone(),

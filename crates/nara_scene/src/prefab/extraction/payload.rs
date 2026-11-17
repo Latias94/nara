@@ -323,7 +323,7 @@ fn rewrite_payload(
     validate_component_property_value_with_admission(
         shape,
         &path,
-        value,
+        &*value,
         work.materialization()?,
         |nodes, bytes, allocated| work.visit(nodes, bytes, allocated),
     )
@@ -331,18 +331,18 @@ fn rewrite_payload(
     let plan = plan_declared_value_entity_references_with_admission::<ExtractionError, _>(
         field,
         shape,
-        value,
+        &*value,
         work.traversal()?,
         |nodes, bytes, allocated| work.visit(nodes, bytes, allocated),
     )
     .map_err(|error| plan_error(error, work))?;
-    let cost = work.value(value)?;
+    let cost = work.value(&*value)?;
     admit_declared_entity_reference_plan_rewrite(&plan, cost, |nodes, bytes, allocated| {
         work.visit(nodes, bytes, allocated.ok_or(ExtractionError::Capacity)?)
     })?;
     plan.rewrite_in_place(value, |_, reference| rewrite(reference, work))
         .map_err(|error| reference_error(error, work))?;
-    work.value(value)?;
+    work.value(&*value)?;
     Ok(())
 }
 

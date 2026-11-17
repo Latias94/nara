@@ -900,7 +900,7 @@ mod expansion {
             registry
                 .register_persistent_component_with_codec::<Value, _, _>(
                     schema,
-                    |value| Ok(Value(value.clone())),
+                    |value| Ok(Value(value.to_owned())),
                     |value| Ok(value.0.clone()),
                 )
                 .unwrap();
@@ -2679,7 +2679,7 @@ mod expansion {
                 .components()[&component]
                 .value();
             assert_eq!(actual, &value);
-            effective_values.push(actual.clone());
+            effective_values.push(actual.to_owned());
             assert_eq!(
                 (
                     session.document().clone(),

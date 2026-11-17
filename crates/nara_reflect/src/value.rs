@@ -205,84 +205,16 @@ impl ComponentValue {
         max_nodes: usize,
         max_logical_bytes: usize,
         cost: &mut ComponentValueCost,
-        mut admission: Option<&mut dyn FnMut(Option<usize>) -> bool>,
+        admission: Option<&mut dyn FnMut(Option<usize>) -> bool>,
     ) -> bool {
-        enum Frame<'a> {
-            List(std::slice::Iter<'a, ComponentValue>),
-            Map(std::collections::btree_map::Iter<'a, String, ComponentValue>),
-        }
-
-        if max_nodes == 0 {
-            return false;
-        }
-
-        let mut pending = Vec::new();
-        let mut current = Some((0_usize, self));
-        // Count visited nodes and all known children, including unvisited ancestor siblings.
-        let mut minimum_nodes = 1_usize;
-        while let Some((key_bytes, value)) = current {
-            cost.logical_bytes = cost.logical_bytes.saturating_add(key_bytes);
-            let (nodes, logical_bytes, children) = match value {
-                Self::Null => (1, 0, 0),
-                Self::Bool(_) => (1, 1, 0),
-                Self::I64(_) | Self::U64(_) | Self::F64(_) => (1, 8, 0),
-                Self::String(value) => (1, value.len(), 0),
-                Self::List(values) => (1, 0, values.len()),
-                Self::Map(values) => (1, 0, values.len()),
-                Self::EntityReference(reference) => {
-                    let cost = reference.cost();
-                    (cost.nodes(), cost.logical_bytes(), 0)
-                }
-            };
-            cost.nodes = cost.nodes.saturating_add(nodes);
-            cost.logical_bytes = cost.logical_bytes.saturating_add(logical_bytes);
-            minimum_nodes = minimum_nodes
-                .saturating_add(nodes.saturating_sub(1))
-                .saturating_add(children);
-            if minimum_nodes > max_nodes || cost.logical_bytes > max_logical_bytes {
-                return false;
-            }
-
-            if children != 0 {
-                if let Some(admit) = admission.as_deref_mut()
-                    && pending.len() == pending.capacity()
-                {
-                    let capacity = pending
-                        .len()
-                        .checked_add(1)
-                        .map(|needed| needed.max(pending.capacity().saturating_mul(2)).max(4));
-                    if !admit(capacity.and_then(|capacity| {
-                        capacity.checked_mul(std::mem::size_of::<Frame<'_>>())
-                    })) {
-                        return false;
-                    }
-                    let Some(capacity) = capacity else {
-                        return false;
-                    };
-                    pending.reserve_exact(capacity - pending.len());
-                }
-                match value {
-                    Self::List(values) => pending.push(Frame::List(values.iter())),
-                    Self::Map(values) => pending.push(Frame::Map(values.iter())),
-                    _ => {}
-                }
-            }
-
-            current = loop {
-                let next = match pending.last_mut() {
-                    Some(Frame::List(values)) => values.next().map(|value| (0, value)),
-                    Some(Frame::Map(values)) => {
-                        values.next().map(|(key, value)| (key.len(), value))
-                    }
-                    None => break None,
-                };
-                if next.is_some() {
-                    break next;
-                }
-                pending.pop();
-            };
-        }
-        true
+        let (accepted, observed) = crate::ComponentValueRef::from(self).cost_up_to_impl(
+            max_nodes,
+            max_logical_bytes,
+            *cost,
+            admission,
+        );
+        *cost = observed;
+        accepted
     }
 
     #[must_use]

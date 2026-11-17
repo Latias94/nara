@@ -310,9 +310,10 @@ fn copied_parent_supplies_each_actual_child_occurrences_input() {
         .iter()
         .filter_map(|entity| {
             let record = entity.components().get(&component("Link"))?;
-            let Some(ComponentValue::EntityReference(EntityReference::SceneLocal {
-                entity: target,
-            })) = record.value().get("target")
+            let Some(EntityReference::SceneLocal { entity: target }) = record
+                .value()
+                .get("target")
+                .and_then(|value| value.as_entity_reference())
             else {
                 panic!("expected an actually lowered input")
             };

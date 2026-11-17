@@ -29,6 +29,11 @@ mod registry;
 mod schema;
 mod schema_owner;
 mod value;
+mod value_ref;
+
+pub use value_ref::{
+    ComponentListIter, ComponentListRef, ComponentMapIter, ComponentMapRef, ComponentValueRef,
+};
 
 pub use asset_reference::{
     AssetReferenceRewriteError, DeclaredAssetReference, DeclaredAssetReferenceError,
@@ -115,8 +120,8 @@ pub mod __macro_support {
     pub use crate::{
         AssetReferenceDemand, ComponentCapability, ComponentCodecError, ComponentFieldId,
         ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentSchema,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-        PersistentComponentProvider,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueRef,
+        ComponentValueShape, PersistentComponentProvider,
         authoring::{
             PersistentFieldCodec, PersistentNumericField, decode_persistent_field,
             encode_persistent_field,
@@ -132,15 +137,16 @@ pub mod __private {
         collect_declared_value_asset_references_with_admission,
     };
     pub use crate::effective::{
-        EffectiveValueAdmissionError, component_defaults_are_explicit_with_admission,
-        component_field_default_requires_context,
+        EffectiveValueAdmissionError, FrozenComponentDefaults,
+        component_defaults_are_explicit_with_admission, component_field_default_requires_context,
         component_field_default_requires_context_with_admission,
         effective_component_value_in_place_with_default_overrides,
         effective_component_value_owned_with_default_overrides,
         effective_component_value_with_admission, effective_component_value_with_budget,
         effective_component_value_with_default_overrides,
         effective_component_value_with_default_overrides_with_admission,
-        effective_component_value_with_default_overrides_with_budget,
+        effective_component_value_with_default_overrides_with_budget, freeze_component_defaults,
+        freeze_component_defaults_with_admission,
         validate_native_component_value_references_with_admission,
         validate_native_component_value_references_with_limits,
         validate_value_materialization_budget,
@@ -230,14 +236,15 @@ pub mod prelude {
         ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
         ComponentSchemaVersion, ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember,
         ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueKind,
-        ComponentValueShape, DeclaredAssetReference, DeclaredAssetReferenceError, EntityReference,
-        EntityReferenceTraversalLimits, MigratedComponentValue, PersistentComponent,
-        PersistentComponentProvider, PreparedComponent, PreparedComponentCandidate,
-        ResolvedComponentProperty, collect_declared_asset_references,
-        collect_declared_value_asset_references_with_limits, remap_declared_entity_references,
-        replace_component_property, resolve_component_property, resolve_component_property_in_root,
-        resolve_component_property_schema_claim, resolve_component_property_with_limits,
-        rewrite_declared_entity_references, validate_component_value,
+        ComponentValueRef, ComponentValueShape, DeclaredAssetReference,
+        DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
+        MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
+        PreparedComponent, PreparedComponentCandidate, ResolvedComponentProperty,
+        collect_declared_asset_references, collect_declared_value_asset_references_with_limits,
+        remap_declared_entity_references, replace_component_property, resolve_component_property,
+        resolve_component_property_in_root, resolve_component_property_schema_claim,
+        resolve_component_property_with_limits, rewrite_declared_entity_references,
+        validate_component_value,
     };
     pub use bevy_reflect::prelude::*;
 }

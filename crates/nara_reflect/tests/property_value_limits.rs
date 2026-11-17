@@ -102,7 +102,10 @@ fn explicit_property_limits_admit_a_large_value_without_weakening_default_admiss
     let resolved =
         resolve_component_property_with_limits(&schema, schema.version(), &value, &path, exact)
             .unwrap();
-    assert!(std::ptr::eq(resolved.value, value.get("x").unwrap()));
+    assert!(std::ptr::eq(
+        resolved.value.as_value().unwrap(),
+        value.get("x").unwrap(),
+    ));
     let ComponentValue::List(first) = value.get("first").unwrap() else {
         unreachable!()
     };

@@ -12,8 +12,8 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentMigrationError,
     ComponentRegistrySnapshot, ComponentSchema, ComponentTypeId, ComponentValue,
-    ComponentValueCost, ComponentValueMaterializationLimits, DeclaredAssetReference,
-    EntityReference, EntityReferenceTraversalLimits, PreparedComponent,
+    ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
+    DeclaredAssetReference, EntityReference, EntityReferenceTraversalLimits, PreparedComponent,
     collect_declared_asset_references_from_schema_with_limits,
     validate_component_value_with_limits,
 };
@@ -77,7 +77,27 @@ enum PlacementOwner {
 
 struct NormalizedSceneComponent<'a> {
     id: &'a ComponentTypeId,
-    value: Cow<'a, ComponentValue>,
+    value: NormalizedComponentValue<'a>,
+}
+
+enum NormalizedComponentValue<'a> {
+    Borrowed {
+        value: &'a ComponentValue,
+        defaults: Option<nara_reflect::__private::FrozenComponentDefaults>,
+    },
+    Owned(ComponentValue),
+}
+
+impl NormalizedComponentValue<'_> {
+    fn read(&self) -> ComponentValueRef<'_> {
+        match self {
+            Self::Borrowed { value, defaults } => defaults.as_ref().map_or_else(
+                || ComponentValueRef::from(*value),
+                |defaults| defaults.read(value),
+            ),
+            Self::Owned(value) => value.into(),
+        }
+    }
 }
 
 struct ScenePreflightOptions {
@@ -107,7 +127,7 @@ struct FlatSceneComponentRef<'a> {
     component: &'a ComponentTypeId,
     schema_owner: Option<&'a nara_reflect::PersistentComponentSchemaOwnerId>,
     version: nara_reflect::ComponentSchemaVersion,
-    value: &'a ComponentValue,
+    value: ComponentValueRef<'a>,
     authored_metadata: bool,
 }
 
@@ -266,7 +286,7 @@ fn validate_effective_component_values<'a, E>(
             diagnostics.push(invalid(&ComponentCodecError::UnresolvedAuthoredReference));
             continue;
         }
-        if role != EffectiveValueRole::Draft {
+        {
             let explicit = nara_reflect::__private::component_defaults_are_explicit_with_admission(
                 schema,
                 record.value,
@@ -298,16 +318,9 @@ fn validate_effective_component_values<'a, E>(
                 }
             }
         }
-        let effective = match if role == EffectiveValueRole::Draft {
-            value_budget
-                .materialize(schema, record.value, None)
-                .map_err(nara_reflect::__private::EffectiveValueAdmissionError::Value)
-        } else {
-            value_budget
-                .admit_explicit(record.value, &mut admit_validation_work)
-                .map(|()| Cow::Borrowed(record.value))
-        } {
-            Ok(effective) => effective,
+        let effective = match value_budget.admit_explicit(record.value, &mut admit_validation_work)
+        {
+            Ok(()) => record.value,
             Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
                 return Err(error);
             }
@@ -317,7 +330,7 @@ fn validate_effective_component_values<'a, E>(
             }
         };
         match nara_reflect::__private::validate_native_component_value_references_with_admission(
-            &effective,
+            effective,
             limits,
             &mut admit_validation_work,
         ) {
@@ -335,7 +348,7 @@ fn validate_effective_component_values<'a, E>(
         // allocates; the raw value size does not bound the number of optional fields.
         match nara_reflect::__private::validate_component_value_with_admission(
             schema,
-            &effective,
+            effective,
             limits,
             &mut admit_validation_work,
         ) {
@@ -349,7 +362,7 @@ fn validate_effective_component_values<'a, E>(
             }
         }
         let references = match nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
-                schema, record.version, &effective, traversal, &mut admit_validation_work,
+                schema, record.version, effective, traversal, &mut admit_validation_work,
             ) {
                 Ok(references) => references,
                 Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(error)) =>
@@ -405,9 +418,9 @@ fn validate_effective_component_values<'a, E>(
             nara_reflect::__private::plan_declared_entity_references_with_admission::<
                 SceneLocalTargetMissing,
                 _,
-            >(schema, &effective, traversal, &mut admit_validation_work);
+            >(schema, effective, traversal, &mut admit_validation_work);
         let local_references = match local_references {
-            Ok(plan) => plan.visit(&effective, |_, reference| match reference {
+            Ok(plan) => plan.visit(effective, |_, reference| match reference {
                 EntityReference::SceneLocal { entity } => contains_entity(entity)
                     .then_some(())
                     .ok_or(SceneLocalTargetMissing),
@@ -508,7 +521,7 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
                 component,
                 schema_owner: record.schema_owner.as_ref(),
                 version: record.version,
-                value: &record.value,
+                value: record.value.read(),
                 authored_metadata: false,
             })
     });
@@ -845,12 +858,13 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SceneLocalTargetMissing;
 
-pub(crate) fn validate_effective_local_references(
+pub(crate) fn validate_effective_local_references<'value>(
     schema: &ComponentSchema,
-    effective: &ComponentValue,
+    effective: impl Into<ComponentValueRef<'value>>,
     contains_entity: impl Fn(&SceneEntityId) -> bool,
     limits: EntityReferenceTraversalLimits,
 ) -> Result<(), ComponentEntityReferenceRewriteError<SceneLocalTargetMissing>> {
+    let effective = effective.into();
     let plan = plan_declared_entity_references(schema, effective, limits)?;
     plan.visit(effective, |_, reference| match reference {
         EntityReference::SceneLocal { entity } => contains_entity(entity)
@@ -1094,7 +1108,7 @@ fn preflight_source_values_with_context(
                 continue;
             }
 
-            let default_overrides = Some(&component.contextual_defaults);
+            let default_overrides = &component.contextual_defaults;
             let defaults_validation = value_budget
                 .admit_contextual_defaults(&component.contextual_defaults)
                 .and_then(|()| {
@@ -1166,14 +1180,12 @@ fn preflight_source_values_with_context(
             // needs no defaults moves into the batch instead of borrowing a temporary or
             // repeating its migration in the second phase.
             let effective = match migrated {
-                Cow::Borrowed(value) => value_budget.materialize(schema, value, default_overrides),
-                Cow::Owned(value) => {
-                    match value_budget.materialize(schema, &value, default_overrides) {
-                        Ok(Cow::Borrowed(_)) => Ok(Cow::Owned(value)),
-                        Ok(Cow::Owned(effective)) => Ok(Cow::Owned(effective)),
-                        Err(error) => Err(error),
-                    }
-                }
+                Cow::Borrowed(value) => value_budget
+                    .freeze(schema, value, default_overrides)
+                    .map(|defaults| NormalizedComponentValue::Borrowed { value, defaults }),
+                Cow::Owned(mut value) => value_budget
+                    .complete_owned(schema, &mut value, default_overrides)
+                    .map(|()| NormalizedComponentValue::Owned(value)),
             };
             let effective = match effective {
                 Ok(effective) => effective,
@@ -1193,7 +1205,7 @@ fn preflight_source_values_with_context(
             };
 
             let native_eligible = match validate_native_component_value_references_with_limits(
-                &effective,
+                effective.read(),
                 value_limits,
             ) {
                 Ok(()) => true,
@@ -1217,7 +1229,9 @@ fn preflight_source_values_with_context(
                 [ComponentCapability::Scene],
             )
             .map_err(|error| ComponentCodecError::Message(error.to_string()))
-            .and_then(|()| validate_component_value_with_limits(schema, &effective, value_limits));
+            .and_then(|()| {
+                validate_component_value_with_limits(schema, effective.read(), value_limits)
+            });
             if let Err(error) = validation {
                 push_with_operation_index(
                     &mut diagnostics,
@@ -1235,7 +1249,7 @@ fn preflight_source_values_with_context(
             let asset_references = match collect_declared_asset_references_from_schema_with_limits(
                 schema,
                 schema.version(),
-                &effective,
+                effective.read(),
                 value_limits,
                 traversal_limits,
             ) {
@@ -1286,7 +1300,7 @@ fn preflight_source_values_with_context(
             // declarations and capabilities must remain valid in every role.
             if let Err(error) = validate_effective_local_references(
                 schema,
-                &effective,
+                effective.read(),
                 |target| !validate_local_references || namespace.contains(target),
                 traversal_limits,
             ) {
@@ -1331,8 +1345,11 @@ fn preflight_source_values_with_context(
     for (entity, components) in normalized_entities {
         for component in components {
             let component_id = component.id;
-            match registry.preflight_component_with_context(component_id, &component.value, context)
-            {
+            match registry.preflight_component_with_context(
+                component_id,
+                component.value.read(),
+                context,
+            ) {
                 Ok(_) => {}
                 Err(ComponentCodecError::MissingNativeBinding { .. }) => push_with_operation_index(
                     &mut diagnostics,
@@ -1372,6 +1389,7 @@ struct SceneValueBudget {
     nodes: usize,
     bytes: usize,
     depth: DepthLimit,
+    limits: ComponentValueMaterializationLimits,
 }
 
 impl SceneValueBudget {
@@ -1380,12 +1398,13 @@ impl SceneValueBudget {
             nodes: limits.nodes(),
             bytes: limits.bytes(),
             depth: limits.depth(),
+            limits,
         }
     }
 
     fn admit_explicit<E>(
         &mut self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
     ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
         use nara_reflect::__private::EffectiveValueAdmissionError;
@@ -1441,6 +1460,56 @@ impl SceneValueBudget {
         Ok(cost)
     }
 
+    fn remaining_limits(&self) -> ComponentValueMaterializationLimits {
+        self.limits.remaining(
+            self.limits.nodes() - self.nodes,
+            self.limits.bytes() - self.bytes,
+        )
+    }
+
+    fn freeze(
+        &mut self,
+        schema: &ComponentSchema,
+        value: &ComponentValue,
+        defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
+    ) -> Result<Option<nara_reflect::__private::FrozenComponentDefaults>, ComponentCodecError> {
+        let frozen = nara_reflect::__private::freeze_component_defaults(
+            schema,
+            value,
+            defaults,
+            self.remaining_limits(),
+        )?;
+        let cost = match &frozen {
+            Some(frozen) => frozen.cost(),
+            None => self.admit_input(value)?,
+        };
+        self.nodes -= cost.nodes();
+        self.bytes -= cost.logical_bytes();
+        Ok(frozen)
+    }
+
+    fn complete_owned(
+        &mut self,
+        schema: &ComponentSchema,
+        value: &mut ComponentValue,
+        defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
+    ) -> Result<(), ComponentCodecError> {
+        let cost =
+            nara_reflect::__private::effective_component_value_in_place_with_default_overrides(
+                schema,
+                value,
+                defaults,
+                self.remaining_limits(),
+            )?;
+        let cost = match cost {
+            Some(cost) => cost,
+            None => self.admit_input(value)?,
+        };
+        self.nodes -= cost.nodes();
+        self.bytes -= cost.logical_bytes();
+        Ok(())
+    }
+
     fn admit_contextual_defaults(
         &mut self,
         defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
@@ -1472,6 +1541,7 @@ impl SceneValueBudget {
         Ok(())
     }
 
+    #[cfg(test)]
     fn materialize<'value>(
         &mut self,
         schema: &ComponentSchema,
@@ -2334,6 +2404,7 @@ mod tests {
             nodes: 4,
             bytes: 0,
             depth: DepthLimit::new(2).unwrap(),
+            limits: limits(4, 1, 2),
         };
         let empty_schema = data_schema([]);
         assert!(
@@ -2545,7 +2616,8 @@ mod tests {
                 children: Vec::new(),
                 components: [(
                     native_id(),
-                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, effective.clone()),
+                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, effective.clone())
+                        .clone_for_compilation(),
                 )]
                 .into_iter()
                 .collect(),

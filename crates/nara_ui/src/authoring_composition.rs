@@ -819,7 +819,7 @@ fn create_parameters_from_recipe(
         UiCatalogNodeKind::Text => {
             let text = components
                 .get(&UiAuthoringComponentKind::Text.component_type())
-                .and_then(|record| codec::decode_text(record.value()).ok())
+                .and_then(|record| codec::decode_text(record.value().into()).ok())
                 .ok_or(UiStructureRejection::InvalidRecipe)?;
             Ok(UiCreateParameters::Text {
                 content: text.kernel().content().to_string(),
@@ -828,7 +828,11 @@ fn create_parameters_from_recipe(
         UiCatalogNodeKind::Image => {
             let reference = components
                 .get(&UiAuthoringComponentKind::Visual.component_type())
-                .and_then(|record| codec::visual_image_reference(record.value()).ok().flatten())
+                .and_then(|record| {
+                    codec::visual_image_reference(record.value().into())
+                        .ok()
+                        .flatten()
+                })
                 .ok_or(UiStructureRejection::InvalidRecipe)?;
             let image_path = match &reference {
                 AssetRef::Path(path) => path.as_str(),
@@ -844,7 +848,7 @@ fn create_parameters_from_recipe(
         UiCatalogNodeKind::Button => {
             let button = components
                 .get(&UiAuthoringComponentKind::Button.component_type())
-                .and_then(|record| codec::decode_button(record.value()).ok())
+                .and_then(|record| codec::decode_button(record.value().into()).ok())
                 .ok_or(UiStructureRejection::InvalidRecipe)?;
             Ok(UiCreateParameters::Button {
                 label: button.label().to_string(),
@@ -894,7 +898,7 @@ fn insert_component(
     value: ComponentValue,
 ) -> Result<(), UiStructureRejection> {
     let component = kind.component_type();
-    codec::validate_ui_component_value(&component, &value)
+    codec::validate_ui_component_value(&component, (&value).into())
         .map_err(|_| UiStructureRejection::InvalidRecipe)?;
     let schema = codec::ui_schema_catalog()
         .components
@@ -976,7 +980,11 @@ pub(crate) fn hierarchy_kind(entity: &SceneEntityRecord) -> UiAuthoringHierarchy
     if entity
         .components
         .get(&UiAuthoringComponentKind::Visual.component_type())
-        .and_then(|record| codec::visual_image_reference(record.value()).ok().flatten())
+        .and_then(|record| {
+            codec::visual_image_reference(record.value().into())
+                .ok()
+                .flatten()
+        })
         .is_some()
     {
         return UiAuthoringHierarchyKind::Image;
@@ -1202,7 +1210,7 @@ mod tests {
             let node = recipe
                 .components()
                 .get(&UiAuthoringComponentKind::Node.component_type())
-                .and_then(|record| codec::decode_node(record.value()).ok())
+                .and_then(|record| codec::decode_node(record.value().into()).ok())
                 .expect("every recipe must contain one valid node");
             assert_eq!(node.style().position_mode(), UiPositionMode::Flow);
             assert_eq!(node.style().width(), UiDimension::Px(width));

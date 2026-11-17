@@ -7,7 +7,7 @@ use nara_reflect::{
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
     ComponentSchemaOwnerId, ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
     ComponentSchemaProviderSource, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
-    ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
+    ComponentValue, ComponentValueKind, ComponentValueRef, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
@@ -85,7 +85,7 @@ fn encode_settings(settings: &RuntimeSettings) -> ComponentValue {
     ComponentValue::Map(fields)
 }
 
-fn decode_settings(value: &ComponentValue) -> Result<RuntimeSettings, ComponentCodecError> {
+fn decode_settings(value: ComponentValueRef<'_>) -> Result<RuntimeSettings, ComponentCodecError> {
     let settings = value.field("settings")?;
     let optional = |name| {
         value
@@ -163,6 +163,30 @@ fn settings_schema(editable_locked: bool, template: bool) -> ComponentSchema {
     } else {
         schema
     }
+}
+
+#[test]
+fn settings_decoder_reads_frozen_defaults_without_changing_source_omissions() {
+    let schema = settings_schema(true, true);
+    let source = encode_settings(&RuntimeSettings::default());
+    let defaults = nara_reflect::__private::freeze_component_defaults(
+        &schema,
+        &source,
+        &BTreeMap::new(),
+        nara_reflect::ComponentValueMaterializationLimits::default(),
+    )
+    .unwrap()
+    .unwrap();
+    let read = defaults.read(&source);
+    assert!(read.as_value().is_none());
+    let settings = decode_settings(read).unwrap();
+    assert_eq!(settings.amount, 3);
+    assert_eq!(settings.locked, 7);
+    assert_eq!(settings.optional, Some(5));
+    assert_eq!(settings.defaulted, Some(11));
+    assert_eq!(settings.text, "authored");
+    assert!(source.get("defaulted").is_none());
+    assert_eq!(source.field_u64("optional").unwrap(), 5);
 }
 
 fn editable_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {

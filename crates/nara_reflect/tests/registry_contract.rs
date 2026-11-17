@@ -11,8 +11,8 @@ use nara_reflect::{
     ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
     ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape, component_registry,
-    preloaded_component_registry_plugin, register_schema_provider_for_plugin,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
+    component_registry, preloaded_component_registry_plugin, register_schema_provider_for_plugin,
     validate_component_value, validate_schema_provider_for_plugin,
 };
 
@@ -448,7 +448,7 @@ fn register_position_binding(
                 x: value.field_f64("x")? as f32,
                 debug_label: value
                     .get("debug_label")
-                    .and_then(ComponentValue::as_str)
+                    .and_then(ComponentValueRef::as_str)
                     .unwrap_or_default()
                     .to_owned(),
             })

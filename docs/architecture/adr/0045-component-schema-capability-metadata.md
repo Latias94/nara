@@ -135,6 +135,15 @@ initialize only its touched omitted root from the declared default under ADR 002
 ordinary root-field patch and absence-restoring inverse. It does not call the all-default projection
 as a source-write operation or inherit its ancestor/list construction policy.
 
+Closed effective data need not occupy one newly owning recursive tree. The Reflect planner may
+freeze its selected insertions over privately retained immutable source backing. Borrowed reads
+then observe those explicit values without consulting a receiving Schema or selecting defaults
+again. Native codecs, derived field decoding and complete shape/reference/receiving validation
+consume that same read Interface. Reads cannot detach an owning backing handle. Actual writes,
+public deep extraction and independent cooked ownership use explicitly admitted materialization;
+ordinary decoding does not silently flatten a frozen value first. Source wire and omissions,
+default interpretation, full logical limits and independent retained-owner accounting remain.
+
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque
 payloads. When insertion is needed, combined raw values, defaults, shared ancestors and key bytes

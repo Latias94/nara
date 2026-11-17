@@ -124,13 +124,16 @@ agreement: its records decode against the already admitted frozen native schema 
 Source component values may use component-local immutable storage, independent of raw documents,
 resolvers and snapshots. Public source record/document cloning preserves independent values;
 borrowed access does not grant a detachable storage handle. Only private compilation may share
-payload storage through drafts into move-only compiled values. Actual migration, missing defaults,
-properties and reference lowering isolate storage before changing it; requesting mutable access
-must not eagerly copy a value that the operation will only read.
+payload storage through drafts into move-only compiled values. Missing defaults may retain closed
+selected insertions over that unchanged backing; reads never consult receiving definitions or
+retain an independent owning handle. Actual migration, properties and changed reference lowering
+isolate owning data before mutation. Already isolated migration output may accept defaults in
+place. Requesting mutable access must not eagerly copy a value that the operation will only read.
 
 Source, compiled and independently prepared owners each retain their full logical payload
-allowance, including backing overhead, even when they share the same allocation. Existing retained
-leases, generation claims and per-occurrence materialized limits remain authoritative. Shared
+allowance, including raw backing and selected frozen-insertion overhead, even when they share the
+same allocation. Independent cooked output admits and copies complete effective data. Existing
+retained leases, generation claims and per-occurrence materialized limits remain authoritative. Shared
 payloads do not deduplicate budgets, own a source document or introduce another lifecycle owner.
 Public source clones remain independent allocations, so they cannot extend original storage
 after its original retained allowance is refunded. The source wire representation is unchanged.

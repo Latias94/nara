@@ -876,7 +876,7 @@ impl SceneObservation {
                             id: id.clone(),
                             schema_owner: record.schema_owner().cloned(),
                             version: record.version(),
-                            value: record.value().clone(),
+                            value: record.value().to_owned(),
                         })
                         .collect(),
                 })

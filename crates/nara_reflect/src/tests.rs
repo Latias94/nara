@@ -82,7 +82,7 @@ fn frozen_apply_probe_registry() -> ComponentRegistrySnapshot {
                 Ok(ApplyProbe(
                     value
                         .get("value")
-                        .and_then(ComponentValue::as_i64)
+                        .and_then(|value| value.as_i64())
                         .ok_or_else(|| ComponentCodecError::invalid_field("value", "i64"))?,
                 ))
             },
@@ -789,12 +789,12 @@ fn preflights_applies_and_encodes_scene_component() {
             |value| {
                 let x = value
                     .get("x")
-                    .and_then(ComponentValue::as_f64)
+                    .and_then(|value| value.as_f64())
                     .ok_or_else(|| ComponentCodecError::invalid_field("x", "finite float"))?
                     as f32;
                 let y = value
                     .get("y")
-                    .and_then(ComponentValue::as_f64)
+                    .and_then(|value| value.as_f64())
                     .ok_or_else(|| ComponentCodecError::invalid_field("y", "finite float"))?
                     as f32;
                 Ok(Position { x, y })

@@ -1,14 +1,17 @@
+use std::collections::BTreeMap;
+
 use nara_asset::AssetServer;
 use nara_ecs::World;
 use nara_reflect::{
-    ComponentFieldId, ComponentFieldPath, ComponentNumericDomain, ComponentRegistryBuilder,
-    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, validate_component_value,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistrySnapshot,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueMaterializationLimits, validate_component_value,
 };
 
 use crate::{
-    UI_SCHEMA_OWNER_ID, UI_SCHEMA_PROVIDER, UiButton, UiButtonVisuals, UiColorRole, UiNode,
-    UiStyle, UiText, UiVisual,
+    UI_SCHEMA_OWNER_ID, UI_SCHEMA_PROVIDER, UiActionId, UiButton, UiButtonVisuals, UiColorRole,
+    UiLayer, UiNode, UiRoot, UiSemanticRole, UiSemantics, UiStyle, UiText, UiTheme, UiVisual,
 };
 
 const TEXT_ID: &str = "nara.ui.UiText";
@@ -364,9 +367,123 @@ fn creation_templates_preserve_native_rejection_of_invalid_ui_values() {
             .unwrap();
         validate_component_value(schema, &invalid).unwrap();
         assert!(
-            crate::codec::validate_ui_component_value(&id, &invalid).is_err(),
+            crate::codec::validate_ui_component_value(&id, (&invalid).into()).is_err(),
             "{id}"
         );
         assert!(registry.preflight_component(&id, &invalid).is_err(), "{id}");
     }
+}
+
+#[test]
+fn registered_ui_codecs_decode_frozen_nested_fields_without_changing_source_values() {
+    let registry = ui_registry();
+    let mut world = World::new();
+    let authored = world
+        .spawn((
+            UiRoot::new(UiLayer::Overlay),
+            UiNode::new(UiStyle::fill()),
+            UiVisual::role(UiColorRole::Accent),
+            UiText::new("Frozen text", 18.0).unwrap(),
+            UiButton::new("Apply", UiActionId::new("apply").unwrap(), 18.0).unwrap(),
+            UiButtonVisuals::default(),
+            UiSemantics::new(UiSemanticRole::Group, "Frozen group").unwrap(),
+            UiTheme::default(),
+        ))
+        .id();
+    for (id, path) in [
+        ("nara.ui.UiRoot", "layer"),
+        ("nara.ui.UiNode", "style.padding.left"),
+        ("nara.ui.UiVisual", "radii.top_left"),
+        (TEXT_ID, "brush.kind"),
+        ("nara.ui.UiButton", "enabled"),
+        ("nara.ui.UiButtonVisuals", "focus_border_width"),
+        ("nara.ui.UiSemantics", "name"),
+        ("nara.ui.UiTheme", "palette.surface.red"),
+    ] {
+        let id = ComponentTypeId::new(id);
+        let expected = registry
+            .encode_component(&id, &world, authored)
+            .unwrap()
+            .unwrap();
+        let path = ComponentFieldPath::from_fields(path.split('.'));
+        let mut source = expected.clone();
+        let mut schema = registry.schema(&id).unwrap().clone();
+        let field = schema
+            .fields
+            .iter_mut()
+            .find(|field| field.path() == &path)
+            .unwrap();
+        field.default_value = Some(source.remove_path(&path).unwrap());
+        let before = source.clone();
+        let frozen = nara_reflect::__private::freeze_component_defaults(
+            &schema,
+            &source,
+            &BTreeMap::new(),
+            ComponentValueMaterializationLimits::default(),
+        )
+        .unwrap()
+        .unwrap();
+        let value = frozen.read(&source);
+        assert!(value.as_value().is_none(), "{id}");
+        crate::codec::validate_ui_component_value(&id, value).unwrap();
+        let prepared = registry.preflight_component(&id, value).unwrap();
+        let restored = world.spawn_empty().id();
+        prepared.apply(&mut world, restored).unwrap();
+        assert_eq!(
+            registry.encode_component(&id, &world, restored).unwrap(),
+            Some(expected),
+            "{id}"
+        );
+        assert_eq!(source, before, "{id}");
+    }
+}
+
+#[test]
+fn semantics_codec_decodes_a_frozen_action_list_suffix() {
+    let registry = ui_registry();
+    let id = ComponentTypeId::new("nara.ui.UiSemantics");
+    let authored = UiSemantics::new(UiSemanticRole::Group, "Commands")
+        .unwrap()
+        .with_action(UiActionId::new("first").unwrap())
+        .unwrap()
+        .with_action(UiActionId::new("second").unwrap())
+        .unwrap();
+    let mut world = World::new();
+    let entity = world.spawn(authored.clone()).id();
+    let mut source = registry
+        .encode_component(&id, &world, entity)
+        .unwrap()
+        .unwrap();
+    let path = ComponentFieldPath::new([
+        ComponentFieldPathSegment::field("actions"),
+        ComponentFieldPathSegment::index(1),
+    ]);
+    let mut field = ComponentFieldSchema::required(
+        ComponentFieldId::new("test.action-suffix"),
+        "Action suffix",
+        path.clone(),
+        ComponentValueKind::String,
+    );
+    field.default_value = Some(source.remove_path(&path).unwrap());
+    let mut schema = registry.schema(&id).unwrap().clone();
+    schema.fields.push(field);
+    let frozen = nara_reflect::__private::freeze_component_defaults(
+        &schema,
+        &source,
+        &BTreeMap::new(),
+        ComponentValueMaterializationLimits::default(),
+    )
+    .unwrap()
+    .unwrap();
+    let value = frozen.read(&source);
+    assert!(value.field("actions").unwrap().as_value().is_none());
+    assert_eq!(crate::codec::decode_semantics(value).unwrap(), authored);
+    let prepared = registry.preflight_component(&id, value).unwrap();
+    let restored = world.spawn_empty().id();
+    prepared.apply(&mut world, restored).unwrap();
+    assert_eq!(world.get::<UiSemantics>(restored), Some(&authored));
+    assert_eq!(
+        source.field("actions").unwrap(),
+        &ComponentValue::List(vec![ComponentValue::String("first".to_owned())]),
+    );
 }

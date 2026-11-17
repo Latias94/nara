@@ -611,7 +611,7 @@ fn captured_property_survives_explicit_wire_migration_and_keyed_reorder() {
     registry
         .register_native_component_with_codec::<NativeSettings, _, _>(
             &current.id,
-            |value| Ok(NativeSettings(value.clone())),
+            |value| Ok(NativeSettings(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();

@@ -154,11 +154,12 @@ fn payload_scope_is_lexical_while_explicit_routes_select_nested_input_environmen
             .iter()
             .filter(|entity| entity.components().contains_key(&component()))
         {
-            let ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target }) =
-                host.components()[&component()]
-                    .value()
-                    .get("target")
-                    .unwrap()
+            let Some(EntityReference::SceneLocal { entity: target }) = host.components()
+                [&component()]
+                .value()
+                .get("target")
+                .unwrap()
+                .as_entity_reference()
             else {
                 panic!("expected lowered reference")
             };
@@ -239,8 +240,11 @@ fn self_routed_argument_refuses_a_cycle_but_overwritten_input_needs_no_argument(
                 .find(|entity| entity.components().contains_key(&component()))
                 .unwrap();
             assert_eq!(
-                host.components()[&component()].value().get("target"),
-                Some(&ComponentValue::EntityReference(local("socket")))
+                host.components()[&component()]
+                    .value()
+                    .get("target")
+                    .map(|value| value.to_owned()),
+                Some(ComponentValue::EntityReference(local("socket")))
             );
         }
     }
@@ -291,8 +295,11 @@ fn hidden_contextual_default_is_retained_and_absent_uses_its_original_input_envi
             .find(|entity| entity.components().contains_key(&component()))
             .unwrap();
         assert_eq!(
-            host.components()[&component()].value().get("target"),
-            Some(&if expose {
+            host.components()[&component()]
+                .value()
+                .get("target")
+                .map(|value| value.to_owned()),
+            Some(if expose {
                 ComponentValue::EntityReference(local("socket"))
             } else {
                 ComponentValue::Null

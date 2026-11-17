@@ -60,7 +60,7 @@ fn register_health(registry: &mut ComponentRegistryBuilder) -> Result<(), Compon
         |value| {
             let current = value
                 .get("current")
-                .and_then(ComponentValue::as_i64)
+                .and_then(|value| value.as_i64())
                 .ok_or_else(|| ComponentCodecError::invalid_field("current", "i64"))?;
             Ok(Health { current })
         },

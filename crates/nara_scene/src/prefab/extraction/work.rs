@@ -11,7 +11,7 @@ use nara_reflect::{
     },
     ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
     ComponentPropertyError, ComponentPropertyPath, ComponentPropertyReadBudget, ComponentTypeId,
-    ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits,
+    ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
     EntityReferenceTraversalLimits,
 };
 
@@ -274,12 +274,12 @@ impl ExtractionWork {
         ))
     }
 
-    pub(super) fn value(
+    pub(super) fn value<'value>(
         &mut self,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'value>>,
     ) -> Result<ComponentValueCost, ExtractionError> {
         let remaining = self.traversal()?;
-        let (result, visited) = value.cost_up_to_with_admission_measured(
+        let (result, visited) = value.into().cost_up_to_with_admission_measured(
             remaining.nodes().get(),
             remaining.bytes().get(),
             |bytes| self.admit(bytes),

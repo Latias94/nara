@@ -261,7 +261,10 @@ fn expanded_record(candidate: &CompiledSceneCandidate) -> &nara_scene::CompiledS
     record
 }
 
-fn inventory(schema: &ComponentSchema, value: &ComponentValue) -> Vec<DeclaredAssetReference> {
+fn inventory<'a>(
+    schema: &ComponentSchema,
+    value: impl Into<nara_reflect::ComponentValueRef<'a>>,
+) -> Vec<DeclaredAssetReference> {
     collect_declared_effective_asset_references_with_admission(
         schema,
         ComponentSchemaVersion::ONE,
@@ -272,14 +275,15 @@ fn inventory(schema: &ComponentSchema, value: &ComponentValue) -> Vec<DeclaredAs
     .unwrap()
 }
 
-fn assert_inventory(
+fn assert_inventory<'a>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<nara_reflect::ComponentValueRef<'a>>,
     deferred: u64,
     fallback: u64,
 ) -> Vec<DeclaredAssetReference> {
     // Assert actual compiler materialization before using the already-effective collector.
-    assert_eq!(value.get("wire_fallback"), Some(&asset(fallback)));
+    let value = value.into();
+    assert_eq!(value.get("wire_fallback").unwrap(), &asset(fallback));
     let references = inventory(schema, value);
     assert_eq!(references.len(), 3);
     for (path, field, target, demand) in [
@@ -334,7 +338,7 @@ fn prefab_property_pin_and_materialized_default_keep_distinct_demands_for_one_pr
         2
     );
 
-    let mut rewritten = record.value().clone();
+    let mut rewritten = record.value().to_owned();
     rewrite_declared_asset_references(&mut rewritten, &references, |reference| {
         Ok::<_, Infallible>(
             if reference.asset_ref() == &AssetRef::Product(product(SHARED)) {
@@ -373,7 +377,7 @@ fn prefab_absent_restores_immediate_default_and_property_set_keeps_actual_deferr
     let schema = fixture.schema();
     assert_inventory(schema, record.value(), SHARED, SHARED);
 
-    let mut edited = record.value().clone();
+    let mut edited = record.value().to_owned();
     let previous = replace_component_property(
         schema,
         record.version(),

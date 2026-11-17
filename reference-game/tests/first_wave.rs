@@ -1196,7 +1196,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
         .find(|entity| entity.components.contains_key(&weapon_id))
         .and_then(|entity| entity.components.get_mut(&weapon_id))
         .expect("the startup fixture should expose its authored weapon");
-    let ComponentValue::Map(fields) = &mut weapon.value else {
+    let ComponentValue::Map(fields) = weapon.value_mut() else {
         panic!("the authored Weapon value should remain a map");
     };
     fields.insert("damage".to_owned(), ComponentValue::I64(0));

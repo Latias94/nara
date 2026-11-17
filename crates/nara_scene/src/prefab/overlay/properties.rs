@@ -124,7 +124,7 @@ pub(super) fn prepare_claims(
                 let selected = resolve_component_property_with_limits(
                     schema,
                     version,
-                    &base,
+                    base.as_ref(),
                     &claim.path,
                     base_limits,
                 )
@@ -169,7 +169,7 @@ pub(super) fn prepare_claims(
                     resolve_component_property_with_limits(
                         schema,
                         version,
-                        &base,
+                        base.as_ref(),
                         &claim.path,
                         base_limits,
                     )
@@ -183,7 +183,7 @@ pub(super) fn prepare_claims(
                     resolve_component_property_storage_path_with_admission(
                         schema,
                         version,
-                        &base,
+                        base.as_ref(),
                         &claim.path,
                         base_limits,
                         &mut admit_path,

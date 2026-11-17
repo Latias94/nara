@@ -231,7 +231,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             continue;
         };
         exported_components += 1;
-        let value = Relationships::__decode_persistent_component(record.value()).unwrap();
+        let value = Relationships::__decode_persistent_component(record.value().into()).unwrap();
         assert_eq!(value.weights, [7, 255]);
         let Some(EntityReference::SceneLocal { entity: target }) = &value.targets["friends"][0]
         else {

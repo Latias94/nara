@@ -187,6 +187,100 @@ fn record(value: ComponentValue) -> SceneComponentRecord {
 }
 
 #[test]
+fn frozen_data_preparation_keeps_selected_defaults_and_cook_owns_explicit_values() {
+    let bindings = bindings();
+    let component = component("game.Defaults");
+    let mut source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("root"))
+        .with_component(
+            component.clone(),
+            record(ComponentValue::map([] as [(&str, ComponentValue); 0])),
+        )]);
+    let report = bindings.compile_scene(&source, &InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let compiled = report.candidate.unwrap().bind_source(containing());
+    let selected = compiled.document().entities()[0].components()[&component].value();
+    assert!(selected.as_value().is_none());
+    assert_eq!(selected.field_u64("amount").unwrap(), 7);
+    let cost = selected.cost();
+    let limits = ComponentValueMaterializationLimits::new(
+        ItemLimit::new(cost.nodes()).unwrap(),
+        ByteLimit::new(cost.logical_bytes()).unwrap(),
+        DepthLimit::new(2).unwrap(),
+    );
+    let database = ProjectAssetDatabase::default();
+    let cooked = RuntimeSceneCandidate::cook(
+        &compiled,
+        &bindings,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+        RuntimeSceneLimits::default(),
+    )
+    .unwrap();
+    let actual = cooked.document().entities()[0].components()[&component].value();
+    assert!(actual.as_value().is_some());
+    assert_eq!(actual, selected);
+    assert!(!std::ptr::eq(
+        actual.get("amount").unwrap().as_value().unwrap(),
+        selected.get("amount").unwrap().as_value().unwrap(),
+    ));
+    let occurrence = crate::SceneOccurrenceKey::new("frozen-data", "prepared").unwrap();
+    let mut world = nara_ecs::World::new();
+    for refused in [
+        limits.with_nodes(ItemLimit::new(cost.nodes() - 1).unwrap()),
+        limits.with_bytes(ByteLimit::new(cost.logical_bytes() - 1).unwrap()),
+    ] {
+        assert!(
+            bindings
+                .prepare_scene_with_limits(&mut world, &compiled, &occurrence, None, refused,)
+                .is_err()
+        );
+    }
+    let prepared = bindings
+        .prepare_scene_with_limits(&mut world, &compiled, &occurrence, None, limits)
+        .unwrap();
+    source.entities[0]
+        .components
+        .get_mut(&component)
+        .unwrap()
+        .set_value(ComponentValue::map([("amount", ComponentValue::U64(99))]));
+    drop(compiled);
+    drop(source);
+    let spawned = prepared.commit(&mut world);
+    assert!(
+        !spawned.diagnostics.has_errors(),
+        "{:?}",
+        spawned.diagnostics
+    );
+    let instance = spawned.instance.unwrap();
+    let nara_identity::EntityLookup::Resolved(entity) = instance.resolve(&world, &id("root"))
+    else {
+        panic!("prepared frozen data must retain its complete entity")
+    };
+    let retained = bindings
+        .data_component(&world, entity, &component)
+        .unwrap()
+        .unwrap()
+        .value();
+    assert!(retained.as_value().is_none());
+    assert_eq!(retained.field_u64("amount").unwrap(), 7);
+    let bytes = cooked.to_json_bytes().unwrap();
+    let decoded = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, cooked.limits())
+        .unwrap()
+        .admit(&containing(), &bindings)
+        .unwrap();
+    drop(cooked);
+    assert_eq!(
+        decoded.document().entities()[0].components()[&component].value(),
+        retained
+    );
+    assert!(
+        decoded.document().entities()[0].components()[&component]
+            .value()
+            .as_value()
+            .is_some()
+    );
+}
+
+#[test]
 fn scalar_cook_copies_admit_each_new_payload_backing_before_allocation() {
     use crate::compiled::claims::{FlatSceneComponentClaim, FlatSceneEntityClaim};
     use std::mem::size_of;
@@ -245,8 +339,11 @@ fn scalar_cook_copies_admit_each_new_payload_backing_before_allocation() {
             .unwrap()
             .components()[&component]
             .value();
-        assert_eq!(&**copied, original);
-        assert!(!std::ptr::eq(&**copied, original));
+        assert_eq!(copied.read(), original);
+        assert!(!std::ptr::eq(
+            copied.read().as_value().unwrap(),
+            original.as_value().unwrap()
+        ));
     }
     let mut short =
         budget::WorkBudget::new(defaults.with_working_bytes(ByteLimit::new(expected - 1).unwrap()));
@@ -534,7 +631,7 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
         }
         for record in entity.components.values_mut() {
             if let ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) =
-                record.value.make_mut()
+                record.value.materialize_mut()
             {
                 *entity = renames[entity].clone();
             }
@@ -632,20 +729,34 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
         .iter()
         .find(|entity| entity.id() == &id("anchor"))
         .unwrap();
-    let ComponentValue::List(items) = anchor.components()[&component("game.Links")].value() else {
-        panic!("expected list")
-    };
+    let items = anchor.components()[&component("game.Links")]
+        .value()
+        .as_list()
+        .expect("expected list");
     assert_eq!(
-        items[0].get("local").unwrap().as_entity_reference(),
+        items
+            .get(0)
+            .unwrap()
+            .get("local")
+            .unwrap()
+            .as_entity_reference(),
         Some(&EntityReference::SceneLocal {
             entity: target.clone()
         })
     );
     assert_eq!(
-        items[0].get("persistent").unwrap().as_entity_reference(),
+        items
+            .get(0)
+            .unwrap()
+            .get("persistent")
+            .unwrap()
+            .as_entity_reference(),
         Some(&persistent)
     );
-    assert_eq!(items[0].get("empty"), Some(&ComponentValue::Null));
+    assert_eq!(
+        items.get(0).unwrap().get("empty").unwrap(),
+        &ComponentValue::Null
+    );
     assert_eq!(
         anchor.components()[&component("game.Text")]
             .value()
@@ -817,8 +928,9 @@ fn cook_preserves_explicit_compiled_defaults_and_rewrites_declared_assets_withou
     assert_eq!(
         components[&component("game.AssetDefault")]
             .value()
-            .get("image"),
-        Some(&encode_asset_reference_value(&primary()))
+            .get("image")
+            .map(|value| value.to_owned()),
+        Some(encode_asset_reference_value(&primary()))
     );
     assert_eq!(
         components[&component("game.Text")].value(),

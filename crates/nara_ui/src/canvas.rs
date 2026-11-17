@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue,
+    ComponentValueRef,
 };
 use nara_scene::{SceneComponentRecord, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey};
 use nara_text::bundled_font_face;
@@ -388,7 +388,7 @@ fn decode_required<T>(
     projection: &UiAuthoringProjection,
     entity: &SceneEntityId,
     kind: UiAuthoringComponentKind,
-    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(ComponentValueRef<'_>) -> Result<T, ComponentCodecError>,
 ) -> Result<T, UiAuthoringCanvasCompileError> {
     let component = kind.component_type();
     let record = projection.component_record(entity, kind).ok_or_else(|| {
@@ -404,7 +404,7 @@ fn decode_optional<T>(
     projection: &UiAuthoringProjection,
     entity: &SceneEntityId,
     kind: UiAuthoringComponentKind,
-    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(ComponentValueRef<'_>) -> Result<T, ComponentCodecError>,
 ) -> Result<Option<T>, UiAuthoringCanvasCompileError> {
     let component = kind.component_type();
     projection
@@ -417,7 +417,7 @@ fn decode_record<T>(
     entity: &SceneEntityId,
     component: ComponentTypeId,
     record: &SceneComponentRecord,
-    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(ComponentValueRef<'_>) -> Result<T, ComponentCodecError>,
 ) -> Result<T, UiAuthoringCanvasCompileError> {
     let expected = codec::ui_component_schema_version(&component).ok_or_else(|| {
         UiAuthoringCanvasCompileError::MissingComponentSchema {
@@ -432,7 +432,7 @@ fn decode_record<T>(
             actual: record.version,
         });
     }
-    decode(record.value()).map_err(|source| UiAuthoringCanvasCompileError::ComponentDecode {
+    decode(record.value().into()).map_err(|source| UiAuthoringCanvasCompileError::ComponentDecode {
         entity: entity.clone(),
         component,
         source,
@@ -502,6 +502,7 @@ pub enum UiAuthoringCanvasCompileError {
 
 #[cfg(test)]
 mod tests {
+    use nara_reflect::ComponentValue;
     use nara_scene::{
         PrefabDocument, PrefabEntityTarget, SceneComponentRecord, SceneEntityId,
         SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,

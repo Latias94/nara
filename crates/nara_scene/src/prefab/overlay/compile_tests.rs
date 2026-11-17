@@ -68,14 +68,14 @@ fn registry_with_value_shape(value_shape: ComponentValueShape) -> ComponentRegis
     registry
         .register_persistent_component_with_codec::<C, _, _>(
             schema("test.CompilerC"),
-            |value| Ok(C(value.clone())),
+            |value| Ok(C(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
     registry
         .register_persistent_component_with_codec::<D, _, _>(
             schema("test.CompilerD"),
-            |value| Ok(D(value.clone())),
+            |value| Ok(D(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -953,6 +953,17 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         &mut admit_unit,
     )
     .unwrap();
+    assert!(
+        nara_reflect::__private::freeze_component_defaults_with_admission(
+            schema,
+            &value,
+            &Default::default(),
+            Default::default(),
+            &mut admit_unit,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert!(
         nara_reflect::__private::component_defaults_are_explicit_with_admission(
             schema,

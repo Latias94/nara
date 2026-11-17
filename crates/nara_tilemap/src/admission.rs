@@ -1,7 +1,9 @@
 use std::{error::Error, fmt, mem::size_of};
 
 use nara_asset::AssetRef;
-use nara_reflect::{ComponentCodecError, ComponentValue, asset_reference_decode_work_bytes};
+use nara_reflect::{
+    ComponentCodecError, ComponentValueKind, ComponentValueRef, asset_reference_decode_work_bytes,
+};
 
 use crate::{TileAtlasLayout, TileCoord, TileIndex, read_cell, read_optional_asset_ref};
 
@@ -16,10 +18,11 @@ type CellSelection = (TileCoord, TileIndex, usize);
 /// error diagnostics remain under their existing owner bounds; this is not allocator/RSS
 /// accounting. The direct validator uses the same preparation and scratch bound.
 #[must_use]
-pub fn tilemap_membership_work_bytes(value: &ComponentValue) -> Option<usize> {
+pub fn tilemap_membership_work_bytes<'a>(value: impl Into<ComponentValueRef<'a>>) -> Option<usize> {
+    let value = value.into();
     let Some(tileset) = value
         .get("tileset")
-        .filter(|value| !matches!(value, ComponentValue::Null))
+        .filter(|value| value.kind() != ComponentValueKind::Null)
     else {
         return Some(0);
     };
@@ -27,7 +30,7 @@ pub fn tilemap_membership_work_bytes(value: &ComponentValue) -> Option<usize> {
     // owner bound. Valid-shaped but invalid identities still contribute their parser scratch.
     let reference_bytes = asset_reference_decode_work_bytes(tileset).unwrap_or(0);
     let entries = match value.get("cells") {
-        Some(ComponentValue::List(entries)) => entries.len(),
+        Some(value) => value.as_list().map_or(0, |entries| entries.len()),
         _ => 0,
     };
     if entries == 0 {
@@ -127,22 +130,22 @@ impl TilemapMembershipRequirement {
 /// A present reference is decoded even for an empty cell list. All nonempty cells are parsed and
 /// checked for duplicate coordinates before the temporary selection vector is released. Callers
 /// retaining the compact result separately admit its storage and owned reference data.
-pub fn prepare_persisted_tilemap_membership(
-    value: &ComponentValue,
+pub fn prepare_persisted_tilemap_membership<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<Option<TilemapMembershipRequirement>, TilemapMembershipError> {
+    let value = value.into();
     let Some(tileset) = read_optional_asset_ref(value.get("tileset"), "tileset")
         .map_err(TilemapMembershipError::InvalidValue)?
     else {
         return Ok(None);
     };
     let entries = match value.get("cells") {
-        None => &[][..],
-        Some(ComponentValue::List(entries)) => entries.as_slice(),
-        _ => {
-            return Err(TilemapMembershipError::InvalidValue(
-                ComponentCodecError::invalid_field("cells", "list"),
-            ));
-        }
+        None => return Ok(None),
+        Some(value) => value.as_list().ok_or_else(|| {
+            TilemapMembershipError::InvalidValue(ComponentCodecError::invalid_field(
+                "cells", "list",
+            ))
+        })?,
     };
     if entries.is_empty() {
         return Ok(None);
@@ -182,8 +185,8 @@ pub fn prepare_persisted_tilemap_membership(
 ///
 /// The resolver is not called for an empty map or invalid local cells. Scratch admission uses
 /// [`tilemap_membership_work_bytes`], as for [`prepare_persisted_tilemap_membership`].
-pub fn validate_persisted_tilemap_membership(
-    value: &ComponentValue,
+pub fn validate_persisted_tilemap_membership<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
     resolve_atlas: impl FnOnce(&AssetRef) -> Option<TileAtlasLayout>,
 ) -> Result<(), TilemapMembershipError> {
     let Some(requirement) = prepare_persisted_tilemap_membership(value)? else {

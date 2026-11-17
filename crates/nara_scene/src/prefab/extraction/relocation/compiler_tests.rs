@@ -238,7 +238,8 @@ fn snapshot(
         .iter()
         .map(|entity| {
             assert_eq!(entity.components().len(), 1);
-            let ComponentValue::Map(mut fields) = entity.components()[&component()].value().clone()
+            let ComponentValue::Map(mut fields) =
+                entity.components()[&component()].value().to_owned()
             else {
                 panic!("the real schema admits a map");
             };

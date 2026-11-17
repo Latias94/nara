@@ -187,7 +187,7 @@ fn registry() -> ComponentRegistrySnapshot {
     builder
         .register_persistent_component_with_codec::<Hidden, _, _>(
             hidden_schema,
-            |value| Ok(Hidden(value.clone())),
+            |value| Ok(Hidden(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();

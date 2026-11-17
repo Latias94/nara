@@ -100,8 +100,9 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
                 assert_eq!(
                     result.entities()[0].components()[&component]
                         .value()
-                        .get("icons"),
-                    Some(&references)
+                        .get("icons")
+                        .map(|value| value.to_owned()),
+                    Some(references.clone())
                 );
             } else {
                 assert!(

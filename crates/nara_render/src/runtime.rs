@@ -29,7 +29,7 @@ use nara_ecs::{
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
 };
 use nara_transform::PresentedSpatialSnapshot2d;
 #[cfg(test)]
@@ -609,8 +609,10 @@ fn camera_fields() -> [ComponentFieldSchema; 5] {
     ]
 }
 
-fn read_render_target(value: Option<&ComponentValue>) -> Result<RenderTarget, ComponentCodecError> {
-    match value.and_then(ComponentValue::as_str) {
+fn read_render_target(
+    value: Option<ComponentValueRef<'_>>,
+) -> Result<RenderTarget, ComponentCodecError> {
+    match value.and_then(ComponentValueRef::as_str) {
         None | Some("primary_window") => Ok(RenderTarget::PrimaryWindow),
         Some(_) => Err(ComponentCodecError::invalid_field(
             "target",
@@ -629,10 +631,11 @@ fn render_target_value(target: RenderTarget) -> Result<ComponentValue, Component
 }
 
 fn read_optional_viewport(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
 ) -> Result<Option<ViewportRect>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => Ok(Some(
             ViewportRect::new(
                 read_u32(value, "physical_x", "viewport.physical_x")?,
@@ -646,7 +649,7 @@ fn read_optional_viewport(
 }
 
 fn read_u32(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
     display_field: &str,
 ) -> Result<u32, ComponentCodecError> {
@@ -676,15 +679,16 @@ fn viewport_value(value: ViewportRect) -> Result<ComponentValue, ComponentCodecE
 }
 
 fn read_optional_color(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
 ) -> Result<Option<Color>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => read_color(value, "clear_color").map(Some),
     }
 }
 
-fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+fn read_color(value: ComponentValueRef<'_>, field: &str) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
         read_f32(value.field("r")?, &format!("{field}.r"))?,
         read_f32(value.field("g")?, &format!("{field}.g"))?,
@@ -693,7 +697,7 @@ fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCod
     ))
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
@@ -712,7 +716,10 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
+fn optional_i32(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<Option<i32>, ComponentCodecError> {
     value
         .get(field)
         .map(|value| {

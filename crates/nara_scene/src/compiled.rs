@@ -14,7 +14,7 @@ use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits,
+    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits, ComponentValueRef,
     PersistentComponentSchemaOwnerId,
 };
 
@@ -22,9 +22,9 @@ use crate::{
     PrefabProjectionStep, SceneEntityId, SceneEntityProvenanceMap, SourceDocumentKey,
     SourceDocumentKind, SourceDocumentOrigin,
     candidate::validate_flat_scene_provenance,
-    component_payload::ComponentPayload,
     diagnostics::{error, with_codec_error, with_public_locator},
     draft::SceneDraft,
+    effective_component_payload::EffectiveComponentPayload,
     provenance::CanonicalSceneEntityAddress,
     schema_authority::SchemaAuthority,
 };
@@ -38,7 +38,7 @@ use crate::{
 pub struct CompiledSceneComponent {
     schema_owner: Option<PersistentComponentSchemaOwnerId>,
     version: ComponentSchemaVersion,
-    value: ComponentPayload,
+    value: EffectiveComponentPayload,
 }
 
 impl CompiledSceneComponent {
@@ -77,15 +77,15 @@ impl CompiledSceneComponent {
     }
 
     #[must_use]
-    pub fn value(&self) -> &ComponentValue {
-        &self.value
+    pub fn value(&self) -> ComponentValueRef<'_> {
+        self.value.read()
     }
 
-    /// Models the root value allocation and its control/allocator overhead.
-    /// Every retained owner also accounts the full value payload separately, without deduplication.
-    /// This excludes the record's inline handle and all descendant storage.
+    /// Models raw root backing, frozen insertion storage and their allocation overhead.
+    /// Every retained owner also accounts the complete effective value separately, without
+    /// deduplication. The inline record handle and raw descendant storage are excluded here.
     #[must_use]
-    pub const fn value_storage_retained_bytes(&self) -> usize {
+    pub fn value_storage_retained_bytes(&self) -> usize {
         self.value.retained_bytes()
     }
 }
@@ -253,7 +253,8 @@ pub(crate) fn admit_draft<E>(
                     ),
                 });
             }
-            if authority.schema(component).is_some() && !authority.owner_matches(component, record)
+            if authority.schema(component).is_some()
+                && !authority.owner_claim_matches(component, record.owner(), false)
             {
                 return Err(component_refused(
                     &entity.id,

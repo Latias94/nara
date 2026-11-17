@@ -83,7 +83,7 @@ fn registry() -> ComponentRegistrySnapshot {
                 })),
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
-            |value| Ok(Position(value.clone())),
+            |value| Ok(Position(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -537,7 +537,7 @@ fn descendant_claims_bind_the_selected_replacement_base_instead_of_the_old_sourc
                 entity(report.document().unwrap(), &materialized).components()
                     [&ComponentTypeId::new("nara.scene.Name")]
                     .value()
-                    .clone(),
+                    .to_owned(),
                 ComponentValue::String("Pinned replacement".into())
             );
         } else {

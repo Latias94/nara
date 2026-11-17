@@ -44,7 +44,7 @@ pub(super) fn validate_complete_value<'value>(
                 error,
             )
         })?;
-    nara_reflect::validate_component_value(schema, &effective).map_err(|error| {
+    nara_reflect::validate_component_value(schema, effective.as_ref()).map_err(|error| {
         invalid(
             "Persistent authoring record does not satisfy its declared schema",
             error,

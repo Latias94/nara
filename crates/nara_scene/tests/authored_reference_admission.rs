@@ -372,7 +372,7 @@ fn data_setter_rejects_authored_values_and_defaults_without_replacing_prior_memb
                 .unwrap()
                 .unwrap()
                 .value()
-                .clone(),
+                .to_owned(),
             prior,
         );
     }

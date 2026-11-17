@@ -110,9 +110,9 @@ pub fn register_material_components(
                     }
                     Ok(Material2d {
                         handle: resolve_prepared_reference(context, material, "material")?,
-                        declaration_id: record.declaration_id().to_owned(),
-                        declaration_version: record.declaration_version(),
-                        parameters: record.parameters().clone(),
+                        declaration_id: record.declaration_id,
+                        declaration_version: record.declaration_version,
+                        parameters: record.parameters,
                         texture_overrides,
                     })
                 },

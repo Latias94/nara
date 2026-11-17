@@ -12,8 +12,8 @@ use nara_reflect::__private::{
 };
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldPathSegment, ComponentSchema, ComponentTypeId, ComponentValue,
-    ComponentValueCost, ComponentValueMaterializationLimits, EntityReference,
+    ComponentFieldPathSegment, ComponentSchema, ComponentTypeId, ComponentValueCost,
+    ComponentValueMaterializationLimits, ComponentValueRef, EntityReference,
 };
 
 use super::inputs::{InputFailure, ReferenceResolution, ResolvedReference, authored_clone_bytes};
@@ -22,8 +22,8 @@ use crate::prefab::overlay::properties::PropertyReferenceReplacement;
 use crate::prefab::{PrefabReferenceRemapError, SceneCompilationWorkingSet};
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabOverlaySlot, ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
-    SceneComponentRecord, SceneEntityId,
+    ExpandedSceneComponent, PrefabOverlaySlot, ResolvedPrefabSource, SceneCompilationFailure,
+    SceneCompilationFailureKind, SceneEntityId,
 };
 
 pub(super) struct ScopedReference {
@@ -56,7 +56,7 @@ where
     pub(super) fn record_reference_origins(
         &mut self,
         schema: &ComponentSchema,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         cost: ComponentValueCost,
         scope: ScopeId,
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
@@ -102,7 +102,7 @@ where
     pub(super) fn contextual_default_reference_programs(
         &mut self,
         schema: &ComponentSchema,
-        record: &SceneComponentRecord,
+        record: &ExpandedSceneComponent,
         scope: ScopeId,
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
         entity: &SceneEntityId,
@@ -140,7 +140,7 @@ where
             .map_err(|error| self.reference_plan_failure(entity, component, error))?;
             let program = self.scoped_reference_program(
                 plan,
-                value,
+                value.into(),
                 value.cost(),
                 scope,
                 declaration,
@@ -155,7 +155,7 @@ where
     fn scoped_reference_program(
         &mut self,
         plan: DeclaredEntityReferencePlan,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         cost: ComponentValueCost,
         scope: ScopeId,
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
@@ -280,7 +280,7 @@ where
     pub(super) fn validate_reference_program(
         &mut self,
         schema: &ComponentSchema,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         program: &mut ReferenceProgram,
         limits: ComponentValueMaterializationLimits,
         entity: &SceneEntityId,

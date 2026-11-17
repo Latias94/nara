@@ -15,7 +15,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
+    ComponentValue, ComponentValueKind, ComponentValueRef, PreparedComponentCandidate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -294,7 +294,8 @@ pub fn register_sprite_components(
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
             let y_sort_anchor = match value.get("y_sort_anchor") {
-                None | Some(ComponentValue::Null) => None,
+                None => None,
+                Some(value) if value.kind() == ComponentValueKind::Null => None,
                 Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
             };
 
@@ -654,7 +655,7 @@ impl PreparedSpriteMaterial {
 }
 
 fn read_sprite_material(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     context: &mut ComponentDecodeContext<'_>,
 ) -> Result<PreparedSpriteMaterial, ComponentCodecError> {
     let tint = read_color(value.field("tint")?, "material.tint")?;
@@ -796,7 +797,10 @@ fn invalid_asset_ref(
     ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
 }
 
-fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
+fn optional_i32(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<Option<i32>, ComponentCodecError> {
     value
         .get(field)
         .map(|value| {
@@ -808,7 +812,7 @@ fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, Comp
         .transpose()
 }
 
-fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+fn read_vec2(value: ComponentValueRef<'_>, field: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
         read_f32(value.field("x")?, &format!("{field}.x"))?,
         read_f32(value.field("y")?, &format!("{field}.y"))?,
@@ -816,7 +820,7 @@ fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodec
 }
 
 fn read_optional_anchor(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
 ) -> Result<SpriteAnchor, ComponentCodecError> {
     value
         .map(|value| read_vec2(value, "anchor"))
@@ -826,7 +830,7 @@ fn read_optional_anchor(
         })
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
@@ -844,11 +848,12 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
 }
 
 fn read_optional_texture_region(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<Option<TextureRegion>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => {
             let region = TextureRegion::new(
                 read_vec2(value.field("min")?, &format!("{field}.min"))?,
@@ -872,7 +877,7 @@ fn texture_region_value(region: TextureRegion) -> Result<ComponentValue, Compone
     ]))
 }
 
-fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+fn read_color(value: ComponentValueRef<'_>, field: &str) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
         read_f32(value.field("r")?, &format!("{field}.r"))?,
         read_f32(value.field("g")?, &format!("{field}.g"))?,
@@ -891,13 +896,13 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
 }
 
 fn read_sampler(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<SamplerDescriptor, ComponentCodecError> {
     let Some(value) = value else {
         return Ok(SamplerDescriptor::default());
     };
-    if matches!(value, ComponentValue::Null) {
+    if value.kind() == ComponentValueKind::Null {
         return Ok(SamplerDescriptor::default());
     }
     Ok(SamplerDescriptor {
@@ -930,7 +935,7 @@ fn read_sampler(
 }
 
 fn read_filter_mode(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
     default: FilterMode,
 ) -> Result<FilterMode, ComponentCodecError> {
@@ -951,7 +956,7 @@ fn read_filter_mode(
 }
 
 fn read_address_mode(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
     default: AddressMode,
 ) -> Result<AddressMode, ComponentCodecError> {
@@ -973,7 +978,7 @@ fn read_address_mode(
 }
 
 fn read_alpha_mode(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<AlphaMode2d, ComponentCodecError> {
     let Some(value) = value else {
@@ -1057,11 +1062,12 @@ fn alpha_mode_str(alpha_mode: AlphaMode2d) -> &'static str {
 }
 
 fn read_optional_asset_ref(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => nara_reflect::decode_asset_reference_value(value)
             .map(Some)
             .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),

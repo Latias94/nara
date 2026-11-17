@@ -108,7 +108,7 @@ fn admitted_root_property_read_borrows_the_selected_scalar() {
         panic!("list")
     };
     let expected = items[1].get("wire_stats").unwrap().get("health").unwrap();
-    assert!(std::ptr::eq(result.value, expected));
+    assert!(std::ptr::eq(result.value.as_value().unwrap(), expected));
 }
 
 #[test]
@@ -979,7 +979,7 @@ fn selector_survives_explicit_wire_migration_but_unmigrated_and_future_versions_
     registry
         .register_native_component_with_codec::<NativeValue, _, _>(
             &current.id,
-            |value| Ok(NativeValue(value.clone())),
+            |value| Ok(NativeValue(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();

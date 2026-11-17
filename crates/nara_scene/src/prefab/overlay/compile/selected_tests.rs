@@ -517,6 +517,19 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
         full_anchor.children()[fragment.roots.len()..],
         [id("A_child"), id("skeleton_0")],
     );
+    let copy_components = |entity: &crate::ExpandedSceneEntity| {
+        entity
+            .components()
+            .iter()
+            .map(|(component, record)| {
+                let mut copied =
+                    SceneComponentRecord::new(record.version, record.value().to_owned());
+                copied.owner = record.owner.clone();
+                copied.contextual_defaults = record.contextual_defaults.clone();
+                (component.clone(), copied)
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
     for selected_entity in &fragment.entities {
         let origin = &fragment.provenance[selected_entity.id()];
         let (full_id, _) = provenance
@@ -537,7 +550,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
                 .collect::<Vec<_>>(),
             selected_entity.children(),
         );
-        let mut expected_components = expected.components().clone();
+        let mut expected_components = copy_components(expected);
         for payload in expected_components.values_mut() {
             let plan = plan_declared_entity_references::<Infallible>(
                 &schema(),
@@ -558,7 +571,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
             })
             .unwrap();
         }
-        let mut actual_components = selected_entity.components().clone();
+        let mut actual_components = copy_components(selected_entity);
         for payload in actual_components.values_mut() {
             assert!(
                 payload
@@ -597,11 +610,20 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
                 7
             };
             assert_eq!(
-                payload.value().get("score"),
-                Some(&ComponentValue::U64(score))
+                payload.value().get("score").map(|value| value.to_owned()),
+                Some(ComponentValue::U64(score))
             );
-            assert_eq!(payload.value().get("persistent"), Some(&persistent()));
-            assert_eq!(payload.value().get("image"), Some(&image()));
+            assert_eq!(
+                payload
+                    .value()
+                    .get("persistent")
+                    .map(|value| value.to_owned()),
+                Some(persistent())
+            );
+            assert_eq!(
+                payload.value().get("image").map(|value| value.to_owned()),
+                Some(image())
+            );
         }
     }
     assert_eq!(selected.asset_references.len(), components);
@@ -1011,8 +1033,11 @@ fn only_retained_selected_references_open_a_structurally_suppressed_dependency()
                 .find(|entity| fragment.provenance[entity.id()].local_entity_id() == &id("host"))
                 .unwrap();
             assert_eq!(
-                host.components()[&component()].value().get("target"),
-                Some(&local(host.id().as_str()))
+                host.components()[&component()]
+                    .value()
+                    .get("target")
+                    .map(|value| value.to_owned()),
+                Some(local(host.id().as_str()))
             );
         } else {
             assert!(report.fragment.is_none());

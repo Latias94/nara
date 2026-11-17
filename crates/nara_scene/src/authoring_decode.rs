@@ -153,7 +153,7 @@ impl AuthoringSchemaBasis {
     pub(crate) fn native_preview_matches_registry(
         &self,
         component: &ComponentTypeId,
-        record: &SceneComponentRecord,
+        record: &crate::ExpandedSceneComponent,
         registry: &nara_reflect::ComponentRegistrySnapshot,
     ) -> Option<bool> {
         let entry = self.0.schemas.get(component)?;
@@ -2387,7 +2387,7 @@ fn classify_complete_record(
             } else {
                 validate_effective_local_references(
                 schema,
-                &effective,
+                effective.as_ref(),
                 |entity| context.namespace.contains(entity),
                 context.limits.component_materialization_limits().reference_traversal_limits(),
             )

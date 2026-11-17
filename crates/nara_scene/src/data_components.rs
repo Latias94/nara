@@ -15,14 +15,15 @@ use nara_identity::{
 };
 use nara_reflect::{
     __private::{
-        effective_component_value_with_budget,
+        effective_component_value_in_place_with_default_overrides,
         validate_native_component_value_references_with_limits,
+        validate_value_materialization_budget,
     },
     ComponentCapability, ComponentCodecError, ComponentRegistryAuthorityError, ComponentSchema,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueCost, ComponentValueMaterializationLimits, DeclaredAssetReferenceError,
-    collect_declared_asset_references_from_schema_with_limits, component_registry,
-    component_registry_is_installed, validate_component_registry_authority,
+    ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
+    DeclaredAssetReferenceError, collect_declared_asset_references_from_schema_with_limits,
+    component_registry, component_registry_is_installed, validate_component_registry_authority,
     validate_component_value_with_limits,
 };
 
@@ -273,7 +274,7 @@ impl SceneComponentBindings {
         world: &mut World,
         entity: Entity,
         component: &ComponentTypeId,
-        value: ComponentValue,
+        mut value: ComponentValue,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<(), SceneDataComponentError> {
@@ -281,31 +282,31 @@ impl SceneComponentBindings {
         let schema = self.data_schema(component)?;
         let retained =
             self.validate_data_group(world, entity, asset_resolution, limits, Some(component))?;
-        let (effective, _) = effective_component_value_with_budget(
+        let remaining = limits.remaining(retained.nodes(), retained.logical_bytes());
+        effective_component_value_in_place_with_default_overrides(
             schema,
-            &value,
-            limits.nodes() - retained.nodes(),
-            limits.bytes() - retained.logical_bytes(),
-            limits.depth(),
+            &mut value,
+            &BTreeMap::new(),
+            remaining,
         )
         .map_err(|source| SceneDataComponentError::InvalidValue {
             component: component.clone(),
             source,
         })?;
+        validate_value_materialization_budget(&value, remaining).map_err(|source| {
+            SceneDataComponentError::InvalidValue {
+                component: component.clone(),
+                source,
+            }
+        })?;
         validate_data_value(
             world,
             instance,
             schema,
-            &effective,
+            (&value).into(),
             asset_resolution,
             limits,
         )?;
-        // A no-default candidate can be moved directly; only Reflect's admitted missing defaults
-        // require an owning copy. No sibling record or source document is copied.
-        let value = match effective {
-            std::borrow::Cow::Borrowed(_) => value,
-            std::borrow::Cow::Owned(value) => value,
-        };
         let owner = self.data_owner(component).ok_or_else(|| {
             SceneDataComponentError::BindingUnavailable {
                 component: component.clone(),
@@ -509,23 +510,19 @@ impl SceneComponentBindings {
                     limits.bytes() - retained.logical_bytes(),
                 )
             };
-            let (effective, cost) = effective_component_value_with_budget(
-                schema,
+            let cost = validate_value_materialization_budget(
                 record.value(),
-                nodes,
-                bytes,
-                admission.depth(),
+                admission.remaining(admission.nodes() - nodes, admission.bytes() - bytes),
             )
             .map_err(|source| SceneDataComponentError::InvalidValue {
                 component: component.clone(),
                 source,
             })?;
-            validate_native_component_value_references_with_limits(&effective, admission).map_err(
-                |source| SceneDataComponentError::InvalidValue {
+            validate_native_component_value_references_with_limits(record.value(), admission)
+                .map_err(|source| SceneDataComponentError::InvalidValue {
                     component: component.clone(),
                     source,
-                },
-            )?;
+                })?;
             if !removed {
                 retained = retained.saturating_add(cost);
             }
@@ -554,7 +551,7 @@ fn validate_data_value(
     world: &World,
     instance: SceneInstanceId,
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), SceneDataComponentError> {
@@ -786,7 +783,7 @@ mod tests {
                 .unwrap()
                 .map(|(component, record)| (component, record.value()))
                 .collect::<Vec<_>>(),
-            [(&component, &flat)],
+            [(&component, ComponentValueRef::from(&flat))],
         );
 
         // Source-only contextual defaults must be resolved by compilation, before any carrier.

@@ -17,11 +17,14 @@ use nara_ecs::{
 
 use crate::{
     ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentMemberPath,
-    ComponentValue, PersistentComponentProvider,
+    ComponentValue, ComponentValueRef, PersistentComponentProvider,
     codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext},
     effective::{
-        ComponentValueMaterializationLimits, effective_component_value,
+        ComponentValueMaterializationLimits, freeze_component_defaults,
+        freeze_component_defaults_with_admission,
         validate_native_component_value_references_with_limits,
+        validate_value_materialization_budget,
+        validate_value_materialization_budget_with_admission,
     },
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     persistent_apply::{
@@ -654,7 +657,7 @@ impl Error for ComponentProjectionError {}
 trait ComponentCodec: Send + Sync {
     fn preflight_with_context(
         &self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<ErasedPreparedComponentCandidate, ComponentCodecError>;
 
@@ -675,10 +678,11 @@ struct FnComponentCodec<T, Preflight, Encode> {
 impl<T, Preflight, Encode> ComponentCodec for FnComponentCodec<T, Preflight, Encode>
 where
     T: Component,
-    Preflight: for<'a> Fn(
-            &ComponentValue,
-            &mut ComponentDecodeContext<'a>,
-        ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+    Preflight: for<'value, 'context> Fn(
+            ComponentValueRef<'value>,
+            &mut ComponentDecodeContext<'context>,
+        )
+            -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
         + Send
         + Sync
         + 'static,
@@ -693,7 +697,7 @@ where
 {
     fn preflight_with_context(
         &self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<ErasedPreparedComponentCandidate, ComponentCodecError> {
         (self.preflight)(value, context).map(PreparedComponentCandidate::erase)
@@ -1120,22 +1124,23 @@ impl ComponentRegistrySnapshot {
 
     /// Decodes and binds one Native component using this exact frozen definition.
     ///
-    /// Defaults are expanded and unresolved authored references are rejected before its codec
-    /// runs, including within opaque containers. Source admission uses value validation instead.
-    pub fn preflight_component(
+    /// Missing defaults are frozen and unresolved authored references are rejected before its
+    /// codec runs, including within opaque containers. Frozen reads use their selected explicit
+    /// defaults directly. Source admission uses value validation instead.
+    pub fn preflight_component<'a>(
         &self,
         id: &ComponentTypeId,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'a>>,
     ) -> Result<PreparedComponent, ComponentCodecError> {
         let mut context = ComponentDecodeContext::new();
         self.preflight_component_with_context(id, value, &mut context)
     }
 
     /// Shares the caller's preparation context across a complete component batch.
-    pub fn preflight_component_with_context(
+    pub fn preflight_component_with_context<'a>(
         &self,
         id: &ComponentTypeId,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'a>>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<PreparedComponent, ComponentCodecError> {
         let (schema, binding) = self.execution_binding(id)?;
@@ -1146,15 +1151,29 @@ impl ComponentRegistrySnapshot {
             .path_indexes
             .get(id)
             .ok_or_else(missing_schema_path_index_error)?;
-        let effective = effective_component_value(schema, value, context.materialization_limits())?;
+        let value = value.into();
+        let source = value.as_value();
+        let defaults = match source {
+            Some(source) => freeze_component_defaults(
+                schema,
+                source,
+                &BTreeMap::new(),
+                context.materialization_limits(),
+            )?,
+            None => None,
+        };
+        let effective = match (source, &defaults) {
+            (Some(source), Some(defaults)) => defaults.read(source),
+            _ => value,
+        };
         validate_native_component_value_references_with_limits(
-            effective.as_ref(),
+            effective,
             context.materialization_limits(),
         )?;
-        validate_component_value_coverage(schema, path_index, effective.as_ref())?;
+        validate_component_value_coverage(schema, path_index, effective)?;
         binding
             .codec
-            .preflight_with_context(effective.as_ref(), context)
+            .preflight_with_context(effective, context)
             .map(|prepared| prepared.bind(id.clone()))
     }
 
@@ -1186,10 +1205,18 @@ impl ComponentRegistrySnapshot {
             .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
         let encoded = binding.codec.encode_with_context(world, entity, context)?;
         if let Some(value) = &encoded {
-            let effective =
-                effective_component_value(schema, value, context.materialization_limits())?;
+            let defaults = freeze_component_defaults(
+                schema,
+                value,
+                &BTreeMap::new(),
+                context.materialization_limits(),
+            )?;
+            let effective = defaults.as_ref().map_or_else(
+                || ComponentValueRef::from(value),
+                |defaults| defaults.read(value),
+            );
             validate_native_component_value_references_with_limits(
-                effective.as_ref(),
+                effective,
                 context.materialization_limits(),
             )?;
             let path_index = self
@@ -1482,7 +1509,10 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
+        Decode: for<'a> Fn(ComponentValueRef<'a>) -> Result<T, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
         Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
         self.register_native_component_codec_with_context::<T, _, _>(
@@ -1503,7 +1533,10 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
+        Decode: for<'a> Fn(ComponentValueRef<'a>) -> Result<T, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
         Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
         self.register_persistent_component_codec_with_context::<T, _, _>(
@@ -1550,7 +1583,9 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+        Preflight: for<'a> Fn(
+                ComponentValueRef<'a>,
+            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -1599,10 +1634,11 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: for<'a> Fn(
-                &ComponentValue,
-                &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+        Preflight: for<'value, 'context> Fn(
+                ComponentValueRef<'value>,
+                &mut ComponentDecodeContext<'context>,
+            )
+                -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -1648,7 +1684,9 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+        Preflight: for<'a> Fn(
+                ComponentValueRef<'a>,
+            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -1669,10 +1707,11 @@ impl ComponentRegistryBuilder {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: for<'a> Fn(
-                &ComponentValue,
-                &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+        Preflight: for<'value, 'context> Fn(
+                ComponentValueRef<'value>,
+                &mut ComponentDecodeContext<'context>,
+            )
+                -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -2718,9 +2757,9 @@ fn validate_component_field_default(
 /// source values; Native admission is a separate check. This performs no native codec calls
 /// or World operations. The caller owns raw payload admission and aggregate work; persistent
 /// files, Prefab expansion, patches and reference traversal retain their owner budgets.
-pub fn validate_component_value(
+pub fn validate_component_value<'a>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<(), ComponentCodecError> {
     validate_component_value_with_limits(
         schema,
@@ -2732,21 +2771,27 @@ pub fn validate_component_value(
 /// Validates one effective value using its owner's explicit default-expansion limits.
 ///
 /// The schema must already have been admitted by its catalog owner. Missing defaults are checked
-/// before allocation, then the same effective candidate supplies presence and shape validation.
+/// before allocation, then the same borrowed effective value supplies presence and shape validation.
 /// No-insertion values retain their caller-owned raw admission and are not rescanned for cost.
-pub fn validate_component_value_with_limits(
+/// Frozen reads retain their selected defaults and check the complete value against these limits.
+pub fn validate_component_value_with_limits<'a>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentCodecError::Message(error.to_string()))?;
-    let effective = effective_component_value(schema, value, limits)?;
-    validate_component_value_coverage(
-        schema,
-        &SchemaPathIndex::from_schema(schema),
-        effective.as_ref(),
-    )
+    let value = value.into();
+    let source = value.as_value();
+    let defaults = match source {
+        Some(source) => freeze_component_defaults(schema, source, &BTreeMap::new(), limits),
+        None => validate_value_materialization_budget(value, limits).map(|_| None),
+    }?;
+    let effective = match (source, &defaults) {
+        (Some(source), Some(defaults)) => defaults.read(source),
+        _ => value,
+    };
+    validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), effective)
 }
 
 /// Keeps a source owner's exact refusal separate from component interpretation errors.
@@ -2773,15 +2818,25 @@ type ValueValidationAdmission<'a, E> = dyn FnMut(usize, usize, usize) -> Result<
 /// and keyed-list sets use the existing 96-byte logical entry model, not allocator/RSS bounds.
 /// Preflight follows actual container data, stopping at scalar and opaque leaves. It performs no
 /// numeric, presence, asset parsing or key-uniqueness validation of its own.
-pub fn validate_component_value_with_admission<E>(
+pub fn validate_component_value_with_admission<'a, E>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: ComponentValueMaterializationLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), ComponentValueAdmissionError<E>> {
-    let effective = crate::effective::effective_component_value_with_admission(
-        schema, value, limits, &mut admit,
-    )
+    let value = value.into();
+    let source = value.as_value();
+    let defaults = match source {
+        Some(source) => freeze_component_defaults_with_admission(
+            schema,
+            source,
+            &BTreeMap::new(),
+            limits,
+            &mut admit,
+        ),
+        None => validate_value_materialization_budget_with_admission(value, limits, &mut admit)
+            .map(|_| None),
+    }
     .map_err(|error| match error {
         crate::effective::EffectiveValueAdmissionError::Value(error) => {
             ComponentValueAdmissionError::Value(error)
@@ -2790,6 +2845,10 @@ pub fn validate_component_value_with_admission<E>(
             ComponentValueAdmissionError::Admission(error)
         }
     })?;
+    let effective = match (source, &defaults) {
+        (Some(source), Some(defaults)) => defaults.read(source),
+        _ => value,
+    };
     // sort_unstable allocates no scratch beyond the collected offsets. Charge comparison
     // work against actual declaration lengths before constructing this temporary index.
     let comparisons = (usize::BITS - schema.fields.len().leading_zeros()) as usize;
@@ -2819,30 +2878,30 @@ pub fn validate_component_value_with_admission<E>(
     validate_component_value_coverage_admitted(
         schema,
         &index,
-        effective.as_ref(),
+        effective,
         false,
         &mut Some(&mut admit),
     )
 }
 
-fn validate_component_value_coverage(
+fn validate_component_value_coverage<'a>(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<(), ComponentCodecError> {
     validate_component_value_coverage_with_presence(schema, path_index, value, false)
 }
 
-fn validate_component_value_coverage_with_presence(
+fn validate_component_value_coverage_with_presence<'a>(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     require_all_fields: bool,
 ) -> Result<(), ComponentCodecError> {
     match validate_component_value_coverage_admitted::<std::convert::Infallible>(
         schema,
         path_index,
-        value,
+        value.into(),
         require_all_fields,
         &mut None,
     ) {
@@ -2855,12 +2914,11 @@ fn validate_component_value_coverage_with_presence(
 fn validate_component_value_coverage_admitted<E>(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     require_all_fields: bool,
     admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
 ) -> Result<(), ComponentValueAdmissionError<E>> {
-    if schema.fields.is_empty() && matches!(value, ComponentValue::Map(fields) if fields.is_empty())
-    {
+    if schema.fields.is_empty() && value.as_map().is_some_and(|fields| fields.is_empty()) {
         return Ok(());
     }
 
@@ -2963,14 +3021,12 @@ impl FieldValidationErrorScratch {
 
 fn preflight_field_validation<E>(
     field: &ComponentFieldSchema,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     admit: &mut ValueValidationAdmission<'_, E>,
 ) -> Result<(), E> {
     let mut current = Some(value);
     let mut prefix_bytes = 0usize;
     let mut scratch = FieldValidationErrorScratch::default();
-    // get_path constructs child_path at every step, including successful lookups, and keeps
-    // a separately cloned visited path. Bound both before the original lookup is called.
     for (offset, segment) in field.path.segments().iter().enumerate() {
         let bytes = match segment {
             ComponentFieldPathSegment::Field(name) => name.len(),
@@ -2988,16 +3044,13 @@ fn preflight_field_validation<E>(
                 .saturating_add(VALIDATION_PATH_PUSH_BYTES)
                 .saturating_add(bytes),
         )?;
-        current = current.and_then(|value| match (segment, value) {
-            (ComponentFieldPathSegment::Field(name), ComponentValue::Map(fields)) => {
-                fields.get(name)
-            }
-            (ComponentFieldPathSegment::Index(index), ComponentValue::List(values)) => {
+        current = current.and_then(|value| match segment {
+            ComponentFieldPathSegment::Field(name) => value.get(name),
+            ComponentFieldPathSegment::Index(index) => value.as_list().and_then(|values| {
                 usize::try_from(*index)
                     .ok()
                     .and_then(|index| values.get(index))
-            }
-            _ => None,
+            }),
         });
         if current.is_none() {
             break;
@@ -3017,10 +3070,10 @@ fn preflight_field_validation<E>(
 
 /// Admits the same declaration, payload and potential-error scratch for one selected shape.
 /// There is no field storage lookup, default insertion or synthetic component schema here.
-pub(crate) fn preflight_property_validation<E>(
+pub(crate) fn preflight_property_validation<'a, E>(
     shape: &crate::ComponentValueShape,
     root: &ComponentFieldId,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     admit: &mut ValueValidationAdmission<'_, E>,
 ) -> Result<(), E> {
     let mut scratch = FieldValidationErrorScratch {
@@ -3028,7 +3081,7 @@ pub(crate) fn preflight_property_validation<E>(
         ..FieldValidationErrorScratch::default()
     };
     preflight_validation_shape(shape, 0, 0, &mut scratch, admit)?;
-    preflight_validation_value(shape, value, 0, 0, &mut scratch, admit)?;
+    preflight_validation_value(shape, value.into(), 0, 0, &mut scratch, admit)?;
     admit(0, 0, scratch.allocation_bytes())
 }
 
@@ -3080,7 +3133,7 @@ fn preflight_validation_shape<E>(
 
 fn preflight_validation_value<E>(
     shape: &crate::ComponentValueShape,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     segments: usize,
     bytes: usize,
     scratch: &mut FieldValidationErrorScratch,
@@ -3089,12 +3142,13 @@ fn preflight_validation_value<E>(
     use crate::ComponentValueShape as Shape;
     admit(1, 0, 0)?;
     scratch.path(segments, bytes);
-    match (shape, value) {
-        (Shape::Optional { .. }, ComponentValue::Null) => {}
-        (Shape::Optional { value: shape }, value) => {
+    match (shape, value.kind()) {
+        (Shape::Optional { .. }, ComponentValueKind::Null) => {}
+        (Shape::Optional { value: shape }, _) => {
             preflight_validation_value(shape, value, segments, bytes, scratch, admit)?
         }
-        (Shape::Record { members }, ComponentValue::Map(values)) => {
+        (Shape::Record { members }, ComponentValueKind::Map) => {
+            let values = value.as_map().expect("Map kind checked");
             admit(
                 members.len(),
                 0,
@@ -3122,7 +3176,8 @@ fn preflight_validation_value<E>(
                 scratch.payload_bytes = scratch.payload_bytes.max(name.len());
             }
         }
-        (Shape::List { item } | Shape::KeyedList { item, .. }, ComponentValue::List(values)) => {
+        (Shape::List { item } | Shape::KeyedList { item, .. }, ComponentValueKind::List) => {
+            let values = value.as_list().expect("List kind checked");
             // This only locates the admitted key declaration to account for owned key strings.
             // The original shape validator remains responsible for key validity and uniqueness.
             let key_member = match (shape, item.as_ref()) {
@@ -3134,7 +3189,7 @@ fn preflight_validation_value<E>(
                 }
                 _ => None,
             };
-            for value in values {
+            for value in values.iter() {
                 admit(1, 4, VALIDATION_PATH_PUSH_BYTES)?;
                 preflight_validation_value(
                     item,
@@ -3145,10 +3200,10 @@ fn preflight_validation_value<E>(
                     admit,
                 )?;
                 if let Some(member) = key_member {
-                    let key_bytes = match value.get(&member.name) {
-                        Some(ComponentValue::String(key)) => key.len(),
-                        _ => 0,
-                    };
+                    let key_bytes = value
+                        .get(&member.name)
+                        .and_then(ComponentValueRef::as_str)
+                        .map_or(0, str::len);
                     admit(
                         1,
                         key_bytes,
@@ -3158,8 +3213,8 @@ fn preflight_validation_value<E>(
                 }
             }
         }
-        (Shape::Map { value: shape }, ComponentValue::Map(values)) => {
-            for (name, value) in values {
+        (Shape::Map { value: shape }, ComponentValueKind::Map) => {
+            for (name, value) in value.as_map().expect("Map kind checked").iter() {
                 admit(
                     1,
                     name.len(),
@@ -3175,7 +3230,7 @@ fn preflight_validation_value<E>(
                 )?;
             }
         }
-        (Shape::AssetRef { .. }, value) => {
+        (Shape::AssetRef { .. }, _) => {
             // The same closed leaf grammar drives decoding and work admission. Product maps,
             // source/selector text and UUID parser scratch must precede semantic validation.
             if let Some(work) = crate::asset_reference::asset_reference_value_work(value) {
@@ -3202,7 +3257,7 @@ pub(crate) fn numeric_range_error(field: &ComponentFieldId) -> ComponentCodecErr
 fn validate_value_node_coverage<E>(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     path: &mut Vec<ComponentFieldPathSegment>,
     admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
 ) -> Result<(), ComponentValueAdmissionError<E>> {
@@ -3236,9 +3291,9 @@ fn validate_value_node_coverage<E>(
         .into());
     }
 
-    match value {
-        ComponentValue::Map(fields) if !fields.is_empty() => {
-            for (key, value) in fields {
+    match value.kind() {
+        ComponentValueKind::Map if value.as_map().is_some_and(|fields| !fields.is_empty()) => {
+            for (key, value) in value.as_map().expect("Map kind checked").iter() {
                 admit_coverage_push(path, key.len(), admission)?;
                 path.push(ComponentFieldPathSegment::field(key));
                 validate_value_node_coverage(schema, path_index, value, path, admission)?;
@@ -3246,7 +3301,8 @@ fn validate_value_node_coverage<E>(
             }
             Ok(())
         }
-        ComponentValue::List(values) if !values.is_empty() => {
+        ComponentValueKind::List if value.as_list().is_some_and(|values| !values.is_empty()) => {
+            let values = value.as_list().expect("List kind checked");
             for (index, value) in values.iter().enumerate() {
                 let Ok(index) = u32::try_from(index) else {
                     admit_coverage_error(path, admission)?;
@@ -3262,7 +3318,7 @@ fn validate_value_node_coverage<E>(
             }
             Ok(())
         }
-        ComponentValue::Map(_) | ComponentValue::List(_)
+        ComponentValueKind::Map | ComponentValueKind::List
             if relation == SchemaPathRelation::Descendant =>
         {
             Ok(())
@@ -3758,6 +3814,154 @@ mod value_validation_admission_tests {
             allocation
         };
         assert!(measure(4096) >= measure(8) + 4088);
+    }
+
+    #[derive(Component)]
+    struct BorrowedReadProbe(u64);
+
+    #[test]
+    fn native_codec_borrows_existing_cells_and_keeps_selected_defaults() {
+        let scale_id = ComponentFieldId::new("scale");
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("test.BorrowedReadProbe"),
+            "Borrowed read probe",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities([ComponentCapability::Scene])
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("cells"),
+                "Cells",
+                ComponentFieldPath::from_fields(["cells"]),
+                ComponentValueShape::list(ComponentValueKind::U64.into()),
+            )
+            .with_capability(ComponentCapability::Scene),
+            ComponentFieldSchema::optional_with_default(
+                scale_id.clone(),
+                "Scale",
+                ComponentFieldPath::from_fields(["scale"]),
+                ComponentValueKind::U64,
+                ComponentValue::U64(1),
+            )
+            .with_capability(ComponentCapability::Scene),
+        ]);
+        let source = ComponentValue::map([(
+            "cells",
+            ComponentValue::List(vec![ComponentValue::U64(7); 1024]),
+        )]);
+        let cells_address = std::ptr::from_ref(source.get("cells").unwrap()) as usize;
+        let defaults = freeze_component_defaults(
+            &schema,
+            &source,
+            &BTreeMap::from([(scale_id, ComponentValue::U64(7))]),
+            ComponentValueMaterializationLimits::default(),
+        )
+        .unwrap()
+        .unwrap();
+        let id = schema.id().clone();
+        let mut registry = ComponentRegistryBuilder::new();
+        registry
+            .register_persistent_component_with_codec::<BorrowedReadProbe, _, _>(
+                schema,
+                move |value| {
+                    assert!(value.as_value().is_none());
+                    let cells = value.field("cells")?;
+                    assert_eq!(
+                        cells
+                            .as_value()
+                            .map(|value| std::ptr::from_ref(value) as usize),
+                        Some(cells_address),
+                    );
+                    assert_eq!(cells.as_list().unwrap().len(), 1024);
+                    Ok(BorrowedReadProbe(value.field_u64("scale")?))
+                },
+                |_| Ok(ComponentValue::Null),
+            )
+            .unwrap();
+        let registry = registry.freeze().unwrap();
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        for (value, expected) in [
+            (ComponentValueRef::from(&source), 1),
+            (defaults.read(&source), 7),
+        ] {
+            registry
+                .preflight_component(&id, value)
+                .unwrap()
+                .apply(&mut world, entity)
+                .unwrap();
+            assert_eq!(world.get::<BorrowedReadProbe>(entity).unwrap().0, expected);
+        }
+        assert!(source.get("scale").is_none());
+    }
+
+    #[test]
+    fn frozen_validation_keeps_receiving_limits_and_exact_admission_refusals() {
+        let mut schema = schema(ComponentValueKind::U64);
+        schema.fields[0].default_value = Some(ComponentValue::U64(1));
+        let source = ComponentValue::Map(BTreeMap::new());
+        let defaults = freeze_component_defaults(
+            &schema,
+            &source,
+            &BTreeMap::new(),
+            ComponentValueMaterializationLimits::default(),
+        )
+        .unwrap()
+        .unwrap();
+        let value = defaults.read(&source);
+        let cost = defaults.cost();
+        let limits = |nodes, bytes, depth| {
+            ComponentValueMaterializationLimits::new(
+                nara_core::ItemLimit::new(nodes).unwrap(),
+                nara_core::ByteLimit::new(bytes).unwrap(),
+                nara_core::DepthLimit::new(depth).unwrap(),
+            )
+        };
+        let exact = limits(cost.nodes(), cost.logical_bytes(), 2);
+        validate_component_value_with_limits(&schema, value, exact).unwrap();
+        for refused in [
+            limits(cost.nodes() - 1, cost.logical_bytes(), 2),
+            limits(cost.nodes(), cost.logical_bytes() - 1, 2),
+            limits(cost.nodes(), cost.logical_bytes(), 1),
+        ] {
+            let expected = validate_value_materialization_budget(value, refused).unwrap_err();
+            assert_eq!(
+                validate_component_value_with_limits(&schema, value, refused),
+                Err(expected.clone()),
+            );
+            assert_eq!(
+                validate_component_value_with_admission(&schema, value, refused, |_, _, _| {
+                    Ok::<(), ()>(())
+                }),
+                Err(ComponentValueAdmissionError::Value(expected)),
+            );
+        }
+        let mut boundaries = 0;
+        validate_component_value_with_admission(&schema, value, exact, |_, _, _| {
+            boundaries += 1;
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        for stop in 1..=boundaries {
+            let mut calls = 0;
+            let token = Box::new(stop);
+            let identity = std::ptr::from_ref(token.as_ref());
+            let mut token = Some(token);
+            let result =
+                validate_component_value_with_admission(&schema, value, exact, |_, _, _| {
+                    calls += 1;
+                    if calls == stop {
+                        Err(token.take().unwrap())
+                    } else {
+                        Ok(())
+                    }
+                });
+            let Err(ComponentValueAdmissionError::Admission(returned)) = result else {
+                panic!("expected exact admission refusal at callback {stop}");
+            };
+            assert_eq!(std::ptr::from_ref(returned.as_ref()), identity);
+            assert_eq!(calls, stop);
+        }
     }
 }
 

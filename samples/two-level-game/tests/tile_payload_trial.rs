@@ -27,7 +27,7 @@ use nara::{
     identity::{EntityLookup, SpawnedSceneInstance},
     reflect::{
         ComponentRegistryBuilder, ComponentTypeId, ComponentValue,
-        ComponentValueMaterializationLimits,
+        ComponentValueMaterializationLimits, ComponentValueRef,
     },
     scene::{
         CompiledSceneCandidate, CompiledSceneDocument, InMemoryPrefabSourceResolver,
@@ -201,7 +201,7 @@ fn value<'a>(
     document: &'a CompiledSceneDocument,
     name: &str,
     component: &str,
-) -> &'a ComponentValue {
+) -> ComponentValueRef<'a> {
     document
         .entities()
         .iter()
@@ -258,6 +258,14 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
         &control_resolver,
         &sources.scene_key,
     );
+    let control_inherited =
+        nara::scene::PrefabSourceResolver::resolve_prefab(&control_resolver, &sources.request)
+            .unwrap();
+    assert_eq!(control_inherited.document(), &sources.prefab);
+    assert!(!ptr::eq(
+        control_inherited.document().entities[0].components[&kind(TILEMAP)].value(),
+        sources.prefab.entities[0].components[&kind(TILEMAP)].value(),
+    ));
     let original_direct = &sources
         .scene
         .entities
@@ -267,10 +275,6 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
         .components[&kind(TILEMAP)];
     assert!(original_direct.value().get("sort_key").is_none());
     assert!(original_direct.value().get("y_sort_anchor").is_none());
-    assert!(!ptr::eq(
-        original_direct.value(),
-        value(control.document(), "checkpoint", TILEMAP)
-    ));
     let mut trial_scene = sources.scene.clone();
     let mut trial_prefab = sources.prefab.clone();
     for entity in &mut trial_scene.entities {
@@ -307,6 +311,8 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
     assert!(ptr::eq(
         direct.value(),
         value(trial.document(), "checkpoint", codec::CELLS)
+            .as_value()
+            .unwrap()
     ));
     let inherited =
         nara::scene::PrefabSourceResolver::resolve_prefab(&trial_resolver, &sources.request)
@@ -315,18 +321,38 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
     assert!(ptr::eq(
         inherited.document().entities[0].components[&kind(codec::CELLS)].value(),
         value(trial.document(), "portal", codec::CELLS)
+            .as_value()
+            .unwrap()
     ));
     for name in ["checkpoint", "portal"] {
+        let stock = value(control.document(), name, TILEMAP);
+        let original = if name == "checkpoint" {
+            original_direct.value()
+        } else {
+            control_inherited.document().entities[0].components[&kind(TILEMAP)].value()
+        };
+        assert!(stock.as_value().is_none());
+        assert!(
+            ptr::eq(
+                original.field("cells").unwrap(),
+                stock.field("cells").unwrap().as_value().unwrap()
+            ),
+            "{name} must retain the actual resolver/source cells backing"
+        );
         assert_eq!(
-            value(control.document(), name, TILEMAP).get("cells"),
+            stock.get("cells"),
             value(trial.document(), name, codec::CELLS).get("cells")
         );
         assert_eq!(
-            value(trial.document(), name, codec::CONFIG).get("sort_key"),
+            value(trial.document(), name, codec::CONFIG)
+                .get("sort_key")
+                .and_then(ComponentValueRef::as_value),
             Some(&ComponentValue::I64(0))
         );
         assert_eq!(
-            value(trial.document(), name, codec::CONFIG).get("y_sort_anchor"),
+            value(trial.document(), name, codec::CONFIG)
+                .get("y_sort_anchor")
+                .and_then(ComponentValueRef::as_value),
             Some(&ComponentValue::Null)
         );
     }
@@ -405,7 +431,10 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
         let cooked_cells = value(cooked.document(), name, codec::CELLS);
         let original_cells = value(trial.document(), name, codec::CELLS);
         assert_eq!(cooked_cells, original_cells);
-        assert!(!ptr::eq(cooked_cells, original_cells));
+        assert!(!ptr::eq(
+            cooked_cells.as_value().unwrap(),
+            original_cells.as_value().unwrap()
+        ));
         assert_eq!(
             value(stock_cooked.document(), name, TILEMAP).get("cells"),
             cooked_cells.get("cells")
@@ -459,12 +488,20 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
         expected_edit
     );
     assert!(!ptr::eq(
-        value(edited.document(), "checkpoint", codec::CELLS),
+        value(edited.document(), "checkpoint", codec::CELLS)
+            .as_value()
+            .unwrap(),
         value(trial.document(), "checkpoint", codec::CELLS)
+            .as_value()
+            .unwrap()
     ));
     assert!(ptr::eq(
-        value(edited.document(), "portal", codec::CELLS),
+        value(edited.document(), "portal", codec::CELLS)
+            .as_value()
+            .unwrap(),
         value(trial.document(), "portal", codec::CELLS)
+            .as_value()
+            .unwrap()
     ));
     assert_eq!(
         new_world
@@ -486,6 +523,7 @@ fn actual_16k_records_share_cells_across_defaults_and_preserve_native_values_and
     retire_and_despawn_scene_instance(&mut old_world, &old).unwrap();
     retire_and_despawn_scene_instance(&mut new_world, &new).unwrap();
     drop(inherited);
+    drop(control_inherited);
     drop(sources.scene);
     drop(sources.prefab);
     drop(trial_scene);

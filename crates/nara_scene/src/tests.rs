@@ -1547,9 +1547,12 @@ fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
         .find(|entity| entity.id() == source_id)
         .unwrap();
     let component = source.components().get(&large_data_type_id()).unwrap();
-    let ComponentValue::List(values) = component.value().field("values").unwrap() else {
-        panic!("large data values must remain a list");
-    };
+    let values = component
+        .value()
+        .field("values")
+        .unwrap()
+        .as_list()
+        .expect("large data values must remain a list");
     assert_eq!(values.len(), 17_000);
 }
 
@@ -6332,7 +6335,7 @@ fn register_test_position(
         |value| {
             let x = value
                 .get("x")
-                .and_then(ComponentValue::as_i64)
+                .and_then(|value| value.as_i64())
                 .ok_or_else(|| ComponentCodecError::invalid_field("x", "i64"))?;
             Ok(TestPosition {
                 x: i32::try_from(x).map_err(|_| ComponentCodecError::invalid_field("x", "i32"))?,
@@ -6444,7 +6447,7 @@ fn large_data_registry() -> ComponentRegistrySnapshot {
         .register_persistent_component_with_codec::<TestLargeData, _, _>(
             schema,
             |value| {
-                if matches!(value.field("values")?, ComponentValue::List(_)) {
+                if value.field("values")?.as_list().is_some() {
                     Ok(TestLargeData)
                 } else {
                     Err(ComponentCodecError::invalid_field("values", "list"))
@@ -6821,7 +6824,10 @@ fn prepare_test_asset_handle(
     Ok(PreparedTestAsset::Deferred(asset_ref))
 }
 
-fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
+fn read_asset_ref(
+    value: nara_reflect::ComponentValueRef<'_>,
+    field: &str,
+) -> Result<AssetRef, ComponentCodecError> {
     match value.field_str("kind")? {
         "path" => AssetRef::path(value.field_str("value")?).map_err(|error| {
             ComponentCodecError::invalid_asset_ref(

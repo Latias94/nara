@@ -747,8 +747,11 @@ fn assert_target(document: &ExpandedSceneDocument, owner: &str, anchor: &str, lo
         .find(|entity| entity.id() == &id(owner))
         .unwrap();
     assert_eq!(
-        owner.components()[&component()].value().get("target"),
-        Some(&ComponentValue::EntityReference(
+        owner.components()[&component()]
+            .value()
+            .get("target")
+            .map(|value| value.to_owned()),
+        Some(ComponentValue::EntityReference(
             EntityReference::SceneLocal {
                 entity: target.clone(),
             }

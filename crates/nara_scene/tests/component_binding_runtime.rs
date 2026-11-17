@@ -487,7 +487,7 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
             .unwrap()
             .unwrap()
             .value()
-            .clone(),
+            .to_owned(),
         ComponentValue::U64(19)
     );
     assert_eq!(world.resource::<NativeRetirements>().0, 1);

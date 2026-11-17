@@ -65,7 +65,7 @@ fn registry(
             schema,
             move |value| {
                 observed.fetch_add(1, Ordering::SeqCst);
-                Ok(ReceivedValue(value.clone()))
+                Ok(ReceivedValue(value.to_owned()))
             },
             |received| Ok(received.0.clone()),
         )
@@ -320,7 +320,7 @@ fn receiving_version_requires_source_recompilation_without_activation_migration(
             receiving_schema,
             move |value| {
                 observed_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(ReceivedValue(value.clone()))
+                Ok(ReceivedValue(value.to_owned()))
             },
             |received| Ok(received.0.clone()),
         )

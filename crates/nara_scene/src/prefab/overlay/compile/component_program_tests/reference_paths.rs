@@ -159,7 +159,7 @@ fn keyed_container_reorder_preserves_literal_map_keys_and_untouched_leaf_origins
     definitions
         .register_persistent_component_with_codec::<MixedLinks, _, _>(
             schema.clone(),
-            |value| Ok(MixedLinks(value.clone())),
+            |value| Ok(MixedLinks(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();

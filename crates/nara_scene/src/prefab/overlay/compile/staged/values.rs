@@ -1,6 +1,5 @@
 //! Interprets only retained value programs after structural composition has closed.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 
@@ -8,7 +7,7 @@ use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::__private::{
     EffectiveValueAdmissionError, effective_component_value_in_place_with_default_overrides,
-    effective_component_value_with_default_overrides, validate_value_materialization_budget,
+    freeze_component_defaults_with_admission, validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
@@ -20,14 +19,16 @@ use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, Ref
 use super::{Compiler, Program, Record, instance_from_inputs};
 use crate::diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator};
 use crate::draft::SceneDraft;
+use crate::effective_component_payload::EffectiveComponentPayload;
 use crate::prefab::overlay::{components, properties};
 use crate::prefab::{
     PrefabReferenceRemapError, SceneCompilationBudgetKind, SceneCompilationWorkingSet,
 };
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabComponentIntent, PrefabOverlaySlot, PrefabPropertyIntent, ResolvedPrefabSource,
-    SceneCompilationFailure, SceneCompilationFailureKind, SceneComponentRecord, SceneEntityId,
+    ExpandedSceneComponent, PrefabComponentIntent, PrefabOverlaySlot, PrefabPropertyIntent,
+    ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
+    SceneComponentRecord, SceneEntityId,
 };
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
@@ -119,7 +120,7 @@ where
         component: &ComponentTypeId,
         program: &Program,
         entity: &SceneEntityId,
-    ) -> Result<(SceneComponentRecord, ComponentReferencePrograms), SceneCompilationFailure> {
+    ) -> Result<(ExpandedSceneComponent, ComponentReferencePrograms), SceneCompilationFailure> {
         let authority = self.context.authority;
         let original = self.component(program.record, component);
         #[cfg(feature = "serde")]
@@ -175,7 +176,7 @@ where
             return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         if !opaque && !matches!(program.record, Record::Source { .. }) {
-            authority.current_schema(component, original)?;
+            authority.current_schema(component, original.owner(), original.version)?;
         }
 
         let limits = self.value_program_limits();
@@ -209,7 +210,7 @@ where
                             .map_or(Some(0), |owner| provenance_string_bytes(owner.as_str()))?,
                     )
                 })
-                .and_then(|bytes| bytes.checked_add(size_of::<SceneComponentRecord>()))
+                .and_then(|bytes| bytes.checked_add(size_of::<ExpandedSceneComponent>()))
                 .and_then(|bytes| bytes.checked_add(original.value_storage_retained_bytes()))
                 .and_then(|bytes| bytes.checked_add(contextual_defaults_work_bytes(original)?));
             Ok::<_, ComponentCodecError>((cost, metadata))
@@ -258,8 +259,8 @@ where
                 .version();
             if record.version != schema_version {
                 let previous_version = record.version;
-                let value = record.take_value();
-                let migrated = match authority.migrate_owned(component, &record, value) {
+                let value = record.value.into_owned();
+                let migrated = match authority.migrate_owned(component, record.version, value) {
                     Ok(migrated) => migrated,
                     Err(error) => {
                         self.context.diagnostics.push(
@@ -276,12 +277,12 @@ where
                     self.context.source_upgrade_required = true;
                 }
                 record.version = migrated.version;
-                record.set_value(migrated.value);
+                record.value = migrated.value.into();
                 cost = validate_value_materialization_budget(record.value(), limits)
                     .map_err(|error| self.normalization_failure(&error, entity))?;
             }
         }
-        let schema = authority.current_schema(component, &record)?;
+        let schema = authority.current_schema(component, record.owner(), record.version)?;
         cost = self.materialize_defaults(schema, &mut record, cost, entity)?;
         {
             #[cfg(feature = "work-observation")]
@@ -393,7 +394,7 @@ where
             let prepared = properties::prepare_claims(
                 schema,
                 *version,
-                record.value(),
+                record.value.materialize_mut(),
                 &record.contextual_defaults,
                 claims,
                 limits,
@@ -466,7 +467,7 @@ where
     fn materialize_defaults(
         &mut self,
         schema: &ComponentSchema,
-        record: &mut SceneComponentRecord,
+        record: &mut ExpandedSceneComponent,
         old_cost: ComponentValueCost,
         entity: &SceneEntityId,
     ) -> Result<ComponentValueCost, SceneCompilationFailure> {
@@ -479,30 +480,63 @@ where
         if record.contextual_defaults.is_empty() {
             self.validate_program_contextual_defaults(schema, record, entity)?;
         }
-        self.reserve_program_temporary(schema, record, old_cost, entity)?;
-        let result = if let Some((value, defaults)) = record.unique_value_mut_with_defaults() {
+        let result = if record.value.unique_raw_mut().is_some() {
+            self.reserve_program_temporary(schema, record, old_cost, entity)?;
+            let value = record
+                .value
+                .unique_raw_mut()
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             effective_component_value_in_place_with_default_overrides(
-                schema, value, defaults, limits,
-            )
-            .map(|cost| (None, cost))
-        } else {
-            effective_component_value_with_default_overrides(
                 schema,
-                record.value(),
+                value,
                 &record.contextual_defaults,
                 limits,
             )
-            .map(|(effective, cost)| {
-                let owned = match effective {
-                    Cow::Borrowed(_) => None,
-                    Cow::Owned(value) => Some(value),
-                };
-                (owned, cost)
+            .map(|cost| cost.unwrap_or(old_cost))
+            .map_err(EffectiveValueAdmissionError::Value)
+        } else {
+            let raw = record
+                .value
+                .raw()
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            freeze_component_defaults_with_admission(
+                schema,
+                raw,
+                &record.contextual_defaults,
+                limits,
+                |nodes, bytes, allocated| {
+                    self.context
+                        .admit_terminal_work(nodes, bytes, Some(allocated))
+                },
+            )
+            .and_then(|defaults| {
+                let cost = defaults
+                    .as_ref()
+                    .map_or(old_cost, |defaults| defaults.cost());
+                if let Some(defaults) = defaults {
+                    let bytes = EffectiveComponentPayload::defaulted_storage_bytes(
+                        defaults.retained_bytes(),
+                    )
+                    .saturating_sub(defaults.retained_bytes());
+                    self.context
+                        .admit_terminal_work(0, 0, Some(bytes))
+                        .map_err(EffectiveValueAdmissionError::Admission)?;
+                    let raw = record.value.raw().ok_or_else(|| {
+                        EffectiveValueAdmissionError::Value(ComponentCodecError::Message(
+                            "Default insertions require unchanged source backing".into(),
+                        ))
+                    })?;
+                    record.value = EffectiveComponentPayload::with_defaults(raw.clone(), defaults);
+                }
+                Ok(cost)
             })
         };
-        let (effective, cost) = match result {
+        let cost = match result {
             Ok(result) => result,
-            Err(error) => {
+            Err(EffectiveValueAdmissionError::Admission(())) => {
+                return Err(SceneCompilationFailureKind::WorkLimit.into());
+            }
+            Err(EffectiveValueAdmissionError::Value(error)) => {
                 if self.normalization_failure(&error, entity)
                     == SceneCompilationFailureKind::WorkLimit
                 {
@@ -527,21 +561,19 @@ where
                 return Err(SceneCompilationFailureKind::Component.into());
             }
         };
-        if let Some(effective) = effective {
-            record.set_value(effective);
-        }
-        Ok(cost.unwrap_or(old_cost))
+        Ok(cost)
     }
 
     fn validate_program_contextual_defaults(
         &mut self,
         schema: &ComponentSchema,
-        record: &SceneComponentRecord,
+        record: &ExpandedSceneComponent,
         entity: &SceneEntityId,
     ) -> Result<(), SceneCompilationFailure> {
-        crate::document::validate_contextual_defaults_with_admission(
+        crate::document::validate_contextual_default_values_with_admission(
             schema,
-            record,
+            record.version,
+            &record.contextual_defaults,
             self.value_program_limits(),
             |nodes, bytes, allocated| {
                 self.context
@@ -562,7 +594,7 @@ where
     fn reserve_program_temporary(
         &mut self,
         schema: &ComponentSchema,
-        record: &SceneComponentRecord,
+        record: &ExpandedSceneComponent,
         value: ComponentValueCost,
         entity: &SceneEntityId,
     ) -> Result<(), SceneCompilationFailure> {

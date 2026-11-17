@@ -643,7 +643,7 @@ fn data_coverage_refusal_precedes_native_encoding_and_preserves_the_world() {
         (
             record.schema_owner().cloned(),
             record.version(),
-            record.value().clone(),
+            record.value().to_owned(),
         )
     };
     calls.store(0, Ordering::Relaxed);
@@ -978,7 +978,7 @@ fn asset_value(reference: &AssetRef) -> ComponentValue {
     nara_reflect::encode_asset_reference_value(reference)
 }
 
-fn read_asset(value: &ComponentValue) -> Result<AssetRef, ComponentCodecError> {
+fn read_asset(value: nara_reflect::ComponentValueRef<'_>) -> Result<AssetRef, ComponentCodecError> {
     nara_reflect::decode_asset_reference_value(value)
 }
 

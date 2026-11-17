@@ -273,40 +273,18 @@ impl SceneComponentRecord {
     }
 
     /// Shares only the main payload into an independently admitted compiler draft.
-    pub(crate) fn clone_for_compilation(&self) -> Self {
-        Self {
+    pub(crate) fn clone_for_compilation(&self) -> crate::ExpandedSceneComponent {
+        crate::ExpandedSceneComponent {
             owner: self.owner.clone(),
             version: self.version,
-            value: self.value.clone(),
+            value: self.value.clone().into(),
             contextual_defaults: self.contextual_defaults.clone(),
         }
     }
 
-    pub(crate) fn unique_value_mut_with_defaults(
-        &mut self,
-    ) -> Option<(
-        &mut ComponentValue,
-        &BTreeMap<ComponentFieldId, ComponentValue>,
-    )> {
-        self.value
-            .get_mut()
-            .map(|value| (value, &self.contextual_defaults))
-    }
-
-    /// Extracts an isolated owned value and leaves an explicit null in the record.
+    #[cfg(test)]
     pub(crate) fn take_value(&mut self) -> ComponentValue {
         std::mem::replace(&mut self.value, ComponentValue::Null.into()).into_owned()
-    }
-
-    /// Moves admitted flat storage after the compiler has lowered and cleared source defaults.
-    pub(crate) fn into_compiled_parts(
-        self,
-    ) -> (
-        Option<PersistentComponentSchemaOwnerId>,
-        ComponentSchemaVersion,
-        ComponentPayload,
-    ) {
-        (self.owner, self.version, self.value)
     }
 
     #[must_use]
@@ -353,6 +331,22 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
     schema: &nara_reflect::ComponentSchema,
     record: &SceneComponentRecord,
     limits: ComponentValueMaterializationLimits,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+    validate_contextual_default_values_with_admission(
+        schema,
+        record.version,
+        &record.contextual_defaults,
+        limits,
+        admit,
+    )
+}
+
+pub(crate) fn validate_contextual_default_values_with_admission<E>(
+    schema: &nara_reflect::ComponentSchema,
+    version: ComponentSchemaVersion,
+    defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
     use nara_reflect::__private::{
@@ -362,7 +356,7 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
     };
     use nara_reflect::{ComponentCapability, ComponentCodecError, ComponentValueKind};
 
-    if !record.contextual_defaults.is_empty() && record.version != schema.version() {
+    if !defaults.is_empty() && version != schema.version() {
         return Err(ComponentCodecError::invalid_field(
             "contextual defaults",
             "current record version",
@@ -372,7 +366,7 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
     for field in schema.fields() {
         admit(1, field.id().as_str().len(), 0).map_err(EffectiveValueAdmissionError::Admission)?;
         if component_field_default_requires_context_with_admission(field, &mut admit)?
-            && !record.contextual_defaults.contains_key(field.id())
+            && !defaults.contains_key(field.id())
         {
             return Err(ComponentCodecError::invalid_field(
                 "contextual defaults",
@@ -383,7 +377,7 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
     }
     let mut nodes = 0usize;
     let mut bytes = 0usize;
-    for (id, value) in &record.contextual_defaults {
+    for (id, value) in defaults {
         let mut selected = None;
         for field in schema.fields() {
             admit(

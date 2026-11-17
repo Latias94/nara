@@ -18,8 +18,9 @@ use super::*;
 use crate::{
     __private::AuthoringAdapterReceipt,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
-    ResolvedPrefabSource, SceneCompilationLimits, SceneDocument, SceneEntityPlacement,
-    SceneEntityRecord, ScenePlacement, ScenePlacementParent, SourceDocumentKind,
+    ResolvedPrefabSource, SceneCompilationLimits, SceneComponentRecord, SceneDocument,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    SourceDocumentKind,
     prefab::{
         SourceDocumentInput,
         extraction::{
@@ -314,8 +315,8 @@ fn scene_cut_remaps_actual_growing_ids_and_keeps_persistent_references() {
         .unwrap();
     let value = root.components()[&component()].value();
     assert_eq!(
-        value.get("references"),
-        Some(&ComponentValue::List(vec![
+        value.get("references").map(|value| value.to_owned()),
+        Some(ComponentValue::List(vec![
             ComponentValue::EntityReference(EntityReference::SceneLocal { entity: b.clone() }),
             ComponentValue::EntityReference(local("outside")),
             ComponentValue::EntityReference(persistent()),

@@ -379,7 +379,7 @@ fn copy_payload(
     let plan = plan_declared_value_entity_references::<PrefabCopyError>(
         field,
         shape,
-        value,
+        &*value,
         budget.traversal()?,
     )
     .map_err(|error| reference_error(source, error))?;
@@ -392,7 +392,7 @@ fn copy_payload(
         component,
         field,
         shape,
-        value,
+        &*value,
         traversal,
         |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
     )

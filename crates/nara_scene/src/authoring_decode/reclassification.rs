@@ -492,7 +492,7 @@ pub(super) fn complete_value<'value>(
     let effective = effective_value(schema, record, limits, admission)?;
     nara_reflect::__private::validate_component_value_with_admission(
         schema,
-        &effective,
+        effective.as_ref(),
         limits.component_materialization_limits(),
         |nodes, bytes, allocated| {
             reference_charge(

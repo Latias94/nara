@@ -325,7 +325,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
             }
 
             fn __decode_persistent_component(
-                value: &#support::ComponentValue,
+                value: #support::ComponentValueRef<'_>,
             ) -> Result<Self, #support::ComponentCodecError> {
                 Ok(Self { #(#field_decoders),* })
             }

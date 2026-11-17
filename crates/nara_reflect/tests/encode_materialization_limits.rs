@@ -40,7 +40,7 @@ fn registry(field: ComponentFieldSchema) -> ComponentRegistrySnapshot {
     builder
         .register_persistent_component_with_codec::<Encoded, _, _>(
             schema(field),
-            |value| Ok(Encoded(value.clone())),
+            |value| Ok(Encoded(value.to_owned())),
             |component| Ok(component.0.clone()),
         )
         .unwrap();
@@ -212,7 +212,11 @@ fn trusted_encoder_receives_selected_materialization_limits() {
                 ComponentFieldPath::from_fields(["amount"]),
                 ComponentValueKind::U64,
             )),
-            |value, _| Ok(PreparedComponentCandidate::insert(Encoded(value.clone()))),
+            |value, _| {
+                Ok(PreparedComponentCandidate::insert(Encoded(
+                    value.to_owned(),
+                )))
+            },
             move |component, _, context| {
                 assert_eq!(context.materialization_limits(), selected);
                 Ok(component.0.clone())

@@ -583,8 +583,11 @@ fn worker_retains_original_captures_and_prepares_real_p_q_sources_and_input_mapp
             assert!(x.children().is_empty());
             for (record, target) in [(b, x), (x, b)] {
                 assert_eq!(
-                    record.components()[&component()].value().get("target"),
-                    Some(&ComponentValue::EntityReference(
+                    record.components()[&component()]
+                        .value()
+                        .get("target")
+                        .map(|value| value.to_owned()),
+                    Some(ComponentValue::EntityReference(
                         EntityReference::SceneLocal {
                             entity: target.id().clone()
                         }

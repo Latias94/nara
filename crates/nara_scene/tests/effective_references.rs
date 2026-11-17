@@ -244,7 +244,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         assert_eq!(
             record.components()[&component_id()]
                 .value()
-                .clone()
+                .to_owned()
                 .field_entity_reference("target")
                 .unwrap(),
             &EntityReference::SceneLocal {

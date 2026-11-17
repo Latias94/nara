@@ -789,8 +789,7 @@ pub(crate) fn bounded_scene_source_cost_with_admission<E>(
     admitted_tree_cost(ValueCostNode::Scene(document, 1), limits, admit)
 }
 
-/// Admits borrowed component records without requiring an authored entity representation.
-/// Flat compiler drafts admit their entity IDs and hierarchy storage separately.
+/// Admits raw source records without requiring their containing authored entities.
 pub(crate) fn bounded_component_records_source_cost<'a>(
     records: impl IntoIterator<Item = &'a SceneComponentRecord>,
     limits: ScenePatchApplyLimits,
@@ -800,6 +799,50 @@ pub(crate) fn bounded_component_records_source_cost<'a>(
     for record in records {
         cost.operation_count = cost.operation_count.saturating_add(1);
         add_patch_record_cost(&mut cost, record, 1, Some(limits), &mut observer)?;
+        if cost.operation_count > limits.validation_work().get()
+            || cost.value_cost.nodes() > limits.validation_value_nodes().get()
+            || cost.logical_bytes() > limits.validation_value_bytes().get()
+        {
+            return None;
+        }
+    }
+    Some(cost)
+}
+
+pub(crate) fn bounded_expanded_component_records_cost<'a>(
+    records: impl IntoIterator<Item = &'a crate::ExpandedSceneComponent>,
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    let mut cost = ScenePatchCost::default();
+    let value_limits = ComponentValueMaterializationLimits::new(
+        limits.validation_value_nodes(),
+        limits.validation_value_bytes(),
+        ComponentValueMaterializationLimits::default().depth(),
+    );
+    for record in records {
+        cost.operation_count = cost
+            .operation_count
+            .saturating_add(1)
+            .saturating_add(record.contextual_defaults.len());
+        cost.structural_logical_bytes = cost
+            .structural_logical_bytes
+            .saturating_add(record.owner().map_or(0, |owner| owner.as_str().len()));
+        for (key_bytes, value) in std::iter::once((0, record.value())).chain(
+            record.contextual_defaults.iter().map(|(field, value)| {
+                (
+                    field.as_str().len(),
+                    nara_reflect::ComponentValueRef::from(value),
+                )
+            }),
+        ) {
+            cost.structural_logical_bytes = cost.structural_logical_bytes.saturating_add(key_bytes);
+            let value_cost = nara_reflect::__private::validate_value_materialization_budget(
+                value,
+                value_limits.remaining(cost.value_cost.nodes(), cost.logical_bytes()),
+            )
+            .ok()?;
+            cost.value_cost = cost.value_cost.saturating_add(value_cost);
+        }
         if cost.operation_count > limits.validation_work().get()
             || cost.value_cost.nodes() > limits.validation_value_nodes().get()
             || cost.logical_bytes() > limits.validation_value_bytes().get()

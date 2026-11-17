@@ -6,7 +6,7 @@ use nara_reflect::{
     ComponentEncodeContext, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentFloat, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
     ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
     PreparedComponentCandidate,
 };
 use nara_scene::PrefabDocument;
@@ -121,7 +121,7 @@ pub(crate) fn ui_schema_catalog() -> ComponentSchemaCatalog {
 
 pub(crate) fn validate_ui_component_value(
     id: &ComponentTypeId,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> Result<(), ComponentCodecError> {
     match id.as_str() {
         UI_ROOT_ID => decode_root(value).map(drop),
@@ -147,7 +147,7 @@ pub(crate) fn ui_component_schema_version(id: &ComponentTypeId) -> Option<Compon
     }
 }
 
-pub(crate) fn decode_root(value: &ComponentValue) -> Result<UiRoot, ComponentCodecError> {
+pub(crate) fn decode_root(value: ComponentValueRef<'_>) -> Result<UiRoot, ComponentCodecError> {
     expect_fields(value, "UiRoot", &["layer"])?;
     Ok(UiRoot::new(read_layer(value.field("layer")?, "layer")?))
 }
@@ -159,7 +159,7 @@ pub(crate) fn encode_root(root: &UiRoot) -> Result<ComponentValue, ComponentCode
     )]))
 }
 
-pub(crate) fn decode_node(value: &ComponentValue) -> Result<UiNode, ComponentCodecError> {
+pub(crate) fn decode_node(value: ComponentValueRef<'_>) -> Result<UiNode, ComponentCodecError> {
     expect_fields(value, "UiNode", &["style"])?;
     Ok(UiNode::new(read_style(value.field("style")?)?))
 }
@@ -168,7 +168,7 @@ pub(crate) fn encode_node(node: &UiNode) -> Result<ComponentValue, ComponentCode
     Ok(ComponentValue::map([("style", style_value(node.style())?)]))
 }
 
-fn read_visual(value: &ComponentValue) -> Result<AuthoredVisual, ComponentCodecError> {
+fn read_visual(value: ComponentValueRef<'_>) -> Result<AuthoredVisual, ComponentCodecError> {
     expect_fields(
         value,
         "UiVisual",
@@ -297,7 +297,7 @@ fn resolve_prepared_image(
 }
 
 fn prepare_visual(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     context: &mut ComponentDecodeContext<'_>,
 ) -> Result<PreparedComponentCandidate<UiVisual>, ComponentCodecError> {
     let visual = read_visual(value)?;
@@ -318,7 +318,7 @@ fn prepare_visual(
 
 /// Canvas materialization uses its Host's actual server scratch and selected resolver.
 pub(crate) fn decode_visual_with_context(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     context: &mut ComponentDecodeContext<'_>,
 ) -> Result<UiVisual, ComponentCodecError> {
     let visual = read_visual(value)?;
@@ -338,7 +338,7 @@ pub(crate) fn decode_visual_with_context(
 
 /// Reads authored source selection without constructing a runtime image identity.
 pub(crate) fn visual_image_reference(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     Ok(match read_visual(value)?.background {
         AuthoredBrush::Plain(_) => None,
@@ -406,7 +406,7 @@ fn visual_value(
     ]))
 }
 
-pub(crate) fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCodecError> {
+pub(crate) fn decode_text(value: ComponentValueRef<'_>) -> Result<UiText, ComponentCodecError> {
     expect_fields(
         value,
         "UiText",
@@ -475,7 +475,7 @@ pub(crate) fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCode
     ]))
 }
 
-pub(crate) fn decode_button(value: &ComponentValue) -> Result<UiButton, ComponentCodecError> {
+pub(crate) fn decode_button(value: ComponentValueRef<'_>) -> Result<UiButton, ComponentCodecError> {
     expect_fields(
         value,
         "UiButton",
@@ -508,7 +508,7 @@ pub(crate) fn encode_button(button: &UiButton) -> Result<ComponentValue, Compone
 }
 
 pub(crate) fn decode_button_visuals(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> Result<UiButtonVisuals, ComponentCodecError> {
     expect_fields(
         value,
@@ -595,7 +595,9 @@ pub(crate) fn encode_button_visuals(
     ]))
 }
 
-pub(crate) fn decode_semantics(value: &ComponentValue) -> Result<UiSemantics, ComponentCodecError> {
+pub(crate) fn decode_semantics(
+    value: ComponentValueRef<'_>,
+) -> Result<UiSemantics, ComponentCodecError> {
     expect_fields(
         value,
         "UiSemantics",
@@ -634,7 +636,7 @@ pub(crate) fn decode_semantics(value: &ComponentValue) -> Result<UiSemantics, Co
     if read_bool(value.field("has_expanded")?, "has_expanded")? {
         semantics = semantics.with_expanded(read_bool(value.field("expanded")?, "expanded")?);
     }
-    let ComponentValue::List(actions) = value.field("actions")? else {
+    let Some(actions) = value.field("actions")?.as_list() else {
         return Err(ComponentCodecError::invalid_field(
             "actions",
             "a string list",
@@ -695,7 +697,7 @@ fn encode_semantics(semantics: &UiSemantics) -> Result<ComponentValue, Component
     ]))
 }
 
-pub(crate) fn decode_theme(value: &ComponentValue) -> Result<UiTheme, ComponentCodecError> {
+pub(crate) fn decode_theme(value: ComponentValueRef<'_>) -> Result<UiTheme, ComponentCodecError> {
     expect_fields(value, "UiTheme", &["revision", "palette"])?;
     UiTheme::new(
         read_u64(value.field("revision")?, "revision")?,
@@ -711,7 +713,7 @@ fn encode_theme(theme: &UiTheme) -> Result<ComponentValue, ComponentCodecError> 
     ]))
 }
 
-fn read_style(value: &ComponentValue) -> Result<UiStyle, ComponentCodecError> {
+fn read_style(value: ComponentValueRef<'_>) -> Result<UiStyle, ComponentCodecError> {
     expect_fields(
         value,
         "style",
@@ -836,7 +838,10 @@ fn style_value(style: UiStyle) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn read_dimension(value: &ComponentValue, field: &str) -> Result<UiDimension, ComponentCodecError> {
+fn read_dimension(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<UiDimension, ComponentCodecError> {
     expect_fields(value, field, DIMENSION_FIELDS)?;
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let number = read_non_negative(value.field("value")?, &format!("{field}.value"))?;
@@ -867,7 +872,10 @@ fn dimension_value(value: UiDimension) -> Result<ComponentValue, ComponentCodecE
     ]))
 }
 
-fn read_brush(value: &ComponentValue, field: &str) -> Result<AuthoredBrush, ComponentCodecError> {
+fn read_brush(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<AuthoredBrush, ComponentCodecError> {
     expect_fields(value, field, BRUSH_FIELDS)?;
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let color = read_flat_color(value, field)?;
@@ -909,7 +917,10 @@ fn read_brush(value: &ComponentValue, field: &str) -> Result<AuthoredBrush, Comp
     }
 }
 
-fn read_plain_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentCodecError> {
+fn read_plain_brush(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<UiBrush, ComponentCodecError> {
     match read_brush(value, field)? {
         AuthoredBrush::Plain(brush) => Ok(brush),
         AuthoredBrush::Image { .. } => Err(ComponentCodecError::invalid_field(
@@ -981,18 +992,19 @@ fn image_brush_value(
 }
 
 fn read_optional_asset_ref(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => nara_reflect::decode_asset_reference_value(value)
             .map(Some)
             .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
     }
 }
 
-fn read_radii(value: &ComponentValue) -> Result<UiCornerRadii, ComponentCodecError> {
+fn read_radii(value: ComponentValueRef<'_>) -> Result<UiCornerRadii, ComponentCodecError> {
     expect_fields(
         value,
         "radii",
@@ -1023,7 +1035,7 @@ fn radii_value(radii: UiCornerRadii) -> Result<ComponentValue, ComponentCodecErr
     ]))
 }
 
-fn read_palette(value: &ComponentValue) -> Result<UiThemePalette, ComponentCodecError> {
+fn read_palette(value: ComponentValueRef<'_>) -> Result<UiThemePalette, ComponentCodecError> {
     const NAMES: &[&str] = &[
         "surface",
         "panel",
@@ -1066,12 +1078,15 @@ fn palette_value(palette: UiThemePalette) -> Result<ComponentValue, ComponentCod
     ]))
 }
 
-fn read_color(value: &ComponentValue, field: &str) -> Result<UiColor, ComponentCodecError> {
+fn read_color(value: ComponentValueRef<'_>, field: &str) -> Result<UiColor, ComponentCodecError> {
     expect_fields(value, field, COLOR_FIELDS)?;
     read_flat_color(value, field)
 }
 
-fn read_flat_color(value: &ComponentValue, field: &str) -> Result<UiColor, ComponentCodecError> {
+fn read_flat_color(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<UiColor, ComponentCodecError> {
     Ok(UiColor::rgba(
         read_unit(value.field("red")?, &format!("{field}.red"))?,
         read_unit(value.field("green")?, &format!("{field}.green"))?,
@@ -1091,14 +1106,14 @@ fn color_value(color: UiColor) -> Result<ComponentValue, ComponentCodecError> {
 }
 
 fn expect_fields(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
     expected: &[&str],
 ) -> Result<(), ComponentCodecError> {
-    let ComponentValue::Map(fields) = value else {
+    let Some(fields) = value.as_map() else {
         return Err(ComponentCodecError::invalid_field(field, "an exact map"));
     };
-    if fields.len() != expected.len() || expected.iter().any(|name| !fields.contains_key(*name)) {
+    if fields.len() != expected.len() || expected.iter().any(|name| fields.get(name).is_none()) {
         return Err(ComponentCodecError::invalid_field(
             field,
             format!("exact fields: {}", expected.join(", ")),
@@ -1107,41 +1122,41 @@ fn expect_fields(
     Ok(())
 }
 
-fn read_string(value: &ComponentValue, field: &str) -> Result<String, ComponentCodecError> {
-    match value {
-        ComponentValue::String(value) => Ok(value.clone()),
-        _ => Err(ComponentCodecError::invalid_field(field, "a string")),
-    }
+fn read_string(value: ComponentValueRef<'_>, field: &str) -> Result<String, ComponentCodecError> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "a string"))
 }
 
 fn read_color_role(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
 ) -> Result<UiColorRole, ComponentCodecError> {
     let role = read_string(value, field)?;
     read_color_role_name(&role, field)
 }
 
-fn read_bool(value: &ComponentValue, field: &str) -> Result<bool, ComponentCodecError> {
+fn read_bool(value: ComponentValueRef<'_>, field: &str) -> Result<bool, ComponentCodecError> {
     value
         .as_bool()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "a bool"))
 }
 
-fn read_u64(value: &ComponentValue, field: &str) -> Result<u64, ComponentCodecError> {
+fn read_u64(value: ComponentValueRef<'_>, field: &str) -> Result<u64, ComponentCodecError> {
     value
         .as_u64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "a u64"))
 }
 
-fn read_i32(value: &ComponentValue, field: &str) -> Result<i32, ComponentCodecError> {
+fn read_i32(value: ComponentValueRef<'_>, field: &str) -> Result<i32, ComponentCodecError> {
     let value = value
         .as_i64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "an i32"))?;
     i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "an i32"))
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "a finite f32"))?;
@@ -1151,7 +1166,10 @@ fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecEr
     Ok(value as f32)
 }
 
-fn read_non_negative(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_non_negative(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<f32, ComponentCodecError> {
     let value = read_f32(value, field)?;
     if value < 0.0 {
         return Err(ComponentCodecError::invalid_field(
@@ -1162,7 +1180,7 @@ fn read_non_negative(value: &ComponentValue, field: &str) -> Result<f32, Compone
     Ok(value)
 }
 
-fn read_positive(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_positive(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = read_f32(value, field)?;
     if value <= 0.0 {
         return Err(ComponentCodecError::invalid_field(field, "a positive f32"));
@@ -1170,7 +1188,7 @@ fn read_positive(value: &ComponentValue, field: &str) -> Result<f32, ComponentCo
     Ok(value)
 }
 
-fn read_unit(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_unit(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = read_f32(value, field)?;
     if !(0.0..=1.0).contains(&value) {
         return Err(ComponentCodecError::invalid_field(
@@ -1191,7 +1209,7 @@ fn codec_message(message: impl Into<String>) -> ComponentCodecError {
 
 macro_rules! string_enum_reader {
     ($name:ident, $type:ty, $expected:literal, {$($text:literal => $value:expr),+ $(,)?}) => {
-        fn $name(value: &ComponentValue, field: &str) -> Result<$type, ComponentCodecError> {
+        fn $name(value: ComponentValueRef<'_>, field: &str) -> Result<$type, ComponentCodecError> {
             match read_string(value, field)?.as_str() {
                 $($text => Ok($value),)+
                 _ => Err(ComponentCodecError::invalid_field(field, $expected)),

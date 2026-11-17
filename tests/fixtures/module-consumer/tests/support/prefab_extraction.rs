@@ -22,7 +22,8 @@ use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentRegistryBuilder,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     AuthoringDocumentSource, AuthoringFieldEdit, CompiledSceneDocument, CompiledSceneEntity,
@@ -577,7 +578,7 @@ pub struct EntityObservation {
     pub transform: ComponentValue,
 }
 
-fn payload(entity: &CompiledSceneEntity) -> &ComponentValue {
+fn payload(entity: &CompiledSceneEntity) -> ComponentValueRef<'_> {
     entity.components()[&payload_type()].value()
 }
 
@@ -594,11 +595,11 @@ fn observe(document: &CompiledSceneDocument) -> Vec<EntityObservation> {
             .iter()
             .find(|record| record.id() == entity)
             .unwrap();
-        let ComponentValue::String(label) = payload(record).get("label").unwrap() else {
+        let Some(label) = payload(record).get("label").unwrap().as_str() else {
             panic!("expected an explicit label")
         };
         let path = if parent.is_empty() {
-            label.clone()
+            label.to_owned()
         } else {
             format!("{parent}/{label}")
         };
@@ -614,21 +615,47 @@ fn observe(document: &CompiledSceneDocument) -> Vec<EntityObservation> {
         visit(document, root, "", &mut paths, &mut order);
     }
     assert_eq!(paths.len(), document.entities().len());
-    order.iter().map(|entity| {
-        let record = document.entities().iter().find(|record| record.id() == entity).unwrap();
-        let ComponentValue::U64(amount) = payload(record).get("amount").unwrap() else { panic!("expected an explicit amount") };
-        let ComponentValue::List(references) = payload(record).get("references").unwrap() else { panic!("expected explicit references") };
-        EntityObservation {
-            path: paths[entity].clone(),
-            amount: *amount,
-            children: record.children().iter().map(|child| paths[child].clone()).collect(),
-            references: references.iter().map(|reference| {
-                let ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) = reference else { panic!("the real compiler must resolve authored references: {reference:?}") };
-                paths[entity].clone()
-            }).collect(),
-            transform: record.components()[&ComponentTypeId::new("nara.transform.Transform2d")].value().clone(),
-        }
-    }).collect()
+    order
+        .iter()
+        .map(|entity| {
+            let record = document
+                .entities()
+                .iter()
+                .find(|record| record.id() == entity)
+                .unwrap();
+            let Some(amount) = payload(record).get("amount").unwrap().as_u64() else {
+                panic!("expected an explicit amount")
+            };
+            let Some(references) = payload(record).get("references").unwrap().as_list() else {
+                panic!("expected explicit references")
+            };
+            EntityObservation {
+                path: paths[entity].clone(),
+                amount,
+                children: record
+                    .children()
+                    .iter()
+                    .map(|child| paths[child].clone())
+                    .collect(),
+                references: references
+                    .iter()
+                    .map(|reference| {
+                        let Some(EntityReference::SceneLocal { entity }) =
+                            reference.as_entity_reference()
+                        else {
+                            panic!(
+                                "the real compiler must resolve authored references: {reference:?}"
+                            )
+                        };
+                        paths[entity].clone()
+                    })
+                    .collect(),
+                transform: record.components()[&ComponentTypeId::new("nara.transform.Transform2d")]
+                    .value()
+                    .to_owned(),
+            }
+        })
+        .collect()
 }
 
 pub fn dispatch(editor: &mut EditorProjectSession, action: EditorAction) -> EditorActionOutcome {

@@ -7,8 +7,9 @@ use nara_identity::{EntityReference, EntityReferenceRemap, IdentityRemapError};
 
 use crate::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
-    ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema, ComponentShapeMember,
-    ComponentValue, ComponentValueCost, ComponentValueKind, ComponentValueShape,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentListIter, ComponentMapIter,
+    ComponentMapRef, ComponentSchema, ComponentShapeMember, ComponentValue, ComponentValueCost,
+    ComponentValueKind, ComponentValueRef, ComponentValueShape,
 };
 
 #[cfg(test)]
@@ -144,11 +145,12 @@ impl DeclaredEntityReferencePlan {
     /// Visits every reference captured by this plan without rescanning the complete value tree.
     ///
     /// All planned paths are validated before the first callback is invoked.
-    pub fn visit<E>(
+    pub fn visit<'a, E>(
         &self,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'a>>,
         mut visit: impl FnMut(&ComponentFieldPath, &EntityReference) -> Result<(), E>,
     ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        let value = value.into();
         self.validate_value(value)?;
         for planned in &self.references {
             let reference = planned_reference(value, planned)?;
@@ -172,7 +174,7 @@ impl DeclaredEntityReferencePlan {
         value: &mut ComponentValue,
         mut rewrite: impl FnMut(&ComponentFieldPath, &EntityReference) -> Result<EntityReference, E>,
     ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
-        self.validate_value(value)?;
+        self.validate_value(ComponentValueRef::from(&*value))?;
         for planned in &self.references {
             let reference = planned_reference_mut(value, planned)?;
             let replacement = rewrite(&planned.path, reference).map_err(|error| {
@@ -188,7 +190,7 @@ impl DeclaredEntityReferencePlan {
 
     fn validate_value<E>(
         &self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
     ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
         for planned in &self.references {
             planned_reference(value, planned)?;
@@ -318,9 +320,9 @@ fn admit_reference_access_segment<E>(
 ///
 /// This performs the bounded complete-tree validation once. Later plan visits traverse only the
 /// validated entity-reference paths.
-pub fn plan_declared_entity_references<E>(
+pub fn plan_declared_entity_references<'a, E>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
 ) -> Result<DeclaredEntityReferencePlan, ComponentEntityReferenceRewriteError<E>> {
     let references =
@@ -364,9 +366,9 @@ impl<R, E> From<ReferenceTraversalError<R, E>> for EntityReferencePlanError<R, E
 /// plan nor a value without EntityRef leaves bypasses structural scanning and its work admission.
 /// The final payload scan is unnecessary when the initial complete scan found no EntityRef and
 /// its complete counts plus Schema reference results remain within the receiving limits.
-pub fn plan_declared_entity_references_with_admission<R, E>(
+pub fn plan_declared_entity_references_with_admission<'a, R, E>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
@@ -401,10 +403,10 @@ pub fn plan_declared_entity_references_with_admission<R, E>(
 /// property resolution). Capabilities still come from that field. Paths start at this payload,
 /// so a scalar reference occupies the empty path. This neither resolves a property nor admits
 /// a source edit, native value or default; those remain the caller's existing owner boundaries.
-pub fn plan_declared_value_entity_references<E>(
+pub fn plan_declared_value_entity_references<'a, E>(
     field: &ComponentFieldSchema,
     shape: &ComponentValueShape,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
 ) -> Result<DeclaredEntityReferencePlan, ComponentEntityReferenceRewriteError<E>> {
     let references = collect_present_value_reference_leaves(
@@ -428,10 +430,10 @@ pub fn plan_declared_value_entity_references<E>(
 
 /// Plans the same payload-relative references with admission before traversal allocations.
 /// The supplied field and selected shape belong to an already admitted Schema.
-pub fn plan_declared_value_entity_references_with_admission<R, E>(
+pub fn plan_declared_value_entity_references_with_admission<'a, R, E>(
     field: &ComponentFieldSchema,
     shape: &ComponentValueShape,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
@@ -466,21 +468,22 @@ pub fn plan_declared_value_entity_references_with_admission<R, E>(
 /// This validates the `EntityRef` structural marker. Callers remain responsible for checking the
 /// operation-specific field capability, such as `Scene`, `Save`, or `Edit`, before invoking it.
 /// The rewrite callback must compute candidates only and must not publish external side effects.
-pub fn rewrite_declared_entity_references<E>(
+pub fn rewrite_declared_entity_references<'a, E>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
     rewrite: impl FnMut(&ComponentFieldPath, &EntityReference) -> Result<EntityReference, E>,
 ) -> Result<ComponentValue, ComponentEntityReferenceRewriteError<E>> {
+    let value = value.into();
     let plan = plan_declared_entity_references::<E>(schema, value, limits)?;
-    let mut rewritten = value.clone();
+    let mut rewritten = value.to_owned();
     plan.rewrite_in_place(&mut rewritten, rewrite)?;
     Ok(rewritten)
 }
 
-pub fn remap_declared_entity_references(
+pub fn remap_declared_entity_references<'a>(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    value: impl Into<ComponentValueRef<'a>>,
     limits: EntityReferenceTraversalLimits,
     remap: &EntityReferenceRemap,
 ) -> Result<ComponentValue, ComponentEntityReferenceRewriteError<IdentityRemapError>> {
@@ -490,7 +493,7 @@ pub fn remap_declared_entity_references(
 }
 
 fn planned_reference<'a, E>(
-    value: &'a ComponentValue,
+    value: ComponentValueRef<'a>,
     planned: &PlannedEntityReference,
 ) -> Result<&'a EntityReference, ComponentEntityReferenceRewriteError<E>> {
     let field_value = value.get_path(&planned.path).map_err(|error| {
@@ -499,7 +502,7 @@ fn planned_reference<'a, E>(
             error,
         }
     })?;
-    let ComponentValue::EntityReference(reference) = field_value else {
+    let Some(reference) = field_value.as_entity_reference() else {
         return Err(invalid_planned_reference(planned, field_value));
     };
     Ok(reference)
@@ -517,15 +520,18 @@ fn planned_reference_mut<'a, E>(
     })?;
     match field_value {
         ComponentValue::EntityReference(reference) => Ok(reference),
-        other => Err(invalid_planned_reference(planned, other)),
+        other => Err(invalid_planned_reference(
+            planned,
+            ComponentValueRef::from(&*other),
+        )),
     }
 }
 
 fn invalid_planned_reference<E>(
     planned: &PlannedEntityReference,
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> ComponentEntityReferenceRewriteError<E> {
-    if planned.required && matches!(value, ComponentValue::Null) {
+    if planned.required && value.kind() == ComponentValueKind::Null {
         ComponentEntityReferenceRewriteError::RequiredReferenceMissing {
             path: planned.path.clone(),
         }
@@ -634,13 +640,13 @@ pub(crate) struct PresentReferenceLeaf<'schema, 'value> {
     // Preserve the actual leaf authority, including demand, even for selected subtrees.
     pub(crate) shape: &'schema ComponentValueShape,
     pub(crate) path: ComponentFieldPath,
-    pub(crate) value: &'value ComponentValue,
+    pub(crate) value: ComponentValueRef<'value>,
     required: bool,
 }
 
 pub(crate) fn collect_present_reference_leaves<'schema, 'value, R>(
     schema: &'schema ComponentSchema,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
@@ -656,12 +662,13 @@ pub(crate) fn collect_present_reference_leaves<'schema, 'value, R>(
 
 pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R, E>(
     schema: &'schema ComponentSchema,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
     admitted_schema: bool,
     callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let value = value.into();
     let mut admission = ReferenceAdmission {
         callback,
         maximum_bytes: limits.bytes().get(),
@@ -726,7 +733,7 @@ pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R
 
 pub(crate) fn collect_present_field_reference_leaves<'schema, 'value, R>(
     field: &'schema ComponentFieldSchema,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
@@ -742,12 +749,13 @@ pub(crate) fn collect_present_field_reference_leaves<'schema, 'value, R>(
 
 pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'value, R, E>(
     field: &'schema ComponentFieldSchema,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
     admitted_schema: bool,
     callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let value = value.into();
     let mut admission = ReferenceAdmission {
         callback,
         maximum_bytes: limits.bytes().get(),
@@ -773,7 +781,7 @@ pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'va
 pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
     field: &'schema ComponentFieldSchema,
     shape: &'schema ComponentValueShape,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
@@ -792,12 +800,13 @@ pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
 pub(crate) fn collect_present_value_reference_leaves_with_admission<'schema, 'value, R, E>(
     field: &'schema ComponentFieldSchema,
     shape: &'schema ComponentValueShape,
-    value: &'value ComponentValue,
+    value: impl Into<ComponentValueRef<'value>>,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
     admitted_schema: bool,
     callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let value = value.into();
     let mut admission = ReferenceAdmission {
         callback,
         maximum_bytes: limits.bytes().get(),
@@ -858,7 +867,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
 
     fn validate_undeclared_references<R>(
         &mut self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         root: &ComponentFieldPath,
         reference_free_usage: Option<(usize, usize)>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
@@ -890,35 +899,35 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
 
     fn field_value<R>(
         &mut self,
-        mut value: &'value ComponentValue,
+        mut value: ComponentValueRef<'value>,
         field: &ComponentFieldSchema,
-    ) -> Result<Option<&'value ComponentValue>, ReferenceTraversalError<R, E>> {
+    ) -> Result<Option<ComponentValueRef<'value>>, ReferenceTraversalError<R, E>> {
         for (offset, segment) in field.path.segments().iter().enumerate() {
             self.admission.charge(1, 0, 0)?;
-            let child = match (segment, value) {
-                (ComponentFieldPathSegment::Field(name), ComponentValue::Map(fields)) => {
-                    fields.get(name)
-                }
-                (ComponentFieldPathSegment::Index(index), ComponentValue::List(items)) => {
-                    items.get(usize::try_from(*index).unwrap_or(usize::MAX))
-                }
-                _ => None,
+            let child = match segment {
+                ComponentFieldPathSegment::Field(name) => value.get(name),
+                ComponentFieldPathSegment::Index(index) => value
+                    .as_list()
+                    .and_then(|items| items.get(usize::try_from(*index).unwrap_or(usize::MAX))),
             };
             if let Some(child) = child {
                 value = child;
                 continue;
             }
             let missing = matches!(
-                (segment, value),
-                (ComponentFieldPathSegment::Field(_), ComponentValue::Map(_))
-                    | (ComponentFieldPathSegment::Index(_), ComponentValue::List(_))
+                (segment, value.kind()),
+                (ComponentFieldPathSegment::Field(_), ComponentValueKind::Map)
+                    | (
+                        ComponentFieldPathSegment::Index(_),
+                        ComponentValueKind::List
+                    )
             );
             if missing && !field.is_required() {
                 return Ok(None);
             }
             let path = self.admission.path(field.path.segments())?;
-            let error = match (segment, value) {
-                (ComponentFieldPathSegment::Field(name), ComponentValue::Map(_)) => {
+            let error = match (segment, value.kind()) {
+                (ComponentFieldPathSegment::Field(name), ComponentValueKind::Map) => {
                     let path = self.admission.path(&field.path.segments()[..=offset])?;
                     self.admission.allocation(Some(name.len()))?;
                     ComponentFieldPathError::MissingField {
@@ -926,11 +935,11 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                         field: name.clone(),
                     }
                 }
-                (ComponentFieldPathSegment::Index(index), ComponentValue::List(items)) => {
+                (ComponentFieldPathSegment::Index(index), ComponentValueKind::List) => {
                     ComponentFieldPathError::IndexOutOfBounds {
                         path: self.admission.path(&field.path.segments()[..=offset])?,
                         index: *index,
-                        len: items.len(),
+                        len: value.as_list().expect("List kind checked").len(),
                     }
                 }
                 (ComponentFieldPathSegment::Field(_), _) => ComponentFieldPathError::ExpectedMap {
@@ -966,7 +975,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     fn visit_field<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
-        value: &'value ComponentValue,
+        value: ComponentValueRef<'value>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
         self.visit_field_shape(field, &field.shape, value, field.path())
     }
@@ -975,7 +984,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         &mut self,
         field: &'schema ComponentFieldSchema,
         shape: &'schema ComponentValueShape,
-        value: &'value ComponentValue,
+        value: ComponentValueRef<'value>,
         root: &ComponentFieldPath,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
         if !self.admitted_schema {
@@ -1017,7 +1026,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         &mut self,
         field: &'schema ComponentFieldSchema,
         mut shape: &'schema ComponentValueShape,
-        value: &'value ComponentValue,
+        value: ComponentValueRef<'value>,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
@@ -1037,30 +1046,32 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                 .into());
             }
             match shape {
-                ComponentValueShape::Optional { .. } if matches!(value, ComponentValue::Null) => {
+                ComponentValueShape::Optional { .. }
+                    if value.kind() == ComponentValueKind::Null =>
+                {
                     return Ok(());
                 }
                 ComponentValueShape::Optional { value } => shape = value,
                 _ => break,
             }
         }
-        match (shape, value) {
+        match (shape, value.kind()) {
             (
                 ComponentValueShape::Scalar {
                     kind,
                     numeric_domain,
                     numeric_interval,
                 },
-                value,
-            ) if value.kind() == *kind
+                actual,
+            ) if actual == *kind
                 && numeric_domain.is_none_or(|domain| domain.accepts_value(value))
                 && numeric_interval
                     .is_none_or(|interval| interval.accepts_value(value, *numeric_domain)) => {}
-            (ComponentValueShape::EntityRef, ComponentValue::EntityReference(_)) => {
+            (ComponentValueShape::EntityRef, ComponentValueKind::EntityRef) => {
                 self.check_capability(field, ComponentCapability::EntityRef)?;
                 self.record(field, shape, path, value)?;
             }
-            (ComponentValueShape::AssetRef { .. }, value) => {
+            (ComponentValueShape::AssetRef { .. }, _) => {
                 self.check_capability(field, ComponentCapability::AssetRef)?;
                 let asset_work = crate::asset_reference::asset_reference_value_work(value);
                 // Entity traversal also validates asset leaves. Admit the shared decoder's
@@ -1089,7 +1100,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                     || {
                         value
                             .get("value")
-                            .and_then(ComponentValue::as_str)
+                            .and_then(ComponentValueRef::as_str)
                             .map_or(0, str::len)
                     },
                     |work| work.payload_bytes,
@@ -1097,13 +1108,20 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                 self.result_bytes = self.result_bytes.saturating_add(payload_bytes);
                 self.record(field, shape, path, value)?;
             }
-            (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
-                self.visit_record(field, members, values, path, depth)?;
+            (ComponentValueShape::Record { members }, ComponentValueKind::Map) => {
+                self.visit_record(
+                    field,
+                    members,
+                    value.as_map().expect("Map kind checked"),
+                    path,
+                    depth,
+                )?;
             }
             (
                 ComponentValueShape::List { item } | ComponentValueShape::KeyedList { item, .. },
-                ComponentValue::List(values),
+                ComponentValueKind::List,
             ) => {
+                let values = value.as_list().expect("List kind checked");
                 for (index, value) in values.iter().enumerate() {
                     let index = u32::try_from(index)
                         .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;
@@ -1113,8 +1131,8 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                     path.pop();
                 }
             }
-            (ComponentValueShape::Map { value: shape }, ComponentValue::Map(values)) => {
-                for (name, value) in values {
+            (ComponentValueShape::Map { value: shape }, ComponentValueKind::Map) => {
+                for (name, value) in value.as_map().expect("Map kind checked").iter() {
                     self.admission.allocation(Some(name.len()))?;
                     self.admission.reserve(path, 1)?;
                     path.push(ComponentFieldPathSegment::field(name));
@@ -1122,11 +1140,11 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                     path.pop();
                 }
             }
-            (ComponentValueShape::Opaque { kind }, value) if value.kind() == *kind => {}
-            (_, value) => {
+            (ComponentValueShape::Opaque { kind }, actual) if actual == *kind => {}
+            _ => {
                 let path = self.admission.path(path)?;
                 return Err(if matches!(shape, ComponentValueShape::EntityRef)
-                    && matches!(value, ComponentValue::Null)
+                    && value.kind() == ComponentValueKind::Null
                 {
                     ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path }
                 } else {
@@ -1145,7 +1163,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         &mut self,
         field: &'schema ComponentFieldSchema,
         members: &'schema [ComponentShapeMember],
-        values: &'value std::collections::BTreeMap<String, ComponentValue>,
+        values: ComponentMapRef<'value>,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
@@ -1179,14 +1197,14 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             self.visit(field, &member.shape, value, path, depth.saturating_add(1))?;
             path.pop();
         }
-        if let Some(name) = values.keys().find(|name| !names.contains(name.as_str())) {
+        if let Some((name, value)) = values.iter().find(|(name, _)| !names.contains(name)) {
             self.admission.allocation(Some(name.len()))?;
             self.admission.reserve(path, 1)?;
             path.push(ComponentFieldPathSegment::field(name));
             return Err(
                 ComponentEntityReferenceRewriteError::InvalidReferenceValue {
                     path: self.admission.path(path)?,
-                    actual: values[name].kind(),
+                    actual: value.kind(),
                 }
                 .into(),
             );
@@ -1199,7 +1217,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         field: &'schema ComponentFieldSchema,
         shape: &'schema ComponentValueShape,
         path: &[ComponentFieldPathSegment],
-        value: &'value ComponentValue,
+        value: ComponentValueRef<'value>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
         let kind = shape.value_kind();
         if kind != ComponentValueKind::EntityRef && kind != self.reference_kind {
@@ -1230,7 +1248,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
         } else if kind == ComponentValueKind::AssetRef {
             value
                 .get("value")
-                .and_then(ComponentValue::as_str)
+                .and_then(ComponentValueRef::as_str)
                 .map_or(0, str::len)
         } else {
             0
@@ -1297,7 +1315,7 @@ impl ReferencePathScan {
 }
 
 fn find_undeclared_reference_path<R, E>(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     limits: EntityReferenceTraversalLimits,
     declared_paths: &BTreeSet<ComponentFieldPath>,
     result_nodes: usize,
@@ -1352,16 +1370,16 @@ struct ReferencePathTraversal<'value, 'declared> {
 
 enum ReferenceTraversalFrame<'a> {
     Visit {
-        value: &'a ComponentValue,
+        value: ComponentValueRef<'a>,
         depth: usize,
         segment: Option<TraversalPathSegment<'a>>,
     },
     ContinueList {
-        items: std::iter::Enumerate<std::slice::Iter<'a, ComponentValue>>,
+        items: std::iter::Enumerate<ComponentListIter<'a>>,
         depth: usize,
     },
     ContinueMap {
-        fields: std::collections::btree_map::Iter<'a, String, ComponentValue>,
+        fields: ComponentMapIter<'a>,
         depth: usize,
     },
     Exit,
@@ -1370,7 +1388,7 @@ enum ReferenceTraversalFrame<'a> {
 impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
     fn visit<R, E>(
         &mut self,
-        root: &'value ComponentValue,
+        root: ComponentValueRef<'value>,
         depth: usize,
         admission: &mut ReferenceAdmission<'_, E>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
@@ -1430,7 +1448,7 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
 
     fn visit_value<R, E>(
         &mut self,
-        value: &'value ComponentValue,
+        value: ComponentValueRef<'value>,
         depth: usize,
         segment: Option<TraversalPathSegment<'value>>,
         stack: &mut Vec<ReferenceTraversalFrame<'value>>,
@@ -1473,8 +1491,8 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
             .into());
         }
 
-        match value {
-            ComponentValue::EntityReference(_) => {
+        match value.kind() {
+            ComponentValueKind::EntityRef => {
                 if self.first_undeclared_path.is_none() {
                     let allocation_bytes = self
                         .path
@@ -1497,36 +1515,35 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
                     }
                 }
             }
-            ComponentValue::List(items) => {
+            ComponentValueKind::List => {
+                let items = value.as_list().expect("List kind checked");
                 admission.reserve(stack, 1)?;
                 stack.push(ReferenceTraversalFrame::ContinueList {
                     items: items.iter().enumerate(),
                     depth: depth.saturating_add(1),
                 });
             }
-            ComponentValue::Map(fields) => {
+            ComponentValueKind::Map => {
+                let fields = value.as_map().expect("Map kind checked");
                 admission.reserve(stack, 1)?;
                 stack.push(ReferenceTraversalFrame::ContinueMap {
                     fields: fields.iter(),
                     depth: depth.saturating_add(1),
                 });
             }
-            ComponentValue::Null
-            | ComponentValue::Bool(_)
-            | ComponentValue::I64(_)
-            | ComponentValue::U64(_)
-            | ComponentValue::F64(_)
-            | ComponentValue::String(_) => {}
+            _ => {}
         }
         Ok(())
     }
 }
 
 // Traversal work retains text-width native UUID accounting independently of logical value cost.
-fn dynamic_value_work_cost(value: &ComponentValue) -> (usize, usize) {
-    match value {
-        ComponentValue::String(value) => (1, value.len()),
-        ComponentValue::EntityReference(EntityReference::Persistent { entity }) => (
+fn dynamic_value_work_cost(value: ComponentValueRef<'_>) -> (usize, usize) {
+    if let Some(text) = value.as_str() {
+        return (1, text.len());
+    }
+    match value.as_entity_reference() {
+        Some(EntityReference::Persistent { entity }) => (
             1,
             entity
                 .namespace
@@ -1534,16 +1551,10 @@ fn dynamic_value_work_cost(value: &ComponentValue) -> (usize, usize) {
                 .len()
                 .saturating_add(PERSISTENT_RUNTIME_UUID_TEXT_BYTES),
         ),
-        ComponentValue::EntityReference(reference) => {
+        Some(reference) => {
             let cost = reference.cost();
             (cost.nodes(), cost.logical_bytes())
         }
-        ComponentValue::Null
-        | ComponentValue::Bool(_)
-        | ComponentValue::I64(_)
-        | ComponentValue::U64(_)
-        | ComponentValue::F64(_)
-        | ComponentValue::List(_)
-        | ComponentValue::Map(_) => (1, 0),
+        None => (1, 0),
     }
 }

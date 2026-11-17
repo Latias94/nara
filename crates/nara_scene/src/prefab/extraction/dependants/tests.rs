@@ -1224,7 +1224,7 @@ fn preserved_unknown_storage_stays_exact_at_direct_addition_set_and_property_sit
         version: ComponentSchemaVersion::ONE,
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(field()),
-            intent: PrefabPropertyIntent::Set(opaque.value().clone()),
+            intent: PrefabPropertyIntent::Set(opaque.value().to_owned()),
         }],
     });
     let SplitSourceDocument::Prefab(after) = rewrite_dependant(

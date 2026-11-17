@@ -1,7 +1,7 @@
 //! Candidate-local material validation shared by source and processed Scene preparation.
 
 use nara_material::{Material2dAsset, Material2dRecord};
-use nara_reflect::{ComponentCodecError, ComponentTypeId, ComponentValue};
+use nara_reflect::{ComponentCodecError, ComponentTypeId, ComponentValue, ComponentValueRef};
 use nara_scene::CompiledSceneDocument;
 
 use super::{ProjectAssetCollection, ProjectContentError, ProjectContentErrorKind};
@@ -83,7 +83,10 @@ pub(super) fn attach_source_material_views(
     }
 }
 
-pub(crate) fn material_record_work_bytes(value: &ComponentValue) -> Option<usize> {
+pub(crate) fn material_record_work_bytes<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
+) -> Option<usize> {
+    let value = value.into();
     let cost = value.cost();
     cost.nodes()
         .checked_mul(
@@ -94,11 +97,11 @@ pub(crate) fn material_record_work_bytes(value: &ComponentValue) -> Option<usize
         .checked_add(std::mem::size_of::<Material2dRecord>())
 }
 
-pub(crate) fn validate_material_record(
-    value: &ComponentValue,
+pub(crate) fn validate_material_record<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
     materials: Option<&ProjectAssetCollection<Material2dAsset>>,
 ) -> Result<(), ComponentCodecError> {
-    let record = Material2dRecord::from_component_value(value)?;
+    let record = Material2dRecord::from_component_value(value.into())?;
     let asset = materials
         .and_then(|materials| materials.get(record.material()))
         .ok_or_else(|| {

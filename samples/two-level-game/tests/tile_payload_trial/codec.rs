@@ -10,7 +10,7 @@ use nara::{
         ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-        decode_asset_reference_value, encode_asset_reference_value,
+        ComponentValueRef, decode_asset_reference_value, encode_asset_reference_value,
     },
     tilemap::{TileCell, TileCoord, TileIndex},
 };
@@ -119,7 +119,7 @@ pub(super) fn register(
 }
 
 pub(super) fn decode_configuration(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
 ) -> Result<Configuration, ComponentCodecError> {
     let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
     validate_tile_size(tile_size)?;
@@ -128,11 +128,11 @@ pub(super) fn decode_configuration(
         layer: read_i32(value, "layer", "layer")?,
         sort_key: read_i32(value, "sort_key", "sort_key")?,
         y_sort_anchor: match value.field("y_sort_anchor")? {
-            ComponentValue::Null => None,
+            value if value.kind() == ComponentValueKind::Null => None,
             value => Some(read_vec2(value, "y_sort_anchor")?),
         },
         tileset: match value.field("tileset")? {
-            ComponentValue::Null => None,
+            value if value.kind() == ComponentValueKind::Null => None,
             value => Some(decode_asset_reference_value(value).map_err(|_| {
                 ComponentCodecError::invalid_field("tileset", "canonical asset reference")
             })?),
@@ -167,10 +167,11 @@ pub(super) fn encode_configuration(
     ]))
 }
 
-pub(super) fn decode_cells(value: &ComponentValue) -> Result<Cells, ComponentCodecError> {
-    let ComponentValue::List(entries) = value.field("cells")? else {
-        return Err(ComponentCodecError::invalid_field("cells", "list"));
-    };
+pub(super) fn decode_cells(value: ComponentValueRef<'_>) -> Result<Cells, ComponentCodecError> {
+    let entries = value
+        .field("cells")?
+        .as_list()
+        .ok_or_else(|| ComponentCodecError::invalid_field("cells", "list"))?;
     let mut coordinates = BTreeSet::new();
     let mut cells = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
@@ -207,7 +208,7 @@ pub(super) fn encode_cells(value: &Cells) -> Result<ComponentValue, ComponentCod
     )]))
 }
 
-fn read_cell(entry: &ComponentValue) -> Result<(TileCoord, TileCell), ComponentCodecError> {
+fn read_cell(entry: ComponentValueRef<'_>) -> Result<(TileCoord, TileCell), ComponentCodecError> {
     let coord = entry.field("coord")?;
     let cell = entry.field("cell")?;
     let coord = TileCoord::new(
@@ -253,12 +254,16 @@ fn encode_cell(coord: TileCoord, cell: TileCell) -> Result<ComponentValue, Compo
     ]))
 }
 
-fn read_i32(value: &ComponentValue, field: &str, path: &str) -> Result<i32, ComponentCodecError> {
+fn read_i32(
+    value: ComponentValueRef<'_>,
+    field: &str,
+    path: &str,
+) -> Result<i32, ComponentCodecError> {
     i32::try_from(value.field_i64(field)?)
         .map_err(|_| ComponentCodecError::invalid_field(path, "i32"))
 }
 
-fn read_f32(value: &ComponentValue, path: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, path: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(path, "finite f32"))?;
@@ -268,7 +273,7 @@ fn read_f32(value: &ComponentValue, path: &str) -> Result<f32, ComponentCodecErr
     Ok(value as f32)
 }
 
-fn read_vec2(value: &ComponentValue, path: &str) -> Result<Vec2, ComponentCodecError> {
+fn read_vec2(value: ComponentValueRef<'_>, path: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
         read_f32(value.field("x")?, &format!("{path}.x"))?,
         read_f32(value.field("y")?, &format!("{path}.y"))?,

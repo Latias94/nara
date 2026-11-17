@@ -230,7 +230,11 @@ where
                     .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
                 let reference_program = &component_programs.value;
                 let cost = reference_program.cost;
-                if !self.context.authority.can_interpret(component, payload) {
+                if !self.context.authority.can_interpret(
+                    component,
+                    payload.owner(),
+                    payload.version,
+                ) {
                     #[cfg(feature = "serde")]
                     if self.context.capture_unavailable_declarations {
                         self.capture_unavailable_declaration(node, id, component)?;
@@ -367,7 +371,12 @@ where
                     return Err(SceneCompilationFailureKind::WorkLimit.into());
                 }
                 if rewrite_required {
-                    plan.rewrite_in_place(payload.value_mut(), |path, reference| {
+                    self.admit(
+                        cost.nodes()
+                            .checked_mul(96)
+                            .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
+                    )?;
+                    plan.rewrite_in_place(payload.materialize_value_mut(), |path, reference| {
                         materialized_reference(
                             reference,
                             path,
@@ -535,7 +544,7 @@ where
                 .as_ref()
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             let mut bytes = Some(0usize);
-            plan.visit(value, |path, reference| {
+            plan.visit(&*value, |path, reference| {
                 let replacement = match reference {
                     EntityReference::SceneLocal { .. } | EntityReference::Authored { .. } => {
                         match program

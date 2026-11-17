@@ -18,7 +18,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
+    ComponentValue, ComponentValueKind, ComponentValueRef, PreparedComponentCandidate,
 };
 
 mod admission;
@@ -593,12 +593,13 @@ pub fn register_tilemap_components(
     validate_tilemap_components(registry)?;
     registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
         tilemap_schema(),
-        |value, context| {
+        |value: ComponentValueRef<'_>, context| {
             let tile_size = read_positive_vec2(value.field("tile_size")?, "tile_size")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
             let y_sort_anchor = match value.get("y_sort_anchor") {
-                None | Some(ComponentValue::Null) => None,
+                None => None,
+                Some(value) if value.kind() == ComponentValueKind::Null => None,
                 Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
             };
             let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
@@ -919,7 +920,10 @@ fn invalid_asset_ref(
     ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
 }
 
-fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
+fn optional_i32(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<Option<i32>, ComponentCodecError> {
     value
         .get(field)
         .map(|value| {
@@ -931,14 +935,17 @@ fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, Comp
         .transpose()
 }
 
-fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+fn read_vec2(value: ComponentValueRef<'_>, field: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
         read_f32(value.field("x")?, &format!("{field}.x"))?,
         read_f32(value.field("y")?, &format!("{field}.y"))?,
     ))
 }
 
-fn read_positive_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+fn read_positive_vec2(
+    value: ComponentValueRef<'_>,
+    field: &str,
+) -> Result<Vec2, ComponentCodecError> {
     let value = read_vec2(value, field)?;
     if value.x <= 0.0 {
         return Err(ComponentCodecError::invalid_field(
@@ -955,7 +962,7 @@ fn read_positive_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, Compo
     Ok(value)
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
@@ -972,7 +979,7 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn read_color(value: &ComponentValue) -> Result<Color, ComponentCodecError> {
+fn read_color(value: ComponentValueRef<'_>) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
         read_f32(value.field("r")?, "cell.color.r")?,
         read_f32(value.field("g")?, "cell.color.g")?,
@@ -991,14 +998,14 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
 }
 
 fn read_cells(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
 ) -> Result<Vec<(TileCoord, TileCell)>, ComponentCodecError> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    let ComponentValue::List(entries) = value else {
-        return Err(ComponentCodecError::invalid_field("cells", "list"));
-    };
+    let entries = value
+        .as_list()
+        .ok_or_else(|| ComponentCodecError::invalid_field("cells", "list"))?;
     let mut coordinates = BTreeSet::new();
     entries
         .iter()
@@ -1016,7 +1023,7 @@ fn read_cells(
         .collect()
 }
 
-fn read_cell(entry: &ComponentValue) -> Result<(TileCoord, TileCell), ComponentCodecError> {
+fn read_cell(entry: ComponentValueRef<'_>) -> Result<(TileCoord, TileCell), ComponentCodecError> {
     let coord = entry.field("coord")?;
     let cell = entry.field("cell")?;
     Ok((
@@ -1030,7 +1037,7 @@ fn read_cell(entry: &ComponentValue) -> Result<(TileCoord, TileCell), ComponentC
 }
 
 fn read_i32(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
     display_field: &str,
 ) -> Result<i32, ComponentCodecError> {
@@ -1039,7 +1046,7 @@ fn read_i32(
 }
 
 fn read_u32(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     field: &str,
     display_field: &str,
 ) -> Result<u32, ComponentCodecError> {
@@ -1073,11 +1080,12 @@ fn cells_value(tilemap: &Tilemap) -> Result<ComponentValue, ComponentCodecError>
 }
 
 fn read_optional_asset_ref(
-    value: Option<&ComponentValue>,
+    value: Option<ComponentValueRef<'_>>,
     field: &str,
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
+        None => Ok(None),
+        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
         Some(value) => nara_reflect::decode_asset_reference_value(value)
             .map(Some)
             .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
@@ -1099,7 +1107,10 @@ mod tests {
         AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
         ProjectAssetDatabase, StableAssetId,
     };
-    use nara_reflect::{ComponentDecodeContext, ComponentRegistrySnapshot};
+    use nara_reflect::{
+        __private::freeze_component_defaults, ComponentDecodeContext, ComponentRegistrySnapshot,
+        ComponentValueMaterializationLimits,
+    };
 
     fn frozen_tilemap_registry() -> ComponentRegistrySnapshot {
         let mut registry = ComponentRegistryBuilder::new();
@@ -1228,6 +1239,207 @@ mod tests {
         prepared.apply(&mut world, restored).unwrap();
 
         assert_eq!(world.get::<Tilemap>(restored), Some(&original));
+    }
+
+    #[test]
+    fn frozen_defaults_preserve_cell_backing_through_membership_and_native_decode() {
+        let snapshot = frozen_tilemap_registry();
+        let product = AssetProductRef::new(
+            stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
+            ImportedProductId::PRIMARY,
+        )
+        .unwrap();
+        let reference = AssetRef::Product(product);
+        let mut server = AssetServer::new();
+        let handle = server.reserve_product::<TileSet>(product).unwrap();
+        let tile_size = Vec2::new(16.0, 8.0);
+        let authored_cells = [
+            (
+                TileCoord::new(33, -33),
+                TileCell::new(TileIndex::new(7)).with_color(Color::rgba(0.25, 0.5, 0.75, 0.125)),
+            ),
+            (TileCoord::new(-32, 31), TileCell::new(TileIndex::new(7))),
+            (TileCoord::new(0, 0), TileCell::new(TileIndex::new(0))),
+            (
+                TileCoord::new(i32::MAX, i32::MIN),
+                TileCell::new(TileIndex::new(3)),
+            ),
+        ];
+        let source = ComponentValue::map([
+            ("tile_size", vec2_value(tile_size).unwrap()),
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&reference),
+            ),
+            (
+                "cells",
+                ComponentValue::List(
+                    authored_cells
+                        .iter()
+                        .map(|(coord, cell)| {
+                            ComponentValue::map([
+                                (
+                                    "coord",
+                                    ComponentValue::map([
+                                        ("x", ComponentValue::I64(i64::from(coord.x))),
+                                        ("y", ComponentValue::I64(i64::from(coord.y))),
+                                    ]),
+                                ),
+                                (
+                                    "cell",
+                                    ComponentValue::map([
+                                        ("tile", ComponentValue::U64(u64::from(cell.tile.raw()))),
+                                        ("color", color_value(cell.color).unwrap()),
+                                    ]),
+                                ),
+                                (
+                                    "opaque",
+                                    ComponentValue::map([
+                                        ("integer", ComponentValue::U64(u64::MAX)),
+                                        (
+                                            "precise",
+                                            ComponentValue::f64(1.000_000_000_000_000_2).unwrap(),
+                                        ),
+                                        ("text", ComponentValue::String("retained".to_string())),
+                                    ]),
+                                ),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+        ]);
+        let schema = tilemap_schema();
+        let atlas = TileAtlasLayout::grid(tile_size, 4, 2);
+        for (overrides, mut expected) in [
+            (
+                BTreeMap::new(),
+                Tilemap::new(tile_size).with_tileset(handle),
+            ),
+            (
+                BTreeMap::from([
+                    (ComponentFieldId::new("layer"), ComponentValue::I64(4)),
+                    (ComponentFieldId::new("sort_key"), ComponentValue::I64(-9)),
+                    (
+                        ComponentFieldId::new("y_sort_anchor"),
+                        vec2_value(Vec2::new(2.0, -4.0)).unwrap(),
+                    ),
+                ]),
+                Tilemap::new(tile_size)
+                    .with_tileset(handle)
+                    .with_layer(4)
+                    .with_sort_key(-9)
+                    .with_y_sort_anchor(Vec2::new(2.0, -4.0)),
+            ),
+        ] {
+            let frozen = freeze_component_defaults(
+                &schema,
+                &source,
+                &overrides,
+                ComponentValueMaterializationLimits::default(),
+            )
+            .unwrap()
+            .unwrap();
+            let value = frozen.read(&source);
+            assert!(value.as_value().is_none());
+            assert!(std::ptr::eq(
+                value.field("cells").unwrap().as_value().unwrap(),
+                source.field("cells").unwrap(),
+            ));
+            assert_eq!(
+                tilemap_membership_work_bytes(value),
+                tilemap_membership_work_bytes(&source),
+            );
+            validate_persisted_tilemap_membership(value, |observed| {
+                assert_eq!(observed, &reference);
+                Some(atlas)
+            })
+            .unwrap();
+            assert_eq!(
+                validate_persisted_tilemap_membership(value, |_| {
+                    Some(TileAtlasLayout::grid(tile_size, 4, 1))
+                }),
+                Err(TilemapMembershipError::TileOutsideAtlas {
+                    tileset: reference.clone(),
+                    coord: TileCoord::new(-32, 31),
+                    tile: TileIndex::new(7),
+                }),
+            );
+            let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+            let prepared = snapshot
+                .preflight_component_with_context(&tilemap_type_id(), value, &mut context)
+                .unwrap();
+            assert!(context.asset_server_touched());
+            drop(frozen);
+            for (coord, cell) in authored_cells {
+                expected.set_cell(coord, cell);
+            }
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+            prepared.apply(&mut world, entity).unwrap();
+            assert_eq!(world.get::<Tilemap>(entity), Some(&expected));
+        }
+        for field in ["layer", "sort_key", "y_sort_anchor"] {
+            assert!(source.get(field).is_none());
+        }
+    }
+
+    #[test]
+    fn frozen_reads_preserve_cell_and_reference_rejections() {
+        let snapshot = frozen_tilemap_registry();
+        let reference = nara_reflect::encode_asset_reference_value(
+            &AssetRef::path("tilesets/terrain.ron").unwrap(),
+        );
+        let mut invalid_color = tile_cell_value(1, 0, 1);
+        invalid_color
+            .set_path(
+                &ComponentFieldPath::from_fields(["cell", "color", "g"]),
+                ComponentValue::f64(f64::MAX).unwrap(),
+            )
+            .unwrap();
+        for (tileset, cells) in [
+            (
+                reference.clone(),
+                vec![tile_cell_value(2, 3, 1), tile_cell_value(2, 3, 2)],
+            ),
+            (reference, vec![tile_cell_value(0, 0, 0), invalid_color]),
+            (ComponentValue::Bool(true), Vec::new()),
+        ] {
+            let source = ComponentValue::map([
+                ("tile_size", vec2_value(DEFAULT_TILE_SIZE).unwrap()),
+                ("tileset", tileset),
+                ("cells", ComponentValue::List(cells)),
+            ]);
+            let frozen = freeze_component_defaults(
+                &tilemap_schema(),
+                &source,
+                &BTreeMap::new(),
+                ComponentValueMaterializationLimits::default(),
+            )
+            .unwrap()
+            .unwrap();
+            let value = frozen.read(&source);
+            assert!(value.as_value().is_none());
+            let expected = prepare_persisted_tilemap_membership(&source)
+                .err()
+                .expect("the owning input must reject the invalid cells or reference");
+            assert_eq!(
+                validate_persisted_tilemap_membership(value, |_| {
+                    panic!("invalid local data must refuse before atlas resolution")
+                }),
+                Err(expected),
+            );
+            let expected = snapshot
+                .preflight_component(&tilemap_type_id(), &source)
+                .err()
+                .expect("the stock codec must reject the invalid cells or reference");
+            assert_eq!(
+                snapshot
+                    .preflight_component(&tilemap_type_id(), value)
+                    .err(),
+                Some(expected),
+            );
+        }
     }
 
     #[test]

@@ -22,7 +22,7 @@ use crate::{
     ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
     ScenePlacementParent,
     authoring::{creation::allocate_entity_id, history_error_report},
-    patch::bounded_component_records_source_cost,
+    patch::{bounded_component_records_source_cost, bounded_expanded_component_records_cost},
     prefab::{
         AuthoringSceneCompilationOmissionReason, PrefabOverlayCostLimits,
         SceneCompilationWorkingSet, SelectedInstanceCompilation, SourceDocumentInput,
@@ -262,7 +262,7 @@ fn lower(
     let nodes = history
         .max_entry_value_nodes()
         .min(replay.validation_value_nodes().get());
-    let raw = bounded_component_records_source_cost(
+    let raw = bounded_expanded_component_records_cost(
         fragment
             .entities
             .iter()
@@ -457,8 +457,16 @@ fn lower(
                 EntityReferencePlanError::Reference(error) => reference_error(error),
                 EntityReferencePlanError::Admission(report) => report,
             })?;
+            let cost = payload.value().cost();
+            work.conversion_work.reserve(
+                "localization-value",
+                cost.nodes()
+                    .checked_mul(96)
+                    .and_then(|bytes| bytes.checked_add(cost.logical_bytes()))
+                    .and_then(|bytes| bytes.checked_add(payload.value_storage_retained_bytes())),
+            )?;
             localize_references(
-                payload.value_mut(),
+                payload.materialize_value_mut(),
                 &plan,
                 &identifiers,
                 &fragment.targets,
@@ -477,7 +485,7 @@ fn lower(
                     plan_declared_value_entity_references_with_admission::<ScenePatchReport, _>(
                         field,
                         field.shape(),
-                        value,
+                        &*value,
                         reference_limits,
                         |_, _, allocation_bytes| work.reserve(allocation_bytes),
                     )
@@ -504,14 +512,18 @@ fn lower(
                 operations.push(ScenePatchOperation::AddComponent {
                     entity: entity.clone(),
                     component,
-                    value,
+                    value: value.into_source_record(),
                 });
             }
         } else {
             operations.push(ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord {
                     id: entity,
-                    components: expanded.components,
+                    components: expanded
+                        .components
+                        .into_iter()
+                        .map(|(component, value)| (component, value.into_source_record()))
+                        .collect(),
                     prefab: None,
                 },
             });
@@ -574,7 +586,7 @@ fn localize_references(
     work: &mut LocalizationWork<'_>,
 ) -> Result<(), ScenePatchReport> {
     let mut reference_refusal = None;
-    plan.visit(value, |_, reference| {
+    plan.visit(&*value, |_, reference| {
         if reference_refusal.is_some() {
             return Ok::<_, ScenePatchReport>(());
         }

@@ -258,7 +258,10 @@ fn large_explicit_values_admit_actual_reference_work_without_a_depth_multiplier(
             &value
         );
         assert!(std::ptr::eq(
-            document.entities[0].components[&component()].value(),
+            document.entities[0].components[&component()]
+                .value()
+                .as_value()
+                .unwrap(),
             fixture.source.entities[0].components[&component()].value(),
         ));
         assert_eq!(report.usage.materialized_value_nodes, PAYLOAD_ITEMS + 2);
@@ -491,7 +494,14 @@ fn opaque_cost_preserves_raw_payload_and_separate_hidden_default_admission() {
     let observed = fixture.compile(limits);
     let document = observed.result.as_ref().unwrap();
     assert!(!observed.budget_failed && !observed.diagnostics.has_errors());
-    assert_eq!(document.entities[0].components[&component()], original);
+    let observed_record = &document.entities[0].components[&component()];
+    assert_eq!(observed_record.owner, original.owner);
+    assert_eq!(observed_record.version, original.version);
+    assert_eq!(observed_record.value(), original.value());
+    assert_eq!(
+        observed_record.contextual_defaults,
+        original.contextual_defaults
+    );
     assert_eq!(observed.usage.materialized_value_nodes, 1);
     assert_eq!(observed.usage.materialized_value_bytes, 192);
     assert!(observed.usage.scratch_bytes >= PAYLOAD_ITEMS * 96);

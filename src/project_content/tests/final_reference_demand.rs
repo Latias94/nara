@@ -116,12 +116,13 @@ fn runtime_content_resolves_repaired_reference_after_property_composition() {
                 .find(|entity| entity.components().contains_key(&component))
                 .unwrap();
             assert_eq!(
-                host.components()[&component].value().get("target"),
-                Some(&ComponentValue::EntityReference(
-                    EntityReference::SceneLocal {
-                        entity: socket.clone(),
-                    }
-                )),
+                host.components()[&component]
+                    .value()
+                    .get("target")
+                    .and_then(|value| value.as_entity_reference()),
+                Some(&EntityReference::SceneLocal {
+                    entity: socket.clone(),
+                }),
             );
             drop(snapshot);
         } else {

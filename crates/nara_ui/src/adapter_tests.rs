@@ -109,7 +109,10 @@ fn persistent_text_input_semantics_round_trip_empty_values_with_the_exact_role()
         encoded.field("value").unwrap(),
         &ComponentValue::String(String::new())
     );
-    assert_eq!(crate::codec::decode_semantics(&encoded).unwrap(), authored);
+    assert_eq!(
+        crate::codec::decode_semantics((&encoded).into()).unwrap(),
+        authored
+    );
 }
 
 #[derive(Debug, Default, Resource)]
@@ -599,7 +602,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
     .unwrap();
     let encoded = cooked.document().entities()[0].components()[&component_id]
         .value()
-        .clone();
+        .to_owned();
     assert_eq!(
         encoded.field("background").unwrap().field("image").unwrap(),
         &nara_reflect::encode_asset_reference_value(&AssetRef::product(
@@ -897,7 +900,7 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
         .unwrap()
         .unwrap();
     assert_eq!(
-        crate::codec::visual_image_reference(&value).unwrap(),
+        crate::codec::visual_image_reference((&value).into()).unwrap(),
         Some(AssetRef::path("panel.png").unwrap())
     );
     let replaced = bound.clone().with_background(UiBrush::Image {

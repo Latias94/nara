@@ -54,7 +54,7 @@ fn migrated_invalid_default_parent_refuses_once_without_changing_source_or_previ
     previous
         .register_persistent_component_with_codec::<Payload, _, _>(
             schema(ComponentSchemaVersion::ONE),
-            |value| Ok(Payload(value.clone())),
+            |value| Ok(Payload(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -70,7 +70,7 @@ fn migrated_invalid_default_parent_refuses_once_without_changing_source_or_previ
                 let decodes = Arc::clone(&decodes);
                 move |value| {
                     decodes.fetch_add(1, Ordering::SeqCst);
-                    Ok(Payload(value.clone()))
+                    Ok(Payload(value.to_owned()))
                 }
             },
             |value| Ok(value.0.clone()),

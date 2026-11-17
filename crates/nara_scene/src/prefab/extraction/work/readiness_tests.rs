@@ -4,7 +4,7 @@ use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentValueKind, PersistentComponentSchemaOwnerId,
+    ComponentSchemaVersion, ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 
 use super::*;

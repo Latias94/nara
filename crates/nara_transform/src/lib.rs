@@ -20,7 +20,7 @@ use nara_ecs::{Component, bevy_ecs::system::ScheduleSystem, schedule::IntoSchedu
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Component)]
@@ -330,14 +330,14 @@ fn transform_fields() -> [ComponentFieldSchema; 5] {
     ]
 }
 
-fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+fn read_vec2(value: ComponentValueRef<'_>, field: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
         read_f32(value.field("x")?, &format!("{field}.x"))?,
         read_f32(value.field("y")?, &format!("{field}.y"))?,
     ))
 }
 
-fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;

@@ -13,7 +13,7 @@ use nara_identity::{
 
 use crate::{
     AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
-    ComponentPropertyKey, ComponentValue,
+    ComponentPropertyKey, ComponentValue, ComponentValueRef,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -1230,7 +1230,7 @@ impl ComponentValueShape {
     }
 
     #[must_use]
-    pub fn accepts_value(&self, value: &ComponentValue) -> bool {
+    pub fn accepts_value<'a>(&self, value: impl Into<ComponentValueRef<'a>>) -> bool {
         self.validate_value(value).is_ok()
     }
 
@@ -1238,28 +1238,31 @@ impl ComponentValueShape {
     ///
     /// Callers own admission of the value's size and work. Opaque containers validate their outer
     /// kind only; reference traversal and persistent file owners enforce their own payload limits.
-    pub fn validate_value(&self, value: &ComponentValue) -> Result<(), ComponentShapeError> {
+    pub fn validate_value<'a>(
+        &self,
+        value: impl Into<ComponentValueRef<'a>>,
+    ) -> Result<(), ComponentShapeError> {
         self.validate()?;
-        self.validate_value_node(value, &mut Vec::new())
+        self.validate_value_node(value.into(), &mut Vec::new())
     }
 
     fn validate_value_node(
         &self,
-        value: &ComponentValue,
+        value: ComponentValueRef<'_>,
         path: &mut Vec<ComponentFieldPathSegment>,
     ) -> Result<(), ComponentShapeError> {
         let expected = self.value_kind();
-        match (self, value) {
-            (Self::Optional { .. }, ComponentValue::Null) => Ok(()),
-            (Self::Optional { value: shape }, value) => shape.validate_value_node(value, path),
+        match (self, value.kind()) {
+            (Self::Optional { .. }, ComponentValueKind::Null) => Ok(()),
+            (Self::Optional { value: shape }, _) => shape.validate_value_node(value, path),
             (
                 Self::Scalar {
                     kind,
                     numeric_domain,
                     numeric_interval,
                 },
-                value,
-            ) if value.kind() == *kind => {
+                actual,
+            ) if actual == *kind => {
                 if let Some(domain) = numeric_domain
                     && !domain.accepts_value(value)
                 {
@@ -1275,14 +1278,15 @@ impl ComponentValueShape {
                 }
                 Ok(())
             }
-            (Self::EntityRef, ComponentValue::EntityReference(_)) => Ok(()),
-            (Self::AssetRef { .. }, value)
+            (Self::EntityRef, ComponentValueKind::EntityRef) => Ok(()),
+            (Self::AssetRef { .. }, _)
                 if crate::asset_reference::is_asset_reference_value(value) =>
             {
                 Ok(())
             }
-            (Self::Opaque { kind }, value) if value.kind() == *kind => Ok(()),
-            (Self::Record { members }, ComponentValue::Map(values)) => {
+            (Self::Opaque { kind }, actual) if actual == *kind => Ok(()),
+            (Self::Record { members }, ComponentValueKind::Map) => {
+                let values = value.as_map().expect("Map kind checked");
                 let declared = members
                     .iter()
                     .map(|member| member.name.as_str())
@@ -1299,16 +1303,17 @@ impl ComponentValueShape {
                     path.pop();
                 }
                 for name in values.keys() {
-                    if !declared.contains(name.as_str()) {
+                    if !declared.contains(name) {
                         return Err(shape_error(
                             path,
-                            ComponentShapeErrorKind::UndeclaredMember(name.clone()),
+                            ComponentShapeErrorKind::UndeclaredMember(name.to_owned()),
                         ));
                     }
                 }
                 Ok(())
             }
-            (Self::List { item }, ComponentValue::List(values)) => {
+            (Self::List { item }, ComponentValueKind::List) => {
+                let values = value.as_list().expect("List kind checked");
                 for (index, value) in values.iter().enumerate() {
                     path.push(ComponentFieldPathSegment::index(index as u32));
                     item.validate_value_node(value, path)?;
@@ -1316,7 +1321,8 @@ impl ComponentValueShape {
                 }
                 Ok(())
             }
-            (Self::KeyedList { item, key }, ComponentValue::List(values)) => {
+            (Self::KeyedList { item, key }, ComponentValueKind::List) => {
+                let values = value.as_list().expect("List kind checked");
                 let member =
                     keyed_list_member(item, key).map_err(|kind| shape_error(path, kind))?;
                 let mut keys = BTreeSet::new();
@@ -1342,8 +1348,8 @@ impl ComponentValueShape {
                 }
                 Ok(())
             }
-            (Self::Map { value: shape }, ComponentValue::Map(values)) => {
-                for (name, value) in values {
+            (Self::Map { value: shape }, ComponentValueKind::Map) => {
+                for (name, value) in value.as_map().expect("Map kind checked").iter() {
                     path.push(ComponentFieldPathSegment::field(name));
                     shape.validate_value_node(value, path)?;
                     path.pop();
@@ -1434,23 +1440,24 @@ fn collect_member_paths(
 }
 
 fn validate_value_budget(
-    value: &ComponentValue,
+    value: ComponentValueRef<'_>,
     depth: usize,
     budget: &mut ShapeBudget,
     path: &mut Vec<ComponentFieldPathSegment>,
 ) -> Result<(), ComponentShapeError> {
-    let (nodes, bytes) = match value {
-        ComponentValue::String(value) => (1, value.len()),
-        ComponentValue::EntityReference(reference) => {
+    let (nodes, bytes) = match value.kind() {
+        ComponentValueKind::String => (1, value.as_str().expect("String kind checked").len()),
+        ComponentValueKind::EntityRef => {
+            let reference = value.as_entity_reference().expect("reference kind checked");
             let cost = reference.cost();
             (cost.nodes(), cost.logical_bytes())
         }
         _ => (1, 8),
     };
     budget.observe_cost(depth, nodes, bytes, path)?;
-    match value {
-        ComponentValue::Map(values) => {
-            for (name, value) in values {
+    match value.kind() {
+        ComponentValueKind::Map => {
+            for (name, value) in value.as_map().expect("Map kind checked").iter() {
                 budget.bytes = budget.bytes.saturating_add(name.len());
                 if budget.bytes > MAX_SHAPE_BYTES {
                     return Err(shape_error(path, ComponentShapeErrorKind::ByteLimit));
@@ -1460,7 +1467,8 @@ fn validate_value_budget(
                 path.pop();
             }
         }
-        ComponentValue::List(values) => {
+        ComponentValueKind::List => {
+            let values = value.as_list().expect("List kind checked");
             for (index, value) in values.iter().enumerate() {
                 path.push(ComponentFieldPathSegment::index(index as u32));
                 validate_value_budget(value, depth + 1, budget, path)?;
@@ -1522,10 +1530,15 @@ fn validate_field_shape_budget(
         .validate_shape_node(path.len(), budget, &mut path)
 }
 
-pub(crate) fn validate_component_value_budget(
-    value: &ComponentValue,
+pub(crate) fn validate_component_value_budget<'a>(
+    value: impl Into<ComponentValueRef<'a>>,
 ) -> Result<(), ComponentShapeError> {
-    validate_value_budget(value, 0, &mut ShapeBudget::default(), &mut Vec::new())
+    validate_value_budget(
+        value.into(),
+        0,
+        &mut ShapeBudget::default(),
+        &mut Vec::new(),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1711,7 +1724,7 @@ impl ComponentFieldSchema {
     /// Optional fields retain their explicit-null semantics. Native codecs may impose further
     /// component-specific invariants that are not represented by this schema.
     #[must_use]
-    pub fn accepts_value(&self, value: &ComponentValue) -> bool {
+    pub fn accepts_value<'a>(&self, value: impl Into<ComponentValueRef<'a>>) -> bool {
         self.shape.accepts_value(value)
     }
 
@@ -1854,18 +1867,30 @@ impl ComponentNumericDomain {
     }
 
     #[must_use]
-    pub fn accepts_value(self, value: &ComponentValue) -> bool {
-        match (self, value) {
-            (Self::I8, ComponentValue::I64(value)) => i8::try_from(*value).is_ok(),
-            (Self::I16, ComponentValue::I64(value)) => i16::try_from(*value).is_ok(),
-            (Self::I32, ComponentValue::I64(value)) => i32::try_from(*value).is_ok(),
-            (Self::U8, ComponentValue::U64(value)) => u8::try_from(*value).is_ok(),
-            (Self::U16, ComponentValue::U64(value)) => u16::try_from(*value).is_ok(),
-            (Self::U32, ComponentValue::U64(value)) => u32::try_from(*value).is_ok(),
-            (Self::F32, ComponentValue::F64(value)) => {
-                value.get() >= f64::from(f32::MIN) && value.get() <= f64::from(f32::MAX)
-            }
-            _ => false,
+    pub fn accepts_value<'a>(self, value: impl Into<ComponentValueRef<'a>>) -> bool {
+        let value = value.into();
+        match self {
+            Self::I8 => value
+                .as_i64()
+                .is_some_and(|value| i8::try_from(value).is_ok()),
+            Self::I16 => value
+                .as_i64()
+                .is_some_and(|value| i16::try_from(value).is_ok()),
+            Self::I32 => value
+                .as_i64()
+                .is_some_and(|value| i32::try_from(value).is_ok()),
+            Self::U8 => value
+                .as_u64()
+                .is_some_and(|value| u8::try_from(value).is_ok()),
+            Self::U16 => value
+                .as_u64()
+                .is_some_and(|value| u16::try_from(value).is_ok()),
+            Self::U32 => value
+                .as_u64()
+                .is_some_and(|value| u32::try_from(value).is_ok()),
+            Self::F32 => value
+                .as_f64()
+                .is_some_and(|value| value >= f64::from(f32::MIN) && value <= f64::from(f32::MAX)),
         }
     }
 

@@ -67,7 +67,7 @@ fn large_registry() -> ComponentRegistrySnapshot {
     registry
         .register_persistent_component_with_codec::<LargePropertyValue, _, _>(
             large_schema(),
-            |value| Ok(LargePropertyValue(value.clone())),
+            |value| Ok(LargePropertyValue(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -115,8 +115,8 @@ fn assert_large_result(document: &CompiledSceneDocument) {
     assert_large_value(record.value(), record.schema_owner());
 }
 
-fn assert_large_value(
-    value: &ComponentValue,
+fn assert_large_value<'value>(
+    value: impl Into<nara_reflect::ComponentValueRef<'value>>,
     selected_owner: Option<&PersistentComponentSchemaOwnerId>,
 ) {
     let mut expected = large_value();
@@ -126,7 +126,7 @@ fn assert_large_value(
             ComponentValue::U64(7),
         )
         .unwrap();
-    assert_eq!(value, &expected);
+    assert_eq!(value.into(), &expected);
     assert_eq!(selected_owner, Some(&owner()));
 }
 
@@ -209,7 +209,7 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
     registry
         .register_persistent_component_with_codec::<LargePropertyValue, _, _>(
             schema,
-            |value| Ok(LargePropertyValue(value.clone())),
+            |value| Ok(LargePropertyValue(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -249,12 +249,16 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
                 .iter()
                 .find_map(|entity| entity.components().get(&large_component()))
                 .unwrap();
-            let ComponentValue::Map(fields) = result.value() else {
-                panic!("expected component fields")
-            };
+            let fields = result.value().as_map().expect("expected component fields");
             assert_eq!(
-                fields.values().next().unwrap().get("key_0"),
-                Some(&ComponentValue::U64(7))
+                fields
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .1
+                    .get("key_0")
+                    .map(|value| value.to_owned()),
+                Some(ComponentValue::U64(7))
             );
         } else {
             let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
@@ -398,7 +402,7 @@ fn cost_registry(migrated: Option<ComponentValue>) -> ComponentRegistrySnapshot 
     registry
         .register_persistent_component_with_codec::<LargePropertyValue, _, _>(
             schema,
-            |value| Ok(LargePropertyValue(value.clone())),
+            |value| Ok(LargePropertyValue(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();

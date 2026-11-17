@@ -1,8 +1,8 @@
 //! Finite numeric intervals shared by persistent scalar validation.
 
 use crate::{
-    ComponentFloat, ComponentNumericDomain, ComponentShapeErrorKind, ComponentValue,
-    ComponentValueKind,
+    ComponentFloat, ComponentNumericDomain, ComponentShapeErrorKind, ComponentValueKind,
+    ComponentValueRef,
 };
 
 /// One explicitly inclusive or exclusive numeric endpoint.
@@ -191,23 +191,27 @@ impl ComponentNumericInterval {
         }
     }
 
-    pub(crate) fn accepts_value(
+    pub(crate) fn accepts_value<'a>(
         self,
-        value: &ComponentValue,
+        value: impl Into<ComponentValueRef<'a>>,
         domain: Option<ComponentNumericDomain>,
     ) -> bool {
-        match (self, value) {
-            (Self::I64 { min, max }, ComponentValue::I64(value)) => contains(min, max, *value),
-            (Self::U64 { min, max }, ComponentValue::U64(value)) => contains(min, max, *value),
-            (Self::F64 { min, max }, ComponentValue::F64(value)) => {
+        let value = value.into();
+        match self {
+            Self::I64 { min, max } => value
+                .as_i64()
+                .is_some_and(|value| contains(min, max, value)),
+            Self::U64 { min, max } => value
+                .as_u64()
+                .is_some_and(|value| contains(min, max, value)),
+            Self::F64 { min, max } => value.as_f64().is_some_and(|value| {
                 let value = if domain == Some(ComponentNumericDomain::F32) {
-                    f64::from(value.get() as f32)
+                    f64::from(value as f32)
                 } else {
-                    value.get()
+                    value
                 };
                 contains(min.map(float_bound), max.map(float_bound), value)
-            }
-            _ => false,
+            }),
         }
     }
 

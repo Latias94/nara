@@ -132,7 +132,7 @@ fn capture(
             &ComponentPropertyPath::new(field.id.clone()),
         ) {
             Ok(property) => {
-                fields.insert(field.id.as_str().to_owned(), property.value.clone());
+                fields.insert(field.id.as_str().to_owned(), property.value.to_owned());
             }
             Err(ComponentPropertyError::ValueUnavailable(_)) if !field.required => {}
             Err(error) => return Err(error.to_string()),

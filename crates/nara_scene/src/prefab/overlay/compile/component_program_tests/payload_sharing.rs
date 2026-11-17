@@ -83,7 +83,7 @@ fn sharing_registry_with_migration(
     registry
         .register_persistent_component_with_codec::<SharingPayload, _, _>(
             schema,
-            |value| Ok(SharingPayload(value.clone())),
+            |value| Ok(SharingPayload(value.to_owned())),
             |value| Ok(value.0.clone()),
         )
         .unwrap();
@@ -168,7 +168,10 @@ fn current_explicit_payloads_share_storage_when_references_need_no_rewrite() {
         };
         let compiled = compiled_record(&report, &host);
         assert_record(compiled, source);
-        assert!(ptr::eq(source.value(), compiled.value()));
+        assert!(ptr::eq(
+            source.value(),
+            compiled.value().as_value().unwrap()
+        ));
         assert!(!report.source_upgrade_required());
         drop(resolved);
         drop(sources);
@@ -198,7 +201,10 @@ fn projected_local_reference_rewrite_separates_storage_and_preserves_the_raw_pre
     assert_ne!(socket, id("socket"));
     let source = &resolved.document().entities[0].components[&sharing_component()];
     let compiled = compiled_record(&report, &host);
-    assert!(!ptr::eq(source.value(), compiled.value()));
+    assert!(!ptr::eq(
+        source.value(),
+        compiled.value().as_value().unwrap()
+    ));
     assert_eq!(source.value(), &original);
     let mut expected = original.clone();
     expected
@@ -224,7 +230,10 @@ fn public_deep_clones_and_value_edits_preserve_earlier_compiled_values() {
     assert_eq!(source, copy);
     assert!(ptr::eq(
         source.value(),
-        compiled_record(&report, &id("host")).value(),
+        compiled_record(&report, &id("host"))
+            .value()
+            .as_value()
+            .unwrap(),
     ));
     assert!(!ptr::eq(source.value(), copy.value()));
     let (Some(ComponentValue::List(source_items)), Some(ComponentValue::List(copy_items))) =
@@ -337,10 +346,16 @@ fn migration_and_default_insertion_preserve_sources_and_previous_compilations() 
         );
         assert_eq!(compiled.schema_owner(), Some(&owner()));
         assert_eq!(report.source_upgrade_required(), migrate);
-        assert!(!ptr::eq(
-            document.entities[0].components[&sharing_component()].value(),
-            compiled.value(),
-        ));
+        let source = document.entities[0].components[&sharing_component()].value();
+        if migrate {
+            assert!(!ptr::eq(source, compiled.value().as_value().unwrap()));
+        } else {
+            assert!(compiled.value().as_value().is_none());
+            assert!(ptr::eq(
+                source.get("payload").unwrap(),
+                compiled.value().get("payload").unwrap().as_value().unwrap(),
+            ));
+        }
         assert_eq!(document, before);
         assert_eq!(compiled_record(&previous, &id("host")).value(), &original);
         assert_eq!(
@@ -427,7 +442,7 @@ fn native_migration_defaults_reuse_list_storage_and_keep_original_budgets() {
     assert!(report.source_upgrade_required());
     assert_eq!(migrations.load(Ordering::SeqCst), 1);
     assert_eq!(
-        list_ptr(compiled.value()),
+        list_ptr(compiled.value().as_value().unwrap()),
         migrated_list.load(Ordering::SeqCst)
     );
     let exact = SceneCompilationLimits::default()
@@ -504,7 +519,10 @@ fn property_replacement_preserves_raw_prefab_and_the_previous_compiled_output() 
     let source = &resolved.document().entities[0].components[&sharing_component()];
     assert!(ptr::eq(
         source.value(),
-        compiled_record(&previous, &projected(&previous, "host")).value(),
+        compiled_record(&previous, &projected(&previous, "host"))
+            .value()
+            .as_value()
+            .unwrap(),
     ));
     let mut overlay = PrefabOverlay::new(key("base"));
     overlay.components.push(PrefabComponentIntent::Properties {
@@ -581,8 +599,10 @@ fn data_preparation_keeps_old_values_after_candidate_drop_and_enforces_full_rece
         )
         .unwrap(),
     );
-    let old_value = candidate.document().entities()[0].components()[&sharing_component()].value()
-        as *const ComponentValue;
+    let old_value = candidate.document().entities()[0].components()[&sharing_component()]
+        .value()
+        .as_value()
+        .unwrap() as *const ComponentValue;
     let cost = original.cost();
     let nodes = cost.nodes() * 2;
     let bytes = cost.logical_bytes() * 2;
@@ -707,7 +727,7 @@ fn data_preparation_keeps_old_values_after_candidate_drop_and_enforces_full_rece
         assert_eq!(data.version(), ComponentSchemaVersion::ONE);
         assert_eq!(data.schema_owner(), Some(&owner()));
         if name == "host" {
-            assert!(ptr::eq(data.value(), old_value));
+            assert!(ptr::eq(data.value().as_value().unwrap(), old_value));
         }
     }
     assert!(world.get_entity(sentinel).is_ok());

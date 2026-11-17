@@ -29,6 +29,53 @@ The declaration is the single Rust source for the generated
 `PersistentComponentProvider`, schema, decoder, and encoder. Do not duplicate a
 `ComponentFieldSchema` table or hand-write a `ComponentValue` conversion for a supported type.
 
+## Borrowed Native Decoding
+
+Handwritten native decode and preflight callbacks receive `ComponentValueRef<'_>` by value.
+The derive uses the same Interface for supported fields and recursive containers. Encoders and
+source migrations continue producing owned `ComponentValue`; source record access and JSON/RON
+encoding keep their existing contract.
+
+A read can borrow an ordinary value or closed explicit defaults over unchanged source data.
+Scalar accessors, `field`, `get` and `get_path` read that exact effective value. `as_map` and
+`as_list` return borrowed containers with `len`, `get` and ordered iteration. They do not allocate
+an effective owning tree first. The complete receiving Schema, value limits and reference checks
+still run before native publication; a read grants no independent Scene or asset authority.
+
+```rust
+use nara::reflect::{ComponentCodecError, ComponentValueRef};
+
+fn decode_count(value: ComponentValueRef<'_>) -> Result<u32, ComponentCodecError> {
+    u32::try_from(value.field_u64("count")?)
+        .map_err(|_| ComponentCodecError::invalid_field("count", "u32"))
+}
+```
+
+When migrating a handwritten provider, change its decode parameter from `&ComponentValue` to
+`ComponentValueRef<'_>`. Read enum-pattern matches become scalar or container accessors. Existing
+owned inputs can be borrowed with `ComponentValueRef::from(&value)` or `.into()` where the target
+read type is known. Registry and ordinary validation entry points accept either form through the
+same implementation. `PersistentComponentProvider::__decode_persistent_component` uses the new
+read parameter; generated implementations need no handwritten change.
+
+`ComponentValueRef` is Copy: `clone()` copies only the borrow. Use `to_owned()` when an independently
+owned payload is actually required, after the owning operation has admitted its complete allocation.
+Do not materialize a component merely to feed an old decoder. A typed native component naturally
+owns the fields its decoder constructs; it cannot retain this borrow beyond the callback.
+`as_value()` returns an owning-value borrow only for an unchanged subtree and returns `None` for
+a container with inserted descendants. It is not an automatic materialization fallback.
+
+Compiled and expanded Scene component `value()` accessors return this read type. Public source
+`SceneComponentRecord::value()` still returns `&ComponentValue`, and its public Clone and owned
+extraction remain deep. Receiving definitions cannot choose new defaults for a closed compiled
+value; an incompatible definition requires recompiling source. Independent cooked output owns
+its complete data and does not retain the source/default backing.
+
+`rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
+borrowed reads and return one independent owned result. They validate the complete reference
+structure before copying, then rewrite only that unpublished result. The owning caller still
+admits its complete allocation; callbacks compute candidates and must not publish side effects.
+
 ## Register Components from a Plugin
 
 A component-owning plugin publishes one explicit owner/provider definition. Its source describes

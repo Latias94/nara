@@ -15,7 +15,8 @@ use nara_core::{
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
 use nara_reflect::{
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueRef,
+    PersistentComponentSchemaOwnerId,
 };
 use serde::{
     Deserialize, Serialize, Serializer,
@@ -293,7 +294,7 @@ impl Serialize for ComponentsRef<'_> {
             #[serde(rename = "owner", skip_serializing_if = "Option::is_none")]
             schema_owner: Option<&'a PersistentComponentSchemaOwnerId>,
             version: ComponentSchemaVersion,
-            value: &'a ComponentValue,
+            value: ComponentValueRef<'a>,
         }
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (component, record) in self.0 {

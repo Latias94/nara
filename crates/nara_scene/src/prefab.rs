@@ -1979,28 +1979,6 @@ where
         true
     }
 
-    fn reserve_raw_clone(
-        &mut self,
-        cost: crate::patch::ScenePatchCost,
-        roots: &[SceneEntityId],
-        anchor: Option<&SceneEntityId>,
-        source: Option<&AssetRef>,
-    ) -> bool {
-        let bytes = cost
-            .operation_count()
-            .checked_mul(512)
-            .and_then(|bytes| bytes.checked_add(cost.value_cost().nodes().checked_mul(96)?))
-            .and_then(|bytes| bytes.checked_add(cost.logical_bytes()))
-            .and_then(|bytes| {
-                roots.iter().try_fold(bytes, |bytes, root| {
-                    bytes
-                        .checked_add(std::mem::size_of::<SceneEntityId>())?
-                        .checked_add(crate::provenance::provenance_string_bytes(root.as_str())?)
-                })
-            });
-        self.reserve_scratch_bytes(bytes, anchor, source)
-    }
-
     fn materialization_limits(&self) -> ComponentValueMaterializationLimits {
         self.options.limits.materialization_limits()
     }
@@ -2179,47 +2157,64 @@ where
 
     #[cfg(feature = "serde")]
     fn validate_authoring_document(&mut self, document: &SceneDraft) -> DiagnosticReport {
-        // Final values have already paid their materialized counters during lowering. This
-        // guard admits validation's complete temporary copy, including IDs and record metadata,
-        // against working storage rather than imposing value-only ceilings on that metadata.
         let working = self.options.limits.working_bytes();
-        let cost = crate::patch::bounded_component_records_source_cost(
-            document
-                .entities
-                .iter()
-                .flat_map(|entity| entity.components.values()),
-            crate::ScenePatchApplyLimits::default()
-                .with_validation_value_nodes(
-                    ItemLimit::new((working.get() / 96).max(1))
-                        .expect("a working allowance produces a nonzero node ceiling"),
-                )
-                .with_validation_value_bytes(working),
-        );
-        let Some(cost) = cost else {
-            self.fail_budget(
-                SceneCompilationBudgetKind::WorkingBytes,
-                usize::MAX,
-                self.options.limits.working_bytes().get(),
-                None,
-                None,
+        for record in document
+            .entities
+            .iter()
+            .flat_map(|entity| entity.components.values())
+        {
+            let cost = record.value().cost_up_to_with_admission(
+                (working.get() / 96).max(1),
+                working.get(),
+                |bytes| self.admit_terminal_work(0, 0, bytes),
             );
-            return DiagnosticReport::default();
-        };
-        if !self.reserve_raw_clone(cost, &document.roots, None, None) {
-            return DiagnosticReport::default();
+            let Ok(Some(cost)) = cost else {
+                self.fail_budget(
+                    SceneCompilationBudgetKind::WorkingBytes,
+                    usize::MAX,
+                    working.get(),
+                    None,
+                    None,
+                );
+                return DiagnosticReport::default();
+            };
+            let bytes = cost
+                .nodes()
+                .checked_mul(96)
+                .and_then(|bytes| bytes.checked_add(cost.logical_bytes()))
+                .and_then(|bytes| bytes.checked_add(record.value_storage_retained_bytes()))
+                .and_then(|bytes| bytes.checked_add(512))
+                .and_then(|bytes| {
+                    bytes.checked_add(record.owner().map_or(0, |owner| owner.as_str().len()))
+                });
+            if !self.reserve_scratch_bytes(bytes, None, None) {
+                return DiagnosticReport::default();
+            }
         }
-        let structure_bytes = document.entities.iter().try_fold(0usize, |bytes, entity| {
-            entity.children.iter().try_fold(
+        let structure_bytes = document
+            .roots
+            .iter()
+            .try_fold(0usize, |bytes, root| {
                 bytes
-                    .checked_add(std::mem::size_of::<ExpandedSceneEntity>())?
-                    .checked_add(crate::provenance::provenance_string_bytes(
-                        entity.id.as_str(),
-                    )?)?,
-                |bytes, child| {
-                    bytes.checked_add(crate::provenance::provenance_string_bytes(child.as_str())?)
-                },
-            )
-        });
+                    .checked_add(std::mem::size_of::<SceneEntityId>())?
+                    .checked_add(crate::provenance::provenance_string_bytes(root.as_str())?)
+            })
+            .and_then(|bytes| {
+                document.entities.iter().try_fold(bytes, |bytes, entity| {
+                    entity.children.iter().try_fold(
+                        bytes
+                            .checked_add(std::mem::size_of::<ExpandedSceneEntity>())?
+                            .checked_add(crate::provenance::provenance_string_bytes(
+                                entity.id.as_str(),
+                            )?)?,
+                        |bytes, child| {
+                            bytes.checked_add(crate::provenance::provenance_string_bytes(
+                                child.as_str(),
+                            )?)
+                        },
+                    )
+                })
+            });
         if !self.reserve_scratch_bytes(structure_bytes, None, None) {
             return DiagnosticReport::default();
         }
@@ -2254,7 +2249,11 @@ where
         };
         for entity in &mut document.entities {
             entity.components.retain(|component, record| {
-                let unavailable = self.authority.unavailable_reason(component, record);
+                let unavailable = self.authority.unavailable_claim_reason(
+                    component,
+                    record.owner(),
+                    record.version,
+                );
                 let reason = unavailable
                     .map(AuthoringSceneCompilationOmissionReason::RecordUnavailable)
                     .or_else(|| {

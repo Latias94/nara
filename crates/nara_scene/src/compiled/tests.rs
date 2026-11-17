@@ -93,7 +93,8 @@ fn entity(name: &str, target: ComponentValue) -> ExpandedSceneEntity {
         children: Vec::new(),
         components: [(
             component(),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target)),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target))
+                .clone_for_compilation(),
         )]
         .into_iter()
         .collect(),
@@ -227,7 +228,8 @@ fn wide_optional_fixture() -> (SceneDraft, ComponentRegistrySnapshot, Arc<Atomic
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 ComponentValue::Map(BTreeMap::new()),
-            ),
+            )
+            .clone_for_compilation(),
         )]
         .into_iter()
         .collect(),
@@ -268,7 +270,11 @@ fn admission_moves_payloads_and_preserves_order_canonical_identity_and_selected_
     let (registry, calls) = registry(schema, Some("game.compiled-owner"));
     let mut root = entity("root", ComponentValue::Null);
     root.children = vec![id("z"), id("a")];
-    let ComponentValue::Map(fields) = root.components.get_mut(&component()).unwrap().value_mut()
+    let ComponentValue::Map(fields) = root
+        .components
+        .get_mut(&component())
+        .unwrap()
+        .materialize_value_mut()
     else {
         unreachable!()
     };
@@ -308,12 +314,8 @@ fn admission_moves_payloads_and_preserves_order_canonical_identity_and_selected_
         record.schema_owner().unwrap().as_str(),
         "game.compiled-owner",
     );
-    let ComponentValue::Map(fields) = record.value() else {
-        unreachable!()
-    };
-    let ComponentValue::String(payload) = &fields["retained"] else {
-        unreachable!()
-    };
+    let fields = record.value().as_map().unwrap();
+    let payload = fields.get("retained").unwrap().as_str().unwrap();
     assert_eq!(payload.as_ptr(), payload_pointer);
 
     let source = SourceDocumentKey::named(
@@ -508,7 +510,7 @@ fn mixed_definitions_require_the_data_owner_and_flat_data_values() {
                     let mut record =
                         SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target));
                     record.owner = claim;
-                    record
+                    record.clone_for_compilation()
                 })]
                 .into_iter()
                 .collect(),
@@ -905,6 +907,7 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
     let mut raw_bytes = 0usize;
     claims.entities[0].components[&component()]
         .value
+        .read()
         .cost_up_to_with_admission(limits.nodes(), limits.bytes(), |bytes| {
             raw_bytes = raw_bytes.checked_add(bytes.unwrap()).unwrap();
             Ok::<_, Infallible>(())
@@ -912,7 +915,7 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
         .unwrap()
         .unwrap();
     nara_reflect::__private::validate_native_component_value_references_with_admission(
-        &claims.entities[0].components[&component()].value,
+        claims.entities[0].components[&component()].value.read(),
         limits,
         |_, _, allocated| {
             raw_bytes = raw_bytes.checked_add(allocated).unwrap();
