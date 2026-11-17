@@ -3259,6 +3259,80 @@ reviews and final numeric review retain their bounded scope in the owning plan. 
 dependency, public interface, runtime policy or new observation owner, and qualifies neither
 foreign execution nor full Foundation/R9/R10/R12.
 
+### Direct Native Tilemap Construction Experiment
+
+The [direct-construction experiment](../plans/2026-11-13-rust-state-reconstruction-plan.md#direct-native-tilemap-construction)
+tests one concrete hypothesis from the attributed component envelope. Instead of a coordinate
+BTreeSet plus typed Vec followed by final cell BTreeMap construction, the candidate parses each
+complete cell directly into the final tree with `Entry` duplicate rejection. Dirty-chunk revisions
+advance in original input order. Deferred asset candidates own the complete private Tilemap before
+handle resolution. Configuration, numeric/color parsing, duplicate input-index errors and asset
+failure order remain; there is no new API, format, dependency or validation owner.
+
+**Disposition: rejected; production restored.** Direct construction makes the actual World
+preflight cheaper but makes the diagnostic candidate path more expensive. The final production
+algorithm remains unchanged; five useful public codec controls are retained at `8e8a1f6`.
+A private loop reduction is not a sufficient reason to keep a mixed whole-workflow outcome.
+
+The candidate's original Tilemap/related rendering selection passes 113/113 with 48 outside
+the filter (`3b460e2d-fb3f-4b97-8206-053a4c2aa0fa`), five new codec controls pass
+(`0a350f1b-4b81-48b8-82ca-6175a9c46e46`), and independently locked actual Runtime TileSet
+delivery passes 14/14 without skips (`d0547e7a-7c41-4880-a4a8-12add2858f10`). The complete
+original release game/library/metrics/span/native/record selection passes 148/148 without
+skips (`66fadd4c-d835-4e56-aeb8-4750b8377fb6`), 64.871 seconds after a serial 5m26s build.
+Original travel, 27 retained-input GPU replays, both observer-panic cleanup cases and the complete
+record/cook probe remain. Production/test reviews find no P1/P2; the early native-tree storage
+tradeoff is explicitly reported rather than treated as a memory improvement.
+
+The [candidate receipt](data/2026-11-14-development-runtime/authored-tiles-direct-native-rejected-paired-metadata.json)
+retains 163 candidate source/control hashes, both executable hashes and four finite summaries.
+The [archived patch](data/2026-11-14-development-runtime/direct-tilemap-candidate.patch) reconstructs
+the candidate `lib.rs` relative to `936ac51` using `git apply --unidiff-zero`; the independent
+new test module is retained in the final test commit. Candidate source snapshots, raw reports and frozen programs remain in
+`%TEMP%/nara-direct-tilemap-paired-20261117`. The after hashes describe an uncommitted rejected
+experiment, not the final runtime. Summaries preserve complete source/phase/acceptance/cleanup/
+replay facts and distributions; only the same four named raw per-frame arrays are omitted.
+
+All programs use Rust 1.95.0, hardware DX12/NVIDIA GeForce RTX4090, unchanged authored input and
+the same 46-phase observation. Four serial before/after/after/before processes complete twelve
+16K lifetimes and 36 GPU replays with exact expected phase counts and original physical cleanup.
+Each row is a median cumulative wall envelope across six lifetimes/version, not one file, load
+or frame. Parent/child phases overlap and must not be added.
+
+| Scope | Calls per lifetime | Before | Candidate | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| Combined diagnostic/receiving decode | 15 | 196.600 ms | 196.310 ms | No meaningful demonstrated improvement; candidate destruction is outside this scope. |
+| Diagnostic component preflight | 9 | 58.688 ms | 64.546 ms | 9.98% higher in this observation. |
+| Actual unbound component preflight | 6 | 46.122 ms | 42.550 ms | 7.74% lower, but not a complete workflow improvement. |
+| Unbound receiving validation | 6 | 36.754 ms | 35.491 ms | Unchanged implementation; no credit. |
+| Complete unbound preparation | 6 | 83.473 ms | 78.674 ms | Contains actual changed construction and unchanged work. |
+| Unbound candidate materialization | 6 | 0.029 ms | 0.029 ms | No demonstrated improvement. |
+| Expansion including nested Prefabs | 9 | 537.035 ms | 530.629 ms | Contains changed/unchanged work; no isolated improvement claim. |
+| Publication | 6 | 1.436 ms | 1.479 ms | Unchanged implementation; no credit. |
+
+Per-process diagnostic component medians are 58.449/64.391/64.700/59.347 ms and actual unbound
+component medians 46.014/42.060/42.739/46.229 ms. Both candidate groups have the same split
+outcome. Process walls are 15.769/15.799/15.962/15.701 seconds, with no consistent improvement.
+All logs use the same Python binary-file redirection. Host/cache/clock/driver state remains
+uncontrolled and lifetimes within each process are correlated; no confidence interval,
+exclusive CPU/GPU, frame-P99 or physical-memory claim follows.
+
+The diagnostic preflight scope ends before returned candidates are destroyed. The candidate
+moves final-map destruction outside that bucket while the old coordinate-set destruction occurs
+inside `read_cells`, yet the measured diagnostic construction is still more expensive. Sparse
+inputs can also retain more dirty-chunk tree entries before asset resolution. This is enough
+reason to reject the selected candidate, not proof that every possible direct construction is
+slower. Do not solve the result by deleting domain checks or extending a generic cache.
+
+After restoring the original production algorithm, the complete Tilemap library passes 110/110
+without skips (`0c30b04b-53e0-404e-b705-6e57aa777e1b`), including the five added controls.
+The rebuilt original program completes another three 16K lifetimes/nine GPU replays and full
+cleanup; its final receipt records correctness and exact program/source/raw identity separately
+from the rejected candidate. Owning correctness Clippy, feature-free Tilemap compilation,
+root/sample formatting and source/document/hash checks pass. Four scoped implementation/review
+agents are closed with no remaining P1/P2. Future work must preserve the distinction between
+compact admitted typed data for diagnostics and mutable native structures for actual World construction.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

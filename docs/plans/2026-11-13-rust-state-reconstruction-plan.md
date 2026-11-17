@@ -4426,6 +4426,96 @@ dirty-revision semantics. The World/identity envelope is not a worthwhile first 
 Keep cross-stage reference-fact reuse as a separate exact immutable value/Schema ownership design;
 the existing cost/depth facts alone do not establish declared-reference coverage.
 
+#### Direct Native Tilemap Construction
+
+Status: experiment rejected after complete comparison; production restored, additional public
+behavior controls retained at `8e8a1f60158c6b7f96af915607b0d926812a39ba`. The preceding attributed
+16K game spends
+about 46 ms cumulative in actual component preflight and another 59 ms in separate diagnostic
+component preflight. Static source identifies duplicate coordinate indexing and a temporary
+typed Vec in stock Tilemap decoding before final native cell-tree construction. Compare a
+single native construction within `nara_tilemap`, without changing Scene or generic value owners.
+
+Parse each complete cell in original input order and use the final BTreeMap entry to reject
+duplicate coordinates with the same input-index diagnostic. Keep configuration/TileSet preflight
+order, finite numeric/color conversion and source/frozen borrowing. A partially built Tilemap
+remains local and is dropped on failure; no World or independent retained handle is published.
+The existing deferred asset candidate may own that pure native value before handle resolution,
+then set its resolved TileSet and move it through the original batch. No new candidate type,
+preparation owner, public API, source format, domain exemption or cross-stage cache is selected.
+
+Preserve exact per-cell dirty revision and chunk updates in input order. Do not combine this
+experiment with a new initial dirty-batch policy. Remove the independent coordinate BTreeSet,
+intermediate cell Vec and later second construction loop instead of retaining compatibility
+helpers. Compare full native values, later edits, duplicate/malformed failure ordering and
+deferred asset lifecycle through public codecs, then original complete game/source/processed
+and independently locked delivery consumers. Freeze the qualified attribution program as the
+same-observer control and retain the change only if its complete consumers benefit.
+
+Production review finds no P1/P2 and identifies a real cost tradeoff: deferred/diagnostic candidates
+now own final native cell and dirty-chunk trees before asset resolution, rather than only typed
+cells. Sparse data spanning many chunks may change retained storage and diagnostic construction
+cost. Measure diagnostic and actual unbound component preflight separately; dense-map results
+do not establish a general heap or sparse-map improvement. The initial original Tilemap and
+related render selection passes 113/113 with 48 outside the filter; no old assertion is changed.
+The diagnostic component-preflight span ends before its returned candidates are discarded in
+`validate_compiled_scene`; final-map destruction is outside that bucket, whereas the old temporary
+coordinate-set destruction occurred inside `read_cells`. Do not interpret that child bucket
+alone as a complete Check speedup. Complete consumer observations and preserved lifetime cleanup
+remain necessary even if individual construction timers decline.
+The frozen qualified attribution program completes its original three 16K lifetimes/nine GPU
+replays as the control. The initial owner/render selection passes at
+`3b460e2d-fb3f-4b97-8206-053a4c2aa0fa`, 7.048 seconds after a 1m32s serial debug build.
+Independently locked Runtime TileSet delivery passes 14/14 without skips at
+`d0547e7a-7c41-4880-a4a8-12add2858f10`, 1.371 seconds after a 1m13s build. This retains actual
+source-free primary/auxiliary publication, travel, retained-pack and failure-preservation behavior.
+Five added public codec controls pass at `0a350f1b-4b81-48b8-82ca-6175a9c46e46`, 0.325 seconds,
+with 105 existing cases outside that selection. They compare complete values and subsequent
+dirty revisions with ordinary setters, exact late duplicate indices and malformed-cell ordering,
+omitted/explicit defaults and owned deferred candidate success/failure/drop isolation. No test
+assertion or allowance is relaxed. The candidate's original release
+game/library/metrics/span/native/record selection passes 148/148 without skips at
+`66fadd4c-d835-4e56-aeb8-4750b8377fb6`, 64.871 seconds after a 5m26s serial build. Original
+64/4K/16K travel, 27 retained-input GPU replays, both observer-panic cleanup controls and the
+complete 16K record/cook probe remain.
+
+Four frozen before/after/after/before processes add twelve 16K lifetimes and 36 GPU replays,
+all accepted with identical phase counts and original cleanup. Actual unbound component
+preflight cumulative medians fall from 46.1215 to 42.54965 ms, but diagnostic component preflight
+rises from 58.688 to 64.5459 ms. The combined `scene_decode` envelope is 196.600/196.310 ms,
+without a meaningful demonstrated gain, and process walls 15.769/15.799/15.962/15.701 seconds
+show no consistent improvement. Nested walls and correlated lifetimes are descriptive; the
+diagnostic candidate destruction boundary also differs. The dense game does not settle sparse
+dirty-chunk retained-memory costs.
+
+Reject this direct-final-tree design instead of shipping a faster sub-operation at the expense
+of diagnostic work. Manual `apply_patch` restores only this experiment's production changes.
+The final `lib.rs` difference is solely a `cfg(test)` module registration; public/domain/runtime
+behavior is unchanged. All five public controls pass with the restored algorithm as part of the
+full 110/110 Tilemap library selection without skips, 6.747 seconds, at
+`0c30b04b-53e0-404e-b705-6e57aa777e1b`. The
+[rejected experiment receipt](../benchmarks/2026-11-14-development-runtime-costs.md#direct-native-tilemap-construction-experiment)
+retains the exact candidate patch, source/program hashes, raw report identities and complete
+finite summaries; measured candidate hashes are explicitly not final production hashes.
+The restored release program is rebuilt and completes another original three 16K lifetimes,
+nine retained-input GPU replays and complete cleanup; that is correctness evidence, not a timing
+improvement claim. Its receipt stores final source/program/raw-report hashes separately from the
+rejected candidate. Owning all-target/all-feature correctness Clippy, feature-free Tilemap library,
+root/sample formatting, source/program/patch/report equivalence and document/whitespace checks
+pass; existing warnings remain. Final numeric review confirms candidate recovery from the patch,
+exact table/counts and raw/summary equivalence. Its early documentation-status note is closed
+after final restored execution and checks, without another unchanged-product run. Four scoped
+implementation/production/test/numeric agents are closed with no remaining P1/P2. The original
+15 paused UI/Dialogue files remain byte-identical; no dependency or remote publication changes.
+This rejects the chosen experiment rather than claiming full Foundation/R9/R10/R12 completion.
+
+The next construction design must distinguish the compact typed data needed by diagnostics
+from the mutable native storage actually needed by a World. Preserve complete codec refusal,
+input-index precedence and ownership while investigating a compact unique-cell representation
+or domain-owned reuse through the existing real consumers. Do not infer that every stage may
+skip checks, adopt a cross-stage cache keyed by source path, or make a broad Scene validation
+API solely to rescue this failed loop experiment. Full Foundation remains active.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

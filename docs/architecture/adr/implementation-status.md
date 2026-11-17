@@ -3508,6 +3508,17 @@ speed-improvement claim. Correctness Clippy, feature-free compilation, formattin
 report checks pass. No new validation, lifecycle or observation owner is introduced; full
 Foundation and remaining runtime representation/Native-construction work stay open.
 
+The [direct-native Tilemap experiment](../../plans/2026-11-13-rust-state-reconstruction-plan.md#direct-native-tilemap-construction)
+is measured and rejected: actual unbound component preparation is cheaper, diagnostic preparation
+is more expensive and combined decode/process observations establish no complete improvement.
+The original production algorithm is restored; independent public codec controls at `8e8a1f6`
+pass with the full 110/110 Tilemap library. A restored release process completes three original
+16K lifetimes/nine GPU replays and cleanup. Candidate success results, exact archived patch and
+program/source/report identities remain explicitly separate in the
+[rejected report](../../benchmarks/2026-11-14-development-runtime-costs.md#direct-native-tilemap-construction-experiment).
+No API, format, policy, dependency or new owner is adopted. Future typed/domain construction
+work and full Foundation remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

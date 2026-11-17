@@ -5815,6 +5815,17 @@ The added observation changes overhead and establishes no new speed, GPU, memory
 gain. Existing-owner Tilemap construction is the next measured candidate; generic reference reuse
 still needs its exact immutable value/Schema contract. Full Foundation remains active.
 
+The [direct Tilemap construction experiment](2026-11-13-rust-state-reconstruction-plan.md#direct-native-tilemap-construction)
+is rejected after complete comparison. Building the final native trees during preflight lowers
+actual unbound component work but raises diagnostic construction, while combined decode and
+process walls show no consistent improvement. The [rejected-candidate report](../benchmarks/2026-11-14-development-runtime-costs.md#direct-native-tilemap-construction-experiment)
+retains exact source/program/patch/report provenance and the twelve-lifetime/36-replay comparison.
+Production is restored; five public behavior controls are retained at `8e8a1f6`. The final Tilemap
+library passes 110/110 and the restored original game completes another three 16K lifetimes/nine
+GPU replays with cleanup. Next distinguish compact diagnostic typed data from actual mutable
+native construction without weakening domain checks or inventing another cache. Full Foundation
+and the original runtime representation/construction work remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

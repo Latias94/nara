@@ -600,6 +600,16 @@ must retain its exact immutable value and admitted Schema relationship; cost/dep
 do not establish declared-reference coverage. These are measurement hypotheses, not changes
 already selected from static source inspection.
 
+The subsequent [direct final-tree experiment](../plans/2026-11-13-rust-state-reconstruction-plan.md#direct-native-tilemap-construction)
+is rejected after the original game comparison. Eliminating the independent uniqueness index
+makes actual native preparation cheaper, but a diagnostic candidate now builds final mutable
+cell/dirty trees that it will discard. Diagnostic component time rises, combined decode shows
+no demonstrated gain and sparse retained-memory cost remains unqualified. The original production
+path is restored; public lifetime/error/dirty-revision controls are retained. The
+[candidate report and patch](../benchmarks/2026-11-14-development-runtime-costs.md#direct-native-tilemap-construction-experiment)
+prevent that local loop improvement from being mistaken for an adopted full-workflow optimization.
+Future representation work must serve both the diagnostic and actual World consumers.
+
 ## 6. Common Issues and What the Sources Do Not Prove
 
 - **A faster capture is not a removed lifetime copy.** The existing report already shows the copy
