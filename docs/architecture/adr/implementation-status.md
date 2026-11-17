@@ -2139,6 +2139,18 @@ External source-free packages preserve edited W-to-I and physically exercised D-
 actual headless and continuous desktop Rust-edit/adoption each pass. Original-selection `98969c4`,
 native-key `7cbdd9f` and the linked unit own exact results and final-check scope. No physical
 controller or broad R10 qualification follows.
+
+The [actual-game recording successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
+at `da96f1e` adds a source/headless exact-step game tool through the original command, Session and Scene
+owners. It captures successful consumption, requires the original generation/tick acknowledgement,
+then confirms Scene activation and game reconstruction before publishing a row. Fresh playback
+uses the original immutable Replay-only ingress. The game/development protocol shares one finite
+semantic vocabulary, and actual CLI processes exchange a bounded recording file. The owning
+unit records focused21 and affected186 passing cases, actual separate-process CLI recording and
+playback, correctness Clippy, minimal cooked-player compilation and formatting/document checks.
+It retains ordinary versus quarantined-startup cleanup limits. This
+does not qualify cooked/native replay, SaveSlot/audio effects, arbitrary live recording or
+cross-platform determinism, and adds no validation to ordinary gameplay frames.
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

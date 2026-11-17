@@ -171,3 +171,36 @@ cache observations are not resolution/build/hardware results. Defer that choice 
 controller consumer can exercise startup-before-connect, hotplug, sticks/triggers, Wait wake,
 focus loss/held recovery, Pause/Step and original-session close. Haptics, battery, sensor and
 touchpad behavior remain separate requirements.
+
+## November 18: Actual Game Replay And Scene Barriers
+
+The next [game-owned successor](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
+selects a finite source/headless exact-step profile. It records actual command consumption,
+requires the original queue acknowledgement, and then waits for the actual game's Scene activation
+and reconstruction. Both paths remain paused between steps, so variable loading waits do not
+advance the authoritative fixed or game clocks. This is a selected Nara game policy, not an
+upstream determinism guarantee. SaveSlot and audio effects, cooked replay and physical desktop
+recording remain separate workflows.
+
+At the pinned Bevy revision above,
+[`bevy_asset` dependency tests](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_asset/src/lib.rs)
+release controlled reads, update until a concrete condition and compare actual event vectors.
+[`SceneInstanceReady`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/lib.rs)
+has a specific Scene/dependency lifecycle; it does not complete arbitrary work started by ready
+callbacks. The
+[`bevy_dev_tools` CI driver](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_dev_tools/src/ci_testing/systems.rs)
+executes frame-indexed operations without supplying a game-specific Scene barrier.
+
+Pinned Godot separates
+[`ResourceLoader` threaded status/result collection](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/io/resource_loader.cpp)
+from actual
+[`SceneTree` replacement and `scene_changed`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/main/scene_tree.cpp).
+A pending replacement can change, and an uncorrelated ready notification is not a request token.
+Nara therefore confirms the selected target, original new activation and expected game counters
+before publishing a structural row. It keeps the existing Scene request and task-return owners.
+
+These mechanisms justify a finite game-owned state machine and explicit observations. They do
+not justify a new global validator, static purity analysis, second command queue, or repeated
+whole-state checking in ordinary gameplay. State/file checks belong to the opt-in recording and
+playback boundaries. Runtime capabilities take priority over further micro-optimization; future
+performance work needs a demonstrated cost in a representative workload.

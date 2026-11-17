@@ -18,6 +18,96 @@ The [pinned source study](../research/2026-11-13-seat-input-and-replay.md) disti
 Nara implementation, upstream mechanisms and new design requirements. A numeric helper, extra
 event variant, serialized command vector or a Replay source label does not complete this outcome.
 
+## Actual Game Recording And Replay Successor
+
+Status: implemented and qualified at `da96f1e` for the source/headless profile below.
+Runtime capability takes priority over micro-optimization. This unit delivers
+a usable source-game debugging workflow rather than another normalized-input demonstration.
+
+The game owns a finite exact-step recording profile and an ordinary command-line consumer. A
+caller supplies semantic movement, marker, travel, instance and Retry operations. Recording runs
+the real Two-Level Game, captures commands from the original successful Capture set, checks the
+original queue acknowledgement after the step, and records the resulting supported game state.
+Playback starts a fresh game with the original queue's immutable Replay-only ingress and compares
+each newly produced result. The existing development protocol shares the same semantic vocabulary.
+
+Both paths remain paused between exact steps. After each step they drive ordinary paused
+maintenance until the original Scene request, game reconstruction and task-return owners settle.
+No additional fixed tick runs while waiting for a Scene. A command acknowledgement is not Scene
+activation: the game must also reach its own healthy Running state with the matching target and
+complete reconstruction before the row can be published. Failed or unacknowledged work cannot
+be appended as a successful recording. Original Runtime faults require Close, not in-place retry.
+
+The selected observation is the source game's existing finite reconstruction inventory: complete
+checkpoint/progress, player pose, held intent, game clock, scheduling continuation, counters,
+Schema and admitted level content. App configuration fingerprints are recorded separately for the
+fixed recording/playback recipes: their queue ingress modes intentionally differ. This is not an
+arbitrary ECS snapshot, native-effect rollback, an executable hash or cross-platform determinism.
+Only the fixed interactive source/headless recipe is accepted. Save/Restore operations, open
+SaveSlots, audio publication, desktop recording, cooked Player replay, unknown gameplay services
+and arbitrary frame grouping remain outside this profile.
+
+Admission is finite at program/file and row boundaries; normal gameplay does not acquire a new
+whole-state validation loop. Files contain no Runtime authority. Import checks version, shape,
+complete finite command vocabulary, contiguous step order and bounded retained bytes before a
+fresh Runtime starts. Recordings preserve original command provenance as data; playback assigns
+one monotonically ordered Replay source without authorizing local or competing producers.
+
+Acceptance covers an actual two-level recording, held movement and release, pickups, persistent
+markers, distinct Cavern instances, Retry, fresh-Runtime playback, portable encode/decode, source
+drift and tampered-result refusal, original Ack and Scene barriers, competing ingress refusal,
+and physical original Session cleanup on success and failure. The ordinary CLI records and
+replays a file in fresh processes. Focused affected tests and an independent review qualify the
+changed boundaries; no new microbenchmark or unrelated Editor/native matrix is required.
+
+Ordinary startup errors keep the original Session cleanup owner. Arbitrary Rust startup panics
+follow the engine's existing Runtime quarantine contract; this adapter does not claim that an
+empty outer Session retired that owner or add a second quarantine manager. Post-start recording
+operation panics close the original Session before resuming the original payload. A pending
+ordinary Close remains retained in the returned error for explicit cleanup retry.
+
+### Actual Game Qualification
+
+The public game trajectory records 71 engine steps and twelve semantic commands, producing 67
+game ticks. It collects three pickups, preserves three markers across Meadow/Cavern and distinct
+Cavern instances, restarts the current level and returns to Meadow. Each structural loading row
+retains its engine tick while paused maintenance adds no simulation time. A fresh copied source
+project reexecutes every row and matches complete canonical supported state. Separate ordinary
+CLI processes record the supplied 67-step/twenty-command program and reproduce all 63 game ticks.
+The file contains provenance data and expected results, never an imported queue or World owner.
+
+Initial run `8dfe63a3-09e1-4a47-83cb-88ebc78ee86b` passes 19/21. One regression reveals that Serde's
+internally tagged unit variants accept unknown fields despite the outer attribute. The shared
+semantic type now decodes through closed empty-struct variants while preserving its existing wire
+format. The other failure is the CLI test's incorrect equality between engine and game ticks:
+four loading rows intentionally do not simulate the game. The assertion now checks the actual
+selected trajectory. Corrected run `84de6ad7-0a97-4b60-92d7-adf6b1626956` passes 21/21.
+
+Final affected run `cbbe3664-cc39-4e6c-b941-0a67566d72f9` passes 186/186 with two explicit ignored
+actual-build tests. It includes all default library cases and the ordinary authored-Input,
+development-Host, resume, gameplay, recording and CLI consumers. Controls cover intermediate
+result tampering, admitted content drift, bad destination repair, key/tick/version/byte refusal,
+original ordered multi-command Capture, competing Replay/AI/Test/External ingress refusal and
+post-start panic cleanup before the original payload resumes. Existing Save/Restore and source
+continuation regressions remain in this affected selection.
+
+Two independent source reviews close their concrete P2 findings: arbitrary startup panic keeps
+the engine's original quarantine contract rather than a false empty-Session retirement claim;
+later cleanup retry preserves an actual terminal failure in the returned diagnostic. Published
+Runtime operations still close through their original Session. The review covers Capture/Ack,
+generation custody, Scene confirmation, finite decoding and CLI output publication; it does not
+create a new global validator or a static proof of arbitrary native behavior.
+
+Default all-target correctness Clippy, no-default `cooked-player` all-target compilation, root
+and sample formatting, added local documentation links/fragments, manifest/program parsing and
+whitespace checks pass on Windows/Rust1.95, release/offline/locked with one Cargo job and the
+existing target directory. Non-correctness warnings remain. The minimal compilation is not
+cooked replay execution. Native output, source-free packages, actual Rust-edit adoption and
+foreign platforms are not rerun or newly qualified by this source/headless tool unit. No numeric
+performance result, arbitrary frame grouping, whole-runtime rollback or full R10/R12/Foundation
+completion follows. Subsequent work prioritizes useful Runtime consumers over small performance
+experiments; paused UI/Dialogue work remains preserved.
+
 ## Ordered work and owning seams
 
 1. Establish the two-seat consumer and compare shared global definitions, seat-scoped mapping

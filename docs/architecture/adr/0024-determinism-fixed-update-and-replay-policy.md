@@ -25,7 +25,9 @@ Rules:
 - Variable frame update is for input collection, UI, animation interpolation, rendering, and non-authoritative presentation.
 - Randomness used by deterministic systems should come from explicit seeded RNG resources.
 - Background async tasks do not mutate simulation state directly; they apply results at scheduled boundaries.
-- Replay support is a future feature, but input/events/state capture should not be made impossible by early design.
+- Replay formats and outcome inventories belong to concrete games or domain consumers. The
+  normalized seat consumer already qualifies finite raw and semantic replay; this does not
+  establish arbitrary game or cross-platform replay.
 - Gameplay replay capture and acknowledgement require successful consumption of the exact admitted
   runtime generation and tick (ADR 0057). An earlier successful tick does not authorize a successor.
   An execution fault can leave partial effects, including deferred commands; the generation must be
@@ -33,6 +35,16 @@ Rules:
 - Fixed scheduling, ECS access analysis, serial execution and Schema admission do not establish
   that arbitrary Rust or native operations can be restored or replayed. Prediction admits only
   an explicitly bounded state and effect model qualified by its concrete consumer.
+
+The [actual-game recording unit](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
+uses healthy paused exact-step boundaries and the game's own Scene-ready barrier. Successful
+Capture is only a candidate recording: the adapter also checks the original exact-generation
+queue acknowledgement after driving the Runtime. Structural commands additionally need the
+matching activated target and completed game reconstruction. Loading waits run ordinary paused
+maintenance without additional fixed ticks. File admission and full-state comparison stay in this
+opt-in tool; ordinary gameplay does not repeatedly serialize or validate the world for replay.
+This source/headless profile excludes SaveSlot and native audio effects, cooked playback and
+arbitrary live desktop recording.
 
 ```text
 Frame:

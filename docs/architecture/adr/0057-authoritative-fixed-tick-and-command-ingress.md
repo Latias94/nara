@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-11-13
+**Last Revised**: 2026-11-18
 **Refines**: ADR 0023: Event, Message, and Command Model; ADR 0024: Determinism,
 Fixed Update, and Replay Policy; ADR 0036: Event, Message, and Resource Queue Lifetime;
 ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056: Headless Runtime
@@ -155,6 +155,13 @@ Every accepted key enters at most one active batch and is retired once after Cap
 successfully completed tick. Multiple read-only systems may observe that batch. This is not a
 claim of one business handler, durable crash recovery, or transactional exactly-once execution
 across a process failure.
+
+The [source-game recording consumer](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
+publishes a row only after checking the original acknowledgement following the managed step.
+Scene commands also require the game's matching activation and reconstruction result; Ack alone
+does not establish asynchronous effect success. Its portable provenance key is data, and playback
+creates new submissions through the original immutable Replay-only queue. This game-owned file
+does not select the universal persistent artifact or crash-recovery policy in OQ-018.
 
 An empty healthy tick still has an active `GameplayCommandBatch` for `T`; therefore `Consume` and
 `Capture` run once for every authoritative fixed tick, including ticks with no commands.

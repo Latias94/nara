@@ -1578,6 +1578,21 @@ owns exact runs, final correctness Clippy/format/document checks and limits. Thi
 format, resume field or per-tick validation; physical controller work remains separate. Small
 performance experiments and paused UI/Dialogue work remain deferred in favor of Runtime capability.
 
+The [actual-game recording successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
+at `da96f1e` extends that usable Runtime path: a finite source/headless semantic program drives the
+original exact-step Session, records actual successful Capture plus original acknowledgement,
+and waits for the matching Scene activation and game reconstruction using paused maintenance.
+Fresh playback installs the existing Replay-only queue before Startup and compares newly
+produced complete supported game states. The ordinary `replay` CLI writes and loads a bounded
+recording file in separate processes. Its closed command vocabulary is shared with development
+control; no second queue, time owner or global validator is selected. Full-state comparisons are
+opt-in tool work, with no added ordinary-frame replay validation. New focused cases pass21/21;
+the final affected library/game/development/resume/CLI cohort passes186/186 with two explicit
+actual-build skips. Separate CLI processes execute the real recording and playback. Correctness
+Clippy, minimal cooked-player compilation and formatting/document checks pass. The linked unit
+owns exact runs, initial corrections and the startup-quarantine boundary. Cooked/native replay, SaveSlot/audio effects,
+arbitrary live input, cross-platform determinism and complete R10/R12/Foundation remain open.
+
 The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
 installed compiler's relevant changes and a passing Input/Gameplay production-library check.
 The complete unit retains its Rust 1.95 runtime qualification baseline; the bounded 1.100 probe
