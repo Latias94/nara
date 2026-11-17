@@ -7,11 +7,16 @@ use nara::{
     fs::ContentDigest,
     identity::{EntityLookup, SpawnedSceneInstance},
     image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat},
+    material::SamplerDescriptor,
+    prelude::{Color, Vec2},
     project_host::HeadlessSession,
     scene::{SourceDocumentKind, SourceDocumentOrigin},
+    sprite::{Sprite, TextureRegion},
 };
 use serde_json::{Value, json};
-use two_level_game::{GameSnapshot, Scenario, levels::LevelId};
+use two_level_game::{
+    GamePhase, GameSnapshot, Scenario, animation::atlas_product, levels::LevelId,
+};
 
 use super::output;
 
@@ -20,6 +25,16 @@ const SOURCE_UNIVERSE: &str = "be3dea0c-93ef-5607-ab84-af715a1f98b3";
 const RGBA_HASH: [u8; 32] = [
     61, 120, 191, 178, 229, 162, 52, 78, 30, 139, 104, 91, 1, 216, 130, 90, 82, 239, 180, 84, 73,
     118, 182, 59, 143, 200, 59, 95, 88, 7, 54, 75,
+];
+const ATLAS_RGBA_HASH: [u8; 32] = [
+    181, 15, 191, 222, 208, 248, 60, 15, 165, 121, 233, 83, 238, 249, 97, 147, 186, 153, 15, 101,
+    119, 235, 173, 161, 179, 46, 29, 61, 98, 242, 249, 66,
+];
+const ATLAS_FRAME_PIXELS: [[u8; 4]; 4] = [
+    [64, 160, 240, 255],
+    [32, 216, 232, 255],
+    [240, 152, 48, 255],
+    [112, 224, 80, 255],
 ];
 
 #[derive(Default)]
@@ -30,6 +45,7 @@ pub(super) struct Evidence {
     pub visited: BTreeSet<LevelId>,
     images: BTreeMap<AssetProductRef, Value>,
     resident: BTreeSet<AssetProductRef>,
+    animation_frames: BTreeSet<u8>,
     receipts: Vec<Value>,
 }
 
@@ -77,6 +93,56 @@ impl Evidence {
                 || snapshot.scene_members != current.receipt().len())
         {
             return Err("gameplay snapshot disagrees with the actual current Scene receipt".into());
+        }
+        if let Some(snapshot) = &self.snapshot
+            && snapshot.initialized
+            && snapshot.phase == GamePhase::Running
+            && !snapshot.restoring
+            && snapshot.error.is_none()
+        {
+            let id = current
+                .receipt()
+                .entity_ids()
+                .iter()
+                .take(6)
+                .find(|id| id.as_str() == "explorer")
+                .ok_or("current Scene receipt has no bounded explorer identity")?;
+            let EntityLookup::Resolved(entity) = current.receipt().resolve(world, id) else {
+                return Err("current Scene receipt does not resolve its live explorer".into());
+            };
+            let sprite = world
+                .get::<Sprite>(entity)
+                .ok_or("current receipt-resolved explorer has no Sprite")?;
+            let frame =
+                if snapshot.held[0] == snapshot.held[1] && snapshot.held[2] == snapshot.held[3] {
+                    0_u8
+                } else {
+                    1 + ((snapshot.logical_elapsed_nanos / 100_000_000) % 3) as u8
+                };
+            let region = TextureRegion::new(
+                Vec2::new(f32::from(frame) * 0.25, 0.0),
+                Vec2::new(0.25, 1.0),
+            );
+            if sprite.texture_region != Some(region)
+                || sprite.material.sampler != SamplerDescriptor::NEAREST_CLAMP
+                || sprite.material.tint != Color::WHITE
+            {
+                return Err(format!(
+                    "current explorer Sprite disagrees with logical atlas frame {frame}, nearest sampling or white tint"
+                ));
+            }
+            let image = sprite
+                .material
+                .image
+                .and_then(|handle| world.get_resource::<Assets<ImageAsset>>()?.get(handle))
+                .ok_or("current explorer Sprite has no resident bound Image")?;
+            if image.product() != Some(atlas_product()) || image.source().is_some() {
+                return Err(
+                    "current explorer Sprite is not bound to the source-free atlas Image Product"
+                        .into(),
+                );
+            }
+            self.animation_frames.insert(frame);
         }
         if !changed
             && self
@@ -172,6 +238,51 @@ impl Evidence {
                 "source_free": image.source().is_none(),
             }),
         );
+        let product = atlas_product();
+        let mut matches = assets
+            .iter()
+            .filter(|(_, image)| image.product() == Some(product));
+        let (_, image) = matches
+            .next()
+            .ok_or("shared explorer atlas Image Product is not resident")?;
+        let pixel_digest = ContentDigest::of_bytes(image.pixels());
+        if matches.next().is_some()
+            || image.source().is_some()
+            || image.extent() != ImageExtent::new(64, 16)
+            || image.format() != ImageFormat::Rgba8
+            || image.color_space() != ImageColorSpace::Srgb
+            || pixel_digest != ContentDigest::from_parts(4096, ATLAS_RGBA_HASH)
+            || ATLAS_FRAME_PIXELS
+                .iter()
+                .enumerate()
+                .any(|(frame, expected)| {
+                    let offset = (8 * 64 + frame * 16 + 8) * 4;
+                    image.pixels().get(offset..offset + 4) != Some(expected.as_slice())
+                })
+        {
+            return Err(
+                "resident explorer atlas disagrees with its exact RGBA8 sRGB descriptor and four-frame pixels"
+                    .into(),
+            );
+        }
+        self.images.insert(
+            product,
+            json!({
+                "role": "explorer_atlas",
+                "product": product.to_string(),
+                "format": image.format(),
+                "color_space": image.color_space(),
+                "extent": image.extent(),
+                "columns": 4,
+                "rows": 1,
+                "cell_extent": ImageExtent::new(16, 16),
+                "frame_center_rgba": ATLAS_FRAME_PIXELS,
+                "pixel_bytes": image.pixels().len(),
+                "pixel_blake3": pixel_digest.as_bytes(),
+                "content_hash": image.content_hash().as_bytes(),
+                "source_free": image.source().is_none(),
+            }),
+        );
         self.visited.insert(level);
         self.receipts.push(json!({
             "level": level,
@@ -236,6 +347,7 @@ impl Evidence {
                 .collect::<Vec<_>>()
         );
         result["image_proofs"] = json!(self.images.values().collect::<Vec<_>>());
+        result["animation_frames"] = json!(self.animation_frames);
         result["startup_receipt"] = self.startup.as_ref().map(receipt).into();
         result["current_receipt"] = self.current.as_ref().map(receipt).into();
         result["scene_receipts"] = json!(self.receipts);

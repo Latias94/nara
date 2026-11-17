@@ -354,8 +354,8 @@ jobs:
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cook --test cook_source --test cooked_delivery --test sound_bank_content --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test Two-Level Game sample headless
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features cook,cooked-player --test-threads=1 --no-fail-fast
-      - name: Test active runtime metrics, original worker spans and Tilemap payload reads
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features desktop,cost-measurement,scene-work-observation --test runtime_workload_metrics --test runtime_workload_spans --test tile_payload_trial --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test runtime CPU evidence and atlas pixel oracle
+        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features desktop,cost-measurement,scene-work-observation --test runtime_workload_metrics --test runtime_workload_spans --test tile_payload_trial --test desktop_pixel_oracle --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test concrete game audio CPU controls and independent callback oracle
         if: runner.os == 'Windows'
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features audio-cpal --lib --test audio_oracle --test cooked_audio_oracle -E 'test(audio::) | test(sound_bank::) | binary(audio_oracle) | binary(cooked_audio_oracle)' --test-threads=1 --no-fail-fast --no-tests fail

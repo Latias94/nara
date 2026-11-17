@@ -287,7 +287,7 @@ impl Plugin for ExplorationPlugin {
         add_local_gameplay_command_systems(app, verification::drive)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (travel::consume, simulate, capture)
+            (travel::consume, simulate, project_animation, capture)
                 .chain()
                 .in_set(GameplayCommandSet::Consume)
                 .before(GameplayCommandSet::Capture)
@@ -299,7 +299,7 @@ impl Plugin for ExplorationPlugin {
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            (travel::advance, resume::finish).chain(),
+            (travel::advance, resume::finish, project_animation).chain(),
         )?;
         app.add_systems(CoreStage::Last, capture)?;
         Ok(())
@@ -414,6 +414,7 @@ fn initialize(world: &mut World) {
                 fail(world, error);
             } else {
                 world.resource_mut::<Session>().initialized = true;
+                project_animation(world);
                 println!(
                     "two_level_game: entered Meadow instance=0; WASD move, E travel, Q instance, M marker, K save, L restore, R retry"
                 );
@@ -509,6 +510,31 @@ fn simulate(world: &mut World) {
         }
     }
     travel::hide_collected(world);
+}
+
+fn project_animation(world: &mut World) {
+    let session = world.resource::<Session>();
+    if !session.initialized || session.phase != GamePhase::Running {
+        return;
+    }
+    let region = crate::animation::explorer_frame(session.clock, session.held).texture_region();
+    let Some(entity) = player(world) else {
+        fail(
+            world,
+            "the animated explorer identity is unavailable".into(),
+        );
+        return;
+    };
+    match world.get::<nara::sprite::Sprite>(entity) {
+        Some(sprite) if sprite.texture_region == Some(region) => {}
+        Some(_) => {
+            world
+                .get_mut::<nara::sprite::Sprite>(entity)
+                .unwrap()
+                .texture_region = Some(region);
+        }
+        None => fail(world, "the animated explorer has no Sprite".into()),
+    }
 }
 
 fn capture(world: &mut World) {

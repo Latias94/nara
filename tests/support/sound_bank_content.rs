@@ -450,7 +450,11 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
     .unwrap()
     .into_group();
     builder.add_group(&group).unwrap();
-    for path in ["textures/meadow.png", "textures/cavern.png"] {
+    for path in [
+        "textures/meadow.png",
+        "textures/cavern.png",
+        "textures/explorer.png",
+    ] {
         let request = fixture.request(
             path,
             ArtifactBuildDefinition {
@@ -575,7 +579,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 5);
+    assert_eq!(prepared.base().catalog().members().len(), 6);
     let acquired = prepared
         .base()
         .acquire_asset::<SoundBankDomain, SoundBankCodec>(bank_product())

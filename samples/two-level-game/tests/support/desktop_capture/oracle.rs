@@ -1,6 +1,11 @@
 //! Expectations for the two shipped Scenes; this is not a general rasterizer or schema reader.
 
 use nara::{
+    asset::{AssetRecord, AssetSourceKind, AssetSourcePath, StableAssetId},
+    image::{
+        ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageFormat, ImageImportSettings,
+        ImageImporter,
+    },
     material::{AlphaMode2d, SamplerDescriptor},
     prelude::{Color, Transform2d, Vec2},
     render::{RenderFrameTarget, ViewLoadOp, ViewportRect},
@@ -10,6 +15,14 @@ use nara::{
 use two_level_game::{GamePhase, GameSnapshot, levels::LevelId, resume::ResumeState};
 
 use super::{CANVAS_EXTENT, Result, SealedGameFrame, WINDOW_EXTENT, require};
+
+const PLAYER_FILL: [[u8; 4]; 4] = [
+    [64, 160, 240, 255],
+    [32, 216, 232, 255],
+    [240, 152, 48, 255],
+    [112, 224, 80, 255],
+];
+const PLAYER_BORDER: [u8; 4] = [16, 32, 48, 255];
 
 pub(super) fn assert_snapshot(snapshot: &GameSnapshot, expected: &ResumeState) -> Result<()> {
     expected.validate()?;
@@ -143,6 +156,7 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         .sprite_batches()
         .ok_or_else(|| std::io::Error::other("original stock input lacks Sprite extraction"))?;
     let objects = objects(expected)?;
+    let player_atlas = player_fixture()?;
     require(
         batches.total_instances() == objects.len(),
         "stock capture has missing or extra game objects",
@@ -155,6 +169,7 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
     });
     for object in &objects {
         let (batch, instance) = originals.next().unwrap();
+        let (sampler, uv_min, uv_size) = object.image.sprite_sampling();
         let matrix = object.transform.matrix();
         let center = view.mapping.world_to_clip(object.transform.translation);
         let x = view
@@ -171,14 +186,14 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
                 && batch.sort_key == 0
                 && batch.material_extension.is_none()
                 && batch.material.alpha_mode == AlphaMode2d::Blend
-                && batch.material.sampler == SamplerDescriptor::LINEAR_CLAMP
+                && batch.material.sampler == sampler
                 && instance.center.abs_diff_eq(center, 0.00001)
                 && instance.x_axis.abs_diff_eq(x, 0.00001)
                 && instance.y_axis.abs_diff_eq(y, 0.00001)
                 && instance.color == object.color
-                && instance.uv.min == Vec2::ZERO
-                && instance.uv.size == Vec2::ONE
-                && batch.image.is_some() == object.pickup,
+                && instance.uv.min == uv_min
+                && instance.uv.size == uv_size
+                && batch.image.is_some() == (object.image != GameImage::Solid),
             format!(
                 "original ordered stock Sprite differs from expected {}",
                 object.name
@@ -186,17 +201,36 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         )?;
         if let Some(image) = &batch.image {
             let image = image.resource();
+            let width = match object.image {
+                GameImage::PlayerAtlas(_) => 64,
+                GameImage::Pickup => 16,
+                GameImage::Solid => unreachable!(),
+            };
             require(
-                image.extent().width == 16
+                image.extent().width == width
                     && image.extent().height == 16
-                    && image.color_space() == nara::image::ImageColorSpace::Srgb
-                    && image.pixels().len() == 16 * 16 * 4
-                    && image.has_retention_owner()
-                    && image.pixels()[(3 * 16 + 7) * 4..(3 * 16 + 7) * 4 + 4] == [255; 4]
-                    && image.pixels()[(11 * 16 + 9) * 4..(11 * 16 + 9) * 4 + 4]
-                        == [185, 185, 185, 255],
-                "captured pickup must retain the real sRGB diamond texture and its allocation owner",
+                    && image.format() == ImageFormat::Rgba8
+                    && image.color_space() == ImageColorSpace::Srgb
+                    && image.pixels().len() == width as usize * 16 * 4
+                    && image.has_retention_owner(),
+                format!(
+                    "captured {} must retain its original RGBA8 sRGB Image and allocation owner",
+                    object.name
+                ),
             )?;
+            match object.image {
+                GameImage::PlayerAtlas(_) => require(
+                    image.pixels() == player_atlas.pixels(),
+                    "captured player atlas differs from the independently decoded original fixture",
+                )?,
+                GameImage::Pickup => require(
+                    image.pixels()[(3 * 16 + 7) * 4..(3 * 16 + 7) * 4 + 4] == [255; 4]
+                        && image.pixels()[(11 * 16 + 9) * 4..(11 * 16 + 9) * 4 + 4]
+                            == [185, 185, 185, 255],
+                    "captured pickup must retain the real sRGB diamond fixture pixels",
+                )?,
+                GameImage::Solid => unreachable!(),
+            }
         }
     }
     Ok(())
@@ -207,7 +241,112 @@ struct GameObject {
     transform: Transform2d,
     size: f32,
     color: Color,
-    pickup: bool,
+    image: GameImage,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GameImage {
+    Solid,
+    Pickup,
+    PlayerAtlas(usize),
+}
+
+impl GameImage {
+    fn sprite_sampling(self) -> (SamplerDescriptor, Vec2, Vec2) {
+        match self {
+            Self::PlayerAtlas(frame) => (
+                SamplerDescriptor::NEAREST_CLAMP,
+                Vec2::new(frame as f32 / 4.0, 0.0),
+                Vec2::new(0.25, 1.0),
+            ),
+            Self::Solid | Self::Pickup => (SamplerDescriptor::LINEAR_CLAMP, Vec2::ZERO, Vec2::ONE),
+        }
+    }
+}
+
+fn player_frame(expected: &ResumeState) -> usize {
+    let held = expected.held;
+    if held[0] == held[1] && held[2] == held[3] {
+        0
+    } else {
+        1 + ((expected.clock.elapsed_nanos / 100_000_000) % 3) as usize
+    }
+}
+
+fn player_fixture() -> Result<ImageAsset> {
+    let record = AssetRecord::new(
+        StableAssetId::parse_str("2eece9cd-6332-4868-b0d2-289879df9de8")?,
+        AssetSourcePath::new("textures/explorer.png")?,
+        AssetSourceKind::Image,
+    );
+    let image = ImageImporter::new()?
+        .preflight_unpublished_import(ImageBytesImportRequest::new(
+            record,
+            include_bytes!("../../../assets/textures/explorer.png").as_slice(),
+            ImageImportSettings::new(ImageColorSpace::Srgb),
+        ))?
+        .import()?;
+    require(
+        image.extent().width == 64
+            && image.extent().height == 16
+            && image.format() == ImageFormat::Rgba8
+            && image.color_space() == ImageColorSpace::Srgb
+            && image.pixels().len() == 64 * 16 * 4,
+        "original player fixture must be a 64x16 RGBA8 sRGB atlas",
+    )?;
+    assert_player_fixture_pixels(image.pixels())?;
+    Ok(image)
+}
+
+fn assert_player_fixture_pixels(pixels: &[u8]) -> Result<()> {
+    require(
+        pixels.len() == 64 * 16 * 4,
+        "wrong player fixture byte length",
+    )?;
+    for (index, actual) in pixels.chunks_exact(4).enumerate() {
+        let x = index % 64;
+        let y = index / 64;
+        let local_x = x % 16;
+        let expected = if local_x == 0 || local_x == 15 || y == 0 || y == 15 {
+            PLAYER_BORDER
+        } else if (local_x == 5 || local_x == 10) && y == 5 {
+            [255; 4]
+        } else {
+            PLAYER_FILL[x / 16]
+        };
+        require(
+            actual == expected,
+            format!(
+                "original player fixture texel ({x}, {y}): expected {expected:?}, got {actual:?}"
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn player_texel(image: &ImageAsset, frame: usize, local_uv: Vec2) -> [u8; 4] {
+    let x = (((frame as f32 + local_uv.x) / 4.0 * 64.0).floor() as usize).min(63);
+    let y = ((local_uv.y * 16.0).floor() as usize).min(15);
+    let offset = (y * 64 + x) * 4;
+    image.pixels()[offset..offset + 4].try_into().unwrap()
+}
+
+fn srgb_channel(byte: u8) -> f32 {
+    let encoded = f32::from(byte) / 255.0;
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn texel_color(texel: [u8; 4]) -> Color {
+    Color::rgba(
+        srgb_channel(texel[0]),
+        srgb_channel(texel[1]),
+        srgb_channel(texel[2]),
+        f32::from(texel[3]) / 255.0,
+    )
 }
 
 fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
@@ -223,12 +362,12 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             "unknown game pickup in complete progress",
         )?;
     }
-    let object = |name: &str, position, size, color, pickup| GameObject {
+    let object = |name: &str, position, size, color, image| GameObject {
         name: name.into(),
         transform: Transform2d::from_translation(position),
         size,
         color,
-        pickup,
+        image,
     };
     let mut objects = vec![
         GameObject {
@@ -239,15 +378,15 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
                 scale: Vec2::from_array(expected.player.scale),
             },
             size: 18.0,
-            color: Color::rgb(0.25, 0.7, 1.0),
-            pickup: false,
+            color: Color::WHITE,
+            image: GameImage::PlayerAtlas(player_frame(expected)),
         },
         object(
             "checkpoint",
             Vec2::new(-120.0, 0.0),
             14.0,
             Color::rgb(0.25, 1.0, 0.5),
-            false,
+            GameImage::Solid,
         ),
     ];
     let determinant = objects[0].transform.matrix().determinant();
@@ -269,7 +408,7 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             position,
             18.0,
             Color::rgba(1.0, 0.8, 0.2, if collected { 0.0 } else { 1.0 }),
-            true,
+            GameImage::Pickup,
         ));
     }
     objects.push(object(
@@ -277,7 +416,7 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
         Vec2::new(200.0, 0.0),
         26.0,
         Color::rgb(0.8, 0.3, 1.0),
-        false,
+        GameImage::Solid,
     ));
     let mut markers: Vec<_> = expected
         .progress
@@ -297,7 +436,7 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             position,
             10.0,
             Color::rgb(1.0, 0.3, 0.8),
-            false,
+            GameImage::Solid,
         ));
     }
     Ok(objects)
@@ -331,16 +470,25 @@ impl GameObject {
     }
 }
 
+struct PlayerPixelWitness {
+    x: usize,
+    y: usize,
+    texel: [u8; 4],
+}
+
 pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<PixelChecks> {
     require(
         rgba8.len() == 960 * 540 * 4,
         "unexpected replay readback length",
     )?;
     let objects = objects(expected)?;
+    let player_atlas = player_fixture()?;
     let mut checks = PixelChecks::default();
     let clear = background(expected.progress.location.level.level());
     for (index, object) in objects.iter().enumerate() {
         let mut found = 0;
+        let mut player_witnesses: Vec<PlayerPixelWitness> = Vec::with_capacity(4);
+        let mut player_fill_seen = false;
         for y in 0..180 {
             for x in 0..320 {
                 let world = Vec2::new(
@@ -362,15 +510,31 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                     continue;
                 }
                 let mut color = object.color;
-                if object.pickup {
-                    let uv = Vec2::new(local.x / 18.0 + 0.5, 0.5 - local.y / 18.0);
+                let uv = Vec2::new(local.x / object.size + 0.5, 0.5 - local.y / object.size);
+                if let GameImage::PlayerAtlas(frame) = object.image {
+                    let texel = player_texel(&player_atlas, frame, uv);
+                    let witness = PlayerPixelWitness { x, y, texel };
+                    if texel == PLAYER_FILL[frame] {
+                        player_fill_seen = true;
+                        if player_witnesses.len() < 4 {
+                            player_witnesses.push(witness);
+                        }
+                    } else if !player_witnesses.iter().any(|sample| sample.texel == texel) {
+                        if player_witnesses.len() == 4 {
+                            player_witnesses.pop();
+                        }
+                        player_witnesses.insert(0, witness);
+                    }
+                    continue;
+                }
+                if object.image == GameImage::Pickup {
                     let white = (0.40..0.49).contains(&uv.x) && (0.28..0.38).contains(&uv.y);
                     let shadow = (0.51..0.60).contains(&uv.x) && (0.62..0.72).contains(&uv.y);
                     if !white && !shadow {
                         continue;
                     }
                     if shadow {
-                        let linear = ((185.0_f32 / 255.0 + 0.055) / 1.055).powf(2.4);
+                        let linear = srgb_channel(185);
                         color.r *= linear;
                         color.g *= linear;
                         color.b *= linear;
@@ -389,7 +553,23 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                 break;
             }
         }
-        if index == 0 || object.pickup || index >= 5 {
+        if let GameImage::PlayerAtlas(frame) = object.image {
+            require(
+                player_fill_seen,
+                "player has no unoccluded frame-specific atlas pixel witness; choose a discriminating game state",
+            )?;
+            for witness in player_witnesses {
+                check_block(
+                    rgba8,
+                    witness.x,
+                    witness.y,
+                    texel_color(witness.texel),
+                    &format!("player atlas frame {frame}"),
+                )?;
+                found += 9;
+            }
+        }
+        if index == 0 || object.image == GameImage::Pickup || index >= 5 {
             require(
                 found > 0,
                 format!(
@@ -421,12 +601,247 @@ fn check_block(rgba8: &[u8], x: usize, y: usize, expected: Color, label: &str) -
             let offset = (py * 960 + px) * 4;
             let actual = &rgba8[offset..offset + 4];
             require(
-                actual.iter().zip(channels).all(|(a, b)| a.abs_diff(b) <= 3),
+                actual
+                    .iter()
+                    .zip(channels)
+                    .take(3)
+                    .all(|(a, b)| a.abs_diff(b) <= 3)
+                    && actual[3] == channels[3],
                 format!(
-                    "replay {label} pixel ({px}, {py}): expected {channels:?} +/-3, got {actual:?}"
+                    "replay {label} pixel ({px}, {py}): expected {channels:?} +/-3 RGB and exact alpha, got {actual:?}"
                 ),
             )?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use nara::{asset::ImportedProductId, identity::SceneEntityId};
+    use two_level_game::{
+        levels::LevelKey,
+        resume::{
+            GameClock, LevelContentStamp, PlayerState, ResumeCompatibility, RuntimeCatchUpPolicy,
+            RuntimeTimeState, SessionCounters,
+        },
+        save::{Checkpoint, CheckpointLocation, CollectedPickup, MarkerId, MarkerRecord},
+    };
+
+    use super::*;
+
+    const LINEAR_FILL: [[u8; 4]; 4] = [
+        [13, 90, 222, 255],
+        [4, 175, 206, 255],
+        [222, 80, 8, 255],
+        [41, 190, 20, 255],
+    ];
+    const PLAYER_FILL_BLOCKS: [(usize, usize); 3] = [(156, 106), (157, 106), (158, 106)];
+    const PLAYER_EYE_BLOCK: (usize, usize) = (158, 108);
+
+    fn resume(frame: usize) -> ResumeState {
+        let level = LevelKey::main(LevelId::Meadow);
+        let mut progress = Checkpoint::new(CheckpointLocation {
+            level,
+            anchor: SceneEntityId::new("checkpoint").unwrap(),
+        });
+        progress.score = 10;
+        progress.collected.push(CollectedPickup {
+            level,
+            entity: SceneEntityId::new("gem-near").unwrap(),
+        });
+        progress.markers.push(MarkerRecord {
+            id: MarkerId::new(1).unwrap(),
+            level,
+            position: [40.0, -60.0],
+        });
+        progress.next_marker_id = MarkerId::new(2).unwrap();
+        let ticks = frame.saturating_sub(1) as u64;
+        let state = ResumeState {
+            progress,
+            player: PlayerState {
+                translation: [0.0, -40.0],
+                rotation: 0.0,
+                scale: [1.0; 2],
+            },
+            held: [false, frame != 0, false, false],
+            clock: GameClock {
+                ticks,
+                elapsed_nanos: ticks * 100_000_000,
+                timestep_nanos: 100_000_000,
+            },
+            runtime_time: RuntimeTimeState {
+                timestep_nanos: 100_000_000,
+                max_steps_per_frame: 8,
+                max_debt_steps: 8,
+                catch_up_policy: RuntimeCatchUpPolicy::PreserveDebt,
+                time_scale: 1.0,
+                max_delta_nanos: 250_000_000,
+                pending_nanos: 0,
+            },
+            counters: SessionCounters::default(),
+            compatibility: ResumeCompatibility {
+                schema: [1; 32],
+                configuration: [2; 32],
+                levels: vec![LevelContentStamp {
+                    level: LevelId::Meadow,
+                    manifest: [3; 32],
+                    content: [4; 32],
+                }],
+            },
+        };
+        state.validate().unwrap();
+        state
+    }
+
+    fn paint_block(pixels: &mut [u8], (x, y): (usize, usize), color: [u8; 4]) {
+        for py in y * 3..y * 3 + 3 {
+            for px in x * 3..x * 3 + 3 {
+                let offset = (py * 960 + px) * 4;
+                pixels[offset..offset + 4].copy_from_slice(&color);
+            }
+        }
+    }
+
+    fn readback(frame: usize) -> Vec<u8> {
+        let mut pixels = vec![0; 960 * 540 * 4];
+        for block in PLAYER_FILL_BLOCKS {
+            paint_block(&mut pixels, block, LINEAR_FILL[frame]);
+        }
+        paint_block(&mut pixels, PLAYER_EYE_BLOCK, [255; 4]);
+        for x in 97..101 {
+            paint_block(&mut pixels, (x, 87), [64, 255, 128, 255]);
+        }
+        for block in [(129, 88), (130, 91)] {
+            paint_block(&mut pixels, block, [10, 33, 23, 255]);
+        }
+        paint_block(&mut pixels, (199, 68), [255, 204, 51, 255]);
+        paint_block(&mut pixels, (200, 71), [124, 99, 25, 255]);
+        for x in 254..258 {
+            paint_block(&mut pixels, (x, 84), [204, 77, 255, 255]);
+        }
+        for x in 178..182 {
+            paint_block(&mut pixels, (x, 118), [255, 77, 204, 255]);
+        }
+        for block in [(4, 4), (315, 4), (4, 175), (315, 175)] {
+            paint_block(&mut pixels, block, [10, 33, 23, 255]);
+        }
+        pixels
+    }
+
+    #[test]
+    fn original_atlas_has_the_known_primary_product_and_texels_in_every_quarter() {
+        let atlas = player_fixture().unwrap();
+        let product = atlas.product().unwrap();
+        assert_eq!(
+            product.source().to_string(),
+            "2eece9cd-6332-4868-b0d2-289879df9de8"
+        );
+        assert_eq!(product.product(), ImportedProductId::PRIMARY);
+        for frame in 0..4 {
+            for (local, expected) in [
+                (Vec2::new(1.5, 1.5), PLAYER_FILL[frame]),
+                (Vec2::new(5.5, 5.5), [255; 4]),
+                (Vec2::new(10.5, 5.5), [255; 4]),
+                (Vec2::new(5.5, 10.5), PLAYER_FILL[frame]),
+                (Vec2::new(0.5, 8.5), PLAYER_BORDER),
+                (Vec2::new(15.5, 8.5), PLAYER_BORDER),
+                (Vec2::new(8.5, 0.5), PLAYER_BORDER),
+                (Vec2::new(8.5, 15.5), PLAYER_BORDER),
+            ] {
+                assert_eq!(player_texel(&atlas, frame, local / 16.0), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn source_recipe_rejects_swapped_frames_wrong_rows_and_opacity_corruption() {
+        let atlas = player_fixture().unwrap();
+        let mut swapped = atlas.pixels().to_vec();
+        for y in 0..16 {
+            for x in 0..16 {
+                for channel in 0..4 {
+                    swapped.swap((y * 64 + x) * 4 + channel, (y * 64 + x + 16) * 4 + channel);
+                }
+            }
+        }
+        assert!(assert_player_fixture_pixels(&swapped).is_err());
+        for (x, y, replacement) in [
+            (21, 5, PLAYER_FILL[1]),
+            (21, 10, [255; 4]),
+            (32, 8, PLAYER_FILL[2]),
+            (49, 1, [112, 224, 80, 254]),
+        ] {
+            let mut corrupted = atlas.pixels().to_vec();
+            let offset = (y * 64 + x) * 4;
+            corrupted[offset..offset + 4].copy_from_slice(&replacement);
+            assert!(assert_player_fixture_pixels(&corrupted).is_err());
+        }
+    }
+
+    #[test]
+    fn four_frames_preserve_the_original_object_categories_and_pixel_counts() {
+        for frame in 0..4 {
+            let checks = check_pixels(&readback(frame), &resume(frame)).unwrap();
+            assert_eq!(checks.player, 36);
+            assert_eq!(checks.markers, 36);
+            assert_eq!(checks.visible_pickups, 18);
+            assert_eq!(checks.collected_pickups, 18);
+            assert_eq!(checks.background, 36);
+            assert_eq!(checks.other_scene_objects, 72);
+        }
+    }
+
+    #[test]
+    fn pixel_oracle_rejects_wrong_frame_full_atlas_uv_wrong_row_and_encoded_rgb() {
+        let state = resume(2);
+        let original = readback(2);
+        check_pixels(&original, &state).unwrap();
+        for wrong_frame in [0, 1, 3] {
+            let mut corrupted = original.clone();
+            for block in PLAYER_FILL_BLOCKS {
+                paint_block(&mut corrupted, block, LINEAR_FILL[wrong_frame]);
+            }
+            let error = check_pixels(&corrupted, &state).unwrap_err().to_string();
+            assert!(error.contains("player atlas frame 2"), "{error}");
+        }
+        let mut full_atlas = original.clone();
+        for (block, frame) in PLAYER_FILL_BLOCKS.into_iter().zip([0, 0, 1]) {
+            paint_block(&mut full_atlas, block, LINEAR_FILL[frame]);
+        }
+        assert!(check_pixels(&full_atlas, &state).is_err());
+        let mut wrong_row = original.clone();
+        paint_block(&mut wrong_row, PLAYER_EYE_BLOCK, LINEAR_FILL[2]);
+        assert!(check_pixels(&wrong_row, &state).is_err());
+        let mut encoded_rgb = original;
+        for block in PLAYER_FILL_BLOCKS {
+            paint_block(&mut encoded_rgb, block, PLAYER_FILL[2]);
+        }
+        assert!(check_pixels(&encoded_rgb, &state).is_err());
+    }
+
+    #[test]
+    fn pixel_oracle_keeps_exact_opaque_alpha_and_the_old_non_player_witnesses() {
+        let state = resume(2);
+        let original = readback(2);
+        for (block, label) in [
+            (PLAYER_FILL_BLOCKS[0], "player"),
+            ((97, 87), "checkpoint"),
+            ((129, 88), "gem-near"),
+            ((199, 68), "gem-far"),
+            ((200, 71), "gem-far"),
+            ((254, 84), "portal"),
+            ((178, 118), "marker 1"),
+            ((4, 4), "level background"),
+        ] {
+            let mut corrupted = original.clone();
+            let offset = (block.1 * 3 * 960 + block.0 * 3) * 4;
+            corrupted[offset + 3] = 254;
+            let error = check_pixels(&corrupted, &state).unwrap_err().to_string();
+            assert!(
+                error.contains(label) && error.contains("exact alpha"),
+                "{error}"
+            );
+        }
+    }
 }

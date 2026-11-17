@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -20,12 +20,17 @@ use nara::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use two_level_game::levels::LevelId;
+use two_level_game::{
+    animation::atlas_product,
+    levels::{LevelId, LevelKey},
+};
 
 use crate::continuity::Fixture;
 
 #[path = "cooked_desktop/evidence.rs"]
 mod evidence;
+#[path = "cooked_audio/images.rs"]
+mod images;
 #[path = "cooked_desktop/process.rs"]
 mod process;
 #[path = "cooked_desktop/window.rs"]
@@ -215,6 +220,7 @@ pub fn accept(cooker: &Path) {
         "build.rs",
         "src/gameplay/mod.rs",
         "src/gameplay/input.rs",
+        "src/animation.rs",
         "src/bin/player_desktop.rs",
         "src/bin/player_desktop/arguments.rs",
         "src/bin/player_desktop/runtime.rs",
@@ -291,6 +297,24 @@ pub fn accept(cooker: &Path) {
     assert_eq!(report["finite_processes"], 1);
     assert_eq!(report["refused_processes"], 1);
     assert_eq!(report["scripted_controls"].as_array().unwrap().len(), 3);
+    for field in ["saved", "continued", "finite"] {
+        assert_images(&report[field], &request.images);
+    }
+    assert_eq!(report["saved"]["animation_frames"], json!([0, 1, 2, 3]));
+    assert_eq!(report["continued"]["animation_frames"], json!([0]));
+    for control in report["scripted_controls"].as_array().unwrap() {
+        assert_images(&control["result"], &request.images);
+        assert_eq!(
+            control["result"]["animation_frames"],
+            if control["scenario"] == "restore" {
+                json!([0])
+            } else {
+                json!([0, 1, 2, 3])
+            },
+            "completed cooked desktop {} animation frames",
+            control["scenario"]
+        );
+    }
     println!("{REPORT}{report}");
     evidence::assert_payload(&relocated);
     for (name, expected) in ["player_desktop.exe", "content.pack", "package.json"]
@@ -321,6 +345,55 @@ pub fn accept(cooker: &Path) {
         working_files.is_empty(),
         "unexpected current-directory writes: {working_files:?}"
     );
+}
+
+fn assert_images(record: &Value, level_images: &BTreeMap<LevelId, Value>) {
+    let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
+    let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        record["resident_images"],
+        json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
+    );
+    let visited: BTreeSet<LevelId> =
+        serde_json::from_value(record["visited_levels"].clone()).unwrap();
+    assert_eq!(
+        visited.len(),
+        record["visited_levels"].as_array().unwrap().len()
+    );
+    assert!(visited.contains(&LevelId::STARTUP) && visited.contains(&current.level()));
+    let products: BTreeSet<_> = visited
+        .iter()
+        .map(|level| level.image_product())
+        .chain([atlas_product()])
+        .collect();
+    assert_eq!(
+        record["observed_image_products"],
+        json!(products.iter().map(ToString::to_string).collect::<Vec<_>>())
+    );
+    let proofs = record["image_proofs"].as_array().unwrap();
+    assert_eq!(proofs.len(), products.len());
+    assert_eq!(
+        json!(
+            proofs
+                .iter()
+                .map(|proof| &proof["product"])
+                .collect::<Vec<_>>()
+        ),
+        record["observed_image_products"]
+    );
+    for level in visited {
+        assert_eq!(
+            proofs
+                .iter()
+                .filter(|proof| **proof == level_images[&level])
+                .count(),
+            1
+        );
+    }
+    let atlas = images::atlas_proof(&images::atlas());
+    assert_eq!(proofs.iter().filter(|proof| **proof == atlas).count(), 1);
 }
 
 pub fn worker() {

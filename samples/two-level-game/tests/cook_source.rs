@@ -42,6 +42,8 @@ impl Directory {
             ("assets/textures/meadow.png.meta", "meta A"),
             ("assets/textures/cavern.png", "image B"),
             ("assets/textures/cavern.png.meta", "meta B"),
+            ("assets/textures/explorer.png", "explorer atlas"),
+            ("assets/textures/explorer.png.meta", "explorer metadata"),
             ("assets/audio/game.soundbank.json", "bank"),
             ("assets/audio/game.soundbank.json.meta", "bank meta"),
             ("assets/audio/pickup.wav", "pickup"),
@@ -114,11 +116,32 @@ impl Drop for Directory {
 
 #[test]
 fn content_fence_remains_original_when_code_is_bound_after_generation() {
-    let directory = Directory::new();
-    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
-    let inputs = source::code_inventory(&directory.0).unwrap();
-    fs::write(directory.0.join("scenes/cavern.scene.json"), "changed").unwrap();
-    assert!(fence.bind_code(&inputs).is_err());
+    for name in [
+        "scenes/cavern.scene.json",
+        "assets/textures/explorer.png",
+        "assets/textures/explorer.png.meta",
+    ] {
+        let directory = Directory::new();
+        let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+        let inputs = source::code_inventory(&directory.0).unwrap();
+        fs::write(directory.0.join(name), "changed").unwrap();
+        assert!(fence.bind_code(&inputs).unwrap_err().contains(name));
+    }
+}
+
+#[test]
+fn content_fence_requires_both_atlas_source_and_metadata() {
+    for name in [
+        "assets/textures/explorer.png",
+        "assets/textures/explorer.png.meta",
+    ] {
+        let directory = Directory::new();
+        fs::remove_file(directory.0.join(name)).unwrap();
+        assert!(
+            source::ContentFence::capture(&directory.0).is_err(),
+            "{name}"
+        );
+    }
 }
 
 #[test]

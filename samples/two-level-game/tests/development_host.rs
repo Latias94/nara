@@ -12,6 +12,7 @@ use nara::{
     project_tooling::cargo_build::CargoBuildFailure, project_workflow::cargo::CargoBuildError,
 };
 use two_level_game::{
+    animation::{ExplorerFrame, explorer_frame},
     development::{
         DevelopmentHost, DevelopmentStage, ProbeStep, RetirementRole, RetirementStatus, protocol,
     },
@@ -120,8 +121,22 @@ fn production_host_adopts_real_body_and_structure_edits_without_probe_state_leak
         );
         host.step(vec![SemanticCommand::Travel]).unwrap();
         walk_to_score(&mut host, 20);
-        let meaningful = host.step(vec![SemanticCommand::Marker]).unwrap();
+        let mut meaningful = host.step(vec![SemanticCommand::Marker]).unwrap();
+        for _ in 0..5 {
+            let state = host.capture().unwrap();
+            if matches!(
+                explorer_frame(state.clock, state.held),
+                ExplorerFrame::WalkTwo | ExplorerFrame::WalkThree
+            ) {
+                break;
+            }
+            meaningful = host.step(Vec::new()).unwrap();
+        }
         let baseline = host.capture().unwrap();
+        assert!(matches!(
+            explorer_frame(baseline.clock, baseline.held),
+            ExplorerFrame::WalkTwo | ExplorerFrame::WalkThree
+        ));
         assert_meaningful(&baseline);
         assert_observation(&meaningful, &baseline);
         let request = fixture.request();

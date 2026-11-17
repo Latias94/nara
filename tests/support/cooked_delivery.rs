@@ -114,6 +114,10 @@ fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
 }
 
 #[cfg(all(feature = "cook", feature = "development"))]
+#[path = "cooked_audio/images.rs"]
+mod images;
+
+#[cfg(all(feature = "cook", feature = "development"))]
 pub mod native {
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -127,9 +131,9 @@ pub mod native {
     };
 
     use nara::{
-        asset::RuntimeAssetCodec,
+        asset::{AssetProductRef, RuntimeAssetCodec},
         fs::{ContentDigest, RelativePath},
-        image::{ImageExtent, ImageRuntimeCodec},
+        image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
         project_tooling::{
             cargo_build::CargoBuildTools,
             host_fs,
@@ -140,19 +144,22 @@ pub mod native {
                 SupervisedProductProcessCommand,
             },
         },
+        runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
         scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
     };
     use serde::{Deserialize, Serialize};
     use serde_json::{Value, json};
     use two_level_game::{
+        animation::atlas_product,
         levels::{LevelId, LevelKey},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
+        sound_bank::{SoundBankCodec, bank_product},
     };
 
     use crate::continuity::Fixture;
 
     use super::{
-        HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene,
+        HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene, images,
         inspect_pack, record,
     };
 
@@ -502,13 +509,59 @@ pub mod native {
             pack.catalog.startup_scene(),
             LevelId::Meadow.scene_product()
         );
+        assert!(pack.catalog.addressable_roots().is_empty());
+        assert_eq!(pack.catalog.members().len(), 6);
+        let mut products = BTreeSet::new();
+        for member in pack.catalog.members() {
+            assert_eq!(member.products().len(), 1);
+            assert!(products.insert(member.products()[0]));
+        }
+        assert_eq!(
+            products,
+            LevelId::ALL
+                .into_iter()
+                .flat_map(|level| [level.scene_product(), level.image_product()])
+                .chain([atlas_product(), bank_product()])
+                .collect()
+        );
         for level in LevelId::ALL {
             assert!(
                 pack.catalog
                     .member_for_product(level.image_product())
                     .is_some()
             );
+            let scene = pack
+                .catalog
+                .member_for_product(level.scene_product())
+                .unwrap();
+            assert!(matches!(
+                scene.kind(),
+                RuntimeContentMemberKind::Scene { .. }
+            ));
+            assert_eq!(scene.dependencies().len(), 3);
+            assert_eq!(
+                scene
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| dependency.product())
+                    .collect::<BTreeSet<_>>(),
+                [level.image_product(), atlas_product(), bank_product()]
+                    .into_iter()
+                    .collect()
+            );
+            assert!(
+                scene.dependencies().iter().all(|dependency| {
+                    dependency.role() == RuntimeContentDependencyRole::Required
+                })
+            );
         }
+        let bank = pack.catalog.member_for_product(bank_product()).unwrap();
+        assert!(matches!(
+            bank.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == SoundBankCodec::RUNTIME_KIND
+                    && version.get() == SoundBankCodec::RUNTIME_VERSION
+        ));
         for (member, extent) in pack.catalog.members().iter().zip(&pack.members) {
             assert_eq!(
                 ContentDigest::of_bytes(&pack_bytes[extent.clone()]),
@@ -535,6 +588,7 @@ pub mod native {
             "src/gameplay/mod.rs",
             "src/gameplay/player_launch.rs",
             "src/gameplay/verification.rs",
+            "src/animation.rs",
             "src/levels.rs",
             bootstrap,
         ] {
@@ -577,6 +631,7 @@ pub mod native {
         let travel = custody.player(&executable, vec!["--verify-travel".into()], "travel");
         let travel = assert_player(&travel, "travel", true);
         assert_progress(&travel, LevelId::Meadow, &[1]);
+        assert_eq!(travel["animation_frames"], json!([0, 1, 2, 3]));
         assert_images(&travel, &LevelId::ALL, &expected_images);
         assert_scene_sequence(
             &travel,
@@ -600,6 +655,7 @@ pub mod native {
         );
         let saved = assert_player(&saved, "save", true);
         assert_progress(&saved, LevelId::Cavern, &[2]);
+        assert_eq!(saved["animation_frames"], json!([0, 1, 2, 3]));
         assert_images(&saved, &LevelId::ALL, &expected_images);
         assert_scene_sequence(
             &saved,
@@ -630,6 +686,7 @@ pub mod native {
         );
         let restored = assert_player(&restored, "restore", true);
         assert_progress(&restored, LevelId::Meadow, &[1]);
+        assert_eq!(restored["animation_frames"], json!([0]));
         assert_images(&restored, &LevelId::ALL, &expected_images);
         assert_scene_sequence(
             &restored,
@@ -715,6 +772,7 @@ pub mod native {
             "markers",
             "visited_levels",
             "observed_image_products",
+            "resident_images",
             "image_proofs",
             "scene_receipts",
         ] {
@@ -775,8 +833,8 @@ pub mod native {
         assert_eq!(result["markers"], json!(markers));
     }
 
-    fn expected_images(pack: &KnownPack, bytes: &[u8]) -> BTreeMap<LevelId, Value> {
-        LevelId::ALL
+    fn expected_images(pack: &KnownPack, bytes: &[u8]) -> BTreeMap<AssetProductRef, Value> {
+        let mut images: BTreeMap<_, _> = LevelId::ALL
             .into_iter()
             .map(|level| {
                 let index = pack
@@ -785,13 +843,23 @@ pub mod native {
                     .iter()
                     .position(|member| member.products().contains(&level.image_product()))
                     .unwrap();
+                let member = &pack.catalog.members()[index];
+                assert!(matches!(
+                    member.kind(),
+                    RuntimeContentMemberKind::Asset { format, version }
+                        if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                            && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
+                ));
                 let image =
                     ImageRuntimeCodec::decode_runtime(&bytes[pack.members[index].clone()]).unwrap();
                 assert_eq!(image.product(), Some(level.image_product()));
                 assert_eq!(image.extent(), ImageExtent::new(16, 16));
+                assert_eq!(image.format(), ImageFormat::Rgba8);
+                assert_eq!(image.color_space(), ImageColorSpace::Srgb);
+                assert_eq!(image.pixels().len(), 1024);
                 assert!(image.source().is_none());
                 (
-                    level,
+                    level.image_product(),
                     json!({
                         "level": level,
                         "product": level.image_product().to_string(),
@@ -805,16 +873,45 @@ pub mod native {
                     }),
                 )
             })
-            .collect()
+            .collect();
+        let index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [atlas_product()])
+            .unwrap();
+        let member = &pack.catalog.members()[index];
+        assert!(matches!(
+            member.kind(),
+            RuntimeContentMemberKind::Asset { format, version }
+                if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                    && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
+        ));
+        assert!(member.dependencies().is_empty());
+        let image = ImageRuntimeCodec::decode_runtime(&bytes[pack.members[index].clone()]).unwrap();
+        assert!(
+            images
+                .insert(atlas_product(), images::atlas_proof(&image))
+                .is_none()
+        );
+        assert_eq!(images.len(), 3);
+        images
     }
 
-    fn assert_images(result: &Value, levels: &[LevelId], images: &BTreeMap<LevelId, Value>) {
+    fn assert_images(
+        result: &Value,
+        levels: &[LevelId],
+        images: &BTreeMap<AssetProductRef, Value>,
+    ) {
         let current: LevelKey = serde_json::from_value(result["level"].clone()).unwrap();
+        let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
+            .into_iter()
+            .collect();
         assert_eq!(
             result["resident_images"],
-            json!([current.level().image_product().to_string()])
+            json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
         );
-        let mut actual = result["observed_image_products"]
+        let actual = result["observed_image_products"]
             .as_array()
             .expect("actual ProcessedRuntime Image residency proofs")
             .iter()
@@ -823,21 +920,35 @@ pub mod native {
         let mut expected = levels
             .iter()
             .map(|level| level.image_product().to_string())
+            .chain([atlas_product().to_string()])
             .collect::<Vec<_>>();
-        actual.sort();
         expected.sort();
         assert_eq!(actual, expected);
         let proofs = result["image_proofs"].as_array().unwrap();
-        assert_eq!(proofs.len(), levels.len());
+        assert_eq!(proofs.len(), levels.len() + 1);
+        assert_eq!(
+            proofs
+                .iter()
+                .map(|proof| proof["product"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>(),
+            expected
+        );
         for level in levels {
             assert_eq!(
                 proofs
                     .iter()
-                    .filter(|proof| **proof == images[level])
+                    .filter(|proof| **proof == images[&level.image_product()])
                     .count(),
                 1
             );
         }
+        assert_eq!(
+            proofs
+                .iter()
+                .filter(|proof| **proof == images[&atlas_product()])
+                .count(),
+            1
+        );
         let visited: Vec<LevelId> =
             serde_json::from_value(result["visited_levels"].clone()).unwrap();
         assert_eq!(visited.len(), levels.len());

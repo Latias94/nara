@@ -49,6 +49,8 @@ impl Directory {
             "assets/textures/meadow.png.meta",
             "assets/textures/cavern.png",
             "assets/textures/cavern.png.meta",
+            "assets/textures/explorer.png",
+            "assets/textures/explorer.png.meta",
             "assets/audio/game.soundbank.json",
             "assets/audio/game.soundbank.json.meta",
             "assets/audio/pickup.wav",

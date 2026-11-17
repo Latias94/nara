@@ -12,6 +12,7 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, RunOptions, Scenario,
+    animation::atlas_product,
     levels::{LevelId, LevelKey},
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
 };
@@ -38,6 +39,11 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
+            || base.catalog().members().len() != 6
+            || base.member(atlas_product()).is_none()
+            || base
+                .member(two_level_game::sound_bank::bank_product())
+                .is_none()
             || LevelId::ALL.into_iter().any(|level| {
                 !base.catalog().scenes().contains(&level.scene_product())
                     || base.member(level.image_product()).is_none()

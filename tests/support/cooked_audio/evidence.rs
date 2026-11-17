@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use two_level_game::{
+    animation::atlas_product,
     levels::{LevelId, LevelKey},
     sound_bank::bank_product,
 };
@@ -52,6 +53,51 @@ pub fn presented(record: &Value, request: &Request) {
     assert_eq!(record["state"]["phase"], "Running");
     assert_eq!(record["state"]["restoring"], false);
     assert!(record["state"]["error"].is_null(), "{record}");
+    let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
+    let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        record["resident_images"],
+        json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
+    );
+    let visited: BTreeSet<LevelId> =
+        serde_json::from_value(record["visited_levels"].clone()).unwrap();
+    assert_eq!(
+        visited.len(),
+        record["visited_levels"].as_array().unwrap().len()
+    );
+    assert!(visited.contains(&LevelId::STARTUP) && visited.contains(&current.level()));
+    let products: BTreeSet<_> = visited
+        .iter()
+        .map(|level| level.image_product())
+        .chain([atlas_product()])
+        .collect();
+    assert_eq!(
+        record["observed_image_products"],
+        json!(products.iter().map(ToString::to_string).collect::<Vec<_>>())
+    );
+    let proofs = record["image_proofs"].as_array().unwrap();
+    assert_eq!(proofs.len(), products.len());
+    assert_eq!(
+        json!(
+            proofs
+                .iter()
+                .map(|proof| &proof["product"])
+                .collect::<Vec<_>>()
+        ),
+        record["observed_image_products"]
+    );
+    for product in products {
+        assert_eq!(
+            proofs
+                .iter()
+                .filter(|proof| **proof == request.images[&product.to_string()])
+                .count(),
+            1,
+            "missing complete Runtime Image proof for {product}"
+        );
+    }
 }
 
 pub fn retired(record: &Value, request: &Request) {
@@ -140,7 +186,15 @@ pub fn refused(record: &Value, reason: &str) {
             "{field} was published before content admission: {record}"
         );
     }
-    assert!(record["scene_receipts"].as_array().unwrap().is_empty());
+    for field in [
+        "scene_receipts",
+        "visited_levels",
+        "resident_images",
+        "observed_image_products",
+        "image_proofs",
+    ] {
+        assert!(record[field].as_array().unwrap().is_empty(), "{record}");
+    }
     assert!(
         record["message"]
             .as_str()
@@ -206,6 +260,7 @@ struct Cue {
 pub fn verified(record: &Value, request: &Request) {
     retired(record, request);
     assert_eq!(record["scenario"], "travel");
+    assert_eq!(record["animation_frames"], json!([0, 1, 2, 3]));
     assert_eq!(record["state"]["verified"], true);
     assert_eq!(record["level"], json!(LevelKey::main(LevelId::Meadow)));
     assert_eq!(record["score"], 30);

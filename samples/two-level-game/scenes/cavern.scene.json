@@ -180,16 +180,31 @@
                 "material": {
                   "type": "map",
                   "value": {
+                    "image": {
+                      "type": "map",
+                      "value": {
+                        "kind": { "type": "string", "value": "path" },
+                        "value": { "type": "string", "value": "textures/explorer.png" }
+                      }
+                    },
+                    "sampler": {
+                      "type": "map",
+                      "value": {
+                        "min_filter": { "type": "string", "value": "nearest" },
+                        "mag_filter": { "type": "string", "value": "nearest" },
+                        "mipmap_filter": { "type": "string", "value": "nearest" }
+                      }
+                    },
                     "tint": {
                       "type": "map",
                       "value": {
                         "r": {
                           "type": "f64",
-                          "value": 0.25
+                          "value": 1
                         },
                         "g": {
                           "type": "f64",
-                          "value": 0.7
+                          "value": 1
                         },
                         "b": {
                           "type": "f64",
@@ -199,6 +214,25 @@
                           "type": "f64",
                           "value": 1
                         }
+                      }
+                    }
+                  }
+                },
+                "texture_region": {
+                  "type": "map",
+                  "value": {
+                    "min": {
+                      "type": "map",
+                      "value": {
+                        "x": { "type": "f64", "value": 0 },
+                        "y": { "type": "f64", "value": 0 }
+                      }
+                    },
+                    "size": {
+                      "type": "map",
+                      "value": {
+                        "x": { "type": "f64", "value": 0.25 },
+                        "y": { "type": "f64", "value": 1 }
                       }
                     }
                   }

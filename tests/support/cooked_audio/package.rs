@@ -1,22 +1,29 @@
-use std::{collections::BTreeSet, fs, ops::Range, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    ops::Range,
+    path::Path,
+};
 
 use nara::{
     asset::RuntimeAssetCodec,
     fs::ContentDigest,
-    image::{ImageExtent, ImageRuntimeCodec},
+    image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
-        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentMemberKind,
+        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependencyRole,
+        RuntimeContentMemberKind,
     },
 };
 use serde_json::{Value, json};
 use two_level_game::{
+    animation::atlas_product,
     levels::LevelId,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
-use super::process::read_bounded;
+use super::{images, process::read_bounded};
 
 struct Pack {
     catalog_bytes: Range<usize>,
@@ -97,7 +104,7 @@ pub fn inspect(
     triple: &str,
     configuration: &RuntimeConfiguration,
     expected: &[Vec<f32>; 2],
-) {
+) -> BTreeMap<String, Value> {
     let bytes = read_bounded(&directory.join("content.pack"), 32 * 1024 * 1024);
     let pack = inspect_pack(&bytes);
     let catalog = &pack.catalog;
@@ -130,7 +137,7 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 5);
+    assert_eq!(catalog.members().len(), 6);
     assert_eq!(payload["executable_name"], "player_audio.exe");
     assert_eq!(payload["pack_file"], "content.pack");
     assert_eq!(
@@ -163,6 +170,7 @@ pub fn inspect(
     features.sort();
     assert_eq!(features, ["audio-cpal", "cooked-player", "desktop"]);
     let mut products = BTreeSet::new();
+    let mut images = BTreeMap::new();
     for (member, range) in catalog.members().iter().zip(pack.members) {
         assert_eq!(member.products().len(), 1);
         let product = member.products()[0];
@@ -183,19 +191,50 @@ pub fn inspect(
         {
             assert!(matches!(
                 member.kind(),
-                RuntimeContentMemberKind::Asset { .. }
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
             ));
             let image = ImageRuntimeCodec::decode_runtime(&bytes[range]).unwrap();
             assert_eq!(image.product(), Some(level.image_product()));
             assert_eq!(image.extent(), ImageExtent::new(16, 16));
+            assert_eq!(image.format(), ImageFormat::Rgba8);
+            assert_eq!(image.color_space(), ImageColorSpace::Srgb);
             assert_eq!(image.pixels().len(), 1024);
             assert!(image.source().is_none());
-        } else {
-            assert!(
-                LevelId::ALL
-                    .into_iter()
-                    .any(|level| level.scene_product() == product)
+            images.insert(
+                product.to_string(),
+                json!({
+                    "level": level,
+                    "product": product.to_string(),
+                    "format": image.format(),
+                    "color_space": image.color_space(),
+                    "extent": image.extent(),
+                    "pixel_bytes": image.pixels().len(),
+                    "pixel_blake3": ContentDigest::of_bytes(image.pixels()).as_bytes(),
+                    "content_hash": image.content_hash().as_bytes(),
+                    "source_free": true,
+                }),
             );
+        } else if product == atlas_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let image = ImageRuntimeCodec::decode_runtime(&bytes[range]).unwrap();
+            assert!(
+                images
+                    .insert(product.to_string(), images::atlas_proof(&image))
+                    .is_none()
+            );
+        } else {
+            let level = LevelId::ALL
+                .into_iter()
+                .find(|level| level.scene_product() == product)
+                .expect("only the two declared Scene Products remain");
             assert!(matches!(
                 member.kind(),
                 RuntimeContentMemberKind::Scene { .. }
@@ -206,9 +245,34 @@ pub fn inspect(
                     .iter()
                     .any(|dependency| dependency.product() == bank_product())
             );
+            assert_eq!(member.dependencies().len(), 3);
+            assert_eq!(
+                member
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| dependency.product())
+                    .collect::<BTreeSet<_>>(),
+                [level.image_product(), atlas_product(), bank_product()]
+                    .into_iter()
+                    .collect()
+            );
+            assert!(
+                member.dependencies().iter().all(|dependency| {
+                    dependency.role() == RuntimeContentDependencyRole::Required
+                })
+            );
         }
     }
-    assert_eq!(products.len(), 5);
+    assert_eq!(images.len(), 3);
+    assert_eq!(
+        products,
+        LevelId::ALL
+            .into_iter()
+            .flat_map(|level| [level.scene_product(), level.image_product()])
+            .chain([atlas_product(), bank_product()])
+            .collect()
+    );
+    images
 }
 
 pub fn copy_package(source: &Path, destination: &Path) {

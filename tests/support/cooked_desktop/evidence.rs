@@ -11,17 +11,19 @@ use nara::{
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
-        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentMemberKind,
+        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependencyRole,
+        RuntimeContentMemberKind,
     },
     scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
 };
 use serde_json::{Value, json};
 use two_level_game::{
+    animation::atlas_product,
     levels::{LevelId, LevelKey},
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
-use super::process::read_bounded;
+use super::{images, process::read_bounded};
 
 pub fn digest(value: ContentDigest) -> Value {
     json!({"length": value.length(), "hash": value.as_bytes()})
@@ -90,8 +92,8 @@ pub fn inspect_package(
     assert!(catalog.addressable_roots().is_empty());
     assert_eq!(
         catalog.members().len(),
-        5,
-        "two processed Scenes, two Images and one shared Sound Bank; keyboard declarations are code-first"
+        6,
+        "two processed Scenes, three Images and one shared Sound Bank; keyboard declarations are code-first"
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -141,6 +143,12 @@ pub fn inspect_package(
                 "color_space": image.color_space(), "extent": image.extent(), "pixel_bytes": image.pixels().len(),
                 "pixel_blake3": ContentDigest::of_bytes(image.pixels()).as_bytes(),
                 "content_hash": image.content_hash().as_bytes(), "source_free": true}));
+        } else if product == atlas_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { .. }
+            ));
+            images::atlas_proof(&ImageRuntimeCodec::decode_runtime(data).unwrap());
         } else if product == bank_product() {
             assert!(matches!(
                 member.kind(),
@@ -160,6 +168,23 @@ pub fn inspect_package(
                 member.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
+            let level = LevelId::ALL
+                .into_iter()
+                .find(|level| level.scene_product() == product)
+                .unwrap();
+            assert_eq!(
+                member
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| {
+                        assert_eq!(dependency.role(), RuntimeContentDependencyRole::Required);
+                        dependency.product()
+                    })
+                    .collect::<BTreeSet<_>>(),
+                [level.image_product(), atlas_product(), bank_product()]
+                    .into_iter()
+                    .collect()
+            );
         }
         offset = end;
     }
@@ -170,7 +195,7 @@ pub fn inspect_package(
         LevelId::ALL
             .into_iter()
             .flat_map(|level| [level.scene_product(), level.image_product()])
-            .chain([bank_product()])
+            .chain([atlas_product(), bank_product()])
             .collect()
     );
     images
@@ -264,17 +289,34 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         assert_eq!(record[field], record["state"][field]);
     }
     let level: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
+    let resident = [level.level().image_product(), atlas_product()]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     assert_eq!(
         record["resident_images"],
-        json!([level.level().image_product().to_string()])
+        json!(
+            resident
+                .into_iter()
+                .map(|product| product.to_string())
+                .collect::<Vec<_>>()
+        )
     );
     let visited: BTreeSet<LevelId> =
         serde_json::from_value(record["visited_levels"].clone()).unwrap();
     assert!(visited.contains(&level.level()));
     let proofs = record["image_proofs"].as_array().unwrap();
-    assert_eq!(proofs.len(), visited.len());
+    assert_eq!(proofs.len(), visited.len() + 1);
     let products = record["observed_image_products"].as_array().unwrap();
-    assert_eq!(products.len(), visited.len());
+    assert_eq!(products.len(), visited.len() + 1);
+    let atlas = images::atlas_proof(&images::atlas());
+    assert_eq!(proofs.iter().filter(|proof| **proof == atlas).count(), 1);
+    assert_eq!(
+        products
+            .iter()
+            .filter(|product| **product == atlas_product().to_string())
+            .count(),
+        1
+    );
     for level in visited {
         assert_eq!(
             proofs

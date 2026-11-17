@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     fs,
     num::NonZeroUsize,
@@ -24,6 +25,7 @@ use serde_json::Value;
 use crate::continuity::Fixture;
 
 mod evidence;
+mod images;
 mod package;
 #[path = "../cooked_desktop/process.rs"]
 #[allow(dead_code)]
@@ -59,6 +61,7 @@ struct Request {
     title: String,
     target: String,
     catalog_digest: Value,
+    images: BTreeMap<String, Value>,
     source_samples: [Vec<f32>; 2],
 }
 
@@ -221,7 +224,7 @@ pub fn accept(cooker: &Path) {
     let manifest_bytes = read_bounded(&published.join("package.json"), 1024 * 1024);
     let manifest: Value = serde_json::from_slice(&manifest_bytes).unwrap();
     let payload = &manifest["payload"];
-    package::inspect(
+    let images = package::inspect(
         &published,
         payload,
         &triple,
@@ -244,6 +247,7 @@ pub fn accept(cooker: &Path) {
         "Cargo.lock",
         "build.rs",
         "src/lib.rs",
+        "src/animation.rs",
         "src/sound_bank.rs",
         "src/sound_bank/source.rs",
         "src/sound_bank/runtime.rs",
@@ -318,6 +322,7 @@ pub fn accept(cooker: &Path) {
         title,
         target: triple,
         catalog_digest: payload["catalog_digest"].clone(),
+        images,
         source_samples,
     };
     fs::write(worker.join(REQUEST), serde_json::to_vec(&request).unwrap()).unwrap();

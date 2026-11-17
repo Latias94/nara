@@ -29,7 +29,10 @@ use nara::{
         GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
         GameplayCommandValue,
     },
-    input::{ActionOutcomes, ActionPhase, InputSeatId, KeyboardHold, SemanticActions},
+    input::{
+        ActionOutcomes, ActionPhase, ButtonDriverInput, InputSeatId, KeyCode, KeyboardHold,
+        SemanticActions,
+    },
     project_host::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
         DesktopRunOptions, DesktopRunOutcome, DesktopRunProgress, WinitEventLoop,
@@ -41,7 +44,9 @@ use nara::{
     },
 };
 use two_level_game::{
-    GamePhase, GameResumeError, GameSnapshot, capture_desktop_resume,
+    GamePhase, GameResumeError, GameSnapshot,
+    animation::{ExplorerFrame, explorer_frame},
+    capture_desktop_resume,
     levels::{LevelId, LevelKey},
     movement_keyboard_bindings, restore_desktop_resume,
     resume::{ResumeState, RuntimeTimeState, encode_resume},
@@ -96,7 +101,7 @@ fn qualify() -> Result<(), String> {
     let captured = catch_unwind(AssertUnwindSafe(|| original.prepare_original()))
         .unwrap_or_else(|_| Err("original trajectory panicked; retaining original cleanup".into()));
     let physical_loop = original.close("original")?;
-    let captured = captured?;
+    let (captured, animation) = captured?;
 
     let mut plain = Game::new_with_observer(Some(physical_loop), false)?;
     let refused = catch_unwind(AssertUnwindSafe(|| {
@@ -115,6 +120,23 @@ fn qualify() -> Result<(), String> {
     let restored = restored?;
     drop(physical_loop);
 
+    let mut animation_pixels = Vec::new();
+    for sample in &animation {
+        let replay = desktop_capture::replay_and_check(&sample.frame, &sample.state)
+            .map_err(|error| error.to_string())?;
+        assert!(replay.checks.player > 0 && replay.checks.background > 0);
+        animation_pixels.push(replay.rgba8);
+    }
+    assert_eq!(animation_pixels[0], animation_pixels[1]);
+    for first in 2..5 {
+        for second in first + 1..5 {
+            assert_ne!(animation_pixels[first], animation_pixels[second]);
+        }
+    }
+    println!(
+        "two_level_desktop_reconstruction_animation: ok atlas_frames=4 paused_equal=true retained_replays={} restored_first_frame=true",
+        animation.len()
+    );
     let source_pixels = desktop_capture::replay_and_check(&captured.frame, &captured.state)
         .map_err(|error| error.to_string())?;
     let restored_pixels = desktop_capture::replay_and_check(&restored.frame, &restored.state)
@@ -222,7 +244,7 @@ impl Game {
         Ok(())
     }
 
-    fn prepare_original(&mut self) -> Result<Capture, String> {
+    fn prepare_original(&mut self) -> Result<(Capture, Vec<Capture>), String> {
         self.settle()?;
         assert_eq!(self.run.state(), Some(RuntimeState::Paused));
         assert_eq!(
@@ -242,6 +264,7 @@ impl Game {
         assert!(self.run.capture(|_| ()).is_err());
         self.settle()?;
 
+        let animation = self.animation_samples()?;
         self.walk_to_score(10)?;
         self.step(Some(movement(false)?))?;
         let meadow_marker = self.snapshot()?.player.to_array();
@@ -301,7 +324,76 @@ impl Game {
             captured.frame.presentation.device_epoch,
             captured.app_frame
         );
-        Ok(captured)
+        Ok((captured, animation))
+    }
+
+    fn animation_samples(&mut self) -> Result<Vec<Capture>, String> {
+        let bindings = movement_keyboard_bindings();
+        let holds = self
+            .run
+            .isolate_keyboard_input(&bindings)
+            .map_err(|error| error.to_string())?;
+        assert!(holds.iter().all(|hold| !hold.held));
+        self.settle()?;
+        self.isolated_key(ButtonDriverInput::Press(bindings[2].key))?;
+        for _ in 0..5 {
+            self.step(None)?;
+        }
+        self.isolated_key(ButtonDriverInput::Release(bindings[2].key))?;
+        self.step(None)?;
+        let mut samples = vec![self.full_capture()?];
+        assert_eq!(
+            explorer_frame(samples[0].state.clock, samples[0].state.held),
+            ExplorerFrame::Idle
+        );
+        self.run
+            .request_paused_maintenance()
+            .map_err(|error| error.to_string())?;
+        self.settle()?;
+        samples.push(self.full_capture()?);
+        assert_eq!(samples[0].bytes, samples[1].bytes);
+
+        self.isolated_key(ButtonDriverInput::Press(bindings[2].key))?;
+        for (steps, expected) in [
+            (4, ExplorerFrame::WalkThree),
+            (5, ExplorerFrame::WalkOne),
+            (5, ExplorerFrame::WalkTwo),
+        ] {
+            for _ in 0..steps {
+                self.step(None)?;
+            }
+            let sample = self.full_capture()?;
+            assert_eq!(
+                explorer_frame(sample.state.clock, sample.state.held),
+                expected
+            );
+            samples.push(sample);
+        }
+        self.isolated_key(ButtonDriverInput::Release(bindings[2].key))?;
+        self.step(None)?;
+        let idle = self.full_capture()?;
+        assert_eq!(
+            explorer_frame(idle.state.clock, idle.state.held),
+            ExplorerFrame::Idle
+        );
+        samples.push(idle);
+
+        self.isolated_key(ButtonDriverInput::Press(bindings[3].key))?;
+        for _ in 0..19 {
+            self.step(None)?;
+        }
+        self.isolated_key(ButtonDriverInput::Release(bindings[3].key))?;
+        self.step(None)?;
+        self.assert_input(false)?;
+        assert!(self.snapshot()?.player.y.abs() < 0.0001);
+        Ok(samples)
+    }
+
+    fn isolated_key(&mut self, input: ButtonDriverInput<KeyCode>) -> Result<(), String> {
+        self.run
+            .admit_isolated_keyboard_input(input)
+            .map_err(|error| error.to_string())?;
+        self.settle()
     }
 
     fn reconstruct(&mut self, original: &Capture) -> Result<Capture, String> {

@@ -19,12 +19,15 @@ use nara::{
     project_workflow::cooked_content::{
         CookedContentBuilder, CookedContentLimits, CookedContentRequest, PreparedRuntimeContent,
     },
-    runtime_content::{RuntimeContentMemberKind, RuntimeContentTarget},
+    runtime_content::{
+        RuntimeContentDependencyRole, RuntimeContentMemberKind, RuntimeContentTarget,
+    },
     scene::{
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
 use two_level_game::{
+    animation::{ATLAS_PATH, atlas_product},
     levels::LevelId,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
@@ -81,12 +84,18 @@ pub(super) fn prepare(
         .map_err(|error| format!("asset import cache: {error}"))?;
     let mut database = ProjectAssetDatabase::default();
     let mut observations = Vec::new();
-    for level in LevelId::ALL {
-        let path = AssetPath::new(match level {
-            LevelId::Meadow => "textures/meadow.png",
-            LevelId::Cavern => "textures/cavern.png",
+    for (path, product) in LevelId::ALL
+        .into_iter()
+        .map(|level| {
+            let path = match level {
+                LevelId::Meadow => "textures/meadow.png",
+                LevelId::Cavern => "textures/cavern.png",
+            };
+            (path, level.image_product())
         })
-        .map_err(|error| format!("Image source path: {error}"))?;
+        .chain([(ATLAS_PATH, atlas_product())])
+    {
+        let path = AssetPath::new(path).map_err(|error| format!("Image source path: {error}"))?;
         let source = scope.resolve(&path);
         let metadata_path = source.meta_path();
         let metadata = read(root, &metadata_path, METADATA_BYTES)?;
@@ -95,10 +104,10 @@ pub(super) fn prepare(
             .into_identity();
         if identity.path() != &path
             || identity.source_kind() != &AssetSourceKind::Image
-            || identity.stable_id() != level.image_product().source()
+            || identity.stable_id() != product.source()
         {
             return Err(format!(
-                "{metadata_path}: expected this level's Image identity and path"
+                "{metadata_path}: expected the game's declared Image identity and path"
             ));
         }
         database
@@ -109,13 +118,13 @@ pub(super) fn prepare(
         let imported = build_image_import(&store, &request, |_| Ok(()))
             .map_err(|error| format!("{source}: Image import failed: {error}"))?
             .into_group();
-        if imported.seed().source != level.image_product()
+        if imported.seed().source != product
             || imported.seed().location.as_ref() != Some(&source)
             || imported.members().len() != 1
-            || imported.members()[0].products.as_slice() != [level.image_product()]
+            || imported.members()[0].products.as_slice() != [product]
         {
             return Err(format!(
-                "{source}: imported group must supply only this level's Image Product"
+                "{source}: imported group must supply only its declared Image Product"
             ));
         }
         builder
@@ -214,9 +223,9 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 5 {
+    if catalog.members().len() != 6 {
         return Err(
-            "cooked content must contain exactly two Scenes, two Images and one SoundBank"
+            "cooked content must contain exactly two Scenes, three Images and one SoundBank"
                 .to_owned(),
         );
     }
@@ -241,17 +250,29 @@ pub(super) fn prepare(
         );
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
+            || !scene.dependencies().iter().any(|dependency| {
+                dependency.product() == atlas_product()
+                    && dependency.role() == RuntimeContentDependencyRole::Required
+            })
         {
-            return Err(format!("cooked {level:?} Scene identity changed"));
+            return Err(format!(
+                "cooked {level:?} Scene identity or required shared explorer atlas changed"
+            ));
         }
+    }
+    for product in LevelId::ALL
+        .into_iter()
+        .map(LevelId::image_product)
+        .chain([atlas_product()])
+    {
         let image = catalog
-            .member_for_product(level.image_product())
-            .ok_or_else(|| format!("missing cooked {level:?} Image"))?;
-        if image.products() != [level.image_product()]
+            .member_for_product(product)
+            .ok_or_else(|| format!("missing cooked Image {product}"))?;
+        if image.products() != [product]
             || !matches!(image.kind(), RuntimeContentMemberKind::Asset { format, version }
                 if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND && *version == FormatVersion::ONE)
         {
-            return Err(format!("cooked {level:?} Image identity or format changed"));
+            return Err(format!("cooked Image {product} identity or format changed"));
         }
     }
     Ok((prepared, observations))
