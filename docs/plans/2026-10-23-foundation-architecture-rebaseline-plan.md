@@ -5593,6 +5593,28 @@ test-only feasibility evidence. Production same-entity joining, source upgrades,
 and complete frozen-program cost comparison remain before selecting a representation; no new
 game capacity, speedup or Foundation/R9/R10/R12 completion is claimed.
 
+The subsequent [frozen effective-read unit](2026-11-13-rust-state-reconstruction-plan.md#frozen-effective-reads-through-the-existing-component)
+at `6ceb534` retains the existing single Tilemap record after comparing native pairing, source upgrades and
+compact inline encoding. Reflect freezes only selected default insertions and exposes borrowed
+effective reads to actual codecs, references and Scene consumers. Source wire, omissions, Schema
+identity and the complete native Tilemap remain unchanged. Expanded/compiled reads and native
+decode callbacks migrate to `ComponentValueRef`; independently owned mutation, extraction and
+cook still require complete allocation admission. Initial Reflect owner/public qualification
+passes 265/265. Complete Scene/Tooling and affected domain libraries pass within the recorded
+1,608-case CPU scope after fixture corrections, and root custody/content controls pass 139/139.
+Actual release game/metric/span/native controls pass 143/143; the corrected 16K record probe
+passes 5/5. Nine Tile lifetimes retain 27 GPU replays and both observer-panic cleanup controls.
+The [balanced comparison](../benchmarks/2026-11-14-development-runtime-costs.md#frozen-effective-reads)
+adds twelve 16K lifetimes and 36 replays. Default wall median falls 242.509/94.931 ms, while
+complete component materialization is 371.721/367.683 ms and expansion 1,002.514/1,009.882 ms.
+No stable end-to-end speedup is established. Complete independent consumers pass 262/262 with
+one manual timing case skipped; selected Reflect/Scene integrations pass 134/134 and 179/179,
+ordinary reference-game controls 44/44, and the final public reference-copy owner cohort 285/285.
+Language-consumer compilation, owning/root/sample correctness Clippy, feature-free libraries and
+four workspace formatting checks pass. The next optimization investigates repeated complete
+validation and raw-subtree traversal within the same complete workflow. No capacity,
+physical-memory, numeric-budget or full Foundation claim follows.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

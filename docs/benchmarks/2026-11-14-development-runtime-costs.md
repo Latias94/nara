@@ -2388,6 +2388,76 @@ remain. Additional prepared-authoring controls pass 20/20 with three manual meas
 and feature-free storage/default controls pass 10/10. These are not scalar allocation or UI
 performance observations. Paused UI/Dialogue changes remain outside this qualification.
 
+### Frozen Effective Reads
+
+Date: 2026-11-17. The before program is the already qualified `2dd0083` executable, frozen
+outside target before build-cache cleanup. The implementation lands at `6ceb534`; the changed
+program retains the same source record,
+omitted defaults, native Tilemap and original measurement hooks. It freezes selected default
+insertions over privately retained payloads and passes borrowed effective reads through actual
+validation and codecs. Independently owned cook and mutation still admit and copy complete values.
+The after program also includes the separately qualified isolated-migration correction; this
+current-version Tilemap workload does not exercise that path.
+
+All four serial before/after/after/before processes pass their original game, GPU and cleanup
+checks: twelve complete 16K lifetimes and 36 retained-input replays, six lifetimes per version.
+Rust 1.95 release, manifests, locks, population, source generator, phase hooks and actual hardware
+DX12 adapter match. Reports are
+[1 before](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-paired-4-before.json), with
+[source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-paired-metadata.json).
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 51.859 ms | 76.999 ms |
+| Shared record capture | 0.030 ms | 0.032 ms |
+| Migration, including post-migration admission | 0.039 ms | 0.041 ms |
+| Default materialization | 242.509 ms | 94.931 ms |
+| Semantic validation | 1.377 ms | 76.514 ms |
+| Reference planning | 75.050 ms | 116.146 ms |
+| Reference-program validation | 0.015 ms | 0.015 ms |
+| Complete component materialization | 371.721 ms | 367.683 ms |
+| Expansion, including nested Prefab acquisition | 1,002.514 ms | 1,009.882 ms |
+| Source payload decode | 688.202 ms | 708.473 ms |
+
+The default envelope is 60.85% lower, but more expensive validation and complete traversal offset
+most of that difference. Complete component materialization is 1.09% lower and expansion 0.73%
+higher in this finite observation. Source inspection confirms that the new frozen-value validation
+branch performs a complete materialization-budget walk before shape coverage, while canonical
+borrowed reads still traverse all raw descendants. The observations do not isolate each function's
+exclusive cost or promise that removing one walk recovers its whole enclosing wall envelope.
+The next bounded investigation should compare duplicate complete-budget work at an already
+admitted compiler boundary and raw-subtree read overhead, preserving full receiving checks,
+per-occurrence accounting and the same complete workload. No new cache owner or packed format
+is selected by these results.
+
+Complete process walls in order are 19.375, 19.767, 19.428 and 17.608 seconds. They establish no
+stable end-to-end speedup. Correlated lifetimes, uncontrolled host/driver/cache/clock state,
+overlapping wall envelopes and unchanged pacing prevent a CPU/GPU duration, physical-memory,
+frame-tail or numerical production-budget claim. Allocation identity proves that unchanged cells
+retain their actual original backing; it does not by itself measure physical-memory savings.
+
+The changed program's separate qualification completes nine authored 64/4K/16K lifetimes with
+2,923 initialized presentations and 27 original-input replays, plus three baseline lifetimes with
+485 initialized presentations and both observer-panic cleanup controls. These counts describe
+the paced scripts, not throughput. Reports are
+[64](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-64.json),
+[4,096](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-4096.json),
+[16,384](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-16384.json) and
+[baseline](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-baseline.json), with
+[qualification metadata](data/2026-11-14-development-runtime/authored-tiles-frozen-reads-metadata.json).
+The initial combined run passes all 143 game/library/metric/span/native cases and four of five
+CPU record-probe cases. Its remaining pointer control compares against the wrong side of a
+public deep Prefab clone. The corrected probe resolves the actual original allocation, also
+checks that the public clone is independent, and passes 5/5 without changing production code or
+the original native trajectory. The owning plan retains exact run IDs and review evidence.
+The later public reference-copy input migration has its own owner/reference tests and external
+language-consumer compilation; it is outside the earlier frozen measurement program's exact
+source hashes. The compiler's private reference plan/in-place route is unchanged by that follow-up.
+Full Foundation/R9/R10/R12, numerical budgets and foreign execution remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

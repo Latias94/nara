@@ -1,7 +1,8 @@
 # Large Tilemap Payload Ownership
 
-Date: 2026-11-17. Status: source research with a qualified bounded persistent-record comparison,
-not an adopted production representation. Editor/UI/Dialogue remain paused.
+Date: 2026-11-17. Status: source research with a qualified bounded persistent-record comparison;
+frozen effective reads are implemented at `6ceb534` and qualified within the linked Windows scope.
+Editor/UI/Dialogue remain paused.
 
 The [owning follow-up](../plans/2026-11-13-rust-state-reconstruction-plan.md#closed-effective-values-and-large-payload-follow-up)
 records the complete consumer comparison. Its separate
@@ -11,7 +12,7 @@ payload case studied here. The source findings below remain pinned to the revisi
 
 ## 1. Summary
 
-The immediate problem is **copy granularity**: inserting two small missing defaults currently
+At the pinned baseline, the immediate problem is **copy granularity**: inserting two small missing defaults
 copies the entire generic Tilemap value, including `cells`. Component-local sharing has moved
 that copy from capture to default materialization in the qualified workload. Neither Godot nor
 Bevy establishes that moving authored cells into an external asset is necessary. Both supplied
@@ -286,6 +287,62 @@ migration framework. Relevant owners are the
 [reviewed source-upgrade proposal](../../src/project_host/authoring/project/source_upgrade/proposal.rs),
 [schema-upgrade lowering](../../crates/nara_scene/src/authoring_decode/schema_upgrade.rs) and
 [Prefab overlays](../../crates/nara_scene/src/prefab/overlay.rs).
+
+### Production Direction After The Probe
+
+The selected next implementation keeps one persistent record and the complete native Tilemap,
+with frozen effective reads. This selects the implementation to qualify, not a measured cost
+winner. The [owning successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#frozen-effective-reads-through-the-existing-component)
+requires complete codec, receiving, native and cook integration plus the unchanged full game
+and balanced frozen-program comparison. Its implementation and qualification are still active.
+
+The production source comparison provides concrete reasons for retaining the current domain
+composition. Native Tilemap mutations already change cells without copying configuration or
+cells. Dirty revisions currently do not limit stock extraction, which reads configuration and
+all cells each time. A native split would permit independent borrowing/change tracking, but no
+current consumer requires it. It also creates a presence contract: suppressing only configuration
+can leave Cells behind, so content validation must inspect either record, not just configuration.
+The split would change ordinary `set_cell` usage, native registration, project and processed
+membership joins, extraction and real consumers. The original captured render inputs already own
+their data and must not begin querying live configuration/cells later.
+
+The source-upgrade proposal can reuse the existing publication/recovery owner, but needs a new
+exact one-to-two declaration proof across Scene, Tooling and ProjectHost. Required Cells without
+a default cannot preserve a legal old `Absent(cells)` simply by writing `Set([])`. Retaining the
+old type ID at a higher version requires a registered migration chain that cannot return both
+records; retiring it instead requires explicit predecessor/tombstone metadata and two successors.
+Neither policy follows from the green test-only probe. The known four Scene/Prefab files contain
+11,148,694 bytes in the existing 16K report. Three recovery copies alone total 33,446,082 bytes,
+leaving 108,350 bytes below the current 32 MiB recovery aggregate before both schema bundles and
+other overhead. Thus a complete upgrade may also need explicitly selected operation/recovery
+limits. This is source evidence and arithmetic, not an executed upgrade.
+
+A compact inline alternative addresses a separate decode cost. A lossless ordinary row would
+retain i32 coordinates, a u32 index and four authored f64 colors: 44 bytes per row before headers
+and text encoding. Native f32 conversion occurs later. Current opaque cell Maps also admit extra
+members, so copying only those seven numbers would discard retained source data. A complete
+format needs bounded extensions, one lossless alternative representation or an explicit refusal
+policy. Base64 inside an ordinary String is not sufficient: receiving node/depth checks run before
+the domain codec. A new packed primitive must supply independently validated complete logical
+cost, traversal, reference and scratch policies in Reflect/Scene. Even that format still copies
+the entire block under the current default materializer. This is not chosen as a local codec fix.
+
+Frozen reads instead keep source wire, omissions, component/field IDs and native ergonomics.
+Reflect freezes its existing planner's selected insertions; complete effective data remain closed
+after compilation. The borrowed Interface reads raw unchanged subtrees and those frozen branches
+without a receiving-Schema lookup. Actual writes and independent ownership explicitly materialize
+after admission. This has a substantial cross-consumer migration cost; the implementation must
+not disguise it as a small private Arc change or flatten before actual codecs. Full logical work,
+receiving checks and independent source/compiled/prepared payload/backing fees remain required.
+
+The implemented successor now qualifies actual borrowed codec reads, original direct/inherited
+cell allocation identity and complete game/GPU lifetimes within the
+[owning plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#frozen-effective-reads-through-the-existing-component).
+The [balanced original-program comparison](../benchmarks/2026-11-14-development-runtime-costs.md#frozen-effective-reads)
+reduces the default wall envelope but increases complete validation/traversal cost. Complete
+materialization and expansion show no stable end-to-end gain. This supports the storage boundary,
+not a physical-memory or speedup claim; the next optimization must attribute repeated admission
+and raw-subtree read work without relaxing receiving or retained-owner contracts.
 
 ## 5. Best Practices: Preserve the Existing Budgets and Escape Rules
 

@@ -3326,6 +3326,24 @@ wire allowance for complete positive cook/readmission. No production limits or r
 change. Native pairing, TileSet membership, source upgrades and the complete game/GPU/cost
 comparison remain before selection; this does not close full Foundation/R9/R10/R12.
 
+The subsequent [frozen effective-read implementation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#frozen-effective-reads-through-the-existing-component)
+at `6ceb534` retains that single source/native Tilemap after comparing pairing, migration and packed-value
+costs. Reflect freezes selected defaults over private admitted backing; actual native/derived
+codecs, complete validation, Scene preparation and cook read `ComponentValueRef` directly.
+ADRs0006/0045/0117 and the component guide record the changed read/callback contract. Initial
+Reflect owner/public qualification passes 265/265. Complete affected owner/domain libraries
+pass within the recorded 1,608-case CPU scope after fixture corrections; root custody/content
+controls pass 139/139. Actual game/metric/span/native controls pass 143/143 and the corrected
+16K probe 5/5, including 27 original-input GPU replays and both panic cleanup controls. The
+[balanced comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#frozen-effective-reads)
+adds twelve 16K lifetimes and 36 replays but establishes no stable end-to-end speedup. Complete
+independent consumers pass 262/262 with one manual timing case skipped; selected public
+Reflect/Scene integrations pass 134/134 and 179/179, ordinary reference-game controls 44/44 and
+the final reference-copy owner cohort 285/285. Language-consumer compilation, owning/root/sample
+correctness Clippy, feature-free libraries and formatting pass. Source wire, domain schemas, full
+per-owner accounting and original publication/retirement authorities remain. No capacity,
+physical-memory, numeric-budget, complete R12 or Foundation qualification follows.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

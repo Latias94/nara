@@ -3204,6 +3204,206 @@ closed-view alternative. Preserve the original complete 64/4K/16K game/source-re
 and balanced frozen-program acceptance for the selected production direction. Full Foundation,
 R9/R10/R12, numeric budgets and foreign execution remain open.
 
+#### Frozen Effective Reads Through The Existing Component
+
+Status: implemented at `6ceb534` and qualified on Windows/Rust 1.95 within the CPU/public/native
+and measured scope below. Keep the current Tilemap source record, Schema,
+Prefab property/version semantics and complete native Tilemap. Configuration/cells separation
+adds no independently required current consumer capability: mutation already changes cells
+without copying them, and stock extraction still needs both configuration and cells. Selecting
+it only to avoid a generic default copy adds a new pairing/deletion contract, native joins and
+a complete one-to-two source-upgrade operation. Compact inline cells remains an independent
+decode hypothesis; it needs budget-aware packed values, lossless opaque-extra preservation and
+property upgrades and still copies the whole block during default insertion. Neither becomes
+the production default in this unit.
+
+Implement a borrowed `ComponentValueRef` Interface over ordinary owned values and a frozen
+default-insertion tree. Reflect retains the single existing default planner, complete effective
+preflight and source-selected defaults. Freeze only the chosen insertions, including missing
+Map ancestors and contiguous List suffixes; retain raw backing through the existing private
+Scene owner. The frozen value is closed explicit data, with no receiving-Schema lookup or later
+default interpretation. Reads expose scalar values and borrowed Map/List traversal, not a
+clonable owning backing handle. Public source values/wire/omissions and deep Clone remain.
+
+Migrate real native codec and derived field decoding, full value/shape/reference validation,
+Scene compiler/expanded/compiled/prepared/data reads, Tilemap membership and native decoding,
+and actual cook/export to that same borrowed read Interface. A codec compatibility path that
+first flattens the complete value is not the selected implementation. Property/reference writes,
+public deep extraction and independent cooked ownership may explicitly materialize after the
+original owner admits the complete allocation. Reuse already unique migrated storage where
+appropriate; do not lose the preceding owned-default correction.
+
+Keep complete per-occurrence node/byte/depth checks, actual Schema/owner witnesses, source and
+compiled/prepared independent full logical/backing fees, cumulative work and pre-allocation
+admission. Account frozen paths/default data and traversal scratch honestly. This is not a
+general persistent editing tree, a new publication owner or a packed-value budget exemption.
+No new domain record, format version or source upgrade is needed for this storage change.
+
+Acceptance remains the original direct/root-bound 16K source with omitted defaults. Prove the
+unmodified cell backing reaches actual membership and native codecs without flattening; compare
+effective values with the original materializer, including nested/default override/Null/sparse
+refusal cases, exact/one-short receiving limits, source edits, old prepared/cooked values and
+final refunds. Qualify derived and handwritten independent codecs plus the original full game,
+source removal, retained-input GPU replay and panic cleanup. Run the unchanged balanced frozen
+program comparison before any performance claim. Keep all Foundation/R9/R10/R12 completion,
+numeric budgets, foreign native execution and paused UI/Dialogue scopes distinct.
+
+Implementation begins after `c63e297` and lands at `6ceb534`. Reflect has borrowed scalar/container reads,
+one canonical logical-cost walk for owned and frozen data, owned selected insertions from the
+existing planner, actual native/derived decode callbacks and full shape/reference/property
+validation. Scene retains a separate private effective payload and public read-only expanded
+component rather than changing source record ownership. Native Tilemap, Material, UI, Camera
+and Transform decoders use the read Interface directly. Source wire, domain schemas and native
+Tilemap composition remain unchanged. Public callback/provider signatures change from
+`&ComponentValue` to `ComponentValueRef`; Clone copies only the borrow. The
+[component guide](../guides/persistent-components.md#borrowed-native-decoding) documents explicit
+owned extraction and the absence of an automatic flattening bridge.
+
+The first Reflect all-feature release production check passes in 8.91 seconds. Its first
+public consumer passes 7/7 without skips at `d51d25f8-3145-464c-ab09-c693e42f6b37`. Independent
+review identifies a canonical-cost forwarding regression: replacing the supplied accumulator
+discarded its nonzero starting cost. The shared walk now accepts that initial cost and preserves
+the original saturation/minimum-node/refusal policy. The untouched original saturation test
+passes with the complete owner/public cohort, 265/265 without skips at
+`115ccda4-885b-4511-99ca-dd68c2c51f09`, 13.221 seconds after a 1m35s release build. This includes
+14 frozen tests, nonempty Authored route allocation accounting, actual native callback pointer
+checks, derived nested values and exact selector/receiving/refusal controls. Review closes the
+accumulator finding; separate Scene and registry/derived/Inspector static reviews find no P1/P2.
+These are bounded source/CPU/API results, not full consumer or performance qualification.
+
+The first root Runtime production check reports ten Scene call migrations involving explicit
+Cow/raw reborrows. After correction it reaches one root expanded-record retention call, which
+now charges the new record's complete payload, backing, frozen data and contextual metadata.
+The selected Runtime/UI/render production closure then passes in 12.34 seconds. The root
+all-feature closure additionally exposes one finite source-tool initial-value borrow; that path
+now explicitly checks its actual unchanged raw subtree. The final all-feature root production
+check passes in 13.74 seconds. The first Scene/Tooling test-target check reports thirty Scene and
+one Tooling API migrations; corrected complete all-feature test-target checking passes in
+37.24 seconds. This proves compilation, not execution of those test targets. Original API
+semantics/assertions remain, with explicit owning extraction for intentionally owned native
+payloads. Scene's unchanged structural root-work allowance is also preserved before its actual
+owner tests. Independent public integrations, domain owners, game/native/GPU and balanced
+comparison remain required. No new runtime capacity, cost reduction or complete Foundation
+claim is made at this intermediate checkpoint.
+
+The historical record probe at `7088b9e` remains the pre-change comparison. Its current consumer
+now observes the changed stock contract explicitly: the defaulted root is a frozen read, and
+the complete `cells` subtree retains its exact original source allocation for both direct and
+root-bound records. The former whole-root-copy assertion is replaced by those stronger borrowed
+data observations. The original 16K population, values, provenance, receiving/cancellation,
+independent cook and matched wire-limit controls remain; the original gameplay/native workload
+and its metric-count oracles are unchanged. Current execution of this migrated probe is pending.
+
+The first Scene/Tooling owner-test build stops before execution when its output fingerprint
+directory disappears during build-cache cleanup (`os error 3` while writing dependency
+information). No behavioral result is claimed from that attempt. After the user reports cleanup
+complete, the resumed release build reuses the original target with one job. A bounded
+cross-owner review also finds one unmigrated root retention-test pointer comparison; its
+correction extracts the actual raw subtree borrow and preserves the original allocation-identity
+assertion. Review closes that finding; root execution remains a separate gate. The previously
+frozen `2dd0083` measurement executable survives outside target, with its original qualified
+hash and source receipt intact, so the balanced comparison need not reconstruct its baseline.
+
+That resumed release build completes in 28m55s. Actual execution passes 981/983 without skips
+at `af664887-063e-470b-be49-66ff84807419`, 62.296 seconds. Two test corrections preserve their
+original behavior: the new Inspector depth fixture registers a real native binding before registry
+freeze, and the existing reference-work oracle includes the now-admitted no-insertion default
+planner. The latter adds exactly one node and zero bytes per component; exact success and
+one-short node/byte refusal remain. Independent review confirms the owning call, total and
+unchanged product limits. All Scene/Tooling test targets then check successfully in the release
+profile. Complete owner/domain CPU execution continues in the debug test profile; native game
+qualification and the balanced program comparison retain their release scope.
+
+The complete all-feature debug owner/domain run executes 1,608 tests in 104.336 seconds at
+`2af6aee7-eafd-41d3-af07-0c9ce0584988`: 1,607 pass, one new Material fixture fails and no tests
+skip. Scene 801/801, Tooling 182/182, Reflect 258/258, Tilemap 105/105, Sprite 15/15,
+Transform 40/40 and UI 127/127 all pass, including both preceding corrections. The remaining
+fixture incorrectly expects depth 5 for a complete Product texture reference whose actual
+`texture_overrides -> reference -> value -> product -> kind` reaches depth 6. Its corrected
+control accepts both owned and frozen inputs at depth 6 and refuses depth 5, retaining exact
+node/byte boundaries and the real native resource application. The complete all-feature Material
+library then passes 80/80 without skips at `304af988-8591-4836-9e6e-7efd5b7bcaad`, 3.200 seconds.
+No production decoder or limit changes for these fixture corrections. Root/consumer/native
+qualification and the unchanged balanced comparison remain required.
+
+The root retained-content/custody/startup cohort then passes 139/139, with 801 outside its filter,
+at `ebb67d7b-b579-44d6-b390-4f460c1c0e80`, 11.926 seconds in the debug test profile. It includes
+the original large root-bound Tilemap source and last-owner refund, repaired effective references,
+processed resources, original-base retention after file removal, exact overlap refusals and
+startup replacement. The corrected raw backing-pointer assertion compiles and passes. The
+selected feature closure is `runtime-2d,serde,project-tooling`; no native presentation follows
+from this CPU result. Complete release game/metric/native and 16K probe acceptance is next.
+
+The complete release sample/metric/span/native/probe run builds in 15m37s and executes 148 tests
+in 61.371 seconds at `2e00e020-54bc-44f8-981b-a3801c76ebea`: 147 pass, one CPU pointer control
+fails and none skip. All 143 game/library/metric/span/native cases pass, including the original
+64/4K/16K Travel populations, 27 original-input GPU replays and both observer-panic cleanup
+controls. The pointer control incorrectly compares inherited compilation with the original side
+of a public deep Prefab clone, rather than the allocation actually transferred into the resolver.
+It now resolves that actual source, also verifies that the public clone remains independent,
+and explicitly drops the extra observation before the original source/resolver retirement.
+Direct and inherited stock cells must still retain their exact respective original allocations.
+Independent review confirms the correction without P1/P2. The complete probe then passes 5/5
+without skips at `d70b2cc3-68f2-41d8-8140-13ec9ea75dbd`, 5.034 seconds. Production code, receiving
+ceilings, original native trajectory and its qualified executable remain unchanged by this fix.
+
+The [current native evidence](../benchmarks/2026-11-14-development-runtime-costs.md#frozen-effective-reads)
+retains nine Tile lifetimes with 2,923 initialized presentations and 27 replays, plus three
+baseline lifetimes with 485 initialized presentations. Those counts describe the paced workload,
+not throughput. The unchanged balanced frozen-program comparison completes twelve additional
+16K lifetimes and 36 GPU replays. Default wall median falls from 242.509 to 94.931 ms, but complete
+component materialization is 371.721/367.683 ms and expansion 1,002.514/1,009.882 ms before/after.
+Four complete process walls establish no stable end-to-end speedup. More expensive full validation
+and raw-descendant traversal offset most of the removed copying. The linked report preserves
+all source/program/report/order hashes and excludes CPU/GPU duration, physical-memory and numeric
+tail-budget claims. Independent public consumers and final owning checks remain in progress.
+
+The complete independently locked Scene/Material/Asset-domain consumer selection passes
+262/262, with the existing manual timing case skipped, at `be70cdcc-975b-499b-9e96-b57d65bc0e23`,
+30.337 seconds in the debug test profile. It retains handwritten/derived codecs, source-free
+native and data cook, actual products, TileSet membership, prepared cancellation, exact closure
+retention/refund, local input replay and final effective reference demand. Selected public
+Reflect integrations pass 134/134 without skips at `4273561d-4ae9-4a2e-a74a-fdeadc6d38fb`,
+7.033 seconds, including frozen/derived nested values, exact materialization, ownership, property
+and registry boundaries. Selected public Scene integrations pass 179/179 without skips at
+`b14a5ad1-6987-484a-aef1-dd21000f7381`, 8.306 seconds, retaining mixed/data native preparation,
+runtime/export references, direct/Prefab conversion, saved-source extraction and exact receiving
+refusals. The ordinary reference-game compatibility consumer and final checks continue separately.
+
+Ordinary reference-game library/authoring/first-wave/Prefab/Vec2 migration controls pass 44/44
+without skips at `ceed3315-fc6c-4738-997f-00d098267f6e`, 5.909 seconds. The independently locked
+language-consumer compilation identifies one remaining public copy-operation signature: its
+existing snapshot observation calls `rewrite_declared_entity_references` with a compiled read.
+The existing rewrite/remap operations now accept that borrowed input, plan the complete reference
+structure first and create one independent owning result before rewriting. They do not flatten
+before a native codec or change the compiler's private plan/in-place path. The new public control
+checks frozen defaults, payload independence, refusal before callbacks, input preservation and
+result survival after source/default retirement. The first test compile misses its shape import;
+after correction, the complete selected Reflect owner/reference cohort passes 285/285 without
+skips at `6264e448-4ffd-4a45-9d39-d08f3bf93b93`, 9.475 seconds, and actual language-consumer
+test-target checking passes. Independent API review finds no remaining P1/P2. This late public
+copy-input migration is qualified separately from the preceding native/measurement executable;
+the recorded binary and source hashes retain that exact earlier scope. Foreign language/native
+execution is not inferred from this compilation.
+
+Final owning all-target/all-feature correctness Clippy, all-feature root library Clippy and
+sample library/record-probe Clippy pass; existing warnings remain. Feature-free Reflect/Scene
+libraries compile. Root, sample, independent-module and reference-game formatting pass after
+correcting one new import's wrapping. Added document paths/fragments, CI YAML, JSON report/hash
+integrity and Git whitespace checks pass. CI adds the finite 16K CPU record probe to the existing
+runtime metric/span step; no remote CI or publication runs. The late public reference-copy entry
+is independently reviewed and tested; no relevant private compiler/native consumer changes
+follow the recorded complete native and balanced comparison. All seven scoped agents started
+during this resumed qualification are closed. Cargo stays serial with one job and the original
+target; paused UI/Dialogue work remains byte-identical and excluded from commits.
+
+This closes the selected frozen-read implementation and its complete Windows consumer scope.
+It establishes allocation identity and preserved semantics, not stable end-to-end acceleration.
+The next owner-local optimization must attribute repeated complete validation and raw-subtree
+traversal against the same frozen programs and original game. Full Foundation/R9/R10/R12,
+physical-memory and numerical runtime-tail budgets, larger named workloads and foreign execution
+remain open. No domain record split, source upgrade, new cache or lifecycle owner is introduced.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
