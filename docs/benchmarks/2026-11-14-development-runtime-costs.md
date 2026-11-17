@@ -3407,6 +3407,94 @@ Existing unchanged behavior tests remain valid; root/sample formatting and docum
 close the experiment without rerunning all unmodified product tests. Future work should target a larger, attributable owning operation,
 especially repeated diagnostic/domain cell preparation, before another fine-grained index change.
 
+### Codec-Owned Diagnostic Validation
+
+The [diagnostic-consumer unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#codec-owned-diagnostic-validation)
+implemented at `1b4a4ade89f917629eb323306be9a94b66a99af6` separates Check/source-load diagnosis
+from actual native construction through the original
+frozen codec binding. An optional domain callback shares receiving admission with preflight
+but returns no typed candidate. Existing codecs retain original preflight and disposal timing;
+compiled fallback candidates remain alive through the complete batch. Actual preparation
+calls only the original preflight. Tilemap shares its complete configuration parser and
+cell visitor, preserving asset-context effects and first input-index errors while avoiding
+the diagnostic typed Vec and final mutable map. No cache, new source format or reusable
+validation result is introduced.
+
+Public Reflect/Scene and real third-party Check controls pass 13/13 without skips at
+`ded8ca96-ea5e-4ebd-b3fc-7186c3881e32`. These include original fallback lifetimes, explicit
+dispatch counts, unchanged borrowed payload/defaults, whole-batch admission before callbacks,
+stricter context readmission, native/data composition and actual native commit. The Check
+consumer keeps its original schema-valid business-domain refusal after authoring Save.
+Independent production reviews find no remaining P1/P2. An eager complete-list Vec reservation
+is removed after review: the original fallible collection grows only with successful input,
+and early-invalid input must not acquire a new full-list allocation.
+
+The full owner-library selection runs 1,200 cases at
+`af0b47e0-fc68-4fc9-9736-fafde8a837a9`: Reflect 283/283 and Scene 806/806 pass, along with
+110 existing Tilemap cases. Only the new asset-context fixture fails because independent
+global AssetId allocations differ. The corrected fixture gives both catalogues one original
+untyped identity and compares complete catalogue state and actual type-claim mutation; it
+passes 1/1 at `8a9dc68d-6187-46b6-af6d-bdbdaba7148d`, without rerunning unchanged successes.
+Affected public Scene consumers pass 20/20 at `7b1d4e4d-5686-4e71-86b7-0e26b00f3069`;
+independently locked codec/preparation/inventory and source/processed TileSet consumers pass
+33/33 at `6c5d0a6c-a378-48ae-938a-918ef0038bcd`. Neither selection skips a case.
+
+The original release game/library/metrics/span/native selection passes 148/148 with no skips
+at `61e588e2-3dd0-469b-b258-86464739ccb1`, 80.962 seconds after an 11m31s serial build.
+Final test review strengthens provider composition with valid input and a no-candidate result,
+so losing an explicit validator cannot silently pass by returning the same fallback error.
+That final provider case passes 1/1 at `df3d1820-8514-4d47-8fc0-75ef8f80307d`.
+
+These results establish behavior, not a speedup. The same-observer paired comparison follows.
+The historical [cross-engine observations](2026-11-17-runtime-module-comparison.md) remain a
+different single-collection workload and cannot be replaced by cumulative game envelopes.
+
+Four consecutive Windows/hardware-DX12 RTX4090 processes run in before/after/after/before order
+using the same 46-phase observer. Each completes three original 16K lifetimes and nine retained
+GPU replays, including exact source/gameplay/native/cleanup checks. No owning Cargo runs during
+them. The earlier development baseline is excluded from this timing series. The
+[source/program/report receipt](data/2026-11-14-development-runtime/authored-tiles-codec-diagnostics-paired-metadata.json)
+retains 163 before and 166 final source/control hashes, exact binaries, compiler, adapter,
+operation counts, complete raw-report hashes and the four checked summaries. Only the same four
+listed raw per-frame arrays are omitted from each tracked summary; frozen programs and complete
+reports remain in `%TEMP%/nara-codec-diagnostics-paired-20261117`.
+
+The table contains median cumulative wall milliseconds over six lifetimes per variant.
+These are correlated repeated operations, not one scene load or one frame. Child spans overlap
+their parents, and separately calculated medians must not be added.
+
+| Original scope | Calls per lifetime | Before | After |
+| --- | ---: | ---: | ---: |
+| Source payload decode | 18 | 294.287 | 373.916 |
+| Diagnostic receiving validation | 9 | 62.642 | 101.612 |
+| Diagnostic component dispatch | 9 | 64.270 | 106.202 |
+| Actual unbound receiving validation | 6 | 39.583 | 68.319 |
+| Actual unbound component preflight | 6 | 48.494 | 83.272 |
+| Complete original unbound preparation | 6 | 88.666 | 152.447 |
+| Source expansion | 9 | 600.862 | 866.773 |
+
+The series **does not establish a speed improvement**. The two after process walls are
+17.726/22.825 seconds, versus 16.111/17.024 seconds before. Multiple unchanged decode,
+receiving, actual preparation and publication stages also become slower; variation exists
+within the same executable. This is insufficient to isolate either the new callback's latency
+benefit or a causal runtime regression. No exclusive CPU/GPU, affinity, clock/cache, allocator,
+RSS/heap, frame-tail or GPU-duration control is claimed. Do not normalize one noisy phase by
+another to manufacture a gain or keep repeating this comparison until favorable results appear.
+
+The retained implementation is a diagnostic-consumer separation with exact fallback behavior,
+not a qualified speed optimization: explicit Tilemap diagnosis no longer constructs the typed
+Vec/final native tree, and actual preparation remains original. Counter/lifetime tests establish
+that work distinction, while elapsed costs remain unqualified. Continue with larger
+representation/construction attribution and controlled complete-consumer costs before claiming
+the cross-engine milestones are achieved. Full Foundation/R9/R10/R12 remain open.
+
+Scoped owning all-target/all-feature and root public-consumer correctness Clippy pass,
+along with feature-free production compilation, root/sample formatting and targeted document/
+source/report checks. Existing warnings remain. Independent numerical review reproduces the
+table, verifies raw and compact reports, both binaries and all source hashes, and confirms the
+non-improvement disposition. All eight scoped agents are closed. Paused UI/Dialogue files are
+unchanged; no remote publication or foreign-platform execution is claimed.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

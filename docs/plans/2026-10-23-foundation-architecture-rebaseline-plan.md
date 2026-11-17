@@ -5837,6 +5837,21 @@ Production is restored exactly; the rebuilt original adds three lifetimes/nine r
 No validation policy, profiler, hasher dependency or public interface is added. Stop iterating on
 this small index and attribute larger domain/diagnostic duplicate work; full Foundation remains open.
 
+The [codec-owned diagnostic successor](2026-11-13-rust-state-reconstruction-plan.md#codec-owned-diagnostic-validation)
+at `1b4a4ad` separates the real Check/load diagnostic consumer from native construction at the
+original frozen binding. Optional validators share receiving/default/reference/domain/context
+rules, while old codecs preserve their preflight and disposal lifetimes. Actual preparation
+calls only preflight. Tilemap uses one configuration parser/cell visitor and avoids a diagnostic
+typed Vec/final native tree. Public controls pass 13/13, affected Scene consumers 20/20,
+independent consumers 33/33 and original release game/native controls 148/148. Owning libraries
+record 1,199 successes and the corrected remaining fixture passing separately; the strengthened
+provider control passes too. Scoped checks and reviews close the unit's behavioral evidence.
+The [complete-game comparison](../benchmarks/2026-11-14-development-runtime-costs.md#codec-owned-diagnostic-validation)
+passes twelve original 16K lifetimes/36 GPU replays and original cleanup, but the after program
+is slower across multiple unchanged stages as well. No elapsed improvement or isolated causal
+regression is established. Representation, larger construction/receiving costs and controlled
+runtime budgets remain open; the cross-engine proposals and full Foundation are not complete.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

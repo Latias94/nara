@@ -4591,6 +4591,88 @@ Choose a concrete representation/handoff only after identifying its full receivi
 mutable escape and retained-resource effects. The previously rejected final-tree choice is not
 reintroduced, and a source-path cache is not selected. Full Foundation/R9/R10/R12 remains open.
 
+#### Codec-Owned Diagnostic Validation
+
+Status: implemented at `1b4a4ad` and behavior-qualified on Windows/Rust1.95; elapsed-time
+improvement remains unqualified. Check and source-load diagnosis previously asked
+the same codec as actual Runtime preparation to construct a candidate, although diagnostics
+discarded it. The stock Tilemap parsed complete cells and retained a typed Vec for that candidate.
+The earlier experiments show that eagerly constructing final trees does not serve diagnostics,
+and fine-grained membership timing cannot select a reliable optimization under host variation.
+Separate these two real consumers at the original codec interface instead of adding a cache.
+
+Reflect may register an explicit context-aware diagnostic validator alongside the exact typed
+preflight/encode callbacks. Existing registrations retain their current preflight fallback and
+candidate lifetime: compiled diagnostic batches retain fallback candidates until complete
+batch disposal; source-authoring diagnostics drop each immediately. The explicit validator
+must preserve the preflight domain refusal and context effects
+for the same effective input/context; it produces neither `T` nor a prepared candidate. Actual
+preparation calls only preflight, not validator plus preflight. Generic Schema/default/native
+reference/limit checks remain shared, and a complete Scene batch is admitted before its first
+domain callback. Earlier callbacks that tighten context limits keep the later full-admission
+fallback. No new public Scene authority, detached result, mutable World access or retained proof
+is introduced.
+
+Scene diagnostic paths use the validator dispatch; actual spawn and replacement retain original
+typed candidates and resource/World checks. Tilemap opts in using one shared configuration parser
+and complete cell visitor. The visitor retains coordinate uniqueness and exact original input
+error order. Diagnostics need no typed cell Vec or final native tree; actual preflight gathers
+the same owned cells and preserves deferred TileSet resolution and dirty revision order. The
+existing standalone membership operation remains complete and is not silently treated as codec
+validation. Third-party codecs without an explicit validator still execute their original code.
+
+Qualify public fallback/explicit dispatch, defaults/limits/hidden references, current context
+changes and exact diagnostics, native preparation/commit, dropped candidate effects, source/
+processed delivery and the original game's full travel/GPU/cleanup workflow. Inspect the complete
+source Check consumer as well as compiled diagnosis. Do not infer performance from deleted
+allocation sites; distinguish removed diagnostic native construction from still-required generic
+receiving/reference checks. This interface improvement does not complete full Foundation.
+
+Initial Windows/Rust1.95 production compilation passes. The public Reflect/Scene and real
+third-party Check selection passes 13/13 without skips at
+`ded8ca96-ea5e-4ebd-b3fc-7186c3881e32`. Its first build exposes a stale owned-value clone in
+the existing business-diagnostic fixture, corrected to the borrowed reader's explicit `to_owned`.
+New Scene tests initially assume a zero-entity fresh World and codec-level Schema errors;
+they now compare the actual initial population, require no identity-domain publication, and
+assert the original compiler refusal before any domain callback. No production policy changes
+follow from those fixture corrections.
+
+Independent Reflect and Scene/Tilemap source reviews find no remaining P1/P2. A review removes
+an eager full-list Vec reservation proposed during integration: the old fallible collection
+grows with its successful prefix, so reserving the whole malformed list would increase failed
+preparation memory. The shared visitor now preserves prefix growth. Complete owner/public
+consumers preserve the existing behavior: the full Reflect/Scene/Tilemap library selection runs
+1,200 tests at `af0b47e0-fc68-4fc9-9736-fafde8a837a9`, with 1,199 passing and only the new
+asset-context fixture failing because independent global AssetId allocations differ. The final
+test starts both catalogues from one untyped identity, then compares full catalogue equality,
+exact refusal and actual type-claim mutation; it passes 1/1 at
+`8a9dc68d-6187-46b6-af6d-bdbdaba7148d`. Unchanged passing tests are not rerun for that fixture-only
+correction. Scene public receiving/preparation/reference controls pass 20/20 without skips at
+`7b1d4e4d-5686-4e71-86b7-0e26b00f3069`; independently locked codec/preparation/inventory and
+source/processed TileSet consumers pass 33/33 without skips at
+`6c5d0a6c-a378-48ae-938a-918ef0038bcd`. The original release game/library/metrics/span/native
+selection passes 148/148 with no skips at `61e588e2-3dd0-469b-b258-86464739ccb1`. Final review
+strengthens provider composition with valid input and an explicit no-candidate result, so a
+lost validator cannot pass by producing the same fallback error. That case passes 1/1 at
+`df3d1820-8514-4d47-8fc0-75ef8f80307d`.
+
+The [same-observer report](../benchmarks/2026-11-14-development-runtime-costs.md#codec-owned-diagnostic-validation)
+retains four complete serial before/after/after/before processes: twelve original 16K lifetimes,
+36 GPU replays and complete original cleanup pass. The earlier development baseline is excluded.
+The after program is slower across multiple unchanged stages as well as diagnostic dispatch,
+so the comparison establishes no latency improvement or isolated causal regression. Retain the
+exact behavioral separation and removed diagnostic native construction without claiming the
+cross-engine timing milestones are achieved. Do not add normalization or repeat small experiments
+until a favorable number appears. Source payload representation, remaining receiving work and
+controlled complete-consumer costs still require attribution; full Foundation remains open.
+
+Scoped shared all-target/all-feature and root public-consumer correctness Clippy pass, as do
+feature-free Reflect/Scene/Tilemap production compilation, root/sample formatting and targeted
+document/source/report checks. Existing warnings remain. Independent source, final acceptance
+and numeric reviews close all actionable findings; the timing report's disposition is checked
+against exact raw arrays and source/program provenance. No official engine test suite is rerun,
+and paused UI/Dialogue files remain byte-identical.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified

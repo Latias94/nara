@@ -3529,6 +3529,20 @@ The rebuilt unchanged program completes another three 16K lifetimes/nine replays
 No runtime, validation, dependency, profiler or public interface change is adopted. Larger
 domain/diagnostic preparation work and full Foundation remain open.
 
+The [codec-owned diagnostic successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#codec-owned-diagnostic-validation)
+at `1b4a4ad` adds an optional validator to the original frozen native binding. Check/load
+diagnosis can avoid candidate construction while preserving full receiving/domain/context
+semantics and original fallback lifetimes; actual preparation executes only original preflight.
+Tilemap shares its configuration and complete cell parser without building a diagnostic typed
+Vec/native tree. Public controls pass 13/13, affected Scene consumers 20/20, independently
+locked consumers 33/33 and original release game/native controls 148/148. Full owning libraries
+record 1,199 successes plus one corrected fixture passing separately; a final valid-provider
+control also passes. Correctness Clippy, feature-free compilation, formatting and source/report
+checks pass. The [same-observer report](../../benchmarks/2026-11-14-development-runtime-costs.md#codec-owned-diagnostic-validation)
+retains twelve original lifetimes/36 GPU replays and cleanup, but multiple unchanged stages
+also slow down: no elapsed improvement or causal regression is established. This is qualified
+behavioral separation, not achieved performance targets; full Foundation remains open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
