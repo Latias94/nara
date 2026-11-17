@@ -123,6 +123,12 @@ It contains no native handles or solver state. The consumer installs
 the exact native Schema provider through ordinary App composition, then materializes Scene and
 Prefab documents through public Scene interfaces before deriving native bodies and colliders.
 
+Fixed affine box construction reuses the directly consumed
+[nara_rapier2d](../../../crates/nara_rapier2d/README.md) package. This fixture retains its original
+coordinate/size bounds, diagnostics and native dynamic solver. The shared collider's world pose
+becomes the fixed body pose, with an identity local collider pose. Enabling `authoring` selects
+this dependency; the base motion plugin does not inherit it.
+
 Reconciliation receives the complete selected set of current Scene receipts and reads the actual
 current `FixedInputSpatialSnapshot2d` published by the original Transform owner. There is no
 identity/local fallback. It validates every receipt, source association and native shape before

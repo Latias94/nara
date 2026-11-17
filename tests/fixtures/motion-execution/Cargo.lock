@@ -885,6 +885,7 @@ dependencies = [
  "nara_ecs",
  "nara_hierarchy",
  "nara_identity",
+ "nara_rapier2d",
  "nara_reflect",
  "nara_scene",
  "nara_transform",
@@ -1056,6 +1057,15 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+]
+
+[[package]]
+name = "nara_rapier2d"
+version = "0.1.0"
+dependencies = [
+ "nara_core",
+ "rapier2d",
+ "thiserror",
 ]
 
 [[package]]

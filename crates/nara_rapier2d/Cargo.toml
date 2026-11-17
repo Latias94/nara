@@ -1,0 +1,12 @@
+[package]
+name = "nara_rapier2d"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Immutable Rapier2D collision queries and top-down character movement."
+
+[dependencies]
+nara_core.workspace = true
+rapier2d = { version = "=0.33.0", default-features = false, features = ["dim2", "f32", "std"] }
+thiserror.workspace = true

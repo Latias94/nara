@@ -95,57 +95,36 @@ pub(super) fn prepare(
     let offsets = corners.map(|corner| source.global.transform_vector2(corner));
     let determinant = f64::from(source.global.x_axis.x) * f64::from(source.global.y_axis.y)
         - f64::from(source.global.x_axis.y) * f64::from(source.global.y_axis.x);
-    if determinant == 0.0
-        || !bounded(center)
-        || offsets.iter().any(|point| !bounded(*point))
-        || canonical_vertices(offsets).is_none()
-        || (0..4).any(|index| {
-            (offsets[(index + 1) % 4] - offsets[index])
-                .try_normalize()
-                .is_none()
-        })
-    {
+    if determinant == 0.0 || !bounded(center) || offsets.iter().any(|point| !bounded(*point)) {
         return Err(invalid(
-            "Fixed box corners require bounded values and natively normalizable nondegenerate edges",
+            "Fixed box coordinates must be bounded and their affine transform nonsingular",
             "transform",
         ));
     }
-    let points = offsets.map(|point| Vector::new(point.x, point.y));
-    let collider = ColliderBuilder::convex_hull(&points).ok_or_else(|| {
+    let collider = nara_rapier2d::affine_box_collider(
+        definition.center,
+        Vec2::new(definition.half_width, definition.half_height),
+        source.global,
+    )
+    .map_err(|_| {
         invalid(
-            "Rapier cannot construct the transformed four-corner convex hull",
+            "Rapier cannot construct valid transformed fixed box geometry within its corner budget",
             "transform",
         )
     })?;
-    let polygon = collider.shape.as_convex_polygon().ok_or_else(|| {
-        invalid(
-            "The transformed fixed box requires a native convex polygon",
-            "transform",
-        )
-    })?;
-    let native_points: [Vector; 4] = polygon.points().try_into().map_err(|_| {
-        invalid(
-            "The native convex hull did not retain all four box corners",
-            "transform",
-        )
-    })?;
-    let native_offsets = native_points.map(|point| Vec2::new(point.x, point.y));
-    let actual_world = native_offsets.map(|point| center + point);
-    if polygon.normals().iter().any(|normal| !normal.is_finite())
-        || actual_world.iter().any(|point| !bounded(*point))
-        || canonical_vertices(native_offsets).is_none()
-        || canonical_vertices(actual_world).is_none()
-        || !corners_match(&offsets, &native_offsets)
-        || !corners_match(&expected_world, &actual_world)
+    if native_vertices(&collider)
+        .is_none_or(|vertices| vertices.iter().any(|point| !bounded(*point)))
     {
         return Err(invalid(
-            "The native convex hull cannot retain all four corners within the declared budget",
+            "Fixed native box corners must be nondegenerate and within the spatial bounds",
             "transform",
         ));
     }
     Ok(PreparedPair {
-        body: RigidBodyBuilder::fixed().pose(Pose::translation(center.x, center.y)),
-        collider: collider.restitution(0.0),
+        body: RigidBodyBuilder::fixed().pose(*collider.position()),
+        collider: ColliderBuilder::new(collider.shared_shape().clone())
+            .position(Pose::IDENTITY)
+            .restitution(0.0),
     })
 }
 
