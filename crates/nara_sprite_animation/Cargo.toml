@@ -1,0 +1,16 @@
+[package]
+name = "nara_sprite_animation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bounded sprite animation clips with caller-owned playback time."
+
+[dependencies]
+nara_asset = { workspace = true, features = ["serde"] }
+nara_core.workspace = true
+nara_diagnostic.workspace = true
+nara_sprite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
