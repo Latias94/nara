@@ -73,7 +73,7 @@ fn preflight(
 }
 
 #[test]
-fn borrowed_map_key_limits_precede_nara_owned_copies() {
+fn borrowed_map_key_limits_and_duplicate_checks_do_not_copy_input_keys() {
     const KEY_BYTES: usize = 1024 * 1024;
     let key = "x".repeat(KEY_BYTES);
     let input = format!(r#"{{"{key}":0}}"#);
@@ -107,8 +107,21 @@ fn borrowed_map_key_limits_precede_nara_owned_copies() {
     let (result, maximum) = preflight(&input, limits(4096, 4096));
     result.unwrap();
     assert!(
-        maximum >= 4096,
-        "accepted keys must still participate in duplicate detection"
+        maximum < 4096,
+        "borrowed key allocated an unnecessary {maximum}-byte copy"
+    );
+
+    let input = format!(r#"{{"{key}":0,"{key}":1}}"#);
+    let (result, maximum) = preflight(&input, limits(4096, 8192));
+    assert!(matches!(
+        result,
+        Err(SerdeShapePreflightError::Shape(
+            SerdeShapeError::DuplicateMapKey
+        ))
+    ));
+    assert!(
+        maximum < 4096,
+        "duplicate borrowed key allocated an unnecessary {maximum}-byte copy"
     );
 }
 

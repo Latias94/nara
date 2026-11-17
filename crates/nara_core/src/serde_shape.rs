@@ -1,6 +1,7 @@
 //! Allocation-bounded structural preflight for serde-backed persistent files.
 
 use std::{
+    borrow::Cow,
     collections::BTreeSet,
     error::Error,
     fmt::{self, Display, Formatter},
@@ -142,8 +143,10 @@ impl<E: Error + 'static> Error for SerdeShapePreflightError<E> {
 ///
 /// This enforces only format-neutral structure. Domain-specific limits, migrations, and semantic
 /// validation remain the responsibility of the owning loader.
-/// Nara checks map-key budgets before copying borrowed keys. Allocations already performed by the
-/// syntax adapter (for example, decoding escaped strings) remain outside this preflight's control.
+/// Duplicate detection borrows keys with the deserializer's input lifetime and owns transient or
+/// already owned keys. Nara checks key budgets before copying transient keys. Allocations already
+/// performed by the syntax adapter (for example, decoding escaped strings) remain outside this
+/// preflight's control.
 pub fn preflight_serde_shape<'de, D>(
     deserializer: D,
     limits: SerdeShapeLimits,
@@ -447,7 +450,7 @@ struct MapKeySeed<'a> {
 }
 
 impl<'de> DeserializeSeed<'de> for MapKeySeed<'_> {
-    type Value = String;
+    type Value = Cow<'de, str>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -468,7 +471,7 @@ struct MapKeyVisitor<'a> {
 }
 
 impl<'de> Visitor<'de> for MapKeyVisitor<'_> {
-    type Value = String;
+    type Value = Cow<'de, str>;
 
     fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str("a persistent map or struct field identifier")
@@ -479,14 +482,15 @@ impl<'de> Visitor<'de> for MapKeyVisitor<'_> {
         E: DeError,
     {
         self.observe_string::<E>(value)?;
-        Ok(value.to_owned())
+        Ok(Cow::Owned(value.to_owned()))
     }
 
-    fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+    fn visit_borrowed_str<E>(mut self, value: &'de str) -> Result<Self::Value, E>
     where
         E: DeError,
     {
-        self.visit_str(value)
+        self.observe_string::<E>(value)?;
+        Ok(Cow::Borrowed(value))
     }
 
     fn visit_string<E>(mut self, value: String) -> Result<Self::Value, E>
@@ -494,7 +498,7 @@ impl<'de> Visitor<'de> for MapKeyVisitor<'_> {
         E: DeError,
     {
         self.observe_string::<E>(&value)?;
-        Ok(value)
+        Ok(Cow::Owned(value))
     }
 }
 
