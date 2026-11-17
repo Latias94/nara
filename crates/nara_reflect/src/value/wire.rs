@@ -161,8 +161,63 @@ impl<'de> DeserializeSeed<'de> for PayloadSeed<'_> {
         match self.0 {
             Some("list") => deserializer.deserialize_any(ListVisitor).map(Payload::List),
             Some("map") => deserializer.deserialize_any(MapVisitor).map(Payload::Map),
+            Some("bool" | "i64" | "u64" | "f64" | "string") => {
+                deserializer.deserialize_any(ScalarPayloadVisitor)
+            }
             _ => Payload::deserialize(deserializer),
         }
+    }
+}
+
+struct ScalarPayloadVisitor;
+
+impl<'de> Visitor<'de> for ScalarPayloadVisitor {
+    type Value = Payload;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a scalar component value payload")
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(Payload::Bool(value))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(Payload::Signed(value))
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(i64::try_from(value).map_or(Payload::Unsigned(value), Payload::Signed))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        ComponentFloat::new(value)
+            .map(Payload::Float)
+            .map_err(E::custom)
+    }
+
+    fn visit_char<E: de::Error>(self, value: char) -> Result<Self::Value, E> {
+        Err(E::invalid_type(de::Unexpected::Char(value), &self))
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(Payload::Text(value.to_owned()))
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(Payload::Text(value))
+    }
+
+    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
+        std::str::from_utf8(value)
+            .map(|value| Payload::Text(value.to_owned()))
+            .map_err(|_| E::invalid_value(de::Unexpected::Bytes(value), &self))
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+        String::from_utf8(value)
+            .map(Payload::Text)
+            .map_err(|error| E::invalid_value(de::Unexpected::Bytes(error.as_bytes()), &self))
     }
 }
 

@@ -1,4 +1,5 @@
 //! Compatibility cases for the existing tagged wire and untagged payload classification.
+mod scalars;
 
 use nara_identity::{
     AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, EntityReference,
