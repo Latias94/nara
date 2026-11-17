@@ -23,6 +23,8 @@ use nara_reflect::{
 
 mod admission;
 mod atlas;
+#[cfg(test)]
+mod construction_tests;
 #[cfg(feature = "serde")]
 mod content;
 mod runtime;
