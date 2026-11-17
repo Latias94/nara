@@ -3,11 +3,14 @@
 pub mod animation;
 #[cfg(all(windows, feature = "audio-cpal"))]
 pub mod audio;
+pub mod command;
 #[cfg(feature = "development")]
 pub mod development;
 mod gameplay;
 mod host;
 pub mod levels;
+#[cfg(feature = "development")]
+pub mod replay;
 pub mod resume;
 pub mod save;
 pub mod sound_bank;

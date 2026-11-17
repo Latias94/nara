@@ -6,6 +6,7 @@
 //! Replies use Serde's ordinary `Result` representation: `{"Ok": reply}` or `{"Err": message}`.
 //! The Host consumes replies before retrying their filenames; the child never overwrites one.
 
+pub use crate::command::SemanticCommand;
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
@@ -137,16 +138,6 @@ pub enum Command {
     IsolateInput,
     ActivateInput,
     Close,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SemanticCommand {
-    Move { direction: usize, pressed: bool },
-    Marker,
-    Travel,
-    Instance,
-    Retry,
 }
 
 /// Diagnostic control-service observations from one original child response.

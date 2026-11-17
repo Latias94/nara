@@ -1,5 +1,5 @@
 mod collision;
-mod commands;
+pub(crate) mod commands;
 mod content;
 pub mod input;
 #[cfg(feature = "desktop")]

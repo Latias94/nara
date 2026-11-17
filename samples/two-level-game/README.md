@@ -437,6 +437,37 @@ exercises build/startup/compatibility failure, stale requests/replies and incumb
 package tests keep this nested-build case ignored. Execution results and limits belong to the
 [reconstruction plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md).
 
+## Source/Headless Recording And Replay
+
+The `replay` CLI records a finite semantic program against the actual source game and plays its
+recording in a fresh process. Build the `replay` binary with the default development feature,
+then run it with explicit absolute paths (use `replay.exe` on Windows):
+
+```text
+replay record --project-root ABS_PROJECT_ROOT --program ABS_PROGRAM_JSON --output ABS_NEW_RECORDING_JSON
+replay play --project-root ABS_PROJECT_ROOT --recording ABS_RECORDING_JSON
+```
+
+Use [the supplied program](replays/two-level.program.json) for a complete Meadow/Cavern trajectory:
+movement and releases, three pickups and markers, a distinct Cavern instance, Retry and return to
+Meadow. Programs use `{"format":1,"steps":[[{"operation":"move","direction":1,"pressed":true}],[],[{"operation":"move","direction":1,"pressed":false}]]}`.
+Each row advances exactly one fixed tick; `[]` continues held intent. Directions `0..3` mean
+left, right, up and down. Other operations are `marker`, `travel`, `instance` and `retry`.
+
+Both paths use the fixed interactive source/headless recipe, remaining paused between steps.
+Ordinary paused maintenance waits for Scene activation, reconstruction and task return without
+adding simulation ticks. Playback compares each newly produced supported state; source drift or
+a mismatched recorded result fails. This profile excludes Save/Restore, open save slots, native
+audio/desktop output, cooked Players, arbitrary runtime services and cross-platform determinism.
+
+Input files are limited to 16 MiB. The output parent must already exist and the output must be
+absent; recording never overwrites it. Serialization finishes before output creation, and a failed
+write attempts to remove the incomplete file. Stdout may contain game logs; consume the final
+`TWO_LEVEL_REPLAY_RESULT ` line as compact JSON. `ok` agrees with the process exit status.
+Success includes `report.steps`, `report.commands` and `report.final_state` after original Session
+cleanup. Failure includes `error.stage`, `error.message` and `cleanup_pending`; if original cleanup
+remains pending, the CLI retries it for up to ten more seconds before reporting that fact.
+
 ## Source/Headless Development Host
 
 The ordinary [development Host](src/development/mod.rs) owns candidate preparation and the single

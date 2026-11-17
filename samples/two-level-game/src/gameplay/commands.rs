@@ -2,20 +2,20 @@ use nara::gameplay::{
     GameplayCommandDraft, GameplayCommandPayload, GameplayCommandTypeId, GameplayCommandValue,
 };
 
-pub(super) const MOVE: &str = "two-level-game.move";
-pub(super) const TRAVEL: &str = "two-level-game.travel";
-pub(super) const INSTANCE: &str = "two-level-game.instance";
-pub(super) const MARKER: &str = "two-level-game.marker";
-pub(super) const SAVE: &str = "two-level-game.save";
-pub(super) const RESTORE: &str = "two-level-game.restore";
-pub(super) const RETRY: &str = "two-level-game.retry";
-pub(super) const PLAYER_LAUNCH: &str = "two-level-game.player-launch";
+pub(crate) const MOVE: &str = "two-level-game.move";
+pub(crate) const TRAVEL: &str = "two-level-game.travel";
+pub(crate) const INSTANCE: &str = "two-level-game.instance";
+pub(crate) const MARKER: &str = "two-level-game.marker";
+pub(crate) const SAVE: &str = "two-level-game.save";
+pub(crate) const RESTORE: &str = "two-level-game.restore";
+pub(crate) const RETRY: &str = "two-level-game.retry";
+pub(crate) const PLAYER_LAUNCH: &str = "two-level-game.player-launch";
 
-pub(super) fn action(id: &str) -> GameplayCommandDraft {
+pub(crate) fn action(id: &str) -> GameplayCommandDraft {
     GameplayCommandDraft::new(GameplayCommandTypeId::new(id).expect("static game command"))
 }
 
-pub(super) fn movement(direction: usize, pressed: bool) -> GameplayCommandDraft {
+pub(crate) fn movement(direction: usize, pressed: bool) -> GameplayCommandDraft {
     let mut payload = GameplayCommandPayload::new();
     payload
         .insert("direction", GameplayCommandValue::I64(direction as i64))

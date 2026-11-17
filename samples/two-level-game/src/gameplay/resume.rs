@@ -120,6 +120,7 @@ fn supported_service(id: &str) -> bool {
             | "nara.image"
             | "nara.startup-scene-activation"
             | "two-level-game.input"
+            | "two-level-game.replay"
             | "two-level-game.test.desktop-capture"
             | "two-level-game.development.presentation"
     )

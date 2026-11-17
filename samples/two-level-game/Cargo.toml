@@ -60,6 +60,13 @@ path = "src/bin/headless.rs"
 required-features = ["development"]
 
 [[bin]]
+name = "replay"
+path = "src/bin/replay.rs"
+required-features = ["development"]
+test = false
+bench = false
+
+[[bin]]
 name = "desktop"
 path = "src/bin/desktop.rs"
 required-features = ["development", "desktop"]
