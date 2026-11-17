@@ -167,6 +167,15 @@ can consume them directly; stricter limits retain the original value checks and 
 Changing a value requires new measurements through its concrete publication owner. Separate
 cooked output cannot inherit source measurements without its own admission.
 
+After complete Scene receiving admission succeeds for the current registry and limits, codec
+dispatch need not repeat that same default, Native-reference or field pass. The internal dispatch
+still selects the original native binding and executes its codec with the original context;
+domain checks, asset preparation and native/publication lifecycle admission remain. Standalone
+registry preflight continues to admit arbitrary dynamic input completely. This is reuse within
+the current operation, not a caller-controlled validation bypass or a new stored certificate.
+If an earlier codec changes the shared decode limits, the later value receives ordinary preflight
+under that changed policy; reuse requires the original receiving limits to remain unchanged.
+
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque
 payloads. When insertion is needed, combined raw values, defaults, shared ancestors and key bytes

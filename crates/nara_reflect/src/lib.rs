@@ -210,6 +210,17 @@ pub mod __private {
         witness.matches(snapshot)
     }
 
+    /// Scene-only dispatch after complete receiving admission against this exact registry.
+    /// Standalone dynamic input uses `ComponentRegistrySnapshot::preflight_component_with_context`.
+    pub fn preflight_admitted_component_with_context(
+        snapshot: &ComponentRegistrySnapshot,
+        component: &crate::ComponentTypeId,
+        value: crate::ComponentValueRef<'_>,
+        context: &mut crate::ComponentDecodeContext<'_>,
+    ) -> Result<crate::PreparedComponent, crate::ComponentCodecError> {
+        snapshot.preflight_admitted_component_with_context(component, value, context)
+    }
+
     pub fn component_snapshot_matches_runtime_type(
         snapshot: &ComponentRegistrySnapshot,
         world: &nara_ecs::World,

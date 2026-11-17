@@ -612,6 +612,7 @@ pub(crate) fn preflight_compiled_scene_with_context(
 ) -> PreparedScene {
     #[cfg(feature = "work-observation")]
     let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_decode").entered();
+    let admitted_limits = context.materialization_limits();
     let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
     let mut diagnostics = DiagnosticReport::default();
     if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {
@@ -669,7 +670,17 @@ pub(crate) fn preflight_compiled_scene_with_context(
                 });
                 continue;
             }
-            match registry.preflight_component_with_context(component, record.value(), context) {
+            let prepared = if context.materialization_limits() == admitted_limits {
+                nara_reflect::__private::preflight_admitted_component_with_context(
+                    registry,
+                    component,
+                    record.value(),
+                    context,
+                )
+            } else {
+                registry.preflight_component_with_context(component, record.value(), context)
+            };
+            match prepared {
                 Ok(prepared) => components.push(PreparedSceneComponent {
                     id: component.clone(),
                     prepared,

@@ -1177,6 +1177,25 @@ impl ComponentRegistrySnapshot {
             .map(|prepared| prepared.bind(id.clone()))
     }
 
+    /// Dispatches the original codec after Scene has admitted this exact effective value.
+    ///
+    /// The caller must have checked the complete value against this registry and the current
+    /// limits, or established the existing immutable Runtime definition contract. This operation
+    /// does not select defaults or repeat value admission. Codec/domain checks and its original
+    /// decode context remain active; the result retains the original component binding.
+    pub(crate) fn preflight_admitted_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        value: ComponentValueRef<'_>,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<PreparedComponent, ComponentCodecError> {
+        let (_, binding) = self.execution_binding(id)?;
+        binding
+            .codec
+            .preflight_with_context(value, context)
+            .map(|prepared| prepared.bind(id.clone()))
+    }
+
     /// Encodes the selected component, returning `None` only for entity/component absence.
     ///
     /// The effective result, including omitted defaults, must contain only Native references.

@@ -91,6 +91,14 @@ different schema, asset database or World. Replacing a live data component estab
 measurements, and independent cooked data are checked again on admission. A prepared read-only
 copy preserves the facts for its unchanged value; each owner still pays its full retained fee.
 
+Scene preparation completes receiving validation for every record before invoking native codecs.
+It then dispatches each original codec directly without selecting defaults or repeating the same
+Native/field checks. Codecs still perform their domain checks and asset preparation through the
+original context. Standalone `ComponentRegistrySnapshot::preflight_component_with_context`
+retains its complete dynamic-input admission; callers do not select a validation-skip mode. If a
+codec changes the shared context's materialization limits, later values use ordinary preflight
+under that changed policy.
+
 `rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
 borrowed reads and return one independent owned result. They validate the complete reference
 structure before copying, then rewrite only that unpublished result. The owning caller still
