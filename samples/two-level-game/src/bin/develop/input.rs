@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fs,
     io::{BufRead, Read},
     path::{Path, PathBuf},
@@ -60,11 +61,7 @@ impl Arguments {
                     profile = Some(value.into_string().map_err(|_| "profile must be UTF-8")?);
                 }
                 Some("--placement") if placement.is_none() => {
-                    placement = Some(match value.to_str() {
-                        Some("headless") => DevelopmentPlacement::SourceHeadless,
-                        Some("desktop") => DevelopmentPlacement::SourceDesktop,
-                        _ => return Err("placement must be headless or desktop".into()),
-                    });
+                    placement = Some(parse_placement(&value)?);
                 }
                 _ => return Err("unknown or repeated develop option".into()),
             }
@@ -107,6 +104,11 @@ impl Arguments {
                 DevelopmentPlacement::SourceDesktop => {
                     vec!["development".to_owned(), "desktop".to_owned()]
                 }
+                DevelopmentPlacement::SourceDesktopAudio => vec![
+                    "audio-cpal".to_owned(),
+                    "desktop".to_owned(),
+                    "development".to_owned(),
+                ],
             },
             false,
         )
@@ -140,6 +142,15 @@ impl Arguments {
         )
         .and_then(|request| request.with_target_directory(&self.target_dir))
         .map_err(|error| error.to_string())
+    }
+}
+
+fn parse_placement(value: &OsStr) -> Result<DevelopmentPlacement, String> {
+    match value.to_str() {
+        Some("headless") => Ok(DevelopmentPlacement::SourceHeadless),
+        Some("desktop") => Ok(DevelopmentPlacement::SourceDesktop),
+        Some("audio-desktop") => Ok(DevelopmentPlacement::SourceDesktopAudio),
+        _ => Err("placement must be headless, desktop or audio-desktop".into()),
     }
 }
 
@@ -227,6 +238,8 @@ fn linked(metadata: &fs::Metadata) -> bool {
 pub(super) enum Command {
     Observe {},
     ExecutionStatus {},
+    AudioStatus {},
+    EnableAudio {},
     Pause {},
     Resume {},
     Step {
@@ -250,6 +263,8 @@ impl Command {
         match self {
             Self::Observe {} => "observe",
             Self::ExecutionStatus {} => "execution_status",
+            Self::AudioStatus {} => "audio_status",
+            Self::EnableAudio {} => "enable_audio",
             Self::Pause {} => "pause",
             Self::Resume {} => "resume",
             Self::Step { .. } => "step",
@@ -333,11 +348,30 @@ fn validate_commands(commands: &[SemanticCommand]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{ffi::OsStr, path::Path};
 
     use nara::fs::RelativePath;
 
-    use super::{Arguments, DevelopmentPlacement, inventory, read_command};
+    use super::{Arguments, DevelopmentPlacement, inventory, parse_placement, read_command};
+
+    #[test]
+    fn placements_are_explicit_cli_arguments() {
+        assert_eq!(
+            DevelopmentPlacement::default(),
+            DevelopmentPlacement::SourceHeadless
+        );
+        for (argument, placement) in [
+            ("headless", DevelopmentPlacement::SourceHeadless),
+            ("desktop", DevelopmentPlacement::SourceDesktop),
+            ("audio-desktop", DevelopmentPlacement::SourceDesktopAudio),
+        ] {
+            assert_eq!(parse_placement(OsStr::new(argument)).unwrap(), placement);
+            assert_eq!(placement.argument(), argument);
+        }
+        for invalid in ["", "audio", "source_desktop_audio", "desktop,audio-cpal"] {
+            assert!(parse_placement(OsStr::new(invalid)).is_err());
+        }
+    }
 
     #[test]
     fn cli_builds_only_the_explicit_development_placement() {
@@ -355,6 +389,13 @@ mod tests {
         arguments.placement = DevelopmentPlacement::SourceDesktop;
         let selection = arguments.selection().unwrap();
         assert_eq!(selection.features(), ["desktop", "development"]);
+        assert!(!selection.default_features());
+        arguments.placement = DevelopmentPlacement::SourceDesktopAudio;
+        let selection = arguments.selection().unwrap();
+        assert_eq!(
+            selection.features(),
+            ["audio-cpal", "desktop", "development"]
+        );
         assert!(!selection.default_features());
     }
 
@@ -409,6 +450,33 @@ mod tests {
                 r#""generation":999999"#,
             ] {
                 let invalid = format!(r#"{{"operation":"{operation}",{fact}}}"#);
+                assert!(read_command(&mut invalid.as_bytes()).is_err(), "{invalid}");
+            }
+        }
+    }
+
+    #[test]
+    fn audio_commands_refuse_caller_supplied_audio_authority_or_observations() {
+        for operation in ["audio_status", "enable_audio"] {
+            let valid = format!(r#"{{"operation":"{operation}"}}"#);
+            assert_eq!(
+                read_command(&mut valid.as_bytes())
+                    .unwrap()
+                    .unwrap()
+                    .operation(),
+                operation,
+            );
+            for fact in [
+                r#""generation":999999"#,
+                r#""runtime_generation":1"#,
+                r#""pid":1"#,
+                r#""placement":"source_desktop_audio""#,
+                r#""output_enabled":true"#,
+                r#""physical_complete":true"#,
+                r#""status":{}"#,
+            ] {
+                let invalid = format!(r#"{{"operation":"{operation}",{fact}}}"#);
+                serde_json::from_str::<serde_json::Value>(&invalid).unwrap();
                 assert!(read_command(&mut invalid.as_bytes()).is_err(), "{invalid}");
             }
         }

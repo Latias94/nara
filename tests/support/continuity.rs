@@ -225,6 +225,10 @@ impl Fixture {
         self.request_features(&["desktop", "development"])
     }
 
+    pub fn audio_desktop_request(&self) -> CargoBuildRequest {
+        self.request_features(&["audio-cpal", "desktop", "development"])
+    }
+
     pub fn assert_player_feature_closure(&self, desktop: bool) {
         let features = if desktop {
             "cooked-player,desktop"

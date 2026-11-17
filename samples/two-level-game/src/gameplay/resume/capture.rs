@@ -101,9 +101,10 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 
 /// Captures complete supported game semantics at the Session's completed paused boundary.
 ///
-/// The shipped source/headless recipe is supported. Unknown plugin services, processed/direct
-/// sources, pending commands/travel/tasks, scripted verification and unrepresented time policy
-/// refuse capture, as do material assets or components not represented by `ResumeState`.
+/// The shipped source/headless recipe and explicit game-owned development audio reset policy
+/// are supported. Ordinary audio, unknown plugin services, processed/direct sources, pending
+/// commands/travel/tasks, scripted verification and unrepresented time policy refuse capture,
+/// as do material assets or components not represented by `ResumeState`.
 /// Empty material storage and its installed Schema are supported. This value contains no
 /// World identity or native-service authority.
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
@@ -122,7 +123,8 @@ pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResu
 ///
 /// Native handles, WGPU resources and presentation receipts remain owned by `DesktopRun`; only
 /// the game-owned logical state crosses this boundary. A fresh desktop candidate must reconstruct
-/// those native services before a caller can use this value for restore.
+/// those native services before a caller can use this value for restore. Development audio resets
+/// its voices and effect history with publication disabled; no audio state is reconstructed.
 #[cfg(feature = "desktop")]
 pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;

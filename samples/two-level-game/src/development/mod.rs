@@ -30,8 +30,8 @@ use nara::{
 use crate::resume::{ResumeState, encode_resume};
 use process::{Executable, Process, Store};
 pub use protocol::{
-    ControlServiceObservation, DesktopPresentation, DevelopmentPlacement, ExecutionState,
-    ExecutionStatus, InputActivation,
+    AudioStatus, ControlServiceObservation, DesktopPresentation, DevelopmentPlacement,
+    ExecutionState, ExecutionStatus, InputActivation,
 };
 use protocol::{MAX_STEP_COMMANDS, Observation, SemanticCommand};
 use source::SourceFence;
@@ -119,6 +119,8 @@ pub struct RetirementReport {
     pub terminated: bool,
     /// Last validated child response's diagnostics, independent of native cleanup completion.
     pub control_service: Option<ControlServiceObservation>,
+    /// Final status of this exact child's original audio owner, when explicitly selected.
+    pub audio: Option<AudioStatus>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +204,7 @@ impl DevelopmentHost {
         work_parent: &Path,
         placement: DevelopmentPlacement,
     ) -> Result<Self, DevelopmentError> {
-        if placement == DevelopmentPlacement::SourceDesktop && !cfg!(windows) {
+        if placement.is_desktop() && !cfg!(windows) {
             return Err(DevelopmentError::at(
                 DevelopmentStage::State,
                 "source desktop development is currently qualified only on Windows",
@@ -312,9 +314,57 @@ impl DevelopmentHost {
         self.placement
     }
 
+    /// Observes the current adopted audible child's original device and publication gate.
+    pub fn audio_status(&mut self) -> Result<AudioStatus, DevelopmentError> {
+        self.active_mut()?
+            .process
+            .audio_status()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+    }
+
+    /// Enables only future effects after every original predecessor's audio has physically retired.
+    /// A failed enablement preserves the adopted route and all retained cleanup ownership.
+    pub fn enable_active_audio(&mut self) -> Result<AudioStatus, DevelopmentError> {
+        self.ready_for_audio()?;
+        self.active_mut()?
+            .process
+            .enable_audio()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+    }
+
+    fn ready_for_audio(&self) -> Result<(), DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktopAudio {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "sound publication requires the explicit audible desktop placement",
+            ));
+        }
+        self.ready_for_work()?;
+        if self.reports.iter().any(|report| {
+            report.role == RetirementRole::Predecessor
+                && (!report.native.containment_empty()
+                    || !report.native.readers_stopped()
+                    || !report.native.output_drained()
+                    || !report.audio.is_some_and(|audio| {
+                        !audio.output_enabled
+                            && !audio.admission_open
+                            && audio.physical_complete
+                            && audio.stream_drop_returned
+                            && audio.data_callback_released
+                            && audio.error_callback_released
+                    }))
+        }) {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::Cleanup,
+                "sound publication requires physical original predecessor audio retirement",
+            ));
+        }
+        Ok(())
+    }
+
     /// Observes the adopted desktop child's actual execution state without requiring a capture.
     pub fn execution_status(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
+        if !self.placement.is_desktop() {
             return Err(DevelopmentError::at(
                 DevelopmentStage::State,
                 "continuous execution controls require the explicit desktop placement",
@@ -330,7 +380,7 @@ impl DevelopmentHost {
     /// A predecessor awaiting retirement does not prevent controlling the current active child.
     pub fn pause_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
         self.measure(DevelopmentTimingPhase::Pause, |host| {
-            if host.placement != DevelopmentPlacement::SourceDesktop {
+            if !host.placement.is_desktop() {
                 return Err(DevelopmentError::at(
                     DevelopmentStage::State,
                     "continuous execution controls require the explicit desktop placement",
@@ -347,11 +397,20 @@ impl DevelopmentHost {
     /// Admission refusal preserves the adopted route and all retained cleanup owners.
     pub fn resume_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
         self.measure(DevelopmentTimingPhase::Resume, |host| {
-            if host.placement != DevelopmentPlacement::SourceDesktop {
+            if !host.placement.is_desktop() {
                 return Err(DevelopmentError::at(
                     DevelopmentStage::State,
                     "continuous execution controls require the explicit desktop placement",
                 ));
+            }
+            if host.placement == DevelopmentPlacement::SourceDesktopAudio {
+                host.ready_for_audio()?;
+                if !host.audio_status()?.output_enabled {
+                    return Err(DevelopmentError::at(
+                        DevelopmentStage::State,
+                        "audible Resume requires explicit sound publication enablement",
+                    ));
+                }
             }
             host.active_mut()?
                 .process
@@ -373,11 +432,14 @@ impl DevelopmentHost {
     /// Reveals and activates the already adopted child. A failure does not undo route adoption.
     pub fn activate_active(&mut self) -> Result<ActivationOutcome, DevelopmentError> {
         self.measure(DevelopmentTimingPhase::Activation, |host| {
-            if host.placement != DevelopmentPlacement::SourceDesktop {
+            if !host.placement.is_desktop() {
                 return Err(DevelopmentError::at(
                     DevelopmentStage::State,
                     "native activation requires the explicit desktop placement",
                 ));
+            }
+            if host.placement == DevelopmentPlacement::SourceDesktopAudio {
+                host.enable_active_audio()?;
             }
             let live = host.active_mut()?;
             let (activation, error) = live
@@ -393,7 +455,7 @@ impl DevelopmentHost {
     }
 
     pub fn confirm_active_presentation(&mut self) -> Result<DesktopPresentation, DevelopmentError> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
+        if !self.placement.is_desktop() {
             return Err(DevelopmentError::at(
                 DevelopmentStage::State,
                 "native presentation requires the explicit desktop placement",
@@ -486,7 +548,7 @@ impl DevelopmentHost {
                 DevelopmentError::at(DevelopmentStage::Probe, error.to_string())
             })?;
         }
-        if self.placement == DevelopmentPlacement::SourceDesktop {
+        if self.placement.is_desktop() {
             self.isolate_active_input()?;
         }
         let basis = self.capture()?;
@@ -526,7 +588,7 @@ impl DevelopmentHost {
         let mut probe = self.launch(Arc::clone(&executable))?;
         let qualification = (|| {
             restore_exact(&mut probe.process, &basis, &mut self.timings)?;
-            if self.placement == DevelopmentPlacement::SourceDesktop {
+            if self.placement.is_desktop() {
                 qualify_presentation(&mut probe.process, &basis, &mut self.timings)?;
             }
             for step in probes {
@@ -547,7 +609,7 @@ impl DevelopmentHost {
                             "the candidate did not match the complete expected game state",
                         ));
                     }
-                    if host.placement == DevelopmentPlacement::SourceDesktop {
+                    if host.placement.is_desktop() {
                         qualify_presentation(&mut probe.process, &actual, &mut host.timings)?;
                     }
                     Ok(())
@@ -587,7 +649,7 @@ impl DevelopmentHost {
             self.retire(candidate, RetirementRole::Candidate);
             return Err(error);
         }
-        let presentation = if self.placement == DevelopmentPlacement::SourceDesktop {
+        let presentation = if self.placement.is_desktop() {
             match qualify_presentation(&mut candidate.process, &basis, &mut self.timings) {
                 Ok(presentation) => Some(presentation),
                 Err(error) => {
@@ -626,7 +688,7 @@ impl DevelopmentHost {
         ticket: &PreparedRebuild,
     ) -> Result<AdoptionOutcome, DevelopmentError> {
         self.check_ticket(ticket)?;
-        if self.placement == DevelopmentPlacement::SourceDesktop {
+        if self.placement.is_desktop() {
             self.isolate_active_input()?;
         }
         self.measure(DevelopmentTimingPhase::SourceCheck, |host| {
@@ -655,7 +717,7 @@ impl DevelopmentHost {
                 "the candidate no longer matches its restored capture",
             ));
         }
-        if self.placement == DevelopmentPlacement::SourceDesktop {
+        if self.placement.is_desktop() {
             qualify_presentation(&mut candidate.live.process, &basis, &mut self.timings)?;
         }
         timing::measure(
@@ -709,6 +771,7 @@ impl DevelopmentHost {
                     game_closed: retired.game_closed,
                     terminated: retired.terminated,
                     control_service: retired.control_service,
+                    audio: retired.audio,
                 }),
                 Err(error) => {
                     self.cleanup_error = Some(error);
@@ -950,6 +1013,9 @@ fn eligible_features(features: &[String], placement: DevelopmentPlacement) -> bo
     match placement {
         DevelopmentPlacement::SourceHeadless => features == ["development"],
         DevelopmentPlacement::SourceDesktop => features == ["desktop", "development"],
+        DevelopmentPlacement::SourceDesktopAudio => {
+            features == ["audio-cpal", "desktop", "development"]
+        }
     }
 }
 
@@ -1038,6 +1104,16 @@ fn clean_game_retirement(report: &RetirementReport) -> bool {
         && report.native.containment_empty()
         && report.native.readers_stopped()
         && report.native.output_drained()
+        && report.audio.is_none_or(|audio| {
+            !audio.failed
+                && audio.faults == 0
+                && !audio.output_enabled
+                && audio.physical_complete
+                && audio.stream_drop_returned
+                && audio.data_callback_released
+                && audio.error_callback_released
+                && !audio.admission_open
+        })
 }
 
 #[cfg(test)]
@@ -1053,6 +1129,10 @@ mod selection_tests {
             (
                 DevelopmentPlacement::SourceDesktop,
                 vec!["desktop", "development"],
+            ),
+            (
+                DevelopmentPlacement::SourceDesktopAudio,
+                vec!["audio-cpal", "desktop", "development"],
             ),
         ] {
             let selection = |target, features: Vec<&str>, defaults| {
@@ -1078,6 +1158,9 @@ mod selection_tests {
                 placement,
             ));
             for extra in ["cook", "cooked-player", "cost-measurement", "audio-cpal"] {
+                if features.contains(&extra) {
+                    continue;
+                }
                 let mut widened = features.clone();
                 widened.push(extra);
                 let widened = selection("continuity", widened, false);

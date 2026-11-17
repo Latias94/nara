@@ -37,8 +37,8 @@ use two_level_game::{
 };
 
 use super::protocol::{
-    Command, DesktopPresentation, ExecutionState, ExecutionStatus, InputActivation, Reply,
-    SemanticCommand,
+    AudioStatus, Command, DesktopPresentation, ExecutionState, ExecutionStatus, InputActivation,
+    Reply, SemanticCommand,
 };
 use super::{POLL_INTERVAL, check_deadline, command_draft, observation, observed_snapshot};
 
@@ -56,10 +56,17 @@ pub(super) struct DesktopGame {
     execution_failed: bool,
     closing: bool,
     presentations: Rc<RefCell<Presentations>>,
+    audible: bool,
+    #[cfg(all(windows, feature = "audio-cpal"))]
+    audio: Option<two_level_game::audio::AudioWitness>,
 }
 
 impl DesktopGame {
-    pub(super) fn new(root: DirectoryCapability) -> Result<Self, String> {
+    pub(super) fn new(root: DirectoryCapability, audible: bool) -> Result<Self, String> {
+        #[cfg(not(all(windows, feature = "audio-cpal")))]
+        if audible {
+            return Err("audible development requires Windows and the audio-cpal feature".into());
+        }
         let presentations = Rc::new(RefCell::new(Presentations::default()));
         let observed = Rc::clone(&presentations);
         let options = DesktopRunOptions::new()
@@ -82,7 +89,17 @@ impl DesktopGame {
                 }
                 DesktopPresentationControl::Continue
             });
-        let recipe = two_level_game::product_recipe()
+        let recipe = two_level_game::product_recipe();
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        let recipe = if audible {
+            two_level_game::audio::development_recipe(
+                two_level_game::RunOptions::default(),
+                two_level_game::audio::AudioOptions::default(),
+            )
+        } else {
+            recipe
+        };
+        let recipe = recipe
             .add_plugin::<DevelopmentPresentationPlugin>()
             .map_err(|error| format!("compose source-desktop presentation witness: {error}"))?;
         Ok(Self {
@@ -97,11 +114,31 @@ impl DesktopGame {
             execution_failed: false,
             closing: false,
             presentations,
+            audible,
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            audio: None,
         })
     }
 
     pub(super) fn initialize(&mut self, deadline: Instant) -> Result<(), String> {
         self.wait_quiescent(deadline)?;
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        if self.audible {
+            self.audio = self
+                .run
+                .capture(two_level_game::audio::witness)
+                .map_err(|error| format!("original audio owner is unavailable: {error}"))?;
+            let status = self.audio_status()?;
+            if !status.reset_on_rebuild
+                || status.output_enabled
+                || status.accepted != 0
+                || status.failed
+            {
+                return Err(
+                    "audible candidate did not start with sound publication disabled".into(),
+                );
+            }
+        }
         let snapshot = self.snapshot()?;
         if snapshot.tick != 0 || snapshot.restoring || snapshot.phase != GamePhase::Running {
             return Err("desktop startup did not reach a fresh initialized paused game".into());
@@ -228,6 +265,9 @@ impl DesktopGame {
         }
         if control == RuntimeControl::Resume {
             self.wait_quiescent(deadline)?;
+            if self.audible && !self.audio_status()?.output_enabled {
+                return Err("audible Resume requires explicit sound publication enablement".into());
+            }
             if self.run.input_activation() != Some(WinitInputActivation::Active) {
                 return Err("Resume requires explicit original native input activation".into());
             }
@@ -287,6 +327,51 @@ impl DesktopGame {
     fn canonical(&self) -> Result<ResumeState, String> {
         capture_desktop_resume(&self.run)
             .map_err(|error| format!("desktop canonical capture was refused: {error}"))
+    }
+
+    fn audio_status(&self) -> Result<AudioStatus, String> {
+        if !self.audible {
+            return Err("this desktop placement has no resettable audio owner".into());
+        }
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        {
+            let snapshot = self
+                .audio
+                .as_ref()
+                .ok_or("original audio owner is unavailable")?
+                .snapshot();
+            Ok(AudioStatus {
+                runtime_generation: snapshot.runtime,
+                reset_on_rebuild: snapshot.reset_on_rebuild,
+                output_enabled: snapshot.output_enabled,
+                suppressed_effects: snapshot.suppressed_effects,
+                accepted: snapshot.accepted,
+                started: snapshot.started,
+                completed: snapshot.completed,
+                cancelled: snapshot.cancelled,
+                faults: snapshot.faults,
+                failed: snapshot.error.is_some() || snapshot.faults != 0,
+                callbacks: snapshot.callbacks,
+                output_frames: snapshot.output_frames,
+                admission_open: snapshot.admission_open,
+                physical_complete: snapshot.physical_complete,
+                stream_drop_returned: snapshot.stream_drop_returned,
+                data_callback_released: snapshot.data_callback_released,
+                error_callback_released: snapshot.error_callback_released,
+            })
+        }
+        #[cfg(not(all(windows, feature = "audio-cpal")))]
+        Err("audible development is unavailable in this build".into())
+    }
+
+    fn enable_audio(&mut self) -> Result<AudioStatus, String> {
+        self.require_paused()?;
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        self.audio
+            .as_ref()
+            .ok_or("original audio owner is unavailable")?
+            .enable_development_output()?;
+        self.audio_status()
     }
 
     pub(super) fn observed(&self) -> Result<Reply, String> {
@@ -359,6 +444,9 @@ impl DesktopGame {
             return Err("the original desktop child retains only physical cleanup".into());
         }
         match &command {
+            Command::AudioStatus => {
+                return self.audio_status().map(|status| Reply::Audio { status });
+            }
             Command::ExecutionStatus => {
                 check_deadline(deadline)?;
                 return self
@@ -409,6 +497,8 @@ impl DesktopGame {
 
     fn execute_inner(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
         match command {
+            Command::AudioStatus => self.audio_status().map(|status| Reply::Audio { status }),
+            Command::EnableAudio => self.enable_audio().map(|status| Reply::Audio { status }),
             Command::ExecutionStatus | Command::Pause | Command::Resume => {
                 Err("execution controls must retain their managed result".into())
             }
@@ -663,8 +753,8 @@ impl DesktopGame {
         }
         loop {
             match self.run.progress() {
-                DesktopRunProgress::Completed(_) => return Ok(Reply::Closed { failed: false }),
-                DesktopRunProgress::Failed => return Ok(Reply::Closed { failed: true }),
+                DesktopRunProgress::Completed(_) => return self.closed_reply(false),
+                DesktopRunProgress::Failed => return self.closed_reply(true),
                 DesktopRunProgress::CleanupIncomplete => return Ok(Reply::Closing),
                 _ => {}
             }
@@ -673,6 +763,18 @@ impl DesktopGame {
             }
             let wait = POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now()));
             self.run.poll(wait);
+        }
+    }
+
+    fn closed_reply(&self, failed: bool) -> Result<Reply, String> {
+        if self.audible {
+            let status = self.audio_status()?;
+            Ok(Reply::AudioClosed {
+                failed: failed || status.failed || !status.physical_complete,
+                status,
+            })
+        } else {
+            Ok(Reply::Closed { failed })
         }
     }
 }

@@ -538,7 +538,7 @@ Run the production desktop Host's actual body/private-structure edit qualificati
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-This game-owned development protocol is version five and requires explicit placement in every
+This game-owned development protocol is version six and requires explicit placement in every
 reply. Original bounded envelope decoding and version checks refuse old children. The resume format remains version
 two; progress saves and the supervised Editor Play protocol retain their separate formats.
 
@@ -579,6 +579,52 @@ keys it does not own. Its bounded native input guard releases
 an injected hold during failure cleanup. Actual results and limits belong to the
 [continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
 
+## Audible Development And Effect Reset
+
+The explicit `SourceDesktopAudio` placement joins the existing source-desktop development Host
+to the actual Windows CPAL game. Its child selects exactly `audio-cpal,desktop,development` with
+defaults disabled. Compiling those features alone does not enable sound in a silent placement.
+Run the ordinary CLI with explicit absolute paths:
+
+```text
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --bin develop -- --project-root ABS_GAME_ROOT --work-parent ABS_EXISTING_PARENT --target-dir ABS_ENGINE_TARGET --target x86_64-pc-windows-msvc --profile dev --placement audio-desktop
+```
+
+Every audible development process starts with an empty mixer and gameplay publication disabled.
+Step still changes normal game state; pickup/travel sounds while disabled are discarded, never
+queued for enablement. Probe and prepared candidate processes remain disabled. A fresh adopter
+restores the complete canonical game state and original presentation, without restoring an audio
+cursor or replaying old events. The recipe fingerprint records that reset policy. Ordinary
+`audio::recipe` continues refusing exact reconstruction.
+
+`{"operation":"audio_status"}` observes only the current adopted child's reset/publication and
+device facts. `{"operation":"enable_audio"}` enables future gameplay effects explicitly.
+`activate_input` also enables sound before requesting original native activation. In this
+placement, enablement, activation and Resume refuse while original predecessor audio/process
+physical retirement remains unfinished or unconfirmed. Adoption still reports committed plus Pending;
+the adopted paused game can Step/capture during that wait. Drive `retry_cleanup`, then enable or
+activate and Resume. A postcommit cleanup, device or focus error does not restore an old route.
+Completed cleanup errors remain in the retirement report. An unrelated failed game shutdown
+cannot block a new healthy audio output after the original stream, callbacks and contained
+process have physically retired; error severity and physical completion remain separate facts.
+
+Ordinary Pause preserves the device-clock policy: an already started short effect can finish.
+Samples already delivered to the device cannot be rolled back. Preparation does not suppress
+the incumbent's already enabled effects; the prospective processes cannot publish new ones.
+Final retirement reports retain the exact child's audio snapshot alongside the original native
+process receipt. Neither counters nor audio flags replace stream/callback/Runtime/process cleanup.
+Production development leaves callback PCM capture disabled. The existing native audio controls
+use finite capture for sample comparison; this does not establish human audibility or hardware
+output latency.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,audio-cpal --test audio_development --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The [owning unit](../../docs/plans/2026-11-03-joint-motion-execution-plan.md#audible-development-with-explicit-effect-reset)
+records actual execution results and limits. This game-owned reset policy does not admit arbitrary
+native service restoration or change the supervised Editor Play protocol.
+
 ## Physical Task Return Before Capture
 
 Canonical capture also requires original admitted tasks to have physically returned.
@@ -587,7 +633,7 @@ Drop is still owned by an executor. The game uses `TaskPools::return_state()` an
 pending return or cleanup failure without changing game state. Child startup/capture/restore
 waits preserve their original deadlines. A failed task's eventual physical Close remains a
 failure; it does not become a successful capture or clean shutdown. Resume format v2 and
-the game-owned protocol v5 retain their existing field definitions.
+the game-owned protocol v6 retain their existing field definitions outside the explicit audio extension.
 
 ## Native Request Notifications
 
@@ -602,7 +648,7 @@ request-budget checks before the next receive; responding does not require an ex
 Parent response polling remains 10 ms. This is not a zero-wakeup or hard real-time contract;
 the Windows vendor watcher retains its 100 ms internal wait and backend reporting limitations.
 
-Protocol v5 requires `control_service` diagnostics in every response. The public Host exposes the
+Protocol v6 requires `control_service` diagnostics in every response. The public Host exposes the
 last validated response from the active child through `control_service()`, and the CLI includes
 the same field. Candidate/predecessor observations do not replace active observations. Counters
 are outside canonical state and never prove authority, successful commands or native cleanup.

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-11-16
+**Last Revised**: 2026-11-18
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
@@ -472,6 +472,25 @@ refuse continuous execution before admitting mutation. Pause does not discard de
 manufacture an extra simulation tick to make capture pass. A failure after control admission
 retains its original outcome and cleanup owner; a pre-admission refusal remains recoverable.
 These game-owned controls do not extend the separate supervised Editor Play launch protocol.
+
+The audible development placement explicitly selects effect reset rather than native audio-state
+restoration. Its fingerprinted game recipe starts sound publication disabled in every child.
+Suppressed gameplay effects are discarded, including in a probe; they are not queued for later
+activation. A fresh adopter restores canonical gameplay with a new empty mixer. Ordinary audible
+recipes and unknown services remain ineligible for exact reconstruction. Existing device-clock
+one-shots may finish while the incumbent is paused; previously delivered samples are irreversible.
+
+The original Host enables sound only for its current adopted process. For this placement,
+unfinished or unconfirmed predecessor audio retirement blocks output enablement, native activation
+and Resume after route commit. Candidate Step/capture/presentation remain possible with output
+disabled. Original stream/callback and contained-process physical retirement precede explicit
+output enablement, which permits only new gameplay effects. Completed cleanup errors remain
+observable; an unrelated failed game shutdown does not block a new healthy output after those
+owners physically retire. This preserves the existing distinction between error and completion.
+Audio status is diagnostic; it does not replace original stream,
+callback, Runtime or contained-process cleanup receipts. This policy is owned by the
+[audible development unit](../../plans/2026-11-03-joint-motion-execution-plan.md#audible-development-with-explicit-effect-reset),
+not a universal service snapshot, reversible playback or an extension of supervised Editor Play.
 
 The game-owned source-desktop child may explicitly select original native Wait cadence for
 its known paused inventory and Poll for continuous play. Native events, semantic operations,

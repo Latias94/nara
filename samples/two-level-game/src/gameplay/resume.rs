@@ -71,7 +71,14 @@ pub(super) fn record_configuration(app: &mut App) -> Result<(), PluginError> {
     let configuration = app.configuration_fingerprint().as_bytes();
     let unsupported = app
         .installed_plugins()
-        .filter(|declaration| !supported_service(declaration.id.as_str()))
+        .filter(|declaration| {
+            let supported = supported_service(declaration.id.as_str());
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            let supported = supported
+                || (declaration.id == crate::audio::AUDIO_PLUGIN_ID
+                    && crate::audio::development_reset_installed(app.world()));
+            !supported
+        })
         .map(|declaration| declaration.id.as_str().to_owned())
         .collect();
     let mut control = app.world_mut()?.resource_mut::<ResumeControl>();

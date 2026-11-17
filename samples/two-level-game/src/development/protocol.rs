@@ -9,7 +9,7 @@
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
@@ -23,6 +23,7 @@ pub enum DevelopmentPlacement {
     #[default]
     SourceHeadless,
     SourceDesktop,
+    SourceDesktopAudio,
 }
 
 impl DevelopmentPlacement {
@@ -30,7 +31,12 @@ impl DevelopmentPlacement {
         match self {
             Self::SourceHeadless => "headless",
             Self::SourceDesktop => "desktop",
+            Self::SourceDesktopAudio => "audio-desktop",
         }
+    }
+
+    pub const fn is_desktop(self) -> bool {
+        matches!(self, Self::SourceDesktop | Self::SourceDesktopAudio)
     }
 }
 
@@ -60,6 +66,32 @@ pub struct ExecutionStatus {
     pub state: ExecutionState,
     pub input_activation: InputActivation,
     pub observation: Observation,
+}
+
+/// Original child audio diagnostics, without PCM, native handles or control authority.
+///
+/// Runtime generations are process-local observations. Physical audio flags do not replace
+/// the original native process cleanup receipt or grant permission to enable output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioStatus {
+    pub runtime_generation: u64,
+    pub reset_on_rebuild: bool,
+    pub output_enabled: bool,
+    pub suppressed_effects: u64,
+    pub accepted: u64,
+    pub started: u64,
+    pub completed: u64,
+    pub cancelled: u64,
+    pub faults: u64,
+    pub failed: bool,
+    pub callbacks: u64,
+    pub output_frames: u64,
+    pub admission_open: bool,
+    pub physical_complete: bool,
+    pub stream_drop_returned: bool,
+    pub data_callback_released: bool,
+    pub error_callback_released: bool,
 }
 
 /// Original presentation joined to the exact sealed canonical game state.
@@ -93,6 +125,8 @@ pub struct Request {
 pub enum Command {
     Observe,
     ExecutionStatus,
+    AudioStatus,
+    EnableAudio,
     Pause,
     Resume,
     Step { commands: Vec<SemanticCommand> },
@@ -152,6 +186,9 @@ pub enum Reply {
     Execution {
         status: ExecutionStatus,
     },
+    Audio {
+        status: AudioStatus,
+    },
     Observed {
         observation: Observation,
     },
@@ -168,6 +205,10 @@ pub enum Reply {
     Closing,
     Closed {
         failed: bool,
+    },
+    AudioClosed {
+        failed: bool,
+        status: AudioStatus,
     },
 }
 
@@ -189,4 +230,87 @@ pub struct Observation {
     pub phase: String,
     pub restoring: bool,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn game_audio_placement_and_commands_have_explicit_wire_values() {
+        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(
+            DevelopmentPlacement::default(),
+            DevelopmentPlacement::SourceHeadless
+        );
+        assert!(!DevelopmentPlacement::SourceHeadless.is_desktop());
+        assert!(DevelopmentPlacement::SourceDesktop.is_desktop());
+        assert!(DevelopmentPlacement::SourceDesktopAudio.is_desktop());
+        assert_eq!(
+            DevelopmentPlacement::SourceDesktopAudio.argument(),
+            "audio-desktop"
+        );
+        assert_eq!(
+            serde_json::to_value(DevelopmentPlacement::SourceDesktopAudio).unwrap(),
+            json!("source_desktop_audio"),
+        );
+        for (command, operation) in [
+            (Command::AudioStatus, "audio_status"),
+            (Command::EnableAudio, "enable_audio"),
+        ] {
+            let wire = json!({ "operation": operation });
+            assert_eq!(serde_json::to_value(&command).unwrap(), wire);
+            assert_eq!(serde_json::from_value::<Command>(wire).unwrap(), command);
+        }
+    }
+
+    #[test]
+    fn audio_diagnostics_preserve_game_failure_without_native_faults() {
+        let wire = json!({
+            "runtime_generation": 1,
+            "reset_on_rebuild": true,
+            "output_enabled": false,
+            "suppressed_effects": 3,
+            "accepted": 0,
+            "started": 0,
+            "completed": 0,
+            "cancelled": 0,
+            "faults": 0,
+            "failed": true,
+            "callbacks": 2,
+            "output_frames": 1024,
+            "admission_open": false,
+            "physical_complete": true,
+            "stream_drop_returned": true,
+            "data_callback_released": true,
+            "error_callback_released": true,
+        });
+        let status: AudioStatus = serde_json::from_value(wire.clone()).unwrap();
+        let copied = status;
+        assert_eq!(copied, status);
+        assert_eq!(serde_json::to_value(status).unwrap(), wire);
+        assert!(status.failed);
+        assert_eq!(status.faults, 0);
+        for reply in [
+            Reply::Audio { status },
+            Reply::AudioClosed {
+                failed: true,
+                status,
+            },
+            Reply::Closed { failed: false },
+        ] {
+            let encoded = serde_json::to_vec(&reply).unwrap();
+            assert_eq!(serde_json::from_slice::<Reply>(&encoded).unwrap(), reply);
+        }
+        let mut missing_failure = wire.clone();
+        missing_failure.as_object_mut().unwrap().remove("failed");
+        assert!(serde_json::from_value::<AudioStatus>(missing_failure).is_err());
+        for unknown in ["samples", "pcm", "error", "native_handle"] {
+            let mut invalid = wire.clone();
+            invalid[unknown] = json!([]);
+            assert!(serde_json::from_value::<AudioStatus>(invalid).is_err());
+        }
+    }
 }

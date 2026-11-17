@@ -94,6 +94,9 @@ fn fixture() -> (AudioSnapshot, Vec<f32>, BTreeMap<u64, LevelKey>) {
     (
         AudioSnapshot {
             runtime: 7,
+            reset_on_rebuild: false,
+            output_enabled: false,
+            suppressed_effects: 0,
             desired_instance: 6,
             applied_instance: 6,
             play_admitted: true,

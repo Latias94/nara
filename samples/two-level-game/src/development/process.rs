@@ -33,10 +33,10 @@ use nara::{
 use crate::resume::ResumeState;
 
 use super::protocol::{
-    Command, ControlServiceObservation, DesktopPresentation, DevelopmentPlacement, ExecutionState,
-    ExecutionStatus, InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS,
-    Observation, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response,
-    SemanticCommand,
+    AudioStatus, Command, ControlServiceObservation, DesktopPresentation, DevelopmentPlacement,
+    ExecutionState, ExecutionStatus, InputActivation, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES,
+    MAX_STEP_COMMANDS, Observation, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request,
+    Response, SemanticCommand,
 };
 use super::timing::{self, DevelopmentTimingPhase, DevelopmentTimingSnapshot};
 
@@ -467,6 +467,8 @@ pub(super) struct Retirement {
     pub game_closed: bool,
     pub terminated: bool,
     pub control_service: Option<ControlServiceObservation>,
+    /// Last validated audio reply, independently of native process cleanup completion.
+    pub audio: Option<AudioStatus>,
 }
 
 pub(super) struct Process {
@@ -479,8 +481,10 @@ pub(super) struct Process {
     _control_lease: nara::fs::DirectoryNamespaceLease,
     session: String,
     generation: String,
+    runtime_generation: u64,
     next_request: u64,
     control_service: Option<ControlServiceObservation>,
+    audio: Option<AudioStatus>,
     fault: Option<String>,
     closing: bool,
     close_request: Option<u64>,
@@ -514,7 +518,7 @@ impl Process {
             DevelopmentTimingPhase::ChildNamespacePreparation,
             |_| -> Result<PreparedLaunch, StartFailure> {
                 #[cfg(not(windows))]
-                if placement == DevelopmentPlacement::SourceDesktop {
+                if placement.is_desktop() {
                     return Err(
                         "source desktop development processes are supported only on Windows"
                             .to_owned()
@@ -611,8 +615,10 @@ impl Process {
             _control_lease: prepared.control_lease,
             session: prepared.session,
             generation: prepared.generation,
+            runtime_generation: 0,
             next_request: 1,
             control_service: None,
+            audio: None,
             fault: None,
             closing: false,
             close_request: None,
@@ -621,11 +627,22 @@ impl Process {
             cleanup_error: None,
             retired: None,
         };
-        let startup = timing::measure(timings, DevelopmentTimingPhase::ChildReadyWait, |_| {
-            process
-                .wait_response(READY_FILE, 0, Instant::now() + START_TIMEOUT)
-                .and_then(|response| commit_ready_response(&mut process.control_service, response))
-        });
+        let startup: Result<(), String> =
+            timing::measure(timings, DevelopmentTimingPhase::ChildReadyWait, |_| {
+                let deadline = Instant::now() + START_TIMEOUT;
+                let response = process.wait_response(READY_FILE, 0, deadline)?;
+                process.runtime_generation =
+                    commit_ready_response(&mut process.control_service, response)?;
+                if placement == DevelopmentPlacement::SourceDesktopAudio {
+                    let Reply::Audio { status } =
+                        process.request(Command::AudioStatus, deadline)?
+                    else {
+                        return Err("audio startup returned an unexpected reply".into());
+                    };
+                    validate_initial_audio(status)?;
+                }
+                Ok(())
+            });
         if let Err(message) = startup {
             process.fence(&message);
             return Err(StartFailure {
@@ -668,8 +685,28 @@ impl Process {
         self.execution(Command::Resume)
     }
 
+    pub(super) fn audio_status(&mut self) -> Result<AudioStatus, String> {
+        self.audio(Command::AudioStatus)
+    }
+
+    pub(super) fn enable_audio(&mut self) -> Result<AudioStatus, String> {
+        self.audio(Command::EnableAudio)
+    }
+
+    fn audio(&mut self, command: Command) -> Result<AudioStatus, String> {
+        if self.placement != DevelopmentPlacement::SourceDesktopAudio {
+            return Err("audio controls require the explicit audio-desktop placement".into());
+        }
+        match self.request(command, Instant::now() + REQUEST_TIMEOUT)? {
+            Reply::Audio { status } => Ok(status),
+            reply => Err(self.protocol_fault(format!(
+                "audio control returned an unexpected reply: {reply:?}"
+            ))),
+        }
+    }
+
     fn execution(&mut self, command: Command) -> Result<ExecutionStatus, String> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
+        if !self.placement.is_desktop() {
             return Err(
                 "continuous execution controls require the explicit desktop placement".into(),
             );
@@ -849,7 +886,14 @@ impl Process {
             packet.request,
             deadline,
         )?;
-        commit_exchange_response(&mut self.control_service, &packet.command, &response)?;
+        commit_exchange_response(
+            &mut self.control_service,
+            &mut self.audio,
+            self.placement,
+            self.runtime_generation,
+            &packet.command,
+            &response,
+        )?;
         Ok(response)
     }
 
@@ -1010,6 +1054,9 @@ impl Process {
                     ));
                 }
                 Ok(Reply::Closed { failed }) => self.close_result = Some(Ok(failed)),
+                Ok(Reply::AudioClosed { failed, status }) => {
+                    self.close_result = Some(Ok(failed || !clean_audio_close(status)));
+                }
                 Ok(reply) => {
                     self.close_result = Some(Err(
                         self.protocol_fault(format!("unexpected Close reply: {reply:?}"))
@@ -1076,13 +1123,14 @@ impl Process {
                 game_closed: matches!(self.close_result, Some(Ok(false))),
                 terminated: self.terminated || native.force_killed(),
                 control_service: self.control_service,
+                audio: self.audio,
             });
         }
     }
 
     pub(super) fn diagnostics(&self) -> String {
         let mut text = format!(
-            "bounded diagnostic tail (records<={MAX_LOG_RECORDS}, bytes<={MAX_LOG_BYTES}): {:?}; placement={:?}; output_loss={}; native_state={:?}; cleanup_receipt={:?}; protocol_fault={:?}; closing={}; close_request={:?}; close_result={:?}; fallback_termination_requested={}; cleanup_error={:?}",
+            "bounded diagnostic tail (records<={MAX_LOG_RECORDS}, bytes<={MAX_LOG_BYTES}): {:?}; placement={:?}; output_loss={}; native_state={:?}; cleanup_receipt={:?}; protocol_fault={:?}; closing={}; close_request={:?}; close_result={:?}; audio={:?}; fallback_termination_requested={}; cleanup_error={:?}",
             self.native.logs().stats(),
             self.placement,
             self.native.output_loss_observed(),
@@ -1092,6 +1140,7 @@ impl Process {
             self.closing,
             self.close_request,
             self.close_result,
+            self.audio,
             self.terminated,
             self.cleanup_error,
         );
@@ -1110,7 +1159,7 @@ impl Process {
 fn commit_ready_response(
     cached: &mut Option<ControlServiceObservation>,
     response: Response,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     match response.result {
         Ok(Reply::Observed { observation })
             if observation.phase == "running"
@@ -1122,7 +1171,7 @@ fn commit_ready_response(
                 && observation.runtime_generation != 0 =>
         {
             *cached = Some(response.control_service);
-            Ok(())
+            Ok(observation.runtime_generation)
         }
         other => Err(format!(
             "bootstrap did not observe a fresh initialized paused game: {other:?}"
@@ -1132,18 +1181,55 @@ fn commit_ready_response(
 
 fn commit_exchange_response(
     cached: &mut Option<ControlServiceObservation>,
+    audio: &mut Option<AudioStatus>,
+    placement: DevelopmentPlacement,
+    runtime_generation: u64,
     command: &Command,
     response: &Response,
 ) -> Result<(), String> {
     if let Ok(reply) = &response.result {
-        validate_exchange_reply(command, reply)?;
+        validate_exchange_reply(placement, runtime_generation, command, reply)?;
+        if let Reply::Audio { status } | Reply::AudioClosed { status, .. } = reply {
+            *audio = Some(*status);
+        }
     }
     *cached = Some(response.control_service);
     Ok(())
 }
 
-fn validate_exchange_reply(command: &Command, reply: &Reply) -> Result<(), String> {
+fn validate_exchange_reply(
+    placement: DevelopmentPlacement,
+    runtime_generation: u64,
+    command: &Command,
+    reply: &Reply,
+) -> Result<(), String> {
     match (command, reply) {
+        (Command::AudioStatus | Command::EnableAudio, Reply::Audio { status }) => {
+            validate_audio_status(placement, runtime_generation, status)?;
+            if matches!(command, Command::EnableAudio)
+                && (!status.output_enabled
+                    || !status.admission_open
+                    || status.physical_complete
+                    || status.stream_drop_returned
+                    || status.data_callback_released
+                    || status.error_callback_released
+                    || status.faults != 0
+                    || status.failed)
+            {
+                return Err(format!(
+                    "audio enablement did not observe a healthy open original output: {status:?}"
+                ));
+            }
+            Ok(())
+        }
+        (Command::Close, Reply::AudioClosed { status, .. }) => {
+            validate_audio_status(placement, runtime_generation, status)
+        }
+        (Command::Close, Reply::Closed { .. })
+            if placement != DevelopmentPlacement::SourceDesktopAudio =>
+        {
+            Ok(())
+        }
         (Command::Pause | Command::Resume, Reply::Execution { status }) => {
             let expected = if matches!(command, Command::Pause) {
                 ExecutionState::Paused
@@ -1172,9 +1258,56 @@ fn validate_exchange_reply(command: &Command, reply: &Reply) -> Result<(), Strin
         | (Command::ExecutionStatus, Reply::Execution { .. })
         | (Command::ConfirmPresentation, Reply::Presented { .. })
         | (Command::ActivateInput, Reply::Activated { .. })
-        | (Command::Close, Reply::Closing | Reply::Closed { .. }) => Ok(()),
+        | (Command::Close, Reply::Closing) => Ok(()),
         _ => Err(format!("unexpected game reply for {command:?}: {reply:?}")),
     }
+}
+
+fn validate_audio_status(
+    placement: DevelopmentPlacement,
+    runtime_generation: u64,
+    status: &AudioStatus,
+) -> Result<(), String> {
+    if placement != DevelopmentPlacement::SourceDesktopAudio
+        || runtime_generation == 0
+        || status.runtime_generation != runtime_generation
+        || !status.reset_on_rebuild
+    {
+        return Err(format!(
+            "audio status does not match the original audio-desktop Runtime and reset policy: {status:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn clean_audio_close(status: AudioStatus) -> bool {
+    !status.failed
+        && status.faults == 0
+        && !status.output_enabled
+        && !status.admission_open
+        && status.physical_complete
+        && status.stream_drop_returned
+        && status.data_callback_released
+        && status.error_callback_released
+}
+
+fn validate_initial_audio(status: AudioStatus) -> Result<(), String> {
+    if !status.reset_on_rebuild
+        || status.output_enabled
+        || status.accepted != 0
+        || status.faults != 0
+        || status.failed
+        || !status.admission_open
+        || status.physical_complete
+        || status.stream_drop_returned
+        || status.data_callback_released
+        || status.error_callback_released
+    {
+        return Err(format!(
+            "audio startup did not observe a healthy original output with publication disabled and no accepted effects: {status:?}"
+        ));
+    }
+    Ok(())
 }
 
 fn create_private_directory(path: &Path) -> Result<(), String> {

@@ -1,7 +1,7 @@
 //! Caller-driven source development for the Two-Level Game's explicit execution placement.
 //!
 //! Usage: develop --project-root ABS --work-parent ABS --target-dir ABS --target TRIPLE
-//!                [--profile dev] [--placement headless|desktop]
+//!                [--profile dev] [--placement headless|desktop|audio-desktop]
 //! Supplying this project authorizes execution of its trusted Rust and Cargo build inputs.
 //! stdout contains one ready record followed by newline-delimited JSON command results.
 //! At most 128 commands are accepted. Lifetime checks run between commands and after stdin reads;
@@ -9,6 +9,8 @@
 //! Desktop execution_status, pause and resume commands use the original child's execution owner.
 //! The child pumps independently while stdin is blocked. Commands never implicitly pause or resume;
 //! a successful execution result can carry a separate capture_error when paused capture is unavailable.
+//! The audio-desktop placement starts with sound publication disabled. audio_status observes the
+//! original output; enable_audio enables future effects through the adopted Host's retirement gate.
 
 #[path = "develop/input.rs"]
 mod input;
@@ -256,6 +258,18 @@ fn execute(
                 .map_err(|error| output::development_error(&error, None))?;
             Ok(with_capture(host, json!({ "execution_status": status })))
         }
+        Command::AudioStatus {} => {
+            let status = host
+                .audio_status()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(json!({ "audio_status": output::audio_status(Some(status)) }))
+        }
+        Command::EnableAudio {} => {
+            let status = host
+                .enable_active_audio()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(json!({ "audio_status": output::audio_status(Some(status)) }))
+        }
         Command::Pause {} => {
             let status = host
                 .pause_active()
@@ -426,7 +440,17 @@ fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> Exi
                     && !report.native.force_killed()
                     && report.native.containment_empty()
                     && report.native.readers_stopped()
-                    && report.native.output_drained(),
+                    && report.native.output_drained()
+                    && report.audio.is_none_or(|status| {
+                        !status.failed
+                            && status.faults == 0
+                            && !status.output_enabled
+                            && !status.admission_open
+                            && status.physical_complete
+                            && status.stream_drop_returned
+                            && status.data_callback_released
+                            && status.error_callback_released
+                    }),
             )
         }),
     );

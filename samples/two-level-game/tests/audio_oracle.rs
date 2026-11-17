@@ -58,6 +58,9 @@ fn fixture() -> (
     output.extend([0.0; 4]);
     let snapshot = AudioSnapshot {
         runtime: 7,
+        reset_on_rebuild: false,
+        output_enabled: false,
+        suppressed_effects: 0,
         desired_instance: 3,
         applied_instance: 3,
         play_admitted: true,

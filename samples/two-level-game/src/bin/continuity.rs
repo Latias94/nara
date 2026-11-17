@@ -1,7 +1,7 @@
 //! Game-owned finite source consumer for the actual Rust rebuild/restore Host.
 //!
 //! Usage: continuity --project-root ABS --control-dir ABS --session STRING --generation STRING
-//!                   [--placement headless|desktop]
+//!                   [--placement headless|desktop|audio-desktop]
 //! The Host creates a PRIVATE control directory under its temporary root and owns Child
 //! wait/kill. stdout, stderr, stdin and process-local Runtime generations grant no authority.
 
@@ -126,9 +126,14 @@ fn run() -> Result<(), String> {
             execution_failed: false,
         }),
         #[cfg(feature = "desktop")]
-        DevelopmentPlacement::SourceDesktop => ChildGame::Desktop(desktop::DesktopGame::new(root)?),
+        DevelopmentPlacement::SourceDesktop | DevelopmentPlacement::SourceDesktopAudio => {
+            ChildGame::Desktop(desktop::DesktopGame::new(
+                root,
+                arguments.placement == DevelopmentPlacement::SourceDesktopAudio,
+            )?)
+        }
         #[cfg(not(feature = "desktop"))]
-        DevelopmentPlacement::SourceDesktop => {
+        DevelopmentPlacement::SourceDesktop | DevelopmentPlacement::SourceDesktopAudio => {
             return Err("source-desktop continuity requires the desktop feature".into());
         }
     };
@@ -169,10 +174,10 @@ fn run() -> Result<(), String> {
         ));
     }
     match cleanup {
-        Ok(Reply::Closed { failed: false }) => result,
-        Ok(Reply::Closed { failed: true }) => Err(format!(
-            "{result:?}; original game owner closed with failure"
-        )),
+        Ok(Reply::Closed { failed: false } | Reply::AudioClosed { failed: false, .. }) => result,
+        Ok(Reply::Closed { failed: true } | Reply::AudioClosed { failed: true, .. }) => Err(
+            format!("{result:?}; original game owner closed with failure"),
+        ),
         cleanup => Err(format!(
             "{result:?}; physical close did not report completion: {cleanup:?}"
         )),
@@ -190,7 +195,9 @@ fn serve(
     watch.start(&arguments.control_dir)?;
     let startup_budget = match arguments.placement {
         DevelopmentPlacement::SourceHeadless => OPERATION_TIMEOUT,
-        DevelopmentPlacement::SourceDesktop => Duration::from_secs(60),
+        DevelopmentPlacement::SourceDesktop | DevelopmentPlacement::SourceDesktopAudio => {
+            Duration::from_secs(60)
+        }
     };
     game.initialize(Instant::now() + startup_budget)?;
     game.bind_request_watch(watch)?;
@@ -252,7 +259,10 @@ fn serve(
                 let joined = close_watch(watch, deadline);
                 match (result, joined) {
                     (Ok(Reply::Closed { failed }), Ok(true)) => Ok(Reply::Closed { failed }),
-                    (Ok(Reply::Closed { .. } | Reply::Closing), Ok(false)) => Ok(Reply::Closing),
+                    (
+                        Ok(Reply::Closed { .. } | Reply::AudioClosed { .. } | Reply::Closing),
+                        Ok(false),
+                    ) => Ok(Reply::Closing),
                     (result, Ok(true)) => result,
                     (result, Err(error)) => {
                         Err(format!("{result:?}; request watcher close failed: {error}"))
@@ -267,8 +277,10 @@ fn serve(
         });
         let close_result = if closing {
             match &result {
-                Ok(Reply::Closed { failed: false }) => Some(Ok(())),
-                Ok(Reply::Closed { failed: true }) => {
+                Ok(Reply::Closed { failed: false } | Reply::AudioClosed { failed: false, .. }) => {
+                    Some(Ok(()))
+                }
+                Ok(Reply::Closed { failed: true } | Reply::AudioClosed { failed: true, .. }) => {
                     Some(Err("original game owner closed with failure".into()))
                 }
                 _ => None,
@@ -547,6 +559,9 @@ impl Game {
 
     fn execute_inner(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
         let result = match command {
+            Command::AudioStatus | Command::EnableAudio => {
+                Err("headless placement has no resettable audio owner".into())
+            }
             Command::ExecutionStatus | Command::Pause | Command::Resume => {
                 Err("continuous execution controls require the explicit desktop placement".into())
             }

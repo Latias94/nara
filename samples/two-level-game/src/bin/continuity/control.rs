@@ -1,7 +1,7 @@
 //! The explicit Host-owned private directory is the only control endpoint.
 
 use std::{
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs,
     io::{self, Read, Write},
     path::PathBuf,
@@ -57,18 +57,7 @@ impl Arguments {
                     generation = Some(identity(value)?);
                 }
                 Some("--placement") if placement.is_none() => {
-                    placement = Some(match value.to_str() {
-                        Some("headless") => DevelopmentPlacement::SourceHeadless,
-                        Some("desktop") if cfg!(feature = "desktop") => {
-                            DevelopmentPlacement::SourceDesktop
-                        }
-                        Some("desktop") => {
-                            return Err(
-                                "source-desktop continuity requires the desktop feature".into()
-                            );
-                        }
-                        _ => return Err("placement must be headless or desktop".into()),
-                    });
+                    placement = Some(parse_placement(&value)?);
                 }
                 _ => return Err("unknown or repeated continuity option".into()),
             }
@@ -137,6 +126,24 @@ impl Arguments {
             control_service,
             result,
         }
+    }
+}
+
+fn parse_placement(value: &OsStr) -> Result<DevelopmentPlacement, String> {
+    match value.to_str() {
+        Some("headless") => Ok(DevelopmentPlacement::SourceHeadless),
+        Some("desktop") if cfg!(feature = "desktop") => Ok(DevelopmentPlacement::SourceDesktop),
+        Some("desktop") => Err("source-desktop continuity requires the desktop feature".into()),
+        Some("audio-desktop")
+            if cfg!(all(windows, feature = "desktop", feature = "audio-cpal")) =>
+        {
+            Ok(DevelopmentPlacement::SourceDesktopAudio)
+        }
+        Some("audio-desktop") => Err(
+            "audio-desktop continuity requires Windows and the desktop and audio-cpal features"
+                .into(),
+        ),
+        _ => Err("placement must be headless, desktop or audio-desktop".into()),
     }
 }
 
@@ -307,4 +314,36 @@ fn preflight(bytes: &[u8]) -> Result<(), String> {
     deserializer
         .end()
         .map_err(|error| format!("invalid request JSON: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_placement_requires_explicit_selection_and_native_features() {
+        assert_eq!(
+            DevelopmentPlacement::default(),
+            DevelopmentPlacement::SourceHeadless
+        );
+        assert_eq!(
+            parse_placement(OsStr::new("headless")).unwrap(),
+            DevelopmentPlacement::SourceHeadless,
+        );
+        let desktop = parse_placement(OsStr::new("desktop"));
+        if cfg!(feature = "desktop") {
+            assert_eq!(desktop.unwrap(), DevelopmentPlacement::SourceDesktop);
+        } else {
+            assert!(desktop.unwrap_err().contains("desktop feature"));
+        }
+        let audio = parse_placement(OsStr::new("audio-desktop"));
+        if cfg!(all(windows, feature = "desktop", feature = "audio-cpal")) {
+            assert_eq!(audio.unwrap(), DevelopmentPlacement::SourceDesktopAudio);
+        } else {
+            assert!(audio.unwrap_err().contains("audio-cpal"));
+        }
+        for invalid in ["audio", "source_desktop_audio", "desktop,audio-cpal"] {
+            assert!(parse_placement(OsStr::new(invalid)).is_err());
+        }
+    }
 }

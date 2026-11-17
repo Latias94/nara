@@ -1,5 +1,10 @@
+use super::super::{
+    AudioCause, AudioPhase, AudioPolicy, AudioRecord, AudioWitness as GameWitness, GameAudioState,
+    MAX_CAUSES,
+};
 use super::super::{clips::ClipKind, mixer::EffectId};
 use super::*;
+use crate::levels::{LevelId, LevelKey};
 
 struct CallbackControl {
     control: AudioController,
@@ -83,6 +88,221 @@ fn cue_records(witness: &AudioWitness) -> Vec<(Cue, u64, CueRecordKind)> {
             DeviceRecord::ScopeApplied { .. } => None,
         })
         .collect()
+}
+
+fn game_witness(callback: &CallbackControl, policy: AudioPolicy) -> GameWitness {
+    callback
+        .control
+        .shared
+        .stream_created
+        .store(true, Ordering::Release);
+    GameWitness(Arc::new(Mutex::new(GameAudioState::new(
+        callback.control.clone(),
+        callback.witness.clone(),
+        policy,
+    ))))
+}
+
+fn publish_game(witness: &GameWitness, instance: u64, clip: ClipKind) {
+    let level = LevelKey::main(LevelId::Meadow);
+    let cause = match clip {
+        ClipKind::Pickup => AudioCause::Pickup {
+            level,
+            entity: "gem-near".into(),
+        },
+        ClipKind::Travel => AudioCause::Travel { level },
+    };
+    witness
+        .0
+        .lock()
+        .unwrap()
+        .publish(scope(instance), clip, cause);
+}
+
+#[test]
+fn development_suppression_uses_no_effect_or_queue_capacity_and_its_count_saturates() {
+    let mut callback = CallbackControl::new(None);
+    let game = game_witness(&callback, AudioPolicy::ResetOnRebuild);
+    for _ in 0..MAX_CAUSES + 7 {
+        publish_game(&game, 1, ClipKind::Pickup);
+    }
+    publish_game(&game, 2, ClipKind::Travel);
+    assert_eq!(callback.output(3), [0.0; 6]);
+    let snapshot = game.snapshot();
+    assert!(snapshot.reset_on_rebuild && !snapshot.output_enabled);
+    assert_eq!(snapshot.suppressed_effects, (MAX_CAUSES + 8) as u64);
+    assert_eq!(snapshot.desired_instance, 2);
+    assert_eq!(snapshot.applied_instance, 2);
+    assert_eq!(
+        (snapshot.accepted, snapshot.started, snapshot.completed),
+        (0, 0, 0)
+    );
+    assert_eq!(snapshot.faults, 0);
+    assert!(snapshot.error.is_none());
+    assert!(
+        snapshot
+            .records
+            .iter()
+            .all(|record| matches!(record, AudioRecord::ScopeApplied { instance: 2, .. }))
+    );
+    assert_eq!(
+        callback.control.commands.lock().unwrap().slots(),
+        COMMAND_CAPACITY
+    );
+    assert_eq!(
+        callback
+            .control
+            .shared
+            .cue_record_slots
+            .load(Ordering::Acquire),
+        CUE_RECORD_CAPACITY
+    );
+    {
+        let mut state = game.0.lock().unwrap();
+        assert_eq!(state.next_sequence, 1);
+        assert!(state.causes.is_empty());
+        assert_eq!(state.journal.cues, 0);
+        state.suppressed_effects = u64::MAX - 1;
+    }
+    publish_game(&game, 2, ClipKind::Pickup);
+    publish_game(&game, 2, ClipKind::Travel);
+    assert_eq!(game.snapshot().suppressed_effects, u64::MAX);
+    assert!(game.snapshot().error.is_none());
+}
+
+#[test]
+fn development_enablement_never_replays_and_new_cues_keep_literal_pcm_and_first_identity() {
+    let mut callback = CallbackControl::new(Some(16));
+    let game = game_witness(&callback, AudioPolicy::ResetOnRebuild);
+    publish_game(&game, 1, ClipKind::Pickup);
+    publish_game(&game, 1, ClipKind::Travel);
+    assert_eq!(callback.output(2), [0.0; 4]);
+    game.enable_development_output().unwrap();
+    game.enable_development_output().unwrap();
+    assert_eq!(callback.output(3), [0.0; 6]);
+    let enabled = game.snapshot();
+    assert!(enabled.output_enabled);
+    assert_eq!(enabled.suppressed_effects, 2);
+    assert_eq!(enabled.accepted, 0);
+    publish_game(&game, 1, ClipKind::Pickup);
+    assert_eq!(
+        callback.output(4),
+        [0.5, 0.5, 0.25, 0.25, -0.5, -0.5, 0.0, 0.0]
+    );
+    publish_game(&game, 1, ClipKind::Travel);
+    assert_eq!(callback.output(3), [-0.25, -0.25, 0.75, 0.75, 0.0, 0.0]);
+    let snapshot = game.snapshot();
+    assert_eq!(
+        (snapshot.accepted, snapshot.started, snapshot.completed),
+        (2, 2, 2)
+    );
+    assert_eq!(snapshot.cancelled, 0);
+    assert_eq!(snapshot.suppressed_effects, 2);
+    assert_eq!(snapshot.faults, 0);
+    assert!(snapshot.error.is_none());
+    let sequences = snapshot
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            AudioRecord::Cue {
+                sequence,
+                phase: AudioPhase::Accepted,
+                ..
+            } => Some(*sequence),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, [1, 2]);
+    let captured = game
+        .drain_output()
+        .into_iter()
+        .flat_map(|chunk| chunk.samples)
+        .collect::<Vec<_>>();
+    let mut expected = vec![0.0; 10];
+    expected.extend([0.5, 0.5, 0.25, 0.25, -0.5, -0.5, 0.0, 0.0]);
+    expected.extend([-0.25, -0.25, 0.75, 0.75, 0.0, 0.0]);
+    assert_eq!(captured, expected);
+}
+
+#[test]
+fn development_gate_refuses_ordinary_unstarted_faulted_and_retired_owners() {
+    let mut callback = CallbackControl::new(None);
+    let ordinary = game_witness(&callback, AudioPolicy::Ordinary);
+    assert!(!ordinary.snapshot().reset_on_rebuild);
+    assert!(ordinary.snapshot().output_enabled);
+    assert!(ordinary.enable_development_output().is_err());
+    publish_game(&ordinary, 1, ClipKind::Pickup);
+    assert_eq!(callback.output(3), [0.5, 0.5, 0.25, 0.25, -0.5, -0.5]);
+    assert_eq!(ordinary.snapshot().suppressed_effects, 0);
+
+    let game = game_witness(&callback, AudioPolicy::ResetOnRebuild);
+    callback
+        .control
+        .shared
+        .play_admitted
+        .store(false, Ordering::Release);
+    assert!(game.enable_development_output().is_err());
+    assert!(!game.snapshot().output_enabled);
+    callback
+        .control
+        .shared
+        .play_admitted
+        .store(true, Ordering::Release);
+    callback
+        .control
+        .shared
+        .admission_open
+        .store(false, Ordering::Release);
+    assert!(game.enable_development_output().is_err());
+    callback
+        .control
+        .shared
+        .admission_open
+        .store(true, Ordering::Release);
+    game.enable_development_output().unwrap();
+    callback
+        .control
+        .shared
+        .fault(DeviceFault::NativeStreamInvalidated);
+    assert!(game.enable_development_output().is_err());
+    assert!(!game.snapshot().output_enabled);
+
+    let mut callback = CallbackControl::new(None);
+    let game = game_witness(&callback, AudioPolicy::ResetOnRebuild);
+    game.enable_development_output().unwrap();
+    drop(callback.callback.take());
+    assert!(game.enable_development_output().is_err());
+    assert!(!game.snapshot().output_enabled);
+    assert!(game.snapshot().data_callback_released);
+}
+
+#[test]
+fn development_scene_retirement_still_cancels_an_original_started_voice() {
+    let mut callback = CallbackControl::new(None);
+    let game = game_witness(&callback, AudioPolicy::ResetOnRebuild);
+    publish_game(&game, 1, ClipKind::Travel);
+    assert_eq!(callback.output(1), [0.0; 2]);
+    game.enable_development_output().unwrap();
+    publish_game(&game, 1, ClipKind::Pickup);
+    assert_eq!(callback.output(1), [0.5, 0.5]);
+    callback.control.set_scope(scope(2)).unwrap();
+    assert_eq!(callback.output(2), [0.0; 4]);
+    let snapshot = game.snapshot();
+    assert_eq!(snapshot.cancelled, 1);
+    assert!(snapshot.records.iter().any(|record| matches!(
+        record,
+        AudioRecord::Cue {
+            instance: 1,
+            sequence: 1,
+            phase: AudioPhase::Cancelled { started: true },
+            ..
+        }
+    )));
+    publish_game(&game, 2, ClipKind::Travel);
+    assert_eq!(callback.output(3), [-0.25, -0.25, 0.75, 0.75, 0.0, 0.0]);
+    assert_eq!(game.snapshot().accepted, 2);
+    assert_eq!(game.snapshot().completed, 1);
+    assert_eq!(game.snapshot().suppressed_effects, 1);
 }
 
 #[test]

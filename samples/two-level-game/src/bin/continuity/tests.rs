@@ -32,11 +32,17 @@ fn desktop_execution_controls_refuse_headless_without_consuming_commands_or_clos
     let mut game = game();
     let original =
         two_level_game::resume::encode_resume(&capture_resume(&game.session).unwrap()).unwrap();
-    for command in [Command::ExecutionStatus, Command::Pause, Command::Resume] {
+    for (command, message) in [
+        (Command::ExecutionStatus, "desktop placement"),
+        (Command::Pause, "desktop placement"),
+        (Command::Resume, "desktop placement"),
+        (Command::AudioStatus, "no resettable audio owner"),
+        (Command::EnableAudio, "no resettable audio owner"),
+    ] {
         assert!(
             game.execute(command, Instant::now() + OPERATION_TIMEOUT)
                 .unwrap_err()
-                .contains("desktop placement")
+                .contains(message)
         );
         assert!(!game.execution_failed);
         assert_eq!(game.session.state(), Some(RuntimeState::Paused));

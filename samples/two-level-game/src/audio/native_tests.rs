@@ -13,9 +13,13 @@ use nara::{
 
 use super::{AudioOptions, AudioPlugin, AudioWitness, device::NativeGate, start_audio, witness};
 
+#[path = "development_native_tests.rs"]
+mod development;
+
 fn isolated_audio(gate: Option<NativeGate>) -> AudioPlugin {
     AudioPlugin {
         options: AudioOptions::default(),
+        policy: super::AudioPolicy::Ordinary,
         native_gate: gate,
         test_clips: Some(super::PreparedClips::new(Arc::from([0.0]), Arc::from([0.0])).unwrap()),
     }
@@ -106,6 +110,16 @@ fn wait(mut condition: impl FnMut() -> bool, label: &str) {
 #[test]
 #[ignore = "requires an actual Windows stereo 48 kHz f32 output device; run serially"]
 fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_recovers() {
+    held_callback_retirement(super::AudioPolicy::Ordinary);
+}
+
+#[test]
+#[ignore = "requires an actual Windows stereo 48 kHz f32 output device; run serially"]
+fn a_development_gate_cannot_reenable_its_original_owner_during_pending_close() {
+    held_callback_retirement(super::AudioPolicy::ResetOnRebuild);
+}
+
+fn held_callback_retirement(policy: super::AudioPolicy) {
     let gate = NativeGate::new(Duration::from_secs(8)).unwrap();
     let (ready, receive_ready) = mpsc::sync_channel::<Result<AudioWitness, String>>(1);
     let (close, receive_close) = mpsc::channel();
@@ -113,8 +127,9 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     let callback_gate = gate.clone();
     let worker = thread::spawn(move || {
         let mut app = App::new();
-        app.add_plugin(isolated_audio(Some(callback_gate)))
-            .map_err(|error| error.to_string())?;
+        let mut plugin = isolated_audio(Some(callback_gate));
+        plugin.policy = policy;
+        app.add_plugin(plugin).map_err(|error| error.to_string())?;
         let runtime = match start(app) {
             Ok(runtime) => runtime,
             Err(error) => {
@@ -145,6 +160,13 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
         "the actual native callback never started",
     );
     let generation = observed.snapshot().runtime;
+    if policy == super::AudioPolicy::ResetOnRebuild {
+        assert!(!observed.snapshot().output_enabled);
+        observed.enable_development_output().unwrap();
+        assert!(observed.snapshot().output_enabled);
+    } else {
+        assert!(observed.enable_development_output().is_err());
+    }
     original.gate.arm().unwrap();
     wait(
         || original.gate.entered(),
@@ -157,6 +179,8 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     );
     assert!(!observed.snapshot().stream_drop_returned);
     assert!(!observed.snapshot().physical_complete);
+    assert!(!observed.snapshot().output_enabled);
+    assert!(observed.enable_development_output().is_err());
     assert!(matches!(
         receive_done.recv_timeout(Duration::from_millis(50)),
         Err(mpsc::RecvTimeoutError::Timeout)
@@ -172,10 +196,13 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     assert!(closed.data_callback_released && closed.error_callback_released);
     assert!(!closed.admission_open && closed.error.is_none());
     assert_eq!(closed.faults, 0);
+    assert!(observed.enable_development_output().is_err());
     assert!(!original.gate.timed_out());
 
     let mut app = App::new();
-    app.add_plugin(isolated_audio(None)).unwrap();
+    let mut plugin = isolated_audio(None);
+    plugin.policy = policy;
+    app.add_plugin(plugin).unwrap();
     let mut runtime = ManagedRuntime(Some(start(app).unwrap()));
     let fresh = witness(runtime.0.as_ref().unwrap().world()).unwrap();
     wait(
@@ -184,6 +211,14 @@ fn a_held_real_callback_prevents_managed_audio_retirement_and_a_fresh_runtime_re
     );
     assert_ne!(fresh.snapshot().runtime, generation);
     assert_eq!(fresh.snapshot().accepted, 0);
+    assert_eq!(
+        fresh.snapshot().reset_on_rebuild,
+        policy == super::AudioPolicy::ResetOnRebuild
+    );
+    assert_eq!(
+        fresh.snapshot().output_enabled,
+        policy == super::AudioPolicy::Ordinary
+    );
     finish(runtime.0.take().unwrap()).unwrap();
     assert!(fresh.snapshot().physical_complete);
     assert!(observed.snapshot().physical_complete);

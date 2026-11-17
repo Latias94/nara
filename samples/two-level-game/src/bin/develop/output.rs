@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use two_level_game::{
     development::{
         ActiveGeneration, ControlServiceObservation, DevelopmentError, RetirementReport,
-        RetirementRole, RetirementStatus, protocol::Observation,
+        RetirementRole, RetirementStatus,
+        protocol::{AudioStatus, Observation},
     },
     resume::{MAX_RESUME_BYTES, ResumeState, encode_resume},
 };
@@ -59,6 +60,10 @@ pub(super) fn control_service(observation: Option<ControlServiceObservation>) ->
     json!(observation)
 }
 
+pub(super) fn audio_status(status: Option<AudioStatus>) -> Value {
+    json!(status)
+}
+
 pub(super) fn retirement(status: RetirementStatus) -> &'static str {
     match status {
         RetirementStatus::Complete => "complete",
@@ -83,6 +88,7 @@ pub(super) fn retirements(reports: &[RetirementReport]) -> Value {
                     "game_closed": report.game_closed,
                     "terminated": report.terminated,
                     "control_service": control_service(report.control_service),
+                    "audio": audio_status(report.audio),
                     "native": {
                         "exit_code": report.native.exit().code(),
                         "exit_success": report.native.exit().success(),

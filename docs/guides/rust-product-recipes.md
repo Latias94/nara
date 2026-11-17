@@ -819,3 +819,9 @@ hardware backend and `NARA_WGPU_FORCE_FALLBACK=0`. Executed results and limitati
 [desktop development plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-development-and-original-native-session).
 This control path does not extend `desktop-supervised-play/v1` or qualify desktop reconstruction
 and adoption without their complete consumer evidence.
+
+The same game's [audible development placement](../../samples/two-level-game/README.md#audible-development-and-effect-reset)
+uses these original DesktopRun controls with a game-owned sound reset policy. Canonical gameplay
+restores in a fresh Runtime while probes and candidates discard sound effects. Only the adopted
+child can enable future cues, after original audio/process physical retirement. This concrete policy
+does not make arbitrary native services checkpointable or add audio ownership to DesktopRun.

@@ -63,6 +63,9 @@ fn build_variant(placement: DevelopmentPlacement, variant: Variant) -> BuiltVari
     let request = match placement {
         DevelopmentPlacement::SourceHeadless => fixture.request(),
         DevelopmentPlacement::SourceDesktop => fixture.desktop_request(),
+        DevelopmentPlacement::SourceDesktopAudio => {
+            panic!("the notification comparison selects only the original silent placements")
+        }
     };
     let started_unix_ns = timestamp();
     let started = Instant::now();
@@ -165,7 +168,7 @@ fn write_report(output: &Path, report: &Value) -> io::Result<()> {
 #[ignore = "actual nested builds and twelve native game processes; run serially on an idle Windows hardware desktop with CARGO_BUILD_JOBS=1 and a new absolute NARA_DEVELOPMENT_NOTIFICATIONS_OUTPUT JSON path"]
 fn public_hosts_compare_native_request_notifications_with_periodic_reconciliation() {
     assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
-    assert_eq!(protocol::PROTOCOL_VERSION, 5);
+    assert_eq!(protocol::PROTOCOL_VERSION, 6);
     let output = PathBuf::from(
         std::env::var_os("NARA_DEVELOPMENT_NOTIFICATIONS_OUTPUT")
             .expect("supply an explicit new absolute JSON result path"),

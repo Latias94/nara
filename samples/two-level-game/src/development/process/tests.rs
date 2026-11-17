@@ -171,7 +171,7 @@ fn valid_ready_commits_diagnostics() {
             observation: fresh_observation(),
         }));
         response.request = 0;
-        commit_ready_response(&mut cached, response).unwrap();
+        assert_eq!(commit_ready_response(&mut cached, response).unwrap(), 1);
         assert_eq!(cached, Some(diagnostics(2)));
     }
 }
@@ -191,7 +191,17 @@ fn unexpected_exchange_reply_kind_preserves_diagnostics() {
         for previous in [None, Some(diagnostics(1))] {
             let mut cached = previous;
             let response = response(Ok(reply.clone()));
-            assert!(commit_exchange_response(&mut cached, &command, &response).is_err());
+            assert!(
+                commit_exchange_response(
+                    &mut cached,
+                    &mut None,
+                    response.placement,
+                    1,
+                    &command,
+                    &response,
+                )
+                .is_err()
+            );
             assert_eq!(cached, previous);
         }
     }
@@ -206,7 +216,15 @@ fn wrong_pause_and_resume_states_preserve_diagnostics() {
         for previous in [None, Some(diagnostics(1))] {
             let mut cached = previous;
             let response = response(Ok(execution_reply(state)));
-            let error = commit_exchange_response(&mut cached, &command, &response).unwrap_err();
+            let error = commit_exchange_response(
+                &mut cached,
+                &mut None,
+                response.placement,
+                1,
+                &command,
+                &response,
+            )
+            .unwrap_err();
             assert!(error.contains("execution control returned"));
             assert_eq!(cached, previous);
         }
@@ -221,8 +239,15 @@ fn invalid_capture_state_preserves_diagnostics() {
     let response = response(Ok(Reply::Captured { state }));
     for previous in [None, Some(diagnostics(1))] {
         let mut cached = previous;
-        let error =
-            commit_exchange_response(&mut cached, &Command::Capture, &response).unwrap_err();
+        let error = commit_exchange_response(
+            &mut cached,
+            &mut None,
+            response.placement,
+            1,
+            &Command::Capture,
+            &response,
+        )
+        .unwrap_err();
         assert!(error.contains("the game returned invalid resume state"));
         assert_eq!(cached, previous);
     }
@@ -253,18 +278,391 @@ fn valid_exchange_replies_commit_diagnostics() {
     ] {
         let mut cached = Some(diagnostics(1));
         let response = response(Ok(reply));
-        commit_exchange_response(&mut cached, &command, &response).unwrap();
+        commit_exchange_response(
+            &mut cached,
+            &mut None,
+            response.placement,
+            1,
+            &command,
+            &response,
+        )
+        .unwrap();
         assert_eq!(cached, Some(diagnostics(2)));
     }
 }
 
 #[test]
 fn recoverable_error_reply_commits_diagnostics_and_preserves_error() {
-    for command in [Command::Pause, Command::Resume, Command::Capture] {
+    for command in [
+        Command::Pause,
+        Command::Resume,
+        Command::Capture,
+        Command::AudioStatus,
+        Command::EnableAudio,
+    ] {
         let mut cached = Some(diagnostics(1));
         let response = response(Err("operation refused".into()));
-        commit_exchange_response(&mut cached, &command, &response).unwrap();
+        let previous_audio = Some(audio_status());
+        let mut audio = previous_audio;
+        commit_exchange_response(
+            &mut cached,
+            &mut audio,
+            response.placement,
+            1,
+            &command,
+            &response,
+        )
+        .unwrap();
         assert_eq!(cached, Some(diagnostics(2)));
+        assert_eq!(audio, previous_audio);
         assert_eq!(response.result, Err("operation refused".into()));
     }
+}
+
+fn audio_status() -> AudioStatus {
+    AudioStatus {
+        runtime_generation: 1,
+        reset_on_rebuild: true,
+        output_enabled: false,
+        suppressed_effects: 3,
+        accepted: 0,
+        started: 0,
+        completed: 0,
+        cancelled: 0,
+        faults: 0,
+        failed: false,
+        callbacks: 2,
+        output_frames: 1024,
+        admission_open: true,
+        physical_complete: false,
+        stream_drop_returned: false,
+        data_callback_released: false,
+        error_callback_released: false,
+    }
+}
+
+#[test]
+fn audio_startup_requires_reset_suppression_and_an_unused_healthy_original_output() {
+    let original = audio_status();
+    validate_initial_audio(original).unwrap();
+    for status in [
+        AudioStatus {
+            reset_on_rebuild: false,
+            ..original
+        },
+        AudioStatus {
+            output_enabled: true,
+            ..original
+        },
+        AudioStatus {
+            accepted: 1,
+            ..original
+        },
+        AudioStatus {
+            faults: 1,
+            ..original
+        },
+        AudioStatus {
+            failed: true,
+            ..original
+        },
+        AudioStatus {
+            admission_open: false,
+            ..original
+        },
+        AudioStatus {
+            physical_complete: true,
+            ..original
+        },
+        AudioStatus {
+            stream_drop_returned: true,
+            ..original
+        },
+        AudioStatus {
+            data_callback_released: true,
+            ..original
+        },
+        AudioStatus {
+            error_callback_released: true,
+            ..original
+        },
+    ] {
+        assert!(validate_initial_audio(status).is_err());
+    }
+}
+
+#[test]
+fn audio_replies_require_the_original_placement_runtime_and_reset_policy() {
+    let original = audio_status();
+    for (placement, runtime, status) in [
+        (DevelopmentPlacement::SourceHeadless, 1, original),
+        (DevelopmentPlacement::SourceDesktop, 1, original),
+        (DevelopmentPlacement::SourceDesktopAudio, 0, original),
+        (DevelopmentPlacement::SourceDesktopAudio, 2, original),
+        (
+            DevelopmentPlacement::SourceDesktopAudio,
+            1,
+            AudioStatus {
+                runtime_generation: 0,
+                ..original
+            },
+        ),
+        (
+            DevelopmentPlacement::SourceDesktopAudio,
+            1,
+            AudioStatus {
+                reset_on_rebuild: false,
+                ..original
+            },
+        ),
+    ] {
+        for (command, reply) in [
+            (Command::AudioStatus, Reply::Audio { status }),
+            (Command::EnableAudio, Reply::Audio { status }),
+            (
+                Command::Close,
+                Reply::AudioClosed {
+                    failed: false,
+                    status,
+                },
+            ),
+        ] {
+            let previous = Some(diagnostics(1));
+            let mut cached = previous;
+            let mut audio = Some(original);
+            let mut response = response(Ok(reply));
+            response.placement = placement;
+            assert!(
+                commit_exchange_response(
+                    &mut cached,
+                    &mut audio,
+                    placement,
+                    runtime,
+                    &command,
+                    &response,
+                )
+                .is_err()
+            );
+            assert_eq!(cached, previous);
+            assert_eq!(audio, Some(original));
+        }
+    }
+}
+
+#[test]
+fn audio_status_observes_faults_and_game_errors_without_claiming_enablement() {
+    let original = audio_status();
+    for status in [
+        original,
+        AudioStatus {
+            faults: 1,
+            ..original
+        },
+        AudioStatus {
+            failed: true,
+            ..original
+        },
+    ] {
+        let mut cached = None;
+        let mut audio = None;
+        let mut response = response(Ok(Reply::Audio { status }));
+        response.placement = DevelopmentPlacement::SourceDesktopAudio;
+        commit_exchange_response(
+            &mut cached,
+            &mut audio,
+            response.placement,
+            1,
+            &Command::AudioStatus,
+            &response,
+        )
+        .unwrap();
+        assert_eq!(cached, Some(diagnostics(2)));
+        assert_eq!(audio, Some(status));
+    }
+}
+
+#[test]
+fn enable_audio_requires_an_enabled_healthy_original_live_output() {
+    let enabled = AudioStatus {
+        output_enabled: true,
+        ..audio_status()
+    };
+    let mut cached = None;
+    let mut audio = None;
+    let mut response = response(Ok(Reply::Audio { status: enabled }));
+    response.placement = DevelopmentPlacement::SourceDesktopAudio;
+    commit_exchange_response(
+        &mut cached,
+        &mut audio,
+        response.placement,
+        1,
+        &Command::EnableAudio,
+        &response,
+    )
+    .unwrap();
+    assert_eq!(audio, Some(enabled));
+    for status in [
+        AudioStatus {
+            output_enabled: false,
+            ..enabled
+        },
+        AudioStatus {
+            admission_open: false,
+            ..enabled
+        },
+        AudioStatus {
+            physical_complete: true,
+            ..enabled
+        },
+        AudioStatus {
+            stream_drop_returned: true,
+            ..enabled
+        },
+        AudioStatus {
+            data_callback_released: true,
+            ..enabled
+        },
+        AudioStatus {
+            error_callback_released: true,
+            ..enabled
+        },
+        AudioStatus {
+            faults: 1,
+            ..enabled
+        },
+        AudioStatus {
+            failed: true,
+            ..enabled
+        },
+    ] {
+        response.result = Ok(Reply::Audio { status });
+        assert!(
+            commit_exchange_response(
+                &mut cached,
+                &mut audio,
+                response.placement,
+                1,
+                &Command::EnableAudio,
+                &response,
+            )
+            .is_err()
+        );
+        assert_eq!(audio, Some(enabled));
+        assert_eq!(cached, Some(diagnostics(2)));
+    }
+}
+
+#[test]
+fn audio_close_keeps_actual_final_diagnostics_even_when_not_clean() {
+    let clean = AudioStatus {
+        admission_open: false,
+        physical_complete: true,
+        stream_drop_returned: true,
+        data_callback_released: true,
+        error_callback_released: true,
+        ..audio_status()
+    };
+    assert!(clean_audio_close(clean));
+    for status in [
+        AudioStatus {
+            output_enabled: true,
+            ..clean
+        },
+        AudioStatus {
+            admission_open: true,
+            ..clean
+        },
+        AudioStatus {
+            physical_complete: false,
+            ..clean
+        },
+        AudioStatus {
+            stream_drop_returned: false,
+            ..clean
+        },
+        AudioStatus {
+            data_callback_released: false,
+            ..clean
+        },
+        AudioStatus {
+            error_callback_released: false,
+            ..clean
+        },
+        AudioStatus { faults: 1, ..clean },
+        AudioStatus {
+            failed: true,
+            ..clean
+        },
+    ] {
+        assert!(!clean_audio_close(status));
+        for failed in [false, true] {
+            let mut cached = None;
+            let mut audio = Some(audio_status());
+            let mut response = response(Ok(Reply::AudioClosed { failed, status }));
+            response.placement = DevelopmentPlacement::SourceDesktopAudio;
+            commit_exchange_response(
+                &mut cached,
+                &mut audio,
+                response.placement,
+                1,
+                &Command::Close,
+                &response,
+            )
+            .unwrap();
+            assert_eq!(audio, Some(status));
+            assert_eq!(cached, Some(diagnostics(2)));
+        }
+    }
+}
+
+#[test]
+fn closing_and_non_audio_replies_preserve_last_audio_diagnostics() {
+    for (command, reply) in [
+        (Command::Close, Reply::Closing),
+        (
+            Command::ExecutionStatus,
+            execution_reply(ExecutionState::Paused),
+        ),
+        (
+            Command::Observe,
+            Reply::Observed {
+                observation: fresh_observation(),
+            },
+        ),
+    ] {
+        let original = Some(audio_status());
+        let mut cached = None;
+        let mut audio = original;
+        let response = response(Ok(reply));
+        commit_exchange_response(
+            &mut cached,
+            &mut audio,
+            DevelopmentPlacement::SourceDesktopAudio,
+            1,
+            &command,
+            &response,
+        )
+        .unwrap();
+        assert_eq!(audio, original);
+    }
+}
+
+#[test]
+fn silent_close_cannot_complete_an_audio_placement() {
+    let response = response(Ok(Reply::Closed { failed: false }));
+    let mut cached = None;
+    let mut audio = None;
+    assert!(
+        commit_exchange_response(
+            &mut cached,
+            &mut audio,
+            DevelopmentPlacement::SourceDesktopAudio,
+            1,
+            &Command::Close,
+            &response,
+        )
+        .is_err()
+    );
+    assert_eq!(cached, None);
+    assert_eq!(audio, None);
 }
