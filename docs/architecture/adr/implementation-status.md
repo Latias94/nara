@@ -3344,6 +3344,23 @@ correctness Clippy, feature-free libraries and formatting pass. Source wire, dom
 per-owner accounting and original publication/retirement authorities remain. No capacity,
 physical-memory, numeric-budget, complete R12 or Foundation qualification follows.
 
+The subsequent [compiler validation-locality unit](../../plans/2026-11-13-rust-state-reconstruction-plan.md#validation-locality-after-the-frozen-read-comparison)
+at `9fc9322` separates field semantics from full payload-cost admission after default materialization. Scene
+reuses its unchanged effective value's original cost; standalone dynamic-value and receiving
+validation keep their paths. ADRs0045/0049 distinguish reusable facts from new data and current
+World/resource checks. The [source investigation](../../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+traces actual pinned Godot/Bevy loading/construction rather than assuming every layer needs a
+complete generic budget scan. Reflect controls pass 266/266, Scene/Tooling 983/983, existing selected
+public Scene integrations 76/76 and new regression cases 4/4 after a population-fixture correction.
+Release game/library/metric/span/probe/native qualification passes 148/148 with original GPU
+replays and both panic cleanup controls. The independent Scene consumer passes 157/157, with one
+manual timing case skipped. The [paired comparison](../../benchmarks/2026-11-14-development-runtime-costs.md#compiler-validation-locality)
+retains twelve additional 16K lifetimes and 36 replays: semantic-validation wall median drops
+83.977/0.815 ms, complete materialization 394.190/310.312 ms and expansion 1,056.126/940.849 ms.
+This establishes reduced work in those finite cumulative wall envelopes, not stable process,
+CPU/GPU, physical-memory or numerical production-tail performance. Source-compiled receiving
+reuse, other traversal costs and full Foundation/R9/R10/R12 qualification remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

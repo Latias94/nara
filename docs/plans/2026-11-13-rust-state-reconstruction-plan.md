@@ -3406,8 +3406,8 @@ remain open. No domain record split, source upgrade, new cache or lifecycle owne
 
 #### Validation Locality After The Frozen-Read Comparison
 
-Status: pinned-source investigation complete; production simplification is next, not implemented
-by this documentation update. The [validation study](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+Status: scoped compiler implementation at `9fc9322` and Windows qualification complete below;
+source-compiled receiving reuse remains a follow-up. The [validation study](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
 compares actual Godot parsing/resource/property paths with Bevy Reflect, resolved Scene and typed
 Tilemap paths. Both check construction or changed state without imposing Nara's repeated generic
 node/byte/work-budget passes on this route. Godot also allows some property/dependency errors to
@@ -3438,12 +3438,80 @@ ordering where affected; exact/one-short receiving limits, original diagnostics 
 callbacks or allocation remain useful behavioral controls. More elaborate accounting needs a
 named bounded-operation consumer and must not become a prerequisite for ordinary native gameplay.
 
+For subsequent performance work, review validation placement before adding another layer. Trace
+the corresponding pinned Godot/Bevy operation, the error being prevented, the data origin and
+mutation since the preceding check. Prefer typed construction and owner-retained facts for
+unchanged internal data. A generic budget or defensive full scan needs a named failure/workload
+contract; neither an old test nor a speculative future plugin is sufficient justification.
+Check the same operation after edits or different receiving constraints rather than trusting
+an unrelated earlier input. This rule addresses overvalidation during design, not only a later
+optimization pass over accumulated validators.
+
 Qualify the affected Reflect/Scene and public receiving paths, then the unchanged authored game
 and original-input GPU replay/retirement trajectory. Compare balanced frozen programs against the
 qualified frozen-read executable; avoid simultaneous representation/encoding changes that obscure
-the cause. Do not rerun unrelated Editor or UI suites. This source investigation runs no Cargo,
-runtime or upstream benchmark and claims no new acceleration. Full Foundation/R9/R10/R12 remain
+the cause. Do not rerun unrelated Editor or UI suites. The pinned-source investigation itself ran
+no Cargo, runtime or upstream benchmark; implementation results follow below. Full Foundation/R9/R10/R12 remain
 active; this unit does not reopen UI, Dialogue or physical mixed-DPI product work.
+
+##### Implementation And Qualification
+
+Reflect now exposes its existing explicit-field semantics through one hidden operation. The
+standalone validator still performs its ordinary schema/default/value admission before invoking
+those semantics. Scene invokes the semantic operation immediately after its original source,
+migration and default-materialization admission, retaining the complete cost for reference
+planning. This removes the frozen-view cost walk at that point without changing source wire,
+default selection, numeric domains, reference interpretation, receiving limits or publication.
+No owning receipt, generic cache or new lifecycle authority is introduced. ADRs0045/0049 and the
+component guide distinguish reusable immutable facts from current receiving state.
+
+Production all-feature Reflect/Scene libraries compile. Reflect owner/frozen public controls pass
+266/266 without skips at `b1dca14d-0f3b-425a-8e2d-4d338aa6c3c0`, 7.833 seconds; all-feature
+Scene/Tooling libraries pass 983/983 without skips at `ad83d126-81de-42f0-a92a-02e1e6012984`,
+62.517 seconds in the debug test profile. The selected public Scene run passes 79/80: all
+76 existing cases pass, while one new positive fixture assumes a fresh World has zero entities.
+Nara's World has internal resource entities. The fixture now compares the actual population
+before/after preparation rather than hardcoding an implementation detail. All four new public
+cases pass at `797f942b-8eec-4343-878c-0a7684615870`, 0.274 seconds. They retain opaque source
+allocation through native preparation, reject missing/wrong/undeclared/out-of-domain fields,
+reject malformed migration output and preserve exact/one-short receiving node/byte/depth limits
+before codecs without changing the World. Independent implementation review finds no P1/P2.
+Release game/library/metric/span/probe/native qualification passes 148/148 without skips at
+`44005346-b3e6-43f8-b7da-9e86dea54b48`, 62.398 seconds after a 9m31s serial build. The original
+64/4K/16K travel lifetimes, 27 retained-input GPU replays, baseline and both observer-panic cleanup
+controls remain. The same executable then completes four serial before/after/after/before
+16K processes: twelve complete lifetimes and 36 replays. Source workload, manifests/locks,
+original value-phase call counts and compiler/profile remain unchanged.
+
+The [recorded paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#compiler-validation-locality)
+has semantic-validation wall medians of 83.977/0.815 ms, complete component materialization
+394.190/310.312 ms and expansion 1,056.126/940.849 ms before/after. These are cumulative wall
+envelopes, not one function's exclusive CPU time. Process walls 21.673/19.663/21.925/22.214 seconds
+remain variable; no stable whole-process, GPU/CPU duration, physical-memory, frame-tail or numerical
+budget claim follows. Four summary exports preserve the phase, source, acceptance, cleanup and
+replay facts plus complete raw-report digests while omitting repeated per-frame arrays. Original
+programs and complete reports remain outside target. The independently locked Scene consumer
+passes 157/157 with one existing manual timing case skipped at
+`8e25b7bf-f997-4a89-ae73-79b90bba5d83`, 18.772 seconds after a 6m04s serial debug build.
+Owning all-target/all-feature correctness Clippy, feature-free Reflect/Scene compilation and root
+formatting checks pass; pre-existing warnings remain. Independent final implementation and new
+public-test review find no P1/P2. The two scoped agents are closed. No remote publication, new
+dependencies, source-format/capacity changes or UI/Dialogue edits accompany this unit.
+
+The bounded receiving audit identifies the next separate operation to reconcile. Compiled sealing
+validates closed values, but a bare `CompiledSceneCandidate` does not retain exact receiving
+definitions or a complete logical cost/max-depth summary. Root project-backed `SceneSource`
+already checks an exact bindings witness, while its Direct branch delegates to ordinary receiving
+validation. `spawn.rs` currently revalidates both compiled routes, unlike the processed Runtime
+route. Within `validate_effective_component_values`, aggregate admission and native/reference
+validation already walk complete data before the frozen field-validator path repeats cost
+admission. First remove that repetition inside the receiving owner; then evaluate reuse through
+the existing project witness without adding a blanket trusted boolean or new certificate/cache.
+`compiled_scene_retained_bytes` also recomputes immutable costs; retaining a final cost summary
+could avoid inspection while preserving each owner's fee. Current World, reservations, actual
+product state and publication checks remain distinct. This audit is source evidence, not a new
+implemented receiving fast path or qualification of that future change. Full Foundation/R9/R10/R12,
+raw-subtree costs, physical-memory and numerical runtime-tail budgets remain open.
 
 ### Preserve Isolated Migration Storage During Defaults
 

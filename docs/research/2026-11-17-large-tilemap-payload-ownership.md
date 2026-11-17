@@ -437,8 +437,11 @@ The next implementation should use the following division of responsibility:
 | Closed candidate with exact definitions at preparation | Reuse applicable pure value facts through its existing private owner. Check current World, namespace, product membership and reservations where they are actually consumed. A different definition or stricter receiving policy still requires its own admission. |
 | Commit after asynchronous preparation | Recheck mutable owner/generation/resource facts needed to publish. Do not use a complete immutable-payload traversal as a substitute for those current-state checks. |
 
-This is a direction for the next owner-local refactor, not an implemented bypass. Prefer Rust
-ownership and the existing compiler/candidate state to a public `unchecked` API, global
+The scoped compiler correction at `9fc9322` separates explicit-field semantics from the repeated budget
+walk after defaults; its [qualification and paired comparison](../benchmarks/2026-11-14-development-runtime-costs.md#compiler-validation-locality)
+record the actual original game and unchanged 16K workflow. Standalone and receiving admission
+keep their own paths. Broader preparation reuse remains a follow-up. Prefer Rust ownership and
+the existing compiler/candidate state to a public `unchecked` API, global
 address/hash cache or general validation-certificate framework. Logical size and retained
 allowances can be checked from applicable admitted facts; work counters should account for the
 operations actually performed, rather than preserve removed scans. Tests should protect the

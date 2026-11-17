@@ -5615,6 +5615,25 @@ four workspace formatting checks pass. The next optimization investigates repeat
 validation and raw-subtree traversal within the same complete workflow. No capacity,
 physical-memory, numeric-budget or full Foundation claim follows.
 
+The [compiler validation-locality correction](2026-11-13-rust-state-reconstruction-plan.md#validation-locality-after-the-frozen-read-comparison)
+at `9fc9322` uses the [pinned Godot/Bevy comparison](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+to separate input admission, immutable field semantics and mutable receiving checks. Scene reuses
+the original complete default cost before semantic validation instead of walking the frozen
+value again. Public dynamic-value and receiving policies remain. ADRs0045/0049 require a distinct
+invariant/data change/receiving reason for an additional pass, rather than treating historic
+counters or an eventual plugin as sufficient justification. Reflect owner/public controls pass
+266/266, Scene/Tooling libraries 983/983, existing selected Scene integrations 76/76 and four new
+public regression cases 4/4 after a World-population fixture correction. Complete release
+game/library/metrics/span/probe/native qualification passes 148/148, including original 64/4K/16K
+travel, 27 retained-input replays and both observer-panic cleanup cases. The independently locked
+Scene consumer passes 157/157 with one existing manual timing case skipped.
+The [balanced frozen-program comparison](../benchmarks/2026-11-14-development-runtime-costs.md#compiler-validation-locality)
+adds twelve 16K lifetimes and 36 replays; semantic-validation wall medians are 83.977/0.815 ms,
+component materialization 394.190/310.312 ms and expansion 1,056.126/940.849 ms before/after.
+These finite cumulative envelopes support removing duplicate work, not stable whole-process,
+CPU/GPU, physical-memory or numerical tail-budget claims. Broader source-compiled receiving reuse,
+raw-subtree traversal and full Foundation/R9/R10/R12 remain open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

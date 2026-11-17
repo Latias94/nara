@@ -2458,6 +2458,69 @@ language-consumer compilation; it is outside the earlier frozen measurement prog
 source hashes. The compiler's private reference plan/in-place route is unchanged by that follow-up.
 Full Foundation/R9/R10/R12, numerical budgets and foreign execution remain open.
 
+### Compiler Validation Locality
+
+Date: 2026-11-17. The before program is the qualified frozen-read executable with SHA256
+`e341e03ac11fef074ac14a77659ac64e2ca1146b705c9df6464f27d32ddd3017`. Implementation `9fc9322` removes
+the repeated complete materialization-budget walk between default materialization and field
+semantics inside the original compiler. Standalone dynamic-value validation and receiving
+World/definition/resource checks retain their original paths. Both programs use frozen defaults,
+the same authored 16K Tilemap, source omissions, native codecs and observation hooks. The
+[owning unit](../plans/2026-11-13-rust-state-reconstruction-plan.md#validation-locality-after-the-frozen-read-comparison)
+and [pinned source investigation](../research/2026-11-17-large-tilemap-payload-ownership.md#5-validation-at-owning-boundaries)
+distinguish this Nara correction from Godot/Bevy's construction and validation policies.
+
+All four serial before/after/after/before processes pass the unchanged original game, copied-source
+removal, physical cleanup and retained-input GPU replay checks: twelve complete 16K lifetimes and
+36 replays, six lifetimes per version. Rust 1.95 release, manifests, locks, generated source,
+measurement hooks and the hardware DX12 RTX4090 adapter match. Summary reports retain all
+phase/call counters, acceptance, source, cleanup and replay facts:
+[1 before](data/2026-11-14-development-runtime/authored-tiles-validation-locality-paired-1-before.json),
+[2 after](data/2026-11-14-development-runtime/authored-tiles-validation-locality-paired-2-after.json),
+[3 after](data/2026-11-14-development-runtime/authored-tiles-validation-locality-paired-3-after.json) and
+[4 before](data/2026-11-14-development-runtime/authored-tiles-validation-locality-paired-4-before.json),
+with [source/program/report hashes and order](data/2026-11-14-development-runtime/authored-tiles-validation-locality-paired-metadata.json).
+The exports omit only four raw per-frame arrays; unchanged complete reports remain in the local
+frozen observation directory and their original digests are recorded. Summary distributions and
+complete source-workload descriptions remain. This avoids retaining another 17.7 MB of repeated
+frame traces in the repository; it does not remove any check from the actual executed workflow.
+
+| Named wall envelope, median over six complete 16K lifetimes per version | Before | After |
+| --- | ---: | ---: |
+| Original-value cost/capture admission | 83.902 ms | 81.219 ms |
+| Shared record capture | 0.035 ms | 0.037 ms |
+| Migration, including post-migration admission | 0.042 ms | 0.040 ms |
+| Default materialization | 100.147 ms | 98.871 ms |
+| Semantic validation | 83.977 ms | 0.815 ms |
+| Reference planning | 125.855 ms | 123.961 ms |
+| Reference-program validation | 0.015 ms | 0.015 ms |
+| Complete component materialization | 394.190 ms | 310.312 ms |
+| Expansion, including nested Prefab acquisition | 1,056.126 ms | 940.849 ms |
+| Source payload decode | 722.578 ms | 716.564 ms |
+
+The semantic-validation envelope is 99.03% lower, complete component materialization 21.28%
+lower and expansion 10.92% lower in this finite observation. Before/after semantic-validation
+ranges are 78.421-101.279 ms and 0.774-0.853 ms. These are cumulative wall envelopes over the
+original compiler work, not a single call's exclusive CPU cost. The original 180 calls per named
+value phase, eight worker expansion entries and six owner publications per lifetime remain.
+No workload population, source format, schema, receiving ceiling or retained allowance changes.
+
+Complete process walls in order are 21.673, 19.663, 21.925 and 22.214 seconds. Their variation,
+correlated lifetimes, overlapping envelopes, unchanged pacing and uncontrolled host/driver/cache/
+clock state do not establish a stable whole-process improvement, CPU/GPU duration, physical-memory
+saving, frame-tail result or numeric production budget. The old frozen program predates the later
+public reference-copy input migration; its exact source receipt is retained. That migration does
+not change the compiler's private plan/in-place path exercised here. After-program SHA256 is
+`1d80843f10ce3455804d28c5f5d3a6c3921ae2af5da5d6930ff46316d353403a`.
+
+Separate release game/library/metric/span/probe/native qualification passes 148/148 without skips
+at `44005346-b3e6-43f8-b7da-9e86dea54b48`, 62.398 seconds after a 9m31s serial build. It includes
+baseline plus authored 64/4K/16K travel, 27 original-input replays, both observer-panic cleanup
+controls and the complete 16K CPU record probe. The executable used for that qualification and
+the paired after runs is identical. Remaining source-value admission, defaults and reference
+planning still traverse data; source-compiled receiving reuse requires its own exact-definition
+analysis. Full Foundation/R9/R10/R12 and foreign execution remain open.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first
