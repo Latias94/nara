@@ -71,6 +71,12 @@ extraction remain deep. Receiving definitions cannot choose new defaults for a c
 value; an incompatible definition requires recompiling source. Independent cooked output owns
 its complete data and does not retain the source/default backing.
 
+Use the ordinary registry and Scene operations to establish their documented admission. Passing
+a borrowed read between callbacks is not a reason to run a standalone validator again. Inside
+compilation, default materialization already admits the complete effective size/depth; field
+semantics are checked separately without repeating that cost traversal. Receiving operations
+still own their definition, resource and World checks.
+
 `rewrite_declared_entity_references` and `remap_declared_entity_references` accept the same
 borrowed reads and return one independent owned result. They validate the complete reference
 structure before copying, then rewrite only that unpublished result. The owning caller still

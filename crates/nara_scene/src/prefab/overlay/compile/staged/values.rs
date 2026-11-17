@@ -7,12 +7,12 @@ use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::__private::{
     EffectiveValueAdmissionError, effective_component_value_in_place_with_default_overrides,
-    freeze_component_defaults_with_admission, validate_value_materialization_budget,
+    freeze_component_defaults_with_admission, validate_explicit_component_value,
+    validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
     ComponentSchema, ComponentTypeId, ComponentValueCost, ComponentValueMaterializationLimits,
-    validate_component_value_with_limits,
 };
 
 use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, ReferencePrograms};
@@ -289,12 +289,8 @@ where
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_value_validation")
                     .entered();
-            validate_component_value_with_limits(
-                schema,
-                record.value(),
-                self.value_program_limits(),
-            )
-            .map_err(components::codec_failure)?;
+            validate_explicit_component_value(schema, record.value())
+                .map_err(components::codec_failure)?;
         }
         let declaration = match program.record {
             Record::Source { .. } => None,

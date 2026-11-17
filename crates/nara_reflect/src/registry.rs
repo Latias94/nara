@@ -2791,7 +2791,21 @@ pub fn validate_component_value_with_limits<'a>(
         (Some(source), Some(defaults)) => defaults.read(source),
         _ => value,
     };
-    validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), effective)
+    validate_explicit_component_value(schema, effective)
+}
+
+/// Checks field coverage, required paths, wire kinds and numeric domains of an effective value.
+///
+/// The original owner must already have admitted the immutable Schema and complete value against
+/// its size/depth limits. This operation neither selects defaults nor repeats payload-cost
+/// traversal. It does not establish reference resolution, native invariants or receiving-World
+/// admission. Standalone dynamic values use [`validate_component_value_with_limits`] instead.
+#[doc(hidden)]
+pub fn validate_explicit_component_value(
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+) -> Result<(), ComponentCodecError> {
+    validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), value)
 }
 
 /// Keeps a source owner's exact refusal separate from component interpretation errors.

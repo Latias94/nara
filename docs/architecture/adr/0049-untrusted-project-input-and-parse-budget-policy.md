@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-11-17
 **Refines**: ADR 0006, ADR 0007, ADR 0009, ADR 0011, ADR 0043
 **Refined By**: ADR 0050: Asset Root, Symlink, Junction, and Package Trust Policy; ADR 0068: Global
 Resource Budgets, Metrics, and Diagnostic Privacy; ADR 0070: Capability-Oriented Filesystem
@@ -46,6 +46,23 @@ Rules:
   Nara copies the key for duplicate detection, and charges owned keys exactly once. Syntax-adapter
   allocations already made before visiting (such as escaped-string decoding) remain outside this
   guarantee; the owning loader still applies the encoded-byte limit before parsing.
+
+### Reuse After Admission
+
+Untrusted input describes the acquisition boundary, not a permanent requirement to revalidate
+every internal use. An immutable value's original owner may reuse the facts already established
+against the same definitions and applicable limits. Moving or borrowing that unchanged value
+does not itself require another full traversal. Default insertion, migration and other writes
+must establish the facts their output changes; arbitrary callback output cannot inherit its
+input's validation. Receiving World, namespace, resource and publication state have their own
+checks where those mutable facts are consumed.
+
+Per-owner retained allowances and actual expansion/work admission remain distinct from repeated
+payload inspection. Use available admitted size facts where applicable. Charge actual work and
+allocation rather than performing a scan to preserve a historical counter. A new validation pass
+needs a concrete invariant, data-origin/change or receiving-policy reason, supported by the
+corresponding mature-engine flow where available. This policy does not require normal typed
+gameplay to pass through a generic serialized-value validator on each use.
 
 ### Implemented RGF-U1 Slice
 

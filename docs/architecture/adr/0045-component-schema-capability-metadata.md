@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-01
+**Last Revised**: 2026-11-17
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -143,6 +143,16 @@ consume that same read Interface. Reads cannot detach an owning backing handle. 
 public deep extraction and independent cooked ownership use explicitly admitted materialization;
 ordinary decoding does not silently flatten a frozen value first. Source wire and omissions,
 default interpretation, full logical limits and independent retained-owner accounting remain.
+
+Field semantics and payload-cost admission are separate operations. Inside the original compiler,
+an effective value already admitted against its current limits does not need another cost walk
+before checking required paths, coverage, wire kinds and numeric domains. Reuse that cost while
+the value remains unchanged. Standalone dynamic-value validation retains its own admission;
+the semantic operation alone does not establish reference resolution or receiving-World validity.
+An additional validation pass needs a distinct invariant, changed data or a different receiving
+contract. Existing traversal counters alone do not justify repeating a scan. Use the corresponding
+mature-engine loading/construction path as evidence when selecting where new checks belong;
+ordinary typed gameplay does not require re-encoding components for generic schema validation.
 
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque
