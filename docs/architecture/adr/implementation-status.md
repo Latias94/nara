@@ -3519,6 +3519,16 @@ program/source/report identities remain explicitly separate in the
 No API, format, policy, dependency or new owner is adopted. Future typed/domain construction
 work and full Foundation remain open.
 
+The [membership-index comparison](../../plans/2026-11-13-rust-state-reconstruction-plan.md#native-tile-coordinate-membership-index)
+defers the performance choice and restores the original production BTreeSet. The two-line HashSet
+candidate preserves owner/render 118/118, independent TileSet 14/14 and original game 148/148,
+but unchanged parsing/admission stage drift prevents reliable cost attribution across two full
+comparisons. Exact source/program/raw identities and selected complete 24-lifetime/72-replay facts
+remain in the [finite report](../../benchmarks/2026-11-14-development-runtime-costs.md#native-tile-coordinate-membership-index).
+The rebuilt unchanged program completes another three 16K lifetimes/nine replays and cleanup.
+No runtime, validation, dependency, profiler or public interface change is adopted. Larger
+domain/diagnostic preparation work and full Foundation remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

@@ -3333,6 +3333,80 @@ root/sample formatting and source/document/hash checks pass. Four scoped impleme
 agents are closed with no remaining P1/P2. Future work must preserve the distinction between
 compact admitted typed data for diagnostics and mutable native structures for actual World construction.
 
+### Native Tile Coordinate Membership Index
+
+The [membership-index successor](../plans/2026-11-13-rust-state-reconstruction-plan.md#native-tile-coordinate-membership-index)
+keeps the compact typed cell Vec and final native BTreeMap construction at their original
+phases. Only the never-iterated duplicate-coordinate BTreeSet becomes a default standard-library
+HashSet. It grows incrementally, with no capacity derived up front from the input list and no
+new/custom hasher dependency. Complete per-cell parsing still precedes membership insertion;
+input enumeration selects the first duplicate diagnostic. The Vec preserves native/dirty revision
+order, so randomized buckets cannot become output order or select a different input error.
+
+The [pinned mechanism comparison](../research/2026-11-17-large-tilemap-payload-ownership.md#native-tilemap-construction-and-unbound-preparation)
+separates membership from ordering without importing Godot's overwrite semantics or Bevy's dense
+chunk representation. Their source provides context, not a Nara speed or memory result.
+Unlike the rejected direct-final-tree candidate above, this change does not move final cell/dirty
+tree construction into diagnostic or deferred preflight. Native candidate contents, failure
+ordering, all receiving/domain checks and the original observation configuration remain unchanged.
+
+Initial Tilemap/related render tests pass 118/118, with 48 outside the filter, at
+`3dccd22e-cbf7-4a11-a034-262b51503984`. Independent actual Runtime TileSet delivery passes
+14/14 without skips at `4694adb7-1865-4702-816c-5eea1f3164a1`. All existing assertions remain,
+including the five public construction/lifetime/error controls. The original release game/
+library/metrics/span/native/record selection passes 148/148 without skips at
+`92461861-6dbf-47bb-92e4-e509e9d34e34`, 64.843 seconds after a serial 6m49s build. Original
+64/4K/16K travel, 27 retained-input GPU replays, observer-panic cleanup and the complete record/
+cook probe remain.
+
+**Disposition: deferred; no production change.** Two bounded four-process comparisons complete
+24 original 16K lifetimes and 72 GPU replays with unchanged call counts and complete cleanup.
+Both use before/after/after/before order. The first control runs earlier during development;
+the second series is entirely consecutive. Both still show substantial drift in unchanged
+receiving, payload and value stages alongside the component timers. The observations cannot
+reliably attribute a performance difference to the two-line index change. Restore only this
+experiment's production lines rather than treating lower pooled medians as an isolated gain.
+
+The [finite observations](data/2026-11-14-development-runtime/authored-tiles-coordinate-index-inconclusive.json)
+retain all eight process/raw-report identities, selected complete source/phase/acceptance/final
+state/cleanup/GPU-replay facts for every lifetime, exact before/candidate/final source hashes and
+the unchanged expected counts. Omitted raw fields are listed by scope; no new startup, frame,
+namespace, memory or process-CPU conclusion uses those omissions. Both frozen programs, original
+raw reports and the exact candidate source remain in
+`%TEMP%/nara-tile-coordinate-membership-paired-20261117`. The
+[two-line candidate patch](data/2026-11-14-development-runtime/tile-coordinate-membership-candidate.patch)
+applies with `git apply --unidiff-zero` to `cd1fdc7`. It is an uncommitted experiment, not an
+adopted implementation. No owning Cargo overlaps the measurement processes.
+
+The following are median cumulative wall envelopes across six lifetimes/version in each series,
+not single-file or frame times. Child/parent scopes overlap; do not add or normalize them into
+an exclusive CPU estimate. The changed component scope includes all codecs, not just membership.
+
+| Scope | Initial before / candidate | Consecutive before / candidate | Attribution |
+| --- | ---: | ---: | --- |
+| Diagnostic component preflight | 84.918 / 76.020 ms | 84.586 / 64.520 ms | Contains changed membership; wall attribution remains uncertain. |
+| Actual unbound component preflight | 63.707 / 61.983 ms | 59.816 / 48.352 ms | Contains changed membership; first-series process medians overlap. |
+| Unbound receiving validation | 57.004 / 51.795 ms | 52.277 / 43.735 ms | Unchanged; demonstrates concurrent drift. |
+| Combined decode | 285.399 / 260.220 ms | 274.334 / 219.938 ms | Contains changed and unchanged work; not a proved improvement. |
+| Payload decode | 363.795 / 333.174 ms | 334.478 / 302.882 ms | Unchanged; no parser credit. |
+| Original value admission | 76.494 / 72.643 ms | 76.436 / 63.094 ms | Unchanged; no walker credit. |
+
+Initial process walls are 16.040/16.006/18.138/18.628 seconds, consecutive walls
+17.470/15.832/18.631/17.015 seconds. All logs use Python binary-file redirection. External host
+activity, cache, clocks, driver state and randomized seeds are uncontrolled; lifetimes within
+each process are correlated. The existing whole-process CPU counters cover initialized frames,
+include other threads/driver activity and exclude earlier preparation; they cannot serve as
+these phases' thread CPU counter. No additional profiler or workload iteration is added to
+rescue this small candidate. This result does not prove HashSet is intrinsically slower or
+incorrect; it leaves the performance choice unqualified.
+
+All production source is restored to `cd1fdc7`; all 163 qualified source/control hashes match.
+The rebuilt original program completes another three 16K lifetimes/nine GPU replays and cleanup,
+with its final program/raw-report identity and selected facts in the same observation artifact.
+Existing unchanged behavior tests remain valid; root/sample formatting and document/source checks
+close the experiment without rerunning all unmodified product tests. Future work should target a larger, attributable owning operation,
+especially repeated diagnostic/domain cell preparation, before another fine-grained index change.
+
 ### Retained Original Inputs And Qualification
 
 Nine original native Tilemap lifetimes retain three selected inputs each: first Meadow, first

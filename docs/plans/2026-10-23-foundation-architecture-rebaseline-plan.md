@@ -5826,6 +5826,17 @@ GPU replays with cleanup. Next distinguish compact diagnostic typed data from ac
 native construction without weakening domain checks or inventing another cache. Full Foundation
 and the original runtime representation/construction work remain open.
 
+The [coordinate membership comparison](2026-11-13-rust-state-reconstruction-plan.md#native-tile-coordinate-membership-index)
+also leaves production unchanged. Replacing only an uniterated BTreeSet with randomized HashSet
+preserves all behavior tests, but two complete same-observer comparisons show large drift in
+unchanged stages and cannot isolate a tiny index gain. The
+[inconclusive observations](../benchmarks/2026-11-14-development-runtime-costs.md#native-tile-coordinate-membership-index)
+retain 24 original 16K lifetimes/72 GPU replays, source/program identities and a recoverable patch.
+Candidate owner/render tests pass 118/118, independent TileSet 14/14 and original game 148/148.
+Production is restored exactly; the rebuilt original adds three lifetimes/nine replays and cleanup.
+No validation policy, profiler, hasher dependency or public interface is added. Stop iterating on
+this small index and attribute larger domain/diagnostic duplicate work; full Foundation remains open.
+
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
 Record assistance, undocumented steps, engine patches and the reproducible project artifact.

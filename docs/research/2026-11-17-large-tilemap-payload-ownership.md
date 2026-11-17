@@ -610,6 +610,34 @@ path is restored; public lifetime/error/dirty-revision controls are retained. Th
 prevent that local loop improvement from being mistaken for an adopted full-workflow optimization.
 Future representation work must serve both the diagnostic and actual World consumers.
 
+The following [membership-index comparison](../plans/2026-11-13-rust-state-reconstruction-plan.md#native-tile-coordinate-membership-index)
+keeps that compact typed Vec and its existing deferred construction. Nara's duplicate set is
+only inserted into, never iterated; input enumeration selects diagnostics, and the typed Vec
+selects later dirty-revision order. Standard randomized HashSet membership can therefore replace
+an ordered BTreeSet without selecting bucket order as an output contract. `TileCoord` derives
+both Hash and Eq; equality still distinguishes collisions. No fixed/custom hasher, preallocation,
+source exemption or new dependency follows from this mechanism choice.
+
+The executed Godot pin provides a narrow precedent: terrain inputs use both a Vector and
+HashSet in [`set_cells_terrain_connect`](https://github.com/godotengine/godot/blob/ed1daf0bf001b61586d9930840f2f1394092c079/scene/2d/tile_map_layer.cpp#L3042),
+with the set used for coordinate membership. Its actual cell store is a HashMap, but Godot's
+[`HashMap`](https://github.com/godotengine/godot/blob/ed1daf0bf001b61586d9930840f2f1394092c079/core/templates/hash_map.h#L41)
+also maintains insertion links; it is not Rust HashSet iteration semantics. Godot's setter
+updates existing coordinates rather than rejecting duplicate input records. Bevy's pinned
+[`TilemapChunkTileData`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_sprite_render/src/tilemap_chunk/mod.rs#L135)
+uses a dense Vec indexed by dimensions, so it has no equivalent coordinate uniqueness index.
+Those sources support separating membership from ordering, not changing Nara's first-error,
+whole-input refusal or dirty-update policies. They establish no timing, memory or constant
+worst-case lookup result for Nara's randomized standard-library implementation.
+
+The [complete membership comparison](../benchmarks/2026-11-14-development-runtime-costs.md#native-tile-coordinate-membership-index)
+subsequently defers that performance choice and restores the original index. Two complete
+before/after/after/before series preserve behavior, but unchanged parsing/admission spans drift
+alongside the component spans. This does not isolate a two-line hashing improvement or establish
+that hashing is slower. The mechanism remains semantically suitable; it is not adopted solely
+from expected membership complexity. Larger repeated domain/diagnostic work is the next target,
+without adding a new profiler or universal validation exemption for this small experiment.
+
 ## 6. Common Issues and What the Sources Do Not Prove
 
 - **A faster capture is not a removed lifetime copy.** The existing report already shows the copy

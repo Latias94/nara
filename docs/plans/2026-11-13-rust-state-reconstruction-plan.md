@@ -4516,6 +4516,81 @@ or domain-owned reuse through the existing real consumers. Do not infer that eve
 skip checks, adopt a cross-stage cache keyed by source path, or make a broad Scene validation
 API solely to rescue this failed loop experiment. Full Foundation remains active.
 
+#### Native Tile Coordinate Membership Index
+
+Status: performance decision deferred after two complete comparisons; original production index
+restored. The rejected direct-construction experiment shows that diagnostic
+preflight must keep its compact typed cells instead of eagerly building final native/dirty trees.
+The existing coordinate BTreeSet is used only for `insert` membership, never ordered traversal.
+Compare the standard library's randomized HashSet at this private duplicate-check owner.
+
+Keep incremental growth, complete per-cell parsing before duplicate rejection, first original
+duplicate input index, typed Vec order, deferred asset lifetime and final native BTreeMap/dirty
+revision construction unchanged. Do not preallocate the complete set from untrusted list length,
+replace the default randomized hasher or add a hashing dependency. Output order and diagnostics
+must not depend on bucket order; the set is never iterated. Source/native/domain/receiving checks
+and public formats/interfaces remain unchanged. This changes the membership implementation,
+not the code's guarantees or the stored cell representation.
+
+Use existing full Tilemap/related render and public deferred/error controls, independently
+locked actual TileSet delivery and the original game's complete native travel/replay/cleanup.
+Do not add another test framework or repeat unrelated runtime libraries/official-engine suites.
+Freeze the qualified restored program with its unchanged 46-phase observer, compare both actual
+and diagnostic construction and retain the new index only if complete consumers support it.
+Record all unchanged/correlated wall spans and ordinary randomized-hash/run variation; no blanket
+memory, frame-tail or worst-case latency claim follows from expected membership complexity.
+
+Initial owner/related-render qualification passes 118/118 with 48 outside the filter at
+`3dccd22e-cbf7-4a11-a034-262b51503984`, 7.755 seconds after a 22.66-second serial debug build.
+This includes all five public construction/lifetime/error controls added in the rejected experiment,
+without changing their assertions. Independently locked actual Runtime TileSet delivery passes
+14/14 without skips at `4694adb7-1865-4702-816c-5eea1f3164a1`, 1.436 seconds after a 1m11s build.
+The frozen qualified control completes another original three 16K lifetimes/nine GPU replays and
+cleanup. The candidate production diff is only the membership type and initializer. Original
+release game/library/metrics/span/native/record qualification passes 148/148 without skips at
+`92461861-6dbf-47bb-92e4-e509e9d34e34`, 64.843 seconds after a serial 6m49s build. Original
+64/4K/16K travel, 27 GPU replays, both observer-panic cleanup controls and the complete 16K record/
+cook probe remain. Independent production review finds no P1/P2; the set is never iterated and
+`TileCoord`'s Hash/Eq agree, so input/error/dirty order is independent of bucket order.
+
+The first before/after/after/before series shows changing host cost: diagnostic component
+medians are 84.918/76.020 ms, actual unbound component 63.707/61.983 ms and unchanged receiving
+57.004/51.795 ms. One additional consecutive four-process series resolves the earlier separated
+control timing but still shows large unchanged-stage drift: diagnostic 84.586/64.520 ms,
+actual component 59.816/48.352 ms, unchanged receiving 52.277/43.735 ms and payload decode
+334.478/302.882 ms. In total all 24 original 16K lifetimes and 72 GPU replays complete with exact
+expected phase calls, gameplay and physical cleanup. Neither nested/correlated wall series
+isolates the effect of two source lines. Do not normalize unchanged phases away or turn these
+observations into a CPU, memory, frame-P99, general speedup or regression claim.
+
+Defer the index choice and restore only this experiment's two production lines with `apply_patch`.
+All final production/source/control hashes match the qualified baseline exactly. The
+[inconclusive report](../benchmarks/2026-11-14-development-runtime-costs.md#native-tile-coordinate-membership-index)
+stores one finite observation artifact with exact raw/program/source identities and the
+recoverable candidate patch; selected retained/omitted raw fields are explicit. Existing process
+CPU observations cover different work and threads, so they are not a valid per-phase substitute.
+No new profiler, hash dependency or public API is added to rescue the small index candidate.
+The restored original program is rebuilt in 3m48s and completes another three 16K lifetimes/nine
+GPU replays with physical cleanup. The same finite observation artifact records that final
+program/raw-report identity and selected complete facts, explicitly as correctness rather than
+performance evidence. All 163 final source/control hashes equal the qualified baseline; no
+Rust or dependency changes remain. Root/sample formatting and document/whitespace checks pass;
+there is no reason to rerun unchanged owner/official suites merely for the evidence closure.
+Main verification recomputes every median and phase count, compares selected facts with all raw
+reports, checks both candidate/control programs and the restored program, all source hash tables,
+the applicable candidate patch and local document links. The final independent disposition review
+is partial: it confirms the two-line patch, restoration, ordering and honest deferred claims, but
+does not independently recompute the numeric/source hashes. Do not treat main verification as a
+second independent review. Three scoped source/production/disposition agents are closed; no
+concrete P1/P2 remains in the reviewed scope. These limits are sufficient for documenting a
+non-adopted experiment and are not a performance approval or full Foundation qualification.
+
+Stop iterating on this small index under uncontrolled wall measurements. Next inspect the larger
+repeated Tilemap domain/diagnostic preparation through existing source, Check and Runtime owners.
+Choose a concrete representation/handoff only after identifying its full receiving, failure,
+mutable escape and retained-resource effects. The previously rejected final-tree choice is not
+reintroduced, and a source-path cache is not selected. Full Foundation/R9/R10/R12 remains open.
+
 ### Preserve Isolated Migration Storage During Defaults
 
 Status: implemented at `e2c2a38` and qualified on Windows/Rust1.95 below. Correct the independently identified
