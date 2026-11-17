@@ -31,6 +31,19 @@ The declaration is the single Rust source for the generated
 
 ## Borrowed Native Decoding
 
+Handwritten codecs with expensive native construction may register an explicit diagnostic
+validator through `register_persistent_component_codec_with_context_and_validation`. Its
+validator takes the same borrowed value and mutable decode context as preflight and returns
+`Result<(), ComponentCodecError>`. Keep configuration, conversion, reference/domain checks and
+their error order shared with preflight. It must enforce the same domain refusal for the same
+input/context while avoiding native-value/candidate construction; it is not a validation bypass.
+Scene Check and source-load diagnosis use that callback after complete receiving admission.
+Actual preparation still calls preflight once. Existing registrations use preflight for
+diagnostics and preserve their original candidate lifetime: compiled batches retain fallback
+candidates through the complete batch; source-authoring diagnostics drop each immediately.
+Adding a validator is optional. Deferred apply failures and target-World eligibility remain
+preparation work.
+
 Handwritten native decode and preflight callbacks receive `ComponentValueRef<'_>` by value.
 The derive uses the same Interface for supported fields and recursive containers. Encoders and
 source migrations continue producing owned `ComponentValue`; source record access and JSON/RON

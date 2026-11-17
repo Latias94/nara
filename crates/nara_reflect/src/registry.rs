@@ -716,10 +716,36 @@ where
     }
 }
 
+type ComponentValidator = dyn for<'value, 'context> Fn(
+        ComponentValueRef<'value>,
+        &mut ComponentDecodeContext<'context>,
+    ) -> Result<(), ComponentCodecError>
+    + Send
+    + Sync
+    + 'static;
+
 struct NativeComponentBinding {
     rust_type_path: &'static str,
     validate_registration: fn() -> Result<(), PersistentComponentMetadataError>,
+    validate: Option<Box<ComponentValidator>>,
     codec: Box<dyn ComponentCodec>,
+}
+
+impl NativeComponentBinding {
+    fn diagnose_with_context(
+        &self,
+        id: &ComponentTypeId,
+        value: ComponentValueRef<'_>,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<Option<PreparedComponent>, ComponentCodecError> {
+        match &self.validate {
+            Some(validate) => validate(value, context).map(|()| None),
+            None => self
+                .codec
+                .preflight_with_context(value, context)
+                .map(|prepared| Some(prepared.bind(id.clone()))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1143,6 +1169,59 @@ impl ComponentRegistrySnapshot {
         value: impl Into<ComponentValueRef<'a>>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<PreparedComponent, ComponentCodecError> {
+        self.with_admitted_component_value(id, value.into(), context, |binding, value, context| {
+            binding
+                .codec
+                .preflight_with_context(value, context)
+                .map(|prepared| prepared.bind(id.clone()))
+        })
+    }
+
+    /// Validates one Native component for diagnostics under the caller's current context.
+    ///
+    /// Admission is identical to `preflight_component_with_context`, including defaults, value
+    /// limits, Native references and schema coverage. The binding's explicit validator runs when
+    /// registered; otherwise the original preflight runs exactly once and its candidate is dropped
+    /// before returning. No candidate or validation result is retained for later preparation.
+    /// Deferred apply failures and target-World eligibility remain apply-time concerns.
+    /// Scene batch diagnostics use the internal retaining dispatch to preserve fallback lifetimes.
+    pub fn validate_component_with_context<'a>(
+        &self,
+        id: &ComponentTypeId,
+        value: impl Into<ComponentValueRef<'a>>,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<(), ComponentCodecError> {
+        self.diagnose_component_with_context(id, value, context)
+            .map(drop)
+    }
+
+    /// Performs complete dynamic-input admission and retains an original fallback candidate.
+    ///
+    /// Scene uses this when the current context requires fresh admission. An explicit validator
+    /// returns `None`; fallback preflight returns `Some` bound to this exact registry definition.
+    /// The caller retains fallback candidates for the original diagnostic batch lifetime.
+    pub(crate) fn diagnose_component_with_context<'a>(
+        &self,
+        id: &ComponentTypeId,
+        value: impl Into<ComponentValueRef<'a>>,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<Option<PreparedComponent>, ComponentCodecError> {
+        self.with_admitted_component_value(id, value.into(), context, |binding, value, context| {
+            binding.diagnose_with_context(id, value, context)
+        })
+    }
+
+    fn with_admitted_component_value<Output>(
+        &self,
+        id: &ComponentTypeId,
+        value: ComponentValueRef<'_>,
+        context: &mut ComponentDecodeContext<'_>,
+        execute: impl FnOnce(
+            &NativeComponentBinding,
+            ComponentValueRef<'_>,
+            &mut ComponentDecodeContext<'_>,
+        ) -> Result<Output, ComponentCodecError>,
+    ) -> Result<Output, ComponentCodecError> {
         let (schema, binding) = self.execution_binding(id)?;
         validate_schema_capabilities(schema, [ComponentCapability::Scene])
             .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
@@ -1151,7 +1230,6 @@ impl ComponentRegistrySnapshot {
             .path_indexes
             .get(id)
             .ok_or_else(missing_schema_path_index_error)?;
-        let value = value.into();
         let source = value.as_value();
         let defaults = match source {
             Some(source) => freeze_component_defaults(
@@ -1171,10 +1249,7 @@ impl ComponentRegistrySnapshot {
             context.materialization_limits(),
         )?;
         validate_component_value_coverage(schema, path_index, effective)?;
-        binding
-            .codec
-            .preflight_with_context(effective, context)
-            .map(|prepared| prepared.bind(id.clone()))
+        execute(binding, effective, context)
     }
 
     /// Dispatches the original codec after Scene has admitted this exact effective value.
@@ -1194,6 +1269,22 @@ impl ComponentRegistrySnapshot {
             .codec
             .preflight_with_context(value, context)
             .map(|prepared| prepared.bind(id.clone()))
+    }
+
+    /// Validates through the original binding after complete Scene receiving admission.
+    ///
+    /// The caller owns admission of this exact effective value against this registry and the
+    /// current limits. Dispatch preserves the original context. An explicit validator returns
+    /// `None`; fallback preflight returns `Some` for the caller to retain for the original
+    /// diagnostic batch lifetime. It grants no authority to skip later preparation or apply.
+    pub(crate) fn validate_admitted_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        value: ComponentValueRef<'_>,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<Option<PreparedComponent>, ComponentCodecError> {
+        let (_, binding) = self.execution_binding(id)?;
+        binding.diagnose_with_context(id, value, context)
     }
 
     /// Encodes the selected component, returning `None` only for entity/component absence.
@@ -1670,6 +1761,93 @@ impl ComponentRegistryBuilder {
             + Sync
             + 'static,
     {
+        self.register_persistent_component_codec_internal::<T, _, _>(
+            schema, None, preflight, encode,
+        )
+    }
+
+    /// Registers a typed codec and an explicit diagnostic-only domain validator together.
+    ///
+    /// The validator receives the same borrowed effective value and mutable decode context as
+    /// preflight. It must report equivalent preflight-domain refusals under the current context
+    /// without constructing `T` or a preparation candidate. Deferred apply failures and target-World
+    /// eligibility are still checked later. Ordinary preparation only calls the original preflight;
+    /// it does not run this validator. Validation retains no proof or cache for future calls.
+    ///
+    /// The callback belongs to this exact native binding, including its owner and generation.
+    /// Schema and binding admission are atomic and identical to ordinary codec registration.
+    pub fn register_persistent_component_codec_with_context_and_validation<
+        T,
+        Validate,
+        Preflight,
+        Encode,
+    >(
+        &mut self,
+        schema: ComponentSchema,
+        validate: Validate,
+        preflight: Preflight,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Validate: for<'value, 'context> Fn(
+                ComponentValueRef<'value>,
+                &mut ComponentDecodeContext<'context>,
+            ) -> Result<(), ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Preflight: for<'value, 'context> Fn(
+                ComponentValueRef<'value>,
+                &mut ComponentDecodeContext<'context>,
+            )
+                -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: for<'a> Fn(
+                &T,
+                &World,
+                &ComponentEncodeContext<'a>,
+            ) -> Result<ComponentValue, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.register_persistent_component_codec_internal::<T, _, _>(
+            schema,
+            Some(Box::new(validate)),
+            preflight,
+            encode,
+        )
+    }
+
+    fn register_persistent_component_codec_internal<T, Preflight, Encode>(
+        &mut self,
+        schema: ComponentSchema,
+        validate: Option<Box<ComponentValidator>>,
+        preflight: Preflight,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Preflight: for<'value, 'context> Fn(
+                ComponentValueRef<'value>,
+                &mut ComponentDecodeContext<'context>,
+            )
+                -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: for<'a> Fn(
+                &T,
+                &World,
+                &ComponentEncodeContext<'a>,
+            ) -> Result<ComponentValue, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
         let id = schema.id.clone();
         let data = self.raw_building_mut()?;
         validate_persistent_registration::<T>(data, &schema)?;
@@ -1684,6 +1862,7 @@ impl ComponentRegistryBuilder {
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
                 validate_registration: validate_persistent_component_registration::<T>,
+                validate,
                 codec: Box::new(FnComponentCodec::<T, _, _> {
                     preflight,
                     encode,
@@ -1761,6 +1940,7 @@ impl ComponentRegistryBuilder {
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
                 validate_registration: validate_persistent_component_registration::<T>,
+                validate: None,
                 codec: Box::new(FnComponentCodec::<T, _, _> {
                     preflight,
                     encode,

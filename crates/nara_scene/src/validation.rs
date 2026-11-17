@@ -121,6 +121,12 @@ enum EffectiveValueRole {
     Runtime,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScenePreflightPurpose {
+    Diagnostic,
+    Prepare,
+}
+
 /// The concrete pure value batch shared by source compilation and closed flat admission.
 /// These borrowed facts provide no source loading, mutation or activation authority.
 struct FlatSceneComponentRef<'a> {
@@ -630,6 +636,41 @@ pub(crate) fn preflight_compiled_scene_with_context(
     context: &mut ComponentDecodeContext<'_>,
     exact_definitions_admitted: bool,
 ) -> PreparedScene {
+    process_compiled_scene_with_context(
+        document,
+        registry,
+        bindings,
+        context,
+        exact_definitions_admitted,
+        ScenePreflightPurpose::Prepare,
+    )
+}
+
+pub(crate) fn diagnose_compiled_scene_with_context(
+    document: &crate::CompiledSceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    bindings: Option<&SceneComponentBindings>,
+    context: &mut ComponentDecodeContext<'_>,
+) -> DiagnosticReport {
+    process_compiled_scene_with_context(
+        document,
+        registry,
+        bindings,
+        context,
+        false,
+        ScenePreflightPurpose::Diagnostic,
+    )
+    .diagnostics
+}
+
+fn process_compiled_scene_with_context(
+    document: &crate::CompiledSceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    bindings: Option<&SceneComponentBindings>,
+    context: &mut ComponentDecodeContext<'_>,
+    exact_definitions_admitted: bool,
+    purpose: ScenePreflightPurpose,
+) -> PreparedScene {
     #[cfg(feature = "work-observation")]
     let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_decode").entered();
     let admitted_limits = context.materialization_limits();
@@ -690,28 +731,58 @@ pub(crate) fn preflight_compiled_scene_with_context(
         let mut data_components = Vec::new();
         for (component, record) in entity.components() {
             if let Some(owner) = bindings.and_then(|bindings| bindings.data_owner(component)) {
-                data_components.push(PreparedSceneDataComponent {
-                    id: component.clone(),
-                    owner: owner.clone(),
-                    record: record.copy_for_native_preparation(),
-                });
+                if purpose == ScenePreflightPurpose::Prepare {
+                    data_components.push(PreparedSceneDataComponent {
+                        id: component.clone(),
+                        owner: owner.clone(),
+                        record: record.copy_for_native_preparation(),
+                    });
+                }
                 continue;
             }
-            let prepared = if context.materialization_limits() == admitted_limits {
-                nara_reflect::__private::preflight_admitted_component_with_context(
-                    registry,
-                    component,
-                    record.value(),
-                    context,
-                )
-            } else {
-                registry.preflight_component_with_context(component, record.value(), context)
+            let admitted = context.materialization_limits() == admitted_limits;
+            let prepared = match purpose {
+                ScenePreflightPurpose::Diagnostic => {
+                    if admitted {
+                        nara_reflect::__private::validate_admitted_component_with_context(
+                            registry,
+                            component,
+                            record.value(),
+                            context,
+                        )
+                    } else {
+                        nara_reflect::__private::diagnose_component_with_context(
+                            registry,
+                            component,
+                            record.value(),
+                            context,
+                        )
+                    }
+                }
+                ScenePreflightPurpose::Prepare => {
+                    let prepared = if admitted {
+                        nara_reflect::__private::preflight_admitted_component_with_context(
+                            registry,
+                            component,
+                            record.value(),
+                            context,
+                        )
+                    } else {
+                        registry.preflight_component_with_context(
+                            component,
+                            record.value(),
+                            context,
+                        )
+                    };
+                    prepared.map(Some)
+                }
             };
             match prepared {
-                Ok(prepared) => components.push(PreparedSceneComponent {
+                Ok(Some(prepared)) => components.push(PreparedSceneComponent {
                     id: component.clone(),
                     prepared,
                 }),
+                Ok(None) => {}
                 Err(error) => {
                     diagnostics.push(component_payload_diagnostic(
                         entity.id().as_str(),
@@ -722,20 +793,27 @@ pub(crate) fn preflight_compiled_scene_with_context(
                 }
             }
         }
-        entities.push(PreparedSceneEntity {
-            id: entity.id().clone(),
-            children: entity.children().to_vec(),
-            components,
-            data_components,
-        });
+        if purpose == ScenePreflightPurpose::Prepare || !components.is_empty() {
+            entities.push(PreparedSceneEntity {
+                id: entity.id().clone(),
+                children: entity.children().to_vec(),
+                components,
+                data_components,
+            });
+        }
     }
     PreparedScene {
-        roots: document.roots().to_vec(),
+        roots: if purpose == ScenePreflightPurpose::Prepare {
+            document.roots().to_vec()
+        } else {
+            Vec::new()
+        },
         entities,
         diagnostics,
     }
 }
 
+#[cfg(test)]
 pub(crate) fn preflight_scene(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
@@ -766,31 +844,62 @@ pub(crate) fn preflight_authoring_scene_for_patch(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn preflight_scene_with_context(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_source_native(document, registry, None, context)
+    process_source_native(
+        document,
+        registry,
+        None,
+        context,
+        ScenePreflightPurpose::Prepare,
+    )
 }
 
 /// Compiles source declarations before the complete Native/data admission path.
+#[cfg(test)]
 pub(crate) fn preflight_scene_with_context_and_bindings(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     bindings: &SceneComponentBindings,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_source_native(document, registry, Some(bindings), context)
+    process_source_native(
+        document,
+        registry,
+        Some(bindings),
+        context,
+        ScenePreflightPurpose::Prepare,
+    )
 }
 
-/// Diagnostic validation has no source loader. The ordinary compiler alone interprets authored
-/// placements, defaults and references; its closed result then crosses complete Native preflight.
-fn preflight_source_native(
+pub(crate) fn diagnose_scene_with_context(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     bindings: Option<&SceneComponentBindings>,
     context: &mut ComponentDecodeContext<'_>,
+) -> DiagnosticReport {
+    process_source_native(
+        document,
+        registry,
+        bindings,
+        context,
+        ScenePreflightPurpose::Diagnostic,
+    )
+    .diagnostics
+}
+
+/// Diagnostic validation has no source loader. The ordinary compiler alone interprets authored
+/// placements, defaults and references; its closed result then crosses complete receiving admission.
+fn process_source_native(
+    document: &SceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    bindings: Option<&SceneComponentBindings>,
+    context: &mut ComponentDecodeContext<'_>,
+    purpose: ScenePreflightPurpose,
 ) -> PreparedScene {
     if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {
         let mut diagnostics = DiagnosticReport::default();
@@ -833,7 +942,7 @@ fn preflight_source_native(
         };
     };
     let mut prepared =
-        preflight_compiled_scene_with_context(&document, registry, bindings, context, false);
+        process_compiled_scene_with_context(&document, registry, bindings, context, false, purpose);
     report.diagnostics.extend(prepared.diagnostics);
     prepared.diagnostics = report.diagnostics;
     prepared
@@ -1396,12 +1505,12 @@ fn preflight_source_values_with_context(
     for (entity, components) in normalized_entities {
         for component in components {
             let component_id = component.id;
-            match registry.preflight_component_with_context(
+            match registry.validate_component_with_context(
                 component_id,
                 component.value.read(),
                 context,
             ) {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(ComponentCodecError::MissingNativeBinding { .. }) => push_with_operation_index(
                     &mut diagnostics,
                     with_public_locator(

@@ -593,19 +593,20 @@ pub fn register_tilemap_components(
     registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_tilemap_components(registry)?;
-    registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
+    registry.register_persistent_component_codec_with_context_and_validation::<Tilemap, _, _, _>(
         tilemap_schema(),
         |value: ComponentValueRef<'_>, context| {
-            let tile_size = read_positive_vec2(value.field("tile_size")?, "tile_size")?;
-            let layer = optional_i32(value, "layer")?.unwrap_or(0);
-            let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
-            let y_sort_anchor = match value.get("y_sort_anchor") {
-                None => None,
-                Some(value) if value.kind() == ComponentValueKind::Null => None,
-                Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
-            };
-            let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
-            let tileset = prepare_optional_tileset(context, tileset_ref)?;
+            read_tilemap_configuration(value, context)?;
+            visit_cells(value.get("cells"), |_, _| {})
+        },
+        |value: ComponentValueRef<'_>, context| {
+            let TilemapConfiguration {
+                tile_size,
+                layer,
+                sort_key,
+                y_sort_anchor,
+                tileset,
+            } = read_tilemap_configuration(value, context)?;
             let cells = read_cells(value.get("cells"))?;
 
             if prepared_tileset_requires_asset_server(&tileset) {
@@ -762,6 +763,37 @@ enum PreparedTileset {
     Resolved(Handle<TileSet>),
     DeferredPath(AssetSourcePath),
     DeferredRecord(AssetRecord),
+}
+
+struct TilemapConfiguration {
+    tile_size: Vec2,
+    layer: i32,
+    sort_key: i32,
+    y_sort_anchor: Option<Vec2>,
+    tileset: Option<PreparedTileset>,
+}
+
+fn read_tilemap_configuration(
+    value: ComponentValueRef<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+) -> Result<TilemapConfiguration, ComponentCodecError> {
+    let tile_size = read_positive_vec2(value.field("tile_size")?, "tile_size")?;
+    let layer = optional_i32(value, "layer")?.unwrap_or(0);
+    let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
+    let y_sort_anchor = match value.get("y_sort_anchor") {
+        None => None,
+        Some(value) if value.kind() == ComponentValueKind::Null => None,
+        Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
+    };
+    let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
+    let tileset = prepare_optional_tileset(context, tileset_ref)?;
+    Ok(TilemapConfiguration {
+        tile_size,
+        layer,
+        sort_key,
+        y_sort_anchor,
+        tileset,
+    })
 }
 
 fn prepared_tileset_requires_asset_server(tileset: &Option<PreparedTileset>) -> bool {
@@ -1002,27 +1034,33 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
 fn read_cells(
     value: Option<ComponentValueRef<'_>>,
 ) -> Result<Vec<(TileCoord, TileCell)>, ComponentCodecError> {
+    let mut cells = Vec::new();
+    visit_cells(value, |coord, cell| cells.push((coord, cell)))?;
+    Ok(cells)
+}
+
+fn visit_cells(
+    value: Option<ComponentValueRef<'_>>,
+    mut visit: impl FnMut(TileCoord, TileCell),
+) -> Result<(), ComponentCodecError> {
     let Some(value) = value else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let entries = value
         .as_list()
         .ok_or_else(|| ComponentCodecError::invalid_field("cells", "list"))?;
     let mut coordinates = BTreeSet::new();
-    entries
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let (coord, cell) = read_cell(entry)?;
-            if !coordinates.insert(coord) {
-                return Err(ComponentCodecError::invalid_field(
-                    format!("cells[{index}].coord"),
-                    "unique tile coordinate",
-                ));
-            }
-            Ok((coord, cell))
-        })
-        .collect()
+    for (index, entry) in entries.iter().enumerate() {
+        let (coord, cell) = read_cell(entry)?;
+        if !coordinates.insert(coord) {
+            return Err(ComponentCodecError::invalid_field(
+                format!("cells[{index}].coord"),
+                "unique tile coordinate",
+            ));
+        }
+        visit(coord, cell);
+    }
+    Ok(())
 }
 
 fn read_cell(entry: ComponentValueRef<'_>) -> Result<(TileCoord, TileCell), ComponentCodecError> {

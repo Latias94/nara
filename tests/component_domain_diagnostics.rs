@@ -120,7 +120,7 @@ fn recipe() -> ProductRecipe {
                             .with_field(ComponentFieldId::new("duration"))
                             .into());
                         }
-                        Ok(DomainCooldown(value.clone()))
+                        Ok(DomainCooldown(value.to_owned()))
                     },
                     |value| Ok(value.0.clone()),
                 )

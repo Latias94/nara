@@ -13,9 +13,9 @@ use crate::{
     PrefabInstance, SceneComponentBindings, SceneEntityPlacement,
     component_payload::ComponentPayload,
     validation::{
+        diagnose_compiled_scene_with_context, diagnose_scene_with_context,
         preflight_authoring_scene, preflight_authoring_scene_for_patch,
         preflight_authoring_scene_with_context, preflight_authoring_scene_with_context_for_patch,
-        preflight_scene, preflight_scene_with_context, preflight_scene_with_context_and_bindings,
     },
 };
 
@@ -58,7 +58,7 @@ impl SceneDocument {
 
     #[must_use]
     pub fn validate(&self, registry: &ComponentRegistrySnapshot) -> DiagnosticReport {
-        preflight_scene(self, registry).diagnostics
+        diagnose_scene_with_context(self, registry, None, &mut ComponentDecodeContext::new())
     }
 
     #[must_use]
@@ -68,7 +68,7 @@ impl SceneDocument {
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
-        preflight_scene_with_context(self, registry, &mut context).diagnostics
+        diagnose_scene_with_context(self, registry, None, &mut context)
     }
 
     pub(crate) fn validate_authoring(
@@ -126,21 +126,19 @@ impl SceneComponentBindings {
         if let Some(resolver) = asset_resolution {
             context = context.with_asset_resolution(resolver);
         }
-        crate::validation::preflight_compiled_scene_with_context(
+        diagnose_compiled_scene_with_context(
             document,
             self.native_snapshot(),
             Some(self),
             &mut context,
-            false,
         )
-        .diagnostics
     }
 
-    /// Compiles and validates a complete Scene through the shared native/data preflight.
+    /// Compiles and validates a complete Scene through the shared native/data admission.
     ///
-    /// Native records use the selected real codecs and migrations; data records require their
-    /// admitted owner, current version, Schema and declared references. `limits` bounds aggregate
-    /// retained effective component values across both families. When supplied, `asset_resolution`
+    /// Native records use the selected diagnostics or codec fallback and migrations; data records
+    /// require their admitted owner, current version, Schema and declared references. `limits`
+    /// bounds aggregate retained effective component values across both families. `asset_resolution`
     /// checks declared asset references against project metadata without loading assets.
     /// This does not access a `World`, mutate the source or publish executable state. Sources
     /// that require a Prefab resolver must use the complete compilation operation with that resolver.
@@ -155,13 +153,7 @@ impl SceneComponentBindings {
         if let Some(asset_resolution) = asset_resolution {
             context = context.with_asset_resolution(asset_resolution);
         }
-        preflight_scene_with_context_and_bindings(
-            document,
-            self.native_snapshot(),
-            self,
-            &mut context,
-        )
-        .diagnostics
+        diagnose_scene_with_context(document, self.native_snapshot(), Some(self), &mut context)
     }
 }
 

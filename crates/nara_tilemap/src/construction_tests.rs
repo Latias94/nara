@@ -1,5 +1,5 @@
 use crate::{DEFAULT_TILE_SIZE, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
-use nara_asset::{AssetRef, AssetServer};
+use nara_asset::{AssetRef, AssetServer, AssetSourcePath};
 use nara_core::{Color, Vec2};
 use nara_ecs::World;
 use nara_reflect::{
@@ -339,5 +339,89 @@ fn deferred_path_candidate_owns_cells_and_isolates_live_map_and_catalogue() {
             assert_eq!(world.get::<Tilemap>(entity), Some(&live));
         }
         assert_eq!(world.resource::<AssetServer>(), &catalogue);
+    }
+}
+
+#[test]
+fn diagnostic_validation_preserves_codec_errors_and_asset_context_effects() {
+    let snapshot = registry();
+    let first = cell_value(
+        TileCoord::new(-33, 65),
+        TileCell::new(TileIndex::new(7)).with_color(Color::rgba(0.125, 0.25, 0.5, 0.75)),
+    );
+    let mut malformed = first.clone();
+    malformed
+        .set_path(
+            &ComponentFieldPath::from_fields(["cell", "color", "g"]),
+            ComponentValue::f64(f64::MAX).unwrap(),
+        )
+        .unwrap();
+    let values = [
+        tilemap_value(Vec::new()),
+        tilemap_value(vec![first.clone()]),
+        tilemap_value(vec![first.clone(), first.clone()]),
+        tilemap_value(vec![first.clone(), malformed.clone()]),
+        tilemap_value(vec![first.clone(), first.clone(), malformed]),
+    ];
+    for value in values {
+        for asset in [
+            None,
+            Some("tilesets/valid.ron"),
+            Some("tilesets/conflict.ron"),
+        ] {
+            let mut value = value.clone();
+            if let Some(path) = asset {
+                value
+                    .set_path(
+                        &ComponentFieldPath::from_fields(["tileset"]),
+                        nara_reflect::encode_asset_reference_value(&AssetRef::path(path).unwrap()),
+                    )
+                    .unwrap();
+            }
+            let original = value.clone();
+            let expected = snapshot
+                .preflight_component(&tilemap_type_id(), &value)
+                .map(drop);
+            assert_eq!(
+                snapshot.validate_component_with_context(
+                    &tilemap_type_id(),
+                    &value,
+                    &mut ComponentDecodeContext::new(),
+                ),
+                expected,
+            );
+            let mut native_server = AssetServer::new();
+            native_server
+                .reserve::<String>("tilesets/conflict.ron")
+                .unwrap();
+            let untyped = native_server
+                .reserve_path_id(AssetSourcePath::new("tilesets/valid.ron").unwrap())
+                .unwrap();
+            assert!(native_server.get_handle::<TileSet>(untyped).is_none());
+            let mut validation_server = native_server.clone();
+            let mut native_context = ComponentDecodeContext::with_asset_server(&mut native_server);
+            let mut validation_context =
+                ComponentDecodeContext::with_asset_server(&mut validation_server);
+            let expected = snapshot
+                .preflight_component_with_context(&tilemap_type_id(), &value, &mut native_context)
+                .map(drop);
+            let actual = snapshot.validate_component_with_context(
+                &tilemap_type_id(),
+                &value,
+                &mut validation_context,
+            );
+            assert_eq!(actual, expected);
+            assert_eq!(
+                validation_context.asset_server_touched(),
+                native_context.asset_server_touched(),
+            );
+            drop((native_context, validation_context));
+            assert_eq!(validation_server, native_server);
+            assert_eq!(
+                validation_server.get_handle::<TileSet>(untyped).is_some(),
+                asset == Some("tilesets/valid.ron"),
+            );
+            assert_eq!(value, original);
+        }
     }
 }

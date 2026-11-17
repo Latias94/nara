@@ -112,6 +112,18 @@ product policy and actual asset resolution before entity-plan finalization and n
 No native business codec, mutable World, product existence or publication fact is inferred from
 the shared traversal. Processed exact-definition reuse retains its separate existing contract.
 
+Diagnostic checking may use an explicit domain validator registered by the same native codec
+owner. It accepts the same borrowed effective value and decode context and must preserve the
+preflight domain refusal/context semantics without constructing a native candidate. Existing
+codecs without that callback retain ordinary preflight and their original candidate lifetime:
+compiled diagnostic batches retain fallback candidates until the complete batch is disposed;
+source-authoring diagnostics dispose of each candidate immediately. Complete receiving Schema,
+defaults, value/reference limits and asset/namespace rules still
+precede domain dispatch. Current-context changes can require renewed admission of later values.
+Actual preparation executes the original typed preflight once, not validator then preflight;
+World eligibility, deferred resources and publication remain its original responsibility.
+No reusable acceptance certificate or context-free native result is implied by diagnostics.
+
 Complete data groups are staged with native prepared values and installed through the existing
 exclusive, lifecycle-free Scene publication tail. A carrier contains only current records and
 their owner-local data snapshots, with exact World/entity-incarnation custody; it does not retain

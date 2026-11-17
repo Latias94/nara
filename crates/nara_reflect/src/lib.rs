@@ -222,6 +222,36 @@ pub mod __private {
         snapshot.preflight_admitted_component_with_context(component, value, context)
     }
 
+    /// Scene-only diagnostic dispatch after complete receiving admission against this registry.
+    ///
+    /// The caller must have admitted this exact effective value under the current limits.
+    /// Standalone dynamic input uses `ComponentRegistrySnapshot::validate_component_with_context`.
+    /// The original binding's validator runs, or its original preflight runs exactly once and the
+    /// bound candidate is returned for the caller to retain for the original diagnostic batch
+    /// lifetime. Explicit validation returns `None`. Later preparation and apply retain their checks.
+    pub fn validate_admitted_component_with_context(
+        snapshot: &ComponentRegistrySnapshot,
+        component: &crate::ComponentTypeId,
+        value: crate::ComponentValueRef<'_>,
+        context: &mut crate::ComponentDecodeContext<'_>,
+    ) -> Result<Option<crate::PreparedComponent>, crate::ComponentCodecError> {
+        snapshot.validate_admitted_component_with_context(component, value, context)
+    }
+
+    /// Scene diagnostic dispatch with complete dynamic-input admission under the current context.
+    ///
+    /// Uses the same admission as standalone preflight, including defaults, Native references,
+    /// coverage and current limits. Explicit validation returns `None`; original fallback preflight
+    /// returns `Some` for the caller to retain for the original diagnostic batch lifetime.
+    pub fn diagnose_component_with_context(
+        snapshot: &ComponentRegistrySnapshot,
+        component: &crate::ComponentTypeId,
+        value: crate::ComponentValueRef<'_>,
+        context: &mut crate::ComponentDecodeContext<'_>,
+    ) -> Result<Option<crate::PreparedComponent>, crate::ComponentCodecError> {
+        snapshot.diagnose_component_with_context(component, value, context)
+    }
+
     pub fn component_snapshot_matches_runtime_type(
         snapshot: &ComponentRegistrySnapshot,
         world: &nara_ecs::World,
