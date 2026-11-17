@@ -30,7 +30,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, GameSnapshot,
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
 use super::process_cost::{self, ProcessCost};
@@ -165,7 +165,7 @@ pub(super) fn travel_completed(snapshot: &GameSnapshot) -> Result<bool, String> 
         || snapshot.restarts != 1
         || snapshot.saves != 0
         || snapshot.restores != 0
-        || snapshot.scene_members != 6
+        || snapshot.scene_members != AUTHORED_LEVEL_MEMBERS
         || snapshot.held != [false; 4]
     {
         return Err("verified presentation disagrees with the final ordinary Travel facts".into());

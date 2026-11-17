@@ -2450,6 +2450,128 @@
           "generation": 1,
           "components": [
             {
+              "id": "two-level-game.CollisionBox",
+              "aliases": [
+                "Collision box"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "center",
+                  "aliases": [
+                    "Center"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "center"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "record",
+                    "members": [
+                      {
+                        "name": "x",
+                        "shape": {
+                          "shape": "scalar",
+                          "kind": "f64",
+                          "numeric_domain": "f32"
+                        }
+                      },
+                      {
+                        "name": "y",
+                        "shape": {
+                          "shape": "scalar",
+                          "kind": "f64",
+                          "numeric_domain": "f32"
+                        }
+                      }
+                    ]
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "half_height",
+                  "aliases": [
+                    "Half height"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "half_height"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32",
+                    "numeric_interval": {
+                      "kind": "f64",
+                      "min": {
+                        "bound": "included",
+                        "value": 0.0010000000474974513
+                      },
+                      "max": {
+                        "bound": "included",
+                        "value": 1024.0
+                      }
+                    }
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "half_width",
+                  "aliases": [
+                    "Half width"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "half_width"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32",
+                    "numeric_interval": {
+                      "kind": "f64",
+                      "min": {
+                        "bound": "included",
+                        "value": 0.0010000000474974513
+                      },
+                      "max": {
+                        "bound": "included",
+                        "value": 1024.0
+                      }
+                    }
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
               "id": "two-level-game.ObjectRole",
               "aliases": [
                 "Object role"

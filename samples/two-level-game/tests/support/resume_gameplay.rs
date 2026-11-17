@@ -19,8 +19,9 @@ use nara::{
     tasks::{TaskPools, TaskReturnState},
 };
 use two_level_game::{
-    GamePhase, GameSnapshot, capture_resume, open_explicit_project_root, open_project_root,
-    product_recipe,
+    GamePhase, GameSnapshot, capture_resume,
+    levels::AUTHORED_LEVEL_MEMBERS,
+    open_explicit_project_root, open_project_root, product_recipe,
     resume::{ResumeState, encode_resume},
 };
 
@@ -81,7 +82,7 @@ impl Game {
         assert_eq!(initial.logical_tick, 0);
         assert_eq!(initial.logical_elapsed_nanos, 0);
         assert_eq!(initial.held, [false; 4]);
-        assert_eq!(initial.scene_members, 6);
+        assert_eq!(initial.scene_members, AUTHORED_LEVEL_MEMBERS);
         assert!(initial.current_instance.is_some());
         game
     }

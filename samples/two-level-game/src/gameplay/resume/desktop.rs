@@ -41,6 +41,7 @@ pub fn restore_desktop_resume(
         ));
     }
     run.capture(fresh_candidate)??;
+    run.capture(|world| super::validate_current_placement(world, state))??;
     let holds = run.capture_keyboard_holds(&movement_keyboard_bindings())?;
     if holds.iter().any(|hold| hold.held) {
         return Err(refuse(

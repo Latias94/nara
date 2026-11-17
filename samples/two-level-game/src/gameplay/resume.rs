@@ -193,6 +193,43 @@ pub(super) fn is_pending(world: &World) -> bool {
     world.resource::<ResumeControl>().pending.is_some()
 }
 
+pub(super) fn validate_prepared_placement(
+    world: &World,
+    level: LevelId,
+    content: &super::content::Content,
+) -> Result<(), String> {
+    let control = world.resource::<ResumeControl>();
+    if let Some(state) = control.pending.as_ref()
+        && state.progress.location.level.level() == level
+    {
+        content.collision.validate_placement(player_pose(state))?;
+    }
+    Ok(())
+}
+
+fn player_pose(state: &ResumeState) -> Transform2d {
+    Transform2d {
+        translation: Vec2::from_array(state.player.translation),
+        rotation: state.player.rotation,
+        scale: Vec2::from_array(state.player.scale),
+    }
+}
+
+fn validate_current_placement(world: &World, state: &ResumeState) -> Result<(), GameResumeError> {
+    let level = world.resource::<super::ActiveLevel>();
+    if level.key().level() == state.progress.location.level.level() {
+        level
+            .content()
+            .ok_or_else(|| {
+                GameResumeError::Ineligible("active collision content is unavailable".into())
+            })?
+            .collision
+            .validate_placement(player_pose(state))
+            .map_err(GameResumeError::Ineligible)?;
+    }
+    Ok(())
+}
+
 pub(super) fn reject(world: &mut World) {
     let mut control = world.resource_mut::<ResumeControl>();
     control.pending = None;
@@ -233,6 +270,7 @@ pub fn request_resume(
     state.validate()?;
     let bytes = encode_resume(state)?;
     session.capture(fresh_candidate)??;
+    session.capture(|world| validate_current_placement(world, state))??;
     session.restore_time_continuation(state.runtime_time.to_continuation()?)?;
     if session.frame(Duration::ZERO)?.is_some() {
         return Err(GameResumeError::Ineligible(
@@ -302,6 +340,7 @@ pub(super) fn begin_from_command(
         return Err("resume command lacks its bounded state".into());
     };
     let state = decode_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+    validate_current_placement(world, &state).map_err(|error| error.to_string())?;
     let fixed = world.resource::<FixedTime>();
     let pending = fixed
         .debt()
@@ -388,19 +427,20 @@ pub(super) fn finish(world: &mut World) {
         );
         return;
     }
-    let Some(mut transform) = world.get_mut::<Transform2d>(player) else {
+    if world.get::<Transform2d>(player).is_none() {
         reject(world);
         fail(
             world,
             "reconstructed player transform is unavailable".into(),
         );
         return;
-    };
-    *transform = Transform2d {
-        translation: Vec2::from_array(state.player.translation),
-        rotation: state.player.rotation,
-        scale: Vec2::from_array(state.player.scale),
-    };
+    }
+    let pose = player_pose(&state);
+    if let Err(error) = super::collision::place(world, player, pose) {
+        reject(world);
+        fail(world, error);
+        return;
+    }
     let mut session = world.resource_mut::<Session>();
     session.held = state.held;
     session.clock = state.clock;

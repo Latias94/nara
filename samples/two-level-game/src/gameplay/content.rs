@@ -3,17 +3,19 @@ use std::collections::BTreeMap;
 use nara::{
     asset::AssetRef,
     identity::SceneEntityId,
-    prelude::{Component, PersistentComponent, PersistentComponentProvider, Vec2},
+    prelude::{Component, PersistentComponent, PersistentComponentProvider, Transform2d, Vec2},
     reflect::ComponentTypeId,
     scene::{CompiledSceneDocument, CompiledSceneEntity},
 };
 
+use super::collision::{CollisionBox, RoomCollision, Wall};
 use crate::{levels::LevelId, save::Checkpoint};
 
 pub const PLAYER: u32 = 1;
 pub const CHECKPOINT: u32 = 2;
 pub const PICKUP: u32 = 3;
 pub const PORTAL: u32 = 4;
+pub const WALL: u32 = 5;
 
 /// Authored role only; score, collected state and dynamic identities are explicit game data.
 #[derive(Debug, Clone, Component, PersistentComponent)]
@@ -55,6 +57,7 @@ pub(super) struct Content {
     pub checkpoint_position: Vec2,
     pub pickups: BTreeMap<SceneEntityId, Vec2>,
     pub bank: AssetRef,
+    pub collision: RoomCollision,
 }
 
 impl Content {
@@ -68,6 +71,7 @@ impl Content {
         let mut portals = 0;
         let mut cameras = 0;
         let mut bank = None;
+        let mut walls = Vec::new();
         for entity in scene.entities() {
             let palette = decode::<SoundPalette>(entity)?;
             if entity
@@ -76,7 +80,7 @@ impl Content {
                 .any(|id| id.as_str() == "nara.render.Camera2d")
             {
                 cameras += 1;
-                if !scene.roots().contains(entity.id()) || effective_position(entity)?.is_none() {
+                if !scene.roots().contains(entity.id()) || transform(entity)?.is_none() {
                     return Err("camera must be a transformed level root".into());
                 }
                 bank = Some(palette.ok_or("camera lacks its SoundPalette")?.bank);
@@ -89,9 +93,14 @@ impl Content {
             if !scene.roots().contains(entity.id()) || !entity.children().is_empty() {
                 return Err("game objects must be unparented level roots".into());
             }
-            let position = effective_position(entity)?.ok_or("game object lacks Transform2d")?;
-            if !valid_position(position) {
+            let transform = transform(entity)?.ok_or("game object lacks Transform2d")?;
+            let position = transform.translation;
+            if role.kind != WALL && !valid_position(position) {
                 return Err("game object position is outside the level bounds".into());
+            }
+            if role.kind == WALL && (!position.is_finite() || position.abs().max_element() > 1024.0)
+            {
+                return Err("wall position is outside the game's finite geometry".into());
             }
             if !entity
                 .components()
@@ -101,7 +110,11 @@ impl Content {
                 return Err("game object lacks its authored Sprite".into());
             }
             match role.kind {
-                PLAYER if player.is_none() => player = Some(entity.id().clone()),
+                PLAYER if player.is_none() => {
+                    let definition =
+                        decode::<CollisionBox>(entity)?.ok_or("explorer lacks its CollisionBox")?;
+                    player = Some((entity.id().clone(), transform, definition));
+                }
                 CHECKPOINT if checkpoint.is_none() => {
                     checkpoint = Some((entity.id().clone(), position))
                 }
@@ -109,6 +122,12 @@ impl Content {
                     pickups.insert(entity.id().clone(), position);
                 }
                 PORTAL => portals += 1,
+                WALL => walls.push(Wall {
+                    id: entity.id().clone(),
+                    transform,
+                    definition: decode::<CollisionBox>(entity)?
+                        .ok_or("wall lacks its CollisionBox")?,
+                }),
                 _ => return Err("duplicate or unsupported game object role".into()),
             }
         }
@@ -117,12 +136,18 @@ impl Content {
         if portals != 1 || cameras != 1 || pickups.len() != 2 {
             return Err("level requires one camera, one portal and two authored pickups".into());
         }
+        let (player, mut player_transform, definition) =
+            player.ok_or("level lacks a unique explorer")?;
+        player_transform.translation = checkpoint_position;
+        walls.sort_by(|first, second| first.id.cmp(&second.id));
+        let collision = RoomCollision::prepare(definition, walls, player_transform)?;
         Ok(Self {
-            player: player.ok_or("level lacks a unique explorer")?,
+            player,
             checkpoint,
             checkpoint_position,
             pickups,
             bank: bank.ok_or("level lacks its camera SoundPalette")?,
+            collision,
         })
     }
 
@@ -176,10 +201,7 @@ fn decode<T: PersistentComponentProvider>(
         .map_err(|error| error.to_string())
 }
 
-// ProjectScenes and CurrentScene already admitted these records through the frozen native codec.
-// Inspect only the field needed by this game's bounded placement rules; this is not another
-// Transform2d decoder or schema authority, and unsupported wire versions are rejected explicitly.
-fn effective_position(entity: &CompiledSceneEntity) -> Result<Option<Vec2>, String> {
+fn transform(entity: &CompiledSceneEntity) -> Result<Option<Transform2d>, String> {
     let Some(record) = entity
         .components()
         .get(&ComponentTypeId::new("nara.transform.Transform2d"))
@@ -187,23 +209,32 @@ fn effective_position(entity: &CompiledSceneEntity) -> Result<Option<Vec2>, Stri
         return Ok(None);
     };
     if record.version().get() != 1 {
-        return Err("game placement requires the current built-in Transform2d version".into());
-    }
-    let translation = record
-        .value()
-        .field("translation")
-        .map_err(|error| error.to_string())?;
-    let x = translation
-        .field_f64("x")
-        .map_err(|error| error.to_string())?;
-    let y = translation
-        .field_f64("y")
-        .map_err(|error| error.to_string())?;
-    let position = Vec2::new(x as f32, y as f32);
-    if !position.is_finite() {
         return Err(
-            "authored translation cannot be represented by the game's finite coordinates".into(),
+            "game collision preparation requires the current built-in Transform2d version".into(),
         );
     }
-    Ok(Some(position))
+    let value = record.value();
+    let vector = |name| {
+        let value = value.field(name).map_err(|error| error.to_string())?;
+        Ok::<_, String>(Vec2::new(
+            value.field_f64("x").map_err(|error| error.to_string())? as f32,
+            value.field_f64("y").map_err(|error| error.to_string())? as f32,
+        ))
+    };
+    let transform = Transform2d {
+        translation: vector("translation")?,
+        rotation: value
+            .field_f64("rotation")
+            .map_err(|error| error.to_string())? as f32,
+        scale: vector("scale")?,
+    };
+    if !transform.translation.is_finite()
+        || !transform.rotation.is_finite()
+        || !transform.scale.is_finite()
+    {
+        return Err(
+            "authored Transform2d cannot be represented by finite collision coordinates".into(),
+        );
+    }
+    Ok(Some(transform))
 }

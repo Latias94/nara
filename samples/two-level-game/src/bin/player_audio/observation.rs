@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot,
     audio::{self, AudioSnapshot, AudioWitness},
-    levels::LevelKey,
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelKey},
     sound_bank::{SoundBankDomain, SoundCue, bank_product},
 };
 
@@ -185,7 +185,7 @@ impl PlayerExtension for AudioObservation {
             || game.saves != 0
             || game.restores != 0
             || game.visible_pickups != 1
-            || game.scene_members != 6
+            || game.scene_members != AUTHORED_LEVEL_MEMBERS
             || game.held != [false; 4]
             || game.player.to_array() != [-120.0, 0.0]
         {

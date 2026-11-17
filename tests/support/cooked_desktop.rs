@@ -33,6 +33,8 @@ mod evidence;
 mod images;
 #[path = "cooked_desktop/process.rs"]
 mod process;
+#[path = "cooked_desktop/walls.rs"]
+mod walls;
 #[path = "cooked_desktop/window.rs"]
 mod window;
 #[path = "cooked_desktop/workflow.rs"]
@@ -293,6 +295,7 @@ pub fn accept(cooker: &Path) {
     let text = custody.run(NativeProcess::new(owner, None), Duration::from_secs(6 * 60));
     let report = process::record(&text, REPORT);
     assert_eq!(report["success"], true);
+    evidence::collision_excursions(&report);
     assert_eq!(report["ordinary_processes"], 2);
     assert_eq!(report["finite_processes"], 1);
     assert_eq!(report["refused_processes"], 1);

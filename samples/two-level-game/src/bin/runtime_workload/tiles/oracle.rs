@@ -15,7 +15,10 @@ use nara::{
     scene::{SourceDocumentKind, SourceDocumentOrigin},
 };
 use serde::Serialize;
-use two_level_game::{GamePhase, levels::LevelId};
+use two_level_game::{
+    GamePhase,
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId},
+};
 
 use super::{CANVAS_EXTENT, PresentedTileFrame, WINDOW_EXTENT, require};
 
@@ -75,8 +78,8 @@ pub(super) fn assert_packet(frame: &PresentedTileFrame) -> Result<(), String> {
             && snapshot.error.is_none()
             && snapshot.player.is_finite()
             && snapshot.current_instance == Some(game.instance.instance_id())
-            && snapshot.scene_members == 6
-            && game.instance.entity_ids().len() == 6
+            && snapshot.scene_members == AUTHORED_LEVEL_MEMBERS
+            && game.instance.entity_ids().len() == AUTHORED_LEVEL_MEMBERS
             && packet.source_generation().runtime_generation() == Some(frame.presentation.runtime)
             && packet.frame_index() == frame.presentation.render_frame
             && game.source.kind() == SourceDocumentKind::Scene
@@ -169,21 +172,17 @@ pub(super) fn assert_ground(frame: &PresentedTileFrame, population: usize) -> Re
             )?;
             for instance in &batch.instances {
                 let center = view.mapping.clip_to_world(instance.center);
-                let radius_y = (view
+                let x_axis = view
                     .mapping
                     .clip_to_world(instance.center + instance.x_axis)
-                    .y
-                    - center.y)
-                    .abs()
-                    + (view
-                        .mapping
-                        .clip_to_world(instance.center + instance.y_axis)
-                        .y
-                        - center.y)
-                        .abs();
+                    - center;
+                let y_axis = view
+                    .mapping
+                    .clip_to_world(instance.center + instance.y_axis)
+                    - center;
                 require(
-                    center.is_finite() && radius_y.is_finite() && center.y.abs() + radius_y < 88.0,
-                    "an original game object overlaps the oracle's ground-only Y region",
+                    clears_ground_regions(center, x_axis, y_axis),
+                    "an original game object has nonfinite bounds or overlaps the sampled ground regions",
                 )?;
             }
             continue;
@@ -248,6 +247,20 @@ pub(super) fn assert_ground(frame: &PresentedTileFrame, population: usize) -> Re
         count == population && seen.into_iter().all(|present| present),
         "original stock input does not contain the complete declared ground footprint",
     )
+}
+
+fn clears_ground_regions(center: Vec2, x_axis: Vec2, y_axis: Vec2) -> bool {
+    let radius = x_axis.abs() + y_axis.abs();
+    let min = center - radius;
+    let max = center + radius;
+    center.is_finite()
+        && x_axis.is_finite()
+        && y_axis.is_finite()
+        && min.is_finite()
+        && max.is_finite()
+        && [(-126.0, -88.0), (88.0, 126.0)]
+            .into_iter()
+            .all(|(bottom, top)| max.x < -120.0 || min.x > 136.0 || max.y < bottom || min.y > top)
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -405,6 +418,59 @@ fn check_block(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn room_walls_and_original_objects_clear_the_sampled_ground_regions() {
+        for (center, half_size) in [
+            (Vec2::new(-294.0, 0.0), Vec2::new(5.0, 164.0)),
+            (Vec2::new(294.0, 0.0), Vec2::new(5.0, 164.0)),
+            (Vec2::new(0.0, 164.0), Vec2::new(299.0, 5.0)),
+            (Vec2::new(0.0, -164.0), Vec2::new(299.0, 5.0)),
+            (Vec2::new(0.0, -12.0), Vec2::new(6.0, 36.0)),
+            (Vec2::new(20.0, -12.0), Vec2::new(6.0, 36.0)),
+            (Vec2::new(-120.0, 0.0), Vec2::new(9.0, 9.0)),
+        ] {
+            assert!(clears_ground_regions(
+                center,
+                Vec2::new(half_size.x, 0.0),
+                Vec2::new(0.0, half_size.y),
+            ));
+        }
+    }
+
+    #[test]
+    fn ground_occluders_and_nonfinite_bounds_cannot_qualify_as_clear() {
+        for center in [
+            Vec2::new(-126.0, 107.0),
+            Vec2::new(142.0, 107.0),
+            Vec2::new(-126.0, -107.0),
+            Vec2::new(142.0, -107.0),
+            Vec2::new(0.0, 82.0),
+            Vec2::new(0.0, -82.0),
+            Vec2::new(0.0, 132.0),
+            Vec2::new(0.0, -132.0),
+            Vec2::new(f32::NAN, 0.0),
+            Vec2::new(0.0, f32::INFINITY),
+        ] {
+            assert!(!clears_ground_regions(
+                center,
+                Vec2::new(10.0, 0.0),
+                Vec2::new(0.0, 10.0),
+            ));
+        }
+        for (x_axis, y_axis) in [
+            (Vec2::new(3.0, 40.0), Vec2::new(4.0, -40.0)),
+            (Vec2::new(f32::INFINITY, 0.0), Vec2::Y),
+            (Vec2::X, Vec2::new(0.0, f32::NAN)),
+        ] {
+            assert!(!clears_ground_regions(Vec2::new(0.0, 10.0), x_axis, y_axis,));
+        }
+        assert!(!clears_ground_regions(
+            Vec2::splat(f32::MAX),
+            Vec2::splat(f32::MAX),
+            Vec2::Y,
+        ));
+    }
 
     #[test]
     fn independent_sources_and_ground_centers_cover_every_population() {

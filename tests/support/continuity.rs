@@ -137,6 +137,20 @@ impl Fixture {
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
         let mut manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
+        let original = "path = \"../../crates/nara_rapier2d\"";
+        assert_eq!(
+            manifest.matches(original).count(),
+            1,
+            "the direct nara_rapier2d path dependency"
+        );
+        let path = fixture
+            .repository
+            .join("crates/nara_rapier2d")
+            .canonicalize()
+            .unwrap();
+        assert!(path.join("Cargo.toml").is_file());
+        let absolute = serde_json::to_string(path.to_str().unwrap()).unwrap();
+        manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
         for dependency in ["winit", "notify"] {
             let original = format!("path = \"../../vendor/{dependency}\"");
             assert_eq!(

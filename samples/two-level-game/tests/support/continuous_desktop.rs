@@ -337,6 +337,13 @@ pub fn assert_presentation(
     }
 }
 
+fn assert_free_corridor(player: [f32; 2]) {
+    assert!(
+        (-260.0..260.0).contains(&player[0]) && (38.0..42.0).contains(&player[1]),
+        "rightward speed evidence must stay within the free Y=40 corridor and finite X budget: {player:?}",
+    );
+}
+
 /// Status observes naturally completed ticks. This path never requests Step or a frame.
 pub fn continuous_native_motion(
     host: &mut DevelopmentHost,
@@ -346,7 +353,10 @@ pub fn continuous_native_motion(
     speed: f32,
 ) -> (ResumeState, Duration) {
     let started = Instant::now();
+    assert!(speed.is_finite() && speed > 0.0);
+    assert_free_corridor(canonical.player.translation);
     let initial = status(host, generation, ExecutionState::Running);
+    assert_eq!(initial.observation.player, canonical.player.translation);
     assert_eq!(
         initial.observation.held,
         [false; 4],
@@ -366,13 +376,18 @@ pub fn continuous_native_motion(
     let held = poll_running(host, generation, |observation| {
         input.assert_foreground();
         assert!(input.physical_down());
+        assert_free_corridor(observation.player);
         observation.held == [false, true, false, false]
     });
+    assert_eq!(held.observation.player[1], canonical.player.translation[1]);
+    assert!(held.observation.player[0] >= canonical.player.translation[0]);
     let advanced = poll_running(host, generation, |observation| {
         input.assert_foreground();
         assert!(input.physical_down());
+        assert_free_corridor(observation.player);
         observation.logical_tick >= held.observation.logical_tick + 4
     });
+    assert!(input.release(), "matched native D Up must complete");
     assert_eq!(advanced.observation.runtime_generation, runtime);
     assert_eq!(advanced.observation.held, [false, true, false, false]);
     let ticks = advanced.observation.logical_tick - held.observation.logical_tick;
@@ -387,25 +402,33 @@ pub fn continuous_native_motion(
     let delta = Duration::from_nanos(canonical.clock.timestep_nanos).as_secs_f32();
     let mut expected = held.observation.player;
     for _ in 0..ticks {
-        expected[0] = (expected[0] + speed * delta).clamp(-280.0, 280.0);
+        expected[0] += speed * delta;
     }
+    assert_free_corridor(expected);
     assert_eq!(
         advanced.observation.player, expected,
         "actual completed fixed ticks must execute the selected binary's movement law",
     );
     assert!(advanced.observation.player[0] > held.observation.player[0]);
-    assert!(input.release(), "matched native D Up must complete");
     let released = poll_running(host, generation, |observation| {
         input.assert_foreground();
+        assert_free_corridor(observation.player);
         observation.held == [false; 4]
     });
+    assert!(released.observation.player[0] >= advanced.observation.player[0]);
+    assert_eq!(
+        released.observation.player[1],
+        advanced.observation.player[1]
+    );
     let stopped = poll_running(host, generation, |observation| {
+        assert_free_corridor(observation.player);
         observation.logical_tick >= released.observation.logical_tick + 2
     });
     assert_eq!(stopped.observation.runtime_generation, runtime);
     assert_eq!(stopped.observation.held, [false; 4]);
     assert_eq!(stopped.observation.player, released.observation.player);
     let captured = pause_and_capture(host, generation);
+    assert_free_corridor(captured.player.translation);
     assert_eq!(captured.player.translation, stopped.observation.player);
     assert!(captured.clock.ticks >= stopped.observation.logical_tick);
     assert!(captured.clock.ticks > canonical.clock.ticks);

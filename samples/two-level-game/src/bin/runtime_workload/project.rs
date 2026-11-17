@@ -30,6 +30,7 @@ use nara::{
     tilemap::{TileAtlasLayout, TileSetSource},
 };
 use serde_json::{Map, Value, json};
+use two_level_game::levels::AUTHORED_LEVEL_MEMBERS;
 
 const PREFIX: &str = "nara-runtime-workload-source-";
 const OWNER_FILE: &str = ".runtime-workload-owner";
@@ -213,8 +214,10 @@ impl Project {
                 .pointer("/payload/entities")
                 .and_then(Value::as_array)
                 .ok_or("copied Scene lacks entities")?;
-            if entities.len() != 6 {
-                return Err(format!("{scene_path} must retain six authored members"));
+            if entities.len() != AUTHORED_LEVEL_MEMBERS {
+                return Err(format!(
+                    "{scene_path} must retain {AUTHORED_LEVEL_MEMBERS} authored members"
+                ));
             }
             let columns = if side == 128 { 64 } else { side };
             let record = tilemap_record(side, tile_size, 0..columns, &tileset)?;
@@ -297,7 +300,7 @@ impl Project {
             "cells_per_active_scene": self.population,
             "tile_size": [tile_size, tile_size],
             "world_bounds": {"min": [-120, -128], "max": [136, 128]},
-            "authored_scene_members": 6,
+            "authored_scene_members": AUTHORED_LEVEL_MEMBERS,
             "host_root_ids": if side == 128 {
                 vec!["checkpoint", "portal"]
             } else {

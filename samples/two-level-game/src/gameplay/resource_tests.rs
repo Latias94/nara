@@ -10,6 +10,11 @@ fn checkpoint() -> Checkpoint {
 }
 
 fn content() -> Content {
+    let definition = collision::CollisionBox {
+        center: Vec2::ZERO,
+        half_width: 1.0,
+        half_height: 1.0,
+    };
     Content {
         player: SceneEntityId::new("player").unwrap(),
         checkpoint: SceneEntityId::new("checkpoint").unwrap(),
@@ -19,6 +24,16 @@ fn content() -> Content {
             (SceneEntityId::new("first-pickup").unwrap(), Vec2::X),
             (SceneEntityId::new("second-pickup").unwrap(), Vec2::Y),
         ]),
+        collision: collision::RoomCollision::prepare(
+            definition,
+            vec![collision::Wall {
+                id: SceneEntityId::new("wall").unwrap(),
+                transform: Transform2d::from_translation(Vec2::new(100.0, 0.0)),
+                definition,
+            }],
+            Transform2d::default(),
+        )
+        .unwrap(),
     }
 }
 

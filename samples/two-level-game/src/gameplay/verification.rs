@@ -8,7 +8,7 @@ use nara::{
 };
 
 use super::{GamePhase, GameSnapshot, Scenario, commands::*};
-use crate::levels::{LevelId, LevelKey};
+use crate::levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey};
 
 #[derive(Debug)]
 enum Step {
@@ -169,7 +169,7 @@ pub(super) fn drive(
                 && snapshot.phase == GamePhase::Running =>
             {
                 if snapshot.current_instance == verifier.previous_instance
-                    || snapshot.scene_members != 6
+                    || snapshot.scene_members != AUTHORED_LEVEL_MEMBERS
                     || snapshot.level != Some(*key)
                     || snapshot.score != *score
                     || snapshot.visible_pickups != *visible

@@ -30,7 +30,7 @@ use serde::Serialize;
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
     audio::{self, AudioCause, AudioOptions, AudioSnapshot, AudioWitness},
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
 use super::oracle::{self, CHANNELS, MAX_OUTPUT_FRAMES, PcmEvidence, SAMPLE_RATE};
@@ -784,7 +784,7 @@ impl Session {
                     || snapshot.saves != 0
                     || snapshot.restores != 0
                     || snapshot.held != [false; 4]
-                    || snapshot.scene_members != 6
+                    || snapshot.scene_members != AUTHORED_LEVEL_MEMBERS
                     || snapshot.phase != GamePhase::Running
                     || snapshot.player.to_array() != [-120.0, 0.0]
                 {

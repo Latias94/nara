@@ -308,6 +308,11 @@ pub(super) fn advance(world: &mut World) {
         reject(world, error);
         return;
     }
+    if let Err(error) = super::resume::validate_prepared_placement(world, level, &content) {
+        cancel_ack(world, request);
+        reject(world, error);
+        return;
+    }
     if !pending.validate.is_empty() {
         // Only ordinary owned IDs/positions survive this inspection. Drop the decoded generation
         // before requesting the next source, preserving the Host's two-generation budget.

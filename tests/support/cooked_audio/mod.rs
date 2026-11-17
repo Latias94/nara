@@ -30,6 +30,8 @@ mod package;
 #[path = "../cooked_desktop/process.rs"]
 #[allow(dead_code)]
 mod process;
+#[path = "../cooked_desktop/walls.rs"]
+mod walls;
 #[path = "../sound_bank_content/wav.rs"]
 mod wav;
 #[path = "../cooked_desktop/window.rs"]

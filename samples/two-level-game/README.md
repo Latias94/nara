@@ -21,6 +21,38 @@ keep their ordinary progress semantics. No new playback cursor or resume field i
 Recook earlier installations to include the shared atlas; the existing Scene Schema and resume
 format do not change for this workflow.
 
+## Swept Character Collision
+
+The explorer moves through Rapier's native shape sweep and slide against five authored static
+walls per room. Four perimeter walls replace coordinate clamping. Meadow and Cavern have different
+interior wall positions; moving between them and Retry replace the original collision scene.
+The 18x18 explorer stops with a 0.01 world-unit separation margin. Hold two movement directions
+to slide along a wall and round its end. Walking animation follows held intent while blocked.
+
+The game consumes [nara_rapier2d](../../crates/nara_rapier2d/README.md) directly. That package owns
+immutable native query scenes and a stateless top-down controller. It is optional for Nara
+applications and does not install a second World, clock, transform writer or physics backend
+interface. The game owns `CollisionBox` data, desired movement and the final player Transform.
+Static wall geometry and its query index are prepared once per admitted room. Actor shape data
+is reused until its definition, rotation, scale, placement or room changes. Each move passes an
+already integrated displacement and the original fixed duration to the native query.
+
+The game's existing persistable center range remains `x=+-280`, `y=+-150`. Desired movement is
+limited to that range before the sweep. A finite native slide ending outside it leaves the original
+pose unchanged; it does not teleport to a clamped pose or degrade the game. This also gives smaller
+restored shapes a normal stop before their center leaves the supported save domain.
+
+Checkpoint and exact-resume placements must be outside walls and have representable geometry.
+This controller has no retained velocity, gravity, moving-platform or contact history. Existing
+source geometry and player TRS reconstruct it; the resume wire format stays unchanged. Runtime
+wall mutations are outside that format and make exact capture ineligible. The wire decoder can
+accept finite zero scale while collision admission refuses it. Placement checks happen at
+admission; the movement path does not rescan the Scene or reconstruct wall geometry each tick.
+
+Each shipped Scene now has eleven authored members. The cooked catalog still has six content
+members: two Scenes, three Images and the Sound Bank. Refresh the authoring bundle and recook
+older installations for the new game-owned `CollisionBox` Schema and native binding revision.
+
 ## Build And Run
 
 Run commands from this package directory. The optional desktop target needs the platform's normal

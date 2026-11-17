@@ -6,6 +6,7 @@ use nara::{
     scene::{PrefabInstanceBinding, SceneEntityPlacement},
     tilemap::TileSetSourceFileLimits,
 };
+use two_level_game::levels::WALL_ENTITY_IDS;
 
 use super::*;
 
@@ -16,6 +17,7 @@ fn populations_preserve_sources_and_fit_default_file_limits_at_one_world_footpri
         let mut project = Project::new(population).unwrap();
         let report = project.source_report();
         assert_eq!(report["population"], population);
+        assert_eq!(report["authored_scene_members"], AUTHORED_LEVEL_MEMBERS);
         assert_eq!(
             report["tile_size"],
             json!([tile_size as f64, tile_size as f64])
@@ -56,7 +58,35 @@ fn populations_preserve_sources_and_fit_default_file_limits_at_one_world_footpri
             .unwrap()
             .into_composition_source()
             .unwrap();
-            assert_eq!(document.entities.len(), 6);
+            assert_eq!(document.entities.len(), AUTHORED_LEVEL_MEMBERS);
+            assert_eq!(document.placements.len(), AUTHORED_LEVEL_MEMBERS);
+            let mut expected_ids = [
+                "camera",
+                "explorer",
+                "checkpoint",
+                "gem-near",
+                "gem-far",
+                "portal",
+            ]
+            .into_iter()
+            .chain(WALL_ENTITY_IDS)
+            .collect::<Vec<_>>();
+            assert_eq!(
+                document.placements,
+                expected_ids
+                    .iter()
+                    .map(|id| SceneEntityPlacement::root(SceneEntityId::new(*id).unwrap()))
+                    .collect::<Vec<_>>()
+            );
+            expected_ids.sort_unstable();
+            assert_eq!(
+                document
+                    .entities
+                    .iter()
+                    .map(|entity| entity.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected_ids
+            );
             let checkpoint = document
                 .entities
                 .iter()

@@ -27,8 +27,8 @@ use two_level_game::{
 };
 
 use acceptance::{
-    assert_clean_retirement, assert_preserved, assert_probe_was_discarded, close_to_completion,
-    finish_retirements, movement, walk_to_score,
+    assert_clean_retirement, assert_observation, assert_preserved, assert_probe_was_discarded,
+    close_to_completion, finish_retirements, movement, walk_to_score,
 };
 use continuous::{
     NativeInput, activate_and_resume, assert_presentation, continuous_native_motion,
@@ -70,15 +70,50 @@ fn production_continuous_desktop_adopts_real_body_and_structure_edits() {
         walk_to_score(&mut host, 20);
         host.step(vec![SemanticCommand::Marker]).unwrap();
         host.step(vec![movement(false)]).unwrap();
-        let playable_a = host.capture().unwrap();
+        let meaningful_a = host.capture().unwrap();
         assert_eq!(
-            playable_a.progress.location.level,
+            meaningful_a.progress.location.level,
             LevelKey::main(LevelId::Cavern),
         );
-        assert_eq!(playable_a.progress.score, 20);
-        assert_eq!(playable_a.progress.markers.len(), 2);
+        assert_eq!(meaningful_a.progress.score, 20);
+        assert_eq!(meaningful_a.progress.markers.len(), 2);
+        assert_eq!(meaningful_a.held, [false; 4]);
+        assert_ne!(meaningful_a.player.translation, [-120.0, 0.0]);
+
+        let mut observation = host
+            .step(vec![SemanticCommand::Move {
+                direction: 2,
+                pressed: true,
+            }])
+            .unwrap();
+        for _ in 0..24 {
+            if observation.player[1] >= 38.0 {
+                break;
+            }
+            observation = host.step(Vec::new()).unwrap();
+        }
+        assert!(
+            (38.0..42.0).contains(&observation.player[1]),
+            "{observation:?}",
+        );
+        let observation = host
+            .step(vec![SemanticCommand::Move {
+                direction: 2,
+                pressed: false,
+            }])
+            .unwrap();
+        let playable_a = host.capture().unwrap();
+        assert_observation(&observation, &playable_a);
+        assert_eq!(playable_a.progress, meaningful_a.progress);
+        assert_eq!(playable_a.counters, meaningful_a.counters);
+        assert_eq!(playable_a.compatibility, meaningful_a.compatibility);
+        assert_eq!(
+            playable_a.player.translation[0],
+            meaningful_a.player.translation[0],
+        );
+        assert!((38.0..42.0).contains(&playable_a.player.translation[1]));
         assert_eq!(playable_a.held, [false; 4]);
-        assert_ne!(playable_a.player.translation, [-120.0, 0.0]);
+        assert!(playable_a.clock.ticks > meaningful_a.clock.ticks);
         let presentation = host.confirm_active_presentation().unwrap();
         assert_presentation(&presentation, &playable_a, None);
         let backend = presentation.adapter_backend;

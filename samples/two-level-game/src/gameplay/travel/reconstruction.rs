@@ -108,7 +108,9 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
         .find(|(id, _)| id == &content.player)
         .unwrap()
         .1;
-    world.get_mut::<Transform2d>(player).unwrap().translation = content.checkpoint_position;
+    let mut pose = *world.get::<Transform2d>(player).unwrap();
+    pose.translation = content.checkpoint_position;
+    crate::gameplay::collision::place(world, player, pose)?;
     hide_collected(world);
     rebuild_markers(world)
 }

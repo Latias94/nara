@@ -19,11 +19,12 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     animation::atlas_product,
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
+    save::Checkpoint,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
-use super::{images, process::read_bounded};
+use super::{images, process::read_bounded, walls};
 
 pub fn digest(value: ContentDigest) -> Value {
     json!({"length": value.length(), "hash": value.as_bytes()})
@@ -346,7 +347,7 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         record["state"]["current_instance"],
         record["current_receipt"]["instance_id"]
     );
-    assert_eq!(record["state"]["scene_members"], 6);
+    assert_eq!(record["state"]["scene_members"], AUTHORED_LEVEL_MEMBERS);
     assert!(number(startup, "domain_id") > 0);
     let mut instances = BTreeSet::new();
     for observed in receipts {
@@ -366,21 +367,7 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         assert!(
             number(receipt, "instance_id") > 0 && instances.insert(number(receipt, "instance_id"))
         );
-        assert_eq!(receipt["entity_count"], 6);
-        assert_eq!(receipt["truncated"], false);
-        let mut ids: Vec<String> = serde_json::from_value(receipt["entity_ids"].clone()).unwrap();
-        ids.sort();
-        assert_eq!(
-            ids,
-            [
-                "camera",
-                "checkpoint",
-                "explorer",
-                "gem-far",
-                "gem-near",
-                "portal"
-            ]
-        );
+        walls::scene(observed);
     }
 }
 
@@ -392,4 +379,105 @@ pub fn scene_sequence(record: &Value, expected: &[LevelId]) {
         .map(|entry| serde_json::from_value::<LevelId>(entry["level"].clone()).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(levels, expected);
+}
+
+pub fn collision_excursions(report: &Value) {
+    let probes = report["collision_excursions"].as_array().unwrap();
+    assert_eq!(probes.len(), 2);
+    let checkpoint: Checkpoint = serde_json::from_value(report["checkpoint"].clone()).unwrap();
+    let receipts = report["saved"]["scene_receipts"].as_array().unwrap();
+    for (probe, (level, score, marker, inner_x, contact_x)) in probes.iter().zip([
+        (LevelId::Meadow, 10, 1_u64, 0.0_f32, -15.01_f32),
+        (LevelId::Cavern, 20, 2, 20.0, 4.99),
+    ]) {
+        let key = LevelKey::main(level);
+        assert_eq!(probe["level"], json!(key));
+        assert_eq!(probe["score"], score);
+        assert_eq!(probe["marker"], marker);
+        assert_eq!(probe["inner_wall_x"], json!(inner_x));
+        assert_eq!(probe["expected_contact_x"], json!(contact_x));
+        assert_eq!(probe["margin"], json!(0.01_f32));
+        assert_eq!(probe["held_against_wall_ms"], 350);
+        let saved_marker = checkpoint
+            .markers
+            .iter()
+            .find(|saved| saved.id.get() == marker)
+            .unwrap();
+        assert_eq!(saved_marker.level, key);
+        assert_eq!(probe["start"]["player"], json!(saved_marker.position));
+        assert!(receipts.iter().any(|receipt| {
+            receipt["level"] == json!(level)
+                && receipt["receipt"]["instance_id"] == probe["start"]["current_instance"]
+        }));
+        let stages = [
+            "start", "contact", "blocked", "sliding", "cleared", "released",
+        ];
+        for (index, stage) in stages.into_iter().enumerate() {
+            let sample = &probe[stage];
+            let player: [f64; 2] = serde_json::from_value(sample["player"].clone()).unwrap();
+            assert!(player.into_iter().all(f64::is_finite));
+            assert_eq!(
+                sample["current_instance"],
+                probe["start"]["current_instance"]
+            );
+            assert_eq!(
+                sample["held"],
+                match stage {
+                    "contact" => json!([false, true, false, false]),
+                    "sliding" | "cleared" => json!([false, true, true, false]),
+                    _ => json!([false, false, false, false]),
+                }
+            );
+            for field in [
+                "runtime_generation",
+                "window_id",
+                "surface_generation",
+                "backend_instance",
+                "device_epoch",
+            ] {
+                assert_eq!(
+                    sample["presentation"][field],
+                    report["saved"]["presentation"][field]
+                );
+            }
+            if index > 0 {
+                let previous = &probe[stages[index - 1]];
+                for field in ["tick", "logical_tick", "logical_elapsed_nanos"] {
+                    assert!(
+                        number(sample, field) > number(previous, field),
+                        "collision stage did not advance {field}: {probe}"
+                    );
+                }
+                for field in ["app_frame", "render_frame"] {
+                    assert!(
+                        number(&sample["presentation"], field)
+                            > number(&previous["presentation"], field)
+                    );
+                }
+            }
+        }
+        let position = |stage: &str| -> [f64; 2] {
+            serde_json::from_value(probe[stage]["player"].clone()).unwrap()
+        };
+        assert!(position("contact")[0] > position("start")[0] + 20.0);
+        for stage in ["contact", "blocked", "sliding"] {
+            assert!((position(stage)[0] - f64::from(contact_x)).abs() <= 0.03);
+        }
+        assert_eq!(position("start")[1], 0.0);
+        assert_eq!(position("contact")[1], 0.0);
+        assert_eq!(position("blocked")[1], 0.0);
+        assert!((position("blocked")[0] - position("contact")[0]).abs() <= 0.001);
+        assert!(number(&probe["blocked"], "tick") >= number(&probe["contact"], "tick") + 4);
+        assert!(
+            number(&probe["blocked"], "logical_elapsed_nanos")
+                >= number(&probe["contact"], "logical_elapsed_nanos") + 100_000_000
+        );
+        assert!((10.0..=28.0).contains(&position("sliding")[1]));
+        for stage in ["cleared", "released"] {
+            let [x, y] = position(stage);
+            assert!((f64::from(contact_x) + 2.0..40.0).contains(&x));
+            assert!((33.5..96.0).contains(&y));
+            assert!(y > position("sliding")[1]);
+        }
+    }
 }

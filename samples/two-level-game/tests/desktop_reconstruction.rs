@@ -90,6 +90,7 @@ fn public_desktop_reconstructs_complete_game_on_recovered_loop_and_reconciles_in
         "two_level_desktop_reconstruction_continuation: ok held_steps=3 new_started_commands=0 release_gap_stop=true no_stuck_hold=true",
         "two_level_desktop_reconstruction_pixels: ok original_app_frame=",
         "two_level_desktop_reconstruction_animation: ok atlas_frames=4 paused_equal=true retained_replays=6 restored_first_frame=true",
+        "two_level_desktop_reconstruction_collision: ok wall_stop=true blocked_animation=true diagonal_slide=true original_step=true retained_replays=2 native_retired_before_replay=true",
         "equal_replays=true",
         "two_level_desktop_reconstruction: ok sequential_runtimes=true shared_physical_loop=true canonical_bytes=true fresh_owners=true restored_presentation=true native_cleanup=true",
     ] {

@@ -5,17 +5,20 @@ use nara::{
     asset::{AssetProductRef, Assets},
     ecs::World,
     fs::ContentDigest,
+    hierarchy::Parent,
     identity::{EntityLookup, SpawnedSceneInstance},
     image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat},
     material::SamplerDescriptor,
-    prelude::{Color, Vec2},
+    prelude::{Color, Transform2d, Vec2},
     project_host::HeadlessSession,
     scene::{SourceDocumentKind, SourceDocumentOrigin},
-    sprite::{Sprite, TextureRegion},
+    sprite::{Sprite, SpriteAnchor, TextureRegion},
 };
 use serde_json::{Value, json};
 use two_level_game::{
-    GamePhase, GameSnapshot, Scenario, animation::atlas_product, levels::LevelId,
+    CollisionBox, GamePhase, GameSnapshot, Scenario,
+    animation::atlas_product,
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, WALL_ENTITY_IDS},
 };
 
 use super::output;
@@ -104,7 +107,7 @@ impl Evidence {
                 .receipt()
                 .entity_ids()
                 .iter()
-                .take(6)
+                .take(AUTHORED_LEVEL_MEMBERS)
                 .find(|id| id.as_str() == "explorer")
                 .ok_or("current Scene receipt has no bounded explorer identity")?;
             let EntityLookup::Resolved(entity) = current.receipt().resolve(world, id) else {
@@ -153,7 +156,7 @@ impl Evidence {
             return Ok(());
         }
         if (changed && self.receipts.len() >= 16)
-            || current.receipt().len() != 6
+            || current.receipt().len() != AUTHORED_LEVEL_MEMBERS
             || current.receipt().entity_ids().iter().any(|id| {
                 id.as_str().len() > 256
                     || !matches!(
@@ -163,7 +166,7 @@ impl Evidence {
             })
         {
             return Err(
-                "current Scene receipt is not the bounded live six-entity game level".into(),
+                "current Scene receipt is not the bounded live eleven-entity game level".into(),
             );
         }
         if !changed {
@@ -203,6 +206,7 @@ impl Evidence {
         if self.receipts.is_empty() && level != LevelId::STARTUP {
             return Err("Player did not activate the actual Meadow startup Scene".into());
         }
+        let walls = wall_proofs(world, current.receipt(), level)?;
         let product = level.image_product();
         let assets = world
             .get_resource::<Assets<ImageAsset>>()
@@ -290,6 +294,7 @@ impl Evidence {
             "source_key": source_key,
             "representation": "runtime_scene",
             "receipt": receipt(current.receipt()),
+            "wall_proofs": walls,
         }));
         Ok(())
     }
@@ -366,9 +371,107 @@ fn receipt(receipt: &SpawnedSceneInstance) -> Value {
         "domain_id": receipt.domain_id().get(),
         "instance_id": receipt.instance_id().get(),
         "entity_count": receipt.len(),
-        "entity_ids": receipt.entity_ids().iter().take(6)
+        "entity_ids": receipt.entity_ids().iter().take(AUTHORED_LEVEL_MEMBERS)
             .map(|id| id.as_str().chars().take(256).collect::<String>()).collect::<Vec<_>>(),
-        "truncated": receipt.len() > 6
-            || receipt.entity_ids().iter().take(6).any(|id| id.as_str().len() > 256),
+        "truncated": receipt.len() > AUTHORED_LEVEL_MEMBERS
+            || receipt.entity_ids().iter().take(AUTHORED_LEVEL_MEMBERS).any(|id| id.as_str().len() > 256),
     })
+}
+
+fn wall_proofs(
+    world: &World,
+    receipt: &SpawnedSceneInstance,
+    level: LevelId,
+) -> Result<Vec<Value>, String> {
+    let resolve = |name: &str| {
+        let id = receipt
+            .entity_ids()
+            .iter()
+            .find(|id| id.as_str() == name)
+            .ok_or_else(|| format!("current Scene receipt has no {name} identity"))?;
+        match receipt.resolve(world, id) {
+            EntityLookup::Resolved(entity) => Ok(entity),
+            _ => Err(format!(
+                "current Scene receipt does not resolve its live {name}"
+            )),
+        }
+    };
+    let explorer = resolve("explorer")?;
+    if world.get::<CollisionBox>(explorer)
+        != Some(&CollisionBox {
+            center: Vec2::ZERO,
+            half_width: 9.0,
+            half_height: 9.0,
+        })
+        || world.get::<Parent>(explorer).is_some()
+    {
+        return Err("receipt-resolved explorer lost its authored root collision box".into());
+    }
+    if receipt
+        .entity_ids()
+        .iter()
+        .filter(|id| id.as_str().starts_with("wall-"))
+        .count()
+        != WALL_ENTITY_IDS.len()
+    {
+        return Err("current Scene must contain exactly five authored walls".into());
+    }
+    let inner_x = match level {
+        LevelId::Meadow => 0.0,
+        LevelId::Cavern => 20.0,
+    };
+    WALL_ENTITY_IDS
+        .into_iter()
+        .zip([
+            ([-294.0, 0.0], [5.0, 164.0]),
+            ([294.0, 0.0], [5.0, 164.0]),
+            ([0.0, 164.0], [299.0, 5.0]),
+            ([0.0, -164.0], [299.0, 5.0]),
+            ([inner_x, -12.0], [6.0, 36.0]),
+        ])
+        .map(|(id, (translation, half))| {
+            let entity = resolve(id)?;
+            let transform = world
+                .get::<Transform2d>(entity)
+                .ok_or_else(|| format!("receipt-resolved {id} has no Transform2d"))?;
+            let definition = world
+                .get::<CollisionBox>(entity)
+                .ok_or_else(|| format!("receipt-resolved {id} has no CollisionBox"))?;
+            let sprite = world
+                .get::<Sprite>(entity)
+                .ok_or_else(|| format!("receipt-resolved {id} has no Sprite"))?;
+            if world.get::<Parent>(entity).is_some()
+                || *transform != Transform2d::from_translation(Vec2::from_array(translation))
+                || *definition
+                    != (CollisionBox {
+                        center: Vec2::ZERO,
+                        half_width: half[0],
+                        half_height: half[1],
+                    })
+                || sprite.size != Vec2::from_array(half) * 2.0
+                || sprite.anchor != SpriteAnchor::CENTER
+                || sprite.material.tint != Color::rgba(0.18, 0.22, 0.28, 1.0)
+                || sprite.material.image.is_some()
+                || sprite.texture_region.is_some()
+            {
+                return Err(format!("receipt-resolved {id} disagrees with its authored wall"));
+            }
+            Ok(json!({
+                "id": id,
+                "root": true,
+                "translation": transform.translation.to_array(),
+                "rotation": transform.rotation,
+                "scale": transform.scale.to_array(),
+                "box": {
+                    "center": definition.center.to_array(),
+                    "half_width": definition.half_width,
+                    "half_height": definition.half_height,
+                },
+                "sprite_size": sprite.size.to_array(),
+                "sprite_anchor": sprite.anchor.normalized.to_array(),
+                "tint": [sprite.material.tint.r, sprite.material.tint.g, sprite.material.tint.b, sprite.material.tint.a],
+                "textured": false,
+            }))
+        })
+        .collect()
 }

@@ -20,7 +20,7 @@ use nara::{
 };
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
 #[cfg(feature = "development")]
@@ -267,7 +267,7 @@ fn retry_of_committed_b_uses_retained_source_even_when_the_file_has_become_inval
         .expect("the source change observed committed B");
     assert!(snapshot.current_instance.is_some());
     assert_ne!(snapshot.current_instance, Some(old_instance));
-    assert_eq!(snapshot.scene_members, 6);
+    assert_eq!(snapshot.scene_members, AUTHORED_LEVEL_MEMBERS);
     assert_eq!(snapshot.travel_count, 3);
     assert_eq!(snapshot.score, 30);
     assert_eq!(snapshot.collected, 3);
@@ -309,7 +309,7 @@ fn target_changed_after_startup_is_rejected_while_current_a_remains_playable() {
             .collect::<Vec<_>>(),
         [1]
     );
-    assert_eq!(snapshot.scene_members, 6);
+    assert_eq!(snapshot.scene_members, AUTHORED_LEVEL_MEMBERS);
     assert_eq!(snapshot.phase, GamePhase::Running);
     assert!(
         snapshot
@@ -336,7 +336,7 @@ fn corrupt_save_keeps_current_a_and_its_progress_unchanged() {
     assert_eq!(snapshot.score, 0);
     assert_eq!(snapshot.travel_count, 0);
     assert_eq!(snapshot.visible_pickups, 2);
-    assert_eq!(snapshot.scene_members, 6);
+    assert_eq!(snapshot.scene_members, AUTHORED_LEVEL_MEMBERS);
     assert_eq!(snapshot.phase, GamePhase::Running);
     assert!(snapshot.error.is_some());
 }
@@ -377,7 +377,7 @@ fn valid_wire_with_missing_checkpoint_or_other_level_pickup_cannot_publish_game_
         assert_eq!(snapshot.collected, 0);
         assert_eq!(snapshot.travel_count, 0);
         assert_eq!(snapshot.visible_pickups, 2);
-        assert_eq!(snapshot.scene_members, 6);
+        assert_eq!(snapshot.scene_members, AUTHORED_LEVEL_MEMBERS);
         assert_eq!(snapshot.phase, GamePhase::Running);
         assert!(
             snapshot

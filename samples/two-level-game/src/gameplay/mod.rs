@@ -1,3 +1,4 @@
+mod collision;
 mod commands;
 mod content;
 #[cfg(feature = "desktop")]
@@ -36,6 +37,7 @@ use crate::{
         MarkerRecord,
     },
 };
+pub use collision::CollisionBox;
 use content::Content;
 pub use content::SoundPalette;
 pub use player_launch::{player_launch, player_launch_result};
@@ -45,7 +47,7 @@ const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-lev
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("two-level-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("two-level-game.native", 1),
+    ComponentSchemaProviderBindingId::new("two-level-game.native", 2),
     catalog,
     register,
 );
@@ -278,6 +280,7 @@ impl Plugin for ExplorationPlugin {
         })))?
         .insert_resource(ActiveLevel::new(key, None))?
         .insert_resource(Session::default())?
+        .insert_resource(collision::CharacterState::default())?
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
         .insert_resource(verification::Verification::new(self.options.scenario))?;
@@ -375,6 +378,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
         components: vec![
             content::ObjectRole::persistent_component_schema(),
             content::SoundPalette::persistent_component_schema(),
+            collision::CollisionBox::persistent_component_schema(),
         ],
         ..Default::default()
     })
@@ -382,7 +386,8 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
 fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry
         .register_persistent_component::<content::ObjectRole>()?
-        .register_persistent_component::<content::SoundPalette>()
+        .register_persistent_component::<content::SoundPalette>()?
+        .register_persistent_component::<collision::CollisionBox>()
         .map(|_| ())
 }
 
@@ -472,17 +477,16 @@ fn simulate(world: &mut World) {
         .held
         .map(|held| if held { 1.0 } else { 0.0 });
     let direction = Vec2::new(held[1] - held[0], held[2] - held[3]).normalize_or_zero();
-    let delta = world
-        .resource::<nara::app::FixedTime>()
-        .delta()
-        .as_secs_f32();
-    let Some(mut transform) = world.get_mut::<Transform2d>(player) else {
-        fail(world, "current explorer has no transform".into());
-        return;
+    let duration = world.resource::<nara::app::FixedTime>().delta();
+    let delta = duration.as_secs_f32();
+    let position = match collision::move_player(world, player, direction * 160.0 * delta, duration)
+    {
+        Ok(position) => position,
+        Err(error) => {
+            fail(world, error);
+            return;
+        }
     };
-    transform.translation = (transform.translation + direction * 160.0 * delta)
-        .clamp(Vec2::new(-280.0, -150.0), Vec2::new(280.0, 150.0));
-    let position = transform.translation;
     let level = world.resource::<ActiveLevel>();
     let key = level.key();
     let nearby = level

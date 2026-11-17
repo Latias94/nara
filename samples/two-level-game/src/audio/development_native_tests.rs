@@ -37,8 +37,8 @@ mod oracle {
 mod support {
     mod two_level_game {
         pub use crate::{
-            GamePhase, GameSnapshot, capture_resume, open_explicit_project_root, open_project_root,
-            product_recipe, resume,
+            GamePhase, GameSnapshot, capture_resume, levels, open_explicit_project_root,
+            open_project_root, product_recipe, resume,
         };
     }
 

@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 use two_level_game::{
     animation::atlas_product,
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     sound_bank::bank_product,
 };
 
-use super::{Request, package};
+use super::{Request, package, walls};
 
 pub fn number(value: &Value, field: &str) -> u64 {
     value[field]
@@ -53,6 +53,12 @@ pub fn presented(record: &Value, request: &Request) {
     assert_eq!(record["state"]["phase"], "Running");
     assert_eq!(record["state"]["restoring"], false);
     assert!(record["state"]["error"].is_null(), "{record}");
+    assert_eq!(record["state"]["scene_members"], AUTHORED_LEVEL_MEMBERS);
+    let receipts = record["scene_receipts"].as_array().unwrap();
+    assert!(!receipts.is_empty() && receipts.len() <= 16);
+    for observed in receipts {
+        walls::scene(observed);
+    }
     let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
     let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
         .into_iter()

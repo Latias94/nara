@@ -12,7 +12,11 @@ use nara::{
     render_wgpu::WgpuStockPolicy,
     scene::{SourceDocumentKind, SourceDocumentOrigin},
 };
-use two_level_game::{GamePhase, GameSnapshot, levels::LevelId, resume::ResumeState};
+use two_level_game::{
+    GamePhase, GameSnapshot,
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId},
+    resume::ResumeState,
+};
 
 use super::{CANVAS_EXTENT, Result, SealedGameFrame, WINDOW_EXTENT, require};
 
@@ -63,7 +67,7 @@ pub(super) fn assert_snapshot(snapshot: &GameSnapshot, expected: &ResumeState) -
             && snapshot.restarts == expected.counters.restarts
             && snapshot.saves == expected.counters.saves
             && snapshot.restores == expected.counters.restores
-            && snapshot.scene_members == 6
+            && snapshot.scene_members == AUTHORED_LEVEL_MEMBERS
             && snapshot.current_instance.is_some(),
         format!("presented GameSnapshot differs from expected resume semantics: {snapshot:?}"),
     )
@@ -100,7 +104,7 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
             && frame.snapshot.current_instance == Some(frame.instance.instance_id())
             && frame.timestep_nanos == expected.clock.timestep_nanos
             && frame.runtime_time.to_continuation()? == expected.runtime_time.to_continuation()?
-            && frame.instance.entity_ids().len() == 6
+            && frame.instance.entity_ids().len() == AUTHORED_LEVEL_MEMBERS
             && packet.target().extent() == WINDOW_EXTENT
             && packet.views().len() == 1,
         "original source generation, Scene membership, window extent or View count differs",
@@ -174,10 +178,10 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         let center = view.mapping.world_to_clip(object.transform.translation);
         let x = view
             .mapping
-            .world_vector_to_clip(matrix.transform_vector2(Vec2::new(object.size * 0.5, 0.0)));
+            .world_vector_to_clip(matrix.transform_vector2(Vec2::new(object.size.x * 0.5, 0.0)));
         let y = view
             .mapping
-            .world_vector_to_clip(matrix.transform_vector2(Vec2::new(0.0, object.size * 0.5)));
+            .world_vector_to_clip(matrix.transform_vector2(Vec2::new(0.0, object.size.y * 0.5)));
         require(
             batch.view_index == 0
                 && batch.view_order == view.order
@@ -238,10 +242,20 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
 
 struct GameObject {
     name: String,
+    kind: GameObjectKind,
     transform: Transform2d,
-    size: f32,
+    size: Vec2,
     color: Color,
     image: GameImage,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GameObjectKind {
+    Player,
+    Pickup,
+    Wall,
+    Marker,
+    OtherSceneObject,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -362,8 +376,9 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             "unknown game pickup in complete progress",
         )?;
     }
-    let object = |name: &str, position, size, color, image| GameObject {
+    let object = |name: &str, kind, position, size, color, image| GameObject {
         name: name.into(),
+        kind,
         transform: Transform2d::from_translation(position),
         size,
         color,
@@ -372,19 +387,21 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
     let mut objects = vec![
         GameObject {
             name: "player".into(),
+            kind: GameObjectKind::Player,
             transform: Transform2d {
                 translation: Vec2::from_array(expected.player.translation),
                 rotation: expected.player.rotation,
                 scale: Vec2::from_array(expected.player.scale),
             },
-            size: 18.0,
+            size: Vec2::splat(18.0),
             color: Color::WHITE,
             image: GameImage::PlayerAtlas(player_frame(expected)),
         },
         object(
             "checkpoint",
+            GameObjectKind::OtherSceneObject,
             Vec2::new(-120.0, 0.0),
-            14.0,
+            Vec2::splat(14.0),
             Color::rgb(0.25, 1.0, 0.5),
             GameImage::Solid,
         ),
@@ -405,19 +422,45 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             .any(|pickup| pickup.level == key && pickup.entity.as_str() == name);
         objects.push(object(
             name,
+            GameObjectKind::Pickup,
             position,
-            18.0,
+            Vec2::splat(18.0),
             Color::rgba(1.0, 0.8, 0.2, if collected { 0.0 } else { 1.0 }),
             GameImage::Pickup,
         ));
     }
     objects.push(object(
         "portal",
+        GameObjectKind::OtherSceneObject,
         Vec2::new(200.0, 0.0),
-        26.0,
+        Vec2::splat(26.0),
         Color::rgb(0.8, 0.3, 1.0),
         GameImage::Solid,
     ));
+    let inner_x = match key.level() {
+        LevelId::Meadow => 0.0,
+        LevelId::Cavern => 20.0,
+    };
+    for (name, position, size) in [
+        ("wall-west", Vec2::new(-294.0, 0.0), Vec2::new(10.0, 328.0)),
+        ("wall-east", Vec2::new(294.0, 0.0), Vec2::new(10.0, 328.0)),
+        ("wall-north", Vec2::new(0.0, 164.0), Vec2::new(598.0, 10.0)),
+        ("wall-south", Vec2::new(0.0, -164.0), Vec2::new(598.0, 10.0)),
+        (
+            "wall-inner",
+            Vec2::new(inner_x, -12.0),
+            Vec2::new(12.0, 72.0),
+        ),
+    ] {
+        objects.push(object(
+            name,
+            GameObjectKind::Wall,
+            position,
+            size,
+            Color::rgb(0.18, 0.22, 0.28),
+            GameImage::Solid,
+        ));
+    }
     let mut markers: Vec<_> = expected
         .progress
         .markers
@@ -433,8 +476,9 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
         )?;
         objects.push(object(
             &format!("marker {}", marker.id.get()),
+            GameObjectKind::Marker,
             position,
-            10.0,
+            Vec2::splat(10.0),
             Color::rgb(1.0, 0.3, 0.8),
             GameImage::Solid,
         ));
@@ -454,6 +498,7 @@ fn background(level: LevelId) -> Color {
 pub struct PixelChecks {
     pub player: usize,
     pub markers: usize,
+    pub walls: usize,
     pub visible_pickups: usize,
     pub collected_pickups: usize,
     pub background: usize,
@@ -466,7 +511,10 @@ impl GameObject {
     }
 
     fn may_cover(&self, world: Vec2) -> bool {
-        self.color.a > 0.0 && self.local(world).abs().max_element() <= self.size * 0.5 + 2.0
+        let local = self.local(world);
+        self.color.a > 0.0
+            && local.is_finite()
+            && local.abs().cmple(self.size * 0.5 + Vec2::splat(2.0)).all()
     }
 }
 
@@ -496,7 +544,7 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                     (90.0 - y as f32 - 0.5) * 2.0,
                 );
                 let local = object.local(world);
-                if !local.is_finite() || local.abs().max_element() > object.size * 0.5 - 1.0 {
+                if !local.is_finite() || local.abs().cmpgt(object.size * 0.5 - Vec2::ONE).any() {
                     continue;
                 }
                 let occluded = if object.color.a == 0.0 {
@@ -510,7 +558,7 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                     continue;
                 }
                 let mut color = object.color;
-                let uv = Vec2::new(local.x / object.size + 0.5, 0.5 - local.y / object.size);
+                let uv = Vec2::new(local.x / object.size.x + 0.5, 0.5 - local.y / object.size.y);
                 if let GameImage::PlayerAtlas(frame) = object.image {
                     let texel = player_texel(&player_atlas, frame, uv);
                     let witness = PlayerPixelWitness { x, y, texel };
@@ -569,7 +617,7 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                 found += 9;
             }
         }
-        if index == 0 || object.image == GameImage::Pickup || index >= 5 {
+        if object.kind != GameObjectKind::OtherSceneObject {
             require(
                 found > 0,
                 format!(
@@ -578,12 +626,13 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                 ),
             )?;
         }
-        match index {
-            0 => checks.player += found,
-            2 | 3 if object.color.a == 0.0 => checks.collected_pickups += found,
-            2 | 3 => checks.visible_pickups += found,
-            5.. => checks.markers += found,
-            _ => checks.other_scene_objects += found,
+        match object.kind {
+            GameObjectKind::Player => checks.player += found,
+            GameObjectKind::Pickup if object.color.a == 0.0 => checks.collected_pickups += found,
+            GameObjectKind::Pickup => checks.visible_pickups += found,
+            GameObjectKind::Wall => checks.walls += found,
+            GameObjectKind::Marker => checks.markers += found,
+            GameObjectKind::OtherSceneObject => checks.other_scene_objects += found,
         }
     }
     for (x, y) in [(4, 4), (315, 4), (4, 175), (315, 175)] {
@@ -636,8 +685,15 @@ mod tests {
         [222, 80, 8, 255],
         [41, 190, 20, 255],
     ];
-    const PLAYER_FILL_BLOCKS: [(usize, usize); 3] = [(156, 106), (157, 106), (158, 106)];
-    const PLAYER_EYE_BLOCK: (usize, usize) = (158, 108);
+    const PLAYER_FILL_BLOCKS: [(usize, usize); 3] = [(156, 116), (157, 116), (158, 116)];
+    const PLAYER_EYE_BLOCK: (usize, usize) = (158, 118);
+    const WALL_BLOCKS: [(&str, [(usize, usize); 4]); 5] = [
+        ("wall-west", [(11, 12), (12, 12), (13, 12), (14, 12)]),
+        ("wall-east", [(305, 12), (306, 12), (307, 12), (308, 12)]),
+        ("wall-north", [(11, 6), (12, 6), (13, 6), (14, 6)]),
+        ("wall-south", [(11, 170), (12, 170), (13, 170), (14, 170)]),
+        ("wall-inner", [(157, 78), (158, 78), (159, 78), (160, 78)]),
+    ];
 
     fn resume(frame: usize) -> ResumeState {
         let level = LevelKey::main(LevelId::Meadow);
@@ -660,7 +716,7 @@ mod tests {
         let state = ResumeState {
             progress,
             player: PlayerState {
-                translation: [0.0, -40.0],
+                translation: [0.0, -60.0],
                 rotation: 0.0,
                 scale: [1.0; 2],
             },
@@ -719,6 +775,11 @@ mod tests {
         paint_block(&mut pixels, (200, 71), [124, 99, 25, 255]);
         for x in 254..258 {
             paint_block(&mut pixels, (x, 84), [204, 77, 255, 255]);
+        }
+        for (_, blocks) in WALL_BLOCKS {
+            for block in blocks {
+                paint_block(&mut pixels, block, [46, 56, 71, 255]);
+            }
         }
         for x in 178..182 {
             paint_block(&mut pixels, (x, 118), [255, 77, 204, 255]);
@@ -785,10 +846,26 @@ mod tests {
             let checks = check_pixels(&readback(frame), &resume(frame)).unwrap();
             assert_eq!(checks.player, 36);
             assert_eq!(checks.markers, 36);
+            assert_eq!(checks.walls, 180);
             assert_eq!(checks.visible_pickups, 18);
             assert_eq!(checks.collected_pickups, 18);
             assert_eq!(checks.background, 36);
             assert_eq!(checks.other_scene_objects, 72);
+        }
+    }
+
+    #[test]
+    fn pixel_oracle_rejects_each_missing_wall() {
+        let state = resume(2);
+        let original = readback(2);
+        check_pixels(&original, &state).unwrap();
+        for (name, blocks) in WALL_BLOCKS {
+            let mut missing_wall = original.clone();
+            for block in blocks {
+                paint_block(&mut missing_wall, block, [10, 33, 23, 255]);
+            }
+            let error = check_pixels(&missing_wall, &state).unwrap_err().to_string();
+            assert!(error.contains(name) && error.contains("pixel"), "{error}");
         }
     }
 
@@ -831,6 +908,11 @@ mod tests {
             ((199, 68), "gem-far"),
             ((200, 71), "gem-far"),
             ((254, 84), "portal"),
+            (WALL_BLOCKS[0].1[0], "wall-west"),
+            (WALL_BLOCKS[1].1[0], "wall-east"),
+            (WALL_BLOCKS[2].1[0], "wall-north"),
+            (WALL_BLOCKS[3].1[0], "wall-south"),
+            (WALL_BLOCKS[4].1[0], "wall-inner"),
             ((178, 118), "marker 1"),
             ((4, 4), "level background"),
         ] {

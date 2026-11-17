@@ -168,7 +168,10 @@ pub(crate) fn capture_world(
     if marker_ids.into_iter().collect::<BTreeSet<_>>() != expected_ids {
         return Err(reject("current dynamic marker state is inconsistent"));
     }
-    let player = player(world)
+    let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
+    crate::gameplay::collision::capture_eligible(world, entity)
+        .map_err(GameResumeError::Ineligible)?;
+    let player = Some(entity)
         .and_then(|entity| world.get::<Transform2d>(entity))
         .ok_or_else(|| reject("the current player transform is unavailable"))?;
     let session = world.resource::<Session>();

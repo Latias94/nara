@@ -19,6 +19,8 @@ use super::{
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(15);
+const BLOCKED_HOLD: Duration = Duration::from_millis(350);
+const CONTACT_TOLERANCE: f32 = 0.03;
 
 struct Session<'a> {
     input: Input,
@@ -271,6 +273,117 @@ impl<'a> Session<'a> {
         pose
     }
 
+    fn collision_excursion(&mut self, level: LevelKey, score: u32, marker: u64) -> Value {
+        let start = self.snapshot();
+        evidence::progress(&start, level, score, &[marker], 1);
+        assert_eq!(start["state"]["held"], json!([false, false, false, false]));
+        assert_eq!(position(&start)[1], 0.0);
+        let inner_x = match level.level() {
+            LevelId::Meadow => 0.0,
+            LevelId::Cavern => 20.0,
+        };
+        let expected_x = inner_x - 6.0 - 9.0 - 0.01;
+        assert!(position(&start)[0] < expected_x - CONTACT_TOLERANCE);
+        self.input.press(window::D);
+        let contact = self.wait(&start, |record| {
+            evidence::progress(record, level, score, &[marker], 1);
+            let [x, y] = position(record);
+            assert_eq!(y, 0.0, "D left the original pickup corridor");
+            assert!(
+                x <= expected_x + CONTACT_TOLERANCE,
+                "D crossed the interior wall: {record}"
+            );
+            (x - expected_x).abs() <= CONTACT_TOLERANCE
+                && record["state"]["held"] == json!([false, true, false, false])
+        });
+        self.pump_for(BLOCKED_HOLD);
+        self.input.release();
+        let blocked = self.wait(&contact, |record| {
+            record["state"]["held"] == json!([false, false, false, false])
+        });
+        evidence::progress(&blocked, level, score, &[marker], 1);
+        assert!((position(&blocked)[0] - expected_x).abs() <= CONTACT_TOLERANCE);
+        assert!((position(&blocked)[0] - position(&contact)[0]).abs() <= 0.001);
+        assert_eq!(position(&blocked)[1], 0.0);
+        assert!(
+            evidence::number(&blocked["state"], "tick")
+                >= evidence::number(&contact["state"], "tick") + 4
+        );
+        assert!(
+            evidence::number(&blocked["state"], "logical_elapsed_nanos")
+                >= evidence::number(&contact["state"], "logical_elapsed_nanos") + 100_000_000
+        );
+        self.input.press(window::D);
+        self.input.press(window::W);
+        let sliding = self.wait(&blocked, |record| {
+            evidence::progress(record, level, score, &[marker], 1);
+            let [x, y] = position(record);
+            assert!(
+                (x - expected_x).abs() <= CONTACT_TOLERANCE,
+                "W+D crossed the wall before its upper end: {record}"
+            );
+            assert!(
+                (0.0..=28.0).contains(&y),
+                "W+D skipped the bounded wall-slide sample: {record}"
+            );
+            y >= 10.0 && record["state"]["held"] == json!([false, true, true, false])
+        });
+        let cleared = self.wait(&sliding, |record| {
+            evidence::progress(record, level, score, &[marker], 1);
+            let [x, y] = position(record);
+            assert!(
+                (expected_x - CONTACT_TOLERANCE..40.0).contains(&x) && (0.0..96.0).contains(&y),
+                "wall excursion left its finite pickup-free area: {record}"
+            );
+            if y <= 33.0 {
+                assert!(
+                    (x - expected_x).abs() <= CONTACT_TOLERANCE,
+                    "W+D crossed the wall before clearing it: {record}"
+                );
+            }
+            y >= 33.5
+                && x >= expected_x + 2.0
+                && record["state"]["held"] == json!([false, true, true, false])
+        });
+        self.input.release();
+        let released = self.wait(&cleared, |record| {
+            record["state"]["held"] == json!([false, false, false, false])
+        });
+        evidence::progress(&released, level, score, &[marker], 1);
+        let [x, y] = position(&released);
+        assert!((expected_x + 2.0..40.0).contains(&x) && (33.5..96.0).contains(&y));
+        self.pump_for(Duration::from_millis(100));
+        assert_eq!(
+            position(&self.snapshot()),
+            [x, y],
+            "released wall excursion moved the idle player"
+        );
+        for sample in [&contact, &blocked, &sliding, &cleared, &released] {
+            assert_eq!(
+                sample["state"]["current_instance"],
+                start["state"]["current_instance"]
+            );
+            for field in ["travel_count", "restarts", "saves", "restores"] {
+                assert_eq!(sample["state"][field], start["state"][field]);
+            }
+        }
+        json!({
+            "level": level,
+            "marker": marker,
+            "score": score,
+            "inner_wall_x": inner_x,
+            "expected_contact_x": expected_x,
+            "margin": 0.01_f32,
+            "held_against_wall_ms": BLOCKED_HOLD.as_millis(),
+            "start": collision_sample(&start),
+            "contact": collision_sample(&contact),
+            "blocked": collision_sample(&blocked),
+            "sliding": collision_sample(&sliding),
+            "cleared": collision_sample(&cleared),
+            "released": collision_sample(&released),
+        })
+    }
+
     fn close(mut self) -> (Value, Value) {
         self.input.release();
         self.native.close_window();
@@ -312,8 +425,10 @@ pub fn run(request: &Request) {
     );
     first.travel(window::R, meadow, 0, &[], 2);
     let one = first.walk_and_mark(meadow, 10, 1);
+    let meadow_collision = first.collision_excursion(meadow, 10, 1);
     first.travel(window::E, cavern, 10, &[], 2);
     let two = first.walk_and_mark(cavern, 20, 2);
+    let cavern_collision = first.collision_excursion(cavern, 20, 2);
     first.travel(window::Q, independent, 20, &[], 2);
     let three = first.walk_and_mark(independent, 30, 3);
     first.travel(window::Q, cavern, 30, &[2], 1);
@@ -418,6 +533,7 @@ pub fn run(request: &Request) {
         json!({"success": true, "ordinary_processes": 2, "finite_processes": 1,
         "refused_processes": 1, "refused_initial_save": refused,
         "scripted_controls": scripted,
+        "collision_excursions": [meadow_collision, cavern_collision],
         "saved": saved, "continued": continued, "finite": finite_result,
         "native_cleanup": [first_cleanup, fresh_cleanup, finite.native.cleanup_json(), refused_cleanup],
         "checkpoint": decoded.checkpoint, "stored_bytes_unchanged": true,
@@ -547,6 +663,18 @@ fn running(record: &Value) -> bool {
 }
 fn position(record: &Value) -> [f32; 2] {
     serde_json::from_value(record["state"]["player"].clone()).unwrap()
+}
+
+fn collision_sample(record: &Value) -> Value {
+    json!({
+        "player": record["state"]["player"],
+        "tick": record["state"]["tick"],
+        "logical_tick": record["state"]["logical_tick"],
+        "logical_elapsed_nanos": record["state"]["logical_elapsed_nanos"],
+        "held": record["state"]["held"],
+        "current_instance": record["state"]["current_instance"],
+        "presentation": record["presentation"],
+    })
 }
 
 fn assert_checkpoint(checkpoint: &Checkpoint, expected: [(LevelKey, [f32; 2]); 3]) {

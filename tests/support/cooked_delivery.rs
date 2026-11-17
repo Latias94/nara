@@ -118,6 +118,10 @@ fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
 mod images;
 
 #[cfg(all(feature = "cook", feature = "development"))]
+#[path = "cooked_desktop/walls.rs"]
+mod walls;
+
+#[cfg(all(feature = "cook", feature = "development"))]
 pub mod native {
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -151,7 +155,7 @@ pub mod native {
     use serde_json::{Value, json};
     use two_level_game::{
         animation::atlas_product,
-        levels::{LevelId, LevelKey},
+        levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         sound_bank::{SoundBankCodec, bank_product},
     };
@@ -160,7 +164,7 @@ pub mod native {
 
     use super::{
         HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene, images,
-        inspect_pack, record,
+        inspect_pack, record, walls,
     };
 
     const OUTPUT_BYTES: usize = 2 * 1024 * 1024;
@@ -969,7 +973,7 @@ pub mod native {
         assert_eq!(receipts.first().unwrap()["receipt"], *startup);
         assert_eq!(receipts.last().unwrap()["receipt"], *current);
         assert_eq!(result["state"]["current_instance"], current["instance_id"]);
-        assert_eq!(result["state"]["scene_members"], 6);
+        assert_eq!(result["state"]["scene_members"], AUTHORED_LEVEL_MEMBERS);
         assert!(startup["domain_id"].as_u64().unwrap() > 0);
         let mut instances = BTreeSet::new();
         for observed in receipts {
@@ -988,26 +992,7 @@ pub mod native {
             assert_eq!(receipt["domain_id"], startup["domain_id"]);
             let instance = receipt["instance_id"].as_u64().unwrap();
             assert!(instance > 0 && instances.insert(instance));
-            assert_eq!(receipt["entity_count"], 6);
-            assert_eq!(receipt["truncated"], false);
-            let mut ids = receipt["entity_ids"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|id| id.as_str().unwrap())
-                .collect::<Vec<_>>();
-            ids.sort();
-            assert_eq!(
-                ids,
-                [
-                    "camera",
-                    "checkpoint",
-                    "explorer",
-                    "gem-far",
-                    "gem-near",
-                    "portal"
-                ]
-            );
+            walls::scene(observed);
         }
     }
 

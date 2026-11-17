@@ -25,7 +25,7 @@ use observe::{FrameClass, MAX_SAMPLES, PresentationIdentity};
 use process_cost::ProcessCost;
 use two_level_game::{
     GamePhase, GameSnapshot,
-    levels::{LevelId, LevelKey},
+    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     save::MarkerId,
 };
 
@@ -280,7 +280,7 @@ fn running_snapshot() -> GameSnapshot {
         level: Some(LevelKey::main(LevelId::Meadow)),
         current_instance: Some(SceneInstanceId::new(1).unwrap()),
         player: Vec2::new(-120.0, 0.0),
-        scene_members: 6,
+        scene_members: AUTHORED_LEVEL_MEMBERS,
         ..GameSnapshot::default()
     }
 }
@@ -375,6 +375,11 @@ fn verified_flag_alone_cannot_accept_wrong_travel_counters_or_progress() {
     snapshot.travel_count = 4;
     snapshot.restarts = 1;
     assert!(observe::travel_completed(&snapshot).unwrap());
+    for members in [AUTHORED_LEVEL_MEMBERS - 1, AUTHORED_LEVEL_MEMBERS + 1] {
+        snapshot.scene_members = members;
+        assert!(observe::travel_completed(&snapshot).is_err());
+    }
+    snapshot.scene_members = AUTHORED_LEVEL_MEMBERS;
     snapshot.player.x = -119.0;
     assert!(observe::travel_completed(&snapshot).is_err());
     snapshot.player.x = -120.0;

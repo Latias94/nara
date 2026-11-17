@@ -289,17 +289,54 @@ fn production_audible_development_adopts_real_edits_after_original_audio_retirem
         let before_b_travel = assert_no_replay(&mut host, b, &basis_b);
         host.step(vec![SemanticCommand::Travel]).unwrap();
         let sounded_b = wait_for_fresh_effect(&mut host, b, before_b_travel);
-        let restored_b = host.capture().unwrap();
+        let returned_b = host.capture().unwrap();
         assert_eq!(
-            restored_b.progress.location.level,
+            returned_b.progress.location.level,
             LevelKey::main(LevelId::Cavern),
         );
-        assert_eq!(restored_b.progress.score, 30);
-        assert_eq!(restored_b.progress.markers, basis_b.progress.markers);
+        assert_eq!(returned_b.progress.score, 30);
+        assert_eq!(returned_b.progress.markers, basis_b.progress.markers);
         assert_eq!(
-            restored_b.counters.travel_count,
+            returned_b.counters.travel_count,
             basis_b.counters.travel_count + 1,
         );
+        assert_eq!(returned_b.held, [false; 4]);
+        assert_eq!(returned_b.player.translation, [-120.0, 0.0]);
+
+        let mut observation = host
+            .step(vec![SemanticCommand::Move {
+                direction: 2,
+                pressed: true,
+            }])
+            .unwrap();
+        for _ in 0..48 {
+            if observation.player[1] >= 38.0 {
+                break;
+            }
+            observation = host.step(Vec::new()).unwrap();
+        }
+        assert!(
+            (38.0..42.0).contains(&observation.player[1]),
+            "{observation:?}",
+        );
+        let observation = host
+            .step(vec![SemanticCommand::Move {
+                direction: 2,
+                pressed: false,
+            }])
+            .unwrap();
+        let restored_b = host.capture().unwrap();
+        assert_observation(&observation, &restored_b);
+        assert_eq!(restored_b.progress, returned_b.progress);
+        assert_eq!(restored_b.counters, returned_b.counters);
+        assert_eq!(restored_b.compatibility, returned_b.compatibility);
+        assert_eq!(
+            restored_b.player.translation[0],
+            returned_b.player.translation[0],
+        );
+        assert!((38.0..42.0).contains(&restored_b.player.translation[1]));
+        assert_eq!(restored_b.held, [false; 4]);
+        assert!(restored_b.clock.ticks > returned_b.clock.ticks);
 
         let changed = fixture.edit_structure();
         assert!(changed.contains(GAMEPLAY));

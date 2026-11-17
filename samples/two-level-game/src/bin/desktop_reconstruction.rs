@@ -117,7 +117,7 @@ fn qualify() -> Result<(), String> {
             |_| Err("candidate trajectory panicked; retaining original cleanup".into()),
         );
     let physical_loop = candidate.close("candidate")?;
-    let restored = restored?;
+    let (restored, collision) = restored?;
     drop(physical_loop);
 
     let mut animation_pixels = Vec::new();
@@ -136,6 +136,15 @@ fn qualify() -> Result<(), String> {
     println!(
         "two_level_desktop_reconstruction_animation: ok atlas_frames=4 paused_equal=true retained_replays={} restored_first_frame=true",
         animation.len()
+    );
+    for sample in &collision {
+        let replay = desktop_capture::replay_and_check(&sample.frame, &sample.state)
+            .map_err(|error| error.to_string())?;
+        assert!(replay.checks.player > 0 && replay.checks.walls > 0);
+    }
+    println!(
+        "two_level_desktop_reconstruction_collision: ok wall_stop=true blocked_animation=true diagonal_slide=true original_step=true retained_replays={} native_retired_before_replay=true",
+        collision.len()
     );
     let source_pixels = desktop_capture::replay_and_check(&captured.frame, &captured.state)
         .map_err(|error| error.to_string())?;
@@ -396,7 +405,7 @@ impl Game {
         self.settle()
     }
 
-    fn reconstruct(&mut self, original: &Capture) -> Result<Capture, String> {
+    fn reconstruct(&mut self, original: &Capture) -> Result<(Capture, Vec<Capture>), String> {
         self.settle()?;
         let fresh = capture_desktop_resume(&self.run).map_err(|error| error.to_string())?;
         let fresh_bytes = encode_resume(&fresh).map_err(|error| error.to_string())?;
@@ -489,7 +498,67 @@ impl Game {
         println!(
             "two_level_desktop_reconstruction_continuation: ok held_steps=3 new_started_commands=0 release_gap_stop=true no_stuck_hold=true"
         );
-        Ok(restored)
+        let collision = self.collision_samples()?;
+        Ok((restored, collision))
+    }
+
+    fn collision_samples(&mut self) -> Result<Vec<Capture>, String> {
+        let bindings = movement_keyboard_bindings();
+        let holds = self
+            .run
+            .isolate_keyboard_input(&bindings)
+            .map_err(|error| error.to_string())?;
+        assert!(holds.iter().all(|hold| !hold.held));
+        self.settle()?;
+        let before = self.full_capture()?;
+        assert_eq!(
+            before.state.progress.location.level,
+            LevelKey::new(LevelId::Cavern, 1).unwrap()
+        );
+        assert!(before.state.player.translation[0] < 4.0);
+        assert!(before.state.player.translation[1].abs() < 0.0001);
+        self.isolated_key(ButtonDriverInput::Press(bindings[1].key))?;
+        for _ in 0..20 {
+            self.step(None)?;
+        }
+        let contact = self.full_capture()?;
+        assert!((contact.state.player.translation[0] - 4.99).abs() < 0.03);
+        assert_eq!(
+            contact.state.player.translation[1],
+            before.state.player.translation[1]
+        );
+        assert_eq!(contact.state.held, [false, true, false, false]);
+        assert_ne!(
+            explorer_frame(contact.state.clock, contact.state.held),
+            ExplorerFrame::Idle
+        );
+        for _ in 0..6 {
+            self.step(None)?;
+        }
+        let blocked = self.full_capture()?;
+        assert_eq!(
+            blocked.state.player.translation,
+            contact.state.player.translation
+        );
+        assert_eq!(blocked.state.clock.ticks, contact.state.clock.ticks + 6);
+        assert_eq!(blocked.state.progress, before.state.progress);
+        assert_eq!(blocked.state.counters, before.state.counters);
+
+        self.isolated_key(ButtonDriverInput::Press(bindings[2].key))?;
+        for _ in 0..25 {
+            self.step(None)?;
+        }
+        let slide = self.full_capture()?;
+        assert!(slide.state.player.translation[1] > 33.01);
+        assert!(slide.state.player.translation[0] > contact.state.player.translation[0] + 1.0);
+        assert_eq!(slide.state.held, [false, true, true, false]);
+        assert_eq!(slide.state.progress, before.state.progress);
+        assert_eq!(slide.state.counters, before.state.counters);
+        self.isolated_key(ButtonDriverInput::Release(bindings[1].key))?;
+        self.isolated_key(ButtonDriverInput::Release(bindings[2].key))?;
+        self.step(None)?;
+        assert_eq!(self.full_capture()?.state.held, [false; 4]);
+        Ok(vec![contact, slide])
     }
 
     fn activate_after_release_gap(&mut self, expected: &mut ResumeState) -> Result<(), String> {

@@ -4,6 +4,18 @@ use nara::{
 };
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// Number of authored Scene members in each level, including the explorer and static walls.
+pub const AUTHORED_LEVEL_MEMBERS: usize = 11;
+
+/// Stable authored entity IDs for the four room boundaries and the interior wall.
+pub const WALL_ENTITY_IDS: [&str; 5] = [
+    "wall-west",
+    "wall-east",
+    "wall-north",
+    "wall-south",
+    "wall-inner",
+];
+
 /// The game's finite content catalog, independent of a running Scene instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

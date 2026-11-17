@@ -220,19 +220,7 @@ pub fn stage_pickup(host: &mut DevelopmentHost, generation: ActiveGeneration) ->
     assert_eq!(before.progress.score, 20);
     assert_eq!(before.held, [false; 4]);
     assert_eq!(before.player.translation, [-120.0, 0.0]);
-    let mut observation = host.step(vec![movement(true)]).unwrap();
-    for _ in 0..96 {
-        if observation.player[0] >= 54.0 {
-            break;
-        }
-        observation = host.step(Vec::new()).unwrap();
-    }
-    assert!(
-        (54.0..60.0).contains(&observation.player[0]),
-        "{observation:?}",
-    );
-    host.step(vec![movement(false)]).unwrap();
-    observation = host
+    let mut observation = host
         .step(vec![SemanticCommand::Move {
             direction: 2,
             pressed: true,
@@ -248,14 +236,26 @@ pub fn stage_pickup(host: &mut DevelopmentHost, generation: ActiveGeneration) ->
         (38.0..42.0).contains(&observation.player[1]),
         "{observation:?}",
     );
-    let observation = host
-        .step(vec![SemanticCommand::Move {
-            direction: 2,
-            pressed: false,
-        }])
-        .unwrap();
+    host.step(vec![SemanticCommand::Move {
+        direction: 2,
+        pressed: false,
+    }])
+    .unwrap();
+    observation = host.step(vec![movement(true)]).unwrap();
+    for _ in 0..96 {
+        if observation.player[0] >= 54.0 {
+            break;
+        }
+        observation = host.step(Vec::new()).unwrap();
+    }
+    assert!(
+        (54.0..60.0).contains(&observation.player[0]),
+        "{observation:?}",
+    );
+    let observation = host.step(vec![movement(false)]).unwrap();
     let staged = host.capture().unwrap();
     assert_observation(&observation, &staged);
+    assert!((38.0..42.0).contains(&staged.player.translation[1]));
     assert_eq!(staged.progress, before.progress);
     assert_eq!(staged.counters, before.counters);
     assert_eq!(staged.compatibility, before.compatibility);

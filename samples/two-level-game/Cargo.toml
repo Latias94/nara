@@ -13,6 +13,7 @@ resolver = "3"
 
 [dependencies]
 nara = { path = "../..", default-features = false, features = ["runtime-2d", "serde"] }
+nara_rapier2d = { path = "../../crates/nara_rapier2d" }
 notify = { version = "=8.2.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

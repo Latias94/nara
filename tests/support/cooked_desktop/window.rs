@@ -22,6 +22,7 @@ use super::process::POLL;
 
 const KEYS: [u16; 10] = [0x1e, 0x20, 0x11, 0x1f, 0x12, 0x10, 0x32, 0x25, 0x26, 0x13];
 pub const D: u16 = 0x20;
+pub const W: u16 = 0x11;
 pub const E: u16 = 0x12;
 pub const Q: u16 = 0x10;
 pub const M: u16 = 0x32;
@@ -156,7 +157,7 @@ pub struct Input {
     original: Option<Window>,
     target: Option<Window>,
     title: String,
-    held: Option<u16>,
+    held: Vec<u16>,
 }
 
 impl Input {
@@ -165,7 +166,7 @@ impl Input {
             original: Window::foreground(),
             target: None,
             title: title.to_owned(),
-            held: None,
+            held: Vec::new(),
         };
         input.assert_all_up(0);
         input
@@ -188,7 +189,7 @@ impl Input {
     }
 
     pub fn bind(&mut self, window: Window) {
-        assert!(self.held.is_none());
+        assert!(self.held.is_empty());
         self.assert_all_up(window.thread);
         self.target = Some(window);
         window.focus(&self.title).unwrap();
@@ -207,13 +208,13 @@ impl Input {
 
     pub fn press(&mut self, scan: u16) {
         self.check();
-        assert!(KEYS.contains(&scan) && self.held.is_none());
+        assert!(KEYS.contains(&scan) && !self.held.contains(&scan));
         let key = Self::virtual_key(scan, self.target.unwrap().thread);
         assert!(
             unsafe { GetAsyncKeyState(key) } >= 0,
             "matched key must start Up"
         );
-        self.held = Some(scan);
+        self.held.push(scan);
         eprintln!(
             "cooked_desktop physical Down scan={scan:#x} vk={key:#x} target={:?}",
             self.target
@@ -238,29 +239,35 @@ impl Input {
     }
 
     fn release_owned(&mut self) -> bool {
-        let Some(scan) = self.held else {
+        if self.held.is_empty() {
             return true;
-        };
+        }
         if let Some(target) = self.target
             && Window::observe(target.handle) == Some(target)
             && target.focus(&self.title).is_err()
         {
             eprintln!("owned key release could not reacquire the original foreground");
         }
-        if !send(scan, true) {
-            return false;
-        }
         let thread = self.target.map_or(0, |target| target.thread);
-        let key = Self::virtual_key(scan, thread);
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while unsafe { GetAsyncKeyState(key) } < 0 {
-            if Instant::now() >= deadline {
-                return false;
+        let mut released = true;
+        for index in (0..self.held.len()).rev() {
+            let scan = self.held[index];
+            if !send(scan, true) {
+                released = false;
+                continue;
             }
-            thread::sleep(POLL);
+            let key = Self::virtual_key(scan, thread);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while unsafe { GetAsyncKeyState(key) } < 0 && Instant::now() < deadline {
+                thread::sleep(POLL);
+            }
+            if unsafe { GetAsyncKeyState(key) } < 0 {
+                released = false;
+            } else {
+                self.held.remove(index);
+            }
         }
-        self.held = None;
-        true
+        released
     }
 
     pub fn restore(&mut self) -> bool {

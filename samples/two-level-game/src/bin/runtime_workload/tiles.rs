@@ -37,7 +37,7 @@ use nara::{
         backend::{BackendWindowHandles, WindowTargetPhase},
     },
 };
-use two_level_game::{GamePhase, GameSnapshot};
+use two_level_game::{GamePhase, GameSnapshot, levels::AUTHORED_LEVEL_MEMBERS};
 
 const WINDOW_EXTENT: Extent2d = Extent2d {
     width: 960,
@@ -140,7 +140,7 @@ fn capture(
             snapshot.tick == time.tick()
                 && snapshot.current_instance == Some(current.receipt().instance_id())
                 && snapshot.scene_members == current.receipt().entity_ids().len()
-                && snapshot.scene_members == 6,
+                && snapshot.scene_members == AUTHORED_LEVEL_MEMBERS,
             "initialized original snapshot disagrees with its fixed clock or CurrentScene receipt",
         )?;
         let [view] = input.packet().views() else {
