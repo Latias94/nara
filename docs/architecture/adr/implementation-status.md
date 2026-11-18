@@ -2178,6 +2178,18 @@ render inputs remain valid. Host/source 94, sample 240 and all three Windows coo
 pass. The broader active-set, cross-region travel and native service lifetime design remains
 Proposed in ADR 0089.
 
+The [concurrent regions successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#concurrent-regions-implementation-and-qualification)
+at `a3f6293` extends that residency owner to independent Side Room and Lookout occurrences. It shares original
+Image and catalog publications and releases each after its last live Scene user. Primary travel
+captures the group revision and retires live additions through the original Scene transaction.
+Native retirement fences region changes while an exact attempt is pending. Public retirement
+selections now borrow receipts for preparation; the original Scene owner retains copies after
+membership admission. Source recipes can select their decoded-generation ceiling. The 99 Host/public,
+53 Scene, 22 source/cooked and 276 affected gameplay cases pass. Actual headless delivery and the final
+Windows hardware DX12/WASAPI Players pass. The owning record distinguishes interrupted foreground
+attempts and the cooker-cleanup correction at `9bbea40` from the final complete physical workflow.
+General scene-scoped native services, destination sets and full ADR 0089 remain open.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

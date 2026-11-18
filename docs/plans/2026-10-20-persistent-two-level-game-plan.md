@@ -16,6 +16,140 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Concurrent Regions And Coordinated Travel Successor
+
+Open the existing Meadow side room and a second authored Lookout in the same running World.
+Each room has an independent occurrence and collectible. Both need the same relic Image and
+Meadow Image. Closing either room releases only its lifetime. Shared publications survive until
+their final live Scene user leaves. The rooms use normal deferred requests and reuse the original
+single preparation slot.
+
+Extend Host residency to own the union of the primary Scene and all committed additions.
+Retain the existing source and processed authority checks. Ordered exclusive activation and
+unload update the same owner. A prepared primary replacement joins all live addon receipts,
+resource releases and catalog changes to its existing Scene product transaction. A rejected or
+cancelled destination leaves the original regions playable. A successful destination removes
+the original group and retains runtime-scoped time, progress and applicable services. The same
+rule applies to the existing managed travel publication when it drives the staged transaction.
+The retained-source Restart and exact game capture still require closed rooms.
+
+Give the ordinary source recipe room for the main Scene, two distinct additions and a travel
+candidate through the existing decoded-generation budget. The ordinary default remains two.
+Cooked admission retains the original byte budgets. Room scope remains Image-only. General
+scene-scoped native services and coordinated placement into two destination regions remain
+separate ADR 0089 work.
+
+Qualify both rooms through source and source-free cooked play. Prove shared Image identity and
+exact release, bad-destination preservation, fresh occurrence identity, and real desktop input
+and presentation across the handoff. Retain the game's original collision, checkpoint and
+cleanup evidence.
+
+Bevy spawns independent roots and uses strong asset handles for shared lifetime. Godot's PackedScene
+instances can share cached Resources. Its SceneTree replacement detaches the old root and installs the
+new root at frame end. Nara keeps the group handoff in its existing exclusive publication so observers
+see a complete scene group at each boundary.
+[Bevy instance activation](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/resolved_scene.rs#L47-L65) · [Bevy strong asset handles](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_asset/src/handle.rs#L98-L121) · [Godot resource lifetime](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/doc/classes/Resource.xml#L6-L10) · [Godot scene replacement](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/doc/classes/SceneTree.xml#L42-L71)
+
+### Concurrent Regions Implementation And Qualification
+
+Implementation and game consumers land at `a3f6293`. The cooker/Player cleanup distinction lands
+at `9bbea40`.
+
+The Host retains each occurrence under the existing residency owner and pools only the Image
+and catalog publications it owns. Activation checks an intersecting owned catalog record before
+publishing another region. Unload counts live Scene users, including a region already ended by
+the lower-level exact retirement API. A failed Image reload preserves the last-good publication
+for pure retirement. It does not grant a new region permission to borrow a changed publication.
+
+Prepared travel captures the region-set revision. A change before native work rejects and permits
+discard. Once native retirement begins, that set is fenced until the original attempt completes;
+an unload cannot strand its retry against a newer region set. A pre-native refusal leaves the
+original game playable. A native failure retains the original publications and exact candidate
+for explicit retry; it does not promise rollback of native effects.
+
+`SceneProductRetirement<'a>::Instance(&receipt)` now borrows a receipt during preparation.
+The Scene owner admits the complete membership count before retaining full receipt copies.
+The Host joins its own borrowed receipts to the product selections in the same transaction.
+The caller limit counts original members, including already retired members, and one unit for an
+empty occurrence. This changes the public selection interface without adding a second retirement
+owner. The source recipe selects four decoded generations; the default remains two.
+
+The focused Scene selection passes 53/53 on Windows with Rust 1.95.0 in
+`8b307419-a937-4f59-9379-beb9684628fa`. It retains the original tests for complete and partially
+retired activations, empty-occurrence limits, stale receipts, resource mutation and retry without
+replaying product configuration. The source schema regenerates at native binding revision 6;
+strict Check reports 28 content members.
+
+The final Host, source startup and budget selection passes 99/99 in
+`94b53eaa-330d-4eb6-9606-da41aea5e82e`, including the tooling feature closure. It covers two
+occurrences of the same Deferred Scene, insufficient retirement limits, changed region sets,
+native failure followed by exact retry, and refusal to unload while native retirement is pending.
+A failed Image reload after retirement preparation keeps the original publication eligible for
+removal. Public source limits retain their default two-generation behavior; the configured
+four-generation control releases capacity on the last owner.
+
+The release-profile source and cooked-content selection passes 22/22 in
+`82e78fdc-3cc0-41f7-8963-e0c0bfa53720`. Both room collection directions, independent close/reopen,
+shared Image identity, removed-record refusal, last-live-user release after direct retirement,
+and retained pixels use the actual game and public runtime interfaces. Save runs while one room
+is collected and the other remains open. Bad destination and lifecycle preflight leave both
+rooms intact; successful travel and later Restore retire them with the primary Scene.
+The cooked game runs with its source unavailable, including both regions and coordinated travel.
+The consumer's first compile reveals a test import of a private retirement predicate; its
+replacement checks the public exact inactive-instance error and original-member tombstones.
+
+The affected ordinary gameplay selection passes 276/276, with seven excluded tests, in
+`cff9457e-5d6e-4737-8d83-a71a73abd003`. It covers the library, authored Input and Prefab markers,
+animation, collision, checkpoints, recording/replay, source resume and Player entry contracts.
+The separate-process headless save/fresh Restore and replay trajectories remain intact.
+
+The actual relocated source-free headless and WASAPI Players pass in
+`6e52b395-b232-47ae-a956-aded49255deb`. The same selection stops in the desktop physical-input
+guard. Its retry `bfa60295-96bf-4458-b196-d3dd50fb5785` completes the new B/G open, north pickup,
+independent close and coordinated travel trajectory before losing foreground during the original
+movement workflow. An isolated retry `e81c71c5-0617-4f18-8eb3-f4c6af42cd1b` cannot acquire the
+original HWND at startup: the reported foreground belongs to another process. The supervising
+workers report complete containment, stopped readers and drained output without forced
+termination. The exact-foreground assertion remains enabled. These interrupted attempts do not
+qualify the complete path; the final successful run below supplies that evidence.
+
+After that foreign process exits, `32c8c4fc-8ae2-48a6-906d-af8c235da272` exposes a separate fixture
+error before launching the Player. The cooker exits successfully and publishes its package, but
+the shared supervisor reaps residual descendants after its natural-exit grace. Its original
+receipt correctly records `termination_requested=true` and `force_killed=false`. The fixture had
+applied the game's natural-exit assertion to this build tool. Desktop and Audio now select their
+concrete Cooker or PlayerWorker role. A cooker must exit successfully, complete containment,
+readers and output, avoid loss and force-kill escalation, and report its unchanged receipt.
+The PlayerWorker and every native Player retain the original no-termination requirement.
+Independent review confirms this matches the existing shared process contract. A successful
+build receipt does not establish natural exit of the whole compiler process tree.
+
+The final Desktop and Audio selection passes 2/2 in
+`1ecf03fe-5da2-404f-9bcd-372787dadff0`. The ordinary hardware DX12 Player receives physical B/G
+to open both regions, W to collect the north relic, B to close only the north region, and E to
+retire the remaining Lookout with its primary Scene. Original presentation receipts confirm
+two, one and zero visible relic draws and the same Image publication while shared. The original
+collision excursions, Save, fresh-process Restore and twenty further travels pass. The finite
+software control, rejected initial save and scripted controls remain enabled. All four native
+Player receipts show empty containment, stopped readers, drained output, destroyed windows,
+no termination request and no force kill; the deliberate bad-save process exits unsuccessfully
+as required. The WASAPI Player retains its sample comparison and original native retirement.
+Both final cooker receipts exit successfully with complete physical cleanup and no termination
+request. This qualifies the selected Windows workflows, not foreign native execution or physical
+scanout.
+
+Correctness Clippy passes for the root Runtime/tooling library, all serde-enabled Scene targets,
+and all sample targets with development, cook, desktop, audio and cooked-player enabled. Root
+and sample formatting checks, authored JSON, changed local document links and whitespace checks
+pass. The fifteen paused UI/Dialogue files retain their original byte hashes. Independent review
+closes the catalog, live-consumer, native-retirement fence, last-good Image and borrowed-receipt
+findings.
+
+Ordinary residency adds no per-frame scene-group audit. The desktop Player's opt-in `--observe`
+mode joins room Sprite draws and Image publications to the original native presentation receipt.
+That instrumentation does not establish production frame costs. General additive TileSet, Material
+and native service lifetimes, foreign native execution and complete ADR 0089 remain open.
+
 ## Deferred Additive Region Successor
 
 Add a playable side room admitted through a Deferred Scene reference from Meadow. The player

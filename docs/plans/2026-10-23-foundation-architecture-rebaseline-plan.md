@@ -5219,6 +5219,18 @@ extends the existing source and cooked Players through the same Deferred Scene a
 Its catalog distinguishes optional room data from startup and travel roots. Its execution record owns
 the selected platform and Player package evidence for this limited additive workflow.
 
+The [concurrent regions successor](2026-10-20-persistent-two-level-game-plan.md#concurrent-regions-implementation-and-qualification)
+at `a3f6293` adds an independently controlled Lookout and coordinated primary travel through those same owners.
+The Host pools its shared Image and catalog publications, releases them after the final live user,
+and joins all live additions to its existing replacement transaction. Pre-native refusal preserves
+the playable incumbent group. Native failure retains the original attempt for explicit retry and
+fences region changes. The source recipe selects its retained-generation ceiling, and Scene
+retirement selections borrow original receipts until admitted. Source/cooked checks, actual
+headless delivery and the complete Windows hardware DX12/WASAPI workflows pass. The execution
+record preserves foreground interruptions and the cooker-cleanup fixture correction separately
+from final acceptance. General additive native services and destination sets remain ADR 0089
+work; this does not complete R10 or R12.
+
 R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
 UI, semantic-command and future agent use through the same domain owners and exact outcomes.
 Keep capability coverage explicit per frontend: a semantic snapshot does not prove pointer hit
