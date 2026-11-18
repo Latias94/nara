@@ -335,6 +335,22 @@ impl ImagePublications {
             })
     }
 
+    pub(super) fn retained_image_for_product(
+        &self,
+        product: AssetProductRef,
+        images: &Assets<ImageAsset>,
+    ) -> Option<(Handle<ImageAsset>, ImageAsset)> {
+        if let Some(image) = self.image_for_product(product) {
+            return Some(image);
+        }
+        let handle = self
+            .shared
+            .iter()
+            .find(|image| image.product == product)?
+            .handle;
+        Some((handle, images.get(handle)?.share_retained()?))
+    }
+
     pub(super) fn validate(
         &self,
         server: &AssetServer,

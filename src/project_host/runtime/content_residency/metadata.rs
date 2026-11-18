@@ -77,9 +77,9 @@ impl PreparedCatalog {
         world: &World,
         content: ResidencyInput<'_>,
         current: Option<&ProjectSceneResidency>,
-        shared_images: Option<usize>,
+        addition_to: Option<&ProjectSceneResidency>,
     ) -> Result<Self, HostFault> {
-        let bytes = metadata_bytes(world, content, current, shared_images)?;
+        let bytes = metadata_bytes(world, content, current, addition_to)?;
         match content {
             ResidencyInput::Source(snapshot) => {
                 let lease = snapshot
@@ -184,7 +184,7 @@ fn metadata_bytes(
     world: &World,
     content: ResidencyInput<'_>,
     current: Option<&ProjectSceneResidency>,
-    shared_images: Option<usize>,
+    addition_to: Option<&ProjectSceneResidency>,
 ) -> Result<usize, HostFault> {
     // One conservative logical reservation covers both preparation and its committed receipts.
     // Pixel payloads retain their original acquisition/import charge; native TileSet owners keep
@@ -201,7 +201,7 @@ fn metadata_bytes(
             .ok_or_else(metadata_overflow)?,
         None => size_of::<AssetServer>(),
     };
-    let staged_copies = if shared_images.is_some() { 1 } else { 2 };
+    let staged_copies = 2;
     add_entries(&mut bytes, 1 + staged_copies, catalogue_bytes)?;
     // Only the staged copies grow. A complete new binding is a conservative upper bound
     // even when the target reuses an existing identity; current-only bindings are already above.
@@ -231,8 +231,9 @@ fn metadata_bytes(
             )?;
         }
     }
-    if shared_images.is_some() {
+    if addition_to.is_some() {
         add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
+        add_entries(&mut bytes, 1, size_of::<additive::PreparedAddition>())?;
         add_entries(
             &mut bytes,
             content
@@ -240,6 +241,11 @@ fn metadata_bytes(
                 .checked_add(content.material_count())
                 .ok_or_else(metadata_overflow)?,
             size_of::<AssetProductRef>(),
+        )?;
+        add_entries(
+            &mut bytes,
+            content.tileset_count(),
+            size_of::<nara_asset::Handle<TileSet>>(),
         )?;
     }
     let image_metadata = size_of::<images::ImagePublication>()
@@ -249,14 +255,6 @@ fn metadata_bytes(
         + 5 * ARC_CONTROL_BLOCK_BYTES
         + size_of::<RuntimeContentAsset<ImageAsset>>();
     add_entries(&mut bytes, content.image_count(), image_metadata)?;
-    add_entries(
-        &mut bytes,
-        shared_images.unwrap_or(0),
-        size_of::<OwnedImage>()
-            + size_of::<AssetId>()
-            + size_of::<&OwnedImage>()
-            + BTREE_ENTRY_OVERHEAD,
-    )?;
     let tileset_metadata = 3 * size_of::<TileSetPublicationInput>()
         + 3 * size_of::<TileSetContentReceipt>()
         + size_of::<RuntimeContentAsset<TileSetDescriptor>>()
@@ -264,7 +262,7 @@ fn metadata_bytes(
         + size_of::<AssetId>()
         + 3 * BTREE_ENTRY_OVERHEAD;
     add_entries(&mut bytes, content.tileset_count(), tileset_metadata)?;
-    if let Some(current) = current {
+    if let Some(current) = current.or(addition_to) {
         add_entries(
             &mut bytes,
             current.image_count(),
@@ -275,7 +273,7 @@ fn metadata_bytes(
         )?;
         add_entries(
             &mut bytes,
-            current.tilesets.len(),
+            current.tileset_count(),
             2 * size_of::<TileSetContentReceipt>()
                 + size_of::<AssetId>()
                 + size_of::<AssetMutationBaseline<TileSet>>()

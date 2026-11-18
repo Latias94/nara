@@ -420,10 +420,7 @@ fn validate_resources(world: &World, content: &PreparedSceneContent) -> Result<(
         Some(world.resource::<ProjectSceneResidency>()),
     )?;
     let uses_tilesets = ResidencyInput::from(content).tileset_count() != 0
-        || !world
-            .resource::<ProjectSceneResidency>()
-            .tilesets
-            .is_empty();
+        || world.resource::<ProjectSceneResidency>().tileset_count() != 0;
     if nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
         || source && nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
         || nara_ecs::__private::validate_resource_scope::<crate::project_content::ProjectDomainAssets>(world).is_err()
@@ -441,7 +438,7 @@ pub(super) fn validate_native_resources(
     current: Option<&ProjectSceneResidency>,
 ) -> Result<(), HostFault> {
     let uses_tilesets =
-        content.tileset_count() != 0 || current.is_some_and(|current| !current.tilesets.is_empty());
+        content.tileset_count() != 0 || current.is_some_and(|current| current.tileset_count() != 0);
     let uses_images = uses_tilesets
         || content.image_count() != 0
         || current.is_some_and(|current| current.image_count() != 0);

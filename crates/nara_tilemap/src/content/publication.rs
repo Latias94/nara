@@ -5,7 +5,8 @@ use std::{
 
 use nara_asset::{
     Asset, AssetEvents, AssetMutationBaseline, AssetPathScope, AssetRecord, AssetServer,
-    AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase, SourceHash,
+    AssetStateRevision, AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase,
+    SourceHash,
 };
 use nara_core::ByteLimit;
 use nara_image::{ImageAsset, ImageContentSnapshot};
@@ -35,12 +36,19 @@ impl TileSetContentReceipt {
 }
 
 /// One destination TileSet and the admitted immutable Image allocation it will consume.
+/// Constructors select publication; an explicit shared receipt selects reuse without publication.
 pub struct TileSetPublicationInput {
     handle: Handle<TileSet>,
     declaration: TileSetDeclaration,
     image_handle: Handle<ImageAsset>,
     image: ImageAsset,
-    receipt: Option<TileSetContentReceipt>,
+    receipt: Option<PublicationReceipt>,
+}
+
+#[derive(Clone)]
+enum PublicationReceipt {
+    Replace(TileSetContentReceipt),
+    Shared(TileSetContentReceipt),
 }
 
 impl TileSetPublicationInput {
@@ -100,9 +108,21 @@ impl TileSetPublicationInput {
         }
     }
 
+    /// Replaces an existing declaration under its exact claim, publishing a new TileSet version.
     #[must_use]
     pub fn with_receipt(mut self, receipt: TileSetContentReceipt) -> Self {
-        self.receipt = Some(receipt);
+        self.receipt = Some(PublicationReceipt::Replace(receipt));
+        self
+    }
+
+    /// Reuses the exact live declaration and Image publication under the original claim.
+    ///
+    /// The complete declaration and retained Image allocation must match the original publication.
+    /// Preparation reserves no new version or pixel capacity. Commit revalidates the original
+    /// value/state and Image baselines, returns this receipt, and leaves the publication unchanged.
+    #[must_use]
+    pub fn with_shared_receipt(mut self, receipt: TileSetContentReceipt) -> Self {
+        self.receipt = Some(PublicationReceipt::Shared(receipt));
         self
     }
 }
@@ -143,12 +163,24 @@ impl<T: Asset> SlotGuard<T> {
     }
 }
 
-struct PreparedInput {
+struct PreparedPublication {
     input: TileSetPublicationInput,
     guard: SlotGuard<TileSet>,
     claim: Arc<()>,
     image_record: Option<AssetRecord>,
     retention: usize,
+}
+
+struct PreparedShared {
+    receipt: TileSetContentReceipt,
+    baseline: AssetMutationBaseline<TileSet>,
+    image: ImageContentSnapshot,
+    image_state: AssetStateRevision,
+}
+
+enum PreparedInput {
+    Publish(PreparedPublication),
+    Shared(PreparedShared),
 }
 
 enum PreparedRetention {
@@ -248,20 +280,57 @@ impl TileSetAssets {
                 .declaration
                 .validate_image_extent(input.image.extent())?;
             let claim = if let Some(entry) = self.entries.get(&input.handle.id()) {
-                validate_claim(
-                    entry,
-                    input
-                        .receipt
-                        .as_ref()
-                        .ok_or(TileSetAssetError::Superseded)?,
-                    tilesets,
-                    states,
-                )?;
+                let receipt = match input.receipt.as_ref() {
+                    Some(
+                        PublicationReceipt::Replace(receipt) | PublicationReceipt::Shared(receipt),
+                    ) => receipt,
+                    None => return Err(TileSetAssetError::Superseded),
+                };
+                validate_claim(entry, receipt, tilesets, states)?;
                 if entry
                     .accepted_atlas
                     .is_some_and(|atlas| atlas != input.declaration.atlas())
                 {
                     return Err(TileSetAssetError::AtlasLayoutChangeRequiresRebuild);
+                }
+                if matches!(input.receipt.as_ref(), Some(PublicationReceipt::Shared(_))) {
+                    let image = entry
+                        .published
+                        .as_ref()
+                        .ok_or(TileSetAssetError::DependencyUnavailable)?;
+                    if !entry.active
+                        || entry.error.is_some()
+                        || !shared_declaration_matches(&entry.declaration, &input.declaration)
+                        || !states.state(input.handle.id()).is_some_and(|state| {
+                            state.load_state() == &nara_asset::LoadState::Loaded
+                                && state.usable_version().is_some()
+                                && state.source_hash() == entry.declaration.source_hash()
+                        })
+                        || states.published_slot_revision(input.handle.id()) != Some(&entry.slot)
+                        || tilesets.get(input.handle).and_then(TileSet::image_content)
+                            != Some(image)
+                        || states
+                            .state(image.handle().id())
+                            .and_then(|state| state.usable_version())
+                            != Some(image.version())
+                        || states.published_slot_revision(image.handle().id())
+                            != Some(image.slot_revision())
+                        || server.get_handle::<ImageAsset>(image.handle().id())
+                            != Some(image.handle())
+                        || server.product(image.handle().id()) != Some(image.product())
+                        || !image_matches_input(image, &input)
+                    {
+                        return Err(TileSetAssetError::Superseded);
+                    }
+                    prepared.push(PreparedInput::Shared(PreparedShared {
+                        receipt: receipt.clone(),
+                        baseline: tilesets
+                            .prepare_mutation(input.handle, states)
+                            .map_err(TileSetAssetError::State)?,
+                        image: image.clone(),
+                        image_state: states.state_revision(image.handle().id()),
+                    }));
+                    continue;
                 }
                 if entry.declaration == input.declaration {
                     Arc::clone(&entry.claim)
@@ -285,6 +354,10 @@ impl TileSetAssets {
             }
             let retention_index = if let Some(prior) = prepared
                 .iter()
+                .filter_map(|prior| match prior {
+                    PreparedInput::Publish(prior) => Some(prior),
+                    PreparedInput::Shared(_) => None,
+                })
                 .find(|prior| same_pixels(prior.input.image.pixels(), input.image.pixels()))
             {
                 prior.retention
@@ -318,13 +391,13 @@ impl TileSetAssets {
             };
             let guard = SlotGuard::capture(input.handle, tilesets, states)?;
             let image_record = input.declaration.image_record(database).cloned();
-            prepared.push(PreparedInput {
+            prepared.push(PreparedInput::Publish(PreparedPublication {
                 input,
                 guard,
                 claim,
                 image_record,
                 retention: retention_index,
-            });
+            }));
         }
         Ok(PreparedTileSetPublications {
             owner: self,
@@ -348,6 +421,44 @@ impl PreparedTileSetPublications<'_> {
     ) -> Vec<TileSetContentReceipt> {
         let mut captured = Vec::with_capacity(self.inputs.len());
         for prepared in &self.inputs {
+            let prepared = match prepared {
+                PreparedInput::Publish(prepared) => prepared,
+                PreparedInput::Shared(shared) => {
+                    shared
+                        .baseline
+                        .validate(tilesets, states)
+                        .expect("prepared shared TileSet value/state association changed");
+                    let entry = self
+                        .owner
+                        .entries
+                        .get(&shared.receipt.handle.id())
+                        .expect("borrowed TileSet owner retains its shared entry");
+                    assert!(
+                        entry
+                            .declaration
+                            .binding_matches(shared.receipt.handle, server),
+                        "prepared shared TileSet identity changed"
+                    );
+                    assert_eq!(
+                        states.state_revision(shared.image.handle().id()),
+                        shared.image_state,
+                        "prepared shared Image state changed"
+                    );
+                    let image = ImageContentSnapshot::capture(
+                        shared.image.handle(),
+                        server,
+                        states,
+                        images,
+                    )
+                    .expect("prepared shared Image must remain published");
+                    assert_eq!(
+                        image, shared.image,
+                        "prepared shared Image publication changed"
+                    );
+                    captured.push(image);
+                    continue;
+                }
+            };
             prepared.guard.assert_current(tilesets, states);
             let input = &prepared.input;
             assert!(
@@ -412,6 +523,13 @@ impl PreparedTileSetPublications<'_> {
             .retain(|retained| retained.strong_count() != 0);
         let mut receipts = Vec::with_capacity(self.inputs.len());
         for (prepared, image) in self.inputs.into_iter().zip(captured) {
+            let prepared = match prepared {
+                PreparedInput::Publish(prepared) => prepared,
+                PreparedInput::Shared(shared) => {
+                    receipts.push(shared.receipt);
+                    continue;
+                }
+            };
             let owner = retention_owners[prepared.retention].get_or_insert_with(|| {
                 let owner = Arc::new(RetainedImage {
                     image: image.clone(),
@@ -502,4 +620,38 @@ fn same_pixels(left: &[u8], right: &[u8]) -> bool {
     // ImageAsset admits nonempty, immutable, fixed-length RGBA allocations; a live slice identity
     // therefore proves the same pixel allocation, rather than equal content in another allocation.
     std::ptr::eq(left, right)
+}
+
+fn image_matches_input(image: &ImageContentSnapshot, input: &TileSetPublicationInput) -> bool {
+    image.handle() == input.image_handle
+        && Some(image.product()) == input.image.product()
+        && image.source() == input.image.source()
+        && image.extent() == input.image.extent()
+        && image.format() == input.image.format()
+        && image.color_space() == input.image.color_space()
+        && same_pixels(image.pixels(), input.image.pixels())
+}
+
+fn shared_declaration_matches(left: &TileSetDeclaration, right: &TileSetDeclaration) -> bool {
+    let encoded_floats = |declaration: &TileSetDeclaration| {
+        let atlas = declaration.atlas();
+        let tint = match declaration {
+            TileSetDeclaration::Source { source, .. } => source.tint,
+            TileSetDeclaration::Product(descriptor) => descriptor.tint(),
+        };
+        [
+            atlas.tile_size.x,
+            atlas.tile_size.y,
+            atlas.margin.x,
+            atlas.margin.y,
+            atlas.spacing.x,
+            atlas.spacing.y,
+            tint.r,
+            tint.g,
+            tint.b,
+            tint.a,
+        ]
+        .map(f32::to_bits)
+    };
+    left == right && encoded_floats(left) == encoded_floats(right)
 }

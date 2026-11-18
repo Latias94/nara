@@ -3,6 +3,8 @@ use nara_ecs::{World, bevy_ecs::system::SystemState};
 use nara_image::ImageColorSpace;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 
+mod sharing;
+
 fn auxiliary() -> ImportedProductId {
     ImportedProductId::parse_subproduct("20000000-0000-4000-8000-000000000003").unwrap()
 }

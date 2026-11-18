@@ -12,6 +12,7 @@ pub(super) struct Additions {
     pub(super) active: Vec<ActiveAddition>,
     pub(super) images: Vec<OwnedImage>,
     pub(super) materials: MaterialResidency,
+    pub(super) tilesets: Vec<TileSetContentReceipt>,
     pub(super) catalog: Vec<AssetRecord>,
     pub(super) revision: u64,
     pub(super) retiring: bool,
@@ -21,6 +22,7 @@ pub(super) struct ActiveAddition {
     pub(super) receipt: SpawnedSceneInstance,
     images: Vec<AssetProductRef>,
     materials: Vec<AssetProductRef>,
+    tilesets: Vec<nara_asset::Handle<TileSet>>,
     _authority: ResidencyAuthority,
     source: SceneSource,
 }
@@ -89,14 +91,13 @@ pub(in crate::project_host::runtime) fn activate_addition(
     let revision = residency.additions.next_revision().map_err(rejected)?;
     let input = ResidencyInput::from(content);
     residency.authority.validate(input).map_err(rejected)?;
-    if input.tileset_count() != 0
-        || input
-            .domain_assets()
-            .contains_additive_unsupported_collections()
+    if input
+        .domain_assets()
+        .contains_additive_unsupported_collections()
     {
         return Err(rejected(failure(
             "project.scene.addition-domain-unsupported",
-            "Additive Scene residency supports Image and Material asset closures",
+            "Additive Scene residency supports Image, Material and TileSet asset closures",
         )));
     }
     if let ResidencyInput::Source(snapshot) = input {
@@ -114,12 +115,8 @@ pub(in crate::project_host::runtime) fn activate_addition(
     let material_change = MaterialChange::Add(residency);
     let material_custody =
         MaterialPublications::reserve(input, material_change).map_err(rejected)?;
-    let shared = if input.image_count() == 0 {
-        0
-    } else {
-        residency.image_count()
-    };
-    let catalog = PreparedCatalog::prepare(world, input, None, Some(shared)).map_err(rejected)?;
+    let catalog =
+        PreparedCatalog::prepare(world, input, None, Some(residency)).map_err(rejected)?;
     let mut reservations = SceneAssetReservations::from_world(world);
     let images = prepare_images(
         world,
@@ -129,6 +126,22 @@ pub(in crate::project_host::runtime) fn activate_addition(
         &catalog,
     )
     .map_err(rejected)?;
+    let tilesets = tilesets::prepare(
+        world,
+        input,
+        TileSetChange::Add(residency),
+        &mut reservations,
+        &images,
+    )
+    .map_err(rejected)?;
+    if !tilesets.inputs.is_empty()
+        && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
+    {
+        return Err(rejected(failure(
+            "project.scene.residency-lifecycle-unsupported",
+            "Scene residency owners cannot run lifecycle effects during commit",
+        )));
+    }
     let materials = MaterialPublications::prepare(
         world,
         input,
@@ -138,6 +151,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
         material_custody,
     )
     .map_err(rejected)?;
+    let staged_server = reservations.staged_server().clone();
     let scene = match content {
         PreparedSceneContent::Source(snapshot) => bindings.prepare_scene_with_reservations(
             world,
@@ -154,33 +168,88 @@ pub(in crate::project_host::runtime) fn activate_addition(
                 reservations,
             ),
     }?;
-    catalog.validate(world).map_err(rejected)?;
-    validate_images(world, &images).map_err(rejected)?;
-    materials.validate(world).map_err(rejected)?;
-    let image_products = images.additive_products();
-    let material_products = materials.products();
-    let report = scene.commit(world);
-    if let Some(receipt) = &report.instance {
-        let images = replacement::commit_images(world, images);
-        let materials = replacement::commit_materials(world, materials);
-        let mut authority = catalog.commit(world);
-        let mut residency = world.resource_mut::<ProjectSceneResidency>();
-        let additions = &mut residency.additions;
-        if let ResidencyAuthority::Source { catalog, .. } = &mut authority {
-            additions.catalog.append(catalog);
-        }
-        additions.images.extend(images);
-        additions.materials.append(materials);
-        additions.active.push(ActiveAddition {
-            receipt: receipt.clone(),
-            images: image_products,
-            materials: material_products,
-            _authority: authority,
-            source: content.scene_source(),
-        });
-        additions.revision = revision;
+    let candidate = PreparedAddition {
+        scene,
+        images,
+        materials,
+        catalog,
+        source: content.scene_source(),
+        revision,
+        tileset_uses: tilesets.uses,
+        new_handles: tilesets.new_handles,
+    };
+    if tilesets.inputs.is_empty() {
+        return candidate.commit(world, None);
     }
-    Ok(report)
+    world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
+        let prepared = owner
+            .prepare_publications(
+                tilesets.inputs,
+                &[],
+                &staged_server,
+                candidate
+                    .catalog
+                    .asset_resolution()
+                    .map(|resolver| resolver.database()),
+                world.resource::<Assets<TileSet>>(),
+                world.resource::<AssetStates>(),
+            )
+            .map_err(|error| rejected(tileset_failure(error)))?;
+        candidate.commit(world, Some(prepared))
+    })
+}
+
+pub(super) struct PreparedAddition {
+    scene: nara_scene::PreparedScene,
+    images: ImagePublications,
+    materials: MaterialPublications,
+    catalog: PreparedCatalog,
+    source: SceneSource,
+    revision: u64,
+    tileset_uses: Vec<nara_asset::Handle<TileSet>>,
+    new_handles: BTreeSet<nara_asset::AssetId>,
+}
+
+impl PreparedAddition {
+    fn commit(
+        self,
+        world: &mut World,
+        tilesets: Option<PreparedTileSetPublications<'_>>,
+    ) -> Result<SceneSpawnReport, SceneSpawnReport> {
+        self.catalog.validate(world).map_err(rejected)?;
+        validate_images(world, &self.images).map_err(rejected)?;
+        self.materials.validate(world).map_err(rejected)?;
+        let image_products = self.images.additive_products();
+        let material_products = self.materials.products();
+        let report = self.scene.commit(world);
+        if let Some(receipt) = &report.instance {
+            let (images, receipts, materials) =
+                replacement::commit_publications(world, self.images, tilesets, self.materials);
+            let mut authority = self.catalog.commit(world);
+            let mut residency = world.resource_mut::<ProjectSceneResidency>();
+            let additions = &mut residency.additions;
+            if let ResidencyAuthority::Source { catalog, .. } = &mut authority {
+                additions.catalog.append(catalog);
+            }
+            additions.images.extend(images);
+            additions.materials.append(materials);
+            additions.tilesets.extend(
+                receipts
+                    .into_iter()
+                    .filter(|receipt| self.new_handles.contains(&receipt.handle().id())),
+            );
+            additions.active.push(ActiveAddition {
+                receipt: receipt.clone(),
+                images: image_products,
+                materials: material_products,
+                tilesets: self.tileset_uses,
+                _authority: authority,
+                source: self.source,
+            });
+            additions.revision = self.revision;
+        }
+        Ok(report)
+    }
 }
 
 /// Unloads exactly the active additive Scene returned by its Host's activation operation.
@@ -205,35 +274,99 @@ pub fn unload_project_scene_addition(
     let revision = additions
         .next_revision()
         .map_err(|fault| fault.diagnostics)?;
-    let (retirement, materials, catalog) =
+    let (retirement, materials, tilesets, catalog) =
         prepare_retirement(world, additions, index).map_err(|fault| fault.diagnostics)?;
-    let retiring_images = retirement.retiring_products().collect::<BTreeSet<_>>();
-    let retiring_materials = materials.retiring_products().collect::<BTreeSet<_>>();
-    let count = if nara_scene::__private::scene_instance_retired(world, expected) {
-        0
-    } else {
-        retire_and_despawn_scene_instance(world, expected)?
-    };
-    replacement::commit_materials(world, materials);
-    replacement::commit_images(world, retirement);
-    if !catalog.is_empty() {
-        let mut database = world.resource_mut::<ProjectAssetDatabase>();
-        for record in &catalog {
-            assert!(database.remove_exact(record));
-        }
+    if !tilesets.is_empty()
+        && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
+    {
+        return Err(failure(
+            "project.scene.residency-lifecycle-unsupported",
+            "Scene residency owners cannot run lifecycle effects during commit",
+        )
+        .diagnostics);
     }
-    let mut residency = world.resource_mut::<ProjectSceneResidency>();
-    let additions = &mut residency.additions;
-    additions.active.remove(index);
-    additions
-        .images
-        .retain(|image| !retiring_images.contains(&image.product));
-    additions
-        .materials
-        .retain_products(|product| !retiring_materials.contains(&product));
-    additions.catalog.retain(|record| !catalog.contains(record));
-    additions.revision = revision;
-    Ok(count)
+    let prepared = PreparedUnload {
+        images: retirement,
+        materials,
+        catalog,
+        index,
+        revision,
+    };
+    if tilesets.is_empty() {
+        return prepared.commit(world, expected, None, &[]);
+    }
+    world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
+        let publications = owner
+            .prepare_publications(
+                Vec::new(),
+                &tilesets,
+                world.resource::<AssetServer>(),
+                world.get_resource::<ProjectAssetDatabase>(),
+                world.resource::<Assets<TileSet>>(),
+                world.resource::<AssetStates>(),
+            )
+            .map_err(|error| tileset_failure(error).diagnostics)?;
+        prepared.commit(world, expected, Some(publications), &tilesets)
+    })
+}
+
+struct PreparedUnload {
+    images: ImagePublications,
+    materials: MaterialPublications,
+    catalog: Vec<AssetRecord>,
+    index: usize,
+    revision: u64,
+}
+
+impl PreparedUnload {
+    fn commit(
+        self,
+        world: &mut World,
+        expected: &SpawnedSceneInstance,
+        tileset_publications: Option<PreparedTileSetPublications<'_>>,
+        tilesets: &[TileSetContentReceipt],
+    ) -> Result<usize, DiagnosticReport> {
+        let Self {
+            images: retirement,
+            materials,
+            catalog,
+            index,
+            revision,
+        } = self;
+        let retiring_tilesets = tilesets
+            .iter()
+            .map(|receipt| receipt.handle().id())
+            .collect::<BTreeSet<_>>();
+        let retiring_images = retirement.retiring_products().collect::<BTreeSet<_>>();
+        let retiring_materials = materials.retiring_products().collect::<BTreeSet<_>>();
+        let count = if nara_scene::__private::scene_instance_retired(world, expected) {
+            0
+        } else {
+            retire_and_despawn_scene_instance(world, expected)?
+        };
+        replacement::commit_publications(world, retirement, tileset_publications, materials);
+        if !catalog.is_empty() {
+            let mut database = world.resource_mut::<ProjectAssetDatabase>();
+            for record in &catalog {
+                assert!(database.remove_exact(record));
+            }
+        }
+        let mut residency = world.resource_mut::<ProjectSceneResidency>();
+        let additions = &mut residency.additions;
+        additions.active.remove(index);
+        additions
+            .images
+            .retain(|image| !retiring_images.contains(&image.product));
+        additions
+            .materials
+            .retain_products(|product| !retiring_materials.contains(&product));
+        additions
+            .tilesets
+            .retain(|receipt| !retiring_tilesets.contains(&receipt.handle().id()));
+        additions.catalog.retain(|record| !catalog.contains(record));
+        additions.revision = revision;
+        Ok(count)
+    }
 }
 
 fn addition_mismatch() -> DiagnosticReport {
@@ -248,7 +381,15 @@ fn prepare_retirement(
     world: &World,
     additions: &Additions,
     index: usize,
-) -> Result<(ImagePublications, MaterialPublications, Vec<AssetRecord>), HostFault> {
+) -> Result<
+    (
+        ImagePublications,
+        MaterialPublications,
+        Vec<TileSetContentReceipt>,
+        Vec<AssetRecord>,
+    ),
+    HostFault,
+> {
     let active = &additions.active[index];
     let remaining = additions.active[..index]
         .iter()
@@ -283,6 +424,17 @@ fn prepare_retirement(
         }),
         world,
     )?;
+    let tilesets = additions
+        .tilesets
+        .iter()
+        .filter(|receipt| {
+            active.tilesets.contains(&receipt.handle())
+                && !remaining
+                    .iter()
+                    .any(|other| other.tilesets.contains(&receipt.handle()))
+        })
+        .cloned()
+        .collect();
     let mut retiring_images = additions
         .images
         .iter()
@@ -294,7 +446,12 @@ fn prepare_retirement(
         })
         .peekable();
     if retiring_images.peek().is_none() {
-        return Ok((ImagePublications::empty(), materials, retiring_catalog));
+        return Ok((
+            ImagePublications::empty(),
+            materials,
+            tilesets,
+            retiring_catalog,
+        ));
     }
     let states = world
         .get_resource::<AssetStates>()
@@ -312,7 +469,7 @@ fn prepare_retirement(
             .ok_or_else(resources_missing)?,
         states,
     )?;
-    Ok((retirement, materials, retiring_catalog))
+    Ok((retirement, materials, tilesets, retiring_catalog))
 }
 
 fn validate_catalogue(world: &World) -> Result<&ProjectAssetDatabase, HostFault> {

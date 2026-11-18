@@ -1,5 +1,7 @@
 use super::*;
 
+mod shared;
+
 fn destination_image(record: &AssetRecord, byte: u8) -> ImageAsset {
     let mut image = image(record, 2, 1, byte);
     assert!(image.try_attach_retention_owner(Arc::new(())));

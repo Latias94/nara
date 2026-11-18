@@ -272,6 +272,7 @@ impl ProjectDomainAssets {
             collection.domain_type() != std::any::TypeId::of::<nara_image::ImageDomain>()
                 && collection.domain_type()
                     != std::any::TypeId::of::<nara_material::Material2dDomain>()
+                && collection.domain_type() != std::any::TypeId::of::<nara_tilemap::TileSetDomain>()
         })
     }
 

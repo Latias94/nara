@@ -7,6 +7,7 @@ mod instances;
 mod materials;
 mod metadata;
 mod replacement;
+mod tilesets;
 pub(super) use additive::activate_addition;
 pub(crate) use additive::has_active_project_scene_addition;
 pub use additive::unload_project_scene_addition;
@@ -50,6 +51,7 @@ use catalog::CatalogChange;
 use images::{ImageChange, ImagePublications, OwnedImage};
 use materials::{MaterialChange, MaterialPublications, MaterialResidency, OwnedMaterial};
 use metadata::{PreparedCatalog, ResidencyAuthority};
+use tilesets::{TileSetChange, TileSetChanges};
 
 #[derive(Resource)]
 pub(super) struct ProjectSceneResidency {
@@ -80,6 +82,14 @@ impl ProjectSceneResidency {
 
     fn material_count(&self) -> usize {
         self.owned_materials().count()
+    }
+
+    fn owned_tilesets(&self) -> impl Iterator<Item = &TileSetContentReceipt> + Clone {
+        self.tilesets.iter().chain(&self.additions.tilesets)
+    }
+
+    fn tileset_count(&self) -> usize {
+        self.tilesets.len() + self.additions.tilesets.len()
     }
 
     fn owned_catalog_records(&self) -> impl Iterator<Item = &AssetRecord> {
@@ -323,117 +333,18 @@ impl PreparedResidency {
             &images,
             material_custody,
         )?;
-        let owned_tilesets = current.map_or(&[][..], |current| current.tilesets.as_slice());
-        let old_tilesets = owned_tilesets
-            .iter()
-            .map(|receipt| (receipt.handle().id(), receipt))
-            .collect::<BTreeMap<_, _>>();
-        let mut inputs = Vec::with_capacity(content.tileset_count());
-        let mut tileset_slots = Vec::with_capacity(content.tileset_count() + owned_tilesets.len());
-        let mut next_ids = BTreeSet::new();
-        let mut insert = |handle: nara_asset::Handle<TileSet>,
-                          mut input: TileSetPublicationInput| {
-            if let Some(receipt) = old_tilesets.get(&handle.id()) {
-                input = input.with_receipt((*receipt).clone());
-            }
-            if !next_ids.insert(handle.id()) {
-                return Err(binding_changed());
-            }
-            tileset_slots.push(
-                world
-                    .resource::<Assets<TileSet>>()
-                    .prepare_mutation(handle, world.resource::<AssetStates>())
-                    .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
-            );
-            inputs.push(input);
-            Ok(())
-        };
-        match content {
-            ResidencyInput::Source(snapshot) => {
-                for content in snapshot.tilesets() {
-                    let handle = bindings
-                        .reserve::<TileSet>(
-                            &AssetRef::StableId(content.stable_id()),
-                            snapshot.asset_resolution(),
-                            &tileset_kind(),
-                        )
-                        .map_err(|_| binding_changed())?;
-                    let image_record = snapshot
-                        .asset_resolution()
-                        .resolve_ref(&content.source().image)
-                        .map_err(|_| resources_missing())?;
-                    let image_product = nara_asset::AssetProductRef::new(
-                        image_record.stable_id(),
-                        nara_asset::ImportedProductId::PRIMARY,
-                    )
-                    .map_err(|_| resources_missing())?;
-                    let (image_handle, image) = images
-                        .image_for_product(image_product)
-                        .ok_or_else(resources_missing)?;
-                    let record = AssetRecord::new(
-                        content.stable_id(),
-                        content.path().clone(),
-                        tileset_kind(),
-                    );
-                    insert(
-                        handle,
-                        TileSetPublicationInput::from_source(
-                            handle,
-                            record,
-                            content.source().clone(),
-                            SourceHash::from_digest(*content.source_hash().as_bytes()),
-                            image_handle,
-                            image,
-                            snapshot.asset_resolution().scope(),
-                            world
-                                .resource::<TileSetAssets>()
-                                .limits()
-                                .source_reference_bytes(),
-                        )
-                        .map_err(tileset_failure)?,
-                    )?;
-                }
-            }
-            ResidencyInput::Processed(content) => {
-                for acquired in &content.tilesets {
-                    if !content.base().same_base(acquired.base()) {
-                        return Err(binding_changed());
-                    }
-                    let descriptor = *acquired.product();
-                    if descriptor.product() != acquired.reference() {
-                        return Err(binding_changed());
-                    }
-                    let handle = bindings
-                        .reserve_product::<TileSet>(descriptor.product())
-                        .map_err(|_| binding_changed())?;
-                    let (image_handle, image) = images
-                        .image_for_product(descriptor.image_product())
-                        .ok_or_else(resources_missing)?;
-                    insert(
-                        handle,
-                        TileSetPublicationInput::from_product(
-                            handle,
-                            descriptor,
-                            image_handle,
-                            image,
-                        ),
-                    )?;
-                }
-            }
-        }
-        let retirements: Vec<_> = owned_tilesets
-            .iter()
-            .filter(|receipt| !next_ids.contains(&receipt.handle().id()))
-            .cloned()
-            .collect();
-        for receipt in &retirements {
-            tileset_slots.push(
-                world
-                    .resource::<Assets<TileSet>>()
-                    .prepare_mutation(receipt.handle(), world.resource::<AssetStates>())
-                    .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
-            );
-        }
+        let TileSetChanges {
+            inputs,
+            retirements,
+            slots: tileset_slots,
+            ..
+        } = tilesets::prepare(
+            world,
+            content,
+            TileSetChange::Replace(current),
+            &mut bindings,
+            &images,
+        )?;
         let staged_server = bindings.staged_server().clone();
         Ok(Self {
             bindings,
