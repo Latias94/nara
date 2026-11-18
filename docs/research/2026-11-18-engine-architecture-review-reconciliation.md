@@ -49,9 +49,9 @@ benchmark program.
 | F5: processed Material texture membership omits Image kind | **Scoped correction implemented and qualified below.** Original deep validation joins decoded Material slots to selected Image codec roles. Builder and independently encoded/reopened wrong-kind bases reject before gameplay; valid and missing-Image controls pass. [Deep validation](../../src/runtime_content/deep.rs), [Material texture facts](../../crates/nara_material/src/asset/runtime.rs), [independent consumer](../../tests/fixtures/module-consumer/material-consumer/tests/processed_workflow.rs). |
 | F6: explicit PNG Reimport omits a current PNG check at adoption | **Confirmed source gap; queued for Editor correctness work.** Completion compares the worker observation and checks current metadata, then publishes. The hydration path already verifies current PNG and metadata. Reuse that bounded observation at adoption, keeping the original capability and last-good value. A watcher event alone is insufficient. [Explicit adoption](../../src/project_host/runtime/editor/image_import/transaction.rs), [hydration control](../../src/project_host/runtime/editor/image_import/hydration.rs). |
 | F7: dirty Reopen lacks explicit discard intent | **Confirmed interactive gap; queued while UI is paused.** Both frontends submit the intentional discard operation directly. Keep that exact programmatic operation, but require a document/revision-bound discard-or-cancel decision for dirty interactive use. Preserve failed-read behavior and history on Cancel. [Reference action](../../editor/src/frontend/imgui/authoring.rs), [drawn action](../../editor/src/frontend/drawn/shell.rs), [Accepted discard contract](../architecture/adr/0047-editor-workspace-and-scene-document-state.md). |
-| F9: ordered task results accept different completion owners | **Confirmed result-admission defect; open.** `push` checks duplicate keys while retrieval requires one cutoff owner. Mixed sibling scopes cannot drain this collection. Bind a nonempty collection to its first completion owner and return a mismatched handle intact; release that binding when empty. The trace does not prove callback loss or physical worker leakage. [Result collection](../../crates/nara_tasks/src/runtime.rs), [scope ownership](../../crates/nara_tasks/src/runtime/scope.rs). |
+| F9: ordered task results accept different completion owners | **Implemented and scoped qualification passes below.** A nonempty collection now admits its first completion owner and returns mismatched handles intact; an empty stream can rebind. Public mixed-scope regressions first reproduce the defect, then pass with the full task suite and original source-build/Host consumers. The original trace does not prove callback loss or physical worker leakage. [Result collection](../../crates/nara_tasks/src/runtime.rs), [public controls](../../crates/nara_tasks/tests/ordered_results.rs), [scope ownership](../../crates/nara_tasks/src/runtime/scope.rs). |
 | F10: drawn/reference keyboard translation differs | **Confirmed source discrepancy; defer with UI.** Drawn activation handles Enter but omits focused-button Space; printable text with Ctrl+Alt is filtered. Share only the small text/command decision, preserving each Host's actual focus/IME lifetime. Require actual keyboard/IME evidence when resumed. [Drawn input](../../editor/src/frontend/drawn/input.rs), [reference controls](../../editor/src/platform/imgui/authoring_workflow_tests/owned_keyboard.rs). |
-| F11: replay publication exposes a partial final file | **Confirmed sample reliability gap; open.** The CLI creates its destination before writing. Reuse an owned sibling temporary file and the existing no-replace publication operation, distinguishing prepublication failure from uncertain postpublication durability. Do not introduce a replay store. [Replay writer](../../samples/two-level-game/src/bin/replay.rs), [checkpoint writer](../../samples/two-level-game/src/save/io.rs), [filesystem owner](../../crates/nara_fs/src/capability.rs). |
+| F11: replay publication exposes a partial final file | **Implemented and scoped qualification passes below.** The CLI writes/synchronizes an owned sibling temporary before no-replace publication. It retains cleanup custody, preserves competing targets and distinguishes prepublication failure from published uncertainty and limited durability. Real record/play and publication controls pass. [Replay writer](../../samples/two-level-game/src/bin/replay.rs), [publication](../../samples/two-level-game/src/bin/replay/publication.rs), [checkpoint writer](../../samples/two-level-game/src/save/io.rs), [filesystem owner](../../crates/nara_fs/src/capability.rs). |
 
 The baseline's Image-only additive restriction is historical. Material sharing is committed at
 `780ce6b`/`640024a`; the current TileSet successor supports shared source/processed declarations and
@@ -226,14 +226,134 @@ execution, atomic/hermetic source capture and the other review findings open.
 [package binding](../../src/project_tooling/player_package.rs).
 
 After the shared Cook closure, prioritize F9's completion-owner admission and F11's complete replay
-file publication. Both are confirmed runtime reliability gaps in existing workflows. Keep their
-changes at the original result collection and filesystem owners, with focused consumers rather
-than another task scheduler or replay store. Author onboarding and bounded diagnostics follow
-their existing receiving actions; paused Editor work does not become a prerequisite.
+file publication. The active correction unit below keeps both changes at their existing owners.
+Author onboarding and bounded diagnostics follow their existing receiving actions; paused Editor
+work does not become a prerequisite.
 
 Source PNG feature separation, cache recovery, HUD batching and pipeline working-set changes are
 deferred unless a named workload makes them material. These reviews do not justify a framework
 rewrite, a second World/scheduler/resource owner or a micro-optimization campaign.
+
+## Runtime Result And Replay Publication Corrections
+
+Status: implemented and scoped execution qualified on Windows Rust 1.95.0, November 19, 2026,
+after the shared Cook qualification at `8fd5b61`. Full Foundation remains active.
+Implementation: `e67bdca` (ordered completion owners) and `0f979aa` (replay publication).
+
+For F9, admit one completion owner to each nonempty `OrderedTaskResults`. Return a foreign handle
+intact at insertion, preserving task execution/cancellation and output custody. Release the
+binding only when its last pending handle leaves. Retained ready snapshots keep their original
+owner independently. Use the existing first pending handle as the owner instead of introducing
+another retained token or scanning the entire collection on every cutoff check. Prove sibling
+scopes sharing workers, independent facilities, equal/different order keys, partial prefix
+removal, later rebind and same-scope spawners across task kinds through the public API. Preserve
+existing ordering, cancellation, physical close and source-build integration tests.
+
+For F11, write and synchronize an owned sibling temporary through the existing filesystem
+capability, then publish complete replay bytes with no replacement. Retain original failed
+temporary cleanup custody for retry; report unresolved cleanup and keep its owner through CLI
+exit instead of claiming successful deletion. A destination that appears concurrently must survive
+unchanged. Report prepublication failure separately from an already published outcome with
+uncertain or limited durability; never delete a published destination as rollback. Prove actual
+record/play, exact bytes, existing/raced destination refusal, failed write/sync cleanup and
+postpublication outcome semantics without a replay store or generic publication framework.
+
+Verification stays focused on task owners/consumers, replay/file publication and the original
+sample gameplay/save/replay paths. No per-frame project audit, new scheduler, unrelated UI
+qualification or microbenchmark campaign is added.
+
+### Task Completion Owner Implementation And Qualification
+
+Three new crate-external public tests first reproduce F9 in
+`0817c3de-d48a-4c0b-9102-62474b4c984f`: 0/3 pass before the correction. They exercise sibling
+scopes sharing a facility, independent facilities with both colliding and distinct order keys,
+and partial drain followed by empty-stream rebind while old snapshots remain alive.
+
+`OrderedTaskResults::push` now compares the original completion tokens before insertion and
+returns a mismatched handle unchanged. The first pending handle supplies that identity; all
+insertion paths preserve the invariant, so cutoff validation checks that first handle instead
+of scanning for mixed owners. No additional token field, allocation, lock, task cancellation or
+terminal consumption is introduced. A copied spawner from the same scope and different task
+kinds remain valid. The existing `PoolMismatch` variant also covers a distinct scope owner;
+its display text now says completion owner.
+
+The full all-feature task library/public cohort passes 113/113 in
+`f43bc231-e1c1-4c16-89ca-8dfac98b81c8`, including cancellation, cutoff ordering, physical return,
+shared-scope close, disposal and worker-start failure controls. Original source-build consumers
+pass 6/6, with 973 unrelated or unselected cases excluded, in
+`e5e07da6-22f6-4186-8bee-761e047d5d5a`. That feature closure does not enable the Host scope test
+module; its actual `tooling`-enabled execution is recorded separately after completion. A bounded
+independent correctness review finds no remaining P1/P2. These are scoped correctness results,
+not numerical performance or foreign-platform execution evidence.
+
+The `tooling`-enabled Host scope cohort then passes 13/13, with 1646 unrelated cases excluded,
+in `ad61694f-d2fd-4e23-99a7-1d636e9b5fee`. It retains original body/late-result completion,
+restart admission, required report checks, startup failure and final worker-join behavior.
+The extra feature compilation is distinct from those thirteen executed tests. No physical
+Editor window, UI feature or native display qualification is part of this correction.
+
+### Replay Publication Implementation And Qualification
+
+The CLI serializes its finite recording before creating an owned sibling temporary. It writes,
+flushes and synchronizes that candidate through the existing `TemporaryFile` owner, retains a
+live original file observation across publication, and delegates the name change to
+`replace_temp(..., ExpectedTarget::Missing)`. The existing filesystem receipt supplies atomicity,
+conflict protection, identity, digest and synchronization facts. No engine filesystem API or
+general replay store is added. Failed temporary operations retain their original cleanup owner;
+the CLI attempts cleanup and keeps unresolved custody through terminal output and process exit.
+An already published destination never becomes cleanup authority for a failed later observation.
+
+Record results add `publication.status` and separate data, metadata, name and parent-directory
+sync facts. A verified complete publication can report limited or unsupported parent sync.
+Postpublication verification or parent-sync failure reports `published_uncertain`, preserving
+the target and refusing to imply absence. Windows parent sync remains unsupported. Linux's
+name-bound source operation does not establish hostile-writer isolation, and no platform's
+successful sync call establishes tested crash recovery.
+
+Independent review catches a new result-encoding hazard before qualification: native non-Unicode
+output paths can fail JSON serialization after publication. The CLI now prepares that JSON value
+before reading the program, starting gameplay or creating a candidate. A public CLI regression
+uses an unpaired Windows UTF-16 surrogate or Unix non-UTF-8 byte and requires structured refusal
+with no final or temporary output. A follow-up source review corrects its fixture oracle: the
+child runner retains stdout/stderr capture files, so the test checks for absent publication
+temporaries rather than counting every fixture entry. Both findings are closed by bounded
+independent rereview. The CLI and public replay fixtures also copy the actual Meadow/Cavern
+sidecars added by shared Cook. Actual replay/publication results follow their execution.
+
+The release replay CLI/publication cohort passes 19/19 in
+`72ef1fd4-18b4-4dab-a512-d9622b083596` (4.571 seconds after the first 14m27s feature build).
+Seven actual CLI cases preserve original gameplay record/fresh-process replay, corruption and
+input/path refusal controls, and verify exact decode/re-encode bytes plus the new publication
+facts. Twelve direct production-publication cases cover partial writes, file-sync boundaries,
+competing final names, original temporary identity and cleanup retry, foreign files at old
+temporary names, postpublication replacement/content change, parent-sync failure/unsupported
+facts, and stdout write/flush failures with retained cleanup. The native non-Unicode case runs
+on Windows in this qualification; Unix source coverage is not Linux execution evidence.
+
+The affected release save/replay/checkpoint cohort passes 31/31, with 133 unrelated cases
+excluded, in `5d467f15-eeda-4f16-83c3-1549116a044b`. It retains original fresh-project complete
+game replay, intermediate-result and source-drift refusal, canonical formats, command/capture
+order, failed destination repair, normal Runtime cleanup and consumer-panic retirement. Save
+controls preserve exact old targets, competing owners, migration and uncertain-publication
+readback. Formatting between cohorts triggers an additional dependency build; these build
+durations are verification costs, not runtime-speed evidence.
+
+All-target/all-feature task correctness Clippy and the selected release replay/library/test
+targets pass with `-D clippy::correctness`. Root and sample format checks, added document
+links/fragments and whitespace checks pass. Advisory warnings remain, including existing error
+sizes and test-only Windows permission-reset/style suggestions; no warning-free claim is made.
+Both implementations receive independent bounded review, and the concrete path-encoding and
+test-oracle findings are corrected before the passing replay run. All three scoped agents are
+closed. The fifteen paused UI/Dialogue files keep their original SHA-256 values and remain
+outside these commits; dependency manifests and root/sample locks are unchanged.
+
+These results qualify the concrete Windows task and replay workflows. Linux/other native
+execution, power-loss recovery, hostile-writer exclusion and hard latency are not established.
+No display/GPU acceptance, repeated Cook package trajectory or numerical benchmark is required
+for these owner-local corrections. Remaining receiving actions, full R4/R12/Foundation and
+paused Editor work stay open. Next prioritize the independent author's identity-preserving
+first-game workflow and subcommand discovery already identified above, keeping the generated
+Cook/Player/build-script entries and explicit codec selection usable while adding gameplay.
 
 ## Calendar dependencies and simulation clocks
 

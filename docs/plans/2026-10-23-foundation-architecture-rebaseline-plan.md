@@ -266,6 +266,20 @@ Two-Level headless/desktop/WASAPI packages pass through the same entry. This qua
 Windows native workflow, not general cross-compilation, hermetic builds, server stripping or full
 R7/R12/Foundation. The linked record owns exact results, review corrections and remaining limits.
 
+The [runtime result/replay corrections](../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
+address the receiving review's F9 and F11 at existing owners in `e67bdca` and `0f979aa`.
+A nonempty ordered task stream admits one original completion owner, returns foreign handles
+intact and releases that binding on its final removal; cutoff checks use the admission invariant.
+The full task/public suite
+113, source-build consumers 6 and actual Host scope cohort 13 pass. Replay writes and syncs an
+owned sibling temporary before no-replace publication, keeps cleanup custody, and reports
+published uncertainty separately from absence and unsupported durability. Its actual CLI and
+publication cohort passes 19, including real record/fresh-process replay and native invalid-path
+refusal; affected save/replay/checkpoint controls pass 31. Correctness Clippy and format/document
+checks pass. No new scheduler, filesystem authority, replay format or per-frame project audit is
+introduced. The linked record owns remaining execution and platform limits; full Foundation
+and paused UI/Dialogue work remain separate.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

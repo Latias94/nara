@@ -2265,6 +2265,20 @@ Original generated-project compilation and custom-schema/source Export pass; the
 data-component test consumer is corrected at `abc0a95` and its ten workflows pass. Root/sample
 correctness Clippy, affected Editor compilation and final format/document checks pass.
 
+The [task-result/replay publication correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
+at `e67bdca` / `0f979aa` closes review F9/F11 within their original owners. `OrderedTaskResults`
+now rejects a different completion owner before insertion, returns the original handle untouched
+and releases its binding when empty; no retained token field or per-cutoff owner scan is needed. Task/public 113,
+source-build 6 and Host scope 13 pass. The replay CLI publishes a complete synchronized sibling
+temporary with `ExpectedTarget::Missing`, preserving foreign targets and original failed-cleanup
+custody. Its results distinguish absence, publication and uncertainty with separate durability
+facts. Actual CLI/publication 19 pass, including a real fresh-process replay and invalid native
+Unicode output refusal before publication. Parent-sync/crash recovery and foreign execution
+retain their explicit limits. Affected save/replay/checkpoint controls pass 31 with original
+canonicalization, last-good, source-drift and cleanup behavior. The correction adds no replay
+store or replacement task/FS owner. Task/replay correctness Clippy, format and document checks
+pass; the linked record retains exact execution scope and review corrections.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
