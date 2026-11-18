@@ -64,8 +64,8 @@ See [the qualified TileSet unit](../plans/2026-10-20-persistent-two-level-game-p
 
 | Workflow | Receiving disposition |
 | --- | --- |
-| Preserve a new game's identity | **Confirmed guide defect; open.** The walkthrough copies the completed sample manifest and qualifies identity retention only for another slug. Generated projects already have distinct universes, stable-metadata policy and a startup sidecar. Teach merging settings and creating the imported Prefab's own sidecar while preserving those identities. Two same-named external projects must remain distinct and both finish the game. [Walkthrough](../guides/first-2d-game.md), [starter](../../src/project_workflow/starter.rs), [sample manifest](../../samples/collect-game/nara.toml). |
-| First system and subcommand help | **Confirmed discoverability/parser gaps; open.** The generated `product_recipe` route needs a short observable fixed-step edit before the complete sample. `new/check --help` are consumed as ordinary positional arguments. Handle help before filesystem work and show one usable command. Use the existing plugin mechanism before inventing a new game-level API. [CLI parser](../../src/bin/nara/args.rs), [starter entry](../../starters/desktop-2d/v1/src/lib.rs). |
+| Preserve a new game's identity | **Implemented and scoped qualification passes below.** The walkthrough preserves generated manifests, universe, stable-metadata policy, startup sidecar and Cook/Player/build-script entries. It adds the collection contribution and an imported Prefab's own sidecar. Two same-named real external games retain distinct identities, finish/reset source gameplay and run relocated cooked baselines after source removal. [Walkthrough](../guides/first-2d-game.md), [consumer](../../tests/project_author_workflow.rs), [starter](../../src/project_workflow/starter.rs). |
+| First system and subcommand help | **Implemented and scoped qualification passes below.** The generated README teaches an actual fixed-step plugin without adding a game API; its compiled consumer observes gameplay while Check stays silent. Scoped help runs before filesystem/build work, includes syntax/examples and preserves malformed argument rejection. Actual parser/help subprocess tests pass. [CLI parser](../../src/bin/nara/args.rs), [starter guide](../../starters/desktop-2d/v1/README.md), [help controls](../../tests/project_workflow_help.rs). |
 | Recipe composition diagnostics | **Confirmed loss at the tool boundary; open.** The generic factory discards the original error into fieldless `ToolError::Recipe`; the sample also uses `expect`. Preserve bounded known `ProductRecipeError` code/plugin facts through fallible recipe entry, retaining a generic fallback for opaque errors. [Factory](../../src/project_tooling/mod.rs), [recipe errors](../../src/product.rs), [sample recipe](../../samples/collect-game/src/lib.rs). |
 | Compiler and missing-sidecar locations | **Compiler-span loss confirmed; missing-sidecar diagnostic remains a scoped follow-up.** The Cargo model/parser retains code/message but no primary location. Preserve a bounded primary location and let the project owner display a valid relative path; do not expose arbitrary rendered compiler output. Reproduce the missing-sidecar case before choosing its exact projection. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs). |
 | First persistent component | **Confirmed example/admission mismatch; defer interactive qualification.** The opening Vec2 example lacks a complete creation value, while the scalar Collectible can supply one. Teach a creatable scalar first and demonstrate Add/Edit/Undo/Save/Reopen before the vector case. Presence-only records are an explicit ADR0090 restriction, requiring a deliberate contract amendment rather than being called an implementation regression. [Component guide](../guides/persistent-components.md), [data adapter](../../crates/nara_scene/src/authoring_decode.rs), [ADR0090](../architecture/adr/0090-unavailable-schema-and-lossless-authoring.md). |
@@ -354,6 +354,121 @@ for these owner-local corrections. Remaining receiving actions, full R4/R12/Foun
 paused Editor work stay open. Next prioritize the independent author's identity-preserving
 first-game workflow and subcommand discovery already identified above, keeping the generated
 Cook/Player/build-script entries and explicit codec selection usable while adding gameplay.
+
+## Independent Author Workflow Successor
+
+Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below on
+November 19, 2026, after `2fcfc97`. Full Foundation remains active.
+Implementation: `752fbd8` (scoped CLI help) and `af7886c` (documented independent author consumer).
+
+Preserve a newly created project's `source_universe`, `stable_metadata` policy and exact startup
+sidecar while adding the collection game's source. Keep its generated manifest, build script,
+Cook and Player rather than replacing the whole project with the repository sample. Import the
+Player Prefab with a new project-owned sidecar; copied Image metadata remains the authored asset's
+identity. Add gameplay to the existing recipe and keep the explicitly selected stock Image codec.
+Local Cargo members retain the same engine coordinate, and the project-owned Cook request names
+their actual compiler inputs instead of adding a dependency resolver.
+
+The generated README first teaches one complete observable fixed-step plugin through the current
+API, before persistent schema and Editor workflows. Actual Check must not run it; the generated
+headless target must print its first-tick marker. Subcommand help must succeed before filesystem,
+compiler or gameplay work, with scoped syntax and a usable example.
+
+Create two independent external projects with the same slug. Capture creation identities, make
+the documented first-system edit, add the actual collection plugin/content, refresh/check through
+the compiled tool and finish/reset both games through the ordinary headless entry. Prove distinct
+source universes, startup/Prefab identities and unchanged creation-owned bytes after authoring.
+Keep generated Cook/Player usable: actually Cook, relocate both installations, remove source/cache
+access and execute their original compiled Players. Their default headless profile has no scripted
+collection input; distinguish this baseline execution from the source headless win/reset proof.
+Cross-pack selection must refuse before gameplay. No Editor UI, package resolver, new game API or
+timing benchmark is needed for this author workflow.
+
+### Author Workflow Implementation And Qualification
+
+The CLI adds terminal `-h`/`--help` at finite subcommand boundaries, including
+`repair startup-scene --help`, before filesystem or build work. Supplied duplicate, unknown,
+missing-value and conflicting options still reject; help does not reinterpret an option's
+missing value or accept trailing arguments. Native paths remain lossless, while textual
+arguments keep Unicode requirements. Every scoped help text has syntax and an applicable
+example. The parser and actual subprocess cohort pass 14/14 in
+`140c5af2-2cf8-4fcd-8889-c9482f939a10`, including inaccessible/missing paths and existing fake
+projects with no project/output writes. Independent correctness review finds no remaining P1/P2.
+
+The first-system example is compiled from the generated README's actual Rust block. The guide's
+recipe and Cook-input blocks also supply the external consumer's actual edits. The guide no
+longer copies the sample manifest or entire `src/` tree. It retains creation-owned identity,
+startup metadata, Image codec, build script, Cook/Player and engine dependency selection, adding
+the ordinary collection contribution and a project-owned Prefab sidecar. That metadata uses the
+same fields as the shown PowerShell data; this qualification uses the public Rust metadata owner,
+not execution of every tutorial shell command.
+
+The first fixture run fails before project compilation because its code-block extractor assumed
+LF while the Windows checkout uses CRLF. Normalizing only the fixture's read text fixes that
+test issue. The next run compiles and executes the first system, then catches a fixture TOML
+insertion error for an initially absent `workspace.members`; inserting through the existing table
+fixes it. A later complete run reaches both source win/reset and relocated Players but its final
+test oracle incorrectly requires a digest error for two unequal catalog lengths. The actual
+Player correctly rejects the pack header first. These failed runs remain distinct from the final
+qualified result and do not identify new Runtime defects.
+
+Testing review adds byte-for-byte Scene/Prefab/Image and metadata preservation after each
+win/reset and after Cook, plus normal failure exits and exact refusal diagnostics. A separate
+one-byte, equal-length valid-JSON catalog mutation retains the original header/payload and
+requires the compiled catalog-digest mismatch before gameplay. Original source, Cook and failed
+process cleanup custody stays in the existing consumer helper. Corresponding project/cache
+removal and a sealed Player environment are not full filesystem isolation: the shared target,
+engine checkout and system toolchain remain present. The complete consumer's final execution
+and limits follow its actual result.
+
+The strengthened complete external-game trajectory passes 1/1 in
+`1f747021-03ab-4bfb-8e91-86c5712a5554` (299.217 seconds, including actual nested builds).
+Both projects are created outside the checkout through the real public owner with the same
+`collect-game` slug. Their original manifest bytes, source universes, stable-metadata policy and
+startup sidecars survive all edits; imported Prefab identities are distinct. The generated
+first-system block actually compiles, Check omits its marker and headless gameplay prints it.
+
+Each game adds the ordinary collection plugin while retaining the generated codec, build script,
+Cook and Player. It refreshes/checks through its own compiled tool, rejects a missing Prefab
+sidecar, recovers after repair and actually finishes and resets the complete source game. Scene,
+Prefab, Image and metadata bytes remain unchanged after both plays and Cook. Both project-owned
+cookers build/publish and relocate their three-file installation; corresponding project sources,
+Cook caches and captured tools are removed before sealed Players run from an empty unrelated
+CWD. Both execute their compiled first-step plugin and complete 4096 fixed ticks. This is a
+headless baseline, not cooked win/reset or pixel/interactive desktop evidence.
+
+Real cross-project pack substitution refuses with normal exit 1 and a known expectation/header
+diagnostic. A separate equal-length valid-JSON catalog-byte mutation preserves the header and
+all member payloads and receives the precise catalog-digest mismatch before gameplay. Restoring
+the original pack allows the same Player to complete. Every passing native child supplies its
+original empty-containment, stopped-reader and drained-output receipt without termination
+intervention. Failed fixture runs are retained separately; they do not grant later process
+authority or count as qualified positive runs.
+
+Both bounded independent reviews have no remaining P1/P2 after the actual source-preservation
+and rejection-oracle fixes. CI's existing serial generated-game step now includes the author
+consumer; the YAML configuration is local, with no remote CI execution or publication claim.
+Actual Git dependency publication, foreign-platform execution, hermetic/clean-machine delivery,
+arbitrary local dependency discovery and resumed Editor UI remain separate requirements.
+
+The final ordinary parser/help/creation/CLI cohort passes 29/29, with four nested-build or ignored
+cases excluded, in `5fea892b-98f6-4858-94cd-4b49e22b3c27`. This includes original immutable-Git
+coordinate admission, local relation/collision/tamper defenses and prepared source identities;
+it does not execute a remote Git dependency. Focused correctness Clippy for the CLI and affected
+public consumers and root formatting pass. The help fixture's temporary cleanup additionally
+checks its resolved original parent before recursive removal. Final fixture checks and document
+evidence keep the existing publication and process owners; no general test framework is added.
+
+After that cleanup guard, the five actual help subprocess tests pass again in
+`a6384086-fe01-497f-9399-e6810f40e849`; the CLI/help correctness Clippy and root format check
+also pass. Added document links/fragments, TOML/locks, workflow YAML and whitespace checks pass.
+Existing advisory warnings remain; no warning-free workspace or new compiler-floor claim is
+made. All three scoped implementation/review agents are closed. The fifteen paused UI/Dialogue
+files retain their original SHA-256 values and are outside the commits; dependency versions and
+locks are unchanged. This closes the two receiving author-workflow items, not all author
+ergonomics or full R1/R7/R12/Foundation. Next preserve useful recipe-composition and compiler
+location diagnostics at the current tool boundary, and keep the already identified command
+decoder/binding corrections as bounded independent Runtime follow-ups.
 
 ## Calendar dependencies and simulation clocks
 

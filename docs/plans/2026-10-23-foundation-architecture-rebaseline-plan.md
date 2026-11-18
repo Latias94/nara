@@ -280,6 +280,22 @@ checks pass. No new scheduler, filesystem authority, replay format or per-frame 
 introduced. The linked record owns remaining execution and platform limits; full Foundation
 and paused UI/Dialogue work remain separate.
 
+The [independent author workflow successor](../research/2026-11-18-engine-architecture-review-reconciliation.md#independent-author-workflow-successor)
+at `752fbd8` / `af7886c` teaches and executes the existing public module path: one observable
+fixed-step plugin, identity-preserving collection-game authoring and generated Cook/Player
+delivery. The guide
+keeps each project's source universe, stable-metadata policy, startup sidecar, codec and
+generated entry points instead of copying the sample manifest or whole source tree. Scoped
+command help precedes filesystem/build work. Two real external same-slug projects retain
+distinct identities, finish/reset source gameplay with unchanged authored bytes, and run their
+relocated headless Players after corresponding source/cache removal. Actual cross-pack and
+equal-length catalog corruption refuse before gameplay. The complete Windows Rust 1.95.0
+consumer passes in `1f747021-03ab-4bfb-8e91-86c5712a5554`; all 29 selected ordinary public tests
+and five final help subprocess tests also pass, alongside correctness Clippy and format/document
+checks. Cooked baseline execution remains distinct from source win/reset and native desktop
+interaction. Remaining diagnostics, interactive authoring, foreign execution and full Foundation
+stay open.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

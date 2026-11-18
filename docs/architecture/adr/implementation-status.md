@@ -2279,6 +2279,21 @@ canonicalization, last-good, source-drift and cleanup behavior. The correction a
 store or replacement task/FS owner. Task/replay correctness Clippy, format and document checks
 pass; the linked record retains exact execution scope and review corrections.
 
+The [independent author workflow](../../research/2026-11-18-engine-architecture-review-reconciliation.md#author-workflow-implementation-and-qualification)
+at `752fbd8` / `af7886c` uses ordinary plugin, creation, schema, content, Cargo and Player owners
+without adding a game API. Scoped CLI help and the generated first-system example precede the
+complete sample. Two
+same-named real external games retain their distinct creation identities and generated
+Cook/Player/build-script entries, add gameplay while keeping the Image codec, finish/reset source
+play and preserve all observed authored bytes. Both relocated cooked baselines run after
+corresponding source/cache removal; pack substitution and equal-length catalog mutation refuse
+before gameplay. These are scoped Windows Rust 1.95.0 results, with baseline versus win/reset,
+remaining local compiler-input declarations and foreign/clean-machine limits explicit. The
+guide's manifest/source-tree overwrite instructions are removed. The complete two-project run,
+all 29 selected ordinary public tests and five final help subprocess tests pass, as do correctness
+Clippy and format/document checks. Recipe and compiler diagnostic projection and paused
+interactive authoring remain separate receiving actions.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
