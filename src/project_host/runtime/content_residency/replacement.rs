@@ -325,7 +325,15 @@ pub(super) fn commit_publications(
             .expect("TileSet residency resources passed preflight");
         prepared.commit(&server, &images, &mut values, &mut states, &mut events)
     });
-    let materials = if materials.is_empty() {
+    let materials = commit_materials(world, materials);
+    (images, tilesets, materials)
+}
+
+pub(super) fn commit_materials(
+    world: &mut World,
+    materials: MaterialPublications,
+) -> MaterialResidency {
+    if materials.is_empty() {
         MaterialResidency::default()
     } else {
         let mut access = SystemState::<(
@@ -338,8 +346,7 @@ pub(super) fn commit_publications(
             .get_mut(world)
             .expect("Material residency resources passed preflight");
         materials.commit(&server, &mut values, &mut states, &mut events)
-    };
-    (images, tilesets, materials)
+    }
 }
 
 pub(super) fn commit_images(world: &mut World, images: ImagePublications) -> Vec<OwnedImage> {
@@ -439,7 +446,7 @@ pub(super) fn validate_native_resources(
         || content.image_count() != 0
         || current.is_some_and(|current| current.image_count() != 0);
     let uses_materials = content.material_count() != 0
-        || current.is_some_and(|current| !current.materials.is_empty());
+        || current.is_some_and(|current| current.material_count() != 0);
     if uses_images
         && (!world.contains_resource::<AssetServer>()
             || !world.contains_resource::<Assets<ImageAsset>>()

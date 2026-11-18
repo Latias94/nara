@@ -320,6 +320,21 @@ impl ImagePublications {
         Some((item.handle, item.image.share_retained()?))
     }
 
+    pub(super) fn handle_for_product(
+        &self,
+        product: AssetProductRef,
+    ) -> Option<Handle<ImageAsset>> {
+        self.publish
+            .get(&product)
+            .map(|item| item.handle)
+            .or_else(|| {
+                self.shared
+                    .iter()
+                    .find(|image| image.product == product)
+                    .map(|image| image.handle)
+            })
+    }
+
     pub(super) fn validate(
         &self,
         server: &AssetServer,

@@ -11,6 +11,7 @@ use crate::startup_scene::SceneSource;
 pub(super) struct Additions {
     pub(super) active: Vec<ActiveAddition>,
     pub(super) images: Vec<OwnedImage>,
+    pub(super) materials: MaterialResidency,
     pub(super) catalog: Vec<AssetRecord>,
     pub(super) revision: u64,
     pub(super) retiring: bool,
@@ -19,6 +20,7 @@ pub(super) struct Additions {
 pub(super) struct ActiveAddition {
     pub(super) receipt: SpawnedSceneInstance,
     images: Vec<AssetProductRef>,
+    materials: Vec<AssetProductRef>,
     _authority: ResidencyAuthority,
     source: SceneSource,
 }
@@ -87,10 +89,14 @@ pub(in crate::project_host::runtime) fn activate_addition(
     let revision = residency.additions.next_revision().map_err(rejected)?;
     let input = ResidencyInput::from(content);
     residency.authority.validate(input).map_err(rejected)?;
-    if input.tileset_count() != 0 || input.domain_assets().contains_non_image_collections() {
+    if input.tileset_count() != 0
+        || input
+            .domain_assets()
+            .contains_additive_unsupported_collections()
+    {
         return Err(rejected(failure(
             "project.scene.addition-domain-unsupported",
-            "Additive Scene residency requires an Image-only asset closure",
+            "Additive Scene residency supports Image and Material asset closures",
         )));
     }
     if let ResidencyInput::Source(snapshot) = input {
@@ -104,6 +110,10 @@ pub(in crate::project_host::runtime) fn activate_addition(
             return Err(rejected(catalog_changed()));
         }
     }
+    replacement::validate_native_resources(world, input, Some(residency)).map_err(rejected)?;
+    let material_change = MaterialChange::Add(residency);
+    let material_custody =
+        MaterialPublications::reserve(input, material_change).map_err(rejected)?;
     let shared = if input.image_count() == 0 {
         0
     } else {
@@ -117,6 +127,15 @@ pub(in crate::project_host::runtime) fn activate_addition(
         ImageChange::Add(residency),
         &mut reservations,
         &catalog,
+    )
+    .map_err(rejected)?;
+    let materials = MaterialPublications::prepare(
+        world,
+        input,
+        material_change,
+        &mut reservations,
+        &images,
+        material_custody,
     )
     .map_err(rejected)?;
     let scene = match content {
@@ -137,10 +156,13 @@ pub(in crate::project_host::runtime) fn activate_addition(
     }?;
     catalog.validate(world).map_err(rejected)?;
     validate_images(world, &images).map_err(rejected)?;
+    materials.validate(world).map_err(rejected)?;
     let image_products = images.additive_products();
+    let material_products = materials.products();
     let report = scene.commit(world);
     if let Some(receipt) = &report.instance {
         let images = replacement::commit_images(world, images);
+        let materials = replacement::commit_materials(world, materials);
         let mut authority = catalog.commit(world);
         let mut residency = world.resource_mut::<ProjectSceneResidency>();
         let additions = &mut residency.additions;
@@ -148,9 +170,11 @@ pub(in crate::project_host::runtime) fn activate_addition(
             additions.catalog.append(catalog);
         }
         additions.images.extend(images);
+        additions.materials.append(materials);
         additions.active.push(ActiveAddition {
             receipt: receipt.clone(),
             images: image_products,
+            materials: material_products,
             _authority: authority,
             source: content.scene_source(),
         });
@@ -181,14 +205,16 @@ pub fn unload_project_scene_addition(
     let revision = additions
         .next_revision()
         .map_err(|fault| fault.diagnostics)?;
-    let (retirement, catalog) =
+    let (retirement, materials, catalog) =
         prepare_retirement(world, additions, index).map_err(|fault| fault.diagnostics)?;
     let retiring_images = retirement.retiring_products().collect::<BTreeSet<_>>();
+    let retiring_materials = materials.retiring_products().collect::<BTreeSet<_>>();
     let count = if nara_scene::__private::scene_instance_retired(world, expected) {
         0
     } else {
         retire_and_despawn_scene_instance(world, expected)?
     };
+    replacement::commit_materials(world, materials);
     replacement::commit_images(world, retirement);
     if !catalog.is_empty() {
         let mut database = world.resource_mut::<ProjectAssetDatabase>();
@@ -202,6 +228,9 @@ pub fn unload_project_scene_addition(
     additions
         .images
         .retain(|image| !retiring_images.contains(&image.product));
+    additions
+        .materials
+        .retain_products(|product| !retiring_materials.contains(&product));
     additions.catalog.retain(|record| !catalog.contains(record));
     additions.revision = revision;
     Ok(count)
@@ -219,7 +248,7 @@ fn prepare_retirement(
     world: &World,
     additions: &Additions,
     index: usize,
-) -> Result<(ImagePublications, Vec<AssetRecord>), HostFault> {
+) -> Result<(ImagePublications, MaterialPublications, Vec<AssetRecord>), HostFault> {
     let active = &additions.active[index];
     let remaining = additions.active[..index]
         .iter()
@@ -245,6 +274,15 @@ fn prepare_retirement(
             }
         }
     }
+    let materials = MaterialPublications::retire(
+        additions.materials.iter().filter(|material| {
+            active.materials.contains(&material.product)
+                && !remaining
+                    .iter()
+                    .any(|other| other.materials.contains(&material.product))
+        }),
+        world,
+    )?;
     let mut retiring_images = additions
         .images
         .iter()
@@ -256,7 +294,7 @@ fn prepare_retirement(
         })
         .peekable();
     if retiring_images.peek().is_none() {
-        return Ok((ImagePublications::empty(), retiring_catalog));
+        return Ok((ImagePublications::empty(), materials, retiring_catalog));
     }
     let states = world
         .get_resource::<AssetStates>()
@@ -274,7 +312,7 @@ fn prepare_retirement(
             .ok_or_else(resources_missing)?,
         states,
     )?;
-    Ok((retirement, retiring_catalog))
+    Ok((retirement, materials, retiring_catalog))
 }
 
 fn validate_catalogue(world: &World) -> Result<&ProjectAssetDatabase, HostFault> {

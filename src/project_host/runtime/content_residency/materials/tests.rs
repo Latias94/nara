@@ -7,14 +7,14 @@ use std::{
 
 use nara_asset::{
     AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
-    AssetSourcePath, SourceAssetImporter, StableAssetId,
+    AssetSourcePath, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
 use nara_image::{ImageColorSpace, ImageExtent, ImageFormat};
 use nara_material::{
-    AlphaMode2d, Material2dDeclaration, Material2dRecord, Material2dSource, MaterialParameterKind,
-    MaterialParameterLayout, MaterialParameterValue, MaterialUniformField,
+    AlphaMode2d, Material2dDeclaration, Material2dRecord, Material2dRuntimeCodec, Material2dSource,
+    MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue, MaterialUniformField,
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
@@ -31,18 +31,22 @@ use crate::{
         RuntimeConfigurationPlan, open_explicit_product_project_root, resolve_runtime_configuration,
     },
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentBase,
-        RuntimeContentBudgetKind, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
-        RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
-        RuntimeContentError, RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
-        RuntimeContentMemberKind, RuntimeContentTarget,
+        ProcessedSceneContent, RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId,
+        RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentCatalog,
+        RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits, RuntimeContentDependency,
+        RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentExpectation,
+        RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
 };
+
+mod sharing;
 
 const MATERIAL: &str = "84d00000-0000-4000-8000-000000000001";
 const STARTUP: &str = "84d00000-0000-4000-8000-000000000002";
 const EMPTY: &str = "84d00000-0000-4000-8000-000000000003";
 const IMAGE: &str = "84d00000-0000-4000-8000-000000000004";
+const ADDITION: &str = "84d00000-0000-4000-8000-000000000005";
+const OTHER_MATERIAL: &str = "84d00000-0000-4000-8000-000000000006";
 const BODY: &str = r#"
 fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
     return sampled * tint * material_parameters.tint;
@@ -58,6 +62,10 @@ fn product(source: &str) -> AssetProductRef {
 }
 
 fn material() -> Material2dAsset {
+    import_material(product(MATERIAL), &material_source(), BODY)
+}
+
+fn material_source() -> Material2dSource {
     let declaration = Material2dDeclaration::new(
         "residency.material",
         1,
@@ -73,7 +81,7 @@ fn material() -> Material2dAsset {
         Vec::new(),
     )
     .unwrap();
-    let source = Material2dSource::new(
+    Material2dSource::new(
         declaration,
         vec![AssetPath::new("material.wgsl").unwrap()],
         BTreeMap::from([(
@@ -82,10 +90,17 @@ fn material() -> Material2dAsset {
         )]),
         BTreeMap::new(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn import_material(
+    reference: AssetProductRef,
+    source: &Material2dSource,
+    body: &str,
+) -> Material2dAsset {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
-            product(MATERIAL).source(),
+            reference.source(),
             AssetPath::new("material.json").unwrap(),
             material_kind(),
         ),
@@ -100,7 +115,7 @@ fn material() -> Material2dAsset {
     )
     .unwrap();
     let mut reader = |_: &AssetPath, _: ByteLimit| -> Result<Arc<[u8]>, Infallible> {
-        Ok(Arc::from(BODY.as_bytes()))
+        Ok(Arc::from(body.as_bytes()))
     };
     Material2dDomain::prepare(&mut AssetImportSource::new(
         &metadata,
@@ -173,6 +188,10 @@ struct Fixture(PathBuf);
 
 impl Fixture {
     fn open() -> (Self, RuntimeContentBase) {
+        Self::with_material(material())
+    }
+
+    fn with_material(material: Material2dAsset) -> (Self, RuntimeContentBase) {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "nara_material_residency_{}_{}",
@@ -181,7 +200,7 @@ impl Fixture {
         ));
         fs::create_dir(&root).unwrap();
         let fixture = Self(root);
-        let material = material();
+        let other = import_material(product(OTHER_MATERIAL), &material_source(), BODY);
         let recipe = recipe();
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
@@ -189,11 +208,12 @@ impl Fixture {
         let plan = resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone())
             .unwrap();
         let mut members = Vec::new();
-        for (path, reference, populated) in [
-            ("startup.runtime.json", product(STARTUP), true),
-            ("empty.runtime.json", product(EMPTY), false),
+        for (path, reference, selected, populated) in [
+            ("startup.runtime.json", product(STARTUP), &material, true),
+            ("empty.runtime.json", product(EMPTY), &material, false),
+            ("addition.runtime.json", product(ADDITION), &other, true),
         ] {
-            let bytes = scene_bytes(&plan, reference, &material, populated);
+            let bytes = scene_bytes(&plan, reference, selected, populated);
             fs::write(fixture.0.join(path), &bytes).unwrap();
             members.push(
                 RuntimeContentMember::new(
@@ -208,7 +228,7 @@ impl Fixture {
                     vec![reference],
                     if populated {
                         vec![RuntimeContentDependency::new(
-                            material.product(),
+                            selected.product(),
                             RuntimeContentDependencyRole::Required,
                         )]
                     } else {
@@ -218,21 +238,26 @@ impl Fixture {
                 .unwrap(),
             );
         }
-        let bytes = Material2dRuntimeCodec::encode_runtime(&material).unwrap();
-        fs::write(fixture.0.join("material.runtime.json"), &bytes).unwrap();
-        members.push(
-            RuntimeContentMember::new(
-                "material.runtime.json",
-                ContentDigest::of_bytes(&bytes),
-                RuntimeContentMemberKind::Asset {
-                    format: FormatKind::new(Material2dRuntimeCodec::RUNTIME_KIND).unwrap(),
-                    version: FormatVersion::ONE,
-                },
-                vec![material.product()],
-                Vec::new(),
-            )
-            .unwrap(),
-        );
+        for (path, selected) in [
+            ("material.runtime.json", &material),
+            ("other.runtime.json", &other),
+        ] {
+            let bytes = Material2dRuntimeCodec::encode_runtime(selected).unwrap();
+            fs::write(fixture.0.join(path), &bytes).unwrap();
+            members.push(
+                RuntimeContentMember::new(
+                    path,
+                    ContentDigest::of_bytes(&bytes),
+                    RuntimeContentMemberKind::Asset {
+                        format: FormatKind::new(Material2dRuntimeCodec::RUNTIME_KIND).unwrap(),
+                        version: FormatVersion::ONE,
+                    },
+                    vec![selected.product()],
+                    Vec::new(),
+                )
+                .unwrap(),
+            );
+        }
         let target = RuntimeContentTarget::new("test-host", "material-residency").unwrap();
         let bytes = RuntimeContentCatalog::new(
             RuntimeContentCatalogDefinition {
@@ -245,7 +270,7 @@ impl Fixture {
                     .as_bytes(),
                 runtime_codecs_fingerprint: plan.runtime_codecs_fingerprint().as_bytes(),
                 startup_scene: product(STARTUP),
-                scenes: vec![product(STARTUP), product(EMPTY)],
+                scenes: vec![product(STARTUP), product(EMPTY), product(ADDITION)],
                 addressable_roots: Vec::new(),
                 members,
             },
@@ -318,7 +343,7 @@ fn processed_binding_outlives_residency_and_releases_original_acquisition_and_me
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let residency = world.resource::<ProjectSceneResidency>();
-    let metadata = Arc::downgrade(&residency.materials._custody.as_ref().unwrap().lease);
+    let metadata = Arc::downgrade(&residency.materials.owned[0].identity._metadata);
     let handle = residency.materials.owned[0].handle;
     let published = world
         .resource::<Assets<Material2dAsset>>()

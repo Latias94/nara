@@ -267,9 +267,11 @@ enum DomainAssetsCustody {
 }
 
 impl ProjectDomainAssets {
-    pub(crate) fn contains_non_image_collections(&self) -> bool {
+    pub(crate) fn contains_additive_unsupported_collections(&self) -> bool {
         self.inner.collections.iter().any(|collection| {
             collection.domain_type() != std::any::TypeId::of::<nara_image::ImageDomain>()
+                && collection.domain_type()
+                    != std::any::TypeId::of::<nara_material::Material2dDomain>()
         })
     }
 

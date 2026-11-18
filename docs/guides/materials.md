@@ -124,6 +124,15 @@ matching captures. Shader compilation proves the CPU interface; successful GPU p
 device lifetime and physical submission completion remain separate original render authorities.
 Uniform values and ordinary texture-content changes are not pipeline specialization inputs.
 
+Project-backed additive Scenes may share an identical original Material publication. The Host
+tracks its use with each committed Scene occurrence, and unload releases the publication only
+after its final live user leaves. A prepared primary replacement joins those live occurrences
+and publications to its existing transaction. An independently loaded definition with changed
+Shader source, defaults or texture selections cannot replace a shared incumbent during activation.
+The sharing comparison preserves floating-point bits, including signed zero. These are preparation
+and publication checks; ordinary gameplay does not compare full Material definitions every tick.
+[Playable region consumer](../plans/2026-10-20-persistent-two-level-game-plan.md#material-backed-concurrent-regions-successor)
+
 The native stock adapter bounds its cross-call Ready/Rejected pipeline cache to the most recent
 64 entries after each complete preparation. A single preparation can use more variants: it first
 captures all required native pipelines and buffers, then trims acceleration state. Prepared draws

@@ -68,13 +68,18 @@ explicit `SceneOccurrenceKey`. Retain the resulting `SpawnedSceneInstance` for u
 acknowledge the original terminal request. To cancel, wait for physical return before releasing
 the slot. `unload_project_scene_addition` takes the exact receipt. It removes the companion's
 entities and releases its resource use. Other active Scenes keep shared Image publications until
-their last user leaves. Prepared primary travel retires the prior primary and all live Host
+their last user leaves. Material-backed additions use the same rule for a complete Material
+definition, its Shader and resolved Image references. An identical live Material reuses the
+original handle and version. Changed defaults, Shader inputs or texture selections refuse the
+new activation while another Scene owns that publication. Retained bindings keep their exact
+generation after live assets retire. Prepared primary travel retires the prior primary and all live Host
 additions in its original transaction. The additional retirement limit covers these additions
 and any further retirements supplied by the product. Retained-source Restart requires closed
 additions. For source play, configure the original loader with
 `ProductRecipe::with_source_content_limits` and count the live generations and the prepared
 destination when selecting `ProjectContentLimits::with_retained_generations`.
 [Ordinary game workflow](../../samples/two-level-game/README.md#play-the-side-room)
+[Material-backed regions](../plans/2026-10-20-persistent-two-level-game-plan.md#material-backed-concurrent-regions-successor)
 
 ## Capture And Acquisition
 

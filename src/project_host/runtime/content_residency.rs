@@ -48,7 +48,7 @@ use crate::{
 };
 use catalog::CatalogChange;
 use images::{ImageChange, ImagePublications, OwnedImage};
-use materials::{MaterialPublications, MaterialResidency};
+use materials::{MaterialChange, MaterialPublications, MaterialResidency, OwnedMaterial};
 use metadata::{PreparedCatalog, ResidencyAuthority};
 
 #[derive(Resource)]
@@ -72,6 +72,14 @@ impl ProjectSceneResidency {
 
     fn image_count(&self) -> usize {
         self.images.len() + self.additions.images.len()
+    }
+
+    fn owned_materials(&self) -> impl Iterator<Item = &OwnedMaterial> + Clone {
+        self.materials.iter().chain(self.additions.materials.iter())
+    }
+
+    fn material_count(&self) -> usize {
+        self.owned_materials().count()
     }
 
     fn owned_catalog_records(&self) -> impl Iterator<Item = &AssetRecord> {
@@ -295,8 +303,8 @@ impl PreparedResidency {
             current.authority.validate(content)?;
         }
         replacement::validate_native_resources(world, content, current)?;
-        let owned_materials = current.map(|current| &current.materials);
-        let material_custody = MaterialPublications::reserve(content, owned_materials)?;
+        let material_change = MaterialChange::Replace(current);
+        let material_custody = MaterialPublications::reserve(content, material_change)?;
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
         let catalog = PreparedCatalog::prepare(world, content, current, None)?;
         let mut bindings = SceneAssetReservations::from_world(world);
@@ -310,7 +318,7 @@ impl PreparedResidency {
         let materials = MaterialPublications::prepare(
             world,
             content,
-            owned_materials,
+            material_change,
             &mut bindings,
             &images,
             material_custody,

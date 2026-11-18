@@ -235,7 +235,10 @@ fn metadata_bytes(
         add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
         add_entries(
             &mut bytes,
-            content.image_count(),
+            content
+                .image_count()
+                .checked_add(content.material_count())
+                .ok_or_else(metadata_overflow)?,
             size_of::<AssetProductRef>(),
         )?;
     }
