@@ -10,6 +10,13 @@ pub use nara::project_tooling::{ProductObservationTarget, record_product_observa
 #[must_use]
 pub fn product_recipe() -> nara::ProductRecipe {
     nara::ProductRecipe::new()
+        .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new(
+                "nara.starter.desktop-2d.image",
+                1,
+            ),
+        )
+        .expect("the starter Image runtime codec definition is valid")
 }
 
 /// Opens the ordinary project source without consulting the process CWD.

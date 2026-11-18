@@ -17,6 +17,7 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
+use nara_image::{ImageAsset, ImageDomain, ImageRuntimeCodec};
 use nara_input::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 use nara_project::RuntimeConfiguration;
 use nara_reflect::__private::{
@@ -115,7 +116,7 @@ impl fmt::Display for CookedContentError {
                 formatter.write_str("startup Scene must be a declared Scene root")
             }
             Self::IncompleteProductReference => {
-                formatter.write_str("cooked Scene references require complete Products")
+                formatter.write_str("cooked content requires complete Product references")
             }
             Self::InvalidGroup => {
                 formatter.write_str("verified group has inconsistent retained membership")
@@ -189,6 +190,7 @@ pub struct CookedContentBuilder {
     groups: Vec<VerifiedArtifactGroup>,
     retained_bytes: usize,
     encoded_bytes: usize,
+    consumer_bytes: usize,
 }
 
 impl CookedContentBuilder {
@@ -258,7 +260,39 @@ impl CookedContentBuilder {
             groups: Vec::new(),
             retained_bytes,
             encoded_bytes: 0,
+            consumer_bytes: 0,
         })
+    }
+
+    /// Declares an admitted Scene root during private sequential source traversal.
+    pub(crate) fn declare_scene_root(
+        &mut self,
+        product: AssetProductRef,
+    ) -> Result<(), CookedContentError> {
+        let index = match self.request.scenes.binary_search(&product) {
+            Ok(_) => return Ok(()),
+            Err(index) => index,
+        };
+        let count = add(self.request.scenes.len(), 1)?;
+        check(
+            "Scene-roots",
+            count,
+            self.limits.runtime.catalog().scenes().get(),
+        )?;
+        let retained_bytes = add(self.retained_bytes, size_of::<AssetProductRef>())?;
+        check(
+            "retained-bytes",
+            retained_bytes,
+            self.limits.retained_bytes.get(),
+        )?;
+        self.admit_work(mul(count, size_of::<AssetProductRef>())?)?;
+        let mut scenes = Vec::with_capacity(count);
+        scenes.extend_from_slice(&self.request.scenes[..index]);
+        scenes.push(product);
+        scenes.extend_from_slice(&self.request.scenes[index..]);
+        self.request.scenes = scenes;
+        self.retained_bytes = retained_bytes;
+        Ok(())
     }
 
     pub fn add_scene(
@@ -492,6 +526,15 @@ impl CookedContentBuilder {
         self.add_cpu::<ActionMapDomain, ActionMapRuntimeCodec>(input.product(), input, &[])
     }
 
+    /// Adds the Image's exact Product through the selected production Runtime codec.
+    /// Anonymous Images cannot become cooked members.
+    pub fn add_image(&mut self, image: &ImageAsset) -> Result<(), CookedContentError> {
+        let product = image
+            .product()
+            .ok_or(CookedContentError::IncompleteProductReference)?;
+        self.add_cpu::<ImageDomain, ImageRuntimeCodec>(product, image, &[])
+    }
+
     pub fn add_tileset(&mut self, tileset: &TileSetDescriptor) -> Result<(), CookedContentError> {
         self.add_cpu::<TileSetDomain, TileSetRuntimeCodec>(
             tileset.product(),
@@ -616,7 +659,8 @@ impl CookedContentBuilder {
             mul(self.groups.len(), size_of::<VerifiedArtifactGroup>())?,
             |total, group| add(total, group.retained_bytes()),
         )?;
-        let retained_outside_base = add(prepared_overhead, group_retained)?;
+        let retained_outside_base =
+            add(add(prepared_overhead, group_retained)?, self.consumer_bytes)?;
         let residual = self
             .limits
             .retained_bytes
@@ -680,6 +724,7 @@ impl CookedContentBuilder {
             limits,
             members,
             groups,
+            consumer_bytes,
             ..
         } = self;
         let mut declarations = Vec::with_capacity(members.len());
@@ -725,7 +770,7 @@ impl CookedContentBuilder {
         let retained_bytes = add(base_retained, prepared_overhead)?;
         check(
             "retained-bytes",
-            add(retained_bytes, group_retained)?,
+            add(add(retained_bytes, group_retained)?, consumer_bytes)?,
             limits.retained_bytes.get(),
         )?;
         let report = base.validate_deep()?;
@@ -783,6 +828,22 @@ impl CookedContentBuilder {
             add(self.retained_bytes, additional)?,
             self.limits.work_bytes.get(),
         )
+    }
+
+    pub(crate) fn reserve_consumer_metadata(
+        &mut self,
+        bytes: usize,
+    ) -> Result<(), CookedContentError> {
+        let retained = add(self.retained_bytes, bytes)?;
+        check("retained-bytes", retained, self.limits.retained_bytes.get())?;
+        self.admit_work(bytes)?;
+        self.retained_bytes = retained;
+        self.consumer_bytes = add(self.consumer_bytes, bytes)?;
+        Ok(())
+    }
+
+    pub(crate) fn admit_consumer_work(&self, bytes: usize) -> Result<(), CookedContentError> {
+        self.admit_work(bytes)
     }
 
     fn commit(

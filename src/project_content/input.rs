@@ -1,6 +1,8 @@
 //! The global source Input owner is independent of Scene residency and collection replacement.
 
-use nara_input::{ActionMap, ActionMapBindings, ActionMapDefinition, ActionMapFileCandidate};
+use nara_input::{
+    ActionMap, ActionMapAsset, ActionMapBindings, ActionMapDefinition, ActionMapFileCandidate,
+};
 
 use super::*;
 
@@ -10,8 +12,7 @@ pub struct ProjectInputContent {
 }
 
 struct SourceInputOwner {
-    definition: ActionMapDefinition,
-    product: AssetProductRef,
+    asset: ActionMapAsset,
     path: AssetSourcePath,
     digest: ContentDigest,
     metadata_digest: Option<ContentDigest>,
@@ -20,7 +21,7 @@ struct SourceInputOwner {
 
 impl AsRef<ActionMapDefinition> for SourceInputOwner {
     fn as_ref(&self) -> &ActionMapDefinition {
-        &self.definition
+        self.asset.definition()
     }
 }
 
@@ -37,7 +38,7 @@ impl fmt::Debug for ProjectInputContent {
 impl ProjectInputContent {
     #[must_use]
     pub fn product(&self) -> AssetProductRef {
-        self.inner.product
+        self.inner.asset.product()
     }
     #[must_use]
     pub fn path(&self) -> &AssetSourcePath {
@@ -48,8 +49,16 @@ impl ProjectInputContent {
         self.inner.digest
     }
     #[must_use]
+    pub(crate) fn metadata_digest(&self) -> Option<ContentDigest> {
+        self.inner.metadata_digest
+    }
+    #[must_use]
     pub fn definition(&self) -> &ActionMapDefinition {
-        &self.inner.definition
+        self.inner.asset.definition()
+    }
+
+    pub(crate) fn asset(&self) -> &ActionMapAsset {
+        &self.inner.asset
     }
     #[must_use]
     pub fn bindings(&self) -> ActionMapBindings {
@@ -251,8 +260,7 @@ impl LoadContext<'_> {
         let lease = budget.into_lease().map_err(ProjectContentError::budget)?;
         Ok(Some(ProjectInputContent {
             inner: Arc::new(SourceInputOwner {
-                definition,
-                product,
+                asset: ActionMapAsset::new(product, definition).map_err(|_| invalid_input())?,
                 path,
                 digest,
                 metadata_digest,

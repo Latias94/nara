@@ -10,6 +10,7 @@ use crate::project_tooling::{
         build_executable, parse_host_target,
     },
     host_fs,
+    project_cook::{ProjectCookError, project_rust_input_inventory},
 };
 use crate::project_workflow::{
     __private::{ProjectExportBuildPreparation, ProjectExportCargoArtifact},
@@ -21,18 +22,12 @@ use nara_fs::RelativePath;
 
 use super::acceptance::{self, ExportAcceptanceError};
 
-const STARTER_BUILD_INPUTS: [&str; 5] = [
-    "Cargo.toml",
-    "Cargo.lock",
-    "src/lib.rs",
-    "src/bin/headless.rs",
-    "src/bin/desktop.rs",
-];
-
 #[derive(Debug, Error)]
 pub(crate) enum CargoBuildAdapterError {
     #[error(transparent)]
     Build(#[from] CargoBuildFailure),
+    #[error(transparent)]
+    InputInventory(#[from] ProjectCookError),
     #[error("the closed starter build selection could not be admitted")]
     Selection,
     #[error("the project directory changed around the build")]
@@ -69,18 +64,14 @@ pub(super) fn build_in_target_directory(
     build_with_target_directory(project_root, startup_content, Some(target_directory))
 }
 
-fn input_paths() -> impl Iterator<Item = RelativePath> {
-    STARTER_BUILD_INPUTS
-        .into_iter()
-        .map(|path| RelativePath::new(path).expect("fixed starter input path"))
-}
-
 fn build_with_target_directory(
     project_root: &Path,
     startup_content: &StartupContentClosureReceipt,
     target_directory: Option<&Path>,
 ) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
-    let preparation = ProjectExportBuildPreparation::capture(startup_content, input_paths())?;
+    let inputs = project_rust_input_inventory(project_root)?;
+    let preparation =
+        ProjectExportBuildPreparation::capture(startup_content, inputs.iter().cloned())?;
     verify_project_path_authority(project_root, &preparation)?;
     let tools = CargoBuildTools::discover_in(project_root)?;
     let mut rustc = Command::new(tools.rustc_path());
@@ -129,7 +120,7 @@ fn build_with_target_directory(
             RelativePath::new("Cargo.toml").expect("fixed manifest path"),
             selection,
             tools.clone(),
-            input_paths(),
+            inputs.iter().cloned(),
             CargoBuildLimits::default(),
         )?;
         if let Some(directory) = target_directory {

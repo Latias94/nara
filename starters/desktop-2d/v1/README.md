@@ -10,11 +10,13 @@ once, including `scenes/startup.scene.json.meta`; publication uses those exact p
 Keep authored metadata with its source. Parsing, reopening and startup selection repair do not
 generate replacement identity. The descriptive project `stable_id` is not the source universe.
 
-The project has two explicit product targets:
+The project has four explicit Cargo binary targets:
 
 - `headless`, using the base `runtime-2d` product;
 - `desktop`, enabled with the Cargo `desktop` feature and using the matching desktop capabilities
-  declared by the `desktop` project profile.
+  declared by the `desktop` project profile;
+- `cook`, a compiled headless adapter that prepares this project's content and publishes its Player;
+- `player`, a source-free headless runtime that requires the expectation supplied by Cook.
 
 Open the complete-schema startup Scene in the first-party Editor from the project root:
 
@@ -43,7 +45,11 @@ through normal runtime cleanup.
 
 Check, schema refresh, Export, and startup-Scene Repair build the existing headless executable and enter its explicit
 tool mode before gameplay. Define custom systems, persistent components, and migrations once in
-`product_recipe()` with `SchemaContribution`; the same recipe serves both binaries and strict tools.
+`product_recipe()` with `SchemaContribution`; the same recipe serves all targets and strict tools.
+The starter recipe explicitly registers the stock `ImageRuntimeCodec` with definition
+`nara.starter.desktop-2d.image`, revision 1. Keep that registration when adding game contributions so
+Cook and Player agree on Image decoding.
+
 The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract. Superseded
 entry/response shapes are unsupported; both the headless entry and CLI use this current contract.
 Project Rust and Cargo code remain trusted native code. Default tooling has no window or graphics
@@ -74,6 +80,69 @@ scenes = ["level-b.scene.json"]
 These project-wide paths are relative to the selected profile's effective `paths.scenes` directory.
 The selected startup Scene is always included implicitly. Declaring another Scene does not activate
 it at runtime, and undeclared dynamic content is not included automatically.
+
+### Cook and source-free Player
+
+Run the project-owned cooker from the generated project root. This PowerShell example selects the
+installed native toolchain, an existing output parent, and the project's reusable Cargo target:
+
+```powershell
+$projectRoot = (Get-Location).Path
+$outputParent = (New-Item -ItemType Directory -Force ../installations).FullName
+$targetDirectory = Join-Path $projectRoot 'target'
+$cargoPath = (rustup which cargo).Trim()
+$rustcPath = (rustup which rustc).Trim()
+$targetTriple = ((& $rustcPath -vV | Select-String '^host: ').Line -replace '^host: ', '')
+cargo run --bin cook -- --project-root "$projectRoot" --output-parent "$outputParent" --name game-player --target-dir "$targetDirectory" --target "$targetTriple" --cargo "$cargoPath" --rustc "$rustcPath" --profile release
+```
+
+`--project-root`, `--output-parent`, `--name`, `--target-dir`, `--target`, `--cargo`, and `--rustc`
+are required. Directory and tool paths must be absolute; the project and output parent must already
+exist. `--target-dir` can reuse an existing directory or be created by the build owner. `--name`
+selects one absent portable child directory under the output parent. `--profile` selects the Cargo
+profile and defaults to `release`; a custom profile must already be defined for Cargo. The selected
+toolchain must support `--target`. Paths can contain spaces and are passed as separate arguments.
+
+Cook ingests `nara.toml` with the default source profile and uses the actual `product_recipe()`.
+It delegates content preparation, source and code revalidation, Player building, and whole-directory
+publication to Nara's shared owners. It selects package `env!("CARGO_PKG_NAME")`, binary `player`,
+the explicit target and Cargo profile, no additional features, and disabled default features. The
+cooked content profile is `game-shipping`; it is separate from the Cargo profile and the source
+project's `desktop` profile. This cooker and Player are headless.
+
+Cook stores reusable artifact data under `<output-parent>/nara-cook-cache`. The shared Rust input
+inventory covers `Cargo.toml`, `Cargo.lock`, root `build.rs`, and Rust files under `src/`. The initial
+`cargo run` creates `Cargo.lock` if necessary; retain it for subsequent locked Player builds. Projects
+that add other compiler inputs must explicitly extend the request's declared input inventory in
+`src/bin/cook.rs`. Cargo retains dependency resolution and the original build process owner. Failed
+child cleanup keeps that owner's process and target lease until cleanup completes. A recoverable
+publication orphan is reported with its original evidence for explicit inspection.
+
+`build.rs` tracks `NARA_CARGO_GENERATED_RUST_SOURCE`, writes the selected bootstrap only into
+Cargo's `OUT_DIR`, and enables `nara_cooked_player` only for a request carrying that input. Keep this
+reserved variable out of ambient environment and Cargo configuration. Ordinary Player builds refuse
+to run, including when `OUT_DIR` still contains an earlier cooked bootstrap. No generated bootstrap
+is written into project source.
+
+On success, `STARTER_PACKAGE_PUBLISHED` reports the installation and executable. The installation
+contains only `player` (`player.exe` on Windows), `content.pack`, and `package.json`. Move the whole
+directory elsewhere and launch its Player from any working directory, for example:
+
+```powershell
+& "$outputParent/game-player/player.exe" --frames 120
+```
+
+Use `player` on Linux or macOS. Player opens only the executable-relative `content.pack` with the
+compiled expected catalog digest, target triple, content profile, and game recipe. It has no path,
+expectation, source-profile, or project-tool override and needs no project source, artifact cache,
+Nara CLI, or Rust toolchain at runtime. Scene identities and startup selection come from the actual
+authored `source_universe`, stable metadata, and declared content rather than sample IDs or counts.
+`--frames N` runs complete managed frames, including normal plugin updates and Scene travel, with
+the admitted fixed timestep as each frame's elapsed time. It defaults to 1 and accepts 1 through
+200000; it does not impose a wall-clock deadline on plugin or operating-system work. Runtime cleanup
+continues through the original run owner until it completes. `starter_player: ok` reports success.
+
+### Source-carrying Export
 
 Publish and accept a source-carrying declared-content candidate into an absent destination:
 

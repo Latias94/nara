@@ -21,6 +21,10 @@ const AUTHOR_GUIDE_BODY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/README.md"
 ));
+const BUILD_SCRIPT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v1/build.rs"
+));
 const LIBRARY_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/src/lib.rs"
@@ -32,6 +36,14 @@ const HEADLESS_SOURCE: &[u8] = include_bytes!(concat!(
 const DESKTOP_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/src/bin/desktop.rs"
+));
+const COOK_SOURCE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v1/src/bin/cook.rs"
+));
+const PLAYER_SOURCE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v1/src/bin/player.rs"
 ));
 const STARTUP_SCENE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -132,9 +144,12 @@ pub enum ProjectMember {
     CargoManifest,
     ProjectManifest,
     AuthorGuide,
+    BuildScript,
     LibrarySource,
     HeadlessSource,
     DesktopSource,
+    CookSource,
+    PlayerSource,
     StartupScene,
     StartupSceneMetadata,
     AuthoringSchemaBundle,
@@ -383,6 +398,8 @@ pub(crate) fn build_desktop_2d_v1_plan(
             library: LIBRARY_SOURCE,
             headless: HEADLESS_SOURCE,
             desktop: DESKTOP_SOURCE,
+            cook: COOK_SOURCE,
+            player: PLAYER_SOURCE,
             startup_scene: STARTUP_SCENE,
         },
     )?;
@@ -391,9 +408,12 @@ pub(crate) fn build_desktop_2d_v1_plan(
         member(ProjectMember::CargoManifest, cargo_manifest.as_bytes())?,
         member(ProjectMember::ProjectManifest, project_manifest.as_bytes())?,
         member(ProjectMember::AuthorGuide, author_guide.as_bytes())?,
+        member(ProjectMember::BuildScript, BUILD_SCRIPT)?,
         member(ProjectMember::LibrarySource, LIBRARY_SOURCE)?,
         member(ProjectMember::HeadlessSource, HEADLESS_SOURCE)?,
         member(ProjectMember::DesktopSource, DESKTOP_SOURCE)?,
+        member(ProjectMember::CookSource, COOK_SOURCE)?,
+        member(ProjectMember::PlayerSource, PLAYER_SOURCE)?,
         member(ProjectMember::StartupScene, STARTUP_SCENE)?,
         member(
             ProjectMember::StartupSceneMetadata,

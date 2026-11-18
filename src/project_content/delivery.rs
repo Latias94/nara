@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, mem::size_of, sync::Arc};
+use std::{collections::BTreeMap, convert::Infallible, fmt, mem::size_of, sync::Arc};
 
 use nara_asset::StableAssetId;
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
@@ -14,6 +14,35 @@ use super::{
     StartupContentClosureReceipt, allocation_failed, append_frame, checked_plan_product,
     checked_plan_sum, string_retained_bytes,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeliverySnapshotPhase {
+    /// Initializes the consumer before Deferred targets receive strict validation.
+    Startup,
+    /// Supplies an admitted complete mandatory closure for the selected root.
+    Complete,
+}
+
+#[derive(Debug)]
+pub(crate) enum DeliveryVisitError<E> {
+    Content(ProjectContentError),
+    Visit(E),
+}
+
+impl<E> From<ProjectContentError> for DeliveryVisitError<E> {
+    fn from(error: ProjectContentError) -> Self {
+        Self::Content(error)
+    }
+}
+
+impl From<DeliveryVisitError<Infallible>> for ProjectContentError {
+    fn from(error: DeliveryVisitError<Infallible>) -> Self {
+        match error {
+            DeliveryVisitError::Content(error) => error,
+            DeliveryVisitError::Visit(never) => match never {},
+        }
+    }
+}
 
 /// Strict source delivery for the complete mandatory closure of the project's Scene roots.
 ///
@@ -86,6 +115,16 @@ impl ProjectContentDeliveryReceipt {
     pub(crate) fn runtime_directories(&self) -> &[ProjectPath] {
         self.inner.startup.runtime_directories()
     }
+
+    pub(crate) fn reserve_consumer_retained(
+        &self,
+        bytes: usize,
+    ) -> Result<ProjectContentLease, ProjectContentError> {
+        self.inner
+            ._lease
+            .reserve_retained(bytes)
+            .map_err(ProjectContentError::budget)
+    }
 }
 
 impl fmt::Debug for ProjectContentDeliveryReceipt {
@@ -118,6 +157,21 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
+        self.load_delivery_with_snapshots::<Infallible>(candidate, plan, |_, _| Ok(()))
+            .map_err(ProjectContentError::from)
+    }
+
+    /// Visits each original snapshot before its decoded generation retires.
+    ///
+    /// The ordinary startup snapshot is always first. `Startup` initializes the consumer when
+    /// Deferred targets require strict validation; only `Complete` supplies a strict closure.
+    /// Consumer errors stop traversal and prevent publication of a delivery receipt.
+    pub(crate) fn load_delivery_with_snapshots<E>(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
+    ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
         let readiness = self.validate_inputs(candidate, plan)?;
         let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
             &self.root, candidate, plan,
@@ -125,7 +179,14 @@ impl ProjectContentLoader {
         let (startup, catalogue) = self.load_startup_for_delivery_with_readiness(
             candidate, plan, None, agreement, &readiness,
         )?;
-        self.load_delivery_with_readiness(candidate, plan, startup, catalogue, &readiness)
+        self.load_delivery_with_readiness(
+            candidate,
+            plan,
+            startup,
+            catalogue,
+            &readiness,
+            on_snapshot,
+        )
     }
 
     pub(crate) fn load_delivery_with_startup_and_catalogue(
@@ -136,17 +197,26 @@ impl ProjectContentLoader {
         catalogue: Option<DeliveryCatalogue>,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
         let readiness = self.validate_inputs(candidate, plan)?;
-        self.load_delivery_with_readiness(candidate, plan, snapshot, catalogue, &readiness)
+        self.load_delivery_with_readiness::<Infallible>(
+            candidate,
+            plan,
+            snapshot,
+            catalogue,
+            &readiness,
+            |_, _| Ok(()),
+        )
+        .map_err(ProjectContentError::from)
     }
 
-    fn load_delivery_with_readiness(
+    fn load_delivery_with_readiness<E>(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         snapshot: ProjectContentSnapshot,
         mut catalogue: Option<DeliveryCatalogue>,
         readiness: &SourceReadiness,
-    ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
+        mut on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
+    ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
             delivery_error(
                 "project.delivery.startup-mismatch",
@@ -162,10 +232,10 @@ impl ProjectContentLoader {
             || content.manifest_digest() != candidate.manifest_digest()
             || content.schema_fingerprint() != plan.schema_validation().composition_fingerprint()
         {
-            return Err(delivery_error(
+            return Err(DeliveryVisitError::Content(delivery_error(
                 "project.delivery.authority-mismatch",
                 "Delivery source inputs do not share one project and schema authority",
-            ));
+            )));
         }
 
         let mut budget = self.budget_host.reserve();
@@ -216,6 +286,15 @@ impl ProjectContentLoader {
         // mandatory target through the production compiler/importers. Otherwise startup needs
         // its own strict validation unit, independently of its Immediate attestation.
         let validate_startup = snapshot.inner.deferred_source_targets;
+        on_snapshot(
+            &snapshot,
+            if validate_startup {
+                DeliverySnapshotPhase::Startup
+            } else {
+                DeliverySnapshotPhase::Complete
+            },
+        )
+        .map_err(DeliveryVisitError::Visit)?;
         drop(snapshot);
         for root in &roots {
             if root == startup.content_closure().selected_scene_path() && !validate_startup {
@@ -237,6 +316,8 @@ impl ProjectContentLoader {
                 startup.content_closure(),
                 &mut budget,
             )?;
+            on_snapshot(&snapshot, DeliverySnapshotPhase::Complete)
+                .map_err(DeliveryVisitError::Visit)?;
             // No decoded Scene/Image or generation lease escapes into the delivery receipt.
             drop(snapshot);
         }

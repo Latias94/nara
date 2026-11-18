@@ -998,7 +998,17 @@ fn generated_project_is_an_independent_cargo_product() {
         .map(|target| target["name"].as_str().unwrap())
         .collect::<Vec<_>>();
     target_names.sort_unstable();
-    assert_eq!(target_names, ["desktop", "headless", "nara_game"]);
+    assert_eq!(
+        target_names,
+        [
+            "build-script-build",
+            "cook",
+            "desktop",
+            "headless",
+            "nara_game",
+            "player",
+        ]
+    );
 
     let check = Command::new(env!("CARGO"))
         .current_dir(&checkout)

@@ -138,6 +138,12 @@ impl CargoBuildRequest {
         &self.workspace
     }
 
+    /// The caller's declared filesystem inventory, separate from generated Rust input.
+    #[must_use]
+    pub fn declared_input_paths(&self) -> &[RelativePath] {
+        &self.inputs
+    }
+
     #[must_use]
     pub const fn limits(&self) -> CargoBuildLimits {
         self.limits

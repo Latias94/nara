@@ -79,6 +79,7 @@ pub use closure::{
     ProjectSceneContentStamp, StartupContentClosureReceipt,
 };
 pub use delivery::ProjectContentDeliveryReceipt;
+pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
 pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
@@ -185,6 +186,11 @@ impl ProjectSceneContent {
     #[must_use]
     pub fn compiled_scene(&self) -> &CompiledSceneDocument {
         self.compiled.document()
+    }
+
+    #[must_use]
+    pub(crate) fn compiled_candidate(&self) -> &CompiledSceneCandidate {
+        &self.compiled
     }
 }
 

@@ -1834,11 +1834,14 @@ fn directory_path(directory: ProjectDirectory) -> &'static str {
 fn member_path(member: ProjectMember) -> &'static str {
     match member {
         ProjectMember::CargoManifest => "Cargo.toml",
+        ProjectMember::BuildScript => "build.rs",
         ProjectMember::ProjectManifest => "nara.toml",
         ProjectMember::AuthorGuide => "README.md",
         ProjectMember::LibrarySource => "src/lib.rs",
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
+        ProjectMember::CookSource => "src/bin/cook.rs",
+        ProjectMember::PlayerSource => "src/bin/player.rs",
         ProjectMember::StartupScene => "scenes/startup.scene.json",
         ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
         ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",

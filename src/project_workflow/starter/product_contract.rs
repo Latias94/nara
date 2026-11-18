@@ -22,9 +22,10 @@ const DESKTOP_NARA_FEATURES: [&str; 3] = [
     "nara/desktop-winit",
     "nara/render-wgpu",
 ];
-const LIBRARY_MARKERS: [&[u8]; 2] = [
+const LIBRARY_MARKERS: [&[u8]; 3] = [
     b"pub fn product_recipe() -> nara::ProductRecipe",
     b"nara::ProductRecipe::new()",
+    b".add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(",
 ];
 const BINARY_MARKER: &[u8] = b"nara_game::product_recipe()";
 
@@ -42,6 +43,8 @@ pub(super) struct ProductContractSources<'a> {
     pub(super) library: &'a [u8],
     pub(super) headless: &'a [u8],
     pub(super) desktop: &'a [u8],
+    pub(super) cook: &'a [u8],
+    pub(super) player: &'a [u8],
     pub(super) startup_scene: &'a [u8],
 }
 
@@ -53,6 +56,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
+build = "build.rs"
 
 [package.metadata.nara]
 project-tool-protocol = 1
@@ -79,6 +83,14 @@ path = "src/bin/headless.rs"
 name = "desktop"
 path = "src/bin/desktop.rs"
 required-features = ["desktop"]
+
+[[bin]]
+name = "cook"
+path = "src/bin/cook.rs"
+
+[[bin]]
+name = "player"
+path = "src/bin/player.rs"
 "#,
         slug.as_str(),
         dependency,
@@ -153,6 +165,13 @@ resizable = true
 
 pub(crate) fn product_recipe() -> ProductRecipe {
     ProductRecipe::new()
+        .add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
+            crate::runtime_content::RuntimeCodecDefinitionId::new(
+                "nara.starter.desktop-2d.image",
+                1,
+            ),
+        )
+        .expect("the starter Image runtime codec definition is valid")
 }
 
 pub(super) fn validate(
@@ -167,10 +186,6 @@ pub(super) fn validate(
         sources.creation_command_arguments,
         sources.author_guide,
     )?;
-    if !product_recipe().is_empty() {
-        return Err("generated ProductRecipe disagrees with the starter product contract");
-    }
-
     let load = ProjectManifest::parse_toml_bytes(sources.project_manifest);
     if load.has_errors() {
         return Err("generated project manifest is invalid");
@@ -229,6 +244,8 @@ pub(super) fn validate(
         .all(|marker| source_contains(sources.library, marker))
         || !source_contains(sources.headless, BINARY_MARKER)
         || !source_contains(sources.desktop, BINARY_MARKER)
+        || !source_contains(sources.cook, BINARY_MARKER)
+        || !source_contains(sources.player, BINARY_MARKER)
     {
         return Err("generated Rust entry points disagree with the starter product contract");
     }
@@ -309,6 +326,7 @@ fn validate_cargo_manifest(
         || package.get("edition").and_then(Value::as_str) != Some("2024")
         || package.get("rust-version").and_then(Value::as_str) != Some("1.95")
         || package.get("publish").and_then(Value::as_bool) != Some(false)
+        || package.get("build").and_then(Value::as_str) != Some("build.rs")
         || package
             .get("metadata")
             .and_then(|value| value.get("nara"))
@@ -400,7 +418,7 @@ fn validate_cargo_manifest(
         .get("bin")
         .and_then(Value::as_array)
         .ok_or("generated Cargo binary targets are absent")?;
-    if binaries.len() != 2
+    if binaries.len() != 4
         || !binary_target_matches(&binaries[0], "headless", "src/bin/headless.rs", None)
         || !binary_target_matches(
             &binaries[1],
@@ -408,6 +426,8 @@ fn validate_cargo_manifest(
             "src/bin/desktop.rs",
             Some("desktop"),
         )
+        || !binary_target_matches(&binaries[2], "cook", "src/bin/cook.rs", None)
+        || !binary_target_matches(&binaries[3], "player", "src/bin/player.rs", None)
     {
         return Err("generated Cargo binary targets disagree with the starter");
     }

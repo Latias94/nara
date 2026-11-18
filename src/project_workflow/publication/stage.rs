@@ -118,10 +118,14 @@ fn write_member(
     let parent = match member.member() {
         ProjectMember::CargoManifest
         | ProjectMember::ProjectManifest
-        | ProjectMember::AuthorGuide => &tree.root,
+        | ProjectMember::AuthorGuide
+        | ProjectMember::BuildScript => &tree.root,
         ProjectMember::AuthoringSchemaBundle => &tree.schema,
         ProjectMember::LibrarySource => &tree.source,
-        ProjectMember::HeadlessSource | ProjectMember::DesktopSource => &tree.source_binaries,
+        ProjectMember::HeadlessSource
+        | ProjectMember::DesktopSource
+        | ProjectMember::CookSource
+        | ProjectMember::PlayerSource => &tree.source_binaries,
         ProjectMember::StartupScene | ProjectMember::StartupSceneMetadata => &tree.scenes,
     };
     let mut file = parent
@@ -193,9 +197,12 @@ pub(super) fn member_path(member: ProjectMember) -> RelativePath {
         ProjectMember::ProjectManifest => "nara.toml",
         ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
         ProjectMember::AuthorGuide => "README.md",
+        ProjectMember::BuildScript => "build.rs",
         ProjectMember::LibrarySource => "src/lib.rs",
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
+        ProjectMember::CookSource => "src/bin/cook.rs",
+        ProjectMember::PlayerSource => "src/bin/player.rs",
         ProjectMember::StartupScene => "scenes/startup.scene.json",
         ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
     })

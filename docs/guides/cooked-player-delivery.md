@@ -39,6 +39,48 @@ the Player bootstrap. These source checks do not run in the installed source-fre
 
 ## Assemble Complete Content
 
+For an ordinary source project, use `project_tooling::project_cook` from its compiled cooker.
+Construct `ProjectCookRequest` with the original root capability, admitted settings candidate,
+game recipe, content target, existing artifact store, actual implementation digest and limits.
+Call `prepare_project_cooked_content` and explicitly contribute game-specific build facets:
+
+```rust
+let prepared = prepare_project_cooked_content(request, |context| {
+    context.add_source_assets::<GameSoundBankDomain>()?;
+    context.add_source_assets::<GameAnimationDomain>()?;
+    Ok(())
+})?;
+```
+
+The shared entry consumes the source loader's actual compiled Scene and Prefab results,
+Image pixels, Input definitions, Material and TileSet data. It preserves source identity and
+derives travel roots from the selected manifest, including additional authored roots. Dependency
+Scenes do not become public travel roots. Stock Images retain their admitted extent and color
+space; a device-specific transform remains an explicit separate artifact policy. Each additional
+domain uses its selected `SourceAssetBuild` and complete verified group. A source-only importer
+does not automatically opt into that build contract.
+
+Decoded roots retire sequentially; the unpublished builder accumulates their processed members
+and performs the existing final complete validation. `PreparedProjectCook` retains source and
+presence-aware build observations. Construct an explicit `CargoBuildRequest` covering the actual
+Rust inputs (the supplied `project_rust_input_inventory` covers the finite default tree), plus
+any extra compiler inputs the game uses. `build_player(request, limits)` selects the generated
+bootstrap through the original Cargo owner, and the returned package's `publish` retains source
+and code checks at the original publication checkpoints. Keep typed Cargo/package failures until
+their native cleanup custody completes. Neither the inventory helper nor the Cook entry resolves
+Cargo dependencies or analyzes Rust includes.
+
+The generated `desktop-2d/v1` project includes a headless `cook` and `player` alongside its existing
+source `headless` and `desktop` binaries. Follow its generated README for the explicit Cook command.
+Its Player reads only its compiled executable-relative pack; `--frames N` selects a finite run
+length, without overriding content expectations. This headless entry does not replace the source
+desktop Export or establish foreign-target/native-library support.
+
+Consumers that exhaustively match `ProjectMember` must handle `BuildScript`, `CookSource` and
+`PlayerSource`. The starter publishes twelve members and four binary targets. Source-carrying
+Export continues selecting its original `headless` and `desktop` products; Cook and Player are
+additional project-owned entry points, not extra source Export executables.
+
 The cooker uses `project_workflow::cooked_content` under the `project-workflow` feature.
 Construct `CookedContentRequest` with the complete startup/travel Scene set, explicit addressable
 roots, `RuntimeConfiguration` and `RuntimeContentTarget`. Add actual verified groups with

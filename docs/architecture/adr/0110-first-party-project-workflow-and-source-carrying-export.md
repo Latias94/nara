@@ -134,6 +134,22 @@ cannot qualify a larger package. Native resource publication and gameplay effect
 The assembler owns deterministic portable member facts and explicit allocation bounds, not source
 import execution, a universal cooker, a build scheduler or another Runtime loader.
 
+The compiled project Cook entry consumes the original source loader's sequential strict delivery
+traversal. Borrow the actual bound compiled Scenes, Prefab provenance, Input definitions, Image
+pixels, typed source assets and resolver before each decoded snapshot retires. Ordinary startup
+attestation remains distinct from complete Deferred validation. Only the manifest-selected roots
+receive travel authority; dependency Scenes stay data dependencies. Preserve admitted persistent
+Product identities instead of inventing path-derived identities or requiring game-specific
+metadata databases. The original builder owns encoding and final processed deep validation.
+
+Game-owned typed build facets remain explicit contributions. Source import is not proof of a
+separate `SourceAssetBuild` result: the existing artifact owner supplies the selected build,
+optional/build-only observations and complete primary/auxiliary mappings. The common entry keeps
+source/member and build observations through Cargo and directory publication, with code files
+remaining an explicit caller inventory. It does not infer Rust modules or Cargo dependencies,
+register another importer, or retain every decoded source generation. Starter and game adapters
+select their own recipe, content profile and Player Cargo target through the same entry.
+
 Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
 an independently expected catalog digest/length, content target/profile and relative pack location.
 The trusted Player explicitly compiles and uses that input with its own selected recipe. The

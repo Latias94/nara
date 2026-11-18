@@ -105,9 +105,12 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             ProjectMember::CargoManifest,
             ProjectMember::ProjectManifest,
             ProjectMember::AuthorGuide,
+            ProjectMember::BuildScript,
             ProjectMember::LibrarySource,
             ProjectMember::HeadlessSource,
             ProjectMember::DesktopSource,
+            ProjectMember::CookSource,
+            ProjectMember::PlayerSource,
             ProjectMember::StartupScene,
             ProjectMember::StartupSceneMetadata,
             ProjectMember::AuthoringSchemaBundle,
@@ -119,10 +122,17 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     let cargo_toml = toml::from_str::<toml::Value>(cargo).unwrap();
     assert_eq!(cargo_toml["workspace"]["resolver"].as_str(), Some("3"));
     assert_eq!(cargo_toml["lib"]["name"].as_str(), Some("nara_game"));
+    assert_eq!(cargo_toml["package"]["build"].as_str(), Some("build.rs"));
     let binaries = cargo_toml["bin"].as_array().unwrap();
-    assert_eq!(binaries.len(), 2);
+    assert_eq!(binaries.len(), 4);
     assert_eq!(binaries[0]["name"].as_str(), Some("headless"));
     assert_eq!(binaries[1]["name"].as_str(), Some("desktop"));
+    assert_eq!(binaries[2]["name"].as_str(), Some("cook"));
+    assert_eq!(binaries[2]["path"].as_str(), Some("src/bin/cook.rs"));
+    assert_eq!(binaries[3]["name"].as_str(), Some("player"));
+    assert_eq!(binaries[3]["path"].as_str(), Some("src/bin/player.rs"));
+    assert!(binaries[2].get("required-features").is_none());
+    assert!(binaries[3].get("required-features").is_none());
     assert_eq!(
         cargo_toml["dependencies"]["nara"]["git"].as_str(),
         Some("https://github.com/nara-engine/nara.git")
@@ -615,7 +625,7 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
             ProjectDirectory::SourceBinaries,
         ]
     );
-    assert_eq!(receipt.plan().members().len(), 9);
+    assert_eq!(receipt.plan().members().len(), 12);
 
     let project_root = receipt.project_root();
     assert_eq!(
@@ -662,9 +672,12 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
         "nara.toml",
         "schema/authoring.bundle.json",
         "README.md",
+        "build.rs",
         "src/lib.rs",
         "src/bin/headless.rs",
         "src/bin/desktop.rs",
+        "src/bin/cook.rs",
+        "src/bin/player.rs",
         "scenes/startup.scene.json",
         "scenes/startup.scene.json.meta",
     ] {

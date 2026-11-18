@@ -23,6 +23,7 @@ pub mod host_fs;
 pub mod player_package;
 pub mod process;
 mod product_observation;
+pub mod project_cook;
 mod protocol;
 mod schema;
 
