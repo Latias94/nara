@@ -324,6 +324,17 @@ compilation, affected correctness Clippy, four workspace formatting checks and d
 pass; exact scope belongs to the linked evidence. No new command, registry, queue or per-frame
 audit owner is introduced, and full R7/R10/R12/Foundation remains open.
 
+The [missing-metadata location successor](../research/2026-11-18-engine-architecture-review-reconciliation.md#missing-metadata-implementation-and-qualification)
+at `2b1cd2c` preserves native Scene/Prefab sidecar I/O failures while adding the original configured root
+to one admitted project-relative path observation. The existing compiled-tool protocol exposes
+that optional observation to public callers and the CLI, with bounded omission accounting and
+no raw error strings or new authority. All 52 selected protocol/content regressions and the
+actual generated-project missing-sidecar/restore consumer pass on Windows with Rust 1.95.0.
+Affected correctness Clippy, formatting and document checks pass; the linked record owns exact
+execution scope and the canonical protocol's coordinated rebuild requirement.
+Successful content reads and Runtime frame execution add no new path formatting or audit.
+This does not resume paused UI work or complete R7/R12/Foundation.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

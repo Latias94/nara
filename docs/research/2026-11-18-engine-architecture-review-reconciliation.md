@@ -67,12 +67,88 @@ See [the qualified TileSet unit](../plans/2026-10-20-persistent-two-level-game-p
 | Preserve a new game's identity | **Implemented and scoped qualification passes below.** The walkthrough preserves generated manifests, universe, stable-metadata policy, startup sidecar and Cook/Player/build-script entries. It adds the collection contribution and an imported Prefab's own sidecar. Two same-named real external games retain distinct identities, finish/reset source gameplay and run relocated cooked baselines after source removal. [Walkthrough](../guides/first-2d-game.md), [consumer](../../tests/project_author_workflow.rs), [starter](../../src/project_workflow/starter.rs). |
 | First system and subcommand help | **Implemented and scoped qualification passes below.** The generated README teaches an actual fixed-step plugin without adding a game API; its compiled consumer observes gameplay while Check stays silent. Scoped help runs before filesystem/build work, includes syntax/examples and preserves malformed argument rejection. Actual parser/help subprocess tests pass. [CLI parser](../../src/bin/nara/args.rs), [starter guide](../../starters/desktop-2d/v1/README.md), [help controls](../../tests/project_workflow_help.rs). |
 | Recipe composition diagnostics | **Implemented and scoped qualification passes below.** Known direct `ProductRecipeError` values retain static variant codes and admitted plugin facts. Generated and collection-game recipes are fallible throughout tool and product entries. Opaque values keep a generic failure without formatting. Actual independent duplicate-plugin and opaque-error consumers pass. [Factory](../../src/project_tooling/mod.rs), [recipe errors](../../src/product.rs), [sample recipe](../../samples/collect-game/src/lib.rs). |
-| Compiler and missing-sidecar locations | **Primary compiler locations implemented and scoped qualification passes below; missing-sidecar diagnostic remains a follow-up.** Cargo retains a bounded primary location; bootstrap interprets its original workspace base before displaying an admitted project-relative path. Actual root/member compiler consumers pass. No rendered output/source/suggestions are retained. Missing-sidecar refusal was exercised in the author workflow, but its specific location projection remains separate. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs). |
+| Compiler and missing-sidecar locations | **Implemented and scoped qualification passes below.** Cargo retains its bounded primary location, interpreted against the original workspace before project-relative display. Native Scene/Prefab metadata I/O failures now carry their actual configured project-relative location through Check, the CLI and the public caller. Oversize or unadmitted paths remain omitted and counted. Actual compiler and missing-sidecar consumers pass; no rendered source or suggestions are retained. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs), [metadata qualification](#missing-metadata-implementation-and-qualification). |
 | First persistent component | **Confirmed example/admission mismatch; defer interactive qualification.** The opening Vec2 example lacks a complete creation value, while the scalar Collectible can supply one. Teach a creatable scalar first and demonstrate Add/Edit/Undo/Save/Reopen before the vector case. Presence-only records are an explicit ADR0090 restriction, requiring a deliberate contract amendment rather than being called an implementation regression. [Component guide](../guides/persistent-components.md), [data adapter](../../crates/nara_scene/src/authoring_decode.rs), [ADR0090](../architecture/adr/0090-unavailable-schema-and-lossless-authoring.md). |
 | Current component inventory | **Implemented and scoped qualification passes below.** Collect Game uses existing `persistent_components!` for current catalog and native registration. Explicit predecessor metadata, provider revision and the exact committed fingerprint are preserved. [Sample plugin](../../samples/collect-game/gameplay-plugin/src/lib.rs), [inventory macro](../../crates/nara_reflect/src/inventory.rs). |
 | Completed command-draft binding | **Implemented and scoped qualification passes below.** `from_command` consumes the complete draft; three production games use it, and the obsolete replacement setter is removed. Original map admission, ordered dispatch and serde shape are unchanged. [Binding](../../crates/nara_gameplay/src/action.rs), [game caller](../../samples/two-level-game/src/gameplay/input.rs). |
 | Live movement versus replay admission | **Reproduced, corrected and scoped qualification passes below.** Live consumption and recording share one game-owned movement decoder. Actual Capture/acknowledgement and complete-game tests cover valid order, extra/invalid payloads, targets, phase releases and healthy continuation. [Live consumer](../../samples/two-level-game/src/gameplay/travel.rs), [recording decoder](../../samples/two-level-game/src/command.rs). |
 | Play and Restart feedback | **Concrete paused-UI follow-up.** Preserve explicit Save and accepted-generation behavior. At the controls, identify the dirty document and explain that Restart replays the accepted generation. Qualify using two camera values through real controls when UI work resumes. [Game panel](../../editor/src/frontend/imgui/project.rs), [Play controls](../../editor/src/frontend/imgui/mod.rs). |
+
+## Missing Metadata Location Successor
+
+This author-workflow correction makes a failure locatable when Check cannot read an imported
+Prefab's stable-identity sidecar. The original content owner supplies the path and its actual
+root; an Assets/Prefabs-root-relative value must not be presented as a project-root-relative
+location. Qualification uses an actual generated collection project through the public CLI.
+
+Keep the original content admission, failure outcome and compiled-project protocol owner.
+Carry one bounded optional path facet through the existing projection and public read-only
+diagnostic. General fields, raw error strings and filesystem/repair authority remain outside
+that transport. ADR0110 and the failure-projection design own the amended boundary.
+
+Acceptance covers the producer, projection loss and bounded protocol roundtrip, a structured
+public caller, actual missing-sidecar CLI output and successful Check after restoring the exact
+metadata. Keep this work off Runtime's per-frame paths and use focused verification; it does
+not resume paused Editor work or complete Foundation R7/R12.
+
+### Missing Metadata Implementation And Qualification
+
+Implemented at `2b1cd2c` on Windows with Rust 1.95.0. Canonical unreleased protocol 1 now carries
+`project_path` in failure diagnostic records; rebuild the compiled project tool and CLI together.
+
+The native-document content reader now supplies the original configured source root only for
+metadata reads. Its existing filesystem-error projection attaches `project-path` on I/O failure,
+preserving `project.content.host-io`, severity, static summary, operation, I/O kind and the
+redacted source field. The actual report is built once; its retention statistics are not
+reconstructed. Ordinary successful reads add no path formatting, filesystem query or report.
+
+The existing compiled-tool projection retains only that explicitly classified ProjectRelative
+field as `ProjectToolDiagnostic::project_path()`. It never relabels a local alias or infers a
+coordinate from terminal prose. Other fields, oversized paths and fields of omitted diagnostics
+remain in the original loss accounting. The 256-byte path limit preserves complete paths while
+allowing the original eight diagnostics and missing-startup repair hint within the existing
+16 KiB envelope. Private protocol input reuses the existing path admission; CLI formatting is
+only a sink. Missing metadata has no fabricated line/column and a path grants no authority.
+
+The existing producer regression covers missing Scene then Prefab sidecars under default and
+nonstandard nested roots, original diagnostic/statistics preservation, exact stable identities
+after repair and release of all original budget reservations. Five new protocol controls cover
+UTF-8 observations, wrong field classes and local aliases, omission accounting, malformed input
+and the maximally escaped complete envelope. The focused generated-project consumer uses the
+documented first-system and collection recipes, actual CLI operations and the public Rust
+invocation rather than parsing terminal prose for its structured result.
+
+The first compiled-project consumer attempt stopped before content loading:
+its compiled fixture lacked the first-system module required by the copied recipe. The fixture
+now calls its existing `add_first_system()` step; production recipe admission was not relaxed.
+This attempt, `75acf5b2-327b-40c7-a813-59a5861ca916`, is not evidence that the original
+missing-location assertion executed.
+
+The final owner run passes **52/52** in `40aafd0e-a9e0-4c13-a402-a1bf54f827b8`: 35 selected
+protocol/bootstrap regressions and all 17 `project_content_boot` tests. These include all five
+new location controls, the complete two-root missing-sidecar/recovery workflow and the existing
+native-metadata budget refusal. The original recipe, repair, unsupported-protocol and malformed
+output controls remain passing. The 976 unselected tests are outside this execution result.
+
+The real generated-project consumer passes **1/1** in
+`d4849733-193f-48ae-9fa7-6e68608e6b6f`. It writes the actual compiled Schema, confirms a healthy
+Check, removes the Prefab's own metadata, checks the CLI's exact project-relative location and
+absence of its absolute project root, then inspects the same original I/O code/summary/path
+through `invoke_project_tool`. Restoring the exact bytes recovers Check and preserves the new
+game's identity. The first-system gameplay marker remains absent throughout. This is source
+Check and tool-consumer evidence, not repeated win/reset, Cook/Player or native desktop proof.
+
+An independent bounded API-contract review found no P1/P2 in the new projection, followed by
+a separate read of the content-reader changes and producer test. That review ran no Cargo,
+tests or native operations; execution evidence is owned by the integration run. Both scoped
+agents are closed. This unit adds no dependency, general verifier or Runtime hot-path audit.
+
+Final affected correctness Clippy passes for the library, CLI and both integration targets;
+existing advisory lints remain. Root formatting, added local document links/headings and
+whitespace checks pass. All fifteen paused UI/Dialogue files retain their original byte hashes.
+No remote publication, compiler/dependency migration, native Editor test cycle or new gameplay
+performance result is included. Full Foundation, R7/R12, the paused interactive findings and
+foreign execution remain open.
 
 ## Source agreement and processed Material correction
 

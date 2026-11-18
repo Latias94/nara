@@ -2317,6 +2317,16 @@ compilation. The linked record retains
 the fixture/target-alias corrections and Windows Rust 1.95.0 limits; no native UI, full publication
 matrix or measured speedup is inferred. Full R7/R10/R12 and paused UI remain separate.
 
+The [missing-native-metadata location successor](../../research/2026-11-18-engine-architecture-review-reconciliation.md#missing-metadata-implementation-and-qualification)
+at `2b1cd2c` adds one producer-owned project-relative sidecar path to the existing content failure and
+compiled-tool projection. Local aliases remain distinct from project coordinates; public
+callers inspect the same optional path as the CLI. Original failure classification, omission
+of other fields, bounded response and capability ownership remain unchanged. Execution qualification
+passes all 52 selected protocol/content regressions and one actual generated-project CLI/public
+caller recovery workflow on Windows with Rust 1.95.0. The linked record retains exact scope and
+fixture corrections. Affected Clippy, formatting and document checks pass; no per-frame audit,
+new filesystem authority or completed R7/R12/Foundation claim follows.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
