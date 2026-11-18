@@ -78,7 +78,7 @@ placement creates its own entities, and all occurrences share the level's reside
 Edit the badge PNG to change its appearance. A fresh load reads the authored image. Retry uses
 the committed image and template, including when the files have changed since loading.
 
-The cooked catalog has fourteen members, including five Scenes, five Images and one Material. Meadow and Cavern
+The cooked catalog has fifteen members, including five Scenes, five Images, one Material and one TileSet. Meadow and Cavern
 are the two travel roots. The marker Scene declares its badge Image. Meadow declares the side room
 and Lookout as Deferred dependencies. Regenerate older authoring bundles with native binding
 revision 6 and recook existing installations. Checkpoint and resume retain their wire formats.
@@ -95,6 +95,12 @@ grades the relic in linear color and samples the existing Meadow palette Image. 
 the same Material publication with authored parameter overrides. Open either room again for a
 fresh visit.
 
+Both floors use authored Tilemaps with eight cells each and one shared
+[region TileSet](assets/tilesets/region.tileset.ron). The TileSet uses the relic's 2x2 Image atlas;
+the north and south floors have different checkerboard cell colors. Opening the second room
+retains the first publication's TileSet handle and version. Closing either room leaves the other
+floor live; closing the final user or committing primary travel releases the declaration.
+
 Travel and checkpoint restore close the active rooms when the destination commits. If the
 destination fails to load, the current rooms remain playable. Normal checkpoints record the main
 game's progress. Close the rooms before Retry or exact game capture.
@@ -103,6 +109,8 @@ Editing the Material or its Shader while one room is open cannot silently replac
 definition. A conflicting second activation refuses and leaves the original room playable. Close
 the live users before loading a changed definition, or restore the authored inputs and retry.
 Cooked Players carry the Material and its Image dependency and need no source WGSL files.
+The same rule applies to a changed TileSet atlas, sampler or tint. Cooked Players retain its
+processed descriptor and actual Image dependency without requiring the source RON file.
 
 ## Build And Run
 

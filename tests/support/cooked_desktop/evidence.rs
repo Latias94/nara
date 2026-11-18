@@ -6,8 +6,9 @@ use std::{
 
 use nara::{
     asset::RuntimeAssetCodec,
+    core::{Color, Vec2},
     fs::ContentDigest,
-    image::{ImageExtent, ImageRuntimeCodec},
+    image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
     input::ActionMapRuntimeCodec,
     material::Material2dRuntimeCodec,
     project::RuntimeConfiguration,
@@ -17,6 +18,7 @@ use nara::{
         RuntimeContentDependencyRole, RuntimeContentMemberKind,
     },
     scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
+    tilemap::{TileAtlasLayout, TileSetRuntimeCodec},
 };
 use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
@@ -25,7 +27,7 @@ use two_level_game::{
     input::input_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::{SCENE_PATH, marker_image_product, marker_product},
-    region_material,
+    region_material, region_tileset,
     save::Checkpoint,
     side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
@@ -107,8 +109,8 @@ pub fn inspect_package(
     );
     assert_eq!(
         catalog.members().len(),
-        14,
-        "five processed Scenes with two travel roots, five Images, one shared Material, one shared SoundBank, one Sprite animation set and one global Input"
+        15,
+        "five processed Scenes with two travel roots, five Images, one shared Material, one shared TileSet, one shared SoundBank, one Sprite animation set and one global Input"
     );
     assert_eq!(
         catalog
@@ -150,6 +152,21 @@ pub fn inspect_package(
         1
     );
     assert_eq!(payload["pack_file"], "content.pack");
+    assert_eq!(
+        catalog
+            .members()
+            .iter()
+            .filter(|member| {
+                matches!(
+                    member.kind(),
+                    RuntimeContentMemberKind::Asset { format, version }
+                        if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                            && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION
+                )
+            })
+            .count(),
+        1
+    );
     assert_eq!(
         payload["catalog_digest"],
         digest(ContentDigest::of_bytes(&bytes[20..end]))
@@ -217,6 +234,28 @@ pub fn inspect_package(
         } else if product == region_material::material_product() {
             let material = Material2dRuntimeCodec::decode_runtime(data).unwrap();
             two_level_pack::assert_room_material_member(member, &material);
+        } else if product == region_tileset::tileset_product() {
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                        && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION
+            ));
+            assert_eq!(
+                member.dependencies(),
+                [RuntimeContentDependency::new(
+                    side_room::image_product(),
+                    RuntimeContentDependencyRole::Required,
+                )]
+            );
+            let tileset = TileSetRuntimeCodec::decode_runtime(data).unwrap();
+            assert_eq!(tileset.product(), product);
+            assert_eq!(tileset.image_product(), side_room::image_product());
+            assert_eq!(tileset.atlas(), TileAtlasLayout::grid(Vec2::ONE, 2, 2));
+            assert_eq!(tileset.tint(), Color::WHITE);
+            tileset
+                .validate_image_extent(ImageExtent::new(2, 2))
+                .unwrap();
         } else if product == clips_product() {
             assert!(matches!(
                 member.kind(),
@@ -311,6 +350,7 @@ pub fn inspect_package(
                 marker_product(),
                 marker_image_product(),
                 region_material::material_product(),
+                region_tileset::tileset_product(),
                 side_room::scene_product(),
                 side_room::lookout_scene_product(),
                 side_room::image_product(),
@@ -324,6 +364,46 @@ pub fn number(value: &Value, field: &str) -> u64 {
     value[field]
         .as_u64()
         .unwrap_or_else(|| panic!("missing unsigned {field}: {value}"))
+}
+
+pub fn tileset(value: &Value, image: &Value) {
+    assert_eq!(
+        value["product"],
+        region_tileset::tileset_product().to_string()
+    );
+    assert!(number(value, "asset_id") > 0);
+    assert_eq!(number(value, "version"), 1);
+    assert_eq!(value["observation"], "resident_cpu_declaration");
+    let descriptor = region_tileset::descriptor();
+    assert_eq!(
+        value["declaration"],
+        json!({
+            "image_product": side_room::image_product().to_string(),
+            "atlas": {"tile_size": [1.0_f32, 1.0], "columns": 2, "rows": 2,
+                "margin": [0.0_f32, 0.0], "spacing": [0.0_f32, 0.0]},
+            "sampler": descriptor.sampler(), "alpha_mode": descriptor.alpha_mode(), "tint": Color::WHITE,
+        })
+    );
+    let captured = &value["image"];
+    assert_eq!(captured["asset_id"], image["asset_id"]);
+    assert_eq!(captured["version"], image["version"]);
+    let expected = ImageAsset::from_product(
+        side_room::image_product(),
+        ImageExtent::new(2, 2),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        [64, 224, 180, 255].repeat(4),
+    )
+    .unwrap();
+    assert_eq!(captured["product"], side_room::image_product().to_string());
+    assert_eq!(captured["extent"], json!(expected.extent()));
+    assert_eq!(captured["color_space"], json!(ImageColorSpace::Srgb));
+    assert_eq!(
+        captured["content_hash"],
+        json!(expected.content_hash().as_bytes())
+    );
+    assert_eq!(captured["pixel_bytes"], 16);
+    assert_eq!(captured["source_free"], true);
 }
 
 pub fn presentation(record: &Value, previous: Option<&Value>, fallback: bool, changed: bool) {

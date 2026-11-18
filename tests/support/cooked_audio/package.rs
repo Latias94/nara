@@ -18,6 +18,7 @@ use nara::{
         RuntimeContentDependencyRole, RuntimeContentMemberKind,
     },
     scene::{SourceDocumentKind, SourceDocumentOrigin},
+    tilemap::TileSetRuntimeCodec,
 };
 use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
@@ -26,7 +27,7 @@ use two_level_game::{
     input::input_product,
     levels::LevelId,
     markers::{SCENE_PATH, marker_image_product, marker_product},
-    region_material, side_room,
+    region_material, region_tileset, side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
@@ -147,7 +148,7 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 14);
+    assert_eq!(catalog.members().len(), 15);
     assert_eq!(
         catalog
             .members()
@@ -211,6 +212,11 @@ pub fn inspect(
             two_level_pack::assert_room_material_member(
                 member,
                 &Material2dRuntimeCodec::decode_runtime(&bytes[range]).unwrap(),
+            );
+        } else if product == region_tileset::tileset_product() {
+            two_level_pack::assert_room_tileset_member(
+                member,
+                &TileSetRuntimeCodec::decode_runtime(&bytes[range]).unwrap(),
             );
         } else if product == clips_product() {
             assert!(matches!(
@@ -344,6 +350,7 @@ pub fn inspect(
                 side_room::lookout_scene_product(),
                 side_room::image_product(),
                 region_material::material_product(),
+                region_tileset::tileset_product(),
             ])
             .collect()
     );

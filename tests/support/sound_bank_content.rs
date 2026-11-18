@@ -40,6 +40,10 @@ use nara::{
         RuntimeContentLimits, RuntimeContentMember, RuntimeContentTarget,
     },
     scene::PrefabSourceResolver,
+    tilemap::{
+        TileSetDescriptor, TileSetDomain, TileSetRuntimeCodec, TileSetSource,
+        TileSetSourceFileLimits,
+    },
 };
 use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
@@ -48,7 +52,7 @@ use two_level_game::{
     animation::{CLIPS_PATH, clips_product},
     input::{INPUT_PATH, input_product},
     levels::LevelId,
-    region_material, side_room,
+    region_material, region_tileset, side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
 };
 
@@ -682,6 +686,38 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
                 })
                 .unwrap();
             builder.add_material(&material).unwrap();
+            let tileset = TileSetSource::decode_ron_bytes(
+                &fs::read(
+                    fixture
+                        .project
+                        .join(format!("assets/{}", region_tileset::TILESET_PATH)),
+                )
+                .unwrap(),
+                TileSetSourceFileLimits::default(),
+            )
+            .unwrap();
+            let image = resolver.resolve_ref(&tileset.image).unwrap();
+            assert_eq!(image.source_kind(), &AssetSourceKind::Image);
+            let image = match tileset.image {
+                AssetRef::Product(product) => product,
+                AssetRef::Path(_) | AssetRef::StableId(_) => {
+                    AssetProductRef::new(image.stable_id(), ImportedProductId::PRIMARY).unwrap()
+                }
+            };
+            builder
+                .add_tileset(
+                    &TileSetDescriptor::new(
+                        region_tileset::tileset_product(),
+                        image,
+                        tileset.atlas,
+                    )
+                    .unwrap()
+                    .with_sampler(tileset.sampler)
+                    .with_alpha_mode(tileset.alpha_mode)
+                    .with_tint(tileset.tint)
+                    .unwrap(),
+                )
+                .unwrap();
         }
         let room_scene = plan
             .schema_validation()
@@ -781,7 +817,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 14);
+    assert_eq!(prepared.base().catalog().members().len(), 15);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())
@@ -862,6 +898,11 @@ pub fn processed_and_membership() {
         );
     }
     fixture.retire_source();
+    let tileset = prepared
+        .base()
+        .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(region_tileset::tileset_product())
+        .unwrap();
+    assert_eq!(*tileset.product(), region_tileset::descriptor());
     let material = prepared
         .base()
         .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(

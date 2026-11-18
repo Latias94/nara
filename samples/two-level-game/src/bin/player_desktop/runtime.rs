@@ -21,6 +21,7 @@ use nara::{
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMemberKind,
         RuntimeContentTarget,
     },
+    tilemap::TileSetRuntimeCodec,
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -29,7 +30,7 @@ use two_level_game::{
     input::input_product,
     levels::LevelId,
     markers::{marker_image_product, marker_product},
-    region_material, side_room,
+    region_material, region_tileset, side_room,
     sound_bank::bank_product,
 };
 
@@ -117,7 +118,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 14
+            || base.catalog().members().len() != 15
             || base
                 .catalog()
                 .members()
@@ -147,6 +148,17 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 })
                 .count()
                 != 1
+            || base
+                .catalog()
+                .members()
+                .iter()
+                .filter(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                        && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION)
+                })
+                .count()
+                != 1
             || !base.catalog().addressable_roots().is_empty()
             || base.plan().settings().input().action_map != Some(input_product())
             || [
@@ -157,6 +169,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 marker_product(),
                 marker_image_product(),
                 region_material::material_product(),
+                region_tileset::tileset_product(),
                 side_room::scene_product(),
                 side_room::lookout_scene_product(),
                 side_room::image_product(),

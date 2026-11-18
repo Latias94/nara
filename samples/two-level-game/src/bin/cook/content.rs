@@ -30,6 +30,7 @@ use nara::{
         InMemoryPrefabSourceResolver, PrefabDocumentCandidate, PrefabSourceResolver,
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
+    tilemap::TileSetRuntimeCodec,
 };
 use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
 use two_level_game::{
@@ -37,7 +38,7 @@ use two_level_game::{
     input::{INPUT_PATH, input_product},
     levels::LevelId,
     markers::{IMAGE_PATH, PREFAB_PATH, SCENE_PATH, marker_image_product, marker_product},
-    region_material, side_room,
+    region_material, region_tileset, side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
 
@@ -47,6 +48,8 @@ const COOKER_BYTES: u64 = 512 * 1024 * 1024;
 
 #[path = "material.rs"]
 mod material;
+#[path = "tileset.rs"]
+mod tileset;
 
 pub(super) fn prepare(
     root: &DirectoryCapability,
@@ -257,6 +260,14 @@ pub(super) fn prepare(
         )
     })?;
 
+    let tileset = tileset::prepare(root, &scope, &mut database, &mut observations)?;
+    builder.add_tileset(&tileset).map_err(|error| {
+        format!(
+            "{}: TileSet cooking failed: {error}",
+            region_tileset::TILESET_PATH
+        )
+    })?;
+
     let path =
         AssetPath::new(BANK_PATH).map_err(|error| format!("SoundBank source path: {error}"))?;
     let source = scope.resolve(&path);
@@ -399,7 +410,7 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 14
+    if catalog.members().len() != 15
         || catalog
             .members()
             .iter()
@@ -413,7 +424,7 @@ pub(super) fn prepare(
         || !catalog.addressable_roots().is_empty()
     {
         return Err(
-            "cooked content must contain five Scenes with two travel roots, five Images, one shared Material, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain five Scenes with two travel roots, five Images, one shared Material, one shared TileSet, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
     }
@@ -439,6 +450,7 @@ pub(super) fn prepare(
         side_room::image_product(),
         LevelId::Meadow.image_product(),
         region_material::material_product(),
+        region_tileset::tileset_product(),
     ];
     for (product, source) in &regions {
         let member = catalog
@@ -462,7 +474,7 @@ pub(super) fn prepare(
             })
         {
             return Err(format!(
-                "{source}: cooked Scene identity or required Images and shared Material changed"
+                "{source}: cooked Scene identity or required Images, shared Material and TileSet changed"
             ));
         }
     }
@@ -480,6 +492,21 @@ pub(super) fn prepare(
             )]
     {
         return Err("cooked shared Material identity, format or required palette changed".into());
+    }
+    let tileset = catalog
+        .member_for_product(region_tileset::tileset_product())
+        .ok_or("missing cooked shared region TileSet")?;
+    if tileset.products() != [region_tileset::tileset_product()]
+        || !matches!(tileset.kind(), RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION)
+        || tileset.dependencies()
+            != [RuntimeContentDependency::new(
+                side_room::image_product(),
+                RuntimeContentDependencyRole::Required,
+            )]
+    {
+        return Err("cooked shared TileSet identity, format or required Image changed".into());
     }
     let input_member = catalog
         .member_for_product(input_product())

@@ -10,7 +10,7 @@ use nara::{
     project_tooling::host_fs,
 };
 
-const CONTENT: [&str; 29] = [
+const CONTENT: [&str; 31] = [
     "nara.toml",
     "input/explorer.actions.json",
     "schema/authoring.bundle.json",
@@ -36,6 +36,8 @@ const CONTENT: [&str; 29] = [
     "assets/materials/region.material2d.json",
     "assets/materials/region.material2d.json.meta",
     "assets/materials/region.wgsl",
+    "assets/tilesets/region.tileset.ron",
+    "assets/tilesets/region.tileset.ron.meta",
     "assets/animations/explorer.sprite-animations.json",
     "assets/animations/explorer.sprite-animations.json.meta",
     "assets/audio/game.soundbank.json",

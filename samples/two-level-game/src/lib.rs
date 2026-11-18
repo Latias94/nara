@@ -11,6 +11,7 @@ mod host;
 pub mod levels;
 pub mod markers;
 pub mod region_material;
+pub mod region_tileset;
 #[cfg(feature = "development")]
 pub mod replay;
 pub mod resume;

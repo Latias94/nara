@@ -383,6 +383,10 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
             "two-level-game.region-material", 1,
         ))
         .expect("the region Material Runtime codec is valid")
+        .add_runtime_tileset_codec::<nara::tilemap::TileSetRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.region-tileset", 1),
+        )
+        .expect("the region TileSet Runtime codec is valid")
         .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
         .expect("the game's Sound Bank source importer is valid")
         .add_runtime_asset_codec::<

@@ -5,6 +5,8 @@ mod source;
 
 #[path = "../src/bin/cook/material.rs"]
 mod material;
+#[path = "../src/bin/cook/tileset.rs"]
+mod tileset;
 
 use std::{
     fs,
@@ -25,9 +27,10 @@ use nara::{
     core::FormatVersion,
     material::{Material2dAsset, Material2dRuntimeCodec, Material2dSource},
     project_tooling::host_fs,
+    tilemap::{TileSetDescriptor, TileSetRuntimeCodec, TileSetSource, TileSetSourceFileLimits},
 };
 use two_level_game::{
-    region_material,
+    region_material, region_tileset, side_room,
     sound_bank::{BANK_PATH, SoundBankDomain},
 };
 
@@ -76,6 +79,11 @@ impl Directory {
                 "material metadata",
             ),
             ("assets/materials/region.wgsl", "shader"),
+            ("assets/tilesets/region.tileset.ron", "tileset"),
+            (
+                "assets/tilesets/region.tileset.ron.meta",
+                "tileset metadata",
+            ),
             ("assets/animations/explorer.sprite-animations.json", "clips"),
             (
                 "assets/animations/explorer.sprite-animations.json.meta",
@@ -177,6 +185,39 @@ impl Directory {
         let material = material::prepare(&root, &scope, &mut database, &mut observations).unwrap();
         (material, observations)
     }
+
+    fn tileset() -> Self {
+        let directory = Self::new();
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for name in [
+            "assets/tilesets/region.tileset.ron",
+            "assets/tilesets/region.tileset.ron.meta",
+            "assets/textures/side-room.png.meta",
+        ] {
+            fs::copy(sample.join(name), directory.0.join(name)).unwrap();
+        }
+        directory
+    }
+
+    fn resolve_tileset(&self) -> (TileSetDescriptor, Vec<ArtifactBuildObservation>) {
+        let root = host_fs::readable_directory(&self.0).unwrap();
+        let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
+        let metadata = AssetMetaIdentityCandidate::decode_json_bytes(
+            &fs::read(self.0.join("assets/textures/side-room.png.meta")).unwrap(),
+        )
+        .unwrap();
+        let mut database = ProjectAssetDatabase::default();
+        database
+            .insert_identity(
+                &scope,
+                AssetPath::new(side_room::IMAGE_PATH).unwrap(),
+                metadata.into_identity(),
+            )
+            .unwrap();
+        let mut observations = Vec::new();
+        let tileset = tileset::prepare(&root, &scope, &mut database, &mut observations).unwrap();
+        (tileset, observations)
+    }
 }
 
 impl Drop for Directory {
@@ -230,6 +271,8 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "assets/materials/region.material2d.json",
         "assets/materials/region.material2d.json.meta",
         "assets/materials/region.wgsl",
+        "assets/tilesets/region.tileset.ron",
+        "assets/tilesets/region.tileset.ron.meta",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();
@@ -261,6 +304,8 @@ fn content_fence_requires_authored_sources_and_metadata() {
         "assets/materials/region.material2d.json",
         "assets/materials/region.material2d.json.meta",
         "assets/materials/region.wgsl",
+        "assets/tilesets/region.tileset.ron",
+        "assets/tilesets/region.tileset.ron.meta",
     ] {
         let directory = Directory::new();
         fs::remove_file(directory.0.join(name)).unwrap();
@@ -283,6 +328,8 @@ fn code_and_generated_bootstrap_stay_fenced_through_later_publication_checks() {
         "assets/materials/region.material2d.json",
         "assets/materials/region.material2d.json.meta",
         "assets/materials/region.wgsl",
+        "assets/tilesets/region.tileset.ron",
+        "assets/tilesets/region.tileset.ron.meta",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();
@@ -538,4 +585,138 @@ fn shader_replacement_with_identical_bytes_cannot_replace_the_original_file_iden
             .unwrap_err()
             .contains("assets/materials/region.wgsl")
     );
+}
+
+#[test]
+fn tileset_image_reference_requires_an_admitted_image_identity() {
+    let directory = Directory::tileset();
+    let root = host_fs::readable_directory(&directory.0).unwrap();
+    let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
+    for kind in [None, Some(AssetSourceKind::Scene)] {
+        let mut database = ProjectAssetDatabase::default();
+        if let Some(kind) = kind {
+            let path = AssetPath::new(side_room::IMAGE_PATH).unwrap();
+            database
+                .insert_identity(
+                    &scope,
+                    path.clone(),
+                    AssetMetaIdentity::new(side_room::image_product().source(), path, kind),
+                )
+                .unwrap();
+        }
+        let error = tileset::prepare(&root, &scope, &mut database, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("TileSet"), "{error}");
+        assert!(error.contains("Image"), "{error}");
+    }
+}
+
+#[test]
+fn tileset_source_resolves_the_actual_required_image_and_stays_fenced_through_publication() {
+    let directory = Directory::tileset();
+    let path = directory.0.join("assets/tilesets/region.tileset.ron");
+    let bytes = fs::read(&path).unwrap();
+    let authored =
+        TileSetSource::decode_ron_bytes(&bytes, TileSetSourceFileLimits::default()).unwrap();
+    assert_eq!(
+        authored.image,
+        AssetRef::path(side_room::IMAGE_PATH).unwrap()
+    );
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let (descriptor, observations) = directory.resolve_tileset();
+    assert_eq!(descriptor, region_tileset::descriptor());
+    assert_eq!(observations.len(), 1);
+    assert!(matches!(
+        &observations[0],
+        ArtifactBuildObservation::Raw { path, digest: Some(digest) }
+            if path.as_str() == "assets/tilesets/region.tileset.ron"
+                && *digest == ArtifactContentDigest::of_bytes(&bytes)
+    ));
+    let cooked = TileSetRuntimeCodec::decode_runtime(
+        &TileSetRuntimeCodec::encode_runtime(&descriptor).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cooked, descriptor);
+    let mut dependencies = Vec::new();
+    TileSetRuntimeCodec::visit_runtime_dependencies(&cooked, |product, demand| {
+        dependencies.push((product, demand));
+        Ok::<_, std::convert::Infallible>(())
+    })
+    .unwrap();
+    assert_eq!(
+        dependencies,
+        [(
+            side_room::image_product(),
+            nara::asset::AssetReferenceDemand::Immediate,
+        )]
+    );
+    fence.bind_raw_inputs(&observations).unwrap();
+    fs::write(
+        directory.0.join("src/bin/player/generated.rs"),
+        "new TileSet catalog",
+    )
+    .unwrap();
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    fence.bind_code(&inputs).unwrap();
+    fence.verify().unwrap();
+    fs::write(&path, "changed TileSet after capture").unwrap();
+    assert!(
+        fence
+            .verify()
+            .unwrap_err()
+            .contains("assets/tilesets/region.tileset.ron")
+    );
+    fs::write(&path, bytes).unwrap();
+    fence.verify().unwrap();
+    assert_eq!(cooked, region_tileset::descriptor());
+}
+
+#[test]
+fn tileset_changes_before_resolution_cannot_rebaseline_the_original_capture() {
+    let directory = Directory::tileset();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let path = directory.0.join("assets/tilesets/region.tileset.ron");
+    let mut authored = TileSetSource::decode_ron_bytes(
+        &fs::read(&path).unwrap(),
+        TileSetSourceFileLimits::default(),
+    )
+    .unwrap();
+    authored.tint = nara::core::Color::rgba(0.5, 1.0, 1.0, 1.0);
+    fs::write(&path, authored.encode_ron_bytes().unwrap()).unwrap();
+    let (_, observations) = directory.resolve_tileset();
+    assert!(
+        fence
+            .bind_raw_inputs(&observations)
+            .unwrap_err()
+            .contains("assets/tilesets/region.tileset.ron")
+    );
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    assert!(
+        fence
+            .bind_code(&inputs)
+            .unwrap_err()
+            .contains("assets/tilesets/region.tileset.ron")
+    );
+}
+
+#[test]
+fn identical_tileset_source_and_metadata_replacements_preserve_original_file_identity() {
+    for name in [
+        "assets/tilesets/region.tileset.ron",
+        "assets/tilesets/region.tileset.ron.meta",
+    ] {
+        let directory = Directory::tileset();
+        let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+        let (_, observations) = directory.resolve_tileset();
+        let path = directory.0.join(name);
+        let bytes = fs::read(&path).unwrap();
+        fs::rename(&path, path.with_extension("original")).unwrap();
+        fs::write(&path, bytes).unwrap();
+        assert!(
+            fence
+                .bind_raw_inputs(&observations)
+                .unwrap_err()
+                .contains(name)
+        );
+        assert!(fence.verify().unwrap_err().contains(name));
+    }
 }

@@ -78,8 +78,9 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
     let mut host_frame = 0;
     let mut retained = Vec::new();
 
-    let startup = capture::sample(&mut game, 0);
+    let startup = capture::sample(&mut game, 0, 0);
     assert!(startup.publication.is_none() && startup.binding.is_none());
+    assert!(startup.floor.is_none());
     expected.check(
         &gpu::draw(host, &live, &startup.input, &mut host_frame),
         [Closed, Closed],
@@ -88,22 +89,35 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
 
     game.command(action(SIDE_ROOM));
     settle_rooms(&mut game, [SideRoomPhase::Open, SideRoomPhase::Closed]);
-    let opened = capture::sample(&mut game, 1);
+    let opened = capture::sample(&mut game, 1, 1);
     let publication = opened
         .publication
         .expect("one real resident Material publication");
     let binding = opened.binding.as_ref().unwrap().clone();
     let image = opened.image;
+    let floor = opened
+        .floor
+        .as_ref()
+        .expect("the original resident TileSet floor");
+    let floor_publication = floor.publication;
+    let floor_receipt = floor.receipt.clone();
+    let tileset = floor.tileset.clone();
     let pixels = gpu::draw(host, &live, &opened.input, &mut host_frame);
     expected.check(&pixels, [Open, Closed], LevelId::Meadow);
     retained.push((opened, pixels, [Open, Closed]));
 
     game.command(action(LOOKOUT));
     settle_rooms(&mut game, [SideRoomPhase::Open, SideRoomPhase::Open]);
-    let both = capture::sample(&mut game, 2);
+    let both = capture::sample(&mut game, 2, 2);
     assert_eq!(both.publication, Some(publication));
     assert_eq!(both.binding.as_ref(), Some(&binding));
     assert_eq!(both.image, image);
+    assert_eq!(both.floor.as_ref().unwrap().publication, floor_publication);
+    assert_eq!(both.floor.as_ref().unwrap().tileset, tileset);
+    assert_eq!(
+        both.floor.as_ref().unwrap().receipt.handle(),
+        floor_receipt.handle()
+    );
     let pixels = gpu::draw(host, &live, &both.input, &mut host_frame);
     expected.check(&pixels, [Open, Open], LevelId::Meadow);
     retained.push((both, pixels, [Open, Open]));
@@ -125,14 +139,17 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
     }
     let away = game.command(movement(1, false));
     assert!(
-        away.player.x > -96.0,
-        "the player must leave the relic pixel oracle: {away:?}"
+        away.player.x > -90.0,
+        "the original D10 ticks must clear the relic and floor pixel oracles: {away:?}"
     );
     assert_eq!(away.side_room, SideRoomPhase::RelicFound);
     assert_eq!(away.lookout, SideRoomPhase::Open);
-    let found = capture::sample(&mut game, 1);
+    let found = capture::sample(&mut game, 1, 2);
     assert_eq!(found.publication, Some(publication));
     assert_eq!(found.binding.as_ref(), Some(&binding));
+    assert_eq!(found.image, image);
+    assert_eq!(found.floor.as_ref().unwrap().publication, floor_publication);
+    assert_eq!(found.floor.as_ref().unwrap().tileset, tileset);
     let pixels = gpu::draw(host, &live, &found.input, &mut host_frame);
     expected.check(&pixels, [Collected, Open], LevelId::Meadow);
     retained.push((found, pixels, [Collected, Open]));
@@ -141,10 +158,15 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
     assert_eq!(closed.current_instance, primary);
     assert_eq!(closed.side_room, SideRoomPhase::Closed);
     assert_eq!(closed.lookout, SideRoomPhase::Open);
-    let closed = capture::sample(&mut game, 1);
+    let closed = capture::sample(&mut game, 1, 1);
     assert_eq!(closed.publication, Some(publication));
     assert_eq!(closed.binding.as_ref(), Some(&binding));
     assert_eq!(closed.image, image);
+    assert_eq!(
+        closed.floor.as_ref().unwrap().publication,
+        floor_publication
+    );
+    assert_eq!(closed.floor.as_ref().unwrap().tileset, tileset);
     let pixels = gpu::draw(host, &live, &closed.input, &mut host_frame);
     expected.check(&pixels, [Closed, Open], LevelId::Meadow);
     retained.push((closed, pixels, [Closed, Open]));
@@ -154,10 +176,11 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
     assert_ne!(traveled.current_instance, primary);
     assert_eq!(traveled.side_room, SideRoomPhase::Closed);
     assert_eq!(traveled.lookout, SideRoomPhase::Closed);
-    let traveled = capture::sample(&mut game, 0);
+    let traveled = capture::sample(&mut game, 0, 0);
     assert!(traveled.publication.is_none() && traveled.binding.is_none());
     assert!(traveled.image.is_none());
-    capture::assert_released(&game, publication.0, image.unwrap().0);
+    assert!(traveled.floor.is_none());
+    capture::assert_released(&game, publication.0, image.unwrap().0, &floor_receipt);
     expected.check(
         &gpu::draw(host, &live, &traveled.input, &mut host_frame),
         [Closed, Closed],
@@ -166,9 +189,18 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
     game.close();
     assert!(game.session.is_closed());
 
+    assert_eq!(retained.len(), 4);
     for (frame, original, rooms) in &retained {
         assert_eq!(frame.binding.as_ref(), Some(&binding));
         assert_eq!(frame.publication, Some(publication));
+        let floor = frame.floor.as_ref().unwrap();
+        assert_eq!(floor.publication, floor_publication);
+        assert_eq!(floor.receipt.handle(), floor_receipt.handle());
+        assert_eq!(floor.tileset, tileset);
+        assert_eq!(
+            floor.tileset.image_content().unwrap().pixels(),
+            two_level_game::region_material::SOURCE_PIXEL.repeat(4)
+        );
         let pixels = gpu::draw(host, &replay, &frame.input, &mut host_frame);
         expected.check(&pixels, *rooms, LevelId::Meadow);
         assert_eq!(
@@ -183,9 +215,10 @@ fn qualify(host: &mut WgpuRenderHost, expected: &oracle::Expected) {
         assert!(prefix.poll().unwrap());
     }
     println!(
-        "region_material_pixels: shared_publication=true independent_close=true actual_travel_unload=true runtime_retired=true retained_original_replays={} expected_linear_rgba8={:?}",
+        "region_material_pixels: shared_publication=true shared_tileset=true floor_cells_per_room=8 independent_close=true actual_travel_unload=true runtime_retired=true retained_original_replays={} expected_linear_rgba8={:?} expected_floor_linear_rgba8={:?}",
         retained.len(),
         expected.graded,
+        expected.floors,
     );
 }
 

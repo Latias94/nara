@@ -9,7 +9,7 @@ use nara::project_tooling::process::SupervisedProcessCommand;
 use serde_json::{Value, json};
 use two_level_game::{
     levels::{LevelId, LevelKey},
-    region_material,
+    region_material, region_tileset,
     save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
 };
 
@@ -95,14 +95,41 @@ impl<'a> Session<'a> {
                     record["presentation"]["side_room_sprites"], visible_rooms,
                     "visible Meadow region Sprites disagree with their presented game state: {record}"
                 );
-                let resident_room = ["side_room", "lookout"].into_iter().any(|room| {
-                    matches!(record["state"][room].as_str(), Some("open" | "relic_found"))
-                });
+                let resident_rooms = ["side_room", "lookout"]
+                    .into_iter()
+                    .filter(|room| {
+                        matches!(
+                            record["state"][*room].as_str(),
+                            Some("open" | "relic_found")
+                        )
+                    })
+                    .count();
+                let resident_room = resident_rooms > 0;
                 assert_eq!(
                     record["presentation"]["side_room_material"].is_object(),
                     resident_room,
                     "presented region Material residency disagrees with the live rooms: {record}"
                 );
+                assert_eq!(
+                    record["presentation"]["side_room_tileset"].is_object(),
+                    resident_room,
+                    "resident TileSet declaration disagrees with the live rooms: {record}"
+                );
+                assert_eq!(
+                    record["presentation"]["side_room_tilemaps"], resident_rooms,
+                    "original presented Tilemap batches disagree with the live rooms: {record}"
+                );
+                assert_eq!(
+                    record["presentation"]["side_room_tile_cells"],
+                    resident_rooms * 8,
+                    "original presented Tilemap cell count disagrees with the live rooms: {record}"
+                );
+                if resident_room {
+                    let tileset = &record["presentation"]["side_room_tileset"];
+                    assert_eq!(tileset["cpu_tilemaps"], resident_rooms);
+                    assert_eq!(tileset["cpu_tile_cells"], resident_rooms * 8);
+                    evidence::tileset(tileset, &record["presentation"]["side_room_image"]);
+                }
             }
             match kind {
                 READY => {
@@ -258,6 +285,9 @@ impl<'a> Session<'a> {
         assert_eq!(start["state"]["lookout"], "closed");
         assert!(start["presentation"]["side_room_image"].is_null());
         assert!(start["presentation"]["side_room_material"].is_null());
+        assert!(start["presentation"]["side_room_tileset"].is_null());
+        assert_eq!(start["presentation"]["side_room_tilemaps"], 0);
+        assert_eq!(start["presentation"]["side_room_tile_cells"], 0);
         assert!(
             !start["resident_images"]
                 .as_array()
@@ -271,6 +301,10 @@ impl<'a> Session<'a> {
         assert!(evidence::number(publication, "asset_id") > 0);
         assert!(evidence::number(publication, "version") > 0);
         let material = &opened["presentation"]["side_room_material"];
+        let tileset = &opened["presentation"]["side_room_tileset"];
+        evidence::tileset(tileset, publication);
+        assert_eq!(opened["presentation"]["side_room_tilemaps"], 1);
+        assert_eq!(opened["presentation"]["side_room_tile_cells"], 8);
         assert_eq!(
             material["product"],
             region_material::material_product().to_string()
@@ -307,6 +341,8 @@ impl<'a> Session<'a> {
         let both_open = self.tap(window::G, |record| record["state"]["lookout"] == "open");
         assert_eq!(both_open["state"]["side_room"], "open");
         assert_eq!(both_open["presentation"]["side_room_sprites"], 2);
+        assert_eq!(both_open["presentation"]["side_room_tilemaps"], 2);
+        assert_eq!(both_open["presentation"]["side_room_tile_cells"], 16);
         self.input.press(window::W);
         let found = self.wait(&both_open, |record| {
             record["state"]["side_room"] == "relic_found"
@@ -314,12 +350,16 @@ impl<'a> Session<'a> {
         self.input.release();
         assert_eq!(found["state"]["lookout"], "open");
         assert_eq!(found["presentation"]["side_room_sprites"], 1);
+        assert_eq!(found["presentation"]["side_room_tilemaps"], 2);
+        assert_eq!(found["presentation"]["side_room_tile_cells"], 16);
         assert_eq!(found["state"]["held"], json!([false, false, true, false]));
         assert_eq!(position(&found)[0], position(&start)[0]);
         assert!(position(&found)[1] > position(&start)[1]);
         let closed = self.tap(window::B, |record| record["state"]["side_room"] == "closed");
         assert_eq!(closed["state"]["lookout"], "open");
         assert_eq!(closed["presentation"]["side_room_sprites"], 1);
+        assert_eq!(closed["presentation"]["side_room_tilemaps"], 1);
+        assert_eq!(closed["presentation"]["side_room_tile_cells"], 8);
         assert_eq!(closed["state"]["held"], json!([false, false, false, false]));
         for stage in [&opened, &both_open, &found, &closed] {
             evidence::progress(stage, main(LevelId::Meadow), 0, &[], 2);
@@ -327,6 +367,19 @@ impl<'a> Session<'a> {
             assert_eq!(stage["resident_images"], opened["resident_images"]);
             assert_eq!(&stage["presentation"]["side_room_image"], publication);
             assert_eq!(&stage["presentation"]["side_room_material"], material);
+            for field in [
+                "product",
+                "asset_id",
+                "version",
+                "declaration",
+                "image",
+                "observation",
+            ] {
+                assert_eq!(
+                    stage["presentation"]["side_room_tileset"][field], tileset[field],
+                    "the original shared TileSet publication changed during room use: {stage}"
+                );
+            }
         }
         let traveled = self.travel(window::E, main(LevelId::Cavern), 0, &[], 2);
         assert_eq!(traveled["state"]["side_room"], "closed");
@@ -334,6 +387,9 @@ impl<'a> Session<'a> {
         assert_eq!(traveled["presentation"]["side_room_sprites"], 0);
         assert!(traveled["presentation"]["side_room_image"].is_null());
         assert!(traveled["presentation"]["side_room_material"].is_null());
+        assert!(traveled["presentation"]["side_room_tileset"].is_null());
+        assert_eq!(traveled["presentation"]["side_room_tilemaps"], 0);
+        assert_eq!(traveled["presentation"]["side_room_tile_cells"], 0);
         assert!(
             !traveled["resident_images"]
                 .as_array()
@@ -353,6 +409,7 @@ impl<'a> Session<'a> {
             "primary_instance": start["state"]["current_instance"],
             "released_image": product,
             "released_material": region_material::material_product().to_string(),
+            "released_tileset": region_tileset::tileset_product().to_string(),
         })
     }
 

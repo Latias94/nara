@@ -5,6 +5,7 @@ use std::{
 };
 
 use nara::{
+    asset::RuntimeAssetCodec,
     fs::{ContentDigest, RelativePath},
     material::Material2dRuntimeCodec,
     project_host::{HeadlessSession, HeadlessSessionClose, open_executable_relative_runtime_pack},
@@ -12,6 +13,7 @@ use nara::{
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMemberKind,
         RuntimeContentTarget,
     },
+    tilemap::TileSetRuntimeCodec,
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -20,7 +22,7 @@ use two_level_game::{
     input::input_product,
     levels::{LevelId, LevelKey},
     markers::marker_product,
-    region_material,
+    region_material, region_tileset,
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
     side_room,
 };
@@ -48,7 +50,7 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         let catalog = base.catalog();
         if catalog.startup_scene() != LevelId::STARTUP.scene_product()
             || catalog.scenes().len() != LevelId::ALL.len()
-            || catalog.members().len() != 14
+            || catalog.members().len() != 15
             || catalog
                 .members()
                 .iter()
@@ -78,6 +80,13 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
                     matches!(member.kind(), RuntimeContentMemberKind::Asset { format, version }
                         if format.as_str() == Material2dRuntimeCodec::RUNTIME_KIND
                             && version.get() == Material2dRuntimeCodec::RUNTIME_VERSION)
+                })
+            || !base
+                .member(region_tileset::tileset_product())
+                .is_some_and(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Asset { format, version }
+                        if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                            && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION)
                 })
             || base
                 .member(two_level_game::sound_bank::bank_product())

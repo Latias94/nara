@@ -190,6 +190,10 @@ mod atlas_content {
         },
         scene::{SceneEntitySource, SourceDocumentKind, SourceDocumentOrigin},
         sprite::Sprite,
+        tilemap::{
+            TileSet, TileSetAssets, TileSetDomain, TileSetRuntimeCodec, TileSetSource,
+            TileSetSourceFileLimits, Tilemap,
+        },
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
@@ -197,7 +201,7 @@ mod atlas_content {
         animation::{atlas_product, clips_product},
         levels::{LevelId, LevelKey},
         markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
-        region_material, side_room,
+        region_material, region_tileset, side_room,
         sound_bank::bank_product,
     };
 
@@ -250,6 +254,8 @@ mod atlas_content {
                 "assets/materials/region.material2d.json",
                 "assets/materials/region.material2d.json.meta",
                 "assets/materials/region.wgsl",
+                "assets/tilesets/region.tileset.ron",
+                "assets/tilesets/region.tileset.ron.meta",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/animations/explorer.sprite-animations.json.meta",
                 "assets/audio/game.soundbank.json",
@@ -292,7 +298,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 14);
+        assert_eq!(catalog.members().len(), 15);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
         scenes.sort();
         assert_eq!(catalog.scenes(), scenes);
@@ -368,6 +374,7 @@ mod atlas_content {
                     side_room::lookout_scene_product(),
                     side_room::image_product(),
                     region_material::material_product(),
+                    region_tileset::tileset_product(),
                 ])
                 .collect::<BTreeSet<_>>()
         );
@@ -434,6 +441,16 @@ mod atlas_content {
                 .unwrap(),
             material.product(),
         );
+        let tileset = prepared
+            .base()
+            .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(region_tileset::tileset_product())
+            .unwrap();
+        two_level_pack::assert_room_tileset_member(
+            catalog
+                .member_for_product(region_tileset::tileset_product())
+                .unwrap(),
+            tileset.product(),
+        );
         let input = catalog.member_for_product(super::input_product()).unwrap();
         assert_eq!(input.products(), [super::input_product()]);
         assert!(input.dependencies().is_empty());
@@ -468,6 +485,7 @@ mod atlas_content {
                 "assets/textures/side-room.png",
                 "assets/materials/region.material2d.json",
                 "assets/materials/region.wgsl",
+                "assets/tilesets/region.tileset.ron",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
@@ -480,6 +498,12 @@ mod atlas_content {
         drop(cache);
         assert!(!project.exists() && !store.exists());
         two_level_pack::assert_room_material(material.product());
+        two_level_pack::assert_room_tileset(tileset.product());
+        let decoded_tileset = prepared
+            .base()
+            .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(region_tileset::tileset_product())
+            .unwrap();
+        two_level_pack::assert_room_tileset(decoded_tileset.product());
         let decoded = prepared
             .base()
             .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
@@ -618,6 +642,130 @@ mod atlas_content {
                 .unwrap();
             two_level_pack::assert_room_material(material.product());
             two_level_pack::assert_room_material(retained.product());
+        }
+    }
+
+    #[test]
+    fn tileset_preflight_rejects_invalid_files_layout_and_room_cells_before_publication() {
+        for (name, failure) in [
+            ("assets/tilesets/region.tileset.ron", "source"),
+            ("assets/tilesets/region.tileset.ron.meta", "metadata"),
+            ("assets/tilesets/region.tileset.ron", "layout"),
+            ("scenes/side-room.scene.json", "member"),
+            ("scenes/side-room.scene.json", "cells"),
+            ("scenes/lookout.scene.json", "cells"),
+        ] {
+            let cache = Cache::new();
+            let project = cache.project();
+            let store = cache.path.join("store");
+            fs::create_dir(&store).unwrap();
+            let store = host_fs::writable_directory(&store).unwrap();
+            let mut fence = ContentFence::capture(&project).unwrap();
+            let (original, observations) = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .unwrap();
+            fence.bind_raw_inputs(&observations).unwrap();
+            let retained = original
+                .base()
+                .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(
+                    region_tileset::tileset_product(),
+                )
+                .unwrap();
+            let path = project.join(name);
+            let bytes = fs::read(&path).unwrap();
+            match failure {
+                "source" | "metadata" => fs::write(&path, "invalid region TileSet input").unwrap(),
+                "layout" => {
+                    let mut tileset =
+                        TileSetSource::decode_ron_bytes(&bytes, TileSetSourceFileLimits::default())
+                            .unwrap();
+                    tileset.atlas.columns = 3;
+                    fs::write(&path, tileset.encode_ron_bytes().unwrap()).unwrap();
+                }
+                "member" | "cells" => {
+                    let mut scene: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    let floor = scene["payload"]["entities"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|entity| entity["components"].get("nara.tilemap.Tilemap").is_some())
+                        .unwrap();
+                    let tilemap =
+                        &mut floor["components"]["nara.tilemap.Tilemap"]["value"]["value"];
+                    if failure == "member" {
+                        tilemap["tileset"]["value"]["value"]["value"]["source"]["value"] =
+                            serde_json::json!(side_room::image_product().source().to_string());
+                    } else {
+                        tilemap["cells"]["value"][0]["value"]["cell"]["value"]["tile"]["value"] =
+                            serde_json::json!(4);
+                    }
+                    fs::write(&path, serde_json::to_vec(&scene).unwrap()).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(fence.verify().unwrap_err().contains(name));
+            let error = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .err()
+            .expect("invalid TileSet content must refuse the unpublished candidate");
+            match failure {
+                "source" | "metadata" => {
+                    assert!(error.contains(region_tileset::TILESET_PATH), "{error}");
+                }
+                "layout" => assert!(error.contains("TileSet descriptor"), "{error}"),
+                "member" => assert!(error.contains("Tilemap") || error.contains(name), "{error}"),
+                "cells" => assert!(error.contains("Tilemap cells"), "{error}"),
+                _ => unreachable!(),
+            }
+            two_level_pack::assert_room_tileset(retained.product());
+            let original_tileset = original
+                .base()
+                .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(
+                    region_tileset::tileset_product(),
+                )
+                .unwrap();
+            two_level_pack::assert_room_tileset_member(
+                original
+                    .base()
+                    .catalog()
+                    .member_for_product(region_tileset::tileset_product())
+                    .unwrap(),
+                original_tileset.product(),
+            );
+            fs::write(&path, bytes).unwrap();
+            fence.verify().unwrap();
+            let (repaired, observations) = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .unwrap();
+            fence.bind_raw_inputs(&observations).unwrap();
+            assert_eq!(
+                original.base().catalog().to_json_bytes().unwrap(),
+                repaired.base().catalog().to_json_bytes().unwrap()
+            );
+            drop(fence);
+            drop(store);
+            drop(cache);
+            assert!(!project.exists());
+            let repaired_tileset = repaired
+                .base()
+                .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(
+                    region_tileset::tileset_product(),
+                )
+                .unwrap();
+            two_level_pack::assert_room_tileset(repaired_tileset.product());
+            two_level_pack::assert_room_tileset(retained.product());
         }
     }
 
@@ -840,6 +988,7 @@ mod atlas_content {
                 assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
                 assert_resident_images(world, LevelId::Meadow, None);
                 assert!(world.resource::<Assets<Material2dAsset>>().is_empty());
+                assert!(world.resource::<Assets<TileSet>>().is_empty());
                 CurrentScene::get(world).unwrap().receipt().clone()
             })
             .map_err(|error| error.to_string())?;
@@ -882,6 +1031,22 @@ mod atlas_content {
                     (room, lookout, room_image, material, version, retained)
                 })
                 .map_err(|error| error.to_string())?;
+        let (shared_tileset, tileset_version, tileset_slot, retained_tileset) = session
+            .observe(|world| {
+                let (handle, version) = cooked_floor(world, &room, region_tileset::SIDE_ROOM_FLOOR);
+                assert_eq!(
+                    cooked_floor(world, &lookout, region_tileset::LOOKOUT_FLOOR),
+                    (handle, version)
+                );
+                let tilesets = world.resource::<Assets<TileSet>>();
+                (
+                    handle,
+                    version,
+                    tilesets.slot_revision(handle),
+                    tilesets.get(handle).unwrap().clone(),
+                )
+            })
+            .map_err(|error| error.to_string())?;
         let original_slot = session
             .observe(|world| {
                 world
@@ -898,6 +1063,20 @@ mod atlas_content {
                 assert_eq!(snapshot.current_instance, primary_id);
                 assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
                 assert_retired(world, &room);
+                assert_eq!(
+                    cooked_floor(world, &lookout, region_tileset::LOOKOUT_FLOOR),
+                    (shared_tileset, tileset_version)
+                );
+                let tilesets = world.resource::<Assets<TileSet>>();
+                assert_eq!(tilesets.slot_revision(shared_tileset), tileset_slot);
+                assert!(
+                    tilesets
+                        .get(shared_tileset)
+                        .unwrap()
+                        .image_content()
+                        .unwrap()
+                        .same_allocation(retained_tileset.image_content().unwrap())
+                );
                 assert_eq!(
                     cooked_relic(
                         world,
@@ -937,6 +1116,16 @@ mod atlas_content {
                 assert_eq!(material, shared_material);
                 assert_eq!(version, shared_version);
                 assert_eq!(
+                    cooked_floor(world, &reopened, region_tileset::SIDE_ROOM_FLOOR),
+                    (shared_tileset, tileset_version)
+                );
+                assert_eq!(
+                    world
+                        .resource::<Assets<TileSet>>()
+                        .slot_revision(shared_tileset),
+                    tileset_slot
+                );
+                assert_eq!(
                     world
                         .resource::<Assets<Material2dAsset>>()
                         .slot_revision(material),
@@ -953,6 +1142,20 @@ mod atlas_content {
                 assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
                 assert_eq!(snapshot.current_instance, primary_id);
                 assert_retired(world, &lookout);
+                assert_eq!(
+                    cooked_floor(world, &reopened, region_tileset::SIDE_ROOM_FLOOR),
+                    (shared_tileset, tileset_version)
+                );
+                let tilesets = world.resource::<Assets<TileSet>>();
+                assert_eq!(tilesets.slot_revision(shared_tileset), tileset_slot);
+                assert!(
+                    tilesets
+                        .get(shared_tileset)
+                        .unwrap()
+                        .image_content()
+                        .unwrap()
+                        .same_allocation(retained_tileset.image_content().unwrap())
+                );
                 assert_eq!(
                     cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC),
                     (
@@ -989,6 +1192,16 @@ mod atlas_content {
                 assert_eq!(image, shared_image);
                 assert_eq!(material, shared_material);
                 assert_eq!(version, shared_version);
+                assert_eq!(
+                    cooked_floor(world, &reopened, region_tileset::LOOKOUT_FLOOR),
+                    (shared_tileset, tileset_version)
+                );
+                assert_eq!(
+                    world
+                        .resource::<Assets<TileSet>>()
+                        .slot_revision(shared_tileset),
+                    tileset_slot
+                );
                 let materials = world.resource::<Assets<Material2dAsset>>();
                 assert_eq!(materials.slot_revision(material), original_slot);
                 assert_eq!(
@@ -1039,6 +1252,26 @@ mod atlas_content {
                         .is_none()
                 );
                 assert!(world.resource::<Assets<Material2dAsset>>().is_empty());
+                assert!(world.resource::<Assets<TileSet>>().is_empty());
+                assert!(
+                    world
+                        .resource::<TileSetAssets>()
+                        .desired(shared_tileset)
+                        .is_none()
+                );
+                assert!(world.resource::<TileSetAssets>().sources().next().is_none());
+                assert!(
+                    world
+                        .resource::<AssetStates>()
+                        .state(shared_tileset.id())
+                        .is_none_or(|state| state.usable_version().is_none())
+                );
+                let retained = retained_tileset.image_content().unwrap();
+                assert!(!retained.is_authorized(
+                    world.resource::<AssetServer>(),
+                    world.resource::<AssetStates>(),
+                    world.resource::<Assets<ImageAsset>>()
+                ));
                 assert!(
                     world
                         .resource::<Assets<Material2dAsset>>()
@@ -1055,6 +1288,10 @@ mod atlas_content {
             })
             .map_err(|error| error.to_string())?;
         two_level_pack::assert_room_material(&retained_material);
+        let retained_image = retained_tileset.image_content().unwrap();
+        assert_eq!(retained_image.product(), side_room::image_product());
+        assert!(retained_image.source().is_none());
+        assert_eq!(retained_image.pixels(), [64, 224, 180, 255].repeat(4));
         Ok(())
     }
 
@@ -1174,6 +1411,106 @@ mod atlas_content {
             .usable_version()
             .expect("the cooked shared Material is usable");
         (receipt, handle, material.handle(), version)
+    }
+
+    fn cooked_floor(
+        world: &World,
+        receipt: &SpawnedSceneInstance,
+        floor_id: &str,
+    ) -> (Handle<TileSet>, AssetVersion) {
+        let mut floors = world.iter_entities().filter(|entity| {
+            entity.get::<SceneEntitySource>().is_some_and(|source| {
+                source.instance_id == receipt.instance_id() && source.entity_id.as_str() == floor_id
+            })
+        });
+        let floor = floors
+            .next()
+            .expect("the cooked region publishes its Tilemap floor");
+        assert!(floors.next().is_none());
+        let source = floor.get::<SceneEntitySource>().unwrap();
+        assert_eq!(
+            receipt.resolve(world, &source.entity_id),
+            EntityLookup::Resolved(floor.id())
+        );
+        let tilemap = floor
+            .get::<Tilemap>()
+            .expect("the region floor retains its authored Tilemap");
+        assert!(floor.get::<Sprite>().is_none());
+        assert_eq!(tilemap.tile_size, region_tileset::TILE_SIZE);
+        assert_eq!(tilemap.layer.index, region_tileset::FLOOR_LAYER);
+        assert_eq!(tilemap.sort_key, 0);
+        assert!(tilemap.y_sort_anchor.is_none());
+        let expected = if floor_id == region_tileset::SIDE_ROOM_FLOOR {
+            region_tileset::side_room_cells()
+        } else {
+            assert_eq!(floor_id, region_tileset::LOOKOUT_FLOOR);
+            region_tileset::lookout_cells()
+        };
+        assert_eq!(tilemap.cell_count(), expected.len());
+        assert_eq!(
+            tilemap
+                .cells()
+                .map(|(coord, cell)| (coord, *cell))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let handle = tilemap
+            .tileset
+            .expect("the cooked Tilemap binds its TileSet");
+        let tilesets = world.resource::<Assets<TileSet>>();
+        assert_eq!(tilesets.len(), 1);
+        let tileset = tilesets.get(handle).unwrap();
+        let descriptor = region_tileset::descriptor();
+        assert_eq!(tileset.atlas(), Some(descriptor.atlas()));
+        assert_eq!(tileset.tile_size(), descriptor.atlas().tile_size);
+        assert_eq!(tileset.material().sampler, descriptor.sampler());
+        assert_eq!(tileset.material().alpha_mode, descriptor.alpha_mode());
+        assert_eq!(tileset.material().tint, descriptor.tint());
+        let server = world.resource::<AssetServer>();
+        assert_eq!(
+            server.product(handle.id()),
+            Some(region_tileset::tileset_product())
+        );
+        assert_eq!(
+            server.get_product_handle::<TileSet>(region_tileset::tileset_product()),
+            Some(handle)
+        );
+        assert!(server.path(handle.id()).is_none());
+        let image_handle = tileset.material().image.unwrap();
+        assert_eq!(
+            server.get_product_handle::<ImageAsset>(side_room::image_product()),
+            Some(image_handle)
+        );
+        assert!(server.path(image_handle.id()).is_none());
+        let images = world.resource::<Assets<ImageAsset>>();
+        let image = images.get(image_handle).unwrap();
+        two_level_pack::assert_room_image(image);
+        let content = tileset
+            .image_content()
+            .expect("the cooked TileSet captures its actual Image");
+        assert_eq!(content.handle(), image_handle);
+        assert_eq!(content.product(), side_room::image_product());
+        assert_eq!(content.extent(), image.extent());
+        assert_eq!(content.pixels(), image.pixels());
+        assert!(content.source().is_none());
+        let states = world.resource::<AssetStates>();
+        assert!(content.is_current(server, states, images));
+        let image_state = states.state(image_handle.id()).unwrap();
+        assert!(image_state.source_hash().is_none());
+        assert!(image_state.import_recipe_digest().is_none());
+        let state = states.state(handle.id()).unwrap();
+        assert!(state.source_hash().is_none());
+        assert!(state.import_recipe_digest().is_none());
+        let owner = world.resource::<TileSetAssets>();
+        assert!(owner.desired(handle).is_none());
+        assert!(owner.sources().next().is_none());
+        assert!(owner.error(handle).is_none());
+        (
+            handle,
+            state
+                .usable_version()
+                .expect("the cooked TileSet is usable"),
+        )
     }
 
     fn assert_retired(world: &World, receipt: &SpawnedSceneInstance) {

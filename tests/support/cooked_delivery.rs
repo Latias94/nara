@@ -163,6 +163,7 @@ pub mod native {
             RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey,
             SourceDocumentKind, SourceDocumentOrigin,
         },
+        tilemap::TileSetRuntimeCodec,
     };
     use nara_sprite_animation::SpriteAnimationCodec;
     use serde::{Deserialize, Serialize};
@@ -172,7 +173,7 @@ pub mod native {
         input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         markers::{SCENE_PATH, marker_image_product, marker_product},
-        region_material,
+        region_material, region_tileset,
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         side_room,
         sound_bank::{SoundBankCodec, bank_product},
@@ -545,7 +546,7 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 14);
+        assert_eq!(pack.catalog.members().len(), 15);
         assert_eq!(
             pack.catalog
                 .members()
@@ -579,6 +580,7 @@ pub mod native {
                     side_room::lookout_scene_product(),
                     side_room::image_product(),
                     region_material::material_product(),
+                    region_tileset::tileset_product(),
                 ])
                 .collect()
         );
@@ -628,6 +630,17 @@ pub mod native {
                 &pack_bytes[pack.members[material_index].clone()],
             )
             .unwrap(),
+        );
+        let tileset_index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [region_tileset::tileset_product()])
+            .unwrap();
+        super::two_level_pack::assert_room_tileset_member(
+            &pack.catalog.members()[tileset_index],
+            &TileSetRuntimeCodec::decode_runtime(&pack_bytes[pack.members[tileset_index].clone()])
+                .unwrap(),
         );
         let marker_index = pack
             .catalog
@@ -775,6 +788,7 @@ pub mod native {
             "src/animation.rs",
             "src/levels.rs",
             "src/region_material.rs",
+            "src/region_tileset.rs",
             "assets/materials/region.wgsl",
             bootstrap,
         ] {

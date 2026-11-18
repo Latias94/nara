@@ -17,8 +17,8 @@ use nara::{
     advanced_prelude::CurrentScene,
     app::{CoreStage, PluginCategory, PluginDeclaration, PluginId},
     asset::{
-        AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetStates,
-        AssetVersion, Assets, Handle, ProjectAssetDatabase,
+        AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSlotRevision, AssetSourceKind,
+        AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase,
     },
     ecs::{
         World,
@@ -28,16 +28,21 @@ use nara::{
     gameplay::{GameplayCommandBatch, GameplayCommandSet},
     identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain},
     image::ImageAsset,
-    material::{Material2d, Material2dAsset, Material2dBinding, Material2dSource},
+    material::{
+        Material2d, Material2dAsset, Material2dBinding, Material2dSource, SamplerDescriptor,
+    },
     prelude::{App, Component, Plugin, PluginError, Resource, Transform2d, Vec2},
     scene::{SceneEntitySource, retire_and_despawn_scene_instance},
     sprite::Sprite,
+    tilemap::{
+        TileAtlasLayout, TileSet, TileSetAssets, TileSetSource, TileSetSourceFileLimits, Tilemap,
+    },
 };
 use support::{DEADLINE, Game, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, action, movement};
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, SideRoomPhase, capture_resume, configured_recipe,
     levels::{LevelId, LevelKey},
-    region_material,
+    region_material, region_tileset,
     side_room::{LOOKOUT_RELIC, RELIC, image_product},
 };
 
@@ -284,6 +289,363 @@ fn both_rooms_share_images_but_collect_and_unload_independently() {
     assert!(resident(&game, image_product()).is_none());
     assert_eq!(resident(&game, meadow), Some(primary_image));
     game.close();
+}
+
+#[test]
+fn both_rooms_share_one_authored_tileset_until_either_last_user_closes() {
+    for close_side_first in [true, false] {
+        let mut game = Game::source();
+        let before = game.snapshot();
+        let primary_image = resident(&game, LevelId::Meadow.image_product()).unwrap();
+        assert!(resident_tileset(&game).is_none());
+        let (side, _) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+        let publication = resident_tileset(&game).unwrap();
+        let tileset = room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR);
+        let image = tileset.image_content().unwrap().clone();
+        let relic_image = resident(&game, image_product()).unwrap();
+        let (lookout, _) = open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+        assert_eq!(
+            room_tileset(&game, &lookout, region_tileset::LOOKOUT_FLOOR),
+            tileset
+        );
+        assert_eq!(image.handle(), relic_image.0);
+        assert_eq!(image.version(), relic_image.1);
+        assert_eq!(image.product(), image_product());
+        assert_eq!(image.pixels(), RELIC_PIXEL.repeat(4));
+        let record = game
+            .session
+            .observe(|world| {
+                assert_eq!(world.resource::<Assets<TileSet>>().len(), 1);
+                world
+                    .resource::<ProjectAssetDatabase>()
+                    .record_for_stable_id(region_tileset::tileset_product().source())
+                    .unwrap()
+                    .clone()
+            })
+            .unwrap();
+
+        let (first, last, retired, survivor, floor) = if close_side_first {
+            (
+                SIDE_ROOM,
+                LOOKOUT,
+                &side,
+                &lookout,
+                region_tileset::LOOKOUT_FLOOR,
+            )
+        } else {
+            (
+                LOOKOUT,
+                SIDE_ROOM,
+                &lookout,
+                &side,
+                region_tileset::SIDE_ROOM_FLOOR,
+            )
+        };
+        game.command(action(first));
+        assert_retired(&game, retired);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+        let retained = room_tileset(&game, survivor, floor);
+        assert_eq!(retained, tileset);
+        assert!(retained.image_content().unwrap().same_allocation(&image));
+        assert_eq!(resident(&game, image_product()), Some(relic_image));
+        game.session
+            .observe(|world| {
+                assert_eq!(
+                    world
+                        .resource::<ProjectAssetDatabase>()
+                        .record_for_path(record.path()),
+                    Some(&record)
+                );
+            })
+            .unwrap();
+
+        let closed = game.command(action(last));
+        assert_eq!(
+            room_phases(&closed),
+            (SideRoomPhase::Closed, SideRoomPhase::Closed)
+        );
+        assert_eq!(closed.current_instance, before.current_instance);
+        assert_retired(&game, survivor);
+        assert!(resident_tileset(&game).is_none());
+        assert!(resident(&game, image_product()).is_none());
+        assert_eq!(
+            resident(&game, LevelId::Meadow.image_product()),
+            Some(primary_image)
+        );
+        game.session
+            .observe(|world| {
+                let assets = world.resource::<Assets<TileSet>>();
+                let states = world.resource::<AssetStates>();
+                assert!(assets.get(publication.0).is_none());
+                assert!(
+                    states
+                        .state(publication.0.id())
+                        .unwrap()
+                        .usable_version()
+                        .is_none()
+                );
+                assert!(
+                    world
+                        .resource::<TileSetAssets>()
+                        .content_receipt(publication.0, assets, states)
+                        .is_none()
+                );
+                let database = world.resource::<ProjectAssetDatabase>();
+                assert!(database.record_for_stable_id(record.stable_id()).is_none());
+                assert!(database.record_for_path(record.path()).is_none());
+                assert!(!image.is_current(
+                    world.resource::<AssetServer>(),
+                    states,
+                    world.resource::<Assets<ImageAsset>>()
+                ));
+            })
+            .unwrap();
+        assert_eq!(image.pixels(), RELIC_PIXEL.repeat(4));
+        assert_eq!(tileset.atlas(), Some(region_tileset::atlas()));
+
+        let (reopened, _) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+        let next = resident_tileset(&game).unwrap();
+        assert_eq!(next.0, publication.0);
+        assert_ne!(next.1, publication.1);
+        assert!(next.2 > publication.2);
+        let fresh = room_tileset(&game, &reopened, region_tileset::SIDE_ROOM_FLOOR);
+        assert!(fresh.image_content().unwrap().version() > image.version());
+        assert_eq!(image.pixels(), RELIC_PIXEL.repeat(4));
+        game.command(action(SIDE_ROOM));
+        assert!(resident_tileset(&game).is_none());
+        game.close();
+    }
+}
+
+#[test]
+fn changed_live_tileset_rejects_another_room_without_publication_and_repair_retries() {
+    let project = ProjectCopy::new();
+    let path = project
+        .root()
+        .join("assets")
+        .join(region_tileset::TILESET_PATH);
+    let original = fs::read(&path).unwrap();
+    let source =
+        TileSetSource::decode_ron_bytes(&original, TileSetSourceFileLimits::default()).unwrap();
+    let mut game = Game::from_project(project.root());
+    let (side, _) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let publication = resident_tileset(&game).unwrap();
+    let tileset = room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR);
+    let material = resident_material(&game).unwrap();
+    let relic_image = resident(&game, image_product()).unwrap();
+    let primary_image = resident(&game, LevelId::Meadow.image_product()).unwrap();
+
+    for change in ["sampler", "tint", "layout"] {
+        let mut changed = source.clone();
+        match change {
+            "sampler" => changed.sampler = SamplerDescriptor::LINEAR_CLAMP,
+            "tint" => changed.tint.r = 0.5,
+            "layout" => changed.atlas = TileAtlasLayout::grid(Vec2::new(0.5, 2.0), 4, 1),
+            _ => unreachable!(),
+        }
+        changed
+            .validate_image_extent(tileset.image_content().unwrap().extent())
+            .unwrap();
+        let before = game.snapshot();
+        let (entities, identities, catalog) = game
+            .session
+            .observe(|world| {
+                (
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    world.resource::<WorldIdentityDomain>().stats(),
+                    world.resource::<ProjectAssetDatabase>().clone(),
+                )
+            })
+            .unwrap();
+        fs::write(&path, changed.encode_ron_bytes().unwrap()).unwrap();
+
+        game.submit(action(LOOKOUT));
+        assert_eq!(game.session.step().unwrap(), None);
+        let rejected = wait_for(&mut game, |state| state.lookout != SideRoomPhase::Preparing);
+        assert_eq!(
+            room_phases(&rejected),
+            (SideRoomPhase::Open, SideRoomPhase::Closed)
+        );
+        assert_eq!(rejected.phase, GamePhase::Running);
+        assert_eq!(rejected.current_instance, before.current_instance);
+        assert_eq!(rejected.player, before.player);
+        assert_eq!(rejected.score, before.score);
+        assert_eq!(rejected.travel_count, before.travel_count);
+        assert!(
+            rejected.error.as_deref().is_some_and(|error| {
+                error.contains("lookout activation rejected")
+                    && error.contains("project.scene.tileset-preparation-failed")
+            }),
+            "{change}: {rejected:?}"
+        );
+        game.session
+            .observe(|world| {
+                assert_eq!(
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    entities
+                );
+                assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+                assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+            })
+            .unwrap();
+        assert_eq!(room_receipt(&game, RELIC).0, side);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+        assert_eq!(
+            room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR),
+            tileset
+        );
+        assert_eq!(resident_material(&game), Some(material));
+        assert_eq!(resident(&game, image_product()), Some(relic_image));
+        assert_eq!(
+            resident(&game, LevelId::Meadow.image_product()),
+            Some(primary_image)
+        );
+
+        fs::write(&path, &original).unwrap();
+        let (lookout, _) = open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+        assert_eq!(
+            room_tileset(&game, &lookout, region_tileset::LOOKOUT_FLOOR),
+            tileset
+        );
+        game.command(action(LOOKOUT));
+        assert_retired(&game, &lookout);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+    }
+    game.command(action(SIDE_ROOM));
+    assert!(resident_tileset(&game).is_none());
+    game.close();
+}
+
+#[test]
+fn an_invalid_persisted_tile_index_rejects_either_room_before_mutating_the_live_group() {
+    for invalid_side in [true, false] {
+        let project = ProjectCopy::new();
+        let mut game = Game::from_project(project.root());
+        let (command, relic, scene, floor) = if invalid_side {
+            (
+                SIDE_ROOM,
+                RELIC,
+                "side-room.scene.json",
+                region_tileset::SIDE_ROOM_FLOOR,
+            )
+        } else {
+            (
+                LOOKOUT,
+                LOOKOUT_RELIC,
+                "lookout.scene.json",
+                region_tileset::LOOKOUT_FLOOR,
+            )
+        };
+        let (incumbent_command, incumbent_relic, incumbent_floor) = if invalid_side {
+            (LOOKOUT, LOOKOUT_RELIC, region_tileset::LOOKOUT_FLOOR)
+        } else {
+            (SIDE_ROOM, RELIC, region_tileset::SIDE_ROOM_FLOOR)
+        };
+        let phase: fn(&GameSnapshot) -> SideRoomPhase = if invalid_side {
+            |state| state.side_room
+        } else {
+            |state| state.lookout
+        };
+        let incumbent_phase: fn(&GameSnapshot) -> SideRoomPhase = if invalid_side {
+            |state| state.lookout
+        } else {
+            |state| state.side_room
+        };
+        let (incumbent, _) = open_room(
+            &mut game,
+            incumbent_command,
+            incumbent_relic,
+            incumbent_phase,
+        );
+        let tileset = room_tileset(&game, &incumbent, incumbent_floor);
+        let publication = resident_tileset(&game).unwrap();
+        let material = resident_material(&game).unwrap();
+        let primary_image = resident(&game, LevelId::Meadow.image_product()).unwrap();
+        let relic_image = resident(&game, image_product()).unwrap();
+        let before = game.snapshot();
+        let (entities, identities, catalog) = game
+            .session
+            .observe(|world| {
+                (
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    world.resource::<WorldIdentityDomain>().stats(),
+                    world.resource::<ProjectAssetDatabase>().clone(),
+                )
+            })
+            .unwrap();
+        let path = project.root().join("scenes").join(scene);
+        let original = fs::read(&path).unwrap();
+        let mut invalid: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let floor_entity = invalid["payload"]["entities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entity| entity["id"] == floor)
+            .unwrap();
+        floor_entity["components"]["nara.tilemap.Tilemap"]["value"]["value"]["cells"]["value"][0]
+            ["value"]["cell"]["value"]["tile"]["value"] = serde_json::json!(4);
+        fs::write(&path, serde_json::to_vec_pretty(&invalid).unwrap()).unwrap();
+
+        game.submit(action(command));
+        assert_eq!(game.session.step().unwrap(), None);
+        let rejected = wait_for(&mut game, |state| phase(state) != SideRoomPhase::Preparing);
+        assert_eq!(phase(&rejected), SideRoomPhase::Closed);
+        assert_eq!(incumbent_phase(&rejected), SideRoomPhase::Open);
+        assert_eq!(rejected.phase, GamePhase::Running);
+        assert_eq!(rejected.current_instance, before.current_instance);
+        assert_eq!(rejected.player, before.player);
+        assert_eq!(rejected.score, before.score);
+        assert_eq!(rejected.travel_count, before.travel_count);
+        assert!(
+            rejected.error.as_deref().is_some_and(|error| {
+                error.contains("preparation rejected")
+                    && error.contains("project.content.tile-index-out-of-range")
+            }),
+            "{rejected:?}"
+        );
+        game.session
+            .observe(|world| {
+                assert_eq!(
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    entities
+                );
+                assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+                assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+            })
+            .unwrap();
+        assert_eq!(room_receipt(&game, incumbent_relic).0, incumbent);
+        assert_eq!(resident_tileset(&game), Some(publication.clone()));
+        assert_eq!(room_tileset(&game, &incumbent, incumbent_floor), tileset);
+        assert_eq!(resident_material(&game), Some(material));
+        assert_eq!(resident(&game, image_product()), Some(relic_image));
+        assert_eq!(
+            resident(&game, LevelId::Meadow.image_product()),
+            Some(primary_image)
+        );
+
+        fs::write(path, original).unwrap();
+        let (repaired, _) = open_room(&mut game, command, relic, phase);
+        assert_eq!(resident_tileset(&game), Some(publication));
+        assert_eq!(room_tileset(&game, &repaired, floor), tileset);
+        game.command(action(command));
+        game.command(action(incumbent_command));
+        assert!(resident_tileset(&game).is_none());
+        game.close();
+    }
 }
 
 #[test]
@@ -772,6 +1134,13 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     let meadow = LevelId::Meadow.image_product();
     let primary_image = resident(&game, meadow).unwrap();
     let material = resident_material(&game).unwrap();
+    let tileset_publication = resident_tileset(&game).unwrap();
+    let tileset = room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR);
+    let retained_image = tileset.image_content().unwrap().clone();
+    assert_eq!(
+        room_tileset(&game, &lookout, region_tileset::LOOKOUT_FLOOR),
+        tileset
+    );
     let assert_retained = |game: &Game, state: GameSnapshot| {
         assert_eq!(state.level, incumbent.level);
         assert_eq!(state.current_instance, incumbent.current_instance);
@@ -784,6 +1153,15 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
         assert_eq!(resident(game, image_product()), Some(relic_image));
         assert_eq!(resident(game, meadow), Some(primary_image));
         assert_eq!(resident_material(game), Some(material));
+        assert_eq!(resident_tileset(game), Some(tileset_publication.clone()));
+        assert_eq!(
+            room_tileset(game, &side, region_tileset::SIDE_ROOM_FLOOR),
+            tileset
+        );
+        assert_eq!(
+            room_tileset(game, &lookout, region_tileset::LOOKOUT_FLOOR),
+            tileset
+        );
     };
 
     let saved = game.command(action("two-level-game.save"));
@@ -816,6 +1194,23 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     assert!(resident(&game, image_product()).is_none());
     assert!(resident(&game, meadow).is_none());
     assert!(resident_material(&game).is_none());
+    assert!(resident_tileset(&game).is_none());
+    assert_eq!(retained_image.pixels(), RELIC_PIXEL.repeat(4));
+    game.session
+        .observe(|world| {
+            assert!(!retained_image.is_current(
+                world.resource::<AssetServer>(),
+                world.resource::<AssetStates>(),
+                world.resource::<Assets<ImageAsset>>()
+            ));
+            assert!(
+                world
+                    .resource::<Assets<TileSet>>()
+                    .get(tileset_publication.0)
+                    .is_none()
+            );
+        })
+        .unwrap();
     assert_eq!(
         game.command(action("two-level-game.save")).saves,
         room_saves + 1
@@ -837,6 +1232,15 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     let reopened_material = resident_material(&game).unwrap();
     assert_eq!(reopened_material.0, material.0);
     assert!(reopened_material.1 > material.1);
+    let reopened_tileset = resident_tileset(&game).unwrap();
+    assert_eq!(reopened_tileset.0, tileset_publication.0);
+    assert_ne!(reopened_tileset.1, tileset_publication.1);
+    assert!(reopened_tileset.2 > tileset_publication.2);
+    assert_eq!(
+        room_tileset(&game, &new_side, region_tileset::SIDE_ROOM_FLOOR),
+        room_tileset(&game, &new_lookout, region_tileset::LOOKOUT_FLOOR)
+    );
+    assert_eq!(retained_image.pixels(), RELIC_PIXEL.repeat(4));
     assert_eq!(
         room_material(&game, &new_side, &new_side_relic),
         room_material(&game, &new_lookout, &new_lookout_relic)
@@ -853,6 +1257,8 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     }
     assert!(resident(&game, image_product()).is_none());
     assert!(resident_material(&game).is_none());
+    assert!(resident_tileset(&game).is_none());
+    assert_eq!(retained_image.pixels(), RELIC_PIXEL.repeat(4));
     game.close();
 }
 
@@ -1092,6 +1498,85 @@ fn resident(game: &Game, product: AssetProductRef) -> Option<(Handle<ImageAsset>
                     .state(handle.id())?
                     .usable_version()?,
             ))
+        })
+        .unwrap()
+}
+
+fn resident_tileset(game: &Game) -> Option<(Handle<TileSet>, AssetSlotRevision, AssetVersion)> {
+    game.session
+        .observe(|world| {
+            let handle = world
+                .resource::<AssetServer>()
+                .get_product_handle::<TileSet>(region_tileset::tileset_product())?;
+            let tilesets = world.resource::<Assets<TileSet>>();
+            tilesets.get(handle)?;
+            Some((
+                handle,
+                tilesets.slot_revision(handle),
+                world
+                    .resource::<AssetStates>()
+                    .state(handle.id())?
+                    .usable_version()?,
+            ))
+        })
+        .unwrap()
+}
+
+fn room_tileset(game: &Game, receipt: &SpawnedSceneInstance, floor: &str) -> TileSet {
+    let publication = resident_tileset(game).unwrap();
+    let (origin, cells) = match floor {
+        region_tileset::SIDE_ROOM_FLOOR => (
+            region_tileset::SIDE_ROOM_ORIGIN,
+            region_tileset::side_room_cells(),
+        ),
+        region_tileset::LOOKOUT_FLOOR => (
+            region_tileset::LOOKOUT_ORIGIN,
+            region_tileset::lookout_cells(),
+        ),
+        _ => panic!("the floor must belong to an authored region"),
+    };
+    game.session
+        .observe(|world| {
+            let EntityLookup::Resolved(entity) =
+                receipt.resolve(world, &SceneEntityId::new(floor).unwrap())
+            else {
+                panic!("the authored region floor must remain live")
+            };
+            let transform = world.get::<Transform2d>(entity).unwrap();
+            assert_eq!(transform.translation, origin);
+            assert_eq!(transform.rotation, 0.0);
+            assert_eq!(transform.scale, Vec2::ONE);
+            assert!(world.get::<Sprite>(entity).is_none());
+            let tilemap = world.get::<Tilemap>(entity).unwrap();
+            assert_eq!(tilemap.tileset, Some(publication.0));
+            assert_eq!(tilemap.tile_size, region_tileset::TILE_SIZE);
+            assert_eq!(tilemap.layer.index, region_tileset::FLOOR_LAYER);
+            assert_eq!(tilemap.sort_key, 0);
+            assert_eq!(tilemap.y_sort_anchor, None);
+            assert_eq!(tilemap.cell_count(), cells.len());
+            for (coord, cell) in cells {
+                assert_eq!(tilemap.get_cell(coord), Some(&cell));
+            }
+            let tileset = world
+                .resource::<Assets<TileSet>>()
+                .get(publication.0)
+                .unwrap();
+            let expected = region_tileset::descriptor();
+            assert_eq!(tileset.atlas(), Some(expected.atlas()));
+            assert_eq!(tileset.tile_size(), expected.atlas().tile_size);
+            assert_eq!(tileset.material().sampler, expected.sampler());
+            assert_eq!(tileset.material().alpha_mode, expected.alpha_mode());
+            assert_eq!(tileset.material().tint, expected.tint());
+            let image = tileset.image_content().unwrap();
+            assert_eq!(image.product(), expected.image_product());
+            assert_eq!(tileset.material().image, Some(image.handle()));
+            assert_eq!(image.pixels(), RELIC_PIXEL.repeat(4));
+            assert!(image.is_current(
+                world.resource::<AssetServer>(),
+                world.resource::<AssetStates>(),
+                world.resource::<Assets<ImageAsset>>()
+            ));
+            tileset.clone()
         })
         .unwrap()
 }

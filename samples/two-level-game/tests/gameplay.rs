@@ -63,6 +63,8 @@ impl Directory {
             "assets/textures/marker.png.meta",
             "assets/textures/side-room.png",
             "assets/textures/side-room.png.meta",
+            "assets/tilesets/region.tileset.ron",
+            "assets/tilesets/region.tileset.ron.meta",
             "assets/materials/region.material2d.json",
             "assets/materials/region.material2d.json.meta",
             "assets/materials/region.wgsl",

@@ -8,12 +8,13 @@ use nara::{
         RuntimeContentDependencyRole, RuntimeContentMember, RuntimeContentMemberKind,
     },
     scene::{SourceDocumentKind, SourceDocumentOrigin},
+    tilemap::{TileAtlasLayout, TileSetDescriptor, TileSetRuntimeCodec},
 };
 use two_level_game::{
     animation::{atlas_product, clips_product},
     levels::LevelId,
     markers::marker_product,
-    region_material, side_room,
+    region_material, region_tileset, side_room,
     sound_bank::bank_product,
 };
 
@@ -67,7 +68,7 @@ pub fn assert_room_member(member: &RuntimeContentMember) {
     };
     assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
     assert_eq!(path.as_str(), format!("scenes/{scene_path}"));
-    assert_eq!(member.dependencies().len(), 3);
+    assert_eq!(member.dependencies().len(), 4);
     assert_eq!(
         member
             .dependencies()
@@ -87,8 +88,64 @@ pub fn assert_room_member(member: &RuntimeContentMember) {
                 region_material::material_product(),
                 RuntimeContentDependencyRole::Required
             ),
+            (
+                region_tileset::tileset_product(),
+                RuntimeContentDependencyRole::Required
+            ),
         ]),
     );
+}
+
+pub fn assert_room_tileset_member(member: &RuntimeContentMember, tileset: &TileSetDescriptor) {
+    assert_eq!(member.products(), [region_tileset::tileset_product()]);
+    assert!(matches!(
+        member.kind(),
+        RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == TileSetRuntimeCodec::RUNTIME_KIND
+                && version.get() == TileSetRuntimeCodec::RUNTIME_VERSION
+    ));
+    let mut expected = BTreeMap::new();
+    TileSetRuntimeCodec::visit_runtime_dependencies(tileset, |product, demand| {
+        assert_eq!(demand, nara::asset::AssetReferenceDemand::Immediate);
+        expected.insert(product, RuntimeContentDependencyRole::Required);
+        Ok::<_, std::convert::Infallible>(())
+    })
+    .unwrap();
+    assert_eq!(
+        expected,
+        BTreeMap::from([(
+            side_room::image_product(),
+            RuntimeContentDependencyRole::Required,
+        )])
+    );
+    assert_eq!(member.dependencies().len(), expected.len());
+    assert_eq!(
+        member
+            .dependencies()
+            .iter()
+            .map(|edge| (edge.product(), edge.role()))
+            .collect::<BTreeMap<_, _>>(),
+        expected,
+    );
+    assert_room_tileset(tileset);
+}
+
+pub fn assert_room_tileset(tileset: &TileSetDescriptor) {
+    assert_eq!(tileset.product(), region_tileset::tileset_product());
+    assert_eq!(tileset.image_product(), side_room::image_product());
+    assert_eq!(
+        tileset.atlas(),
+        TileAtlasLayout::grid(nara::core::Vec2::ONE, 2, 2)
+    );
+    assert_eq!(
+        tileset.sampler(),
+        nara::material::SamplerDescriptor::NEAREST_CLAMP
+    );
+    assert_eq!(tileset.alpha_mode(), nara::material::AlphaMode2d::default());
+    assert_eq!(tileset.tint(), nara::core::Color::WHITE);
+    tileset
+        .validate_image_extent(ImageExtent::new(2, 2))
+        .unwrap();
 }
 
 pub fn assert_room_material_member(member: &RuntimeContentMember, material: &Material2dAsset) {
