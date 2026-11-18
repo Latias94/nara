@@ -34,7 +34,8 @@ use windows_sys::Win32::{
     },
     Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-        OPEN_EXISTING, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND,
+        ReadFile, WriteFile,
     },
     System::{
         IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -45,8 +46,8 @@ use windows_sys::Win32::{
             QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
         },
         Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, CreatePipe, PIPE_READMODE_BYTE,
-            PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
+            ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
         },
         Threading::{
             CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateEventW,
@@ -422,7 +423,7 @@ fn spawn_windows(
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     // A game command reserves the duplex bootstrap endpoint as standard input. This gives the
     // product a child-local handle without putting a locator in argv or the environment; Cargo
-    // receives an explicit EOF-only input pipe instead.
+    // receives an explicit EOF-only input device instead.
     startup.StartupInfo.hStdInput = raw_handle(&stdin);
     startup.StartupInfo.hStdOutput = raw_handle(&stdout.child);
     startup.StartupInfo.hStdError = raw_handle(&stderr.child);
@@ -956,25 +957,27 @@ fn random_pipe_name(label: &str) -> io::Result<Vec<u16>> {
 }
 
 fn create_eof_stdin() -> io::Result<OwnedHandle> {
-    let mut read = null_mut();
-    let mut write = null_mut();
     let mut attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>())
             .expect("SECURITY_ATTRIBUTES size fits in u32"),
         lpSecurityDescriptor: null_mut(),
         bInheritHandle: 1,
     };
-    // SAFETY: output pointers and SECURITY_ATTRIBUTES are valid for the call.
-    let created = unsafe { CreatePipe(&mut read, &mut write, &mut attributes, 0) };
-    if created == 0 {
-        return Err(last_os_error("CreatePipe(stdin EOF)"));
-    }
-    let read = owned_handle(read, "CreatePipe(stdin read)")?;
-    let write = owned_handle(write, "CreatePipe(stdin write)")?;
-    set_inheritable(&read, true)?;
-    set_inheritable(&write, false)?;
-    drop(write);
-    Ok(read)
+    let device = [u16::from(b'N'), u16::from(b'U'), u16::from(b'L'), 0];
+    // SAFETY: the fixed device name is NUL-terminated, security attributes are initialized,
+    // and this creates a read-only standard null-device handle without filesystem mutation.
+    let handle = unsafe {
+        CreateFileW(
+            device.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            &mut attributes,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            null_mut(),
+        )
+    };
+    owned_handle(handle, "CreateFileW(stdin NUL)")
 }
 
 fn create_kill_on_close_job() -> io::Result<OwnedHandle> {
@@ -1654,6 +1657,18 @@ fn with_operation(operation: &'static str, error: io::Error) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_stdin_is_an_eof_device_without_a_bootstrap_pipe_shape() {
+        use std::io::Read;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_CHAR, GetFileType};
+
+        let handle = create_eof_stdin().unwrap();
+        // SAFETY: the original null-device handle remains live and uniquely owned here.
+        assert_eq!(unsafe { GetFileType(raw_handle(&handle)) }, FILE_TYPE_CHAR);
+        let mut input = std::fs::File::from(handle);
+        assert_eq!(input.read(&mut [0_u8; 1]).unwrap(), 0);
+    }
 
     #[test]
     fn windows_argument_encoder_handles_empty_quotes_and_trailing_backslashes() {

@@ -183,7 +183,10 @@ meaning. A pathname or process ID is not an alternative exact-launch authority.
 `SupervisedProductProcessCommand` selects an absolute working directory, bounded arguments and
 either a sealed environment or the reviewed desktop-session projection. It starts with closed
 stdin; `with_bootstrap` explicitly selects the inherited duplex child endpoint used by Editor
-Play. `SupervisedProcessCommand` is the separate tool path with its existing inherited environment
+Play. Windows uses the standard read-only `NUL` device for EOF, so an ordinary desktop child
+cannot mistake a closed anonymous input pipe for a bootstrap endpoint. Explicit bootstrap pipe
+shape and access checks remain unchanged. `SupervisedProcessCommand` is the separate tool path
+with its existing inherited environment
 and explicit overrides. Its `bounded_stdout` gives machine-protocol output a cumulative allowance
 independent of truncated diagnostic tails. Parse that exact output rather than a lossy log ring.
 Both spawn calls are synchronous; the Editor continues to use its original background spawn
