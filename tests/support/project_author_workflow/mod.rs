@@ -320,6 +320,79 @@ pub fn accept() {
     );
 }
 
+pub fn missing_metadata_location() {
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .unwrap();
+    let target = PathBuf::from(std::env::var_os("CARGO_TARGET_DIR").unwrap())
+        .canonicalize()
+        .unwrap();
+    assert_eq!(target, checkout.join("target").canonicalize().unwrap());
+    let mut custody = Custody::create(checkout.parent().unwrap());
+    let project = Project::create(&checkout, &custody.directory("metadata location"));
+    project.add_first_system();
+    project.add_collection(&checkout);
+    let tools = CargoBuildTools::discover_in(&project.root).unwrap();
+    custody
+        .tool(
+            command(tools.cargo_path(), &project.root, &tools, &target)
+                .arguments(["generate-lockfile", "--offline", "--manifest-path"])
+                .argument(project.root.join("Cargo.toml")),
+            Duration::from_secs(120),
+        )
+        .assert_success();
+    let schema = nara(
+        &mut custody,
+        &project,
+        &tools,
+        &target,
+        &["schema", "--write"],
+    );
+    assert_tool(&schema, true);
+    let checked = nara(&mut custody, &project, &tools, &target, &["check"]);
+    assert_tool(&checked, true);
+    let relative = "prefabs/player.prefab.json.meta";
+    let metadata = project.root.join(relative);
+    let bytes = fs::read(&metadata).unwrap();
+    fs::remove_file(&metadata).unwrap();
+    let missing = nara(&mut custody, &project, &tools, &target, &["check"]);
+    assert_tool(&missing, false);
+    assert!(
+        missing.stderr.contains(relative),
+        "missing sidecar must be locatable relative to the project: {}",
+        missing.stderr
+    );
+    assert!(!missing.stderr.contains(project.root.to_str().unwrap()));
+    let error = nara::project_tooling::invoke_project_tool(
+        nara::project_tooling::ProjectToolRequest::Check {
+            project: project.root.clone(),
+            profile: None,
+        },
+    )
+    .unwrap_err();
+    let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
+        panic!("missing metadata must retain its typed content failure: {error:?}");
+    };
+    assert_eq!(
+        failure.stage(),
+        nara::project_tooling::ProjectToolFailureStage::ContentAdmission
+    );
+    let diagnostic = failure
+        .diagnostics()
+        .iter()
+        .find(|entry| entry.code() == "project.content.host-io")
+        .expect("the original I/O diagnostic must reach the public caller");
+    assert_eq!(diagnostic.project_path(), Some(relative));
+    assert_eq!(diagnostic.summary(), "Project content host I/O failed");
+    fs::write(&metadata, bytes).unwrap();
+    let repaired = nara(&mut custody, &project, &tools, &target, &["check"]);
+    assert_tool(&repaired, true);
+    project.assert_identity();
+    println!(
+        "METADATA_LOCATION_OK project_relative=true restored_check=true gameplay_started=false"
+    );
+}
+
 fn command(
     executable: &Path,
     cwd: &Path,

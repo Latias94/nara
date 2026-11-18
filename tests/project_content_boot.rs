@@ -3,12 +3,15 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use nara::advanced_prelude::Component;
 
-use nara::asset::{AssetMeta, AssetRef, ImportDependencyDigest, SourceHash, StableAssetId};
-use nara::diagnostic::DiagnosticValueRef;
+use nara::asset::{
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, ImportDependencyDigest,
+    SourceHash, StableAssetId,
+};
+use nara::diagnostic::{DiagnosticFieldClass, DiagnosticSeverity, DiagnosticValueRef};
 use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
     ProjectContentBudgetKind, ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
@@ -1013,29 +1016,164 @@ fn native_location_identity_does_not_promote_unreferenced_adjacent_metadata() {
 
 #[test]
 fn stable_native_identity_never_falls_back_when_either_sidecar_is_missing() {
-    let project = TestProject::with_prefab_startup();
-    project.use_stable_native_identity();
-    let (candidate, plan, root) = project.candidate_plan_and_root();
-    let loader = ProjectContentLoader::new(root).unwrap();
-    assert!(loader.load(&candidate, &plan).is_err());
-    assert!(
-        !project
-            .path()
-            .join("scenes/startup.scene.json.meta")
-            .exists()
-    );
-    project.write_scene_meta(
-        StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap(),
-    );
-    assert!(loader.load(&candidate, &plan).is_err());
-    assert!(
-        !project
-            .path()
-            .join("prefabs/enemy.prefab.json.meta")
-            .exists()
-    );
-    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
-    assert_eq!(loader.budget_snapshot().active_generations(), 0);
+    for (scene_root, scene_alias, prefab_root, prefab_alias) in [
+        (
+            "scenes",
+            "startup.scene.json",
+            "prefabs",
+            "enemy.prefab.json",
+        ),
+        (
+            "Content/Worlds",
+            "chapters/startup.scene.json",
+            "Content/Templates",
+            "actors/enemy.prefab.json",
+        ),
+    ] {
+        let project = TestProject::with_prefab_startup();
+        project.use_stable_native_identity();
+        let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor"));
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path(prefab_alias).unwrap(),
+        ));
+        project.write_scene_source(&SceneDocument::from_ordered_roots([anchor]));
+        let scene_path = format!("{scene_root}/{scene_alias}");
+        let prefab_path = format!("{prefab_root}/{prefab_alias}");
+        for (original, selected) in [
+            ("scenes/startup.scene.json", scene_path.as_str()),
+            ("prefabs/enemy.prefab.json", prefab_path.as_str()),
+        ] {
+            if original != selected {
+                let destination = project.path().join(selected);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::rename(project.path().join(original), destination).unwrap();
+            }
+        }
+        let manifest_path = project.path().join("nara.toml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        fs::write(
+            &manifest_path,
+            manifest
+                .replace("scenes = \"scenes\"", &format!("scenes = \"{scene_root}\""))
+                .replace(
+                    "prefabs = \"prefabs\"",
+                    &format!("prefabs = \"{prefab_root}\""),
+                )
+                .replace(
+                    "default_scene = \"startup.scene.json\"",
+                    &format!("default_scene = \"{scene_alias}\""),
+                ),
+        )
+        .unwrap();
+        let scene_stable_id =
+            StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap();
+        let prefab_stable_id =
+            StableAssetId::parse_str("5f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap();
+        let (candidate, plan, root) = project.candidate_plan_and_root();
+        let loader = ProjectContentLoader::new(root).unwrap();
+        let assert_released = || {
+            let budget = loader.budget_snapshot();
+            for kind in ProjectContentBudgetKind::ALL {
+                assert_eq!(budget.active(*kind), 0, "unreleased {kind:?}");
+            }
+            assert_eq!(budget.active_reservations(), 0);
+            assert_eq!(budget.active_generations(), 0);
+        };
+        for (source, alias, stable_id, kind) in [
+            (
+                &scene_path,
+                scene_alias,
+                scene_stable_id,
+                AssetSourceKind::Scene,
+            ),
+            (
+                &prefab_path,
+                prefab_alias,
+                prefab_stable_id,
+                AssetSourceKind::Prefab,
+            ),
+        ] {
+            let metadata_path = format!("{source}.meta");
+            let error = loader.load(&candidate, &plan).unwrap_err();
+            assert_eq!(error.kind(), ProjectContentErrorKind::HostIo);
+            let report = error.diagnostics();
+            assert_eq!(report.len(), 1);
+            let diagnostic = report.iter().next().unwrap();
+            assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+            assert_eq!(diagnostic.code().as_str(), "project.content.host-io");
+            assert_eq!(
+                diagnostic.summary().as_str(),
+                "Project content host I/O failed"
+            );
+            assert_eq!(diagnostic.fields().len(), 4);
+            for (key, class, value) in [
+                (
+                    "operation",
+                    DiagnosticFieldClass::Public,
+                    DiagnosticValueRef::Identifier("open-file"),
+                ),
+                (
+                    "io_kind",
+                    DiagnosticFieldClass::Public,
+                    DiagnosticValueRef::Identifier("not-found"),
+                ),
+                (
+                    "source",
+                    DiagnosticFieldClass::Sensitive,
+                    DiagnosticValueRef::Redacted,
+                ),
+                (
+                    "project-path",
+                    DiagnosticFieldClass::ProjectRelative,
+                    DiagnosticValueRef::ProjectRelative(&metadata_path),
+                ),
+            ] {
+                assert_eq!(
+                    diagnostic
+                        .fields()
+                        .iter()
+                        .find(|field| field.key().as_str() == key)
+                        .map(|field| (field.class(), field.value())),
+                    Some((class, value)),
+                    "missing or incorrect sidecar diagnostic field {key}",
+                );
+            }
+            let stats = report.stats();
+            assert_eq!(stats.observed_errors(), 1);
+            assert_eq!(stats.observed_entries(), 1);
+            assert_eq!(stats.published_entries(), 1);
+            assert_eq!(stats.rejected_entries(), 0);
+            assert_eq!(stats.evicted_entries(), 0);
+            assert_eq!(stats.dropped_fields(), 0);
+            assert_eq!(stats.truncated_fields(), 0);
+            assert_eq!(stats.truncated_text_bytes(), 0);
+            assert!(!project.path().join(&metadata_path).exists());
+            assert_released();
+            let metadata = AssetMeta::new(
+                AssetMetaIdentity::new(stable_id, AssetPath::new(alias).unwrap(), kind),
+                (),
+            );
+            fs::write(
+                project.path().join(&metadata_path),
+                metadata.to_json_string().unwrap(),
+            )
+            .unwrap();
+        }
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        assert!(matches!(snapshot.selected_scene_source_key().origin(),
+            SourceDocumentOrigin::StableAsset { stable_id } if *stable_id == scene_stable_id));
+        assert!(matches!(snapshot.prefabs()[0].source_key().origin(),
+            SourceDocumentOrigin::StableAsset { stable_id } if *stable_id == prefab_stable_id));
+        for path in [&scene_path, &prefab_path] {
+            let metadata_path = format!("{path}.meta");
+            assert!(snapshot.content_closure().members().iter().any(|member| {
+                member.kind() == ProjectContentMemberKind::AssetMetadata
+                    && member.path().as_str() == metadata_path
+            }));
+        }
+        drop(snapshot);
+        assert_released();
+    }
 }
 
 #[test]

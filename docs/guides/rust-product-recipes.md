@@ -402,8 +402,13 @@ same observation only at its terminal sink.
 `loss()` distinguishes upstream incompleteness from transfer omissions and UTF-8 summary
 truncation. The projection keeps at most eight code/severity/summary records, with 96-byte codes
 and 256-byte summaries, within a 16 KiB failure response. General diagnostic fields are omitted
-and counted. Missing-startup repair hints use separately admitted project-relative paths and a
-public profile identifier; a withheld selected profile becomes a placeholder, not a default-profile
+and counted. `diagnostics()[index].project_path()` exposes one optional path relative to the
+selected project. For example, a missing stable Prefab sidecar is reported as
+`prefabs/player.prefab.json.meta`, including the configured Prefab root. The original content
+producer supplies this explicit coordinate; a local alias is not relabeled by the CLI. Paths
+over 256 UTF-8 bytes are omitted and counted rather than truncated. A sidecar read failure
+has no invented line/column. Missing-startup repair hints use separately admitted project-relative
+paths and a public profile identifier; a withheld selected profile becomes a placeholder, not a default-profile
 command. Inspect the same admitted values with `repair_hint()` and its read-only Scene/root/profile
 accessors; `profile_selected()` distinguishes no selected profile from a withheld one.
 None of these values is a file receipt or repair capability. The tool acquires its own

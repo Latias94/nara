@@ -307,6 +307,10 @@ actual consumer qualification; selecting this contract alone does not mark it co
   code/severity/summary records and explicit upstream/projection loss through bootstrap and public
   callers. CLI formatting is a sink, not the public result contract. General diagnostic fields,
   arbitrary Error/Debug/source strings and runtime capability identities are not transported.
+  One optional project-relative path observation can be retained from the producer's explicit
+  `project-path` diagnostic field, capped at 256 bytes without truncation. Existing typed
+  path admission applies; an asset-root-relative field cannot be relabeled. Omitted fields and
+  withheld paths remain accounted for, and a location grants no filesystem or repair authority.
   The [failure projection design](../compiled-project-failure-projection-design.md) specifies
   eight records, 96-byte codes, 256-byte UTF-8 summaries, 16 KiB encoded failures and the separate
   64 KiB stdout ceiling. A narrow missing-startup hint reuses existing project-relative and public

@@ -1518,6 +1518,18 @@ enum SourceSceneSelection<'a> {
     DeferredProduct(AssetProductRef, &'a AssetSourcePath),
 }
 
+#[derive(Clone, Copy)]
+enum ContentReadContext<'a> {
+    Asset,
+    Native,
+    SelectedScene {
+        is_startup: bool,
+    },
+    NativeMetadata {
+        source_root: &'a nara_project::ProjectPath,
+    },
+}
+
 struct LoadContext<'a> {
     loader: &'a ProjectContentLoader,
     validation: &'a SchemaValidationInput,
@@ -2276,7 +2288,12 @@ impl<'a> LoadContext<'a> {
         logical_path: &str,
         encoded_ceiling: usize,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
-        self.read_file_inner(directory, logical_path, encoded_ceiling, None, false)
+        self.read_file_inner(
+            directory,
+            logical_path,
+            encoded_ceiling,
+            ContentReadContext::Asset,
+        )
     }
 
     fn read_native_file(
@@ -2285,7 +2302,12 @@ impl<'a> LoadContext<'a> {
         logical_path: &str,
         encoded_ceiling: usize,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
-        self.read_file_inner(directory, logical_path, encoded_ceiling, None, true)
+        self.read_file_inner(
+            directory,
+            logical_path,
+            encoded_ceiling,
+            ContentReadContext::Native,
+        )
     }
 
     fn read_selected_scene_file(
@@ -2299,8 +2321,7 @@ impl<'a> LoadContext<'a> {
             directory,
             logical_path,
             encoded_ceiling,
-            Some(is_startup),
-            true,
+            ContentReadContext::SelectedScene { is_startup },
         )
     }
 
@@ -2309,12 +2330,16 @@ impl<'a> LoadContext<'a> {
         directory: &DirectoryCapability,
         logical_path: &str,
         encoded_ceiling: usize,
-        selected_scene: Option<bool>,
-        exact_spelling: bool,
+        context: ContentReadContext<'_>,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
         #[cfg(feature = "scene-work-observation")]
         let _work_span =
             tracing::info_span!(target: "nara::scene::work", "project_content_read").entered();
+        let exact_spelling = !matches!(context, ContentReadContext::Asset);
+        let project_path = match context {
+            ContentReadContext::NativeMetadata { source_root } => Some((source_root, logical_path)),
+            _ => None,
+        };
         let open_handle_peak = if exact_spelling {
             EXACT_RELATIVE_OPEN_HANDLE_PEAK
         } else {
@@ -2338,7 +2363,7 @@ impl<'a> LoadContext<'a> {
             Ok(file) => file,
             Err(error) => {
                 self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handle_peak);
-                if let Some(is_startup) = selected_scene
+                if let ContentReadContext::SelectedScene { is_startup } = context
                     && fs_error_is_not_found(&error)
                 {
                     return Err(ProjectContentError::with_identifier(
@@ -2361,7 +2386,7 @@ impl<'a> LoadContext<'a> {
                         logical_path,
                     ));
                 }
-                return Err(map_fs_error(error));
+                return Err(map_fs_error_at(error, project_path));
             }
         };
         let encoded_before = self.budget_value(ProjectContentBudgetKind::EncodedBytes);
@@ -2388,7 +2413,7 @@ impl<'a> LoadContext<'a> {
             Err(error) => {
                 self.set_budget(ProjectContentBudgetKind::EncodedBytes, encoded_before)
                     .expect("restoring an encoded reservation cannot exceed its limit");
-                Err(map_fs_error(error))
+                Err(map_fs_error_at(error, project_path))
             }
         }
     }
@@ -2509,8 +2534,12 @@ impl<'a> LoadContext<'a> {
                 let metadata_path = format!("{logical_path}.meta");
                 let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
                 self.observe_source_read(Some(source_root), &metadata_path)?;
-                let (metadata_bytes, metadata_digest) =
-                    self.read_native_file(directory, &metadata_path, ceiling)?;
+                let (metadata_bytes, metadata_digest) = self.read_file_inner(
+                    directory,
+                    &metadata_path,
+                    ceiling,
+                    ContentReadContext::NativeMetadata { source_root },
+                )?;
                 self.verify_catalogued_metadata(&project_path, source_root, metadata_digest)?;
                 self.record_member(
                     ProjectContentMemberKind::AssetMetadata,
@@ -4057,6 +4086,13 @@ fn allocation_failed(code: &'static str) -> ProjectContentError {
 }
 
 fn map_fs_error(error: FsError) -> ProjectContentError {
+    map_fs_error_at(error, None)
+}
+
+fn map_fs_error_at(
+    error: FsError,
+    project_path: Option<(&nara_project::ProjectPath, &str)>,
+) -> ProjectContentError {
     match error {
         FsError::Unsupported { operation, .. } => fs_authority_error(
             ProjectContentErrorKind::HostAuthorityUnsupported,
@@ -4086,9 +4122,20 @@ fn map_fs_error(error: FsError) -> ProjectContentError {
                         .expect("I/O kind IDs are engine-owned"),
                 ),
             );
+            let mut diagnostic = with_sensitive(diagnostic, "source");
+            if let Some((root, path)) = project_path {
+                diagnostic = attach_field(
+                    diagnostic,
+                    DiagnosticField::project_relative(
+                        field_key("project-path"),
+                        &format!("{}/{}", root.as_str(), path),
+                    )
+                    .unwrap_or_else(|_| DiagnosticField::sensitive(field_key("project-path"))),
+                );
+            }
             ProjectContentError::with_report(
                 ProjectContentErrorKind::HostIo,
-                single_report(with_sensitive(diagnostic, "source")),
+                single_report(diagnostic),
             )
         }
         FsError::ByteLimitExceeded { limit } => {

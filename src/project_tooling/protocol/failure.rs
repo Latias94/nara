@@ -1,7 +1,7 @@
 use std::fmt;
 
 use nara_diagnostic::{
-    DiagnosticField, DiagnosticFieldKey, DiagnosticReport, DiagnosticSeverity,
+    DiagnosticField, DiagnosticFieldKey, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
     PublicDiagnosticIdentifier,
 };
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 
 use crate::project_workflow::ProjectCheckError;
 
+#[cfg(test)]
+mod location_tests;
 mod recipe;
 
 pub(in crate::project_tooling) use recipe::RecipeFailure;
@@ -17,6 +19,7 @@ pub(super) const MAX_FAILURE_BYTES: usize = 16 * 1024;
 const MAX_DIAGNOSTICS: usize = 8;
 const MAX_CODE_BYTES: usize = 96;
 const MAX_SUMMARY_BYTES: usize = 256;
+const MAX_PROJECT_PATH_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +53,7 @@ pub struct ProjectToolDiagnostic {
     code: String,
     severity: DiagnosticSeverity,
     summary: String,
+    project_path: Option<String>,
 }
 
 impl ProjectToolDiagnostic {
@@ -66,6 +70,12 @@ impl ProjectToolDiagnostic {
     #[must_use]
     pub fn summary(&self) -> &str {
         &self.summary
+    }
+
+    /// Returns an admitted path relative to the selected project, without filesystem authority.
+    #[must_use]
+    pub fn project_path(&self) -> Option<&str> {
+        self.project_path.as_deref()
     }
 }
 
@@ -382,14 +392,30 @@ impl ProjectToolFailure {
             || stats.dropped_fields() != 0
             || stats.truncated_fields() != 0;
         for entry in report.iter() {
-            self.loss.omitted_fields = self
-                .loss
-                .omitted_fields
-                .saturating_add(entry.fields().len() as u64);
             if self.diagnostics.len() == MAX_DIAGNOSTICS {
                 self.loss.omitted_entries = self.loss.omitted_entries.saturating_add(1);
+                self.loss.omitted_fields = self
+                    .loss
+                    .omitted_fields
+                    .saturating_add(entry.fields().len() as u64);
                 continue;
             }
+            let project_path = entry.fields().iter().find_map(|field| {
+                if field.key().as_str() != "project-path" {
+                    return None;
+                }
+                match field.value() {
+                    DiagnosticValueRef::ProjectRelative(value)
+                        if value.len() <= MAX_PROJECT_PATH_BYTES =>
+                    {
+                        Some(value.to_owned())
+                    }
+                    _ => None,
+                }
+            });
+            self.loss.omitted_fields = self.loss.omitted_fields.saturating_add(
+                (entry.fields().len() - usize::from(project_path.is_some())) as u64,
+            );
             let summary = entry.summary().as_str();
             let end = summary.floor_char_boundary(MAX_SUMMARY_BYTES);
             if end != summary.len() {
@@ -403,6 +429,7 @@ impl ProjectToolFailure {
                 code: entry.code().as_str().to_owned(),
                 severity: entry.severity(),
                 summary: summary[..end].to_owned(),
+                project_path,
             });
         }
     }
@@ -417,7 +444,8 @@ impl ProjectToolFailure {
                     DiagnosticSeverity::Warning => "warning",
                     DiagnosticSeverity::Info => "info",
                 };
-                json!({"code":entry.code,"severity":severity,"summary":entry.summary})
+                json!({"code":entry.code,"severity":severity,"summary":entry.summary,
+                    "project_path":entry.project_path})
             })
             .collect();
         let mut value = json!({"stage":self.stage,"code":self.code,"summary":self.summary,
@@ -432,6 +460,9 @@ impl fmt::Display for ProjectToolFailure {
         write!(formatter, "{}: {}", self.code, self.summary)?;
         for entry in &self.diagnostics {
             write!(formatter, "\n{}: {}", entry.code, entry.summary)?;
+            if let Some(path) = &entry.project_path {
+                write!(formatter, "\n  at {path}")?;
+            }
         }
         if let Some(hint) = &self.repair {
             if let Some(scene) = &hint.scene {
@@ -490,6 +521,7 @@ struct RawDiagnostic {
     code: String,
     severity: String,
     summary: String,
+    project_path: Option<String>,
 }
 
 impl RawFailure {
@@ -508,13 +540,19 @@ impl RawFailure {
                 "info" => DiagnosticSeverity::Info,
                 _ => return Err("invalid project tool diagnostic severity"),
             };
-            if !valid_code(&entry.code) || !valid_summary(&entry.summary) {
+            if !valid_code(&entry.code)
+                || !valid_summary(&entry.summary)
+                || entry.project_path.as_deref().is_some_and(|value| {
+                    value.len() > MAX_PROJECT_PATH_BYTES || admitted_path(value).is_none()
+                })
+            {
                 return Err("invalid project tool diagnostic projection");
             }
             diagnostics.push(ProjectToolDiagnostic {
                 code: entry.code,
                 severity,
                 summary: entry.summary,
+                project_path: entry.project_path,
             });
         }
         if let Some(hint) = &self.repair

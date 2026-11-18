@@ -29,9 +29,15 @@ not repair authority, receipts, rollback evidence or the operation's control-flo
 - Carry upstream incompleteness separately from additional omitted entries, omitted retained
   fields, truncated summaries and removed summary bytes. Read retained entries through `iter()`;
   report `len()` counts observations and is not a retained count.
-- Project no general diagnostic field keys or values. Static safe code/summary come from the
-  typed domain report; other failures use explicit static owner classifications, never arbitrary
-  Error/Debug/source chains. Do not format a raw error merely to discard its string afterward.
+- Project no general diagnostic field keys or values. A retained diagnostic can carry one
+  optional `project_path` observation, at most 256 UTF-8 bytes, from the original producer's
+  `project-path` field with the existing ProjectRelative class. The producer is responsible for
+  the actual project-root coordinate; an asset-root-relative `path` is not interchangeable.
+  Do not truncate a path or infer one from a code, summary, raw error or current filesystem.
+  Other fields and withheld paths remain counted as omitted. Static safe code/summary come
+  from the typed domain report; other failures use explicit static owner classifications, never
+  arbitrary Error/Debug/source chains. Do not format a raw error merely to discard its string
+  afterward.
 - Preserve the existing missing-startup repair workflow through one explicit hint facet: selected
   Scene and Scene root admit through the existing project-relative diagnostic policy; a selected
   profile admits through the existing public-identifier policy. Unadmitted values are withheld and
@@ -50,6 +56,11 @@ not repair authority, receipts, rollback evidence or the operation's control-flo
   encoded size without cutting JSON. Private input DTOs reject missing/unknown/duplicate named
   fields, invalid severity/identity, oversize and wrong request association. Remote strings remain
   bounded transport values; do not reconstruct static `SafeSummary`/`DiagnosticCode` by interning.
+  A transported path is re-admitted through the existing project-relative diagnostic policy;
+  it grants no read, mutation, repair or Editor navigation authority. There are no invented
+  line/column coordinates for a sidecar that could not be read.
+  The path cap leaves room for all eight maximally escaped diagnostics and the original
+  missing-startup repair hint in the same failure envelope.
 - Success JSON requires a successful process exit; failure JSON requires an unsuccessful exit.
   Invalid gameplay output is not tool agreement. Compiler/child stderr is outside this projection:
   trusted native project execution is not a sandbox or whole-process secret-sanitization claim.
