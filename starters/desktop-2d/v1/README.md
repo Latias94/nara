@@ -18,6 +18,57 @@ The project has four explicit Cargo binary targets:
 - `cook`, a compiled headless adapter that prepares this project's content and publishes its Player;
 - `player`, a source-free headless runtime that requires the expectation supplied by Cook.
 
+### Your first fixed-step system
+
+Create `src/first_step.rs` with this complete ordinary plugin:
+
+```rust
+use nara::{
+    app::{PluginCategory, PluginDeclaration, PluginError, PluginId},
+    prelude::{App, CoreStage, FixedTime, Plugin, Res},
+};
+
+const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+    PluginId::new("my-game.first-step"),
+    PluginCategory::Runtime,
+);
+
+#[derive(Default)]
+pub struct FirstStepPlugin;
+
+impl Plugin for FirstStepPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(CoreStage::FixedUpdate, first_step)?;
+        Ok(())
+    }
+}
+
+fn first_step(time: Res<FixedTime>) {
+    if time.tick() == 1 {
+        println!("first_fixed_step: tick=1");
+    }
+}
+```
+
+Add `mod first_step;` in `src/lib.rs`. At the end of its existing `product_recipe()` chain,
+after the stock Image codec's `expect`, append:
+
+```rust,ignore
+        .add_plugin::<first_step::FirstStepPlugin>()
+        .expect("the first-step plugin is unique")
+```
+
+Run `nara check .`, then `cargo run --bin headless`. Check must not print the gameplay marker;
+the game prints `first_fixed_step: tick=1` followed by `starter_headless: ok fixed_ticks=1`.
+This registers an ordinary fixed-step system through the existing plugin API. It needs no
+persistent component, custom schema, window or Editor. Change the printed message and rerun to
+observe a Rust edit. Keep the generated `product_recipe`, Image codec and all entry points.
+The same plugin also runs in the cooked Player; its first tick uses the same game code.
+
 Open the complete-schema startup Scene in the first-party Editor from the project root:
 
 ```text

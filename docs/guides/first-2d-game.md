@@ -38,6 +38,11 @@ from a shared directory capability. Both locations must have a usable common
 filesystem ancestor; cross-volume and inaccessible-ancestor cases fail explicitly.
 An immutable HTTPS Git coordinate is the portable dependency alternative.
 
+Use `nara new --help`, `nara check --help`, `nara schema --help`, `nara export --help` or
+`nara repair startup-scene --help` for scoped syntax and examples. These requests do not open
+or build a project. Help is terminal: supplied options still need values and valid preceding
+arguments; extra arguments after `--help` reject.
+
 Before changing anything, run the generated project:
 
 ```powershell
@@ -52,13 +57,56 @@ project is consequently not a cold-cache measurement.
 
 ## Add the game source
 
-Copy these ordinary project files from `samples/collect-game/` into the new project:
+First follow **Your first fixed-step system** in the generated `README.md`: create
+`src/first_step.rs`, add its ordinary plugin to the existing recipe, Check, and run headless.
+The exact snippet prints `first_fixed_step: tick=1` during gameplay; Check must not print it.
+This gives one observable Rust edit before introducing persistent components. Keep that file and
+the `mod first_step;` declaration while following the recipe below.
 
-- `src/`, replacing the generated source with the completed game's source.
-- `gameplay-plugin/`, `scenes/`, `prefabs/`, `assets/`, `variants/`, and `tests/`.
-- `nara.toml`, retaining the new project's own name/identity if you chose another slug.
+Copy only these ordinary files from `samples/collect-game/` into the new project:
 
-Keep the **generated Cargo.toml and its selected Nara path**. Add
+- `src/bin/headless.rs` and `src/bin/desktop.rs`, replacing those two demonstrations.
+- `gameplay-plugin/`, `prefabs/`, `assets/`, `variants/`, and `tests/`.
+- `scenes/startup.scene.json`, replacing its content while keeping the new project's existing
+  `scenes/startup.scene.json.meta` byte-for-byte.
+
+Keep the **generated `nara.toml`, `Cargo.toml`, `src/lib.rs`, `build.rs`, `src/bin/cook.rs` and
+`src/bin/player.rs`**. Do not copy the sample manifest, schema bundle, lockfile or whole `src/`
+directory over them. The new project's `source_universe`, `stable_metadata` policy and startup
+sidecar belong to that creation, even when its slug is also `collect-game`. Two same-named games
+must not acquire the sample's universe or each other's document identities. A display-name edit
+does not change those identities. The generated manifest already provides the required source
+and desktop capabilities; merge later settings into their existing sections. The optional window
+title can describe WASD movement and R reset without replacing the manifest.
+
+The repository sample uses `project_location` for its historical Prefab source. This generated
+project uses `stable_metadata`, so author `prefabs/player.prefab.json.meta` once for its newly
+imported Prefab:
+
+```powershell
+$prefabMetadata = [ordered]@{
+    kind = 'asset_meta'
+    format_version = 1
+    engine_min_version = '0.1.0'
+    generator = @{ name = 'nara'; version = '0.1.0' }
+    payload = @{
+        asset = @{
+            stable_id = [guid]::NewGuid().ToString()
+            path = 'player.prefab.json'
+            source_kind = 'prefab'
+        }
+        settings = @{}
+    }
+}
+$prefabMetadata | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM "$game/prefabs/player.prefab.json.meta"
+```
+
+Keep this sidecar when moving or updating that Prefab, including the fast-player data variant;
+do not regenerate it on every Check. The copied token Image already includes its authored
+metadata, which stays with that asset. Missing required native metadata rejects source Check
+before gameplay rather than selecting a path-derived fallback.
+
+In the **generated Cargo.toml**, add
 `members = ["gameplay-plugin"]` to its existing `[workspace]`, add this dependency,
 and extend its existing desktop feature:
 
@@ -76,12 +124,61 @@ These are edits to existing sections, not duplicate TOML sections. In
 `gameplay-plugin/Cargo.toml`, set its Nara path to `../` followed by the root
 project's selected path. For example, if the generated root dependency is
 `../../nara`, the plugin uses `../../../nara`. Both packages must select the same
-checkout. Do not copy the sample's repository-relative coordinates unchanged.
+checkout. If creation selected Git instead, give the plugin that same `git` and immutable `rev`
+coordinate, retaining its runtime features rather than adding a local path. Do not copy the
+sample's repository-relative coordinates unchanged or mix engine sources in one game.
 
-The library owns one `product_recipe()`. Its contribution carries both native
-gameplay and persistent schema. The headless tool entry, headless gameplay and
-desktop product use that definition. Adding desktop input does not introduce a
-second simulation: keys and headless demonstrations submit the same commands.
+### Keep one product recipe
+
+Replace only `product_recipe()` in the generated `src/lib.rs` with this function. Retain its
+other helpers and `mod first_step;`. The stock Image codec and first-step plugin stay selected:
+
+```rust
+pub fn product_recipe() -> nara::ProductRecipe {
+    let recipe = nara::ProductRecipe::new()
+        .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new(
+                "nara.starter.desktop-2d.image",
+                1,
+            ),
+        )
+        .expect("the starter Image runtime codec definition is valid")
+        .add_plugin::<first_step::FirstStepPlugin>()
+        .expect("the first-step plugin is unique")
+        .add_contribution(collect_gameplay::contribution().expect("the game schema is valid"))
+        .expect("the game contribution is unique");
+    #[cfg(feature = "desktop")]
+    let recipe = recipe
+        .add_plugin::<collect_gameplay::DesktopInputPlugin>()
+        .expect("the desktop input plugin is unique");
+    recipe
+}
+```
+
+The contribution carries native gameplay and persistent schema together. All four generated
+targets use this recipe. Adding desktop input does not create another simulation: physical keys
+and bounded headless demonstrations submit the same commands. These fixed sample declarations
+use `expect`; fallible user-selected composition should retain its error for the tool boundary.
+
+### Declare the local plugin's Cook inputs
+
+The generated Cook inventory covers its own default Rust tree, not Cargo dependencies or
+`include_bytes!` discovery. In `src/bin/cook.rs`, replace the single
+`project_rust_input_inventory(&project)?,` request argument with:
+
+```rust,ignore
+project_rust_input_inventory(&project)?.into_iter().chain([
+    "gameplay-plugin/Cargo.toml",
+    "gameplay-plugin/src/lib.rs",
+    "gameplay-plugin/src/input.rs",
+    "gameplay-plugin/schema/component-schema-generation-1.json",
+].into_iter().map(|path| RelativePath::new(path).expect("fixed local plugin input"))),
+```
+
+This names the local plugin source and its embedded predecessor schema while keeping Cargo's
+dependency and build decisions authoritative. Extend this explicit list when adding another
+local compiler input. The engine's own source/dependency graph stays selected by Cargo, not
+copied or resolved by this helper. Keep `build.rs` and the Player's request-owned bootstrap.
 
 Refresh the data-only schema from compiled code:
 
@@ -106,6 +203,12 @@ The first demonstration collects three targets and wins. The reset demonstration
 restores the initial player position, three visible targets and original background.
 Gameplay changes runtime state and leaves authored source intact. Collected targets
 remain alive, so reset does not destroy and reconstruct persistent entities.
+
+The generated README's Cook command remains usable after these additions. Its Player has no
+scripted collection input and runs a finite headless baseline; the source `headless` demonstration
+above separately proves win/reset. A cooked baseline does not establish interactive desktop
+distribution. Keep the entire three-file installation together when relocating it. See the
+[Cooked Player guide](cooked-player-delivery.md) for preparation and publication boundaries.
 
 ## Select an optional pixel world
 
