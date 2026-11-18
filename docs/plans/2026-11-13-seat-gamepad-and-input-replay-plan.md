@@ -18,6 +18,196 @@ The [pinned source study](../research/2026-11-13-seat-input-and-replay.md) disti
 Nara implementation, upstream mechanisms and new design requirements. A numeric helper, extra
 event variant, serialized command vector or a Replay source label does not complete this outcome.
 
+## Native Gilrs Input And Playable Controller Successor
+
+Status: implemented at `b607a64` and `6795753`, November 19. Windows WGI acquisition/retirement
+and the normalized source-game consumer are qualified below; actual physical controller
+button/stick/hotplug execution remains unqualified. Deliver a concrete optional controller
+adapter and an ordinary game consumer. Normalized gamepad support alone does not connect
+hardware. Keep UI/Dialogue product work paused and prioritize functional Runtime delivery
+over another performance experiment.
+
+Use an independently consumed `nara_gilrs` package with the mature Gilrs mapping/discovery
+backend, not a new abstract backend, SDL runtime, scheduler or window owner. One native context
+is polled in the original App's First stage before Input projection. Routes name an existing
+window and seat explicitly; the adapter does not create or focus endpoints. The original
+InputTimeline retains connection generations, accepted button/axis members, capacity refusal
+and ordered terminal credits. Per-device assignment is product policy over the actual connected
+inventory, not a persisted hardware or player identity.
+
+An Input-owned read-only endpoint observation exposes current incarnation/focus and the last
+physical-invalidation sequence. This permits detection of loss and refocus between backend
+polls after old log entries have been reclaimed. It grants no mutation or ingress authority.
+Actual native samples still require their original connection token.
+
+Enumerate already connected devices, handle later connection/disconnection, and drain native
+events while a route is inactive. Do not replay cached held values into a new route. Known
+held/nonneutral controls remain suppressed until their observed release/neutral; fresh events
+for previously unknown controls can begin new input after the queued-event barrier. Gilrs has
+no portable instantaneous hardware snapshot, so do not claim complete unknown-startup-held
+detection or swallow every first button press while waiting for an unavailable snapshot.
+Reuse its mapped D-pad and device dead-zone logic; keep author-selected action transforms
+separate. Filtered neutral observations must still settle suppression.
+
+Disable force feedback in this input-only context. Register concrete native custody with the
+original managed close owner, including pre-Startup failure. Windows WGI has an upstream
+stop/join path without a bounded latency promise. Foreign backend drop behavior and actual
+controller hardware require their own execution evidence; context creation with zero devices
+does not prove physical button delivery. Do not introduce an additional polling thread.
+The selected foreign backends lack synchronous thread retirement, so the managed plugin refuses
+non-Windows acquisition before creating a native context. Compile support is not Runtime support.
+
+The source Two-Level Game opts in through an explicit desktop `--gamepad` option and build
+feature. Authored D-pad and ordinary game buttons feed the existing action names and command
+queue alongside keyboard input. Releasing one physical contribution must preserve another
+accepted contribution. The existing exact-capture eligibility remains authoritative; this unit
+does not serialize controller connections, add an analog-to-movement expression engine or
+automatically select a shipping Player backend. The backend's normalized axes and per-device
+two-seat routing need their own complete ordinary controls.
+
+Acceptance covers the actual bridge reduction, original Input lifecycle, supported button/axis
+codes, startup/route/focus/reconnect behavior, saturated admission, two-seat routing and managed
+cleanup. The actual game consumer must move, stop and perform structural actions through its
+original Input-to-Gameplay flow. Run native backend initialization and ordinary window startup
+separately where available. Preserve the keyboard-only continuation and source/cooked definition
+consumers. Independent review and focused serial verification own the evidence; no hardware,
+foreign-platform or numerical latency claim follows from synthetic event execution.
+
+### Native Controller Implementation And Qualification
+
+The original Input owner now exposes a read-only endpoint observation, including its actual
+incarnation and the last physical-loss admission sequence. The private endpoint stores that
+watermark when its original physical-loss operation publishes; no independent epoch allocator,
+event retention or per-frame Scene validation is introduced. The initial full Input library
+run passes 103/103 in `ebf84efc-f79b-4d74-be9d-0295c7118b66`, before the later keyboard-continuation
+eligibility correction below.
+
+`nara_gilrs` owns one concrete context, bounded native polling and current device inventory.
+Its nominal tokens distinguish a reconnect from a reused backend label. Product assignment
+uses explicit existing window/seat routes, while original Input connections continue to admit
+each button/axis and settle terminal credits. Startup and changed routes wait for the old native
+queue to drain. Known holds are suppressed rather than replayed. Portable codes deliberately
+map Gilrs controls; no backend discriminant is serialized. Duplicate startup Connected messages
+preserve an existing token/assignment instead of manufacturing a reconnect. FF is disabled.
+
+The root and independent game locks add only the selected Gilrs closure; no previously locked
+package version or source is replaced. The Linux CI build prerequisites gain libudev development
+files and pkg-config because the concrete dependency must compile, even though managed native
+acquisition remains Windows WGI-only. CI configuration is local evidence, not a remote run.
+
+The first bridge test compilation found two old ECS NonSend method names in its fixtures; they
+now use the actual current World methods. All twelve bridge controls pass in
+`8f72f358-81e4-4548-a875-224c3288c54c`, including finite refusal, terminal custody, two-seat routes,
+unassign/reassign, focus loss/regain, endpoint replacement, known holds, duplicate input and
+configured/Startup/Runtime/ordinary retirement. The genuine WGI initialization/close test passes
+1/1 in `ae8027e9-6e52-4153-b01b-e604ba26c802`. It retains the original native state through
+`RuntimeInstance::finish` and observes its context removed. It reports **zero connected devices**;
+this proves native acquisition/retirement, not physical controller gameplay or latency.
+
+Independent review finds a keyboard-continuation integration regression before release: the
+game's declaration helper accepts D-pad alternatives, but the original Input continuation
+validator still requires exactly one binding of any kind per action. That would reject the
+default map even without a native backend. The owning validator now permits Gamepad Button
+alternatives alongside one unique declared keyboard Button, preserving original key fanout,
+context, member and semantic checks. Actual gamepad holds still refuse keyboard capture.
+New public and actual-default-map controls cover empty/held keyboard capture, fresh-Runtime
+restore without Press/Started, actual controller refusal and release/disconnect recovery.
+Bounded rereview finds no remaining P1/P2. The complete Input library plus public claimed-keyboard,
+keyboard-continuation and semantic-action controls pass **135/135** in
+`82b27a1b-4d20-4d4d-b764-acd410c4a1a5`, including that actual restore/refusal/recovery test.
+
+The game adds twelve authored controller Button alternatives without replacing its twelve
+keyboard bindings. The source desktop entry requires both `gamepad` and `--gamepad`, stores
+its route/limits in the original ProductConfiguration fingerprint and otherwise starts no
+native context. Its normalized Platform consumer executes the original game, command queue,
+Scene travel and physical Session cleanup. These injected normalized inputs are not a hardware
+test. The source-copy helper also preserves the new optional direct dependency's original
+checkout path rather than resolving a nonexistent relative crate in the copied project.
+
+The first complete game selection passes 206/207 in
+`030938b7-63e5-4ce4-b187-5d43f1ce719a`: the old Cook rebind fixture changes every row with the
+selected action name into the same key, including its newly added controller row. It now changes
+only the original Key source. The authored-key and native-arrow rebind fixtures use that same
+source distinction. This corrects test input rather than allowing duplicate bindings.
+The final game selection passes **207/207** in `dd39df7c-4eea-4636-ba73-e0abe5be775d`: the
+library and original authored Input, normalized controller gameplay, resume, Cook/source consumers.
+The five controller tests cover four-direction movement, keyboard/controller contribution
+release, disconnect/focus cancellation, Marker/Travel and actual keyboard capture eligibility.
+Cooked definitions retain both source kinds without selecting a native Player backend.
+
+The initial hardware DX12 selection `08229323-1626-4d8a-99d3-1430b2339d2b` passes both existing
+default-key and authored-arrow sequential reconstruction trajectories, including their original
+complete-state, retained-pixel, collision, animation, physical input and native retirement
+assertions. The new optional source-entry first-present control fails before Runtime startup:
+the ordinary process owner's closed anonymous stdin pipe is mistaken for a potential bootstrap
+pipe, and inspection reports BrokenPipe. Its original physical child cleanup still completes.
+
+The owning process correction uses standard read-only Windows `NUL` for non-bootstrap EOF.
+It leaves actual duplex bootstrap construction and strict shape/access admission unchanged,
+alongside exact executable custody, inherited handle allowlists, environment, Job containment
+and reader/output retirement. Independent bounded review finds no P1/P2 in that correction.
+All original process-owner controls plus the new character-device/EOF unit pass **36/36** in
+`4eb74db1-be7b-4a84-bb6d-09b3397cdd0d`. The independently locked public process consumer passes
+**3/3** in `03909189-eb76-4008-a7cc-96946d5152be`, retaining sealed-environment exact launch,
+immediate stdin EOF, bounded raw protocol output, lossy diagnostic accounting and actual
+containment/readers/output cleanup. Its independently resolved dependency versions are unchanged.
+The corrected source-entry first-present control passes **1/1** in
+`f358ce0e-28d7-4c87-bcd5-f0a4f3052b3d`, on actual Windows/DX12 hardware through the same
+contained process owner. The process correction is committed separately at `841ea03`.
+
+The final lifecycle pass identifies a valid one-slot handoff gap: disconnecting an original
+connection retains its slot until actual consumers finish, but an immediate native reconnect
+treated that temporary occupancy as hard capacity exhaustion. Three ordinary App/InputPlugin
+tests reproduce managed Runtime failure for focus loss/regain, two-seat reassignment and
+same-label native disconnect/reconnect in `b1dd9d71-2a3a-42ba-aca3-c9ccf19e9a45`.
+Initial fixture iterations corrected public accessor/static diagnostic use and accidentally
+focusing two windows on the same seat; distinct focused seats establish the actual original
+connection before the reproduced failure.
+
+The original Input topology now distinguishes `GamepadRetirementPending` from a zero-slot or
+entirely live `GamepadCapacityExceeded` pool. The bridge defers only the former and retries on
+a later drained poll. Actual original consumption still reclaims the slot; the bridge adds
+no terminal queue, cursor-based reclamation guess or storage owner. Known holds remain
+suppressed across the wait. The original deferred-action/frame-copy control keeps its full
+retirement assertions and now expects that typed refusal. Final verification follows below.
+
+The complete final Input library, public claimed-keyboard/keyboard-continuation/semantic suites
+and Gilrs bridge/App controls pass **150/150**, with one explicit native skip, in
+`bb11ec6d-20c2-4dd4-b0b2-153366d00a0d`. All three one-slot handoffs now wait for actual original
+consumption, renew the connection generation, suppress held controls and admit fresh input after
+release/neutral. The original zero-slot/all-live hard refusal, deferred action/frame-copy
+retention, two-seat contribution and fresh-Runtime keyboard restore controls remain intact.
+The genuine Windows WGI acquisition/close rerun separately passes **1/1** in
+`858e71e5-7f8a-4546-a6bc-5385bb93ea7a`, again reporting zero connected hardware controllers.
+The final affected actual-game controller controls pass **5/5** in
+`e0acd072-edde-498d-8f8b-ce40402b01e1`, after the Input retirement correction. They preserve
+four-direction movement, overlapping keyboard/controller contributions, disconnect/focus
+cancellation, single-press Marker/Travel and keyboard continuation eligibility. The final
+actual Windows/DX12 source-entry rerun passes **1/1** in
+`9b58c658-92a7-4b67-b126-03b587833d75`, including actual first presentation and original
+process/Runtime retirement. The earlier complete 207-case scope remains recorded above; the final
+Input classification change does not require another unrelated Cook/graphics matrix.
+Independent bounded rereview finds no remaining P1/P2 in the original Input backpressure,
+bridge retry/suppression or corrected App regressions. It confirms that only actual original
+consumers release retiring slots and that true hard-capacity failures still propagate.
+Correctness Clippy passes for all Input/Gilrs targets/features, the selected game library,
+desktop and changed test targets, and the root process-owning library profile. These are
+`-D clippy::correctness` gates; nonblocking style and existing warning output is not reported
+as a warning-free workspace.
+
+Root and independent sample formatting checks pass. Both normal/build graphs for the
+`cooked-player` and `cooked-player,desktop` selections with defaults disabled exclude `nara_gilrs`,
+Gilrs and gilrs-core. The concrete package's direct production dependencies remain only Gilrs,
+App, ECS and Input. The locks retain every previously resolved package version/source while
+adding the eight local/native dependency entries. TOML/lock, authored JSON, CI YAML, added local
+document links/headings and whitespace checks pass. CI configuration was not run remotely.
+The paused UI/Dialogue files remain byte-identical. Implementation commits are local only.
+
+This slice adds no native controller state to SaveSlot, exact continuation or recording wire
+formats. Physical controller hardware, foreign native retirement, analog game movement,
+shipping Player backend selection, rumble and numeric input-latency budgets remain open.
+Full R10/R12 and the Foundation Goal remain active.
+
 ## Actual Game Recording And Replay Successor
 
 Status: implemented and qualified at `da96f1e` for the source/headless profile below.

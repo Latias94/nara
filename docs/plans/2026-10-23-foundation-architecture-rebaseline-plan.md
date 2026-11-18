@@ -1729,6 +1729,29 @@ owns exact runs, final correctness Clippy/format/document checks and limits. Thi
 format, resume field or per-tick validation; physical controller work remains separate. Small
 performance experiments and paused UI/Dialogue work remain deferred in favor of Runtime capability.
 
+The November 19 [native controller successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor)
+at `b607a64` and `6795753` adds optional `nara_gilrs` and a playable source-game selection.
+The concrete backend owns one Windows WGI context, bounded native polling and nominal
+current-device assignment; original
+Input still owns every accepted connection, member and terminal. Read-only endpoint observation
+detects focus loss/refocus after log reclamation. One-slot handoffs defer only while original
+disconnected connections await consumption; true capacity exhaustion still refuses. This adds
+no per-frame Scene scan, independent input ledger, window owner or generic backend framework.
+Twelve authored controller Button alternatives retain existing game actions and keyboard input.
+The source desktop requires both the optional feature and `--gamepad`. Keyboard continuation
+accepts those declarations while still refusing actual held controller members.
+
+The owning Input/public/bridge/App controls pass 150/150, including three actual one-slot handoffs,
+and genuine WGI initialization/close passes 1/1 with zero controllers. The source game's original
+207-case selection, both complete default/rebound-arrow native reconstruction trajectories and
+the new controller-enabled first-present path have executed acceptance recorded in that plan.
+The latter exposed an ordinary Windows child-stdin issue, corrected independently at `841ea03`
+without relaxing bootstrap admission; 36 process-owner and three independent public controls pass.
+Final controller controls pass 5/5 after the retirement correction; correctness Clippy, formatting,
+document checks and both shipping graphs preserve the optional dependency boundary. Native
+hardware button/stick/hotplug play, foreign backend retirement, force feedback, analog game
+movement and shipping Player selection remain open. Full R10/R12/Foundation is not complete.
+
 The [actual-game recording successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` extends that usable Runtime path: a finite source/headless semantic program drives the
 original exact-step Session, records actual successful Capture plus original acknowledgement,
