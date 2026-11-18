@@ -377,21 +377,23 @@ fn inspect_actors(world: &mut World, expected_amount: u64) -> Vec<Entity> {
             .unwrap()
             .unwrap();
         assert_eq!(motion.schema_owner(), Some(&owner(MOTION)));
-        assert_eq!(
-            motion.value().field("amount"),
-            Ok(&ComponentValue::U64(expected_amount))
-        );
-        assert_eq!(motion.value().field("gain"), Ok(&ComponentValue::U64(3)));
+        assert_eq!(motion.value().field_u64("amount"), Ok(expected_amount));
+        assert_eq!(motion.value().field_u64("gain"), Ok(3));
         let sensor = bindings
             .data_component(world, *entity, &component(SENSOR))
             .unwrap()
             .unwrap();
-        assert_eq!(sensor.value().field("image"), Ok(&image_reference()));
-        let ComponentValue::List(references) = sensor.value().field("targets").unwrap() else {
-            panic!("the default target list must survive runtime materialization");
-        };
-        let [ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target })] =
-            references.as_slice()
+        assert_eq!(sensor.value().field("image").unwrap(), image_reference());
+        let references = sensor
+            .value()
+            .field("targets")
+            .unwrap()
+            .as_list()
+            .expect("the default target list must survive runtime materialization");
+        assert_eq!(references.len(), 1);
+        let Some(EntityReference::SceneLocal { entity: target }) = references
+            .get(0)
+            .and_then(|value| value.as_entity_reference())
         else {
             panic!("the default must be rebound to this Prefab occurrence");
         };
@@ -533,14 +535,17 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
         .filter(|entity| entity.components().contains_key(&component(MOTION)))
     {
         assert_eq!(
-            actor.components()[&component(MOTION)].value().field("gain"),
-            Ok(&ComponentValue::U64(3))
+            actor.components()[&component(MOTION)]
+                .value()
+                .field_u64("gain"),
+            Ok(3)
         );
         assert_eq!(
             actor.components()[&component(SENSOR)]
                 .value()
-                .field("image"),
-            Ok(&image_reference())
+                .field("image")
+                .unwrap(),
+            image_reference()
         );
     }
     let checked = check_project(ProjectCheckRequest::new(
@@ -1280,13 +1285,13 @@ fn native_and_data_recipe(owners: &[ComponentSchemaOwnerSnapshot]) -> ProductRec
         |registry| {
             let _ = registry.register_persistent_component_with_codec::<NativeValue, _, _>(
                 native_schema(),
-                |value| Ok(NativeValue(value.clone())),
+                |value| Ok(NativeValue(value.to_owned())),
                 |value| Ok(value.0.clone()),
             )?;
             registry
                 .register_persistent_component_with_codec::<SceneOnlyValue, _, _>(
                     scene_only_schema(),
-                    |value| Ok(SceneOnlyValue(value.clone())),
+                    |value| Ok(SceneOnlyValue(value.to_owned())),
                     |value| Ok(value.0.clone()),
                 )
                 .map(|_| ())
