@@ -12,6 +12,162 @@ seven-case processed regressions, independent reviews and explicit native/budget
 The [guide](../guides/cooked-player-delivery.md) documents the production interfaces. This closes
 the selected finite outcome without completing all R7 or the full foundation Goal.
 
+## Shared Compiled Project Cook Entry
+
+Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below, after
+`ebc50da` / `f0b21b6`. One public compiled entry serves Two-Level and a newly generated independent
+game. Source-carrying Export remains separate; full R7/R12/Foundation stays open.
+
+Consume the original source loader's sequential delivery snapshots before they retire. Preserve
+ordinary startup attestation, strict Deferred coverage, actual declared travel roots, canonical
+source identity, Prefab provenance and the existing schema/codec composition. Encode the actual
+compiled Scenes and admitted Input/Image data; do not create a game-side database, Prefab reader
+or second Scene compiler. Keep incremental source generations bounded instead of retaining every
+decoded root. The original builder remains the sole processed assembly/deep-validation owner.
+
+Keep game-specific typed source-build contributions explicit. Source-only import does not prove
+a separate build facet's output, optional/build-only inputs or compound Product membership.
+Preserve original verified groups and their observations when a game selects that build facet.
+Carry actual source facts, optional-input presence, code inventory and native cleanup through
+the existing Cargo and whole-directory publication checkpoints. Do not infer Cargo dependencies
+or validate the full project again whenever one member is added.
+
+Remove Two-Level's duplicate source preparation and fixed member-count checks from the shared
+entry. Put sample-specific facts in qualification. Generate usable Cook/Player source for the
+starter, retaining game-owned recipes and explicit package/bin/profile/target selection. The
+complete external consumer starts from a real generated project, adds authored Scene/Image data
+and Rust behavior, cooks through the same public entry, relocates the installation, removes
+source/cache/tool access and actually travels to its third Scene while checking behavior and
+Image pixels. Preserve failed preparation, selected-schema, changed Input, source drift,
+compound-domain, deferred corruption and original physical cleanup controls.
+
+### Shared Cook Implementation And Qualification
+
+Implementation: `c3698d3` (shared entry, generated starter and public consumer), `c2d09ca`
+(Two-Level migration) and `abc0a95` (existing borrowed-value integration correction).
+Qualification date: November 19, 2026. Native results below use Windows and Rust 1.95.0.
+
+The original `ProjectContentLoader` now privately lends each strict delivery snapshot before
+retiring it. Startup-only initialization does not emit incomplete Deferred output. The common
+compiled entry consumes the bound Scene candidates and original resolver, plus admitted stock
+Image pixels, Input definitions and Material/TileSet values. It derives declared travel roots
+from the selected source manifest. The existing builder remains the only encoder/catalog and
+complete processed validation owner. Source-domain build contributions retain their separate
+`SourceAssetBuild` execution and original artifact-group observations, including absent inputs.
+
+Two-Level removes its duplicate database, Scene/Prefab compilation, fixed source fence and
+per-game Image/Material/TileSet preparation. Its existing Meadow/Cavern processed Product IDs
+are now authored in source sidecars; ProjectLocation source provenance is unchanged. The starter
+publishes twelve source members, including its project-owned build script, Cook and Player.
+The stock Image codec is explicitly selected in both the actual template recipe and its internal
+creation contract. Source Export retains its two original source products, while its code
+inventory now includes the actual finite Rust tree and optional build script.
+
+The first owner run passes 50/52; the two new code-set controls initially expect the wrong
+refusal variants. Diagnostic assertions expose `MissingDeclaredInput` versus the earlier file-cap
+check. The inventory now classifies an undeclared file through the original Cargo contract before
+the size guard, and the controls preserve their original fail-closed behavior. The next public
+cohort passes 54/54 in `9f9a525c-1244-4440-b411-9803ebd10e92`, covering source delivery, generation
+release, project creation, original cooked assembly and source/code selection. Further typed-build,
+real generated-project and Two-Level execution results follow after their actual runs.
+
+Independent review finds and fixes consumer metadata that was allocated outside the builder's
+work/retained accounting. Incremental Raw facts now merge before copying; conflicting digest or
+presence rejects. Map/table reservations and temporary Input-sidecar paths are admitted before
+allocation and included in the original deep-validation overlap. This is a build-boundary logical
+policy, without allocator/RSS or runtime-speed claims. Input encoding borrows its original compiled
+`ActionMapAsset` instead of cloning a deliberately move-only definition. The first later build
+also catches a missing fixture `Default` and a stale sample-test fence reference; both are corrected
+before execution. At that checkpoint the complete consumer and package trajectories still needed
+their actual execution; their final results follow below.
+
+The expanded owning/public cohort passes 86/86, with 924 unrelated or ignored cases excluded, in
+`1a182a9c-1393-4c3d-abcc-b3667fd2ed09`. The shared compound fixture actually runs its distinct build
+facet once across two roots and decodes both primary/auxiliary output mappings. Build-only optional
+input changes and presence changes reject the retained source selection. Mid-traversal source
+mutation, contribution panic, generation release and exact/one-short consumer work/retention
+controls pass through the production entry. The original delivery/Scene/creation and processed
+assembly regressions pass in the same cohort.
+
+The first actual generated-project run reaches creation and exposes an invalid test identity
+comparison across capability sessions. Its directory oracle now uses `same_object` on the actual
+creation receipt and reopened root. In that initial two-case run, the separate live-child timeout
+control passes: the original owner remains present after `finish` unwinds, then supplies the actual
+termination, empty containment, stopped readers and drained-output receipt. It deliberately does
+not describe forced test termination as graceful game shutdown. Testing review also adds an actual
+Cook refusal for a valid but divergent selected Schema before refreshing the bundle. Missing and
+corrupt selected files retain separate controls; a valid default-path decoy does not authorize
+fallback. The final complete external-game result follows its actual execution.
+
+The generated-project trajectory subsequently passes 1/1 in
+`51c08aa9-bfaf-4def-b5f5-48fd1dd2afcc` (361.531 seconds, including actual nested compilation).
+The real creation owner publishes the starter without changing its source universe or startup
+metadata identity. The game adds a native persistent score component, three declared Scenes and
+three distinct Images, refreshes its selected Schema through its own compiled tool, and cooks
+through the same public entry as Two-Level. Valid-but-divergent, missing and corrupt selected
+Schema cases all refuse without publishing an installation.
+
+The complete three-file installation is relocated, and generated source, import cache and
+captured tools are removed before execution. The sealed Player runs from an unrelated empty CWD,
+uses no source database, performs two original Scene request/commit transitions, and verifies all
+three authored component values and actual acquired Image Products/extents/pixels. Its independent
+calculation finishes at `score=1108`. The original processes finish with empty containment, joined
+readers and drained output without termination intervention. The exceptional timeout control
+retains its separate, explicitly terminated receipt. Windows CI now selects these two public tests;
+that configuration is local and no remote CI execution is claimed.
+
+The migrated Two-Level Cook/source/package controls pass 38/38, with six native or nested-build
+cases excluded, in `0a17d25a-1446-427b-9d77-2b6f04c2eff9`. The preceding 36/38 run exposed two
+test-oracle errors: shared source merging correctly rejects a changed build-only input earlier,
+and file identities from independently opened capability sessions cannot be compared directly.
+The corrected controls assert the exact changed source and the original selection's unequal
+expected/current identity. Source drift still rejects, while a fresh preparation succeeds.
+No production change was needed for those two assertions.
+
+All three real Two-Level packages then pass in
+`ba06888f-72c2-447e-934c-900bbf5da341` (458.037 seconds), with seven unrelated cases excluded.
+The same production cooker prepares headless, desktop and audible Players through the shared
+entry. Their original source/cache removal, installation relocation, ordinary no-input Player
+refusal despite old `OUT_DIR`, saved-state Restore and damaged-content controls remain intact.
+The physical desktop trajectory retains hardware DX12 gameplay, fresh Save/Restore and repeated
+travel plus its explicit software presentation control. The audible trajectory retains actual
+WASAPI callback/PCM checks, physical input and original native teardown. Passing process receipts
+are still required; neither these package results nor the nested compilation times establish
+runtime performance or foreign-platform execution.
+
+The ordinary generated-project all-target/all-feature compilation passes 1/1 in
+`d1e2c4b3-df6a-4f68-8ee0-d80d645c95a5` (115.142 seconds), including the library, build script and
+all four binaries. The original custom-schema/external-domain Check/Run/Repair/Export trajectory
+passes 1/1 in `426afcb3-f2b6-40c4-8a2f-5d6fcf7d1a7f` (1034.354 seconds, including multiple real
+nested builds). It preserves both original executable roles, compiled domain auxiliary content,
+post-export gameplay and missing-input refusal. The source Export adapter now captures the
+project's actual finite Rust tree and optional build script instead of a fixed five-file list.
+Neither duration is a runtime performance measurement.
+
+The final root all-target correctness Clippy gate first exposes eight stale uses in the existing
+`product_data_components` integration: owned-reference comparisons, direct List matching and two
+native decode closures. The fixture now reads the existing borrowed scalar/List views directly
+and materializes owned data only for its two owning native values. Its ten original workflows
+pass in `7ebd42d3-86ff-4958-877d-30d118bcfbbb`; production reflection code is unchanged. Root
+all-target and selected release sample correctness Clippy then pass. Advisory warnings remain,
+including build-boundary error-size and test-helper style suggestions; this is not a warning-free
+workspace claim.
+
+The changed Editor application-contract target compiles with its normal feature closure; this
+only migrates the exhaustive starter-member consumer and does not resume Editor UI work. Root,
+sample and explicit starter-template format checks pass. Added document links/fragments,
+sidecar JSON, manifests/locks, workflow YAML and whitespace checks pass. Root/sample dependency
+locks and versions are unchanged. All eleven scoped implementation/review agents are closed;
+their concrete correctness and testing findings are fixed. The fifteen paused UI/Dialogue files
+still match their original SHA-256 manifest and remain outside these commits. CI changes are
+configured locally; no remote execution or publication is claimed.
+
+Complete source observations remain a trusted-local per-file envelope, not an atomic/hermetic
+snapshot or hostile-writer defense. The generated Player is headless; Two-Level separately
+qualifies desktop and audible placements. General cross-compilation, foreign execution, shared
+native-library deployment, complete shipping schema stripping and numeric runtime budgets
+remain open. This closes the shared Cook unit, not full R7/R12/Foundation.
+
 ## Request-Owned Generated Rust Input Successor
 
 Remove the shared-source bootstrap write used by Two-Level and the independent delivery fixtures.

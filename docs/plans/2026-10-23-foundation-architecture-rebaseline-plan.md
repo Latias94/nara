@@ -227,8 +227,9 @@ another decoder or per-frame audit. Affected content/builder owners 81, Cook/sou
 one Desktop/AudioDesktop preparation control,
 independently encoded Material 4 and the actual relocated source-free package trajectory 1 pass;
 the [receiving record](../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction)
-retains complete execution evidence and limits. Generated-input isolation, a shared starter
-cooked entry and the other review findings remain open.
+retains complete execution evidence and limits. The generated-input and shared starter Cook
+successors below close those delivery gaps within their recorded scopes; other review findings
+remain separate.
 
 The [extracted Material custody correction](2026-11-14-durable-material-and-shader-plan.md#material-texture-capture-implementation-and-qualification)
 now implements F4 at original Extract/Queue in `163dffd`, with native controls at `10ee433`.
@@ -251,6 +252,19 @@ and WASAPI package trajectories pass on Windows Rust 1.95.0. The owning plan ret
 foreground/script interference failures, their diagnosis, final native qualification, review
 corrections and trusted Cargo-configuration constraint. This prerequisite does not complete the
 shared starter/Two-Level cooked entry or the external new-game workflow that will justify it.
+
+The [shared compiled Cook successor](2026-10-31-cooked-player-delivery-plan.md#shared-cook-implementation-and-qualification)
+now serves Two-Level and the actual generated starter through the original source loader,
+artifact builder, processed assembly, Cargo and directory-publication owners. Sequential borrowed
+snapshots supply compiled Scenes, Prefab provenance and stock assets; explicit game build facets
+retain their own observations. The starter adds project-owned Cook/Player targets without
+replacing source Export. Implementation is `c3698d3` and `c2d09ca`; the existing data-value test
+consumer correction is `abc0a95`. Owning/public 86 and affected sample 38 pass. A real generated
+game adds three authored Scenes, three Images and Rust behavior, then cooks, relocates, removes source/cache
+access and completes two source-free travels with independent state/pixel checks. All three actual
+Two-Level headless/desktop/WASAPI packages pass through the same entry. This qualifies the shared
+Windows native workflow, not general cross-compilation, hermetic builds, server stripping or full
+R7/R12/Foundation. The linked record owns exact results, review corrections and remaining limits.
 
 ## Dependency Shape
 

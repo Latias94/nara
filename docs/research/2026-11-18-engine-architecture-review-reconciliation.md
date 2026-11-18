@@ -43,7 +43,7 @@ benchmark program.
 
 | Finding | Receiving disposition and owning action |
 | --- | --- |
-| F2: source Check and Cook disagree on the selected Schema | **Scoped correction implemented and qualified below.** Cook consumes original manifest-selected source delivery, compiles with its admitted bindings and carries actual member observations through build/publication. Alternate-path, invalid/divergent selection, later replacement and actual relocated source-free package controls pass. [Cook inventory](../../samples/two-level-game/src/bin/cook/source.rs), [assembly](../../samples/two-level-game/src/bin/cook/content.rs), [existing agreement](../../src/project_host/runtime_agreement.rs). |
+| F2: source Check and Cook disagree on the selected Schema | **Scoped correction implemented and qualified below.** Cook consumes original manifest-selected source delivery, compiles with its admitted bindings and carries actual member observations through build/publication. Alternate-path, invalid/divergent selection, later replacement and actual relocated source-free package controls pass. [Shared Cook source selection](../../src/project_tooling/project_cook/package.rs), [assembly](../../src/project_tooling/project_cook/content.rs), [existing agreement](../../src/project_host/runtime_agreement.rs). |
 | F3: independent desktop UI can resolve incompatible Winit sources | **Confirmed source-selection gap; defer with paused desktop UI work.** The root selects vendored Winit while AccessKit's dependency uses registry Winit. Root patches are application-owned; the generated project does not emit one. The sprite-only shipping game does not exercise this combination. Qualify local and pinned-Git template selections separately; retain the native DPI repair until its own retirement criteria pass. [Starter manifest](../../src/project_workflow/starter/product_contract.rs), [AccessKit adapter](../../crates/nara_winit/src/accessibility/platform.rs), [vendor contract](../../vendor/winit/NARA-PATCH.md). |
 | F4: Material texture generation can change between Extract and Queue | **Scoped correction implemented and qualified below.** Original Extract freezes complete Material/Image captures, shared across cells/Views/batches. Queue no longer chooses later additional-texture cache entries. Real inter-stage replacement, current authored refusal, publication recovery, post-World old-pixel replay and panic cleanup pass through the original public GPU Host. [Extract](../../crates/nara_sprite_render/src/extract.rs), [Queue](../../crates/nara_sprite_render/src/queue.rs), [Image snapshot](../../crates/nara_image/src/content.rs). |
 | F5: processed Material texture membership omits Image kind | **Scoped correction implemented and qualified below.** Original deep validation joins decoded Material slots to selected Image codec roles. Builder and independently encoded/reopened wrong-kind bases reject before gameplay; valid and missing-Image controls pass. [Deep validation](../../src/runtime_content/deep.rs), [Material texture facts](../../crates/nara_material/src/asset/runtime.rs), [independent consumer](../../tests/fixtures/module-consumer/material-consumer/tests/processed_workflow.rs). |
@@ -148,7 +148,8 @@ Correctness Clippy passes for the selected sample library, cooker, Cook/source/p
 independent Material integration. Existing unrelated warnings remain; this is not a warning-free
 workspace claim. Root/sample and affected independent-package formatting pass, as do document
 link/fragment, TOML/lock and whitespace checks. The paused UI/Dialogue files remain byte-for-byte
-unchanged. Generated-source isolation and the shared external-game cooked entry remain open.
+unchanged. Generated-source isolation and the shared external-game cooked entry were still open
+at that checkpoint; the qualified successors below now implement those workflows.
 
 ## Extracted Material Texture Correction
 
@@ -204,19 +205,31 @@ through its original renderer owner. F9, F11, shared movement decoding and
 bounded diagnostics are independent corrections. Desktop UI source selection, Editor import,
 discard intent, keyboard parity and installed-tool activation remain queued with the paused UI work.
 
-The cooker now owns its generated source per request. The former shared-source write was a real
-mutable build input, not evidence of a successfully published wrong package. Keep generated facts
-and ordinary code observations separate when extracting the next shared delivery entry. Cargo
-continues to own dependency resolution and incremental build decisions.
+The cooker owns its generated source per request. The former shared-source write was a real
+mutable build input, not evidence of a successfully published wrong package. The shared entry
+keeps generated facts and ordinary code observations separate. Cargo continues to own dependency
+resolution and incremental build decisions.
 
-Once source agreement and processed-kind validation pass, give a generated starter and Two-Level
-one compiled cooked-delivery entry using the existing admitted Scene roots/source facts and
-`CookedContentBuilder`. Retain game-owned codecs, importer observations, target policy and independent
-Player expectations. Exact game counts belong in qualification controls. A newly created external
-game adding a third Scene and Image, then running a relocated source-free package, is the complete
-consumer that justifies extraction. Source-carrying export remains a distinct useful operation.
+The [shared compiled Cook unit](../plans/2026-10-31-cooked-player-delivery-plan.md#shared-cook-implementation-and-qualification)
+now implements that extraction for the actual generated starter and Two-Level. Implementation
+commits are `c3698d3` and `c2d09ca`. The original
+loader lends sequential strict snapshots, and the common consumer uses their compiled Scenes,
+Prefab provenance, resolver and stock assets without another database or Scene compiler.
+Game-owned build facets preserve optional/build-only inputs and compound groups. Exact sample
+counts remain qualification facts. Owning/public 86 and affected sample 38 pass. The real
+independent generated game authors three Scenes, three Images and Rust behavior, cooks through
+the public entry and completes two travels after relocation/source/cache removal. All three
+source-free Two-Level packages also pass, including physical desktop and WASAPI checks. Source
+Export stays distinct. This closes the scoped shared-entry follow-up while leaving foreign
+execution, atomic/hermetic source capture and the other review findings open.
 [Delivery facts](../../src/project_content/delivery.rs), [builder](../../src/project_workflow/cooked_content.rs),
 [package binding](../../src/project_tooling/player_package.rs).
+
+After the shared Cook closure, prioritize F9's completion-owner admission and F11's complete replay
+file publication. Both are confirmed runtime reliability gaps in existing workflows. Keep their
+changes at the original result collection and filesystem owners, with focused consumers rather
+than another task scheduler or replay store. Author onboarding and bounded diagnostics follow
+their existing receiving actions; paused Editor work does not become a prerequisite.
 
 Source PNG feature separation, cache recovery, HUD batching and pipeline working-set changes are
 deferred unless a named workload makes them material. These reviews do not justify a framework
