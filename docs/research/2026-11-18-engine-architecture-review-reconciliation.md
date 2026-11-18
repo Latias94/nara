@@ -69,9 +69,9 @@ See [the qualified TileSet unit](../plans/2026-10-20-persistent-two-level-game-p
 | Recipe composition diagnostics | **Implemented and scoped qualification passes below.** Known direct `ProductRecipeError` values retain static variant codes and admitted plugin facts. Generated and collection-game recipes are fallible throughout tool and product entries. Opaque values keep a generic failure without formatting. Actual independent duplicate-plugin and opaque-error consumers pass. [Factory](../../src/project_tooling/mod.rs), [recipe errors](../../src/product.rs), [sample recipe](../../samples/collect-game/src/lib.rs). |
 | Compiler and missing-sidecar locations | **Primary compiler locations implemented and scoped qualification passes below; missing-sidecar diagnostic remains a follow-up.** Cargo retains a bounded primary location; bootstrap interprets its original workspace base before displaying an admitted project-relative path. Actual root/member compiler consumers pass. No rendered output/source/suggestions are retained. Missing-sidecar refusal was exercised in the author workflow, but its specific location projection remains separate. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs). |
 | First persistent component | **Confirmed example/admission mismatch; defer interactive qualification.** The opening Vec2 example lacks a complete creation value, while the scalar Collectible can supply one. Teach a creatable scalar first and demonstrate Add/Edit/Undo/Save/Reopen before the vector case. Presence-only records are an explicit ADR0090 restriction, requiring a deliberate contract amendment rather than being called an implementation regression. [Component guide](../guides/persistent-components.md), [data adapter](../../crates/nara_scene/src/authoring_decode.rs), [ADR0090](../architecture/adr/0090-unavailable-schema-and-lossless-authoring.md). |
-| Current component inventory | **Confirmed duplicated sample wiring; local follow-up.** Collect Game lists the same current types in catalog and native registration. Use existing `persistent_components!`; keep predecessor catalogs/migrations explicit and require an unchanged current fingerprint. [Sample plugin](../../samples/collect-game/gameplay-plugin/src/lib.rs), [inventory macro](../../crates/nara_reflect/src/inventory.rs). |
-| Completed command-draft binding | **Concrete repeated caller choreography; local API follow-up.** Three games construct a binding from a cloned type then replace its draft. A constructor accepting the complete draft can reuse existing `ActionCommandMap::bind` validation. No new command registry is needed. [Binding](../../crates/nara_gameplay/src/action.rs), [game caller](../../samples/two-level-game/src/gameplay/input.rs). |
-| Live movement versus replay admission | **Confirmed game-owned inconsistency; open.** The live MOVE branch accepts extra payload fields while `SemanticCommand::from_envelope` requires exactly two. Share the typed decoder and require equal valid behavior and equal rejection through both public paths. [Live consumer](../../samples/two-level-game/src/gameplay/travel.rs), [recording decoder](../../samples/two-level-game/src/command.rs). |
+| Current component inventory | **Implemented and scoped qualification passes below.** Collect Game uses existing `persistent_components!` for current catalog and native registration. Explicit predecessor metadata, provider revision and the exact committed fingerprint are preserved. [Sample plugin](../../samples/collect-game/gameplay-plugin/src/lib.rs), [inventory macro](../../crates/nara_reflect/src/inventory.rs). |
+| Completed command-draft binding | **Implemented and scoped qualification passes below.** `from_command` consumes the complete draft; three production games use it, and the obsolete replacement setter is removed. Original map admission, ordered dispatch and serde shape are unchanged. [Binding](../../crates/nara_gameplay/src/action.rs), [game caller](../../samples/two-level-game/src/gameplay/input.rs). |
+| Live movement versus replay admission | **Reproduced, corrected and scoped qualification passes below.** Live consumption and recording share one game-owned movement decoder. Actual Capture/acknowledgement and complete-game tests cover valid order, extra/invalid payloads, targets, phase releases and healthy continuation. [Live consumer](../../samples/two-level-game/src/gameplay/travel.rs), [recording decoder](../../samples/two-level-game/src/command.rs). |
 | Play and Restart feedback | **Concrete paused-UI follow-up.** Preserve explicit Save and accepted-generation behavior. At the controls, identify the dirty document and explain that Restart replays the accepted generation. Qualify using two camera values through real controls when UI work resumes. [Game panel](../../editor/src/frontend/imgui/project.rs), [Play controls](../../editor/src/frontend/imgui/mod.rs). |
 
 ## Source agreement and processed Material correction
@@ -587,9 +587,130 @@ errors and primary Rust compiler locations. Boxed/wrapped factory errors remain 
 UNC ambiguity, compiler path remapping, arbitrary source excerpts and foreign execution remain
 outside the display guarantee; location membership is lexical, not a physical file proof.
 Missing-sidecar location projection remains separate from its already qualified refusal.
-Foundation/R1/R7/R12 and paused interactive work stay open. Next align live movement admission
-with the existing semantic replay decoder, then simplify complete command-draft bindings and
-the sample's duplicated current component inventory without introducing new runtime owners.
+Foundation/R1/R7/R12 and paused interactive work stay open. The following unit aligns live
+movement admission with semantic replay and simplifies complete command-draft bindings and the
+sample's duplicated current component inventory without introducing new runtime owners.
+
+## Live Command And Author Inventory Successor
+
+Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below after
+`95edd0c` on November 19, 2026. Full Foundation remains active; Editor/UI work remains paused.
+Implementation: `a6e95bd` (commands/bindings), `f43f98d` (inventory) and `296659b` (resume-copy fixture).
+
+Use one game-owned movement decoder for live command consumption and the existing semantic
+recording path. Preserve exact two-field payloads, integer directions in `0..4`, boolean pressed
+and target-free movement. Malformed live commands report a recoverable game error without
+changing held movement. Keep the original ordered batch, tick acknowledgement, game phase and
+release-while-not-running behavior; Save/Restore, Player launch and room actions retain their
+separate current vocabularies. Do not add per-frame world validation or a new command registry.
+
+Let `ActionCommandBinding` accept a complete draft directly and migrate the three game callers
+that clone its type only to replace the draft. Keep the original map's seat/context, runtime
+Entity-target rejection, count limit, ordered dispatch and serialized representation. Retire the
+superseded whole-command setter when its current consumers are migrated. Replace the collection
+sample's duplicated current component schema/registration list with existing
+`persistent_components!`, retaining explicit predecessor metadata, provider revision, native
+registration order and exact current fingerprint. Use the macro's existing canonical schema
+ordering rather than a second sample-specific ordering rule.
+
+Qualification must first reproduce live/replay movement disagreement through actual command
+consumption, then cover valid press/release, malformed payload/target refusal, phase-sensitive
+release, original Capture/acknowledgement and later healthy continuation. Run existing semantic
+record/play and complete gameplay controls, direct/serde binding dispatch and component
+fingerprint checks. Source and processed games keep their original composition and cooked
+format. Match further native/build work to changed behavior rather than repeating unrelated
+Editor or full-framework matrices.
+
+### Command And Inventory Implementation And Qualification
+
+The new regression first runs the existing live consumer inside an actual
+`GameplayCommandPlugin` Runtime with original Consume/Capture ordering and exact queue
+acknowledgement. It reproduces the discrepancy in
+`cbe7504b-0b7c-40fe-8b2d-26fdab70b2bf`: a MOVE with an additional payload field sets right-held
+input, while the semantic decoder rejects that same captured envelope. This is a genuine
+game-owned admission defect, not a queue or scheduler defect.
+
+`command::decode_movement` now supplies both live consumption and semantic recording. It returns
+only the admitted direction/pressed value. The live consumer decodes movement once while
+borrowing the original batch, retains the small result in batch order, and no longer clones its
+payload or re-parses it during application. A refusal records a recoverable game error without
+changing held state. Valid presses still require Running; releases remain valid during
+Preparing/Reconstructing/Degraded. Other actions retain their current payload and phase handling,
+and the original Player-launch error retains final diagnostic priority.
+
+`ActionCommandBinding::from_command` moves a complete draft without first cloning its type.
+The simple type-only `new` delegates to it. The obsolete whole-command `with_command` setter is
+removed after migrating the three game callers. Original map admission, seat/context defaults,
+count limit, runtime Entity-target refusal and serde representation are unchanged.
+
+The collection game's one `persistent_components!` inventory supplies current schemas and
+native registration. Explicit predecessor bytes, successor baseline and provider revision 2
+remain selected. The macro's canonical schema ordering replaces the old raw Vec order; provider
+resolution and fingerprinting already use canonical order. Native registration retains the
+declared PlayerConfig/Collectible sequence. A fixed regression pins the prechange bundle's
+current fingerprint, without regenerating or rewriting the bundle.
+
+Both bounded independent reviews find no remaining P1/P2. They verify original queue ownership,
+phase gates, exact draft dispatch and provider canonicalization; all four implementation/review
+agents are closed. The complete gameplay command owner suite passes 60/60 with serde in
+`97466bb4-096c-44b6-94ed-3579c9d9bb14`; direct complete-draft tests also pass 2/2 without serde in
+`13f743ab-3326-4d90-90d1-dec7913f681c`. These checks cover the shared command owner; complete
+game, processed and final check evidence follows below.
+
+The first combined source-game cohort runs 189 tests in
+`87ff9c91-f0cc-4978-9082-fe2369c0b781`: 188 pass, including the new exact live/Capture comparison,
+phase releases, full-game malformed press/release continuation and original record/play tests.
+One existing resume-copy test fails before its intended Cavern edit because its explicit file
+inventory omits the committed Meadow/Cavern sidecars. It is not an unchanged project copy.
+The fixture now copies both original metadata files and asserts its initial content stamps match
+the source before testing modification refusal. Production content agreement is unchanged.
+The affected live/authored-input/resume cohort then passes 17/17 in
+`784071cd-b20e-42d6-b74a-30313422aae6`, retaining successful unchanged-copy reconstruction,
+changed-content refusal and original-game continuation. This affected subset precedes the
+complete source cohort below.
+
+The collection-game workspace passes 5/5 with desktop features enabled in
+`2dd70cb6-51b4-48e5-9930-92346a8e06fb`: ordinary collection/reset gameplay, scalar creation data
+and the new prechange-fingerprint control. Its committed bundle and provider revision are
+unchanged. The source preparation, in-process source-free Session and concurrent-room cohort
+passes 42/42 in `8172517a-d2c6-4531-9ffb-444653a26439`, retaining original shared Image/Material/
+TileSet retirement, travel/Restore and source-freshness controls. It does not repeat the complete
+native cooker/desktop/audio publication matrix. The complete source rerun follows.
+
+The next full source rerun reaches 187/189: the two process tests launch a Collect Game
+`headless` executable left in the shared top-level target alias by the intervening independent
+workspace build. Its actual `usage: headless [--verify-reset]` proves the wrong product was
+launched; all current in-process movement, replay and resume controls pass. No command assertion
+is weakened. An explicit locked Cargo build selects Two-Level Game's `headless` again. The real
+`--verify-travel` then completes collection, instance changes, Retry and return with `verified=true`.
+The README records the same profile/feature-matched prebuild when reusing a target across
+independent same-bin workspaces; no second target tree or artifact selector is added.
+
+Immediately afterward, the complete affected source/gameplay/input/recording/CLI/resume cohort
+passes 189/189 in `534b7e04-0167-4b82-9a78-f21e5faa102f` (34.897 seconds of test execution).
+This includes the original separate-process Travel and Save/fresh Restore trajectories, exact
+Capture keys and acknowledgement, actual malformed press/release continuation, phase gates,
+unchanged-copy reconstruction and changed-content refusal. The 60 command tests, two binding
+tests without serde, five collection-game tests and 42 source-free/region tests retain their
+independent scopes. Reference Game's desktop-feature library check passes; this is caller
+compilation, not native UI execution.
+Correctness Clippy passes for all command-crate targets/features, the affected two-level targets
+with desktop enabled, and the complete collection-game workspace/targets/features. Existing
+advisory warnings remain; no warning-free workspace or compiler-floor claim follows.
+
+The new MOVE validation is a shared game-command boundary, not a per-frame World audit. Valid
+movement is decoded once and its old payload/type cloning path is removed; no measured speedup
+or numeric performance budget is claimed. Binding wire shape, recording/resume/cooked formats,
+provider revision, committed schema, dependencies and manifests/locks are unchanged. Complete
+native cooker/desktop/audio publication, foreign platforms and general live recording remain
+separate evidence. Root, both sample workspaces and Reference Game formatting checks pass.
+Document links/fragments, whitespace and unchanged manifest/lock/schema checks pass; the
+fifteen paused UI/Dialogue files retain their original hashes and stay outside these commits.
+No remote publication occurs. This closes the three concrete receiving items within this
+scope, not full R7/R10/R12/Foundation, arbitrary semantic replay or foreign/native UI execution.
+The remaining noninteractive author diagnostic item is missing-sidecar location feedback through
+the current content/tool owner; interactive component qualification and Editor findings remain
+paused. Broader Runtime delivery continues through the owning Foundation plan.
 
 ## Calendar dependencies and simulation clocks
 

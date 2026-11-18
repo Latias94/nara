@@ -2305,6 +2305,18 @@ render-enabled recipe tests pass, alongside affected correctness Clippy and form
 checks. The linked record owns exact qualification and Windows-only execution limits. This does
 not complete R1/R7, missing-sidecar location projection, interactive authoring or full Foundation.
 
+The [live-command and author-inventory correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#command-and-inventory-implementation-and-qualification)
+at `a6e95bd` / `f43f98d` keeps one game-owned movement decoder for live input and recording,
+with original Capture, acknowledgement, phase gates and recoverable game errors. Complete command
+drafts move into the same action map; three game callers use the constructor and the obsolete whole-command setter
+is removed. One existing component inventory supplies the collection sample's schemas and native
+registration without changing its committed fingerprint or predecessor contract. All 60 command
+tests, two bindings tests without serde, 189 source-game/replay tests, five collection-game tests
+and 42 in-process source-free/region tests pass, with affected Clippy and Reference desktop-caller
+compilation. The linked record retains
+the fixture/target-alias corrections and Windows Rust 1.95.0 limits; no native UI, full publication
+matrix or measured speedup is inferred. Full R7/R10/R12 and paused UI remain separate.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

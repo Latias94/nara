@@ -310,6 +310,20 @@ document checks pass. The linked record retains Windows-only execution, opaque/w
 lexical path and missing-sidecar limits. This is tool-boundary work, with no added per-frame
 validation, new authority or performance claim.
 
+The [live-command and author-inventory successor](../research/2026-11-18-engine-architecture-review-reconciliation.md#live-command-and-author-inventory-successor)
+at `a6e95bd` / `f43f98d`, with fixture correction `296659b`, shares one game-owned MOVE decoder
+between live consumption and recording, preserving ordered Capture/acknowledgement and
+phase-sensitive release. Complete drafts enter the original action map directly; three games
+retire redundant type cloning and the old replacement setter. The
+collection sample uses one current component inventory with its committed fingerprint intact.
+All 60 command tests, two binding tests without serde, 189 selected source-game/replay tests,
+five collection-game tests and 42 in-process source-free/region tests pass. The record separates
+the missing-sidecar test copy and shared
+same-bin target alias corrections from the production movement fix. Reference desktop-caller
+compilation, affected correctness Clippy, four workspace formatting checks and document checks
+pass; exact scope belongs to the linked evidence. No new command, registry, queue or per-frame
+audit owner is introduced, and full R7/R10/R12/Foundation remains open.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous
