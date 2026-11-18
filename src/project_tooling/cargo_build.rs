@@ -1295,9 +1295,17 @@ fn diagnostics_allocation(diagnostics: &CargoDiagnostics) -> Result<usize, Cargo
     diagnostics.entries().iter().try_fold(
         std::mem::size_of_val(diagnostics.entries()),
         |bytes, diagnostic| {
+            let path_bytes = diagnostic.primary_location().map_or(0, |location| {
+                location.path().as_os_str().as_encoded_bytes().len()
+            });
             bytes
                 .checked_add(diagnostic.message().len())
                 .and_then(|bytes| bytes.checked_add(diagnostic.code().map_or(0, str::len)))
+                .and_then(|bytes| {
+                    path_bytes
+                        .checked_mul(4)
+                        .and_then(|path| bytes.checked_add(path))
+                })
                 .ok_or(CargoBuildFailure::Limit("diagnostic metadata"))
         },
     )

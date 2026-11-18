@@ -38,7 +38,7 @@ fn custom_creation_templates_keep_the_current_float_wire_contract() {
 fn run(ticks: u32, commands: Vec<GameplayCommandSubmission>) -> GameSnapshot {
     let mut run = HeadlessRun::<GameSnapshot>::from_recipe(
         nara_game::open_project_root().expect("open sample source"),
-        nara_game::product_recipe(),
+        nara_game::product_recipe().expect("construct sample product recipe"),
         NonZeroU32::new(ticks).unwrap(),
         commands,
     );

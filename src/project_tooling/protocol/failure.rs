@@ -9,6 +9,10 @@ use serde_json::{Value, json};
 
 use crate::project_workflow::ProjectCheckError;
 
+mod recipe;
+
+pub(in crate::project_tooling) use recipe::RecipeFailure;
+
 pub(super) const MAX_FAILURE_BYTES: usize = 16 * 1024;
 const MAX_DIAGNOSTICS: usize = 8;
 const MAX_CODE_BYTES: usize = 96;

@@ -20,8 +20,8 @@ pub use build::{
     CargoBuildFacts, CargoBuildInvocation, CargoInvocationError, CargoTargetDeclarationError,
 };
 pub use messages::{
-    CargoCompilerArtifactFacts, CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics,
-    CargoJsonMessage, CargoJsonMessageError,
+    CargoCompilerArtifactFacts, CargoCompilerDiagnostic, CargoDiagnosticLevel,
+    CargoDiagnosticLocation, CargoDiagnostics, CargoJsonMessage, CargoJsonMessageError,
 };
 pub use metadata::{
     CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoPackageSourceKind,

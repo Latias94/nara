@@ -89,7 +89,7 @@ impl Project {
 
     pub fn add_first_system(&self) {
         let readme = TEMPLATE_README.replace("\r\n", "\n");
-        let snippet = readme
+        let (snippet, instructions) = readme
             .split_once("### Your first fixed-step system")
             .unwrap()
             .1
@@ -97,15 +97,29 @@ impl Project {
             .unwrap()
             .1
             .split_once("\n```")
-            .unwrap()
-            .0;
+            .unwrap();
         fs::write(self.root.join("src/first_step.rs"), snippet).unwrap();
         let library = self.root.join("src/lib.rs");
         let source = fs::read_to_string(&library).unwrap().replace("\r\n", "\n");
-        let marker = ".expect(\"the starter Image runtime codec definition is valid\")";
-        assert_eq!(source.matches(marker).count(), 1);
-        let source = source.replacen(marker, &format!("{marker}\n        .add_plugin::<first_step::FirstStepPlugin>()\n        .expect(\"the first-step plugin is unique\")"), 1);
-        fs::write(library, format!("mod first_step;\n{source}")).unwrap();
+        let recipe = instructions
+            .split_once("```rust\n")
+            .unwrap()
+            .1
+            .split_once("\n```")
+            .unwrap()
+            .0;
+        let start = source.find("pub fn product_recipe()").unwrap();
+        let end = start + source[start..].find("\n}\n").unwrap() + 2;
+        fs::write(
+            library,
+            format!(
+                "mod first_step;\n{}{}{}",
+                &source[..start],
+                recipe,
+                &source[end..]
+            ),
+        )
+        .unwrap();
         self.assert_identity();
     }
 

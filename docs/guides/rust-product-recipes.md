@@ -368,10 +368,10 @@ fn main() -> std::process::ExitCode {
 }
 ```
 
-`project_recipe` returns `Result<ProductRecipe, E>`. Tool mode calls it once after admitting the
-request; normal game startup calls the same definition through its ordinary entry. Keep component
-and migration registration in the contribution's provider callback. Its runtime plugin does not
-register that provider again.
+`project_recipe` returns `Result<ProductRecipe, E>` with `E: 'static`. Tool mode calls it once after
+admitting the request; normal game startup calls the same definition through its ordinary
+entry. Keep component and migration registration in the contribution's provider callback. Its
+runtime plugin does not register that provider again.
 
 `nara check`, `nara export`, and `nara repair startup-scene` first discover and build the existing
 `headless` target. A new project generates its initial lockfile as a separate Cargo authoring
@@ -410,6 +410,11 @@ None of these values is a file receipt or repair capability. The tool acquires i
 current authority when the command runs.
 
 Other failures receive static owner classifications rather than arbitrary Error/source strings.
+Known direct `ProductRecipeError` values retain their specific classification, such as
+`project.tool.recipe-duplicate-plugin`, and an admitted plugin identifier in the bounded summary.
+Opaque factory error values keep `project.tool.recipe-failed`; their formatters are never invoked.
+Return the error from the shared recipe instead of using `expect` before tool dispatch. The
+generated entries use that same fallible definition in Check, gameplay, Cook and Player.
 Schema publication uncertainty and pending cleanup remain distinct observations. A published but
 unaccepted repair does not necessarily mean its ordinary Check failed; the typed classification
 retains changed prepared facts and incomplete publication evidence separately.

@@ -11,7 +11,8 @@ use super::cargo_build::{
 };
 use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, protocol};
 use crate::project_workflow::cargo::{
-    CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoMetadataFacts,
+    CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoCompilerDiagnostic,
+    CargoMetadataFacts,
 };
 
 #[derive(Debug, Error)]
@@ -43,11 +44,7 @@ fn bootstrap_failure_details(failure: &CargoBuildFailure) -> String {
     }
     for diagnostic in diagnostics.entries() {
         details.push('\n');
-        if let Some(code) = diagnostic.code() {
-            details.push_str(code);
-            details.push_str(": ");
-        }
-        details.push_str(diagnostic.message());
+        append_compiler_diagnostic(&mut details, diagnostic);
     }
     if diagnostics.dropped_count() != 0 || diagnostics.truncated_count() != 0 {
         details.push_str(&format!(
@@ -57,6 +54,21 @@ fn bootstrap_failure_details(failure: &CargoBuildFailure) -> String {
         ));
     }
     details
+}
+
+fn append_compiler_diagnostic(output: &mut String, diagnostic: &CargoCompilerDiagnostic) {
+    if let Some(location) = diagnostic.primary_location()
+        && let Some(path) = location.path().to_str()
+        && crate::fs::RelativePath::preflight(path).is_ok()
+    {
+        output.push_str(path);
+        output.push_str(&format!(":{}:{}: ", location.line(), location.column()));
+    }
+    if let Some(code) = diagnostic.code() {
+        output.push_str(code);
+        output.push_str(": ");
+    }
+    output.push_str(diagnostic.message());
 }
 
 /// Builds the existing headless entry and delegates an operation without admitting project data.
@@ -150,7 +162,7 @@ mod completion_tests {
         )
         .unwrap();
         let failure =
-            protocol::encode_response("check", Err(super::super::ToolError::Recipe)).unwrap();
+            protocol::encode_response("check", Err(super::super::ToolError::recipe(()))).unwrap();
         let success = serde_json::to_vec(&success).unwrap();
         let failure = serde_json::to_vec(&failure).unwrap();
         assert!(finish_response(true, &success, "check").is_ok());
@@ -286,6 +298,12 @@ fn finish_bootstrap_build(
     bytes: &[u8],
     invocation: CargoBuildInvocation,
 ) -> Result<PathBuf, ProjectToolInvocationError> {
+    let project = invocation
+        .manifest_path()
+        .parent()
+        .unwrap_or(invocation.workspace_root())
+        .to_owned();
+    let workspace = invocation.workspace_root().to_owned();
     let mut decoder = CargoBuildDecoder::new(invocation);
     let decoded = decoder.push(bytes).and_then(|()| decoder.finish());
     match decoded {
@@ -298,7 +316,9 @@ fn finish_bootstrap_build(
         decoded => Err(CargoBuildFailure::Compilation {
             status,
             // Both push and finish can reject after observing actionable compiler messages.
-            diagnostics: decoder.diagnostics(),
+            diagnostics: decoder
+                .diagnostics()
+                .with_project_relative_locations(&project, &workspace),
             protocol: decoded.err(),
         }
         .into()),
@@ -464,6 +484,68 @@ mod build_tests {
         assert_eq!(diagnostics.truncated_count(), 1);
     }
 
+    #[test]
+    fn primary_compiler_location_reaches_bootstrap_as_a_project_relative_observation() {
+        let invocation = invocation();
+        let project = invocation.manifest_path().parent().unwrap();
+        let source = project.join("src/levels.rs");
+        let mut output = diagnostic_output_at(&source.to_string_lossy());
+        output.extend_from_slice(b"{\"reason\":\"build-finished\",\"success\":false}\n");
+        let error = finish_bootstrap_build(exit_status(false), &output, invocation).unwrap_err();
+        let displayed = error.to_string();
+        assert!(
+            displayed.contains(&format!("src/levels.rs:7:11: E0308: {DIAGNOSTIC}")),
+            "{displayed}",
+        );
+        assert!(!displayed.contains("private-rendered-compiler-canary"));
+        assert!(!displayed.contains(&source.to_string_lossy().into_owned()));
+        let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+            diagnostics,
+            ..
+        }) = error
+        else {
+            panic!("the primary location must remain available to the public caller")
+        };
+        let location = diagnostics.entries()[0].primary_location().unwrap();
+        assert_eq!(location.path(), Path::new("src/levels.rs"));
+        assert_eq!((location.line(), location.column()), (7, 11));
+        assert_eq!(diagnostics.truncated_count(), 0);
+    }
+
+    #[test]
+    fn external_or_unsafe_compiler_locations_do_not_erase_the_build_failure() {
+        let invocation = invocation();
+        let external = invocation
+            .workspace_root()
+            .parent()
+            .unwrap()
+            .join("private-external-location.rs");
+        for path in [
+            external.to_string_lossy().into_owned(),
+            "../private-external-location.rs".to_owned(),
+            "src/private-\u{1b}-location.rs".to_owned(),
+        ] {
+            let mut output = diagnostic_output_at(&path);
+            output.extend_from_slice(b"{\"reason\":\"build-finished\",\"success\":false}\n");
+            let error = finish_bootstrap_build(exit_status(false), &output, invocation.clone())
+                .unwrap_err();
+            let displayed = error.to_string();
+            assert!(displayed.contains(DIAGNOSTIC), "{displayed}");
+            assert!(displayed.contains("E0308"), "{displayed}");
+            assert!(!displayed.contains("private-external-location"));
+            assert!(!displayed.contains("private-\u{1b}-location"));
+            let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+                diagnostics,
+                ..
+            }) = error
+            else {
+                panic!("withheld locations must retain the original build failure")
+            };
+            assert!(diagnostics.entries()[0].primary_location().is_none());
+            assert_eq!(diagnostics.truncated_count(), 1);
+        }
+    }
+
     fn invocation() -> CargoBuildInvocation {
         let root = if cfg!(windows) {
             PathBuf::from(r"C:\bootstrap-test")
@@ -508,6 +590,25 @@ mod build_tests {
         let mut output = serde_json::to_vec(&json!({
             "reason": "compiler-message",
             "message": {"level": level, "code": null, "message": message}
+        }))
+        .unwrap();
+        output.push(b'\n');
+        output
+    }
+
+    fn diagnostic_output_at(path: &str) -> Vec<u8> {
+        let mut output = serde_json::to_vec(&json!({
+            "reason": "compiler-message",
+            "message": {
+                "level": "error",
+                "code": {"code": "E0308"},
+                "message": DIAGNOSTIC,
+                "rendered": "private-rendered-compiler-canary",
+                "spans": [
+                    {"is_primary": false, "file_name": "secondary.rs", "line_start": 1, "column_start": 1},
+                    {"is_primary": true, "file_name": path, "line_start": 7, "column_start": 11}
+                ]
+            }
         }))
         .unwrap();
         output.push(b'\n');

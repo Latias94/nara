@@ -23,7 +23,7 @@ const DESKTOP_NARA_FEATURES: [&str; 3] = [
     "nara/render-wgpu",
 ];
 const LIBRARY_MARKERS: [&[u8]; 3] = [
-    b"pub fn product_recipe() -> nara::ProductRecipe",
+    b"pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError>",
     b"nara::ProductRecipe::new()",
     b".add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(",
 ];
@@ -163,15 +163,10 @@ resizable = true
     )
 }
 
-pub(crate) fn product_recipe() -> ProductRecipe {
-    ProductRecipe::new()
-        .add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
-            crate::runtime_content::RuntimeCodecDefinitionId::new(
-                "nara.starter.desktop-2d.image",
-                1,
-            ),
-        )
-        .expect("the starter Image runtime codec definition is valid")
+pub(crate) fn product_recipe() -> Result<ProductRecipe, crate::ProductRecipeError> {
+    ProductRecipe::new().add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
+        crate::runtime_content::RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.image", 1),
+    )
 }
 
 pub(super) fn validate(

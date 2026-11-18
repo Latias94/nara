@@ -8,15 +8,11 @@ pub use nara::project_tooling::{ProductObservationTarget, record_product_observa
 
 /// Returns the one product recipe shared by the generated targets.
 #[must_use]
-pub fn product_recipe() -> nara::ProductRecipe {
-    let recipe = nara::ProductRecipe::new()
-        .add_contribution(collect_gameplay::contribution().expect("the game schema is valid"))
-        .expect("the game recipe is statically valid");
+pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
+    let recipe = nara::ProductRecipe::new().add_contribution(collect_gameplay::contribution()?)?;
     #[cfg(feature = "desktop")]
-    let recipe = recipe
-        .add_plugin::<collect_gameplay::DesktopInputPlugin>()
-        .expect("the desktop input recipe is statically valid");
-    recipe
+    let recipe = recipe.add_plugin::<collect_gameplay::DesktopInputPlugin>()?;
+    Ok(recipe)
 }
 
 /// Opens the ordinary project source without consulting the process CWD.

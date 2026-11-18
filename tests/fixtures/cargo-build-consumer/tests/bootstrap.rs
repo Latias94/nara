@@ -24,8 +24,19 @@ mod workspace;
 #[test]
 #[ignore = "actual serial Cargo bootstrap failure; shared repository target required"]
 fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
+    for workspace_member in [false, true] {
+        check_compile_failure(workspace_member);
+    }
+}
+
+fn check_compile_failure(workspace_member: bool) {
     let owner = workspace::Temporary::new();
-    let project = &owner.root;
+    let project = if workspace_member {
+        owner.root.join("game")
+    } else {
+        owner.root.clone()
+    };
+    let project = &project;
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .canonicalize()
@@ -40,9 +51,9 @@ fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
         repository.join("target").canonicalize().unwrap(),
     );
     fs::create_dir_all(project.join("src/bin")).unwrap();
-    fs::create_dir(project.join(".cargo")).unwrap();
+    fs::create_dir(owner.root.join(".cargo")).unwrap();
     fs::write(
-        project.join(".cargo/config.toml"),
+        owner.root.join(".cargo/config.toml"),
         format!(
             "[build]\njobs = 1\ntarget-dir = {}\n[net]\noffline = true\n",
             serde_json::to_string(target.to_str().unwrap()).unwrap(),
@@ -50,12 +61,21 @@ fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
     )
     .unwrap();
     let manifest = project.join("Cargo.toml");
-    let manifest_bytes = b"[package]\nname = 'nara-bootstrap-diagnostic-consumer'\n\
+    let mut manifest_bytes = b"[package]\nname = 'nara-bootstrap-diagnostic-consumer'\n\
         version = '0.0.0'\nedition = '2024'\n\n\
         [package.metadata.nara]\nproject-tool-protocol = 1\n\n\
-        [[bin]]\nname = 'headless'\npath = 'src/bin/headless.rs'\n\n\
-        [workspace]\nresolver = '3'\n";
-    fs::write(&manifest, manifest_bytes).unwrap();
+        [[bin]]\nname = 'headless'\npath = 'src/bin/headless.rs'\n"
+        .to_vec();
+    if workspace_member {
+        fs::write(
+            owner.root.join("Cargo.toml"),
+            b"[workspace]\nresolver = '3'\nmembers = ['game']\n",
+        )
+        .unwrap();
+    } else {
+        manifest_bytes.extend_from_slice(b"\n[workspace]\nresolver = '3'\n");
+    }
+    fs::write(&manifest, &manifest_bytes).unwrap();
     const DIAGNOSTIC: &str = "nara-bootstrap-F4-distinctive-compile-error";
     const MARKER: &str = "bootstrap-tool-was-launched";
     fs::write(
@@ -80,7 +100,7 @@ fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
         "{}",
         String::from_utf8_lossy(&initialized.stderr),
     );
-    let lockfile = fs::read(project.join("Cargo.lock")).unwrap();
+    let lockfile = fs::read(owner.root.join("Cargo.lock")).unwrap();
 
     let error = invoke_project_tool(ProjectToolRequest::Check {
         project: project.clone(),
@@ -92,6 +112,11 @@ fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
         displayed.contains(DIAGNOSTIC),
         "the error displayed by the CLI must contain the compiler diagnostic: {displayed}",
     );
+    assert!(
+        displayed.contains("src/bin/headless.rs:1:1:"),
+        "the error displayed by the CLI must locate the actual primary compiler span: {displayed}",
+    );
+    assert!(!displayed.contains(&project.to_string_lossy().into_owned()));
     let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
         status,
         diagnostics,
@@ -102,17 +127,21 @@ fn bootstrap_compile_failure_reaches_the_caller_without_launching_the_tool() {
     };
     assert!(!status.success());
     assert!(matches!(protocol, Some(CargoBuildError::BuildFailed)));
-    assert!(
-        diagnostics
-            .entries()
-            .iter()
-            .any(|diagnostic| diagnostic.message() == DIAGNOSTIC),
-        "the public caller must retain the actionable compiler diagnostic",
-    );
+    let diagnostic = diagnostics
+        .entries()
+        .iter()
+        .find(|diagnostic| diagnostic.message() == DIAGNOSTIC)
+        .expect("the public caller must retain the actionable compiler diagnostic");
+    let location = diagnostic
+        .primary_location()
+        .expect("the actual compiler message must retain its primary location");
+    assert_eq!(location.path(), Path::new("src/bin/headless.rs"));
+    assert_eq!((location.line(), location.column()), (1, 1));
+    assert!(!diagnostic.truncated());
     assert!(
         !project.join(MARKER).exists(),
         "a failed bootstrap must never execute a project tool",
     );
     assert_eq!(fs::read(&manifest).unwrap(), manifest_bytes);
-    assert_eq!(fs::read(project.join("Cargo.lock")).unwrap(), lockfile);
+    assert_eq!(fs::read(owner.root.join("Cargo.lock")).unwrap(), lockfile);
 }

@@ -8,7 +8,7 @@ pub use nara::project_tooling::{ProductObservationTarget, record_product_observa
 
 /// Returns the one product recipe shared by the generated targets.
 #[must_use]
-pub fn product_recipe() -> nara::ProductRecipe {
+pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
     nara::ProductRecipe::new()
         .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new(
@@ -16,7 +16,6 @@ pub fn product_recipe() -> nara::ProductRecipe {
                 1,
             ),
         )
-        .expect("the starter Image runtime codec definition is valid")
 }
 
 /// Opens the ordinary project source without consulting the process CWD.

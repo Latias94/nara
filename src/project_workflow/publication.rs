@@ -353,6 +353,7 @@ enum ProjectCreationAdmissionErrorInner {
         source: FsError,
     },
     Manifest(Box<ProjectCandidateError>),
+    RecipeConstruction(Box<crate::ProductRecipeError>),
     ProductRecipe(Box<RuntimePlanError>),
     Content(Box<ProjectContentError>),
 }
@@ -379,7 +380,8 @@ impl ProjectCreationAdmissionError {
             ProjectCreationAdmissionErrorInner::Manifest(_) => {
                 ProjectCreationAdmissionErrorKind::Manifest
             }
-            ProjectCreationAdmissionErrorInner::ProductRecipe(_) => {
+            ProjectCreationAdmissionErrorInner::RecipeConstruction(_)
+            | ProjectCreationAdmissionErrorInner::ProductRecipe(_) => {
                 ProjectCreationAdmissionErrorKind::ProductRecipe
             }
             ProjectCreationAdmissionErrorInner::Content(_) => {
@@ -397,6 +399,7 @@ impl ProjectCreationAdmissionError {
             | ProjectCreationAdmissionErrorInner::PublishedIdentityMismatch { .. }
             | ProjectCreationAdmissionErrorInner::PublishedDirectory { .. }
             | ProjectCreationAdmissionErrorInner::Manifest(_)
+            | ProjectCreationAdmissionErrorInner::RecipeConstruction(_)
             | ProjectCreationAdmissionErrorInner::ProductRecipe(_)
             | ProjectCreationAdmissionErrorInner::Content(_) => None,
         }
@@ -413,6 +416,7 @@ impl ProjectCreationAdmissionError {
             | ProjectCreationAdmissionErrorInner::PublishedIdentityMismatch { .. }
             | ProjectCreationAdmissionErrorInner::PublishedMember { .. }
             | ProjectCreationAdmissionErrorInner::Manifest(_)
+            | ProjectCreationAdmissionErrorInner::RecipeConstruction(_)
             | ProjectCreationAdmissionErrorInner::ProductRecipe(_)
             | ProjectCreationAdmissionErrorInner::Content(_) => None,
         }
@@ -430,6 +434,7 @@ impl ProjectCreationAdmissionError {
             | ProjectCreationAdmissionErrorInner::PublishedDirectory { .. }
             | ProjectCreationAdmissionErrorInner::PublishedMember { .. }
             | ProjectCreationAdmissionErrorInner::Manifest(_)
+            | ProjectCreationAdmissionErrorInner::RecipeConstruction(_)
             | ProjectCreationAdmissionErrorInner::ProductRecipe(_)
             | ProjectCreationAdmissionErrorInner::Content(_) => None,
         }
@@ -469,6 +474,7 @@ impl Error for ProjectCreationAdmissionError {
             }
             ProjectCreationAdmissionErrorInner::PublishedIdentityMismatch { .. } => None,
             ProjectCreationAdmissionErrorInner::Manifest(error) => Some(error.as_ref()),
+            ProjectCreationAdmissionErrorInner::RecipeConstruction(error) => Some(error.as_ref()),
             ProjectCreationAdmissionErrorInner::ProductRecipe(error) => Some(error.as_ref()),
             ProjectCreationAdmissionErrorInner::Content(error) => Some(error.as_ref()),
         }

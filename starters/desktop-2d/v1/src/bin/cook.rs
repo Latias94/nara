@@ -147,7 +147,7 @@ fn run(options: &Options) -> Result<PlayerPackageOutcome, ProjectCookError> {
         ProjectCookRequest {
             root: &root,
             candidate: &candidate,
-            recipe: nara_game::product_recipe(),
+            recipe: nara_game::product_recipe().map_err(invalid)?,
             target: RuntimeContentTarget::new(&options.target, "game-shipping").map_err(invalid)?,
             store: &store,
             implementation,

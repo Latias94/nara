@@ -70,7 +70,7 @@ fn run(frames: NonZeroU32) -> Result<(), String> {
     let base = open_executable_relative_runtime_pack(
         &RelativePath::new(generated::PACK_FILE).map_err(|error| error.to_string())?,
         &expected,
-        nara_game::product_recipe(),
+        nara_game::product_recipe().map_err(|error| error.to_string())?,
         RuntimeContentLimits::default(),
     )
     .map_err(|error| error.to_string())?;

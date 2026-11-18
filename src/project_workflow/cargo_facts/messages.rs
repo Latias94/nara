@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+};
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -82,6 +85,7 @@ pub struct CargoCompilerDiagnostic {
     pub(super) level: CargoDiagnosticLevel,
     pub(super) code: Option<String>,
     pub(super) message: String,
+    pub(super) primary_location: Option<CargoDiagnosticLocation>,
     pub(super) truncated: bool,
 }
 
@@ -98,6 +102,15 @@ impl CargoCompilerDiagnostic {
         &self.message
     }
 
+    /// Returns the first primary span's bounded location, when retained.
+    ///
+    /// The path is an invocation observation, not filesystem or project membership authority.
+    pub fn primary_location(&self) -> Option<&CargoDiagnosticLocation> {
+        self.primary_location.as_ref()
+    }
+
+    /// Reports shortened text/code or an invalid, oversized, over-budget or withheld location.
+    /// Missing spans and diagnostics with no primary span are ordinary location-free records.
     pub const fn truncated(&self) -> bool {
         self.truncated
     }
@@ -106,6 +119,35 @@ impl CargoCompilerDiagnostic {
         self.message
             .len()
             .saturating_add(self.code.as_ref().map_or(0, String::len))
+            .saturating_add(self.primary_location.as_ref().map_or(0, |location| {
+                location.path.as_os_str().as_encoded_bytes().len()
+            }))
+    }
+}
+
+/// A bounded native path and positive, one-based coordinates from one primary compiler span.
+///
+/// Raw paths may be relative, absolute, external or remapped by rustc. They are not resolved or
+/// canonicalized. A presentation sink must establish its own project-relative path policy before
+/// displaying a location. Source text, rendered output, suggestions and expansion spans are ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CargoDiagnosticLocation {
+    path: PathBuf,
+    line: NonZeroU32,
+    column: NonZeroU32,
+}
+
+impl CargoDiagnosticLocation {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn line(&self) -> u32 {
+        self.line.get()
+    }
+
+    pub const fn column(&self) -> u32 {
+        self.column.get()
     }
 }
 
@@ -179,9 +221,80 @@ impl CargoDiagnostics {
         self.dropped_count
     }
 
+    /// Counts observed diagnostics with shortened text/code or an omitted primary location.
+    /// Each diagnostic contributes at most once, including when its location is later withheld.
     pub const fn truncated_count(&self) -> u64 {
         self.truncated_count
     }
+
+    /// Consumes raw observations into portable, lexically admitted project-relative locations.
+    ///
+    /// Relative paths use the original Cargo workspace base before selecting project membership.
+    /// Absolute paths require an absolute known project root and a matching component prefix.
+    /// Windows uses the existing lexical root comparison, including ordinary/verbatim drive roots;
+    /// ambiguous roots are withheld. Links and filesystem identity are not observed. Withheld
+    /// locations mark their diagnostic truncated and count each affected diagnostic only once.
+    #[cfg(any(feature = "project-tooling", test))]
+    pub(crate) fn with_project_relative_locations(
+        mut self,
+        project: &Path,
+        workspace: &Path,
+    ) -> Self {
+        for diagnostic in &mut self.entries {
+            let Some(location) = diagnostic.primary_location.as_mut() else {
+                continue;
+            };
+            if let Some(path) = project_relative_location_path(location.path(), project, workspace)
+            {
+                location.path = path;
+            } else {
+                diagnostic.primary_location = None;
+                if !diagnostic.truncated {
+                    diagnostic.truncated = true;
+                    self.truncated_count = self.truncated_count.saturating_add(1);
+                }
+            }
+        }
+        self
+    }
+}
+
+#[cfg(any(feature = "project-tooling", test))]
+fn project_relative_location_path(
+    path: &Path,
+    project: &Path,
+    workspace: &Path,
+) -> Option<PathBuf> {
+    for base in [project, workspace] {
+        let spelling = base.to_str()?;
+        if !base.is_absolute()
+            || spelling.len() > MAX_PATH_BYTES
+            || spelling.chars().any(char::is_control)
+        {
+            return None;
+        }
+    }
+    let anchored;
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        let spelling = path.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
+        nara_fs::RelativePath::preflight(&spelling).ok()?;
+        anchored = workspace.join(spelling);
+        &anchored
+    };
+    let mut components = absolute.components();
+    let mut prefix = PathBuf::new();
+    for _ in project.components() {
+        prefix.push(components.next()?.as_os_str());
+    }
+    if !super::paths_match(&prefix, project) {
+        return None;
+    }
+    let relative = components.as_path();
+    let spelling = relative.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
+    nara_fs::RelativePath::preflight(&spelling).ok()?;
+    Some(PathBuf::from(spelling))
 }
 
 #[derive(Debug, Default)]
@@ -193,12 +306,19 @@ pub(super) struct CargoDiagnosticsBuilder {
 }
 
 impl CargoDiagnosticsBuilder {
-    pub(super) fn push(&mut self, diagnostic: CargoCompilerDiagnostic) {
+    pub(super) fn push(&mut self, mut diagnostic: CargoCompilerDiagnostic) {
+        let mut next_bytes = self.retained_bytes.checked_add(diagnostic.retained_bytes());
+        if diagnostic.primary_location.is_some()
+            && next_bytes.is_none_or(|bytes| bytes > MAX_DIAGNOSTIC_BYTES)
+        {
+            diagnostic.primary_location = None;
+            diagnostic.truncated = true;
+            next_bytes = self.retained_bytes.checked_add(diagnostic.retained_bytes());
+        }
         if diagnostic.truncated {
             self.truncated_count = self.truncated_count.saturating_add(1);
         }
-        let retained_bytes = diagnostic.retained_bytes();
-        let Some(next_bytes) = self.retained_bytes.checked_add(retained_bytes) else {
+        let Some(next_bytes) = next_bytes else {
             self.dropped_count = self.dropped_count.saturating_add(1);
             return;
         };
@@ -302,12 +422,36 @@ fn parse_compiler_diagnostic(
             });
         }
     };
+    let (primary_location, location_truncated) = parse_primary_location(message.get("spans"));
     Ok(CargoCompilerDiagnostic {
         level,
         code,
         message: message_text,
-        truncated: message_truncated || code_truncated,
+        primary_location,
+        truncated: message_truncated || code_truncated || location_truncated,
     })
+}
+
+fn parse_primary_location(spans: Option<&Value>) -> (Option<CargoDiagnosticLocation>, bool) {
+    let spans = match spans {
+        None | Some(Value::Null) => return (None, false),
+        Some(Value::Array(spans)) => spans,
+        Some(_) => return (None, true),
+    };
+    let Some(span) = spans
+        .iter()
+        .find(|span| span.get("is_primary").and_then(Value::as_bool) == Some(true))
+    else {
+        return (None, false);
+    };
+    let location = (|| {
+        let line = NonZeroU32::new(u32::try_from(span.get("line_start")?.as_u64()?).ok()?)?;
+        let column = NonZeroU32::new(u32::try_from(span.get("column_start")?.as_u64()?).ok()?)?;
+        let path = message_path_field(span.get("file_name"), "message.spans.file_name").ok()?;
+        Some(CargoDiagnosticLocation { path, line, column })
+    })();
+    let truncated = location.is_none();
+    (location, truncated)
 }
 
 fn message_path_field(

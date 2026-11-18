@@ -7,7 +7,10 @@ use super::{ProjectToolRequest, ProjectToolSummary, ToolError};
 
 pub(super) const TOOL_ARGUMENT: &str = "--nara-project-tool";
 mod failure;
+#[cfg(test)]
+mod recipe_tests;
 
+pub(super) use failure::RecipeFailure;
 pub use failure::{
     ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
     ProjectToolRepairHint,
@@ -288,7 +291,7 @@ mod tests {
 
     #[test]
     fn failure_envelope_limit_includes_the_final_newline() {
-        let value = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        let value = encode_response("check", Err(ToolError::recipe(()))).unwrap();
         let mut bytes = serde_json::to_vec(&value).unwrap();
         bytes.resize(failure::MAX_FAILURE_BYTES - 1, b' ');
         bytes.push(b'\n');
@@ -325,11 +328,11 @@ mod tests {
             let error = decode_response(bytes, "check").unwrap_err();
             assert!(!error.contains("NARA_PRIVATE_SOURCE_CANARY"));
         }
-        let mut response = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        let mut response = encode_response("check", Err(ToolError::recipe(()))).unwrap();
         assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "export").is_err());
         response["failure"].as_object_mut().unwrap().remove("loss");
         assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "check").is_err());
-        let mut response = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        let mut response = encode_response("check", Err(ToolError::recipe(()))).unwrap();
         response["failure"]["diagnostics"] = json!(vec![
             json!({
                 "code":"consumer.text.too-long","severity":"error","summary":"Text exceeds max_characters"

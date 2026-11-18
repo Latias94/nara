@@ -134,31 +134,26 @@ Replace only `product_recipe()` in the generated `src/lib.rs` with this function
 other helpers and `mod first_step;`. The stock Image codec and first-step plugin stay selected:
 
 ```rust
-pub fn product_recipe() -> nara::ProductRecipe {
+pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
     let recipe = nara::ProductRecipe::new()
         .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new(
                 "nara.starter.desktop-2d.image",
                 1,
             ),
-        )
-        .expect("the starter Image runtime codec definition is valid")
-        .add_plugin::<first_step::FirstStepPlugin>()
-        .expect("the first-step plugin is unique")
-        .add_contribution(collect_gameplay::contribution().expect("the game schema is valid"))
-        .expect("the game contribution is unique");
+        )?
+        .add_plugin::<first_step::FirstStepPlugin>()?
+        .add_contribution(collect_gameplay::contribution()?)?;
     #[cfg(feature = "desktop")]
-    let recipe = recipe
-        .add_plugin::<collect_gameplay::DesktopInputPlugin>()
-        .expect("the desktop input plugin is unique");
-    recipe
+    let recipe = recipe.add_plugin::<collect_gameplay::DesktopInputPlugin>()?;
+    Ok(recipe)
 }
 ```
 
 The contribution carries native gameplay and persistent schema together. All four generated
 targets use this recipe. Adding desktop input does not create another simulation: physical keys
-and bounded headless demonstrations submit the same commands. These fixed sample declarations
-use `expect`; fallible user-selected composition should retain its error for the tool boundary.
+and bounded headless demonstrations submit the same commands. Recipe construction propagates
+composition errors to the existing tool and product entry boundaries.
 
 ### Declare the local plugin's Cook inputs
 

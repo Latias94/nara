@@ -54,12 +54,20 @@ fn first_step(time: Res<FixedTime>) {
 }
 ```
 
-Add `mod first_step;` in `src/lib.rs`. At the end of its existing `product_recipe()` chain,
-after the stock Image codec's `expect`, append:
+Add `mod first_step;` in `src/lib.rs`. Keep its other helpers and replace only `product_recipe()`
+with this function:
 
-```rust,ignore
+```rust
+pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
+    nara::ProductRecipe::new()
+        .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new(
+                "nara.starter.desktop-2d.image",
+                1,
+            ),
+        )?
         .add_plugin::<first_step::FirstStepPlugin>()
-        .expect("the first-step plugin is unique")
+}
 ```
 
 Run `nara check .`, then `cargo run --bin headless`. Check must not print the gameplay marker;

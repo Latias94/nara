@@ -172,7 +172,7 @@ required-features = ["desktop"]
             .open_file(&RelativePath::new("nara.toml").unwrap())
             .unwrap();
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
-        let plan = resolve_product_recipe(&candidate, library::product_recipe()).unwrap();
+        let plan = resolve_product_recipe(&candidate, library::product_recipe().unwrap()).unwrap();
         let bundle = plan.schema_validation().authoring_schema_bundle();
         fs::write(
             root.join("schema/authoring.bundle.json"),

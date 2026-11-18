@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use engine::{
-    ProductRecipe,
+    ProductRecipe, ProductRecipeError,
     app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
     asset::{AssetProductRef, AssetRef, AssetServer, Assets, ImportedProductId, StableAssetId},
     ecs::World,
@@ -35,12 +35,10 @@ struct PaletteParameters {
     w: f32,
 }
 
-pub fn product_recipe() -> ProductRecipe {
+pub fn product_recipe() -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
-        .add_asset_domain::<Material2dDomain>()
-        .unwrap()
+        .add_asset_domain::<Material2dDomain>()?
         .add_plugin::<VerifyPalette>()
-        .unwrap()
 }
 
 pub fn primary(source: &str) -> AssetProductRef {

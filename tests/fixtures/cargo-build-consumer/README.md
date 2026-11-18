@@ -72,6 +72,27 @@ the Wasm header and captured/provenance facts, and subsequently runs the indepen
 native Host tool. It never executes the foreign artifact or looks up a target runner. This is
 Cargo foreign-build evidence only; it does not qualify Nara's WASI Runtime, target content or Ready.
 
+## Compiler And Recipe Diagnostics
+
+`bootstrap` invokes the public project-tool caller against a real invalid Rust entry. It checks
+the original unsuccessful exit and compiler message, its actual primary file/line/column and
+project-relative display, and proves that the invalid tool never launches. Original manifest and
+lock bytes remain unchanged.
+
+`recipe` compiles an independent tool that genuinely inserts one plugin twice. Check and Export
+retain `project.tool.recipe-duplicate-plugin` and the admitted plugin identifier through the
+existing failure protocol. A second factory returns an opaque error with panicking formatters;
+Schema returns the generic recipe failure without formatting it. Each factory runs once, with no
+plugin build, gameplay, publication or source/lock mutation. These consumers execute nested
+Cargo and must run serially against the shared target:
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --offline --release --test bootstrap --test recipe --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+These are native Windows qualification gates in CI. Other platforms, arbitrary wrapped error
+types and compiler expansion/suggestion trees are outside this result.
+
 ## Cooked Player Delivery Consumer
 
 `cooked_delivery` is a separate ignored consumer of the production cooked-content and Player

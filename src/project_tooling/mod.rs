@@ -110,7 +110,10 @@ pub enum ProjectToolSummary {
 ///
 /// Pass arguments without the executable name. `None` means normal gameplay was requested. The
 /// recipe factory is called once only after a valid tool request has been selected.
-pub fn run_project_tool_mode<E>(
+///
+/// Direct [`crate::ProductRecipeError`] values retain bounded classifications and admitted plugin
+/// identifiers. Other error types remain opaque and are never formatted or traversed.
+pub fn run_project_tool_mode<E: 'static>(
     arguments: impl IntoIterator<Item = OsString>,
     recipe: impl FnOnce() -> Result<ProductRecipe, E>,
 ) -> Option<ExitCode> {
@@ -119,7 +122,7 @@ pub fn run_project_tool_mode<E>(
         .as_ref()
         .map_or("invalid", ProjectToolRequest::operation);
     let result = request.map_err(ToolError::Protocol).and_then(|request| {
-        let recipe = recipe().map_err(|_| ToolError::Recipe)?;
+        let recipe = recipe().map_err(ToolError::recipe)?;
         execute(request, recipe)
     });
     let success = result.is_ok();
@@ -145,7 +148,7 @@ enum ToolError {
     #[error("{0}")]
     Protocol(&'static str),
     #[error("project recipe construction failed")]
-    Recipe,
+    Recipe(protocol::RecipeFailure),
     #[error("schema refresh failed")]
     Schema(crate::project_host::schema::SchemaRefreshError),
     #[error(transparent)]
@@ -167,6 +170,10 @@ enum ToolError {
 }
 
 impl ToolError {
+    fn recipe<E: 'static>(error: E) -> Self {
+        Self::Recipe(protocol::RecipeFailure::from_error(error))
+    }
+
     fn operation(
         stage: ProjectToolFailureStage,
         code: &'static str,
@@ -183,11 +190,7 @@ impl ToolError {
         use ProjectToolFailureStage as Stage;
         let (stage, code, summary) = match self {
             Self::Protocol(summary) => (Stage::Request, "project.tool.invalid-request", *summary),
-            Self::Recipe => (
-                Stage::Recipe,
-                "project.tool.recipe-failed",
-                "Project recipe construction failed",
-            ),
+            Self::Recipe(error) => return error.failure(operation),
             Self::Directory(_) => (
                 Stage::ProjectAccess,
                 "project.tool.directory-unavailable",

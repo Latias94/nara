@@ -4,16 +4,22 @@ use nara::app::RuntimeFrameStatus;
 use nara::project_host::{HeadlessProductRun, HeadlessRunOutcome};
 
 fn main() -> ExitCode {
-    if let Some(exit) =
-        nara::project_tooling::run_project_tool_mode(std::env::args_os().skip(1), || {
-            Ok::<_, std::convert::Infallible>(nara_game::product_recipe())
-        })
-    {
+    if let Some(exit) = nara::project_tooling::run_project_tool_mode(
+        std::env::args_os().skip(1),
+        nara_game::product_recipe,
+    ) {
         return exit;
     }
+    let recipe = match nara_game::product_recipe() {
+        Ok(recipe) => recipe,
+        Err(error) => {
+            eprintln!("failed to construct product recipe: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let report = match HeadlessProductRun::<RuntimeFrameStatus>::from_recipe(
         env!("CARGO_MANIFEST_DIR"),
-        nara_game::product_recipe(),
+        recipe,
         NonZeroU32::new(1).expect("the starter tick bound is non-zero"),
         Vec::new(),
     )

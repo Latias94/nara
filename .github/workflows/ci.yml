@@ -317,6 +317,10 @@ jobs:
         run: cargo fmt --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --all -- --check
       - name: Test independent native process custody
         run: cargo nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --test contained_process --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test real project bootstrap and recipe diagnostics
+        if: runner.os == 'Windows'
+        timeout-minutes: 30
+        run: cargo nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --release --test bootstrap --test recipe --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test independent semantic panel authoring
         run: cargo nextest run --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --locked --test public_host --test property_children --test-threads=1 --no-fail-fast --no-tests fail
       - name: Check UI module consumer formatting

@@ -107,10 +107,13 @@ fn admit_project(
         .member(ProjectMember::StartupScene)
         .expect("the closed starter receipt contains the startup Scene")
         .digest();
+    let recipe = desktop_2d_v1_product_recipe().map_err(|error| ProjectCreationAdmissionError {
+        inner: ProjectCreationAdmissionErrorInner::RecipeConstruction(Box::new(error)),
+    })?;
     let checked = check_project_source_with_expected_digests(
         project_root.share(),
         None,
-        desktop_2d_v1_product_recipe(),
+        recipe,
         manifest_digest,
         startup_scene_digest,
     )

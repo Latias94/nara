@@ -4,11 +4,10 @@ use collect_gameplay::{GameSnapshot, demonstration_commands};
 use nara::project_host::{HeadlessProductRun, HeadlessRunOutcome};
 
 fn main() -> ExitCode {
-    if let Some(exit) =
-        nara::project_tooling::run_project_tool_mode(std::env::args_os().skip(1), || {
-            Ok::<_, std::convert::Infallible>(nara_game::product_recipe())
-        })
-    {
+    if let Some(exit) = nara::project_tooling::run_project_tool_mode(
+        std::env::args_os().skip(1),
+        nara_game::product_recipe,
+    ) {
         return exit;
     }
     let verify_reset = match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
@@ -20,9 +19,16 @@ fn main() -> ExitCode {
         }
     };
     let ticks = if verify_reset { 66 } else { 62 };
+    let recipe = match nara_game::product_recipe() {
+        Ok(recipe) => recipe,
+        Err(error) => {
+            eprintln!("failed to construct product recipe: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let report = match HeadlessProductRun::<GameSnapshot>::from_recipe(
         env!("CARGO_MANIFEST_DIR"),
-        nara_game::product_recipe(),
+        recipe,
         NonZeroU32::new(ticks).expect("the demonstration tick bound is non-zero"),
         demonstration_commands(verify_reset),
     )

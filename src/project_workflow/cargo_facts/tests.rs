@@ -6,6 +6,8 @@ use super::*;
 
 #[path = "declarations_tests.rs"]
 mod declarations;
+#[path = "locations_tests.rs"]
+mod locations;
 
 const PACKAGE_ID: &str = "path+file:///project#sample-game@0.1.0";
 const DEPENDENCY_ID: &str = "registry+https://example.invalid/index#dependency@1.2.3";

@@ -113,6 +113,14 @@ consume full metadata independently of the finite synchronous adapter.
 compiler diagnostics and any protocol rejection. Diagnostics include explicit dropped/truncated
 counts; raw JSON stdout is not retained in the error. A failed compile therefore remains
 actionable without treating a nonzero exit as a successful artifact or discarding its messages.
+`CargoCompilerDiagnostic::primary_location()` optionally supplies the first primary compiler
+span's path and positive line/column. The generic model retains a bounded compiler path as an
+observation; interpret relative paths against the owning invocation's Cargo workspace root.
+Project-tool bootstrap uses that original base and the selected manifest directory to produce
+an admitted project-relative path before displaying it. Missing spans are normal. Invalid,
+oversize or withheld locations preserve the code/message and contribute to diagnostic truncation;
+path bytes share the existing aggregate diagnostic limit. No source excerpt, rendered output,
+suggestion or expansion tree is retained, and the location is not a file capability.
 Tool/version/metadata commands keep their own non-compilation failures, and unconfirmed child
 cleanup retains separate custody as described below.
 

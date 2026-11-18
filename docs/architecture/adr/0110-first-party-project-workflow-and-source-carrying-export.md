@@ -313,6 +313,16 @@ actual consumer qualification; selecting this contract alone does not mark it co
   identifier admission, counts withheld values and preserves a selected profile or an explicit
   placeholder. It grants no repair authority. JSON outcome and process exit must agree in both
   directions; diagnostic omission never turns an operation failure into success.
+- The compiled-tool factory preserves a known direct `ProductRecipeError` through finite static
+  classifications and admitted plugin identifiers in bounded summaries. It does not format opaque
+  factory errors or walk arbitrary source chains. Generated project and collection-game entries
+  propagate recipe construction failure through their ordinary result boundaries rather than
+  panic before the tool can report it. Cargo diagnostics separately retain an optional bounded primary
+  file/line/column observation; bootstrap resolves relative compiler paths against the original
+  Cargo workspace base and displays only admitted locations within the selected project.
+  Withheld or malformed optional locations preserve the compiler failure and count as diagnostic
+  truncation. Source excerpts, rendered output, suggestions and compiler expansion trees are not
+  added to the project protocol, and a location grants no filesystem or Editor authority.
 - Static projection preserves the owning physical outcome: Schema refresh distinguishes
   rejected/failed/uncertain publication from independent pending cleanup; published Repair
   distinguishes failed Check from changed prepared facts or incomplete publication evidence.

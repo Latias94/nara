@@ -13,12 +13,19 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let recipe = match nara_game::product_recipe() {
+        Ok(recipe) => recipe,
+        Err(error) => {
+            eprintln!("failed to construct product recipe: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let launch = DesktopProductLaunch::from_cargo_product(
         env!("CARGO_MANIFEST_DIR"),
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         DESKTOP_BINARY_TARGET,
-        nara_game::product_recipe(),
+        recipe,
     );
     let launch = match launch {
         Ok(launch) if verify_first_present => launch.with_first_present_verification(),
