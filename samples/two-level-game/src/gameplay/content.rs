@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use nara::{
     asset::AssetRef,
+    ecs::World,
     identity::SceneEntityId,
     prelude::{Component, PersistentComponent, PersistentComponentProvider, Transform2d, Vec2},
     project_host::ProjectDomainAssets,
@@ -11,6 +12,7 @@ use nara::{
 
 use super::collision::{CollisionBox, RoomCollision, Wall};
 use crate::animation::{ExplorerAnimation, PreparedAnimation};
+use crate::markers::{MarkerDefinition, MarkerPalette, marker_product};
 use crate::{levels::LevelId, save::Checkpoint};
 
 pub const PLAYER: u32 = 1;
@@ -61,12 +63,32 @@ pub(super) struct Content {
     pub bank: AssetRef,
     pub collision: RoomCollision,
     pub animation: PreparedAnimation,
+    pub marker: MarkerDefinition,
 }
 
 impl Content {
+    pub fn read_current(world: &World) -> Result<Self, String> {
+        let current = nara::advanced_prelude::CurrentScene::get(world)
+            .ok_or("current Scene is unavailable")?;
+        let assets = world
+            .get_resource::<ProjectDomainAssets>()
+            .ok_or("current domain assets are unavailable")?;
+        let registry =
+            nara::reflect::component_registry(world).ok_or("current game Schema is unavailable")?;
+        nara::project_host::inspect_current_scene_dependency(
+            world,
+            current.receipt(),
+            marker_product(),
+            |template| Self::read(current.source(), assets, template, registry),
+        )
+        .map_err(|report| format!("marker dependency is unavailable: {:?}", report.diagnostics))?
+    }
+
     pub fn read(
         scene: &CompiledSceneDocument,
         assets: &ProjectDomainAssets,
+        marker: &CompiledSceneDocument,
+        registry: &nara::reflect::ComponentRegistrySnapshot,
     ) -> Result<Self, String> {
         if scene.entities().len() > 32 {
             return Err("level has too many authored entities".into());
@@ -80,6 +102,7 @@ impl Content {
         let mut walls = Vec::new();
         for entity in scene.entities() {
             let palette = decode::<SoundPalette>(entity)?;
+            let marker = decode::<MarkerPalette>(entity)?;
             if entity
                 .components()
                 .keys()
@@ -90,8 +113,17 @@ impl Content {
                     return Err("camera must be a transformed level root".into());
                 }
                 bank = Some(palette.ok_or("camera lacks its SoundPalette")?.bank);
-            } else if palette.is_some() {
-                return Err("SoundPalette must belong to the level camera".into());
+                let marker = marker.ok_or("camera lacks its MarkerPalette")?.template;
+                let expected = marker_product();
+                if marker.as_product() != Some(expected)
+                    && marker.as_stable_id() != Some(expected.source())
+                {
+                    return Err("camera must select the admitted marker Scene Product".into());
+                }
+            } else if palette.is_some() || marker.is_some() {
+                return Err(
+                    "SoundPalette and MarkerPalette must belong to the level camera".into(),
+                );
             }
             let Some(role) = decode::<ObjectRole>(entity)? else {
                 continue;
@@ -150,6 +182,7 @@ impl Content {
         walls.sort_by(|first, second| first.id.cmp(&second.id));
         let collision = RoomCollision::prepare(definition, walls, player_transform)?;
         let animation = PreparedAnimation::acquire(assets, animation.clips)?;
+        let marker = MarkerDefinition::read(marker, registry)?;
         Ok(Self {
             player,
             checkpoint,
@@ -158,6 +191,7 @@ impl Content {
             bank: bank.ok_or("level lacks its camera SoundPalette")?,
             collision,
             animation,
+            marker,
         })
     }
 
@@ -196,7 +230,7 @@ pub(super) fn valid_position(position: Vec2) -> bool {
     position.is_finite() && position.x.abs() <= 280.0 && position.y.abs() <= 150.0
 }
 
-fn decode<T: PersistentComponentProvider>(
+pub(crate) fn decode<T: PersistentComponentProvider>(
     entity: &CompiledSceneEntity,
 ) -> Result<Option<T>, String> {
     let schema = T::persistent_component_schema();

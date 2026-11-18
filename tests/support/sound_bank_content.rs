@@ -38,6 +38,7 @@ use nara::{
         RuntimeContentCatalogLimits, RuntimeContentError, RuntimeContentExpectation,
         RuntimeContentLimits, RuntimeContentMember, RuntimeContentTarget,
     },
+    scene::PrefabSourceResolver,
 };
 use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
@@ -537,6 +538,51 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
             .load_scene(&candidate, &plan, &level.scene_path())
             .unwrap();
         exact_samples(bank(snapshot.domain_assets()), &fixture.samples());
+        if level == LevelId::STARTUP {
+            let mut prefabs = nara::scene::InMemoryPrefabSourceResolver::new();
+            for prefab in snapshot.prefabs() {
+                let prefix = format!("{}/", candidate.settings().paths.prefabs);
+                let alias = prefab.path().as_str().strip_prefix(&prefix).unwrap();
+                prefabs.insert(
+                    AssetRef::path(alias).unwrap(),
+                    prefab.source_key().clone(),
+                    prefab.document().clone(),
+                );
+            }
+            let marker = snapshot
+                .scene_dependencies()
+                .iter()
+                .find(|scene| scene.path().as_str() == "scenes/marker.scene.json")
+                .expect("the actual level retains its Immediate marker Scene");
+            let compilation = plan
+                .schema_validation()
+                .bindings()
+                .try_compile_scene_with_loader(
+                    marker.document(),
+                    Default::default(),
+                    Some(snapshot.asset_resolution()),
+                    |reference, _| {
+                        Ok::<_, std::convert::Infallible>(prefabs.resolve_prefab(reference))
+                    },
+                )
+                .unwrap();
+            assert!(
+                !compilation.diagnostics.has_errors(),
+                "{:?}",
+                compilation.diagnostics
+            );
+            let compiled = compilation
+                .candidate
+                .unwrap()
+                .bind_source(marker.source_key().clone());
+            builder
+                .add_scene(
+                    two_level_game::markers::marker_product(),
+                    &compiled,
+                    snapshot.asset_resolution(),
+                )
+                .unwrap();
+        }
         let compilation = plan
             .schema_validation()
             .bindings()
@@ -639,7 +685,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 8);
+    assert_eq!(prepared.base().catalog().members().len(), 9);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())

@@ -2610,6 +2610,81 @@
               "field_tombstones": []
             },
             {
+              "id": "two-level-game.MarkerLink",
+              "aliases": [
+                "Marker link"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "target",
+                  "aliases": [
+                    "Target"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "target"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "entity_ref"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "entity_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
+              "id": "two-level-game.MarkerPalette",
+              "aliases": [
+                "Marker palette"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "template",
+                  "aliases": [
+                    "Template Scene"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "template"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "asset_ref",
+                    "demand": "immediate"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
               "id": "two-level-game.ObjectRole",
               "aliases": [
                 "Object role"

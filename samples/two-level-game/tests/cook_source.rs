@@ -39,6 +39,9 @@ impl Directory {
             ("schema/authoring.bundle.json", "schema"),
             ("scenes/meadow.scene.json", "meadow"),
             ("scenes/cavern.scene.json", "cavern"),
+            ("scenes/marker.scene.json", "marker wrapper"),
+            ("scenes/marker.scene.json.meta", "marker metadata"),
+            ("prefabs/marker.prefab.json", "marker prefab"),
             ("assets/textures/meadow.png", "image A"),
             ("assets/textures/meadow.png.meta", "meta A"),
             ("assets/textures/cavern.png", "image B"),
@@ -148,6 +151,9 @@ fn optional_input_metadata_presence_and_content_stay_in_the_original_fence() {
 fn content_fence_remains_original_when_code_is_bound_after_generation() {
     for name in [
         "scenes/cavern.scene.json",
+        "scenes/marker.scene.json",
+        "scenes/marker.scene.json.meta",
+        "prefabs/marker.prefab.json",
         "input/explorer.actions.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
@@ -163,9 +169,12 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
 }
 
 #[test]
-fn content_fence_requires_input_atlas_and_animation_sources_and_metadata() {
+fn content_fence_requires_input_animation_and_marker_sources_and_metadata() {
     for name in [
         "input/explorer.actions.json",
+        "scenes/marker.scene.json",
+        "scenes/marker.scene.json.meta",
+        "prefabs/marker.prefab.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
         "assets/animations/explorer.sprite-animations.json",
@@ -188,6 +197,7 @@ fn code_and_generated_bootstrap_stay_fenced_through_later_publication_checks() {
         "build.rs",
         "src/lib.rs",
         "src/bin/player/generated.rs",
+        "prefabs/marker.prefab.json",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();

@@ -16,6 +16,7 @@ use nara::{
         RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependencyRole,
         RuntimeContentMemberKind,
     },
+    scene::{SourceDocumentKind, SourceDocumentOrigin},
 };
 use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
@@ -23,6 +24,7 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::LevelId,
+    markers::{SCENE_PATH, marker_product},
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
@@ -140,7 +142,15 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 8);
+    assert_eq!(catalog.members().len(), 9);
+    assert_eq!(
+        catalog
+            .members()
+            .iter()
+            .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+            .count(),
+        3
+    );
     assert_eq!(
         catalog.configuration().input.action_map,
         Some(input_product())
@@ -265,6 +275,17 @@ pub fn inspect(
                     .insert(product.to_string(), images::atlas_proof(&image))
                     .is_none()
             );
+        } else if product == marker_product() {
+            assert!(member.dependencies().is_empty());
+            let RuntimeContentMemberKind::Scene { source } = member.kind() else {
+                panic!("marker template must be a real cooked Scene");
+            };
+            assert_eq!(source.kind(), SourceDocumentKind::Scene);
+            let SourceDocumentOrigin::ProjectLocation { universe, path } = source.origin() else {
+                panic!("marker wrapper must retain its ProjectLocation identity");
+            };
+            assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
+            assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
         } else {
             let level = LevelId::ALL
                 .into_iter()
@@ -280,7 +301,7 @@ pub fn inspect(
                     .iter()
                     .any(|dependency| dependency.product() == bank_product())
             );
-            assert_eq!(member.dependencies().len(), 4);
+            assert_eq!(member.dependencies().len(), 5);
             assert_eq!(
                 member
                     .dependencies()
@@ -291,7 +312,8 @@ pub fn inspect(
                     level.image_product(),
                     atlas_product(),
                     bank_product(),
-                    clips_product()
+                    clips_product(),
+                    marker_product(),
                 ]
                 .into_iter()
                 .collect()
@@ -314,6 +336,7 @@ pub fn inspect(
                 bank_product(),
                 clips_product(),
                 input_product(),
+                marker_product(),
             ])
             .collect()
     );

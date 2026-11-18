@@ -104,6 +104,15 @@
               }
             }
           },
+          "two-level-game.MarkerPalette": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "template": { "type": "map", "value": { "kind": { "type": "string", "value": "stable_id" }, "value": { "type": "string", "value": "36654481-1e16-5b3f-844e-3f18380591f7" } } }
+              }
+            }
+          },
           "nara.render.Camera2d": {
             "version": 1,
             "value": {

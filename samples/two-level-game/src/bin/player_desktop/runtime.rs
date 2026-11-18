@@ -14,13 +14,17 @@ use nara::{
         DesktopRunOutcome, DesktopRunProgress, DesktopRunReport, WinitInputActivation,
         open_executable_relative_runtime_pack,
     },
-    runtime_content::{RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget},
+    runtime_content::{
+        RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMemberKind,
+        RuntimeContentTarget,
+    },
 };
 use serde_json::{Value, json};
 use two_level_game::{
     Scenario,
     animation::{atlas_product, clips_product},
     levels::LevelId,
+    markers::marker_product,
 };
 
 use super::{
@@ -107,11 +111,24 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 8
+            || base.catalog().members().len() != 9
+            || base
+                .catalog()
+                .members()
+                .iter()
+                .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+                .count()
+                != 3
+            || !base.catalog().addressable_roots().is_empty()
             || base.plan().settings().input().action_map
                 != Some(two_level_game::input::input_product())
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
+            || base.member(marker_product()).is_none_or(|member| {
+                member.products() != [marker_product()]
+                    || !matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
+                    || !member.dependencies().is_empty()
+            })
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()

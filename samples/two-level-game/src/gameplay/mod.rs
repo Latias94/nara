@@ -1,6 +1,6 @@
 mod collision;
 pub(crate) mod commands;
-mod content;
+pub(crate) mod content;
 pub mod input;
 #[cfg(feature = "desktop")]
 pub use input::movement_keyboard_bindings;
@@ -18,7 +18,7 @@ use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
     ecs::{World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
-    identity::{EntityLookup, SceneEntityId, WorldEntityToken},
+    identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
     reflect::{
         ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
@@ -46,7 +46,7 @@ const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-lev
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("two-level-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("two-level-game.native", 3),
+    ComponentSchemaProviderBindingId::new("two-level-game.native", 4),
     catalog,
     register,
 );
@@ -251,7 +251,7 @@ impl SceneProductResource for ActiveLevel {
 pub(super) struct Session {
     player_launch: Option<Result<(), String>>,
     held: [bool; 4],
-    markers: Vec<WorldEntityToken>,
+    markers: Vec<travel::MarkerInstance>,
     phase: GamePhase,
     travel_count: u32,
     restarts: u32,
@@ -389,6 +389,8 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
             content::SoundPalette::persistent_component_schema(),
             collision::CollisionBox::persistent_component_schema(),
             crate::animation::ExplorerAnimation::persistent_component_schema(),
+            crate::markers::MarkerPalette::persistent_component_schema(),
+            crate::markers::MarkerLink::persistent_component_schema(),
         ],
         ..Default::default()
     })
@@ -398,7 +400,9 @@ fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegi
         .register_persistent_component::<content::ObjectRole>()?
         .register_persistent_component::<content::SoundPalette>()?
         .register_persistent_component::<collision::CollisionBox>()?
-        .register_persistent_component::<crate::animation::ExplorerAnimation>()
+        .register_persistent_component::<crate::animation::ExplorerAnimation>()?
+        .register_persistent_component::<crate::markers::MarkerPalette>()?
+        .register_persistent_component::<crate::markers::MarkerLink>()
         .map(|_| ())
 }
 
@@ -417,14 +421,7 @@ fn initialize(world: &mut World) {
     };
     world.resource_mut::<Session>().clock.timestep_nanos = timestep;
     resume::remember_current(world);
-    let content = CurrentScene::get(world)
-        .ok_or_else(|| "current Scene is unavailable".to_owned())
-        .and_then(|current| {
-            let assets = world
-                .get_resource::<nara::project_host::ProjectDomainAssets>()
-                .ok_or("initial animation content is unavailable")?;
-            Content::read(current.source(), assets)
-        });
+    let content = Content::read_current(world);
     match content {
         Ok(content) => {
             world

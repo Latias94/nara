@@ -9,6 +9,7 @@ pub mod development;
 mod gameplay;
 mod host;
 pub mod levels;
+pub mod markers;
 #[cfg(feature = "development")]
 pub mod replay;
 pub mod resume;

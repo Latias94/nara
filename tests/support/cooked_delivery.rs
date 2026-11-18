@@ -137,6 +137,7 @@ pub mod native {
     use nara::{
         asset::{AssetProductRef, RuntimeAssetCodec},
         fs::{ContentDigest, RelativePath},
+        identity::EntityReference,
         image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
         input::ActionMapRuntimeCodec,
         project_tooling::{
@@ -149,8 +150,12 @@ pub mod native {
                 SupervisedProductProcessCommand,
             },
         },
+        reflect::ComponentTypeId,
         runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
-        scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin},
+        scene::{
+            RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey,
+            SourceDocumentKind, SourceDocumentOrigin,
+        },
     };
     use nara_sprite_animation::SpriteAnimationCodec;
     use serde::{Deserialize, Serialize};
@@ -159,6 +164,7 @@ pub mod native {
         animation::{atlas_product, clips_product},
         input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
+        markers::{SCENE_PATH, marker_product},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         sound_bank::{SoundBankCodec, bank_product},
     };
@@ -530,7 +536,15 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 8);
+        assert_eq!(pack.catalog.members().len(), 9);
+        assert_eq!(
+            pack.catalog
+                .members()
+                .iter()
+                .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+                .count(),
+            3
+        );
         assert_eq!(
             pack.catalog.configuration().input.action_map,
             Some(input_product())
@@ -550,6 +564,7 @@ pub mod native {
                     bank_product(),
                     clips_product(),
                     input_product(),
+                    marker_product(),
                 ])
                 .collect()
         );
@@ -567,7 +582,7 @@ pub mod native {
                 scene.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
-            assert_eq!(scene.dependencies().len(), 4);
+            assert_eq!(scene.dependencies().len(), 5);
             assert_eq!(
                 scene
                     .dependencies()
@@ -578,7 +593,8 @@ pub mod native {
                     level.image_product(),
                     atlas_product(),
                     bank_product(),
-                    clips_product()
+                    clips_product(),
+                    marker_product(),
                 ]
                 .into_iter()
                 .collect()
@@ -589,6 +605,58 @@ pub mod native {
                 })
             );
         }
+        let marker_index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [marker_product()])
+            .unwrap();
+        let marker = &pack.catalog.members()[marker_index];
+        assert_eq!(marker.products(), [marker_product()]);
+        assert!(marker.dependencies().is_empty());
+        let RuntimeContentMemberKind::Scene { source } = marker.kind() else {
+            panic!("marker template must be a real cooked Scene");
+        };
+        assert_eq!(source.kind(), SourceDocumentKind::Scene);
+        let SourceDocumentOrigin::ProjectLocation { universe, path } = source.origin() else {
+            panic!("marker wrapper must retain its ProjectLocation identity");
+        };
+        assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
+        assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
+        let plan = nara::project_host::resolve_runtime_configuration(
+            &pack.catalog.configuration().resolve().unwrap(),
+            two_level_game::cooked_recipe(),
+        )
+        .unwrap();
+        let cooked_marker = RuntimeSceneDocumentCandidate::from_json_bytes(
+            &pack_bytes[pack.members[marker_index].clone()],
+            RuntimeSceneLimits::default(),
+        )
+        .unwrap()
+        .admit(source, plan.schema_validation().bindings())
+        .unwrap();
+        let document = cooked_marker.document();
+        assert_eq!(document.entities().len(), 2);
+        assert_eq!(document.roots().len(), 1);
+        let root = document
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == &document.roots()[0])
+            .unwrap();
+        assert_eq!(root.children().len(), 1);
+        let child = document
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == &root.children()[0])
+            .unwrap();
+        assert!(child.children().is_empty());
+        let link = &root.components()[&ComponentTypeId::new("two-level-game.MarkerLink")];
+        assert_eq!(
+            link.value().field("target").unwrap().as_entity_reference(),
+            Some(&EntityReference::SceneLocal {
+                entity: child.id().clone(),
+            })
+        );
         let bank = pack.catalog.member_for_product(bank_product()).unwrap();
         assert!(matches!(
             bank.kind(),
@@ -814,6 +882,22 @@ pub mod native {
         assert_eq!(refused["current_receipt"], refused["startup_receipt"]);
         assert_scene_sequence(&refused, &[LevelId::Meadow]);
         assert_images(&refused, &[LevelId::Meadow], &expected_images);
+        let marker_range = pack.members[marker_index].clone();
+        assert!(!marker_range.is_empty());
+        let mut bad_marker = pack_bytes.clone();
+        bad_marker[marker_range.start + marker_range.len() / 2] ^= 1;
+        assert_eq!(
+            &bad_marker[..marker_range.start],
+            &pack_bytes[..marker_range.start]
+        );
+        assert_eq!(
+            &bad_marker[marker_range.end..],
+            &pack_bytes[marker_range.end..]
+        );
+        assert_eq!(
+            &bad_marker[pack.catalog_bytes.clone()],
+            &pack_bytes[pack.catalog_bytes.clone()]
+        );
         let mut bad_catalog = pack_bytes.clone();
         let changed_catalog = corrupt_catalog(&mut bad_catalog).unwrap();
         assert_eq!(&bad_catalog[..HEADER_BYTES], &pack_bytes[..HEADER_BYTES]);
@@ -821,43 +905,57 @@ pub mod native {
             &bad_catalog[changed_catalog.end..],
             &pack_bytes[changed_catalog.end..]
         );
-        fs::write(&pack_path, &bad_catalog).unwrap();
-        let refused = custody.player(&executable, vec![], "damaged-catalog");
-        let exit: NativeExit = record(&refused.stdout, CLEANUP).unwrap();
-        assert!(!exit.success && exit.code != Some(0));
-        let rejected: Value = record(&refused.stdout, RESULT).unwrap();
-        assert_eq!(rejected["success"], false);
-        assert_eq!(rejected["scenario"], "interactive");
-        assert_eq!(rejected["source_free"], true);
-        assert_eq!(rejected["cleanup_complete"], true);
-        for missing in [
-            "level",
-            "score",
-            "collected",
-            "state",
-            "startup_receipt",
-            "current_receipt",
+        for (name, damaged) in [
+            ("damaged-immediate-marker", bad_marker),
+            ("damaged-catalog", bad_catalog),
         ] {
-            assert!(
-                rejected[missing].is_null(),
-                "catalog refusal activated gameplay: {rejected}"
+            fs::write(&pack_path, &damaged).unwrap();
+            let refused = custody.player(&executable, vec![], name);
+            let exit: NativeExit = record(&refused.stdout, CLEANUP).unwrap();
+            exit.assert_clean();
+            assert!(!exit.success && exit.code != Some(0));
+            let rejected: Value = record(&refused.stdout, RESULT).unwrap();
+            assert_eq!(rejected["success"], false);
+            assert_eq!(rejected["scenario"], "interactive");
+            assert_eq!(rejected["source_free"], true);
+            assert_eq!(rejected["cleanup_complete"], true);
+            for missing in [
+                "level",
+                "score",
+                "collected",
+                "state",
+                "startup_receipt",
+                "current_receipt",
+            ] {
+                assert!(
+                    rejected[missing].is_null(),
+                    "startup refusal activated gameplay: {rejected}"
+                );
+            }
+            for empty in [
+                "markers",
+                "visited_levels",
+                "observed_image_products",
+                "resident_images",
+                "image_proofs",
+                "scene_receipts",
+            ] {
+                assert_eq!(rejected[empty], json!([]));
+            }
+            let message = rejected["message"].as_str().unwrap().to_ascii_lowercase();
+            assert!(!message.is_empty(), "{rejected}");
+            if name == "damaged-catalog" {
+                assert!(
+                    message.contains("catalog") || message.contains("pack"),
+                    "{rejected}"
+                );
+            }
+            assert_sources_gone(&project, &cache);
+            assert_eq!(
+                fs::read(relocated.join("package.json")).unwrap(),
+                package_bytes
             );
         }
-        for empty in [
-            "markers",
-            "visited_levels",
-            "observed_image_products",
-            "resident_images",
-            "image_proofs",
-            "scene_receipts",
-        ] {
-            assert_eq!(rejected[empty], json!([]));
-        }
-        let message = rejected["message"].as_str().unwrap().to_ascii_lowercase();
-        assert!(
-            message.contains("catalog") || message.contains("pack"),
-            "{rejected}"
-        );
         assert_eq!(
             fs::read(relocated.join("package.json")).unwrap(),
             package_bytes

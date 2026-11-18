@@ -1,8 +1,9 @@
 use super::input::RuntimeKind;
 use nara::{
     asset::{
-        AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetSourceKind, AssetSourcePath,
-        ProjectAssetDatabase, RuntimeAssetCodec, SourceAssetBuild, SourceAssetImporter,
+        AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetRef, AssetSourceKind,
+        AssetSourcePath, ProjectAssetDatabase, RuntimeAssetCodec, SourceAssetBuild,
+        SourceAssetImporter,
     },
     asset_build::{
         ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation, ArtifactBuildStore,
@@ -24,6 +25,7 @@ use nara::{
         RuntimeContentDependencyRole, RuntimeContentMemberKind, RuntimeContentTarget,
     },
     scene::{
+        InMemoryPrefabSourceResolver, PrefabDocumentCandidate, PrefabSourceResolver,
         SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
@@ -32,6 +34,7 @@ use two_level_game::{
     animation::{ATLAS_PATH, CLIPS_PATH, atlas_product, clips_product},
     input::{INPUT_PATH, input_product},
     levels::LevelId,
+    markers::{PREFAB_PATH, SCENE_PATH, marker_product},
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
 
@@ -147,6 +150,44 @@ pub(super) fn prepare(
         path: AssetSourcePath::new(selected.as_str()).map_err(|error| error.to_string())?,
         digest: Some(ArtifactContentDigest::of_bytes(&input_bytes)),
     }];
+    let scene_scope = AssetPathScope::under(
+        AssetSourcePath::new(settings.paths.scenes.as_str())
+            .map_err(|error| format!("Scenes root: {error}"))?,
+    );
+    let marker_path = AssetPath::new(SCENE_PATH).map_err(|error| error.to_string())?;
+    let marker_source = scene_scope.resolve(&marker_path);
+    let metadata_path = marker_source.meta_path();
+    let metadata = read(root, &metadata_path, METADATA_BYTES)?;
+    let identity = AssetMetaIdentityCandidate::decode_json_bytes(&metadata)
+        .map_err(|error| format!("{metadata_path}: {error}"))?
+        .into_identity();
+    if identity.path() != &marker_path
+        || identity.source_kind() != &AssetSourceKind::Scene
+        || identity.stable_id() != marker_product().source()
+    {
+        return Err(format!(
+            "{metadata_path}: expected the game's marker Scene identity and path"
+        ));
+    }
+    database
+        .insert_identity(&scene_scope, marker_path, identity)
+        .map_err(|error| format!("{metadata_path}: {error}"))?;
+    let prefab_source = AssetSourcePath::new(format!("{}/{}", settings.paths.prefabs, PREFAB_PATH))
+        .map_err(|error| format!("marker Prefab source path: {error}"))?;
+    let prefab_bytes = read(root, prefab_source.as_str(), DOCUMENT_BYTES)?;
+    let prefab = PrefabDocumentCandidate::decode_json_bytes(&prefab_bytes)
+        .map_err(|error| format!("{prefab_source}: {error}"))?
+        .into_composition_source()
+        .map_err(|error| format!("{prefab_source}: {error}"))?;
+    let prefabs = InMemoryPrefabSourceResolver::new().with_prefab(
+        AssetRef::path(PREFAB_PATH).map_err(|error| error.to_string())?,
+        SourceDocumentKey::project_location(
+            settings.project.source_universe,
+            prefab_source,
+            SourceDocumentKind::Prefab,
+        ),
+        prefab,
+    );
     for (path, product) in LevelId::ALL
         .into_iter()
         .map(|level| {
@@ -284,20 +325,25 @@ pub(super) fn prepare(
         .map_err(|error| format!("{source}: {error}"))?;
     observations.extend_from_slice(imported.observations());
 
-    for level in LevelId::ALL {
-        let source = scene_source(&settings, level)?;
+    let mut scenes = LevelId::ALL
+        .into_iter()
+        .map(|level| scene_source(&settings, level).map(|source| (level.scene_product(), source)))
+        .collect::<Result<Vec<_>, _>>()?;
+    scenes.push((marker_product(), marker_source.clone()));
+    for (product, source) in scenes {
         let bytes = read(root, source.as_str(), DOCUMENT_BYTES)?;
         let document = SceneDocumentCandidate::decode_json_bytes(&bytes)
             .map_err(|error| format!("{source}: {error}"))?
             .into_composition_source()
             .map_err(|error| format!("{source}: {error}"))?;
-        if document
-            .entities
-            .iter()
-            .any(|entity| entity.prefab.is_some())
+        if product == marker_product()
+            && !document
+                .entities
+                .iter()
+                .any(|entity| entity.prefab.is_some())
         {
             return Err(format!(
-                "{source}: Prefab instances are outside this game's cooked inventory"
+                "{source}: marker Scene must contain its authored Prefab instance"
             ));
         }
         let compilation = plan
@@ -307,7 +353,7 @@ pub(super) fn prepare(
                 &document,
                 SceneCompilationOptions::default(),
                 Some(database.resolver(&scope)),
-                |_, _| Err::<_, String>(format!("{source}: Prefab loading is not supported")),
+                |reference, _| Ok::<_, String>(prefabs.resolve_prefab(reference)),
             )?;
         if compilation.diagnostics.has_errors() {
             return Err(format!(
@@ -324,7 +370,7 @@ pub(super) fn prepare(
                 SourceDocumentKind::Scene,
             ));
         builder
-            .add_scene(level.scene_product(), &compiled, database.resolver(&scope))
+            .add_scene(product, &compiled, database.resolver(&scope))
             .map_err(|error| format!("{source}: Scene cooking failed: {error}"))?;
     }
 
@@ -332,11 +378,37 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 8 {
+    if catalog.members().len() != 9
+        || catalog
+            .members()
+            .iter()
+            .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+            .count()
+            != 3
+        || catalog.scenes().len() != LevelId::ALL.len()
+        || LevelId::ALL
+            .into_iter()
+            .any(|level| !catalog.scenes().contains(&level.scene_product()))
+        || !catalog.addressable_roots().is_empty()
+    {
         return Err(
-            "cooked content must contain exactly two Scenes, three Images, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain exactly three Scenes with two travel roots, three Images, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
+    }
+    let marker = catalog
+        .member_for_product(marker_product())
+        .ok_or("missing cooked marker Scene")?;
+    let expected_source = SourceDocumentKey::project_location(
+        settings.project.source_universe,
+        marker_source,
+        SourceDocumentKind::Scene,
+    );
+    if marker.products() != [marker_product()]
+        || !marker.dependencies().is_empty()
+        || !matches!(marker.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
+    {
+        return Err("cooked marker Scene identity or empty resource dependency set changed".into());
     }
     let input_member = catalog
         .member_for_product(input_product())
@@ -396,21 +468,28 @@ pub(super) fn prepare(
         );
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
+            || scene.dependencies().len() != 5
             || scene
                 .dependencies()
                 .iter()
                 .any(|dependency| dependency.product() == input_product())
-            || [atlas_product(), bank_product(), clips_product()]
-                .into_iter()
-                .any(|product| {
-                    !scene.dependencies().iter().any(|dependency| {
-                        dependency.product() == product
-                            && dependency.role() == RuntimeContentDependencyRole::Required
-                    })
+            || [
+                level.image_product(),
+                atlas_product(),
+                bank_product(),
+                clips_product(),
+                marker_product(),
+            ]
+            .into_iter()
+            .any(|product| {
+                !scene.dependencies().iter().any(|dependency| {
+                    dependency.product() == product
+                        && dependency.role() == RuntimeContentDependencyRole::Required
                 })
+            })
         {
             return Err(format!(
-                "cooked {level:?} Scene identity or required shared atlas, SoundBank or Sprite animation changed"
+                "cooked {level:?} Scene identity or required Image, atlas, SoundBank, Sprite animation or marker Scene changed"
             ));
         }
     }
@@ -458,13 +537,14 @@ fn project_settings(
     }
     if settings.paths.assets.as_str() != "assets"
         || settings.paths.scenes.as_str() != "scenes"
+        || settings.paths.prefabs.as_str() != "prefabs"
         || settings.startup.default_scene.as_ref() != Some(&LevelId::STARTUP.scene_path())
         || settings.content.scenes.as_slice() != [LevelId::Cavern.scene_path()]
         || settings.project.native_document_identity != NativeDocumentIdentity::ProjectLocation
         || !matches!(settings.authoring_state, ProjectAuthoringState::Ready)
     {
         return Err(
-            "nara.toml: expected the ready two-level game's assets/scenes roots, Meadow startup, Cavern content root and project_location identity policy"
+            "nara.toml: expected the ready two-level game's assets/scenes/prefabs roots, Meadow startup, Cavern content root and project_location identity policy"
                 .to_owned(),
         );
     }

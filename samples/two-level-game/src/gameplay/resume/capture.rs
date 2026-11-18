@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopRun;
 use nara::{
@@ -157,19 +155,10 @@ pub(crate) fn capture_world(
             "current source no longer matches game-owned admission facts",
         ));
     }
-    let marker_ids = travel::observe_markers(world).map_err(GameResumeError::Ineligible)?;
+    travel::observe_markers(world).map_err(GameResumeError::Ineligible)?;
     let mut progress = world.resource::<Progress>().checkpoint().clone();
     progress.collected.sort();
     progress.markers.sort_by_key(|record| record.id);
-    let expected_ids = progress
-        .markers
-        .iter()
-        .filter(|record| record.level == key)
-        .map(|record| record.id)
-        .collect::<BTreeSet<_>>();
-    if marker_ids.into_iter().collect::<BTreeSet<_>>() != expected_ids {
-        return Err(reject("current dynamic marker state is inconsistent"));
-    }
     let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
     let content = world
         .resource::<ActiveLevel>()

@@ -7,7 +7,10 @@ use std::{
 use nara::{
     fs::{ContentDigest, RelativePath},
     project_host::{HeadlessSession, HeadlessSessionClose, open_executable_relative_runtime_pack},
-    runtime_content::{RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget},
+    runtime_content::{
+        RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMemberKind,
+        RuntimeContentTarget,
+    },
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -15,6 +18,7 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::{LevelId, LevelKey},
+    markers::marker_product,
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
 };
 
@@ -40,11 +44,24 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 8
+            || base.catalog().members().len() != 9
+            || base
+                .catalog()
+                .members()
+                .iter()
+                .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+                .count()
+                != 3
+            || !base.catalog().addressable_roots().is_empty()
             || base.plan().settings().input().action_map != Some(input_product())
             || base.member(input_product()).is_none()
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
+            || base.member(marker_product()).is_none_or(|member| {
+                member.products() != [marker_product()]
+                    || !matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
+                    || !member.dependencies().is_empty()
+            })
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()

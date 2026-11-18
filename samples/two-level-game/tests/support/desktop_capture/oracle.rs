@@ -161,8 +161,15 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         .ok_or_else(|| std::io::Error::other("original stock input lacks Sprite extraction"))?;
     let objects = objects(expected)?;
     let player_atlas = player_fixture()?;
+    let marker_count = expected
+        .progress
+        .markers
+        .iter()
+        .filter(|marker| marker.level == key)
+        .count();
     require(
-        batches.total_instances() == objects.len(),
+        batches.total_instances() == objects.len()
+            && objects.len() == AUTHORED_LEVEL_MEMBERS - 1 + marker_count * 2,
         "stock capture has missing or extra game objects",
     )?;
     let mut originals = batches.as_slice().iter().flat_map(|batch| {
@@ -482,6 +489,14 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             Color::rgb(1.0, 0.3, 0.8),
             GameImage::Solid,
         ));
+        objects.push(object(
+            &format!("marker {} child", marker.id.get()),
+            GameObjectKind::Marker,
+            position + Vec2::splat(3.0),
+            Vec2::splat(4.0),
+            Color::WHITE,
+            GameImage::Solid,
+        ));
     }
     Ok(objects)
 }
@@ -687,6 +702,9 @@ mod tests {
     ];
     const PLAYER_FILL_BLOCKS: [(usize, usize); 3] = [(156, 116), (157, 116), (158, 116)];
     const PLAYER_EYE_BLOCK: (usize, usize) = (158, 118);
+    const MARKER_ROOT_BLOCKS: [(usize, usize); 4] =
+        [(178, 118), (178, 119), (178, 120), (178, 121)];
+    const MARKER_CHILD_BLOCK: (usize, usize) = (181, 118);
     const WALL_BLOCKS: [(&str, [(usize, usize); 4]); 5] = [
         ("wall-west", [(11, 12), (12, 12), (13, 12), (14, 12)]),
         ("wall-east", [(305, 12), (306, 12), (307, 12), (308, 12)]),
@@ -781,9 +799,10 @@ mod tests {
                 paint_block(&mut pixels, block, [46, 56, 71, 255]);
             }
         }
-        for x in 178..182 {
-            paint_block(&mut pixels, (x, 118), [255, 77, 204, 255]);
+        for block in MARKER_ROOT_BLOCKS {
+            paint_block(&mut pixels, block, [255, 77, 204, 255]);
         }
+        paint_block(&mut pixels, MARKER_CHILD_BLOCK, [255; 4]);
         for block in [(4, 4), (315, 4), (4, 175), (315, 175)] {
             paint_block(&mut pixels, block, [10, 33, 23, 255]);
         }
@@ -845,7 +864,7 @@ mod tests {
         for frame in 0..4 {
             let checks = check_pixels(&readback(frame), &resume(frame)).unwrap();
             assert_eq!(checks.player, 36);
-            assert_eq!(checks.markers, 36);
+            assert_eq!(checks.markers, 45);
             assert_eq!(checks.walls, 180);
             assert_eq!(checks.visible_pickups, 18);
             assert_eq!(checks.collected_pickups, 18);
@@ -866,6 +885,33 @@ mod tests {
             }
             let error = check_pixels(&missing_wall, &state).unwrap_err().to_string();
             assert!(error.contains(name) && error.contains("pixel"), "{error}");
+        }
+    }
+
+    #[test]
+    fn pixel_oracle_rejects_each_missing_authored_marker_member() {
+        let state = resume(2);
+        let original = readback(2);
+        check_pixels(&original, &state).unwrap();
+        let mut missing_root = original.clone();
+        for block in MARKER_ROOT_BLOCKS {
+            paint_block(&mut missing_root, block, [10, 33, 23, 255]);
+        }
+        let error = check_pixels(&missing_root, &state).unwrap_err().to_string();
+        assert!(
+            error.contains("marker 1") && error.contains("pixel"),
+            "{error}"
+        );
+        for replacement in [[255, 77, 204, 255], [10, 33, 23, 255]] {
+            let mut missing_child = original.clone();
+            paint_block(&mut missing_child, MARKER_CHILD_BLOCK, replacement);
+            let error = check_pixels(&missing_child, &state)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("marker 1 child") && error.contains("pixel"),
+                "{error}"
+            );
         }
     }
 
@@ -914,6 +960,7 @@ mod tests {
             (WALL_BLOCKS[3].1[0], "wall-south"),
             (WALL_BLOCKS[4].1[0], "wall-inner"),
             ((178, 118), "marker 1"),
+            (MARKER_CHILD_BLOCK, "marker 1 child"),
             ((4, 4), "level background"),
         ] {
             let mut corrupted = original.clone();

@@ -158,7 +158,7 @@ mod atlas_content {
     };
 
     use nara::{
-        asset::RuntimeAssetCodec,
+        asset::{AssetRef, RuntimeAssetCodec},
         asset_build::ArtifactBuildObservation,
         input::{
             ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec,
@@ -167,13 +167,18 @@ mod atlas_content {
         project_host::{HeadlessSession, HeadlessSessionClose},
         project_tooling::host_fs,
         project_workflow::cooked_content::PreparedRuntimeContent,
-        runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
+        reflect::{ComponentTypeId, decode_asset_reference_value},
+        runtime_content::{
+            RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentMemberKind,
+        },
+        scene::{SourceDocumentKind, SourceDocumentOrigin},
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
         Scenario,
         animation::{atlas_product, clips_product},
         levels::LevelId,
+        markers::{SCENE_PATH, marker_product},
         sound_bank::bank_product,
     };
 
@@ -206,6 +211,9 @@ mod atlas_content {
                 "schema/authoring.bundle.json",
                 "scenes/meadow.scene.json",
                 "scenes/cavern.scene.json",
+                "scenes/marker.scene.json",
+                "scenes/marker.scene.json.meta",
+                "prefabs/marker.prefab.json",
                 "assets/textures/meadow.png",
                 "assets/textures/meadow.png.meta",
                 "assets/textures/cavern.png",
@@ -252,7 +260,35 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 8);
+        assert_eq!(catalog.members().len(), 9);
+        let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
+        scenes.sort();
+        assert_eq!(catalog.scenes(), scenes);
+        assert!(catalog.addressable_roots().is_empty());
+        assert_eq!(
+            catalog
+                .members()
+                .iter()
+                .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+                .count(),
+            3
+        );
+        let marker = catalog.member_for_product(marker_product()).unwrap();
+        assert_eq!(marker.products(), [marker_product()]);
+        assert!(marker.dependencies().is_empty());
+        let RuntimeContentMemberKind::Scene { source } = marker.kind() else {
+            panic!("marker template must be a real cooked Scene");
+        };
+        assert_eq!(source.kind(), SourceDocumentKind::Scene);
+        let SourceDocumentOrigin::ProjectLocation { universe, path } = source.origin() else {
+            panic!("marker wrapper must retain its ProjectLocation identity");
+        };
+        assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
+        assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
+        assert!(matches!(
+            prepared.base().acquire_scene(marker_product()),
+            Err(RuntimeContentError::UndeclaredScene)
+        ));
         assert_eq!(
             catalog
                 .members()
@@ -267,6 +303,7 @@ mod atlas_content {
                     bank_product(),
                     clips_product(),
                     super::input_product(),
+                    marker_product(),
                 ])
                 .collect::<BTreeSet<_>>()
         );
@@ -294,11 +331,33 @@ mod atlas_content {
                     level.image_product(),
                     atlas_product(),
                     bank_product(),
-                    clips_product()
+                    clips_product(),
+                    marker_product(),
                 ]
                 .into_iter()
                 .map(|product| (product, RuntimeContentDependencyRole::Required))
                 .collect::<BTreeSet<_>>()
+            );
+            let cooked = prepared
+                .base()
+                .acquire_scene(level.scene_product())
+                .unwrap();
+            let palettes = cooked
+                .candidate()
+                .document()
+                .entities()
+                .iter()
+                .filter_map(|entity| {
+                    entity
+                        .components()
+                        .get(&ComponentTypeId::new("two-level-game.MarkerPalette"))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(palettes.len(), 1);
+            assert_eq!(
+                decode_asset_reference_value(palettes[0].value().field("template").unwrap())
+                    .unwrap(),
+                AssetRef::Product(marker_product())
             );
         }
         let clips = catalog.member_for_product(clips_product()).unwrap();
@@ -478,6 +537,7 @@ mod atlas_content {
                     atlas_product(),
                     bank_product(),
                     clips_product(),
+                    marker_product(),
                 ]
                 .into_iter()
                 .collect()

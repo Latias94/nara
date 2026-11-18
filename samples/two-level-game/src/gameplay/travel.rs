@@ -1,7 +1,9 @@
+mod markers;
 mod reconstruction;
 
-use reconstruction::add_marker;
-pub(super) use reconstruction::{DynamicMarker, hide_collected, observe_markers, reconstruct};
+use markers::add_marker;
+pub(super) use markers::{DynamicMarker, MarkerInstance, observe_markers};
+pub(super) use reconstruction::{hide_collected, reconstruct};
 
 use std::collections::BTreeSet;
 
@@ -17,7 +19,7 @@ use nara::{
     project_host::{
         ProjectSceneRequestId, ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
     },
-    scene::advanced::SceneProductTransactionLimits,
+    scene::advanced::{SceneProductRetirement, SceneProductTransactionLimits},
 };
 
 use super::{
@@ -160,20 +162,22 @@ fn retry_current(world: &mut World) -> Result<(), String> {
     let progress = world.resource::<Progress>().checkpoint().clone();
     let (expected, content) = {
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
-        let assets = world
-            .get_resource::<nara::project_host::ProjectDomainAssets>()
-            .ok_or("active animation content is unavailable")?;
-        let content = Content::read(current.source(), assets)?;
+        let content = Content::read_current(world)?;
         content.validate_progress(key.level(), &progress)?;
         (current.receipt().clone(), content)
     };
-    let markers = world.resource::<Session>().markers.clone();
+    let markers = world
+        .resource::<Session>()
+        .markers
+        .iter()
+        .map(|marker| SceneProductRetirement::Instance(marker.receipt.clone()))
+        .collect::<Vec<_>>();
     let report = restart_current_scene_with_product(
         world,
         &expected,
         SceneProductTransactionLimits::new(
             ItemLimit::new(4).unwrap(),
-            ItemLimit::new(MAX_MARKERS).unwrap(),
+            ItemLimit::new(MAX_MARKERS * 16).unwrap(),
         ),
         &markers,
         |writer| {
@@ -271,9 +275,20 @@ pub(super) fn advance(world: &mut World) {
     let request = pending.request.unwrap();
     #[cfg(all(windows, feature = "audio-cpal"))]
     let audio_bank = crate::audio::bank_guard(world);
+    let registry = nara::reflect::component_registry(world).cloned();
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
-            let content = Content::read(view.scene(), view.domain_assets())?;
+            let marker = view
+                .scene_dependency(crate::markers::marker_product())
+                .ok_or("prepared level lacks its Immediate marker Scene dependency")?;
+            let content = Content::read(
+                view.scene(),
+                view.domain_assets(),
+                marker,
+                registry
+                    .as_ref()
+                    .ok_or("current game Schema is unavailable")?,
+            )?;
             #[cfg(all(windows, feature = "audio-cpal"))]
             if let Some(bank) = &audio_bank {
                 bank.validate(view.domain_assets(), &content.bank)?;
@@ -325,13 +340,18 @@ pub(super) fn advance(world: &mut World) {
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
     }
-    let old_markers = world.resource::<Session>().markers.clone();
+    let old_markers = world
+        .resource::<Session>()
+        .markers
+        .iter()
+        .map(|marker| SceneProductRetirement::Instance(marker.receipt.clone()))
+        .collect::<Vec<_>>();
     let report = commit_prepared_project_scene(
         world,
         request,
         SceneProductTransactionLimits::new(
             ItemLimit::new(4).unwrap(),
-            ItemLimit::new(MAX_MARKERS).unwrap(),
+            ItemLimit::new(MAX_MARKERS * 16).unwrap(),
         ),
         &old_markers,
         |writer| {

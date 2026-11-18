@@ -23,6 +23,7 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
+    markers::{SCENE_PATH, marker_product},
     save::Checkpoint,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
@@ -100,8 +101,16 @@ pub fn inspect_package(
     );
     assert_eq!(
         catalog.members().len(),
-        8,
-        "two processed Scenes, three Images, one shared SoundBank, one Sprite animation set and one global Input"
+        9,
+        "three processed Scenes with two travel roots, three Images, one shared SoundBank, one Sprite animation set and one global Input"
+    );
+    assert_eq!(
+        catalog
+            .members()
+            .iter()
+            .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+            .count(),
+        3
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -194,6 +203,17 @@ pub fn inspect_package(
             assert_eq!(bank.product(), product);
             assert!(!bank.samples(SoundCue::Pickup).is_empty());
             assert!(!bank.samples(SoundCue::Travel).is_empty());
+        } else if product == marker_product() {
+            assert!(member.dependencies().is_empty());
+            let RuntimeContentMemberKind::Scene { source } = member.kind() else {
+                panic!("marker template must be a real cooked Scene");
+            };
+            assert_eq!(source.kind(), SourceDocumentKind::Scene);
+            let SourceDocumentOrigin::ProjectLocation { universe, path } = source.origin() else {
+                panic!("marker wrapper must retain its ProjectLocation identity");
+            };
+            assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
+            assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
         } else {
             assert!(
                 LevelId::ALL
@@ -221,7 +241,8 @@ pub fn inspect_package(
                     level.image_product(),
                     atlas_product(),
                     bank_product(),
-                    clips_product()
+                    clips_product(),
+                    marker_product(),
                 ]
                 .into_iter()
                 .collect()
@@ -241,6 +262,7 @@ pub fn inspect_package(
                 bank_product(),
                 clips_product(),
                 input_product(),
+                marker_product(),
             ])
             .collect()
     );
