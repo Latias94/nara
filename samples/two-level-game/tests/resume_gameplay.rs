@@ -549,6 +549,15 @@ fn changed_cavern_content_in_a_verified_copy_refuses_resume_and_leaves_original_
     let retained = original.frozen();
 
     let mut unchanged = Game::from_project(project.root());
+    let unchanged_state = unchanged.capture();
+    assert_eq!(unchanged_state.compatibility.levels.len(), 1);
+    assert!(
+        unchanged_state
+            .compatibility
+            .levels
+            .iter()
+            .all(|stamp| { state.compatibility.levels.contains(stamp) })
+    );
     restore_candidate(&original, &mut unchanged, &state);
     unchanged.close();
     project.change_cavern_pickup();
