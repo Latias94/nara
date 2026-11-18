@@ -891,6 +891,7 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
         .resource::<QueuedSpriteItems>()
         .as_slice()
         .to_vec();
+    let extracted = runtime.world().resource::<ExtractedSprites>().clone();
     let batches = runtime.world().resource::<SpriteBatches>().clone();
     runtime.finish().unwrap();
     assert_eq!(
@@ -900,6 +901,15 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
     assert!(queued[0].material_extension.is_none());
     for item in &queued[1..] {
         let extension = item.material_extension.as_ref().unwrap();
+        let original = extracted
+            .as_slice()
+            .iter()
+            .find(|draw| draw.entity == item.entity)
+            .unwrap()
+            .material_extension
+            .as_ref()
+            .unwrap();
+        assert!(Arc::ptr_eq(extension, original));
         assert_eq!(extension.binding, material);
         assert_eq!(extension.textures.len(), 1);
         assert_eq!(extension.textures[0].0, 1);
@@ -972,6 +982,18 @@ fn missing_custom_material_texture_skips_only_that_item() {
         .world()
         .resource::<SpriteRenderStats>()
         .unprepared_textures;
+    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice();
+    assert_eq!(extracted.len(), 1);
+    assert_eq!(extracted[0].entity, stock);
+    assert_eq!(extracted[0].source_order, 0);
+    assert!(extracted[0].material_extension.is_none());
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<SpriteRenderStats>()
+            .missing_materials,
+        0
+    );
     runtime.finish().unwrap();
     assert_eq!(
         queued.iter().map(|item| item.entity).collect::<Vec<_>>(),

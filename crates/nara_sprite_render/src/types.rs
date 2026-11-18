@@ -38,7 +38,7 @@ pub struct ExtractedSprite {
     pub kind: ExtractedSpriteKind,
     pub material: ExtractedSpriteMaterial,
     pub image_content: Option<ImageContentSnapshot>,
-    pub material_extension: Option<Material2dBinding>,
+    pub material_extension: Option<Arc<PreparedMaterial2d>>,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,
     pub world_x_axis: Vec2,
@@ -187,12 +187,15 @@ pub struct QueuedSpriteItem {
     pub world_sort_y: f32,
     pub material: SpriteMaterialKey,
     pub image: Option<PreparedImageSnapshot>,
-    pub material_extension: Option<PreparedMaterial2d>,
+    pub material_extension: Option<Arc<PreparedMaterial2d>>,
     pub source_order: u64,
     pub instance: SpriteInstance,
 }
 
-/// One captured material binding and its exact prepared Image versions.
+/// One material binding and its exact Image versions frozen during Extract.
+///
+/// The immutable value is shared across Sprite, Tilemap cells, Views and batches. Queue never
+/// resolves its original texture handles against a later Image preparation cache.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedMaterial2d {
     pub binding: Material2dBinding,
@@ -261,7 +264,7 @@ pub struct SpriteBatch {
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
     pub image: Option<PreparedImageSnapshot>,
-    pub material_extension: Option<PreparedMaterial2d>,
+    pub material_extension: Option<Arc<PreparedMaterial2d>>,
     pub instances: Vec<SpriteInstance>,
 }
 

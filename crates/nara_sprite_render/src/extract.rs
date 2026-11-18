@@ -1,7 +1,9 @@
-use nara_asset::{AssetRef, AssetServer, AssetStates, Assets};
+use std::sync::Arc;
+
+use nara_asset::{AssetRef, AssetServer, AssetStates, Assets, Handle};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
-use nara_image::{ImageAsset, ImageContentSnapshot};
+use nara_image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
 use nara_material::{Material2d, Material2dAsset, Material2dBinding};
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
@@ -9,7 +11,7 @@ use nara_transform::PresentedSpatialSnapshot2d;
 
 use crate::{
     ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-    SpriteRenderStats, TextureUvRect,
+    PreparedMaterial2d, SpriteRenderStats, TextureUvRect,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -71,8 +73,13 @@ pub(crate) fn extract_sprites(
             images.as_deref(),
         ) {
             Ok(material) => material,
-            Err(()) => {
+            Err(MaterialExtractionError::Material) => {
                 scratch.stats.missing_materials = scratch.stats.missing_materials.saturating_add(1);
+                continue;
+            }
+            Err(MaterialExtractionError::Texture) => {
+                scratch.stats.unprepared_textures =
+                    scratch.stats.unprepared_textures.saturating_add(1);
                 continue;
             }
         };
@@ -135,6 +142,11 @@ pub(crate) fn extract_sprites(
     Ok(())
 }
 
+enum MaterialExtractionError {
+    Material,
+    Texture,
+}
+
 fn extract_material(
     binding: Option<&Material2dBinding>,
     authored: Option<&Material2d>,
@@ -142,63 +154,70 @@ fn extract_material(
     server: Option<&AssetServer>,
     states: Option<&AssetStates>,
     images: Option<&Assets<ImageAsset>>,
-) -> Result<Option<Material2dBinding>, ()> {
+) -> Result<Option<Arc<PreparedMaterial2d>>, MaterialExtractionError> {
     match (binding, authored) {
-        (Some(_), Some(_)) => Err(()),
-        (Some(binding), None) => Ok(Some(binding.clone())),
+        (Some(_), Some(_)) => Err(MaterialExtractionError::Material),
+        (Some(binding), None) => capture_material(binding.clone(), |handle| {
+            PreparedImageSnapshot::capture(handle, images?, states?)
+        })
+        .map(Some)
+        .map_err(|()| MaterialExtractionError::Texture),
         (None, None) => Ok(None),
         (None, Some(authored)) => {
-            let materials = materials.ok_or(())?;
+            let materials = materials.ok_or(MaterialExtractionError::Material)?;
             let handle = authored.handle();
-            let asset = materials.get(handle).ok_or(())?;
-            let server = server.ok_or(())?;
+            let asset = materials
+                .get(handle)
+                .ok_or(MaterialExtractionError::Material)?;
+            let server = server.ok_or(MaterialExtractionError::Material)?;
             if server.get_product_handle::<Material2dAsset>(asset.product()) != Some(handle) {
-                return Err(());
+                return Err(MaterialExtractionError::Material);
             }
-            let states = states.ok_or(())?;
+            let states = states.ok_or(MaterialExtractionError::Material)?;
             if states
                 .state(handle.id())
                 .is_none_or(|state| state.usable_version().is_none())
                 || states.published_slot_revision(handle.id())
                     != Some(&materials.slot_revision(handle))
             {
-                return Err(());
+                return Err(MaterialExtractionError::Material);
             }
             if asset
                 .textures()
                 .values()
                 .any(|reference| !matches!(reference, AssetRef::Product(_)))
             {
-                return Err(());
+                return Err(MaterialExtractionError::Material);
             }
             let binding = authored
                 .bind(asset, |reference| match reference {
                     AssetRef::Product(product) => server.get_product_handle::<ImageAsset>(*product),
                     AssetRef::Path(_) | AssetRef::StableId(_) => None,
                 })
-                .map_err(|_| ())?;
-            if binding.textures().values().any(|handle| {
-                let Some(images) = images else {
-                    return true;
-                };
-                let Some(image) = images.get(*handle) else {
-                    return true;
-                };
-                let Some(product) = image.product() else {
-                    return true;
-                };
-                server.get_product_handle::<ImageAsset>(product) != Some(*handle)
-                    || states
-                        .state(handle.id())
-                        .is_none_or(|state| state.usable_version().is_none())
-                    || states.published_slot_revision(handle.id())
-                        != Some(&images.slot_revision(*handle))
-            }) {
-                return Err(());
-            }
-            Ok(Some(binding))
+                .map_err(|_| MaterialExtractionError::Material)?;
+            capture_material(binding, |handle| {
+                ImageContentSnapshot::capture(handle, server, states, images?)
+                    .ok()
+                    .map(|image| image.prepared_snapshot())
+            })
+            .map(Some)
+            .map_err(|()| MaterialExtractionError::Material)
         }
     }
+}
+
+fn capture_material(
+    binding: Material2dBinding,
+    mut capture: impl FnMut(Handle<ImageAsset>) -> Option<PreparedImageSnapshot>,
+) -> Result<Arc<PreparedMaterial2d>, ()> {
+    let declaration = binding.generation().declaration();
+    let mut textures = Vec::with_capacity(declaration.textures().len());
+    for field in declaration.textures() {
+        let handle = *binding.textures().get(field.id()).ok_or(())?;
+        textures.push((field.binding(), capture(handle).ok_or(())?));
+    }
+    textures.sort_unstable_by_key(|(binding, _)| *binding);
+    Ok(Arc::new(PreparedMaterial2d { binding, textures }))
 }
 
 #[must_use]

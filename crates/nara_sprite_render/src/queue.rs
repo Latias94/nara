@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, sync::Arc};
 
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
@@ -19,7 +19,6 @@ pub fn queue_sprites(
     prepared_images: Option<Res<PreparedImages>>,
 ) {
     queued.clear();
-    stats.unprepared_textures = 0;
     stats.invalid_texture_regions = 0;
 
     for queueable in resolve_queueable_sprites(
@@ -212,7 +211,7 @@ struct QueueableSprite<'a> {
     sprite: &'a ExtractedSprite,
     material: SpriteMaterialKey,
     image: Option<PreparedImageSnapshot>,
-    material_extension: Option<PreparedMaterial2d>,
+    material_extension: Option<Arc<PreparedMaterial2d>>,
     uv: TextureUvRect,
 }
 
@@ -241,7 +240,7 @@ fn resolve_sprite_material(
 ) -> Option<(
     SpriteMaterialKey,
     Option<PreparedImageSnapshot>,
-    Option<PreparedMaterial2d>,
+    Option<Arc<PreparedMaterial2d>>,
     TextureUvRect,
 )> {
     if !sprite.texture_region.is_valid() {
@@ -257,25 +256,7 @@ fn resolve_sprite_material(
         }),
         None => None,
     };
-    let material_extension = match &sprite.material_extension {
-        Some(binding) => {
-            let declaration = binding.generation().declaration();
-            let mut textures = Vec::with_capacity(declaration.textures().len());
-            for field in declaration.textures() {
-                let texture = *binding.textures().get(field.id())?;
-                textures.push((
-                    field.binding(),
-                    resolve_image(texture, prepared_images, stats)?,
-                ));
-            }
-            textures.sort_unstable_by_key(|(binding, _)| *binding);
-            Some(PreparedMaterial2d {
-                binding: binding.clone(),
-                textures,
-            })
-        }
-        None => None,
-    };
+    let material_extension = sprite.material_extension.clone();
     let mut material = SpriteMaterialKey::from_material(sprite.material);
     if let Some(extension) = &material_extension {
         material.alpha_mode = extension.binding.generation().declaration().alpha_mode();

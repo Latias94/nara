@@ -768,6 +768,7 @@ fn equal_material_bindings_retain_the_current_owner_and_outlive_retirement() {
     let current_values = current.uniform_bytes().as_ptr() as usize;
     let mut replacement = Some(current);
     let mut app = sprite_app();
+    insert_loaded_image(&mut app, texture);
     let mut map = Tilemap::new(Vec2::new(4.0, 2.0));
     map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
     let world = app.world_mut().unwrap();
@@ -796,6 +797,7 @@ fn equal_material_bindings_retain_the_current_owner_and_outlive_retirement() {
                 .material_extension
                 .as_ref()
                 .unwrap()
+                .binding
                 .uniform_bytes()
                 .as_ptr() as usize
         })
@@ -825,11 +827,17 @@ fn equal_material_bindings_retain_the_current_owner_and_outlive_retirement() {
             .material_extension
             .as_ref()
             .unwrap()
+            .binding
             .uniform_bytes(),
         parameters.encode_uniform().unwrap()
     );
     assert_eq!(
-        extracted.material_extension.as_ref().unwrap().textures(),
+        extracted
+            .material_extension
+            .as_ref()
+            .unwrap()
+            .binding
+            .textures(),
         &BTreeMap::from([("palette".to_owned(), texture)])
     );
     drop(retained);

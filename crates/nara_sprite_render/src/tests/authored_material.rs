@@ -12,6 +12,8 @@ use nara_material::{
     Material2d, Material2dAsset, Material2dBinding, Material2dDomain, Material2dSource,
 };
 
+mod frozen_textures;
+
 const SHADER: &str = "
 fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
     let palette = textureLoad(material_texture, vec2<i32>(0, 0), 0);
@@ -183,6 +185,13 @@ fn spawn_authored(world: &mut World, authored: Material2d) -> Entity {
 }
 
 fn captures(world: &World, entity: Entity) -> Vec<&Material2dBinding> {
+    prepared_captures(world, entity)
+        .into_iter()
+        .map(|capture| &capture.binding)
+        .collect()
+}
+
+fn prepared_captures(world: &World, entity: Entity) -> Vec<&Arc<PreparedMaterial2d>> {
     world
         .resource::<ExtractedSprites>()
         .as_slice()
@@ -193,13 +202,14 @@ fn captures(world: &World, entity: Entity) -> Vec<&Material2dBinding> {
 }
 
 fn assert_shared_capture(world: &World, entity: Entity, expected: &Material2dBinding) {
-    let captured = captures(world, entity);
+    let captured = prepared_captures(world, entity);
     assert_eq!(captured.len(), 3);
-    for binding in &captured {
-        assert_eq!(*binding, expected);
+    for capture in &captured {
+        assert_eq!(&capture.binding, expected);
+        assert!(Arc::ptr_eq(captured[0], capture));
         assert!(std::ptr::eq(
-            captured[0].uniform_bytes(),
-            binding.uniform_bytes()
+            captured[0].binding.uniform_bytes(),
+            capture.binding.uniform_bytes()
         ));
     }
     assert_eq!(world.resource::<SpriteRenderStats>().extracted_sprites, 3);
@@ -970,7 +980,13 @@ fn invalid_authored_assignments_skip_only_their_entities_without_claiming_or_res
     assert_eq!(extracted.len(), 2);
     assert_eq!(extracted[0].entity, healthy);
     assert_eq!(extracted[0].source_order, 0);
-    assert_eq!(extracted[0].material_extension.as_ref(), Some(&expected));
+    assert_eq!(
+        extracted[0]
+            .material_extension
+            .as_ref()
+            .map(|capture| &capture.binding),
+        Some(&expected)
+    );
     assert_eq!(extracted[1].entity, stock);
     assert_eq!(extracted[1].source_order, 1);
     assert!(extracted[1].material_extension.is_none());
@@ -1101,7 +1117,13 @@ fn missing_optional_material_resources_preserve_code_first_and_stock_extraction(
         let extracted = runtime.world().resource::<ExtractedSprites>().as_slice();
         assert_eq!(extracted.len(), 2);
         assert_eq!(extracted[0].entity, direct);
-        assert_eq!(extracted[0].material_extension.as_ref(), Some(&expected));
+        assert_eq!(
+            extracted[0]
+                .material_extension
+                .as_ref()
+                .map(|capture| &capture.binding),
+            Some(&expected)
+        );
         assert_eq!(extracted[1].entity, stock);
         assert!(extracted[1].material_extension.is_none());
         assert_eq!(

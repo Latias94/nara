@@ -119,89 +119,143 @@ fn affine_camera_and_offset_viewport_cull_the_projected_quad() {
 #[test]
 fn each_view_keeps_its_order_while_offscreen_material_diagnostics_run_once() {
     let materials = palette_materials("test.visibility-material", AlphaMode2d::Blend);
-    let half_x = Vec2::new(0.1, 0.0);
-    let half_y = Vec2::new(0.0, 0.1);
-    let mut sprites = vec![
-        extracted(0, Vec2::ZERO, half_x, half_y),
-        extracted(1, Vec2::new(10.0, 0.0), half_x, half_y),
-        extracted(
-            2,
-            Vec2::new(5.0, 0.0),
-            Vec2::new(6.0, 0.0),
-            Vec2::new(0.0, 0.1),
-        ),
-        extracted(3, Vec2::ZERO, half_x, half_y),
-        extracted(4, Vec2::ZERO, half_x, half_y),
-        extracted(5, Vec2::splat(100.0), Vec2::X, Vec2::Y),
-        extracted(6, Vec2::splat(100.0), Vec2::X, Vec2::Y),
-        extracted(7, Vec2::splat(100.0), Vec2::X, Vec2::Y),
-    ];
-    sprites[0].layer = 2;
-    sprites[1].layer = -1;
-    sprites[2].layer = 1;
-    sprites[3].layer = 1;
-    sprites[3].world_sort_y = 10.0;
-    sprites[4].layer = 1;
-    sprites[4].sort_key = 1;
-    sprites[4].world_sort_y = 20.0;
-    sprites[5].material.image = Some(nara_asset::allocate_anonymous_handle().unwrap());
-    sprites[6].texture_region = TextureUvRect::new(Vec2::ZERO, Vec2::splat(-1.0));
-    sprites[7].material_extension = Some(
-        materials
-            .current("test.visibility-material")
-            .unwrap()
-            .bind(
-                &PaletteParameters {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                    w: 0.0,
+    let missing = nara_asset::allocate_anonymous_handle().unwrap();
+    let binding = materials
+        .current("test.visibility-material")
+        .unwrap()
+        .bind(
+            &PaletteParameters {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 0.0,
+            },
+            BTreeMap::from([("palette".to_owned(), missing)]),
+        )
+        .unwrap();
+    let mut app = sprite_app();
+    let world = app.world_mut().unwrap();
+    let cameras = [(7, Vec2::ZERO), (-2, Vec2::new(10.0, 0.0))].map(|(order, translation)| {
+        world
+            .spawn((
+                Camera2d {
+                    order,
+                    target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+                    viewport: Some(clip_view().viewport),
+                    viewport_height: 2.0,
+                    ..Camera2d::default()
                 },
-                BTreeMap::from([(
-                    "palette".to_owned(),
-                    nara_asset::allocate_anonymous_handle().unwrap(),
-                )]),
-            )
-            .unwrap(),
+                Transform2d::from_translation(translation),
+            ))
+            .id()
+    });
+    let sprites = [
+        (
+            Sprite::from_color(Vec2::splat(0.2), Color::WHITE).with_layer(2),
+            Vec2::ZERO,
+        ),
+        (
+            Sprite::from_color(Vec2::splat(0.2), Color::WHITE).with_layer(-1),
+            Vec2::new(10.0, 0.0),
+        ),
+        (
+            Sprite::from_color(Vec2::new(12.0, 0.2), Color::WHITE).with_layer(1),
+            Vec2::new(5.0, 0.0),
+        ),
+        (
+            Sprite::from_color(Vec2::splat(0.2), Color::WHITE)
+                .with_layer(1)
+                .with_y_sort_anchor(Vec2::new(0.0, 10.0)),
+            Vec2::ZERO,
+        ),
+        (
+            Sprite::from_color(Vec2::splat(0.2), Color::WHITE)
+                .with_layer(1)
+                .with_sort_key(1)
+                .with_y_sort_anchor(Vec2::new(0.0, 20.0)),
+            Vec2::ZERO,
+        ),
+        (
+            Sprite::from_texture(missing, Vec2::splat(2.0)),
+            Vec2::splat(100.0),
+        ),
+        (
+            Sprite::from_color(Vec2::splat(2.0), Color::WHITE)
+                .with_texture_region(TextureRegion::new(Vec2::ZERO, Vec2::splat(-1.0))),
+            Vec2::splat(100.0),
+        ),
+        (
+            Sprite::from_color(Vec2::splat(2.0), Color::WHITE),
+            Vec2::splat(100.0),
+        ),
+    ]
+    .map(|(sprite, translation)| {
+        world
+            .spawn((sprite, Transform2d::from_translation(translation)))
+            .id()
+    });
+    world.entity_mut(sprites[7]).insert(binding);
+    let mut roots = cameras.to_vec();
+    roots.extend(sprites);
+    place_roots(world, &roots);
+    app.add_systems(CoreStage::Update, move |world: &mut World| {
+        if world.resource::<nara_app::RealTime>().frame == 2 {
+            for camera in cameras {
+                world.entity_mut(camera).remove::<Camera2d>();
+            }
+        }
+    })
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert_eq!(
+        world
+            .resource::<ExtractedSprites>()
+            .as_slice()
+            .iter()
+            .map(|draw| draw.entity)
+            .collect::<Vec<_>>(),
+        sprites[..7]
     );
-    let views = [
-        ExtractedView {
-            order: 7,
-            ..clip_view()
-        },
-        ExtractedView {
-            order: -2,
-            mapping: nara_render::ViewMapping2d::orthographic(
-                Mat3::from_translation(Vec2::new(10.0, 0.0)),
-                2.0,
-                clip_view().viewport,
-            )
-            .unwrap(),
-            ..clip_view()
-        },
-    ];
-    let (queued, stats) = run_queue(&sprites, &views);
+    let stats = world.resource::<SpriteRenderStats>();
     assert_eq!(stats.unprepared_textures, 2);
     assert_eq!(stats.invalid_texture_regions, 1);
     assert_eq!(stats.queued_items, 6);
+    assert_eq!(stats.missing_materials, 0);
+    let queued = world.resource::<QueuedSpriteItems>().as_slice();
     assert_eq!(
         queued
             .iter()
             .map(|item| (item.view_index, item.entity))
             .collect::<Vec<_>>(),
         vec![
-            (1, sprites[1].entity),
-            (1, sprites[2].entity),
-            (0, sprites[3].entity),
-            (0, sprites[2].entity),
-            (0, sprites[4].entity),
-            (0, sprites[0].entity),
+            (0, sprites[1]),
+            (0, sprites[2]),
+            (1, sprites[3]),
+            (1, sprites[2]),
+            (1, sprites[4]),
+            (1, sprites[0]),
         ]
     );
-    let (without_views, stats) = run_queue(&sprites, &[]);
-    assert!(without_views.is_empty());
+    assert_eq!(
+        queued
+            .iter()
+            .map(|item| item.view_order)
+            .collect::<Vec<_>>(),
+        vec![-2, -2, 7, 7, 7, 7]
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert!(world.resource::<nara_render::ExtractedViews>().is_empty());
+    assert!(world.resource::<QueuedSpriteItems>().is_empty());
+    let stats = world.resource::<SpriteRenderStats>();
     assert_eq!(stats.unprepared_textures, 2);
     assert_eq!(stats.invalid_texture_regions, 1);
+    assert_eq!(stats.missing_materials, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
