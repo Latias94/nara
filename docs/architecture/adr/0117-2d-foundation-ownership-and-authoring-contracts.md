@@ -89,8 +89,10 @@ requires explicit instantiation of an already resident Immediate Scene dependenc
 inspection and instantiation use the original current content generation, exact component
 definitions and full expected current receipt. The declared travel roots govern travel. Source
 and processed candidates borrow or reuse their retained content. Callers retain each resulting
-activation receipt and retire it before its containing Scene resource owner ends. The first
-concrete marker graph contains untextured Sprites and internal entity references.
+activation receipt and retire it before its containing Scene resource owner ends. The current
+[textured marker consumer](../../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor)
+uses an occurrence-local entity reference and a required Image declared by the marker Scene.
+Ordinary Sprite binding resolves that Image from the containing Scene's retained resource closure.
 
 The existing lifecycle-free product replacement transaction accepts explicit runtime-only entity
 tokens and additional complete Scene activation receipts. Its identity owner prepares one aggregate

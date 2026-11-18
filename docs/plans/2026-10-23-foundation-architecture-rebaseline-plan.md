@@ -1603,6 +1603,15 @@ The linked [execution evidence](2026-10-20-persistent-two-level-game-plan.md#aut
 covers Save/fresh Restore through relocated headless and Windows/DX12 Players, along with native
 source pixel readback. Independent asset residency and cross-platform execution remain open.
 
+The [textured Prefab successor](2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor)
+puts a required badge Image on the marker Scene and reaches it from either travel root. The
+sample uses the original Sprite codec and Scene resource residency in source and cooked play.
+Placement records the installed geometry for the game's existing Retry and exact resume checks.
+The ten-member catalog retains two travel roots. The
+[execution evidence](2026-10-20-persistent-two-level-game-plan.md#textured-prefab-execution-evidence)
+records 77 passing release-profile regressions and five Windows native acceptance paths spanning
+source-free delivery, Save/Restore, WASAPI and hardware DX12 readback.
+
 The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
 installed compiler's relevant changes and a passing Input/Gameplay production-library check.
 The complete unit retains its Rust 1.95 runtime qualification baseline; the bounded 1.100 probe

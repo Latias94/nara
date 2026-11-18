@@ -149,9 +149,12 @@ Its complete native delivery acceptance, observation costs and platform limits b
 [game's current unit](../plans/2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player).
 
 The same game's [explorer animation](../../samples/two-level-game/src/animation.rs) uses one
-shared four-frame Image Product in both Scenes. All three Player placements cook two Scenes,
-three Images and the Sound Bank. Atlas regions remain evaluated Sprite state derived from the
-existing logical clock and held intent, with no additional persisted playback cursor. The
+shared four-frame Image Product in both travel Scenes. Atlas regions are evaluated Sprite state
+derived from the existing logical clock and held intent. The
 [animation workflow](../plans/2026-11-03-joint-motion-execution-plan.md#explorer-atlas-animation-through-runtime-and-delivery)
-owns source-free frame selection and native pixel evidence; adding an Image to the catalog
-alone does not establish animation playback or restore correctness.
+owns source-free frame selection and native pixel evidence.
+
+The [marker Prefab workflow](../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor)
+uses a separate badge Image reached through the retained marker Scene. The three Player
+placements package two travel Scenes, the marker Scene, four Images, the Sound Bank, Sprite
+clips and global startup Input.

@@ -16,6 +16,58 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Textured Prefab Runtime Successor
+
+The marker's child declares a dedicated Image in the authored Prefab. The owning level declares
+the marker Scene as an Immediate dependency. The Image enters the source and cooked closures
+through the marker Scene alone. Exercise the ordinary resolved Sprite handle and visible texture
+through repeated placement, retained-source Retry, travel and fresh checkpoint restoration.
+
+Use the existing Host, content residency, Scene codec and renderer. The game prepares the bounded
+marker topology and local reference from the compiled template. After publication, it records
+the installed Sprite and Transform values for the existing degradation and Retry behavior.
+This removes the temporary World that used to decode every template part. The resulting receipt,
+geometry and game checkpoint remain the existing lifetime and reconstruction owners.
+
+Verify the actual required catalog edge, shared texture across occurrences, distinction between a
+retained value and changed disk bytes, damaged-resource refusal before replacing the current
+level, and GPU readback of the marker during native reconstruction. The cook and fresh Player
+must use the same resource and exclude the source after installation. Texture residency follows
+the containing Scene and any retained render inputs. Independent persistent asset ownership and
+asynchronous additive Scene loading remain open.
+
+### Textured Prefab Execution Evidence
+
+Implementation and consumer coverage land at `52a929d`.
+
+The authored marker selection passes 5/5 on Windows with Rust 1.95.0 in
+`5e68d8cf-a60c-441e-8002-66b8bfffb131`. The original game places repeated occurrences with the
+same Image handle. A Retry after replacing the PNG uses the committed image. Fresh loading sees
+the replacement. Damaged source PNG bytes reject travel while the original level and its markers
+remain playable.
+
+The affected release-profile selection passes 77/77 in `27262a36-f3d3-4603-90c6-54acbef8babd`.
+The cooked catalog has ten members, two travel roots and five direct dependencies per level. Only
+the marker Scene requires the badge Image. The in-process source-free consumer places a marker
+through the original command queue and resolves its child reference to the Sprite bound to the
+processed 2 × 2 Image. The Runtime, source fence, Save/Restore, replay and pixel oracle tests run
+through their existing owners.
+
+The Windows native release selection passes 5/5 in `9d75516a-fac3-453a-81ea-bf350a2b19cf`.
+The production cooker builds the headless, desktop and audible Players and the tests run each
+relocated pack with the source unavailable. The headless path rejects a deliberately damaged
+badge member. The desktop path exercises physical input, travel, Save and fresh-process Restore.
+The audible path compares actual WASAPI samples and completes native retirement. Both source
+desktop reconstruction paths, with default and authored arrow bindings, read back the retained
+marker texture through hardware DX12. The oracle checks its source sRGB texels and the expected
+linear RGBA8 output `[255, 134, 13, 255]`. This qualification covers Windows and the sample's
+Scene-owned Image lifetime. Foreign native execution and independent asset residency remain open.
+
+Focused correctness Clippy, sample and workspace formatting, asset JSON parsing and changed
+document links pass. The unit exercises the existing delivery and resource owners. The Foundation
+[runtime delivery priority](2026-10-23-foundation-architecture-rebaseline-plan.md#november-17-runtime-delivery-priority)
+keeps module timings as comparison evidence for future work.
+
 ## Authored Marker Instantiation Successor
 
 This unit serves the active Foundation Goal and the Runtime delivery priority.

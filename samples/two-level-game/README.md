@@ -71,13 +71,17 @@ wall mutations are outside that format and make exact capture ineligible. The wi
 accept finite zero scale while collision admission refuses it. Placement checks happen at
 admission; the movement path does not rescan the Scene or reconstruct wall geometry each tick.
 
-Each level has eleven authored members. Its Immediate marker Scene dependency contains a real
-two-entity Prefab with a pink root, white child and an occurrence-local entity reference. Placing
-a marker creates a separate full Scene activation; its appearance and hierarchy come from the
-authored Prefab. The cooked catalog has nine content members: three Scenes, three Images, the
-Sound Bank, shared Sprite clips and global startup Input. Only Meadow and Cavern are travel roots.
-Refresh the authoring bundle for `MarkerPalette`, `MarkerLink` and native binding revision 4, then
-recook older installations. Game checkpoint and resume wire formats remain unchanged.
+Each level has eleven authored members. The Immediate marker Scene places a two-entity
+[Prefab](prefabs/marker.prefab.json) with a pink root, a child with an amber
+[sRGB badge texture](assets/textures/marker.png), and an occurrence-local reference. Every
+placement creates its own entities, and all occurrences share the level's resident badge Image.
+Edit the badge PNG to change its appearance. A fresh load reads the authored image. Retry uses
+the committed image and template, including when the files have changed since loading.
+
+The cooked catalog has ten members, including three Scenes and four Images. The marker Scene
+declares its Image dependency. Meadow and Cavern are the two travel roots. Regenerate authoring
+bundles that predate native binding revision 4 for `MarkerPalette` and `MarkerLink`, then recook
+existing installations. Existing checkpoint and resume files retain their wire formats.
 
 ## Build And Run
 
@@ -177,11 +181,12 @@ cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --lo
 Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop,audio-cpal`.
 Use the same explicit project/output/target/tool paths documented for the desktop Player below.
 This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
-`cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain two Scenes,
-three Images, one shared Sound Bank, one Sprite clip resource and global Input. Both Scenes require
-the atlas and clip Product; Input is a separate global startup root. The finite content fence
-includes the action map, clip/bank descriptors and metadata plus both raw WAVs. Cook and Check
-prepare CPU content without opening a device.
+`cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain three
+Scenes, four Images, one shared Sound Bank, one Sprite clip resource and global Input. Both travel
+Scenes require the atlas and clip Product. The marker Scene requires its badge Image. Input is a
+separate global startup root. The finite content fence includes the action map, the clip and bank
+descriptors, their metadata and both raw WAVs. Cook and Check prepare CPU content without opening
+a device.
 
 The published `player_audio.exe` opens only its generated executable-relative content pack.
 There is no source-directory or embedded-WAV fallback. It accepts normal interactive play and
@@ -244,7 +249,8 @@ key or that a particular platform has passed the full interactive trajectory.
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
 Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
 domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
-publisher. Both levels, three Images, one shared Sound Bank, Sprite clips and startup Input are included.
+publisher. The pack contains both levels, the marker Scene, four Images, one shared Sound Bank,
+Sprite clips and startup Input.
 Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
 `LevelId`, separate from logical level instances.
 

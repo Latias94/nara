@@ -2161,6 +2161,15 @@ covers four authored workflows, two relocated source-free Players and two Window
 reconstruction paths. Activation lifetime remains tied to the Host's content custody. This
 unit leaves independently retained activation resources, streaming and hardware audio open.
 
+The [textured Prefab successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor)
+at `52a929d` uses a required Image edge from the retained marker Scene. Both levels keep their five direct
+dependencies, and each marker occurrence receives the same resident badge handle for its level.
+The sample records geometry from the original Scene installation for Retry and exact state
+capture. Its [execution evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-execution-evidence)
+records 77 passing release regressions and five Windows paths for source-free package loading,
+Restore, WASAPI and DX12 readback. Resource residency and retirement stay with the containing
+Scene and retained render inputs.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
