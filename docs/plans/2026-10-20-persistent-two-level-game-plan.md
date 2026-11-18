@@ -16,6 +16,120 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Material-Backed Concurrent Regions Successor
+
+Give both playable Meadow regions one authored Material Product and real Shader input. The relic
+Sprites use the same immutable material definition and existing Images. Source and cooked play
+must prepare, activate, independently unload and travel with those regions through the current
+Scene, asset and render owners. A live material is shared only when its original slot, publication,
+complete Shader/declaration/defaults and texture selections still match. A changed source while
+another region uses the old material refuses the new activation without altering the incumbent.
+
+Extend the current residency pool to Material publications, with per-region use and exact
+last-live-user release. The primary Scene may share a material with its additions. Primary travel
+must retire the union in its existing transaction, and a failed preparation or preflight preserves
+the original group. Retained bindings keep their exact Shader and material data; retained render
+inputs keep their captured texture values after the live publications retire. Reuse the Material compiler, Runtime codec and physical
+submission owner; add no current-generation lookup or independent GPU authority.
+
+The ordinary cooker publishes the Material's complete Required dependency closure, fences the
+original WGSL read and delivers a source-free Player. Qualify the authored game, matching material
+handle/version across both regions, conflict and recovery, independent release, coordinated
+travel, and real GPU pixels from the captured material. Keep the existing physical play, Save,
+fresh Restore and cleanup trajectory. Material admission work runs at load/activation/retirement,
+not in ordinary gameplay ticks. This unit is functional delivery, not an optimization campaign.
+
+This remains a concrete Image/Material additive contract. TileSet and arbitrary native-service
+regions, explicit destination sets and full ADR 0089 stay separate.
+
+Pinned Bevy uses an asset handle on `MeshMaterial2d` and resolves captured render assets through
+the existing renderer. Godot's `ShaderMaterial` retains a `Ref<Shader>` and parameter values.
+Those sources support keeping material data, Shader and rendering responsibility separate.
+They do not establish Nara's transactional shared-definition or retirement guarantees.
+[Bevy Material2d](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_sprite_render/src/mesh2d/material.rs) · [Godot ShaderMaterial](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/material.h#L95-L130)
+
+### Material Region Implementation And Qualification
+
+The Host implementation lands at `780ce6b`; the authored game, cooker and real consumers land
+at `640024a`.
+
+Both relic Sprites reference the authored `two-level-game.region` v1 Material, one static WGSL
+body and a Meadow palette Image. Their component parameters override the asset defaults through
+the existing persistent `nara.material2d` contract. Source and cooked recipes select the same
+Material domain/Runtime codec. The catalog has fourteen members, five Scenes, five Images and
+one Material, with two travel roots. The schema remains native binding revision 6; regeneration
+reports no schema change and strict Check reports 31 content members.
+
+The original Host now pools owned Material publications and records their use per addition.
+An identical imported definition shares the original slot and version, including definitions
+prepared independently. Both original authored references and their resolved Product bindings
+must agree. Live defaults, Shader inputs or texture changes refuse before mutation. Prepared
+primary travel includes the original primary/addition union. Pure retirement can release the
+unchanged last-good Material after a failed reload, while ordinary sharing still requires its
+unchanged publication state. Escaped bindings retain the original Shader, data and metadata
+leases after the live publication ends.
+
+The first Host selection passes 74/74 in `39400077-557c-468f-89f6-dc2c17a6fb34`. Independent
+review finds that numeric equality would merge `+0.0` and `-0.0` defaults despite the existing
+uniform encoding preserving their bits. The sharing comparison now checks those original bits.
+The focused Material selection passes 12/12 in `eab15208-bdb1-4c45-9a3d-09d2ae1f4cbd`, including
+same-bit sharing, changed-sign refusal, failed reload, subset retirement, union replacement and
+escaped-owner release. These checks run within preparation and publication, not gameplay ticks.
+
+The source-game room selection passes 8/8 in `6f30cbef-6a0b-49ba-b5c8-05d2f0fc3b52`. It proves
+both close orders, handle/version sharing, changed live Shader/default refusal and repair,
+independent collection, direct lower-level retirement, bad-destination preservation and travel.
+The cook/content selection passes 26/26 in `fdcee8b6-0223-422b-b66d-7d09ccd0a583`. The cooker
+uses the existing Material importer and `CookedContentBuilder::add_material`; it does not add a
+Material build trait or rewrite authored texture Paths. The importer reads under the original
+source capability, records the exact Material/WGSL bytes and resolves texture Products through
+the admitted database. The original content fence preserves 29 fixed content inputs, raw
+observations and WGSL included as code input, and rejects drift rather than rebasing later reads.
+
+The initial hardware DX12 pixel test passes in `4e3acc91-d44c-4ee2-ab2a-f501b08f4e11`, then review
+requires explicit negative pixels after pickup and independent close. The strengthened test passes
+1/1 in `9e8dc933-1abe-4876-b78e-d92a920d157c`. It moves the actual player off the original relic
+location, checks the authored floor after collection and the main background after independent
+close, and retains the Lookout's positive graded pixels throughout. The original packets render
+linear RGBA8 `[45, 127, 61, 255]` from independently decoded sRGB source/palette texels. Their
+four complete images remain byte-identical when replayed after actual travel releases the live
+assets and the Runtime closes. Original Host producer, native-use and resource retirement finish
+without retained bytes or cleanup faults. This is hardware DX12 image-output evidence, not
+frontbuffer scanout, numeric performance or foreign-platform qualification.
+
+The actual source-free selection `68c650a8-2d6d-4242-a1ae-4d97e369a3d3` first refuses to build the
+audible shipping Player because the shared desktop runtime uses the Image codec's trait constants
+without importing `RuntimeAssetCodec`. That code is behind the generated shipping configuration,
+so the development build does not compile it. The import is corrected without changing codec or
+Player behavior. The headless and complete hardware DX12 desktop trajectories pass in that
+selection. Physical B/G opens both rooms with Material version 1, identical Shader/interface
+digests and no source inputs; north pickup and independent close retain the same publication,
+and coordinated travel reports no resident region Material. Save, fresh-process Restore,
+collision excursions and twenty further travels remain intact. The audible Player is re-run
+against the corrected shipping source rather than counted from the failed build. That rerun
+passes 1/1 in `976ce1f7-0810-4465-89df-138aba5d1bb1`, including actual WASAPI samples, physical
+window Close and original native retirement. The actual desktop and audible Player receipts
+retain their no-termination requirement. Cookers report their original complete cleanup facts
+separately. The selected native scope is Windows hardware DX12 and its existing software control.
+
+The final affected release-profile selection passes 305/305, with seven excluded tests, in
+`18bf1ead-03ef-4faf-95bb-3fe7e2b29b8c`. It includes authored Input/Prefab/animation, collision,
+checkpoint and fresh-process Restore, recording/replay, exact source reconstruction, all room
+tests, cooked content and source fences. No checkpoint or resume wire format changes.
+
+The final Host, public source boot and budget selection passes 107/107 in
+`c2b3f4c4-0236-4d0c-9e53-40b0921fab92` with Runtime and tooling enabled. The original request,
+publication, pre-native refusal, native retry and generation limits remain covered alongside
+the new Material sharing and retirement controls. These cohorts overlap; their counts are not
+additive coverage or a measured performance claim.
+
+Correctness Clippy passes for the root Runtime/tooling library and all sample targets with cook,
+desktop, audio and cooked-player enabled. Root and sample formatting checks pass. Changed local
+document links, authored JSON and whitespace checks pass, and the fifteen paused UI/Dialogue
+files retain their original byte hashes. Independent owner, cooker and pixel-consumer reviews
+close their concrete findings. The feature leaves general additive TileSet/native services,
+explicit destination sets and complete Foundation acceptance open.
+
 ## Concurrent Regions And Coordinated Travel Successor
 
 Open the existing Meadow side room and a second authored Lookout in the same running World.

@@ -5231,6 +5231,16 @@ record preserves foreground interruptions and the cooker-cleanup fixture correct
 from final acceptance. General additive native services and destination sets remain ADR 0089
 work; this does not complete R10 or R12.
 
+The [Material-backed region successor](2026-10-20-persistent-two-level-game-plan.md#material-region-implementation-and-qualification)
+at `780ce6b` and `640024a` extends the same residency pool to exact Material publications. Independently activated rooms
+share an identical Shader, defaults and resolved texture selection, and release the publication
+after its final live user. Changed live definitions refuse the new activation. The sample uses
+an authored grading Material and Meadow palette Image through source and cooked loading.
+Host/public 107 and affected game/cook 305 pass; hardware DX12 verifies positive and negative
+pixels and replays four original inputs after actual travel and Runtime retirement. Source-free
+headless, desktop Save/fresh Restore and WASAPI delivery pass. All definition comparisons remain
+in preparation/publication. General additive TileSet/native services and full R9/R10/R12 stay open.
+
 R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
 UI, semantic-command and future agent use through the same domain owners and exact outcomes.
 Keep capability coverage explicit per frontend: a semantic snapshot does not prove pointer hit

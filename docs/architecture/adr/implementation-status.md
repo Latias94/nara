@@ -2190,6 +2190,16 @@ Windows hardware DX12/WASAPI Players pass. The owning record distinguishes inter
 attempts and the cooker-cleanup correction at `9bbea40` from the final complete physical workflow.
 General scene-scoped native services, destination sets and full ADR 0089 remain open.
 
+The [Material-backed region successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#material-region-implementation-and-qualification)
+at `780ce6b` and `640024a` adds exact shared Material ownership, per-occurrence use and last-live-user release to that same
+Host. It preserves original Shader/default/texture semantics, including floating-point bits,
+and refuses a conflicting live definition. Source and cooked rooms share the original slot and
+version. Host/public 107 and affected game/cook 305 pass. A strengthened hardware DX12 oracle
+checks graded relic pixels and their disappearance, then replays four original packets after
+actual travel and Runtime close. Headless, physical desktop and WASAPI packages run source-free.
+The record distinguishes the corrected shipping-only trait import from final native evidence.
+No runtime per-frame definition audit or universal additive-service contract is introduced.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
