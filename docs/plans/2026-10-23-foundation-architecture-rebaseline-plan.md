@@ -204,8 +204,18 @@ agreement is sound. Isolate generated build inputs without a new dependency reso
 importer observations and independent Player expectations, and move game-specific exact counts
 to qualification controls. This is runtime/author delivery work. UI, installed-tool activation,
 AccessKit source selection and interactive import/discard fixes remain queued with the paused
-Editor program. The study records fresh source confirmation separately from external historical
-reproductions; it does not claim those defects are already repaired or reopen micro-benchmarks.
+Editor program. The study distinguishes fresh source confirmation from external historical
+reproductions and records each scoped implementation outcome without reopening micro-benchmarks.
+
+The [managed time correction](../research/2026-11-18-engine-architecture-review-reconciliation.md#managed-time-correction-unit)
+implements F1 at `f51618a` and F8 at `50f451c`. Missing resources at actual App consumption points
+return the existing typed fault with Stop/once-only cleanup available. The original successful
+Last-stage removal stays valid. Transform consumes the settled simulation-pause fact published
+by App, so exact Step followed immediately by elapsed Resume presents the current pose while
+preserving the original remainder and next control state. App/Transform/public-time 128 and
+actual camera/captured-packet 7 pass after recorded red reproductions. Correctness Clippy, the
+root Runtime/tooling library and formatting checks pass. These focused Windows CPU corrections
+do not requalify native timing, finish the remaining review findings or complete R10/R12.
 
 ## Dependency Shape
 

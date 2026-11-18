@@ -2983,6 +2983,18 @@ an initially paused configuration. The release-mode App library/public cohort pa
 with one explicit skip on Windows. This does not qualify gameplay-state transitions, desktop
 background policy or complete R4c/R10.
 
+The November 18 [managed time correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#managed-time-correction-unit)
+repairs external-review F1 at `f51618a` and F8 at `50f451c`. App reports missing resources at its
+actual post-schedule consumption points through the existing first-fault/Stop contract; resources
+removed after their final use do not trigger a blanket audit. Its frame status now publishes the
+settled simulation-pause fact before Extract, and Transform consumes that fact independently of
+requested control settings. Exact Step followed immediately by elapsed Resume presents the
+current pose and preserves the remainder. Six resource-loss cases and the `2.5` versus `3.0`
+presentation difference are reproduced before repair. Final App/Transform/public-time 128 and
+camera/captured-packet 7 pass, along with original-owner correctness Clippy, root library and
+format checks. This is Windows CPU/runtime evidence; no new native timing or complete R10/R12
+claim follows. Other findings from the two reviews retain their recorded open/paused scopes.
+
 The November 13 [Headless exact-entry successor](../../plans/2026-11-03-joint-motion-execution-plan.md#headless-exact-run-entry-maintenance-november-13)
 separates once-per-run product preparation from individual fixed transactions under the same
 ADR0039/0084 Runtime owner. Entry always drives one paused maintenance frame, including an

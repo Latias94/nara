@@ -34,10 +34,10 @@ benchmark program.
 
 ## Timing findings
 
-| Finding | Current status | Owning correction | Minimum meaningful consumer verification, proposed only |
+| Finding | Current status | Owning correction | Consumer verification |
 | --- | --- | --- | --- |
-| F1: App panics after removal of `FixedTime` | **Confirmed by current source; open.** The original zero/one-tick panic observations remain historical execution evidence. | `nara_app`: make required post-schedule resource accesses fallible at their consumption points, including exact-step finalization, and use the existing time-frame error and managed first-fault path. | A managed consumer removes `FixedTime` through deferred Commands in PreUpdate with zero and one due tick, and during an exact fixed step. Each drive returns the missing-resource fault, retains it on a later drive, and permits managed Stop with once-only cleanup. |
-| F8: elapsed Resume uses a paused interval but Transform interpolates as running | **Confirmed by current source; open.** The original `2.5` versus `3` comparison was not rerun here. | App publishes the effective pause mode of its settled transaction before Extract; Transform uses that frame fact for interpolation and history reset. Keep resumed control settings, remainder and explicit `drive` semantics. | Extend the moving-camera/presented-transform consumer: exact Step immediately followed by Resume plus `drive_elapsed(5 ms)`, compared with an intervening paused maintenance frame. Both must present the current pose; another 10 ms must consume the original remainder correctly. |
+| F1: App panics after removal of `FixedTime` | **Implemented at `f51618a`; scoped verification passes below.** Six focused regressions first reproduce App's panic. | `nara_app`: required post-schedule resource accesses are fallible at their consumption points, including exact-step finalization, using the existing time-frame error and managed first-fault path. | A managed consumer removes `FixedTime` through deferred Commands in PreUpdate with zero and one due tick, and during an exact fixed step. Each drive returns the missing-resource fault, retains it on a later drive, and permits managed Stop with once-only cleanup. |
+| F8: elapsed Resume uses a paused interval but Transform interpolates as running | **Implemented at `50f451c`; scoped verification passes below.** The original `2.5` versus `3` comparison is independently reproduced before the fix. | App publishes the effective pause mode of its settled transaction before Extract; Transform uses that frame fact for interpolation and history reset. Resumed control settings, remainder and explicit `drive` semantics are preserved. | The presented-transform and actual camera/packet consumers cover exact Step immediately followed by Resume plus `drive_elapsed(5 ms)`. Immediate and maintained paths both present the current pose; another 10 ms consumes the original remainder correctly. |
 
 ## Remaining architecture findings
 
@@ -130,6 +130,12 @@ qualification. No dependency or paused GPUI lock changes are made in this runtim
 [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2026-0543.html),
 [advisory source](https://github.com/RustSec/advisory-db/blob/main/crates/chrono/RUSTSEC-2026-0543.md).
 
+## Timing Source Traces At The Receiving Baseline
+
+These traces and line references describe the receiving `a318d1b` sources before the corrections.
+Their proposed controls are now exercised by the implementation results below; they are retained
+to explain the failure and why another schedule-wide audit was not selected.
+
 ### F1: resource consumption after user schedules
 
 Frame entry checks required resources through
@@ -217,6 +223,62 @@ qualification.
 
 ## Evidence limits and handoff
 
+### Managed Time Correction Unit
+
+After TileSet delivery commits `759daae`, `c32d2ad` and `b14076f`, implementation starts on F1/F8.
+Keep all original clocks in the World and the existing managed driver/fault/close route. Replace
+App's infallible post-schedule reads/writes only where it actually consumes a required resource.
+Do not add a schedule-wide clock audit or change the existing successful Last-stage removal case.
+Completed user work before a missing-resource fault is not rolled back.
+
+The F8 successor adds an effective simulation-pause fact to the existing App frame status, captured
+from the same settings used to settle the interval and published before Extract. Transform reads
+that fact for presentation/history reset; public control settings still describe the requested
+next mode. An exact fixed step reports active simulation without becoming an ordinary rendered
+frame. Preserve integer clocks, remainder, paused maintenance, explicit-versus-elapsed drive and
+running zero-step interpolation. Use focused public Runtime and presented-transform regressions;
+no calendar dependency migration or unrelated native/UI matrix belongs to this correction.
+
+The six F1 regressions first fail in `09d555b5-50ef-47a7-91c2-f923170f4690`: the original App
+access panics, so the tests cannot reach managed Stop. They cover `FixedTime` removed during
+PreUpdate with zero/one tick or exact FixedUpdate, `RenderTime` removed before finalization,
+and status/exit requests removed before their final consumption. The private mutable access
+helper initially needs the existing Bevy `Resource<Mutability = Mutable>` bound; the corrected
+owner passes App library plus public time continuation 87/87 in
+`e6d3edfb-78bb-4f5f-a296-9469ad4de571`. All six now return the exact typed missing-resource error,
+retain the first fault, prevent successor schedules and stop with once-only plugin cleanup.
+The original successful Last-stage removal control is preserved. Independent F1 review reports
+no P1/P2; all-target correctness Clippy passes before the separate F8 change.
+
+The first F8 test build incorrectly asks the plain spatial view for an interpolation flag. The
+corrected fixture reads the existing public presented-projection consumer's captured flag. Its
+actual red run `7270d556-e4f7-4f07-819c-3d482add43b9` reports the same current `x = 3`, tick `3`,
+zero steps/delta, `10 ms` remainder and alpha `0.5`, but immediate Resume presents `2.5` while the
+maintenance control presents `3.0`. After adding `RuntimeFrameStatus::simulation_paused` and
+using it in Transform, the App/Transform library and public time continuation selection passes
+128/128 in `fc80a925-4d23-4aa3-8ed3-cbd5d3672236`. The control state is Running while that first
+elapsed interval reports simulation paused. Exact Step reports active simulation despite paused
+control settings; the next `10 ms` consumes the original remainder and reaches tick `4`.
+
+The actual render capture selection passes 7/7, with 63 unrelated cases excluded, in
+`d4d5d8cc-7112-48f1-b0e4-2f90e36db4ba`. It checks the real extracted camera View's center at
+`x = 3`, the captured requested settings versus actual zero virtual delta, subsequent tick
+advancement, and retention of the original packet after Runtime close. Existing scaled,
+zero/multistep, failed extraction and delayed target-adaptation controls remain intact. These
+are CPU runtime/projection facts; no GPU, OS timing, scanout or new cross-platform execution
+claim follows. The earlier TileSet native delivery keeps its own source revision and scope.
+
+The new public status field requires complete `RuntimeFrameStatus` literals to provide
+`simulation_paused`. Ordinary readers and default construction retain their existing interfaces.
+This is a pre-1.0 contract correction, with no compatibility alias or second pause owner.
+
+F8 lands at `50f451c`. Independent bounded review reports no P1/P2 for both fixes. Final
+App/Transform/Render all-target/all-feature correctness Clippy, the root Runtime/tooling library
+check and root formatting check pass on Windows with Rust 1.95.0. Existing advisory lints remain.
+Document links/headings and whitespace pass, and all fifteen paused Editor/Dialogue files retain
+their original bytes. All twelve scoped implementation/research/review agents in this work unit
+are closed. No remote publication, dependency upgrade or calendar-clock migration is performed.
+
 The three review lanes ran no Cargo commands, tests, formatting or native/UI operations. Their
 test-source reads establish intended coverage, not fresh passes. The integration owner separately
 executes the TileSet workflow and records its run IDs in the owning plan; those passes do not
@@ -224,5 +286,5 @@ reproduce the external review's defects. Public dependency metadata, README, mai
 and RustSec advisory were read remotely. GitHub's issue API returned a rate-limit 403; the public
 issue page and original advisory source supplied the facts without authenticated access.
 The archives carry review prose without the standalone probe sources or execution logs, so their
-historical execution claims retain that limit. Current-source confirmation identifies actionable
-repairs; each implementation still needs the scoped consumer verification described above.
+historical execution claims retain that limit. The timing corrections have the fresh results
+above; all remaining findings still require their own scoped implementation and consumer proof.
