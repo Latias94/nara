@@ -219,6 +219,11 @@ pub enum RuntimeContentError {
         declared: Option<RuntimeContentDependencyRole>,
         actual: Option<AssetReferenceDemand>,
     },
+    MaterialTextureKindMismatch {
+        material: AssetProductRef,
+        slot: String,
+        target: AssetProductRef,
+    },
     NotScene,
     NotAsset,
     CodecNotSelected,
@@ -243,7 +248,17 @@ pub enum RuntimeContentError {
 
 impl fmt::Display for RuntimeContentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.summary())
+        match self {
+            Self::MaterialTextureKindMismatch {
+                material,
+                slot,
+                target,
+            } => write!(
+                formatter,
+                "Runtime Material Product {material} texture slot {slot:?} targets Product {target}; expected Image kind with a selected Image codec",
+            ),
+            _ => formatter.write_str(self.summary()),
+        }
     }
 }
 
@@ -270,6 +285,9 @@ impl RuntimeContentError {
             Self::UndeclaredScene => "Runtime Scene is not a declared acquisition root",
             Self::DependencyMismatch { .. } => {
                 "Runtime payload dependencies differ from their complete catalogue declarations"
+            }
+            Self::MaterialTextureKindMismatch { .. } => {
+                "Runtime Material texture requires an Image product with a selected Image codec"
             }
             Self::NotScene => "Runtime product is not a Scene",
             Self::NotAsset => "Runtime product is not an asset member",

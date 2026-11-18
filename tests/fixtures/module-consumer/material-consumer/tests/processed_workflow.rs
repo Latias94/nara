@@ -1,7 +1,7 @@
-use std::sync::atomic::Ordering;
+use std::{convert::Infallible, sync::atomic::Ordering};
 
 use nara::{
-    asset::RuntimeAssetCodec,
+    asset::{AssetRef, RuntimeAssetCodec},
     core::{FormatKind, FormatVersion},
     fs::ContentDigest,
     material::{Material2dDomain, Material2dRuntimeCodec},
@@ -21,7 +21,8 @@ mod runtime;
 
 use project::{
     Fixture, assert_image, authority, catalog_definition, indices_product, material_product,
-    palette_product, parameters, publish_payloads, scene_product, write_catalog,
+    palette_product, parameters, publish_payloads, publish_scene_texture_payloads, scene_product,
+    write_catalog,
 };
 
 #[test]
@@ -70,6 +71,7 @@ fn source_free_palette_materializes_its_real_scene_and_material_only_texture() {
     let validation = base.validate_deep().unwrap();
     assert_eq!(validation.members(), 4);
     assert_eq!(validation.products(), 4);
+    probe.assert_not_started();
     let acquired = base
         .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(material_product())
         .unwrap();
@@ -114,6 +116,85 @@ fn omitted_palette_member_rejects_the_actual_material_closure_before_gameplay() 
     let control = fixture.assemble(true).unwrap();
     assert_eq!(control.base().validate_deep().unwrap().members(), 4);
     fixture.probe.assert_not_started();
+}
+
+#[test]
+fn scene_in_material_texture_slot_rejects_finish_and_independent_encoded_base() {
+    let fixture = Fixture::new();
+    let material = fixture
+        .material
+        .resolve_texture_references(|reference| {
+            assert_eq!(*reference, AssetRef::Product(palette_product()));
+            Ok::<_, Infallible>(scene_product())
+        })
+        .unwrap();
+    let builder = fixture.builder_with_material(&material, false).unwrap();
+    let CookedContentError::Runtime(error) = builder.finish().unwrap_err() else {
+        panic!("the completed builder must reject the Material texture's target kind");
+    };
+    assert_scene_texture_refusal(error);
+    fixture.probe.assert_not_started();
+
+    let control = fixture.assemble(true).unwrap();
+    let (payloads, expectation) = publish_scene_texture_payloads(control.base(), &material);
+    let recipe = fixture.recipe.clone();
+    let probe = fixture.probe.clone();
+    drop(material);
+    drop(control);
+    drop(fixture);
+    assert!(!probe.removed_root.exists());
+    let base = RuntimeContentBase::open(
+        &authority(payloads.path()),
+        &expectation,
+        recipe,
+        RuntimeContentLimits::default(),
+    )
+    .expect("independently encoded payloads and matching catalog edges must admit");
+    let removed_payloads = payloads.path().to_path_buf();
+    drop(payloads);
+    assert!(!removed_payloads.exists());
+    assert_eq!(base.catalog().members().len(), 3);
+    assert!(base.member(palette_product()).is_none());
+    assert!(matches!(
+        base.member(scene_product()).unwrap().kind(),
+        RuntimeContentMemberKind::Scene { .. },
+    ));
+    assert_eq!(
+        base.member(material_product()).unwrap().dependencies(),
+        [RuntimeContentDependency::new(
+            scene_product(),
+            RuntimeContentDependencyRole::Required,
+        )],
+    );
+    assert_eq!(
+        base.acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(material_product())
+            .expect("the actual Material payload must agree with its declared edges")
+            .product()
+            .textures()["palette"],
+        AssetRef::Product(scene_product()),
+    );
+    probe.assert_not_started();
+    assert_scene_texture_refusal(base.validate_deep().unwrap_err());
+    probe.assert_not_started();
+}
+
+fn assert_scene_texture_refusal(error: RuntimeContentError) {
+    assert!(matches!(
+        &error,
+        RuntimeContentError::MaterialTextureKindMismatch { material, slot, target }
+            if *material == material_product() && slot == "palette" && *target == scene_product(),
+    ));
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains(&material_product().to_string()),
+        "{diagnostic}",
+    );
+    assert!(diagnostic.contains("palette"), "{diagnostic}");
+    assert!(
+        diagnostic.contains(&scene_product().to_string()),
+        "{diagnostic}",
+    );
+    assert!(diagnostic.contains("expected Image kind"), "{diagnostic}");
 }
 
 #[test]
@@ -194,6 +275,10 @@ fn the_same_real_payloads_reject_unselected_material_format_version_and_wrong_ho
     let removed_payloads = payloads.path().to_path_buf();
     drop(payloads);
     assert!(!removed_payloads.exists());
+    let validation = control.validate_deep().unwrap();
+    assert_eq!(validation.members(), 4);
+    assert_eq!(validation.products(), 4);
+    probe.assert_not_started();
     let observation = runtime::play(control);
     assert_eq!(observation.asset.product(), material_product());
     assert_eq!(probe.builds.load(Ordering::SeqCst), 1);

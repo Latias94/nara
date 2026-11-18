@@ -2091,6 +2091,7 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::UndeclaredProduct => "undeclared-product",
         RuntimeContentError::UndeclaredScene => "undeclared-scene",
         RuntimeContentError::DependencyMismatch { .. } => "dependency-mismatch",
+        RuntimeContentError::MaterialTextureKindMismatch { .. } => "material-texture-kind-mismatch",
         RuntimeContentError::NotScene => "not-scene",
         RuntimeContentError::NotAsset => "not-asset",
         RuntimeContentError::CodecNotSelected => "codec-not-selected",

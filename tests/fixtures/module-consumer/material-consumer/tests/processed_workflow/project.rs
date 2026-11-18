@@ -48,7 +48,9 @@ use nara::{
     },
     runtime_content::{
         RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentBase,
-        RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentTarget,
+        RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits,
+        RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentExpectation,
+        RuntimeContentMember, RuntimeContentTarget,
     },
     scene::{
         AuthoringDocumentSource, CompiledSceneCandidate, SceneComponentRecord, SceneDocument,
@@ -400,6 +402,16 @@ impl Fixture {
         &self,
         include_palette: bool,
     ) -> Result<PreparedRuntimeContent, Box<CookedContentError>> {
+        self.builder_with_material(&self.material, include_palette)?
+            .finish()
+            .map_err(Box::new)
+    }
+
+    pub(super) fn builder_with_material(
+        &self,
+        material: &Material2dAsset,
+        include_palette: bool,
+    ) -> Result<CookedContentBuilder, Box<CookedContentError>> {
         let mut builder = CookedContentBuilder::new(
             CookedContentRequest {
                 target: RuntimeContentTarget::new("test-host", "processed-palette").unwrap(),
@@ -415,13 +427,13 @@ impl Fixture {
         if include_palette {
             builder.add_group(&self.images[1])?;
         }
-        builder.add_material(&self.material)?;
+        builder.add_material(material)?;
         builder.add_scene(
             scene_product(),
             &self.compiled,
             self.database.resolver(&asset_scope()),
         )?;
-        builder.finish().map_err(Box::new)
+        Ok(builder)
     }
 }
 
@@ -576,6 +588,48 @@ pub(super) fn publish_payloads(base: &RuntimeContentBase) -> Root {
     }
     write_catalog(&root, base.catalog());
     root
+}
+
+pub(super) fn publish_scene_texture_payloads(
+    base: &RuntimeContentBase,
+    material: &Material2dAsset,
+) -> (Root, RuntimeContentExpectation) {
+    assert_eq!(material.textures().len(), 1);
+    assert_eq!(
+        material.textures()["palette"],
+        AssetRef::Product(scene_product()),
+    );
+    let root = publish_payloads(base);
+    let bytes = Material2dRuntimeCodec::encode_runtime(material).unwrap();
+    let mut definition = catalog_definition(base);
+    definition
+        .members
+        .retain(|member| !member.products().contains(&palette_product()));
+    let member = definition
+        .members
+        .iter_mut()
+        .find(|member| member.products().contains(&material_product()))
+        .unwrap();
+    fs::write(root.path().join(member.path()), &bytes).unwrap();
+    *member = RuntimeContentMember::new(
+        member.path(),
+        ContentDigest::of_bytes(&bytes),
+        member.kind().clone(),
+        member.products().to_vec(),
+        vec![RuntimeContentDependency::new(
+            scene_product(),
+            RuntimeContentDependencyRole::Required,
+        )],
+    )
+    .unwrap();
+    let catalog =
+        RuntimeContentCatalog::new(definition, RuntimeContentCatalogLimits::default()).unwrap();
+    let expectation = RuntimeContentExpectation::new(
+        ContentDigest::of_bytes(&catalog.to_json_bytes().unwrap()),
+        catalog.target().clone(),
+    );
+    write_catalog(&root, &catalog);
+    (root, expectation)
 }
 
 pub(super) fn authority(path: &Path) -> DirectoryCapability {

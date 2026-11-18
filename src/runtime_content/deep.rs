@@ -5,6 +5,7 @@ use std::mem::size_of;
 use nara_asset::AssetRef;
 use nara_fs::ContentDigest;
 use nara_image::ImageDomain;
+use nara_material::Material2dDomain;
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
@@ -21,7 +22,8 @@ use super::{
 ///
 /// Root Scenes, addressable roots and global Input participate. Every reachable Required or
 /// Reference target uses its selected production decoder and complete dependency admission.
-/// First-party Image/TileSet/Tilemap CPU constraints are checked against actual decoded facts.
+/// First-party Material texture kinds and Image/TileSet/Tilemap CPU constraints are checked
+/// against actual decoded facts and the executable's selected codec roles.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -239,7 +241,30 @@ impl RuntimeContentBase {
                             self.validate_tileset_member(tileset.reference(), tileset.product())?;
                             facts.tilesets.push((index, *tileset.product()));
                         }
-                        Some(RuntimeCodecRole::Cpu) => {}
+                        Some(RuntimeCodecRole::Cpu) => {
+                            if let Some(material) = asset.typed::<Material2dDomain>() {
+                                for (slot, reference) in material.product().textures() {
+                                    let AssetRef::Product(target) = reference else {
+                                        return Err(RuntimeContentError::ProductIdentityMismatch);
+                                    };
+                                    let target_member = self
+                                        .member(*target)
+                                        .ok_or(RuntimeContentError::UndeclaredProduct)?;
+                                    if self.plan().runtime_codecs().role(target_member)
+                                        != Some(RuntimeCodecRole::Image)
+                                    {
+                                        let _work = self.inner.budget.reserve(0, slot.len())?;
+                                        return Err(
+                                            RuntimeContentError::MaterialTextureKindMismatch {
+                                                material: material.product().product(),
+                                                slot: slot.clone(),
+                                                target: *target,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         None => return Err(RuntimeContentError::CodecNotSelected),
                     }
                 }
