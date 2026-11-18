@@ -72,7 +72,7 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb
+            sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb libudev-dev pkg-config
           fi
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -307,6 +307,11 @@ jobs:
         with:
           tool: nextest@0.9.138
           fallback: none
+      - name: Install controller build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libudev-dev pkg-config
       - name: Check module consumer formatting
         run: cargo fmt --manifest-path tests/fixtures/module-consumer/Cargo.toml --all -- --check
       - name: Check module consumer

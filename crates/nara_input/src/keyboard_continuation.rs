@@ -81,6 +81,8 @@ pub enum KeyboardContinuationOperation {
 ///
 /// The caller separately proves its healthy completed paused frame and native isolation policy.
 /// A staged Release, stale mapping/context or extra held member refuses capture.
+/// An action may have Gamepad Button alternatives alongside its unique declared keyboard source;
+/// a held gamepad contribution remains outside this keyboard inventory and refuses capture.
 pub fn capture_keyboard_holds(
     world: &World,
     window: InputWindowId,
@@ -196,8 +198,14 @@ fn validate_bindings(
             .filter(|binding| {
                 binding.action == expected.action && binding.context == expected.context
             })
-            .count()
-            != 1
+            .any(|binding| {
+                binding.transform != ActionTransform::Button
+                    || match binding.input {
+                        InputBinding::Key(key) => key != expected.key,
+                        InputBinding::GamepadButton(_) => false,
+                        _ => true,
+                    }
+            })
         {
             return Err(KeyboardContinuationError::BindingMismatch);
         }

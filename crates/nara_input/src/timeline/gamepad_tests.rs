@@ -585,7 +585,7 @@ fn retired_connection_slots_wait_for_actions_and_actual_frame_copy_retirement() 
     );
     assert_eq!(
         timeline.connect_gamepad(WINDOW, SEAT, 0),
-        Err(InputIngressError::GamepadCapacityExceeded { limit: 1 })
+        Err(InputIngressError::GamepadRetirementPending { limit: 1 })
     );
     let delivered = timeline.take_deferred_action_inputs();
     assert_eq!(delivered.len(), 2);

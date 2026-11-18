@@ -125,6 +125,9 @@ current mapping/context lifetime, original endpoint claim, empty pending consume
 capacity for the complete batch and its terminal obligations before mutation. Allocate new local
 member identities. A restored logical admission is distinguishable from physical Press and
 creates held button and semantic projection without transient Press or Started outcomes.
+Gamepad Button alternatives may coexist with the unique declared keyboard Button source. They
+do not extend the captured inventory: original member and semantic checks still reject actual
+held gamepad contributions. This changes declaration eligibility, not reconstructed device state.
 
 Capture checks each declared member and its actual semantic contribution, rejecting unsupported
 members and retained unconsumed or deferred events. An observed context or mapping cancellation
@@ -208,9 +211,21 @@ it. Explicit binding transforms select scalar dead zone/inversion without hidden
 Disconnect, focus loss and endpoint retirement neutralize accepted axes and release buttons
 before connection reuse, through the existing ordered terminal credits. UI and action/frame
 copies keep original members charged until their consumers finish. No second gamepad ledger,
-unowned callback writer or independent terminal queue is introduced. An axis member staged under
+unowned callback writer or independent terminal queue is introduced. A full connection pool with
+an original retiring connection reports typed retirement backpressure; a zero-slot or entirely
+live full pool remains a hard capacity refusal. Native handoff can wait for actual original
+consumption without allocating a replacement slot owner. An axis member staged under
 an absent/expired mapping may not be newly adopted by later nonzero samples; neutralization and
-a fresh member are required. These contracts do not establish a physical controller backend.
+a fresh member are required. The normalized owner does not itself establish a physical controller
+backend. The optional concrete Gilrs adapter follows the same connection and terminal owner;
+its native discovery/filtering and explicit window/seat assignment remain outside action state.
+An endpoint observation can expose the original incarnation, focus and last physical-invalidation
+sequence without retaining the event log or granting ingress authority. Known native holds are
+not replayed at route activation. A backend without a hardware snapshot must distinguish fresh
+observations from cached values and state its unknown-startup-input limits; it must not require
+an unavailable snapshot before every first input. The [native successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor)
+owns the selected consumer and execution limits. This adds no controller state to game saves or
+exact continuation and does not make force feedback part of the input backend.
 
 Coordinated owners capture an Input-issued private endpoint-incarnation claim when associating
 with a connected endpoint. The claim retains original owner/identity, independently of the active

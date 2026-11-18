@@ -33,6 +33,7 @@ members = [
     "crates/nara_identity",
     "crates/nara_input",
     "crates/nara_gameplay",
+    "crates/nara_gilrs",
     "crates/nara_material",
     "crates/nara_material_derive",
     "crates/nara_project",
@@ -81,6 +82,7 @@ nara_image = { path = "crates/nara_image" }
 nara_identity = { path = "crates/nara_identity" }
 nara_input = { path = "crates/nara_input" }
 nara_gameplay = { path = "crates/nara_gameplay" }
+nara_gilrs = { path = "crates/nara_gilrs" }
 nara_material = { path = "crates/nara_material" }
 nara_material_derive = { path = "crates/nara_material_derive" }
 nara_project = { path = "crates/nara_project" }

@@ -535,6 +535,69 @@ fn physical_four_key_capture_restores_fresh_members_without_press_or_started() {
 }
 
 #[test]
+fn gamepad_button_alternatives_preserve_keyboard_capture_and_restore_without_capturing_gamepads() {
+    let make_map = || {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        for (code, binding) in bindings().into_iter().enumerate() {
+            builder
+                .bind(ActionBinding::key(binding.action.clone(), binding.key))
+                .unwrap();
+            builder
+                .bind(ActionBinding::gamepad_button(binding.action, code as u16))
+                .unwrap();
+        }
+        ActionMaps::new(
+            ActionMap::new(
+                builder.compile().unwrap().into_bindings(),
+                ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let (mut source, claim, _) =
+        paused_runtime_with(InputLimits::new(64, 3, 1, 8).unwrap(), make_map());
+    assert_eq!(capture(&source).unwrap(), holds(NONE));
+    restore(&mut source, &claim, holds(ALL)).unwrap();
+    paused_frame(&mut source);
+    let captured = capture(&source).unwrap();
+    assert_eq!(captured, holds(ALL));
+    assert_no_edges(last_frame(&source), ALL);
+    let (mut candidate, target, _) =
+        paused_runtime_with(InputLimits::new(64, 3, 1, 8).unwrap(), make_map());
+    restore(&mut candidate, &target, captured).unwrap();
+    paused_frame(&mut candidate);
+    assert_eq!(capture(&candidate).unwrap(), holds(ALL));
+    assert_no_edges(last_frame(&candidate), ALL);
+    let gamepad = driver(&mut source, |scope| {
+        nara_input::connect_gamepad_input(scope, WINDOW, SEAT, 4)
+    })
+    .unwrap();
+    driver(&mut source, |scope| {
+        nara_input::apply_gamepad_button_input(scope, &gamepad, 0, ButtonTransitionPhase::Pressed)
+    })
+    .unwrap();
+    exact_tick(&mut source);
+    paused_frame(&mut source);
+    assert_eq!(
+        capture(&source),
+        Err(KeyboardContinuationError::UnsupportedMembers)
+    );
+    assert_semantic(&source, ALL);
+    driver(&mut source, |scope| {
+        nara_input::disconnect_gamepad_input(scope, &gamepad)
+    })
+    .unwrap();
+    exact_tick(&mut source);
+    paused_frame(&mut source);
+    assert_eq!(capture(&source).unwrap(), holds(ALL));
+    candidate.finish().unwrap();
+    source.finish().unwrap();
+}
+
+#[test]
 fn platform_release_projects_once_in_exact_tick_and_settles_restored_semantics_once() {
     let (mut runtime, claim, _) = paused_runtime();
     let admission = restore(&mut runtime, &claim, holds(ALL)).unwrap();

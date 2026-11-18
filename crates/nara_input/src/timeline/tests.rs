@@ -74,6 +74,72 @@ fn published_timeline() -> InputTimeline {
 }
 
 #[test]
+fn endpoint_observation_preserves_physical_loss_across_refocus_and_log_reclamation() {
+    let window = InputWindowId::new(1);
+    let seat = InputSeatId::PRIMARY;
+    let mut timeline = published_timeline();
+    let original = timeline.endpoint_observation(window, seat).unwrap();
+    assert!(original.focused());
+    assert_eq!(original.invalidated_through(), 0);
+    timeline
+        .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Space))
+        .unwrap();
+    let loss = timeline
+        .admit_window_event(window, seat, InputWindowEvent::Focused(false))
+        .unwrap();
+    let lost = timeline.endpoint_observation(window, seat).unwrap();
+    assert_eq!(lost.incarnation(), original.incarnation());
+    assert!(!lost.focused());
+    assert_eq!(Some(lost.invalidated_through()), loss.last_sequence());
+    timeline
+        .admit_window_event(window, seat, InputWindowEvent::Focused(true))
+        .unwrap();
+    drain_unmapped(&mut timeline);
+    let refocused = timeline.endpoint_observation(window, seat).unwrap();
+    assert!(refocused.focused());
+    assert_eq!(refocused.incarnation(), original.incarnation());
+    assert_eq!(refocused.invalidated_through(), lost.invalidated_through());
+    timeline
+        .admit_window_event(
+            window,
+            seat,
+            InputWindowEvent::Resized {
+                logical_size: Vec2::new(640.0, 480.0),
+            },
+        )
+        .unwrap();
+    assert_eq!(timeline.endpoint_observation(window, seat), Some(refocused));
+    let close = timeline
+        .admit_window_event(window, seat, InputWindowEvent::CloseRequested)
+        .unwrap();
+    let closed = timeline.endpoint_observation(window, seat).unwrap();
+    assert!(!closed.focused());
+    assert!(closed.invalidated_through() > refocused.invalidated_through());
+    assert_eq!(Some(closed.invalidated_through()), close.last_sequence());
+}
+
+#[test]
+fn endpoint_observation_never_creates_or_revives_a_retired_endpoint() {
+    let window = InputWindowId::new(33);
+    let seat = InputSeatId::PRIMARY;
+    let mut timeline = InputTimeline::default();
+    assert!(timeline.endpoint_observation(window, seat).is_none());
+    timeline.connect_endpoint(window, seat).unwrap();
+    let original = timeline.endpoint_observation(window, seat).unwrap();
+    assert!(!original.focused());
+    timeline
+        .admit_window_event(window, seat, InputWindowEvent::SurfaceRetired)
+        .unwrap();
+    assert!(timeline.endpoint_observation(window, seat).is_none());
+    drain_unmapped(&mut timeline);
+    timeline.connect_endpoint(window, seat).unwrap();
+    let replacement = timeline.endpoint_observation(window, seat).unwrap();
+    assert_ne!(replacement.incarnation(), original.incarnation());
+    assert!(!replacement.focused());
+    assert_eq!(replacement.invalidated_through(), 0);
+}
+
+#[test]
 fn fault_retirement_admits_only_surface_retirement_input() {
     let retired = __InputDriverEvent::Window {
         window: InputWindowId::new(1),

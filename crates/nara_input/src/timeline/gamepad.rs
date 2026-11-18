@@ -5,6 +5,8 @@ impl InputTimeline {
     ///
     /// The backend label is metadata, including when two connections use the same label.
     /// Reconnecting creates a fresh generation and does not recover former physical state.
+    /// A full pool with a disconnected connection awaiting consumption returns
+    /// [`InputIngressError::GamepadRetirementPending`]; no new connection is admitted.
     pub fn connect_gamepad(
         &mut self,
         window: InputWindowId,

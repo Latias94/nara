@@ -86,6 +86,10 @@ held and terminal-pending members remain charged while their internal consumers 
 Connected idle records intentionally retain their slots until explicitly retired.
 `with_gamepads(count)` configures the separate finite connection-slot limit, including zero when
 controllers are not selected. A slot does not allocate independent event or terminal storage.
+`GamepadRetirementPending` means the full pool includes a disconnected connection whose original
+consumers have not finished. No new connection is admitted; an adapter can retry after ordinary
+Input consumption. `GamepadCapacityExceeded` still reports a zero-slot or entirely live full
+pool. The Gilrs adapter waits only for the former, including one-slot focus/route handoffs.
 
 A native adapter connects its actual labels once before delivering events. Managed Hosts use
 driver scopes so Runtime state gating remains part of admission:
@@ -132,6 +136,54 @@ changes. An explicit restore may attach a newly connected incarnation with the s
 handoff clears predecessor interaction state. Late preparation or cleanup through the old Surface
 cannot adopt or terminate the replacement connection.
 
+## Optional Native Controllers
+
+[`nara_gilrs`](../../crates/nara_gilrs/README.md) is a separately consumed concrete native
+collector. It depends on App, ECS and Input, not the root product, Winit, UI or rendering.
+Its mapped button and axis codes are explicit portable values; do not persist Gilrs IDs or
+native enum discriminants as player identity.
+
+Install it with an explicit route to an endpoint that the actual Host connects:
+
+```rust
+use nara_gilrs::{GamepadRoute, GilrsInputPlugin};
+use nara_input::{InputSeatId, InputWindowId};
+
+app.add_plugin(GilrsInputPlugin::new(Some(GamepadRoute::new(
+    InputWindowId::new(1),
+    InputSeatId::PRIMARY,
+))))?;
+```
+
+The collector does not create a window or focus a seat. `None` leaves discovered devices
+unassigned. The `GilrsDevices` resource exposes current device metadata and nominal tokens;
+use its `assign`/`unassign` methods for product-owned player assignment. A stale or foreign
+token cannot assign a reconnected device. Several routes can use the same immutable action
+definition while retaining independent seat state.
+
+Polling runs before Input projection in First. Gilrs provides hardware discovery, normalized
+values and mapped D-pad/device filtering. Nara's existing connection token, bounded timeline,
+terminal credits and semantic contribution aggregation still own accepted input. The optional
+backend disables force feedback. Initialization or admission failure follows the managed
+Runtime error/cleanup path; it is not an invisible keyboard-only fallback.
+
+`InputTimeline::endpoint_observation` provides a read-only incarnation/focus snapshot and
+`invalidated_through()` sequence. Backends can observe a focus loss followed by refocus between
+polls even after the original log entries are reclaimed. The snapshot is not a connection or
+an ingress capability. Known controls held across a route boundary need release/neutral before
+they can contribute again; cached values are not replayed as fresh intent. Gilrs does not expose
+a portable instantaneous hardware snapshot, so an unknown startup-held control cannot be
+identified from a missing cache entry. Fresh observations after the queue barrier remain usable.
+
+The Two-Level Game's source desktop entry selects the backend with both the `gamepad` build
+feature and `--gamepad`. Its authored D-pad and game buttons use the existing actions and
+command queue alongside keyboard input. This selection does not serialize device connections
+for exact continuation or automatically enable a cooked Player backend. Managed acquisition
+currently requires Windows WGI. Linux builds need libudev development files, but its selected
+Gilrs backend and macOS do not expose synchronous native retirement; the plugin refuses there
+before creating the native context. Native execution and drop guarantees retain the
+platform scope recorded in the [current unit](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor).
+
 ## Paused Keyboard Continuation
 
 `KeyboardActionBinding` declares an exact keyboard key, Button action and context. A game captures
@@ -140,6 +192,10 @@ its actual held value. The original Input owner checks the current map/context l
 consumer quiescence and agreement between the button and semantic projections. Pending or deferred
 input, additional held members and unsupported routes refuse capture. The game separately checks
 its canonical held state, command watermarks and other services.
+The declared keyboard source must remain unique. Gamepad Button alternatives on the same
+action/context may be present, but their actual held members are not captured or restored by
+this interface. This permits the same authored map in keyboard-only and controller-enabled
+products without claiming that keyboard continuation serializes a controller.
 
 `restore_keyboard_holds` uses the paused Runtime driver port and an exact newly connected endpoint
 claim. It preflights the whole batch and its terminal allowances, then installs fresh local members

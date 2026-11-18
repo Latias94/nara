@@ -204,3 +204,47 @@ not justify a new global validator, static purity analysis, second command queue
 whole-state checking in ordinary gameplay. State/file checks belong to the opt-in recording and
 playback boundaries. Runtime capabilities take priority over further micro-optimization; future
 performance work needs a demonstrated cost in a representative workload.
+
+## November 19: Concrete Native Controller Adapter
+
+The normalized Input owner is now independently useful, but it still has no physical controller
+collector. The [native successor](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor)
+selects a separate optional Gilrs package and an actual source-game consumer. This remains
+distinct from UI work and from a claim that every hardware or foreign backend has executed.
+
+The existing Bevy revision `03ed5a27c92715c8fa2188f31f04e454ec39942f` declares `gilrs = "0.11.0"`
+as a version range. Its repository has no lockfile proving one resolved Gilrs version. The local
+Gilrs 0.11.2/core 0.6.8 packages record VCS revision `07e286e24b046cf39e5c367daa2770b805a64692`;
+that package metadata is not a fresh remote verification. The adapter selects the cached
+0.11.2 input implementation. Gilrs/core permit MIT or Apache-2.0; their embedded controller
+mapping database has its own retained zlib-style notice and does not link the SDL runtime.
+
+Bevy's `crates/bevy_gilrs/src/{lib,gilrs_system,converter}.rs` enumerates existing devices before
+ordinary polling, disables automatic filters/cache updates, converts axis-based D-pads and
+updates Gilrs state explicitly. It forwards analog changes to Bevy's own settings layer rather
+than providing Nara's seat, route or focus lifetime. Its backend IDs are not durable player or
+connection identity. Nara retains its own exact connection token and terminal-credit owner.
+
+Gilrs already normalizes axes and platform Y conventions. Its native device dead-zone filter
+can produce radial stick neutralization and companion-axis zero events; Nara should not invent
+another platform sign correction or an arbitrary epsilon. Axis-based D-pad conversion also
+settles the opposite direction on a direct sign change. Filtered neutral observations remain
+relevant to reactivation even if they do not produce another public value change. Author-selected
+action dead zones remain a separate transform over admitted normalized input.
+
+The public Gilrs cache is not an instantaneous hardware snapshot. WGI initializes its first
+reading as a baseline, so an already held control may have no initial event, while an absent
+cache entry reports zero/false. Do not replay cached holds on assignment or treat cache absence
+as proof of physical release. A strict requirement to observe every unknown control neutral
+would also swallow an ordinary user's first press; the selected adapter instead drains the
+old queue, suppresses known holds until actual neutral/release, and admits later fresh events.
+This preserves the original accepted-member cancellation barrier without claiming unavailable
+hardware knowledge. Native hardware execution must qualify its actual focus and reconnect path.
+
+Disable force feedback for this input-only context: the selected package otherwise creates an
+additional server thread without an explicit disconnect-exit path. Windows WGI owns an upstream
+roughly 8 ms polling loop and stops/joins it in Drop, with no bounded close-time guarantee.
+The selected Linux/macOS implementations have different asynchronous thread/drop behavior and
+are not synchronous physical-retirement evidence. Linux also requires libudev development files
+and appropriate input-device read/write permissions. Retain these platform limits rather than
+adding another Nara thread, generic process owner or universal controller backend.

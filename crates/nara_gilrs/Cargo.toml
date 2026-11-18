@@ -1,0 +1,13 @@
+[package]
+name = "nara_gilrs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Optional native Gilrs input adapter for Nara"
+
+[dependencies]
+gilrs = "=0.11.2"
+nara_app = { path = "../nara_app" }
+nara_ecs = { path = "../nara_ecs" }
+nara_input = { path = "../nara_input" }

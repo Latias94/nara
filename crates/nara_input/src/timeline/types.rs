@@ -147,6 +147,35 @@ pub enum InputEventOrigin {
     Restored,
 }
 
+/// A read-only observation of an existing endpoint, never an ingress or presentation capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputEndpointObservation {
+    pub(super) incarnation: u64,
+    pub(super) focused: bool,
+    pub(super) invalidated_through: u64,
+}
+
+impl InputEndpointObservation {
+    /// Identifies this endpoint incarnation within its original Input owner.
+    #[must_use]
+    pub const fn incarnation(self) -> u64 {
+        self.incarnation
+    }
+
+    #[must_use]
+    pub const fn focused(self) -> bool {
+        self.focused
+    }
+
+    /// The last admitted sequence that ended this endpoint's physical input lifetime.
+    ///
+    /// Backends can detect loss followed by refocus between polls without retaining the event log.
+    #[must_use]
+    pub const fn invalidated_through(self) -> u64 {
+        self.invalidated_through
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputWindowId(u64);
@@ -828,6 +857,11 @@ pub enum InputIngressError {
     GamepadCapacityExceeded {
         limit: usize,
     },
+    /// No slot is free while an original disconnected connection awaits its consumers.
+    /// Retry only after ordinary Input consumption can reclaim that connection.
+    GamepadRetirementPending {
+        limit: usize,
+    },
     ForeignEndpointClaim,
     EndpointClaimExpired {
         window: InputWindowId,
@@ -915,6 +949,10 @@ impl Display for InputIngressError {
                     "input gamepad connection capacity {limit} was exceeded"
                 )
             }
+            Self::GamepadRetirementPending { limit } => write!(
+                formatter,
+                "input gamepad connection capacity {limit} is waiting for original consumers to retire a disconnected connection"
+            ),
             Self::ForeignEndpointClaim => {
                 formatter.write_str("input endpoint claim belongs to a different Input owner")
             }

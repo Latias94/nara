@@ -373,6 +373,22 @@ impl InputTimeline {
         }
     }
 
+    /// Observes a live endpoint without connecting, focusing or granting input authority.
+    #[must_use]
+    pub fn endpoint_observation(
+        &self,
+        window: InputWindowId,
+        seat: InputSeatId,
+    ) -> Option<InputEndpointObservation> {
+        let index = self.topology.connected_endpoint(window, seat).ok()?;
+        let endpoint = self.topology.endpoints[index]?;
+        Some(InputEndpointObservation {
+            incarnation: endpoint.id.0,
+            focused: endpoint.focused,
+            invalidated_through: endpoint.invalidated_through,
+        })
+    }
+
     /// Connects one raw adapter endpoint. Pending retirement must finish before label reuse.
     pub fn connect_endpoint(
         &mut self,
@@ -1658,6 +1674,9 @@ impl InputTimeline {
             }
             let state = owner.topology.endpoints[endpoint_index].as_mut().unwrap();
             state.focused = false;
+            if let Some(sequence) = admission.last_sequence() {
+                state.invalidated_through = sequence;
+            }
             state.geometry = false;
             state.retiring = retiring;
             match reason {

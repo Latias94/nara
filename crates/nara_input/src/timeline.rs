@@ -21,12 +21,12 @@ pub use owner::{
 pub use types::{__InputDriverEvent, __InputDriverOutput};
 pub use types::{
     ActionInputProvenance, InputAdmission, InputConfigurationError, InputConsumerCursors,
-    InputEndpointRetirement, InputEventKind, InputEventOrigin, InputFrameObservations,
-    InputGamepadGeneration, InputGeometryGeneration, InputIngressError, InputInvalidationReason,
-    InputLimits, InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
-    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimelineEntry,
-    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
-    MAX_INPUT_TIMELINE_ENTRIES,
+    InputEndpointObservation, InputEndpointRetirement, InputEventKind, InputEventOrigin,
+    InputFrameObservations, InputGamepadGeneration, InputGeometryGeneration, InputIngressError,
+    InputInvalidationReason, InputLimits, InputPointerId, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputRouteStamp, InputSeatId, InputSlotGeneration,
+    InputSurfaceId, InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent,
+    InputWindowId, MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[cfg(test)]

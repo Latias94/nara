@@ -52,12 +52,13 @@ pub use state::{
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
     ActionInputProvenance, GamepadConnection, InputAdmission, InputConfigurationError,
-    InputConsumerCursors, InputEndpointRetirement, InputEventKind, InputEventOrigin,
-    InputFrameObservations, InputGamepadGeneration, InputGeometryGeneration, InputIngressError,
-    InputInvalidationReason, InputLimits, InputPointerId, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputRouteStamp, InputSeatId, InputSlotGeneration,
-    InputSurfaceId, InputTimeline, InputTimelineEntry, InputUiCursorError, InputUiDisposition,
-    InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
+    InputConsumerCursors, InputEndpointObservation, InputEndpointRetirement, InputEventKind,
+    InputEventOrigin, InputFrameObservations, InputGamepadGeneration, InputGeometryGeneration,
+    InputIngressError, InputInvalidationReason, InputLimits, InputPointerId,
+    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
+    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline, InputTimelineEntry,
+    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
+    MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

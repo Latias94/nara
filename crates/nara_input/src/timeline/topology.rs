@@ -29,6 +29,7 @@ pub(super) struct Endpoint {
     pub(super) retirement: bool,
     pub(super) geometry: bool,
     pub(super) last_binding_generation: u64,
+    pub(super) invalidated_through: u64,
 }
 
 impl Endpoint {
@@ -179,9 +180,20 @@ impl InputTopology {
     }
 
     pub(super) fn free_gamepad(&self) -> Result<usize, InputIngressError> {
-        self.gamepads.iter().position(Option::is_none).ok_or(
-            InputIngressError::GamepadCapacityExceeded {
-                limit: self.gamepads.len(),
+        if let Some(index) = self.gamepads.iter().position(Option::is_none) {
+            return Ok(index);
+        }
+        let limit = self.gamepads.len();
+        Err(
+            if self
+                .gamepads
+                .iter()
+                .flatten()
+                .any(|gamepad| gamepad.retiring)
+            {
+                InputIngressError::GamepadRetirementPending { limit }
+            } else {
+                InputIngressError::GamepadCapacityExceeded { limit }
             },
         )
     }
@@ -230,6 +242,7 @@ impl InputTopology {
             retirement: true,
             geometry: false,
             last_binding_generation: 0,
+            invalidated_through: 0,
         });
     }
 
