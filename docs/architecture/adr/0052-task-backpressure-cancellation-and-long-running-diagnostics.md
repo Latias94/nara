@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-16
+**Last Revised**: 2026-11-19
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -126,6 +126,12 @@ flowchart TD
 - `OrderedTaskResults<T>` provides a cross-frame ordered-prefix policy: a larger key remains held
   until every smaller outstanding key is terminal. This makes application order independent of
   worker completion at the explicit cost of head-of-line blocking.
+- A nonempty ordered collection admits one completion owner. Sibling `TaskScope` values remain
+  distinct owners even when they share physical facilities. Insertion of a different owner or a
+  duplicate key returns the original handle without cancellation or terminal consumption.
+  Removing the final pending handle releases the binding; previously captured snapshots retain
+  their original handles and completion facts independently. Cutoff validation uses this
+  insertion invariant rather than scanning the collection for mixed ownership.
 - Domains whose availability is intentionally asynchronous may instead sort one ready snapshot.
   That guarantees stable ordering only within that integration boundary, not across frames. Such a
   domain must not describe the policy as globally completion-order independent.

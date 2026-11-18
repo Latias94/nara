@@ -1196,6 +1196,11 @@ pub struct OrderedTaskTerminal<T> {
     pub terminal: TaskTerminal<T>,
 }
 
+/// An ordered prefix of handles from one completion owner while nonempty.
+///
+/// Handles from sibling scopes have distinct completion owners even when they share workers.
+/// Removing the final pending handle permits this collection to bind to another owner; captured
+/// snapshots keep their original handles independently.
 pub struct OrderedTaskResults<T> {
     pending: BTreeMap<TaskOrderKey, TaskHandle<T>>,
 }
@@ -1214,9 +1219,8 @@ pub enum TaskCompletionCutoffError {
 impl Display for TaskCompletionCutoffError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PoolMismatch { .. } => formatter.write_str(
-                "ordered task results contain a task from a different task-pool instance",
-            ),
+            Self::PoolMismatch { .. } => formatter
+                .write_str("ordered task results contain a task from a different completion owner"),
         }
     }
 }
@@ -1284,9 +1288,16 @@ impl<T> OrderedTaskResults<T> {
         self.pending.is_empty()
     }
 
+    /// Admits a unique key from the collection's current completion owner.
+    ///
+    /// A duplicate key or different owner returns the original handle without cancellation or
+    /// terminal consumption. An empty collection accepts the first handle's owner.
     pub fn push(&mut self, handle: TaskHandle<T>) -> Result<(), TaskHandle<T>> {
         let key = handle.order_key();
-        if self.pending.contains_key(&key) {
+        if self.pending.first_key_value().is_some_and(|(_, first)| {
+            !Arc::ptr_eq(&first.state.instance_token, &handle.state.instance_token)
+        }) || self.pending.contains_key(&key)
+        {
             return Err(handle);
         }
         self.pending.insert(key, handle);
@@ -1297,10 +1308,8 @@ impl<T> OrderedTaskResults<T> {
         &self,
         cutoff: &TaskCompletionCutoff,
     ) -> Result<(), TaskCompletionCutoffError> {
-        if let Some(handle) = self
-            .pending
-            .values()
-            .find(|handle| !handle.state.belongs_to(cutoff))
+        if let Some((_, handle)) = self.pending.first_key_value()
+            && !handle.state.belongs_to(cutoff)
         {
             return Err(TaskCompletionCutoffError::PoolMismatch {
                 task: handle.descriptor(),
