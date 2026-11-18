@@ -7,13 +7,15 @@ use std::{
 };
 
 use nara_app::{
-    App, CoreStage, FixedCatchUpPolicy, FixedTime, PluginId, RealTime, RenderTime, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeFrameKind, RuntimeInstance, RuntimeState, RuntimeTimeContinuation,
+    App, AppExitRequests, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime, Plugin,
+    PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext, RealTime,
+    RenderTime, RuntimeControl, RuntimeControlFailure, RuntimeControlRequestResult,
+    RuntimeControlStatus, RuntimeDriveError, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+    RuntimeFrameKind, RuntimeFrameStatus, RuntimeInstance, RuntimeState, RuntimeTimeContinuation,
     RuntimeTimeContinuationError, RuntimeTimeContinuationRejection, RuntimeTimeSettings,
-    VirtualTime,
+    TimeFrameError, TimeFrameResource, VirtualTime,
 };
-use nara_ecs::{ResMut, Resource, World};
+use nara_ecs::{Commands, ResMut, Resource, World};
 
 const STEP: Duration = Duration::from_millis(20);
 
@@ -581,4 +583,295 @@ fn missing_time_resources_refuse_without_partial_phase_or_schedule_changes() {
         }
         runtime.finish().unwrap();
     }
+}
+
+#[derive(Default, Resource)]
+struct FrameResourceStages(Vec<CoreStage>);
+
+struct FrameResourceCleanup(Arc<AtomicUsize>);
+
+impl Plugin for FrameResourceCleanup {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.frame-resource-cleanup"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+fn frame_resource_removal_app(paused: bool) -> (App, Arc<AtomicUsize>) {
+    let mut configured = app(paused, FixedCatchUpPolicy::DiscardExcess);
+    configured.init_resource::<FrameResourceStages>().unwrap();
+    for stage in CoreStage::ALL {
+        configured
+            .add_systems(stage, move |mut stages: ResMut<FrameResourceStages>| {
+                stages.0.push(stage);
+            })
+            .unwrap();
+    }
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    configured
+        .add_plugin(FrameResourceCleanup(Arc::clone(&shutdowns)))
+        .unwrap();
+    (configured, shutdowns)
+}
+
+fn assert_missing_frame_resource_stops_and_finishes(
+    mut runtime: RuntimeInstance,
+    error: RuntimeDriveError,
+    resource: TimeFrameResource,
+    shutdowns: &AtomicUsize,
+) {
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    assert_eq!(runtime.fault(), Some(error.fault()));
+    assert_eq!(error.fault().kind(), RuntimeFaultKind::AppFrame);
+    assert_eq!(error.fault().source(), "nara.app.frame");
+    assert_eq!(
+        error.fault().app_error(),
+        Some(&AppRunError::Time {
+            error: TimeFrameError::MissingResource { resource },
+        })
+    );
+    assert_eq!(shutdowns.load(Ordering::Relaxed), 0);
+
+    let stages = runtime.world().resource::<FrameResourceStages>().0.clone();
+    let runs = *runtime.world().resource::<Runs>();
+    assert!(!runtime.fault_reporter().report(RuntimeFault::engine(
+        RuntimeFaultKind::RequiredService,
+        "nara.test.later-frame-resource-fault",
+    )));
+    assert_eq!(runtime.drive(STEP * 2).unwrap_err(), error);
+    assert_eq!(runtime.fault(), Some(error.fault()));
+    assert_eq!(runtime.world().resource::<FrameResourceStages>().0, stages);
+    assert_eq!(*runtime.world().resource::<Runs>(), runs);
+
+    let RuntimeControlRequestResult::Accepted(stop) = runtime.request_control(RuntimeControl::Stop)
+    else {
+        panic!("a faulted runtime must accept Stop");
+    };
+    for state in [
+        RuntimeState::Stopping,
+        RuntimeState::Stopped,
+        RuntimeState::Stopped,
+    ] {
+        let outcome = runtime.drive(STEP).unwrap();
+        assert_eq!(outcome.state(), state);
+        assert_eq!(outcome.frame(), None);
+        assert_eq!(outcome.frame_kind(), None);
+        assert_eq!(runtime.fault(), Some(error.fault()));
+        assert_eq!(runtime.world().resource::<FrameResourceStages>().0, stages);
+        assert_eq!(*runtime.world().resource::<Runs>(), runs);
+    }
+    assert_eq!(
+        runtime.control_status(stop),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+    assert!(!runtime.finish().unwrap().has_terminal_failure());
+    assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+}
+
+fn assert_fixed_time_removed_in_pre_update(real_delta: Duration) {
+    let (mut configured, shutdowns) = frame_resource_removal_app(false);
+    configured
+        .add_systems(CoreStage::PreUpdate, |mut commands: Commands| {
+            commands.remove_resource::<FixedTime>();
+        })
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+
+    let error = runtime.drive(real_delta).unwrap_err();
+    assert!(runtime.world().get_resource::<FixedTime>().is_none());
+    assert_eq!(
+        runtime.world().resource::<FrameResourceStages>().0,
+        [
+            CoreStage::First,
+            CoreStage::TaskUpdate,
+            CoreStage::PreUpdate
+        ]
+    );
+    assert_eq!(
+        *runtime.world().resource::<Runs>(),
+        Runs {
+            tasks: 1,
+            fixed: 0,
+            update: 0,
+        }
+    );
+    assert_eq!(runtime.world().resource::<RealTime>().frame, 1);
+    assert_eq!(runtime.world().resource::<RealTime>().elapsed, real_delta);
+    assert_eq!(
+        runtime.world().resource::<VirtualTime>().elapsed,
+        real_delta
+    );
+    assert_missing_frame_resource_stops_and_finishes(
+        runtime,
+        error,
+        TimeFrameResource::FixedTime,
+        &shutdowns,
+    );
+}
+
+#[test]
+fn removed_fixed_time_in_pre_update_with_zero_due_ticks_faults_before_successors() {
+    assert_fixed_time_removed_in_pre_update(Duration::ZERO);
+}
+
+#[test]
+fn removed_fixed_time_in_pre_update_with_one_due_tick_faults_before_successors() {
+    assert_fixed_time_removed_in_pre_update(STEP);
+}
+
+#[test]
+fn removed_fixed_time_in_exact_fixed_update_faults_after_completed_user_work() {
+    let (mut configured, shutdowns) = frame_resource_removal_app(true);
+    configured
+        .add_systems(CoreStage::FixedUpdate, |mut commands: Commands| {
+            commands.remove_resource::<FixedTime>();
+        })
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+    let RuntimeControlRequestResult::Accepted(step) =
+        runtime.request_control(RuntimeControl::StepFixedTick)
+    else {
+        panic!("a paused runtime must accept an exact fixed step");
+    };
+
+    let real_delta = Duration::from_millis(7);
+    let error = runtime.drive(real_delta).unwrap_err();
+    assert!(runtime.world().get_resource::<FixedTime>().is_none());
+    assert_eq!(
+        runtime.world().resource::<FrameResourceStages>().0,
+        [CoreStage::FixedUpdate]
+    );
+    assert_eq!(
+        *runtime.world().resource::<Runs>(),
+        Runs {
+            tasks: 0,
+            fixed: 1,
+            update: 0,
+        }
+    );
+    assert_eq!(runtime.world().resource::<RealTime>().elapsed, real_delta);
+    assert_eq!(runtime.world().resource::<VirtualTime>().elapsed, STEP);
+    assert_eq!(
+        runtime.control_status(step),
+        Some(RuntimeControlStatus::Failed(
+            RuntimeControlFailure::RuntimeFaulted
+        ))
+    );
+    assert_missing_frame_resource_stops_and_finishes(
+        runtime,
+        error,
+        TimeFrameResource::FixedTime,
+        &shutdowns,
+    );
+}
+
+#[test]
+fn removed_frame_resources_render_time_before_finalization_faults_after_fixed_update() {
+    let (mut configured, shutdowns) = frame_resource_removal_app(false);
+    configured
+        .add_systems(CoreStage::FixedUpdate, |mut commands: Commands| {
+            commands.remove_resource::<RenderTime>();
+        })
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+
+    let error = runtime.drive(STEP).unwrap_err();
+    assert!(runtime.world().get_resource::<RenderTime>().is_none());
+    assert_eq!(
+        runtime.world().resource::<FrameResourceStages>().0,
+        [
+            CoreStage::First,
+            CoreStage::TaskUpdate,
+            CoreStage::PreUpdate,
+            CoreStage::FixedUpdate,
+        ]
+    );
+    assert_eq!(runtime.world().resource::<FixedTime>().tick(), 1);
+    assert_eq!(runtime.world().resource::<Runs>().fixed, 1);
+    assert_eq!(runtime.world().resource::<Runs>().update, 0);
+    assert_missing_frame_resource_stops_and_finishes(
+        runtime,
+        error,
+        TimeFrameResource::RenderTime,
+        &shutdowns,
+    );
+}
+
+#[test]
+fn removed_frame_resources_status_after_calculation_faults_at_final_consumption() {
+    let (mut configured, shutdowns) = frame_resource_removal_app(false);
+    configured
+        .add_systems(
+            CoreStage::Last,
+            |status: nara_ecs::Res<RuntimeFrameStatus>, mut commands: Commands| {
+                assert_eq!(status.fixed_steps, 1);
+                assert_eq!(status.fixed_tick, 1);
+                commands.remove_resource::<RuntimeFrameStatus>();
+            },
+        )
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+
+    let error = runtime.drive(STEP).unwrap_err();
+    assert!(
+        runtime
+            .world()
+            .get_resource::<RuntimeFrameStatus>()
+            .is_none()
+    );
+    assert_eq!(
+        runtime.world().resource::<FrameResourceStages>().0,
+        CoreStage::ALL
+    );
+    assert_eq!(runtime.world().resource::<Runs>().fixed, 1);
+    assert_eq!(runtime.world().resource::<Runs>().update, 1);
+    assert_missing_frame_resource_stops_and_finishes(
+        runtime,
+        error,
+        TimeFrameResource::RuntimeFrameStatus,
+        &shutdowns,
+    );
+}
+
+#[test]
+fn removed_frame_resources_exit_requests_before_consumption_faults_after_last() {
+    let (mut configured, shutdowns) = frame_resource_removal_app(false);
+    configured
+        .add_systems(CoreStage::Last, |mut commands: Commands| {
+            commands.remove_resource::<AppExitRequests>();
+        })
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+
+    let error = runtime.drive(STEP).unwrap_err();
+    assert!(runtime.world().get_resource::<AppExitRequests>().is_none());
+    assert_eq!(
+        runtime.world().resource::<FrameResourceStages>().0,
+        CoreStage::ALL
+    );
+    assert_eq!(
+        runtime.world().resource::<RuntimeFrameStatus>().fixed_steps,
+        1
+    );
+    assert_eq!(runtime.world().resource::<Runs>().fixed, 1);
+    assert_eq!(runtime.world().resource::<Runs>().update, 1);
+    assert_missing_frame_resource_stops_and_finishes(
+        runtime,
+        error,
+        TimeFrameResource::AppExitRequests,
+        &shutdowns,
+    );
 }

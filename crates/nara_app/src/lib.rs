@@ -16,6 +16,7 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
+    bevy_ecs::component::Mutable,
     bevy_ecs::error::{ErrorHandler, FallbackErrorHandler},
     bevy_ecs::observer::IntoObserver,
     bevy_ecs::schedule::{InternedScheduleLabel, InternedSystemSet, ScheduleBuildSettings},
@@ -534,7 +535,7 @@ impl Display for TimeFrameResource {
     }
 }
 
-/// A failure to build an atomic clock plan for one app frame.
+/// A failure to plan an app frame or consume its required resources.
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum TimeFrameError {
     #[error("required frame resource is missing: {resource}")]
@@ -1086,6 +1087,15 @@ fn required_frame_resource<T: Resource>(
 ) -> Result<&T, TimeFrameError> {
     world
         .get_resource::<T>()
+        .ok_or(TimeFrameError::MissingResource { resource })
+}
+
+fn required_frame_resource_mut<T: Resource<Mutability = Mutable>>(
+    world: &mut World,
+    resource: TimeFrameResource,
+) -> Result<nara_ecs::Mut<'_, T>, TimeFrameError> {
+    world
+        .get_resource_mut::<T>()
         .ok_or(TimeFrameError::MissingResource { resource })
 }
 
@@ -2046,16 +2056,28 @@ impl runtime::RuntimeOwnerState {
             if stage == CoreStage::FixedUpdate {
                 for _ in 0..time_frame_plan.fixed_steps_to_run {
                     fixed_time.advance_tick();
-                    *self.world.resource_mut::<FixedTime>() = fixed_time;
+                    *required_frame_resource_mut::<FixedTime>(
+                        &mut self.world,
+                        TimeFrameResource::FixedTime,
+                    )? = fixed_time;
                     self.run_managed_schedule(stage)?;
                 }
                 fixed_time.finish_frame();
-                *self.world.resource_mut::<FixedTime>() = fixed_time;
-                self.world
-                    .resource_mut::<RenderTime>()
-                    .update_from_fixed(&fixed_time);
+                *required_frame_resource_mut::<FixedTime>(
+                    &mut self.world,
+                    TimeFrameResource::FixedTime,
+                )? = fixed_time;
+                required_frame_resource_mut::<RenderTime>(
+                    &mut self.world,
+                    TimeFrameResource::RenderTime,
+                )?
+                .update_from_fixed(&fixed_time);
                 let status = RuntimeFrameStatus {
-                    frame: self.world.resource::<RealTime>().frame,
+                    frame: required_frame_resource::<RealTime>(
+                        &self.world,
+                        TimeFrameResource::RealTime,
+                    )?
+                    .frame,
                     real_delta: time_frame_plan.real_delta,
                     virtual_delta: time_frame_plan.virtual_delta,
                     real_delta_clamped: time_frame_plan.real_delta_clamped,
@@ -2067,7 +2089,10 @@ impl runtime::RuntimeOwnerState {
                     fixed_debt: fixed_time.debt(),
                     fixed_discarded: fixed_time.discarded_this_frame(),
                 };
-                *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+                *required_frame_resource_mut::<RuntimeFrameStatus>(
+                    &mut self.world,
+                    TimeFrameResource::RuntimeFrameStatus,
+                )? = status;
                 frame_status = Some(status);
             } else if !paused_stages_only || stage_runs_while_paused(stage) {
                 self.run_managed_schedule(stage)?;
@@ -2078,9 +2103,16 @@ impl runtime::RuntimeOwnerState {
         }
 
         let status = frame_status.expect("the fixed-update stage always exists");
-        *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        *required_frame_resource_mut::<RuntimeFrameStatus>(
+            &mut self.world,
+            TimeFrameResource::RuntimeFrameStatus,
+        )? = status;
         self.run_managed_schedule(__private::FrameCleanup)?;
-        let exit = self.world.resource_mut::<AppExitRequests>().take();
+        let exit = required_frame_resource_mut::<AppExitRequests>(
+            &mut self.world,
+            TimeFrameResource::AppExitRequests,
+        )?
+        .take();
         self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })
     }
@@ -2124,7 +2156,8 @@ impl runtime::RuntimeOwnerState {
         self.run_managed_schedule(CoreStage::FixedUpdate)?;
 
         fixed_time.finish_exact_step();
-        *self.world.resource_mut::<FixedTime>() = fixed_time;
+        *required_frame_resource_mut::<FixedTime>(&mut self.world, TimeFrameResource::FixedTime)? =
+            fixed_time;
         let status = RuntimeFrameStatus {
             frame: real_time.frame,
             real_delta,
@@ -2138,9 +2171,16 @@ impl runtime::RuntimeOwnerState {
             fixed_debt: fixed_time.debt(),
             fixed_discarded: Duration::ZERO,
         };
-        *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        *required_frame_resource_mut::<RuntimeFrameStatus>(
+            &mut self.world,
+            TimeFrameResource::RuntimeFrameStatus,
+        )? = status;
         self.run_managed_schedule(__private::FrameCleanup)?;
-        let exit = self.world.resource_mut::<AppExitRequests>().take();
+        let exit = required_frame_resource_mut::<AppExitRequests>(
+            &mut self.world,
+            TimeFrameResource::AppExitRequests,
+        )?
+        .take();
         self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })
     }
