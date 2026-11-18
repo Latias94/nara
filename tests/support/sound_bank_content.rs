@@ -515,6 +515,7 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
         "textures/meadow.png",
         "textures/cavern.png",
         "textures/explorer.png",
+        two_level_game::markers::IMAGE_PATH,
     ] {
         let request = fixture.request(
             path,
@@ -685,7 +686,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 9);
+    assert_eq!(prepared.base().catalog().members().len(), 10);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())

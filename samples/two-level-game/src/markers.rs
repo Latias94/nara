@@ -8,12 +8,14 @@ use nara::{
 
 mod definition;
 
-pub(crate) use definition::MarkerDefinition;
+pub(crate) use definition::{MarkerDefinition, MarkerGeometry};
 
 /// Scene alias relative to the project's effective Scene directory.
 pub const SCENE_PATH: &str = "marker.scene.json";
 /// Prefab alias relative to the project's effective Prefab directory.
 pub const PREFAB_PATH: &str = "marker.prefab.json";
+/// Image alias relative to the project's effective asset directory.
+pub const IMAGE_PATH: &str = "textures/marker.png";
 
 /// The exact primary Scene Product shared by both level cameras.
 #[must_use]
@@ -24,6 +26,17 @@ pub fn marker_product() -> AssetProductRef {
         ImportedProductId::PRIMARY,
     )
     .expect("fixed non-nil primary marker Scene Product")
+}
+
+/// The authored marker badge's primary Image Product.
+#[must_use]
+pub fn marker_image_product() -> AssetProductRef {
+    AssetProductRef::new(
+        StableAssetId::parse_str("b7eea767-e2c7-4f31-a3ff-02cb203911e4")
+            .expect("fixed valid marker Image source identity"),
+        ImportedProductId::PRIMARY,
+    )
+    .expect("fixed non-nil primary marker Image Product")
 }
 
 /// Immediate authored marker dependency declared by the level camera.

@@ -12,7 +12,7 @@ use nara::{
 use crate::{
     gameplay::{ActiveLevel, Progress, Session, fail, player},
     levels::{LevelId, LevelKey},
-    markers::marker_product,
+    markers::{MarkerDefinition, MarkerGeometry, marker_product},
     save::{MAX_MARKERS, MarkerId},
 };
 
@@ -28,6 +28,7 @@ pub(in crate::gameplay) struct MarkerInstance {
     pub occurrence: SceneOccurrenceKey,
     pub receipt: SpawnedSceneInstance,
     pub root: SceneEntityId,
+    geometry: Option<MarkerGeometry>,
 }
 
 impl MarkerInstance {
@@ -36,6 +37,19 @@ impl MarkerInstance {
             EntityLookup::Resolved(entity) => Ok(entity),
             _ => Err("authored marker root no longer resolves in its original activation".into()),
         }
+    }
+
+    fn validate_geometry(
+        &self,
+        world: &World,
+        definition: &MarkerDefinition,
+        position: Vec2,
+    ) -> Result<(), String> {
+        let geometry = self
+            .geometry
+            .as_ref()
+            .ok_or("marker placement did not complete")?;
+        definition.validate_world(world, &self.receipt, position, geometry)
     }
 }
 
@@ -111,7 +125,7 @@ pub(in crate::gameplay) fn observe_markers(world: &World) -> Result<Vec<MarkerId
                 "authored marker activation differs from its saved logical placement".into(),
             );
         }
-        definition.validate_world(world, &instance.receipt, Vec2::from_array(record.position))?;
+        instance.validate_geometry(world, definition, Vec2::from_array(record.position))?;
     }
     Ok(actual.into_iter().map(|(_, id)| id).collect())
 }
@@ -164,8 +178,8 @@ pub(super) fn rebuild(world: &mut World) -> Result<(), String> {
             .position(|instance| instance.id == record.id);
         if let Some(index) = existing {
             let instance = world.resource::<Session>().markers[index].clone();
-            if definition
-                .validate_world(world, &instance.receipt, position)
+            if instance
+                .validate_geometry(world, &definition, position)
                 .is_ok()
                 && instance.root_entity(world).is_ok_and(|root| {
                     world
@@ -201,6 +215,7 @@ pub(super) fn rebuild(world: &mut World) -> Result<(), String> {
                 .instance
                 .ok_or("authored marker instantiation produced no activation")?,
             root: definition.root.clone(),
+            geometry: None,
         };
         world
             .resource_mut::<Session>()
@@ -214,7 +229,13 @@ pub(super) fn rebuild(world: &mut World) -> Result<(), String> {
         world
             .entity_mut(root)
             .insert(DynamicMarker { id: record.id });
-        definition.validate_world(world, &instance.receipt, position)?;
+        let geometry = definition.capture_geometry(world, &instance.receipt, position)?;
+        world
+            .resource_mut::<Session>()
+            .markers
+            .last_mut()
+            .expect("the placed marker receipt is retained")
+            .geometry = Some(geometry);
     }
     observe_markers(world)?;
     Ok(())

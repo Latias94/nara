@@ -7,7 +7,7 @@ use nara::{
         EntityLookup, EntityReference, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
     },
     prelude::{Transform2d, Vec2},
-    reflect::{ComponentRegistrySnapshot, ComponentTypeId, ComponentValueKind},
+    reflect::ComponentTypeId,
     scene::CompiledSceneDocument,
     sprite::Sprite,
 };
@@ -15,7 +15,7 @@ use nara::{
 use super::MarkerLink;
 use crate::gameplay::content::decode;
 
-/// Owned expectations derived from the original compiled marker Scene.
+/// Topology and local reference selected from the compiled marker Scene.
 #[derive(Clone, Debug)]
 pub(crate) struct MarkerDefinition {
     pub(crate) root: SceneEntityId,
@@ -25,17 +25,19 @@ pub(crate) struct MarkerDefinition {
 
 #[derive(Clone, Debug)]
 pub(crate) struct MarkerPart {
-    pub(crate) id: SceneEntityId,
-    pub(crate) transform: Transform2d,
-    pub(crate) sprite: Sprite,
-    pub(crate) children: Vec<SceneEntityId>,
+    id: SceneEntityId,
+    children: Vec<SceneEntityId>,
+}
+
+/// The geometry installed by the original Scene codecs for one placed marker.
+#[derive(Clone, Debug)]
+pub(crate) struct MarkerGeometry {
+    position: Vec2,
+    parts: Vec<(Transform2d, Sprite)>,
 }
 
 impl MarkerDefinition {
-    pub(crate) fn read(
-        scene: &CompiledSceneDocument,
-        registry: &ComponentRegistrySnapshot,
-    ) -> Result<Self, String> {
+    pub(crate) fn read(scene: &CompiledSceneDocument) -> Result<Self, String> {
         let [root] = scene.roots() else {
             return Err("marker template requires exactly one spatial root".into());
         };
@@ -45,7 +47,6 @@ impl MarkerDefinition {
 
         let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
         let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
-        let mut scratch = World::new();
         let mut parts = Vec::with_capacity(scene.entities().len());
         let mut link_target = None;
 
@@ -60,46 +61,13 @@ impl MarkerDefinition {
             }) {
                 return Err("marker template contains an unexpected component".into());
             }
-            let transform = entity
-                .components()
-                .get(&transform_id)
-                .ok_or("every marker part requires Transform2d")?;
-            let sprite = entity
-                .components()
-                .get(&sprite_id)
-                .ok_or("every marker part requires Sprite")?;
-            if sprite
-                .value()
-                .field("material")
-                .map_err(|error| error.to_string())?
-                .get("image")
-                .is_some_and(|image| image.kind() != ComponentValueKind::Null)
+            if !entity.components().contains_key(&transform_id)
+                || !entity.components().contains_key(&sprite_id)
             {
-                return Err("marker template Sprites must be untextured".into());
-            }
-
-            let target = scratch.spawn_empty().id();
-            for (id, record) in [(&transform_id, transform), (&sprite_id, sprite)] {
-                let schema = registry.schema(id).ok_or("marker codec is unavailable")?;
-                if record.version() != schema.version() {
-                    return Err(
-                        "marker template requires current built-in component versions".into(),
-                    );
-                }
-                registry
-                    .preflight_component(id, record.value())
-                    .and_then(|prepared| prepared.apply(&mut scratch, target))
-                    .map_err(|error| error.to_string())?;
+                return Err("every marker part requires Transform2d and Sprite".into());
             }
             parts.push(MarkerPart {
                 id: entity.id().clone(),
-                transform: *scratch
-                    .get::<Transform2d>(target)
-                    .ok_or("marker Transform2d codec produced no component")?,
-                sprite: scratch
-                    .get::<Sprite>(target)
-                    .ok_or("marker Sprite codec produced no component")?
-                    .clone(),
                 children: entity.children().to_vec(),
             });
 
@@ -133,14 +101,49 @@ impl MarkerDefinition {
         })
     }
 
+    pub(crate) fn capture_geometry(
+        &self,
+        world: &World,
+        receipt: &SpawnedSceneInstance,
+        position: Vec2,
+    ) -> Result<MarkerGeometry, String> {
+        if !position.is_finite() {
+            return Err("marker placement must be finite".into());
+        }
+        let mut parts = Vec::with_capacity(self.parts.len());
+        self.visit_world(world, receipt, |_, transform, sprite| {
+            parts.push((*transform, sprite.clone()));
+            Ok(())
+        })?;
+        Ok(MarkerGeometry { position, parts })
+    }
+
     pub(crate) fn validate_world(
         &self,
         world: &World,
         receipt: &SpawnedSceneInstance,
         position: Vec2,
+        geometry: &MarkerGeometry,
     ) -> Result<(), String> {
-        if !position.is_finite()
-            || receipt.len() != self.parts.len()
+        if position != geometry.position || self.parts.len() != geometry.parts.len() {
+            return Err("marker occurrence differs from its saved placement".into());
+        }
+        self.visit_world(world, receipt, |index, transform, sprite| {
+            let (expected_transform, expected_sprite) = &geometry.parts[index];
+            if transform != expected_transform || sprite != expected_sprite {
+                return Err("marker occurrence has changed authored geometry".into());
+            }
+            Ok(())
+        })
+    }
+
+    fn visit_world(
+        &self,
+        world: &World,
+        receipt: &SpawnedSceneInstance,
+        mut visit_geometry: impl FnMut(usize, &Transform2d, &Sprite) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if receipt.len() != self.parts.len()
             || self.parts.iter().any(|part| !receipt.contains(&part.id))
         {
             return Err("marker occurrence disagrees with its complete authored definition".into());
@@ -160,19 +163,17 @@ impl MarkerDefinition {
             .get_resource::<HierarchyRoots>()
             .ok_or("marker hierarchy roots are unavailable")?;
 
-        for part in &self.parts {
+        for (index, part) in self.parts.iter().enumerate() {
             let entity = entities[&part.id];
             let is_root = part.id == self.root;
-            let mut transform = part.transform;
-            if is_root {
-                transform.translation += position;
-            }
-            if !transform.translation.is_finite()
-                || world.get::<Transform2d>(entity) != Some(&transform)
-                || world.get::<Sprite>(entity) != Some(&part.sprite)
-            {
-                return Err("marker occurrence has missing or changed authored geometry".into());
-            }
+            let transform = world
+                .get::<Transform2d>(entity)
+                .filter(|transform| transform.translation.is_finite())
+                .ok_or("marker member lacks a finite Transform2d")?;
+            let sprite = world
+                .get::<Sprite>(entity)
+                .ok_or("marker member lacks its Sprite")?;
+            visit_geometry(index, transform, sprite)?;
 
             let parent = self
                 .parts

@@ -18,7 +18,6 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::{LevelId, LevelKey},
-    markers::marker_product,
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
 };
 
@@ -44,7 +43,7 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 9
+            || base.catalog().members().len() != 10
             || base
                 .catalog()
                 .members()
@@ -57,11 +56,6 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
             || base.member(input_product()).is_none()
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
-            || base.member(marker_product()).is_none_or(|member| {
-                member.products() != [marker_product()]
-                    || !matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
-                    || !member.dependencies().is_empty()
-            })
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()

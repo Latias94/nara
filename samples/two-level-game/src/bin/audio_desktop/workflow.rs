@@ -1000,6 +1000,8 @@ impl ProjectCopy {
             "assets/textures/cavern.png.meta",
             "assets/textures/explorer.png",
             "assets/textures/explorer.png.meta",
+            "assets/textures/marker.png",
+            "assets/textures/marker.png.meta",
             "assets/audio/pickup.wav",
             "assets/audio/travel.wav",
             "assets/audio/game.soundbank.json",

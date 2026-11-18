@@ -13,10 +13,13 @@ use std::{
 use nara::{
     advanced_prelude::CurrentScene,
     app::RuntimeState,
+    asset::Assets,
     ecs::Entity,
     gameplay::GameplayCommandQueue,
     hierarchy::{Children, HierarchyRoots, Parent},
     identity::{EntityLookup, EntityReference, SpawnedSceneInstance, WorldIdentityDomain},
+    image::{ImageAsset, ImageColorSpace, ImageExtent},
+    material::SamplerDescriptor,
     prelude::{Color, Transform2d, Vec2},
     project_host::{
         HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
@@ -31,7 +34,7 @@ use support::{DEADLINE, Game, INSTANCE, MARKER, ProjectCopy, TRAVEL, action, mov
 use two_level_game::{
     GamePhase,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
-    markers::{MarkerLink, MarkerPalette, marker_product},
+    markers::{MarkerLink, MarkerPalette, marker_image_product, marker_product},
     open_explicit_project_root, product_recipe, request_resume,
     resume::encode_resume,
     save::{Checkpoint, MarkerId},
@@ -42,17 +45,23 @@ struct Appearance {
     root_size: Vec2,
     root_tint: Color,
     child_translation: Vec2,
+    badge_extent: ImageExtent,
+    badge_texel: (usize, usize, [u8; 4]),
 }
 
 const AUTHORED: Appearance = Appearance {
     root_size: Vec2::new(10.0, 10.0),
     root_tint: Color::rgba(1.0, 0.3, 0.8, 1.0),
     child_translation: Vec2::new(3.0, 3.0),
+    badge_extent: ImageExtent::new(2, 2),
+    badge_texel: (0, 0, [255, 192, 64, 255]),
 };
 const EDITED: Appearance = Appearance {
     root_size: Vec2::new(12.0, 8.0),
     root_tint: Color::rgba(0.0, 1.0, 0.0, 1.0),
     child_translation: Vec2::new(5.0, -2.0),
+    badge_extent: ImageExtent::new(64, 16),
+    badge_texel: (40, 8, [240, 152, 48, 255]),
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +197,23 @@ fn marker_graphs(
                 AUTHORED_LEVEL_MEMBERS + 2 * records.len()
             );
             let hierarchy_roots = world.resource::<HierarchyRoots>();
+            let images = world.resource::<Assets<ImageAsset>>();
+            let mut badges = images
+                .iter()
+                .filter(|(_, image)| image.product() == Some(marker_image_product()));
+            let (_, badge) = badges
+                .next()
+                .expect("the current level retains its marker's Image");
+            assert!(
+                badges.next().is_none(),
+                "occurrences must share one resident Image"
+            );
+            assert_eq!(badge.extent(), appearance.badge_extent);
+            assert_eq!(badge.color_space(), ImageColorSpace::Srgb);
+            assert!(badge.source().is_some());
+            let (x, y, color) = appearance.badge_texel;
+            let offset = (y * badge.extent().width as usize + x) * 4;
+            assert_eq!(badge.pixels()[offset..offset + 4], color);
             let mut graphs = BTreeMap::new();
             for root in roots {
                 let source = root.get::<SceneEntitySource>().unwrap();
@@ -247,7 +273,15 @@ fn marker_graphs(
                 let child_sprite = world.get::<Sprite>(child).unwrap();
                 assert_eq!(child_sprite.size, Vec2::new(4.0, 4.0));
                 assert_eq!(child_sprite.material.tint, Color::WHITE);
-                assert!(child_sprite.material.image.is_none());
+                assert_eq!(
+                    child_sprite.material.sampler,
+                    SamplerDescriptor::NEAREST_CLAMP
+                );
+                let handle = child_sprite
+                    .material
+                    .image
+                    .expect("marker child binds the authored Image");
+                assert!(std::ptr::eq(images.get(handle).unwrap(), badge));
 
                 let link = root.get::<MarkerLink>().unwrap();
                 assert_eq!(
@@ -458,6 +492,11 @@ fn prefab_edits_reach_actual_markers_resume_and_retained_source_retry() {
     baseline.command(action(MARKER));
     let before = baseline.capture();
     marker_graphs(&baseline, &before.progress, AUTHORED);
+    let badge = project.root().join("assets/textures/marker.png");
+    fs::copy(project.root().join("assets/textures/explorer.png"), &badge).unwrap();
+    baseline.command(action("two-level-game.retry"));
+    assert_eq!(baseline.capture().compatibility, before.compatibility);
+    marker_graphs(&baseline, &before.progress, AUTHORED);
     baseline.close();
 
     let path = project.root().join("prefabs/marker.prefab.json");
@@ -541,6 +580,7 @@ fn prefab_edits_reach_actual_markers_resume_and_retained_source_retry() {
     resumed.close();
 
     fs::write(&path, b"{ malformed marker Prefab after admission").unwrap();
+    fs::write(&badge, b"malformed marker Image after admission").unwrap();
     let old_main = main_receipt(&edited);
     edited.command(action("two-level-game.retry"));
     assert_eq!(edited.capture().progress, state.progress);
@@ -558,6 +598,21 @@ fn prefab_edits_reach_actual_markers_resume_and_retained_source_retry() {
 
 #[test]
 fn malformed_marker_prefab_rejects_prepared_instance_travel_without_retiring_the_live_game() {
+    reject_changed_marker_source(
+        "prefabs/marker.prefab.json",
+        "project.content.prefab-format-invalid",
+    );
+}
+
+#[test]
+fn damaged_marker_image_rejects_travel_and_retained_markers_remain_playable() {
+    reject_changed_marker_source(
+        "assets/textures/marker.png",
+        "project.content.image-import-failed",
+    );
+}
+
+fn reject_changed_marker_source(relative: &str, diagnostic: &str) {
     let project = ProjectCopy::new();
     let mut game = Game::from_project(project.root());
     game.command(action(TRAVEL));
@@ -572,8 +627,8 @@ fn malformed_marker_prefab_rejects_prepared_instance_travel_without_retiring_the
     let tick = game.tick();
     let generation = game.session.runtime_generation();
     fs::write(
-        project.root().join("prefabs/marker.prefab.json"),
-        b"{ malformed travel marker Prefab",
+        project.root().join(relative),
+        b"{ malformed marker dependency",
     )
     .unwrap();
     game.submit(action(INSTANCE));
@@ -605,13 +660,7 @@ fn malformed_marker_prefab_rejects_prepared_instance_travel_without_retiring_the
     assert_eq!(game.session.runtime_generation(), generation);
     assert_eq!(game.tick(), tick + 1);
     assert_eq!(rejected.phase, GamePhase::Running);
-    assert!(
-        rejected
-            .error
-            .as_deref()
-            .unwrap()
-            .contains("project.content.prefab-format-invalid")
-    );
+    assert!(rejected.error.as_deref().unwrap().contains(diagnostic));
     assert!(!rejected.restoring);
     assert_eq!(rejected.level, Some(before.progress.location.level));
     assert_eq!(rejected.current_instance, Some(old_main.instance_id()));

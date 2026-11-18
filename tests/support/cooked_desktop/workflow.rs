@@ -475,7 +475,7 @@ pub fn run(request: &Request) {
     let restored = fresh.travel(window::L, cavern, 30, &[2], 1);
     assert_eq!(restored["state"]["restores"], 1);
     assert_eq!(restored["state"]["saves"], 0);
-    assert_eq!(restored["image_proofs"].as_array().unwrap().len(), 3);
+    assert_eq!(restored["image_proofs"].as_array().unwrap().len(), 4);
     let continued = fresh.tap(window::M, |record| record["markers"] == json!([2, 4]));
     evidence::progress(&continued, cavern, 30, &[2, 4], 1);
     fresh.travel(window::Q, independent, 30, &[3], 1);

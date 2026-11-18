@@ -212,17 +212,18 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
         )?;
         if let Some(image) = &batch.image {
             let image = image.resource();
-            let width = match object.image {
-                GameImage::PlayerAtlas(_) => 64,
-                GameImage::Pickup => 16,
+            let (width, height) = match object.image {
+                GameImage::PlayerAtlas(_) => (64, 16),
+                GameImage::Pickup => (16, 16),
+                GameImage::MarkerBadge => (2, 2),
                 GameImage::Solid => unreachable!(),
             };
             require(
                 image.extent().width == width
-                    && image.extent().height == 16
+                    && image.extent().height == height
                     && image.format() == ImageFormat::Rgba8
                     && image.color_space() == ImageColorSpace::Srgb
-                    && image.pixels().len() == width as usize * 16 * 4
+                    && image.pixels().len() == (width * height * 4) as usize
                     && image.has_retention_owner(),
                 format!(
                     "captured {} must retain its original RGBA8 sRGB Image and allocation owner",
@@ -239,6 +240,10 @@ pub(super) fn assert_frame(frame: &SealedGameFrame, expected: &ResumeState) -> R
                         && image.pixels()[(11 * 16 + 9) * 4..(11 * 16 + 9) * 4 + 4]
                             == [185, 185, 185, 255],
                     "captured pickup must retain the real sRGB diamond fixture pixels",
+                )?,
+                GameImage::MarkerBadge => require(
+                    image.pixels() == MARKER_BADGE_TEXEL.repeat(4),
+                    "captured marker must retain its authored sRGB texture pixels",
                 )?,
                 GameImage::Solid => unreachable!(),
             }
@@ -270,7 +275,10 @@ enum GameImage {
     Solid,
     Pickup,
     PlayerAtlas(usize),
+    MarkerBadge,
 }
+
+const MARKER_BADGE_TEXEL: [u8; 4] = [255, 192, 64, 255];
 
 impl GameImage {
     fn sprite_sampling(self) -> (SamplerDescriptor, Vec2, Vec2) {
@@ -280,6 +288,7 @@ impl GameImage {
                 Vec2::new(frame as f32 / 4.0, 0.0),
                 Vec2::new(0.25, 1.0),
             ),
+            Self::MarkerBadge => (SamplerDescriptor::NEAREST_CLAMP, Vec2::ZERO, Vec2::ONE),
             Self::Solid | Self::Pickup => (SamplerDescriptor::LINEAR_CLAMP, Vec2::ZERO, Vec2::ONE),
         }
     }
@@ -495,7 +504,7 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
             position + Vec2::splat(3.0),
             Vec2::splat(4.0),
             Color::WHITE,
-            GameImage::Solid,
+            GameImage::MarkerBadge,
         ));
     }
     Ok(objects)
@@ -602,6 +611,9 @@ pub(super) fn check_pixels(rgba8: &[u8], expected: &ResumeState) -> Result<Pixel
                         color.g *= linear;
                         color.b *= linear;
                     }
+                }
+                if object.image == GameImage::MarkerBadge {
+                    color = texel_color(MARKER_BADGE_TEXEL);
                 }
                 if color.a == 0.0 {
                     color = clear;
@@ -802,7 +814,7 @@ mod tests {
         for block in MARKER_ROOT_BLOCKS {
             paint_block(&mut pixels, block, [255, 77, 204, 255]);
         }
-        paint_block(&mut pixels, MARKER_CHILD_BLOCK, [255; 4]);
+        paint_block(&mut pixels, MARKER_CHILD_BLOCK, [255, 134, 13, 255]);
         for block in [(4, 4), (315, 4), (4, 175), (315, 175)] {
             paint_block(&mut pixels, block, [10, 33, 23, 255]);
         }

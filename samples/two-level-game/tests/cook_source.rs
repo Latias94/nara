@@ -48,6 +48,8 @@ impl Directory {
             ("assets/textures/cavern.png.meta", "meta B"),
             ("assets/textures/explorer.png", "explorer atlas"),
             ("assets/textures/explorer.png.meta", "explorer metadata"),
+            ("assets/textures/marker.png", "marker badge"),
+            ("assets/textures/marker.png.meta", "marker metadata"),
             ("assets/animations/explorer.sprite-animations.json", "clips"),
             (
                 "assets/animations/explorer.sprite-animations.json.meta",
@@ -157,6 +159,8 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "input/explorer.actions.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
+        "assets/textures/marker.png",
+        "assets/textures/marker.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
     ] {
@@ -177,6 +181,8 @@ fn content_fence_requires_input_animation_and_marker_sources_and_metadata() {
         "prefabs/marker.prefab.json",
         "assets/textures/explorer.png",
         "assets/textures/explorer.png.meta",
+        "assets/textures/marker.png",
+        "assets/textures/marker.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
     ] {

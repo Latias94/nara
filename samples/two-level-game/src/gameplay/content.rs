@@ -73,13 +73,11 @@ impl Content {
         let assets = world
             .get_resource::<ProjectDomainAssets>()
             .ok_or("current domain assets are unavailable")?;
-        let registry =
-            nara::reflect::component_registry(world).ok_or("current game Schema is unavailable")?;
         nara::project_host::inspect_current_scene_dependency(
             world,
             current.receipt(),
             marker_product(),
-            |template| Self::read(current.source(), assets, template, registry),
+            |template| Self::read(current.source(), assets, template),
         )
         .map_err(|report| format!("marker dependency is unavailable: {:?}", report.diagnostics))?
     }
@@ -88,7 +86,6 @@ impl Content {
         scene: &CompiledSceneDocument,
         assets: &ProjectDomainAssets,
         marker: &CompiledSceneDocument,
-        registry: &nara::reflect::ComponentRegistrySnapshot,
     ) -> Result<Self, String> {
         if scene.entities().len() > 32 {
             return Err("level has too many authored entities".into());
@@ -182,7 +179,7 @@ impl Content {
         walls.sort_by(|first, second| first.id.cmp(&second.id));
         let collision = RoomCollision::prepare(definition, walls, player_transform)?;
         let animation = PreparedAnimation::acquire(assets, animation.clips)?;
-        let marker = MarkerDefinition::read(marker, registry)?;
+        let marker = MarkerDefinition::read(marker)?;
         Ok(Self {
             player,
             checkpoint,

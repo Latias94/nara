@@ -275,20 +275,12 @@ pub(super) fn advance(world: &mut World) {
     let request = pending.request.unwrap();
     #[cfg(all(windows, feature = "audio-cpal"))]
     let audio_bank = crate::audio::bank_guard(world);
-    let registry = nara::reflect::component_registry(world).cloned();
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
             let marker = view
                 .scene_dependency(crate::markers::marker_product())
                 .ok_or("prepared level lacks its Immediate marker Scene dependency")?;
-            let content = Content::read(
-                view.scene(),
-                view.domain_assets(),
-                marker,
-                registry
-                    .as_ref()
-                    .ok_or("current game Schema is unavailable")?,
-            )?;
+            let content = Content::read(view.scene(), view.domain_assets(), marker)?;
             #[cfg(all(windows, feature = "audio-cpal"))]
             if let Some(bank) = &audio_bank {
                 bank.validate(view.domain_assets(), &content.bank)?;

@@ -69,6 +69,15 @@
             "version": 1,
             "value": { "type": "map", "value": {
               "material": { "type": "map", "value": {
+                "image": { "type": "map", "value": {
+                  "kind": { "type": "string", "value": "path" },
+                  "value": { "type": "string", "value": "textures/marker.png" }
+                } },
+                "sampler": { "type": "map", "value": {
+                  "min_filter": { "type": "string", "value": "nearest" },
+                  "mag_filter": { "type": "string", "value": "nearest" },
+                  "mipmap_filter": { "type": "string", "value": "nearest" }
+                } },
                 "tint": { "type": "map", "value": {
                   "r": { "type": "f64", "value": 1 },
                   "g": { "type": "f64", "value": 1 },

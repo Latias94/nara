@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     animation::atlas_product,
     levels::{LevelId, LevelKey},
+    markers::marker_image_product,
 };
 
 use crate::continuity::Fixture;
@@ -381,9 +382,13 @@ pub fn accept(cooker: &Path) {
 
 fn assert_images(record: &Value, level_images: &BTreeMap<LevelId, Value>) {
     let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
-    let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
-        .into_iter()
-        .collect();
+    let resident: BTreeSet<_> = [
+        current.level().image_product(),
+        atlas_product(),
+        marker_image_product(),
+    ]
+    .into_iter()
+    .collect();
     assert_eq!(
         record["resident_images"],
         json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
@@ -398,7 +403,7 @@ fn assert_images(record: &Value, level_images: &BTreeMap<LevelId, Value>) {
     let products: BTreeSet<_> = visited
         .iter()
         .map(|level| level.image_product())
-        .chain([atlas_product()])
+        .chain([atlas_product(), marker_image_product()])
         .collect();
     assert_eq!(
         record["observed_image_products"],
@@ -426,6 +431,8 @@ fn assert_images(record: &Value, level_images: &BTreeMap<LevelId, Value>) {
     }
     let atlas = images::atlas_proof(&images::atlas());
     assert_eq!(proofs.iter().filter(|proof| **proof == atlas).count(), 1);
+    let badge = images::marker_proof(&images::marker_badge());
+    assert_eq!(proofs.iter().filter(|proof| **proof == badge).count(), 1);
 }
 
 pub fn worker() {

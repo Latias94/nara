@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     animation::atlas_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
+    markers::marker_image_product,
     sound_bank::bank_product,
 };
 
@@ -62,9 +63,13 @@ pub fn presented(record: &Value, request: &Request) {
         package::assert_animation_proof(observed);
     }
     let current: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
-    let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
-        .into_iter()
-        .collect();
+    let resident: BTreeSet<_> = [
+        current.level().image_product(),
+        atlas_product(),
+        marker_image_product(),
+    ]
+    .into_iter()
+    .collect();
     assert_eq!(
         record["resident_images"],
         json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
@@ -79,7 +84,7 @@ pub fn presented(record: &Value, request: &Request) {
     let products: BTreeSet<_> = visited
         .iter()
         .map(|level| level.image_product())
-        .chain([atlas_product()])
+        .chain([atlas_product(), marker_image_product()])
         .collect();
     assert_eq!(
         record["observed_image_products"],

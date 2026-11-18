@@ -151,7 +151,9 @@ pub mod native {
             },
         },
         reflect::ComponentTypeId,
-        runtime_content::{RuntimeContentDependencyRole, RuntimeContentMemberKind},
+        runtime_content::{
+            RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentMemberKind,
+        },
         scene::{
             RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey,
             SourceDocumentKind, SourceDocumentOrigin,
@@ -164,7 +166,7 @@ pub mod native {
         animation::{atlas_product, clips_product},
         input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
-        markers::{SCENE_PATH, marker_product},
+        markers::{SCENE_PATH, marker_image_product, marker_product},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         sound_bank::{SoundBankCodec, bank_product},
     };
@@ -536,7 +538,7 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 9);
+        assert_eq!(pack.catalog.members().len(), 10);
         assert_eq!(
             pack.catalog
                 .members()
@@ -565,6 +567,7 @@ pub mod native {
                     clips_product(),
                     input_product(),
                     marker_product(),
+                    marker_image_product(),
                 ])
                 .collect()
         );
@@ -613,7 +616,13 @@ pub mod native {
             .unwrap();
         let marker = &pack.catalog.members()[marker_index];
         assert_eq!(marker.products(), [marker_product()]);
-        assert!(marker.dependencies().is_empty());
+        assert_eq!(
+            marker.dependencies(),
+            [RuntimeContentDependency::new(
+                marker_image_product(),
+                RuntimeContentDependencyRole::Required,
+            )]
+        );
         let RuntimeContentMemberKind::Scene { source } = marker.kind() else {
             panic!("marker template must be a real cooked Scene");
         };
@@ -650,6 +659,17 @@ pub mod native {
             .find(|entity| entity.id() == &root.children()[0])
             .unwrap();
         assert!(child.children().is_empty());
+        let sprite = &child.components()[&ComponentTypeId::new("nara.sprite.Sprite")];
+        let image = sprite
+            .value()
+            .field("material")
+            .unwrap()
+            .field("image")
+            .unwrap();
+        assert_eq!(
+            nara::reflect::decode_asset_reference_value(image).unwrap(),
+            nara::asset::AssetRef::Product(marker_image_product())
+        );
         let link = &root.components()[&ComponentTypeId::new("two-level-game.MarkerLink")];
         assert_eq!(
             link.value().field("target").unwrap().as_entity_reference(),
@@ -898,6 +918,16 @@ pub mod native {
             &bad_marker[pack.catalog_bytes.clone()],
             &pack_bytes[pack.catalog_bytes.clone()]
         );
+        let badge_index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [marker_image_product()])
+            .unwrap();
+        let badge_range = pack.members[badge_index].clone();
+        assert!(!badge_range.is_empty());
+        let mut bad_badge = pack_bytes.clone();
+        bad_badge[badge_range.start + badge_range.len() / 2] ^= 1;
         let mut bad_catalog = pack_bytes.clone();
         let changed_catalog = corrupt_catalog(&mut bad_catalog).unwrap();
         assert_eq!(&bad_catalog[..HEADER_BYTES], &pack_bytes[..HEADER_BYTES]);
@@ -907,6 +937,7 @@ pub mod native {
         );
         for (name, damaged) in [
             ("damaged-immediate-marker", bad_marker),
+            ("damaged-marker-image", bad_badge),
             ("damaged-catalog", bad_catalog),
         ] {
             fs::write(&pack_path, &damaged).unwrap();
@@ -1047,27 +1078,32 @@ pub mod native {
                 )
             })
             .collect();
-        let index = pack
-            .catalog
-            .members()
-            .iter()
-            .position(|member| member.products() == [atlas_product()])
-            .unwrap();
-        let member = &pack.catalog.members()[index];
-        assert!(matches!(
-            member.kind(),
-            RuntimeContentMemberKind::Asset { format, version }
-                if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
-                    && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
-        ));
-        assert!(member.dependencies().is_empty());
-        let image = ImageRuntimeCodec::decode_runtime(&bytes[pack.members[index].clone()]).unwrap();
-        assert!(
-            images
-                .insert(atlas_product(), images::atlas_proof(&image))
-                .is_none()
-        );
-        assert_eq!(images.len(), 3);
+        for (product, proof) in [
+            (
+                atlas_product(),
+                images::atlas_proof as fn(&nara::image::ImageAsset) -> Value,
+            ),
+            (marker_image_product(), images::marker_proof),
+        ] {
+            let index = pack
+                .catalog
+                .members()
+                .iter()
+                .position(|member| member.products() == [product])
+                .unwrap();
+            let member = &pack.catalog.members()[index];
+            assert!(matches!(
+                member.kind(),
+                RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
+            ));
+            assert!(member.dependencies().is_empty());
+            let image =
+                ImageRuntimeCodec::decode_runtime(&bytes[pack.members[index].clone()]).unwrap();
+            assert!(images.insert(product, proof(&image)).is_none());
+        }
+        assert_eq!(images.len(), 4);
         images
     }
 
@@ -1077,9 +1113,13 @@ pub mod native {
         images: &BTreeMap<AssetProductRef, Value>,
     ) {
         let current: LevelKey = serde_json::from_value(result["level"].clone()).unwrap();
-        let resident: BTreeSet<_> = [current.level().image_product(), atlas_product()]
-            .into_iter()
-            .collect();
+        let resident: BTreeSet<_> = [
+            current.level().image_product(),
+            atlas_product(),
+            marker_image_product(),
+        ]
+        .into_iter()
+        .collect();
         assert_eq!(
             result["resident_images"],
             json!(resident.iter().map(ToString::to_string).collect::<Vec<_>>())
@@ -1093,12 +1133,15 @@ pub mod native {
         let mut expected = levels
             .iter()
             .map(|level| level.image_product().to_string())
-            .chain([atlas_product().to_string()])
+            .chain([
+                atlas_product().to_string(),
+                marker_image_product().to_string(),
+            ])
             .collect::<Vec<_>>();
         expected.sort();
         assert_eq!(actual, expected);
         let proofs = result["image_proofs"].as_array().unwrap();
-        assert_eq!(proofs.len(), levels.len() + 1);
+        assert_eq!(proofs.len(), levels.len() + 2);
         assert_eq!(
             proofs
                 .iter()
@@ -1115,13 +1158,15 @@ pub mod native {
                 1
             );
         }
-        assert_eq!(
-            proofs
-                .iter()
-                .filter(|proof| **proof == images[&atlas_product()])
-                .count(),
-            1
-        );
+        for product in [atlas_product(), marker_image_product()] {
+            assert_eq!(
+                proofs
+                    .iter()
+                    .filter(|proof| **proof == images[&product])
+                    .count(),
+                1
+            );
+        }
         let visited: Vec<LevelId> =
             serde_json::from_value(result["visited_levels"].clone()).unwrap();
         assert_eq!(visited.len(), levels.len());

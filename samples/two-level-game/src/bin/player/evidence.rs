@@ -26,6 +26,7 @@ use two_level_game::{
     animation::{CLIPS_PATH, ExplorerAnimation, atlas_product, clips_product},
     input::{INPUT_PATH, input_product},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, WALL_ENTITY_IDS},
+    markers::marker_image_product,
 };
 
 use super::output;
@@ -337,6 +338,25 @@ impl Evidence {
                 "frame_center_rgba": ATLAS_FRAME_PIXELS,
                 "pixel_bytes": image.pixels().len(),
                 "pixel_blake3": pixel_digest.as_bytes(),
+                "content_hash": image.content_hash().as_bytes(),
+                "source_free": image.source().is_none(),
+            }),
+        );
+        let product = marker_image_product();
+        let (_, image) = assets
+            .iter()
+            .find(|(_, image)| image.product() == Some(product))
+            .ok_or("marker Scene's Image Product is not resident")?;
+        self.images.insert(
+            product,
+            json!({
+                "role": "marker_badge",
+                "product": product.to_string(),
+                "format": image.format(),
+                "color_space": image.color_space(),
+                "extent": image.extent(),
+                "pixel_bytes": image.pixels().len(),
+                "pixel_blake3": ContentDigest::of_bytes(image.pixels()).as_bytes(),
                 "content_hash": image.content_hash().as_bytes(),
                 "source_free": image.source().is_none(),
             }),

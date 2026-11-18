@@ -158,8 +158,15 @@ mod atlas_content {
     };
 
     use nara::{
-        asset::{AssetRef, RuntimeAssetCodec},
+        asset::{AssetRef, Assets, RuntimeAssetCodec},
         asset_build::ArtifactBuildObservation,
+        ecs::World,
+        gameplay::{
+            GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
+            GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
+        },
+        identity::{EntityLookup, WorldIdentityDomain},
+        image::{ImageAsset, ImageExtent},
         input::{
             ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec,
             InputBinding, KeyCode,
@@ -169,16 +176,18 @@ mod atlas_content {
         project_workflow::cooked_content::PreparedRuntimeContent,
         reflect::{ComponentTypeId, decode_asset_reference_value},
         runtime_content::{
-            RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentMemberKind,
+            RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentError,
+            RuntimeContentMemberKind,
         },
-        scene::{SourceDocumentKind, SourceDocumentOrigin},
+        scene::{SceneEntitySource, SourceDocumentKind, SourceDocumentOrigin},
+        sprite::Sprite,
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
         Scenario,
         animation::{atlas_product, clips_product},
         levels::LevelId,
-        markers::{SCENE_PATH, marker_product},
+        markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
         sound_bank::bank_product,
     };
 
@@ -220,6 +229,8 @@ mod atlas_content {
                 "assets/textures/cavern.png.meta",
                 "assets/textures/explorer.png",
                 "assets/textures/explorer.png.meta",
+                "assets/textures/marker.png",
+                "assets/textures/marker.png.meta",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/animations/explorer.sprite-animations.json.meta",
                 "assets/audio/game.soundbank.json",
@@ -260,7 +271,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 9);
+        assert_eq!(catalog.members().len(), 10);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
         scenes.sort();
         assert_eq!(catalog.scenes(), scenes);
@@ -275,7 +286,13 @@ mod atlas_content {
         );
         let marker = catalog.member_for_product(marker_product()).unwrap();
         assert_eq!(marker.products(), [marker_product()]);
-        assert!(marker.dependencies().is_empty());
+        assert_eq!(
+            marker.dependencies(),
+            [RuntimeContentDependency::new(
+                marker_image_product(),
+                RuntimeContentDependencyRole::Required,
+            )]
+        );
         let RuntimeContentMemberKind::Scene { source } = marker.kind() else {
             panic!("marker template must be a real cooked Scene");
         };
@@ -304,6 +321,7 @@ mod atlas_content {
                     clips_product(),
                     super::input_product(),
                     marker_product(),
+                    marker_image_product(),
                 ])
                 .collect::<BTreeSet<_>>()
         );
@@ -404,6 +422,7 @@ mod atlas_content {
                 "assets/textures/meadow.png",
                 "assets/textures/cavern.png",
                 "assets/textures/explorer.png",
+                "assets/textures/marker.png",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
@@ -426,7 +445,7 @@ mod atlas_content {
         let animation = &result["scene_receipts"][0]["animation_proof"];
         assert_eq!(animation, &default_animation_proof());
         let proofs = result["image_proofs"].as_array().unwrap();
-        assert_eq!(proofs.len(), 2);
+        assert_eq!(proofs.len(), 3);
         let atlas = proofs
             .iter()
             .find(|proof| proof["product"] == atlas_product().to_string())
@@ -444,6 +463,17 @@ mod atlas_content {
         assert_eq!(atlas["rows"], 1);
         assert_eq!(atlas["pixel_bytes"], 4096);
         assert_eq!(atlas["source_free"], true);
+        let badge = proofs
+            .iter()
+            .find(|proof| proof["product"] == marker_image_product().to_string())
+            .unwrap();
+        assert_eq!(badge["role"], "marker_badge");
+        assert_eq!(
+            badge["extent"],
+            serde_json::json!({"width": 2, "height": 2})
+        );
+        assert_eq!(badge["pixel_bytes"], 16);
+        assert_eq!(badge["source_free"], true);
         assert_eq!(
             result["observed_image_products"]
                 .as_array()
@@ -451,10 +481,14 @@ mod atlas_content {
                 .iter()
                 .map(|product| product.as_str().unwrap().to_owned())
                 .collect::<BTreeSet<_>>(),
-            [LevelId::STARTUP.image_product(), atlas_product()]
-                .into_iter()
-                .map(|product| product.to_string())
-                .collect::<BTreeSet<_>>()
+            [
+                LevelId::STARTUP.image_product(),
+                atlas_product(),
+                marker_image_product()
+            ]
+            .into_iter()
+            .map(|product| product.to_string())
+            .collect::<BTreeSet<_>>()
         );
     }
 
@@ -637,7 +671,23 @@ mod atlas_content {
                 .frame(Duration::ZERO)
                 .map_err(|error| error.to_string())?;
             evidence.observe(&session)?;
-            Ok(evidence.result(Scenario::Interactive, None, None))
+            let initial = evidence.result(Scenario::Interactive, None, None);
+            session.pause().map_err(|error| error.to_string())?;
+            session
+                .submit(GameplayCommandSubmission::new(
+                    GameplayCommandTick::new(1).unwrap(),
+                    GameplayCommandIngressSource::external("test.cooked-marker").unwrap(),
+                    GameplayCommandSourceSequence::new(1).unwrap(),
+                    GameplayCommandDraft::new(
+                        GameplayCommandTypeId::new("two-level-game.marker").unwrap(),
+                    ),
+                ))
+                .map_err(|error| error.to_string())?;
+            session.step().map_err(|error| error.to_string())?;
+            session
+                .observe(assert_cooked_marker_image)
+                .map_err(|error| error.to_string())??;
+            Ok(initial)
         })();
         let deadline = Instant::now() + Duration::from_secs(10);
         let closed = loop {
@@ -650,6 +700,38 @@ mod atlas_content {
         };
         assert_eq!(closed, HeadlessSessionClose::Complete);
         observed.unwrap()
+    }
+
+    fn assert_cooked_marker_image(world: &World) -> Result<(), String> {
+        let root = world
+            .iter_entities()
+            .find(|entity| entity.contains::<MarkerLink>())
+            .ok_or("processed gameplay did not place its marker")?;
+        let link = root
+            .get::<MarkerLink>()
+            .ok_or("processed marker lost its child reference")?;
+        let source = root
+            .get::<SceneEntitySource>()
+            .ok_or("processed marker has no Scene owner")?;
+        let domain = world.resource::<WorldIdentityDomain>();
+        let EntityLookup::Resolved(child) =
+            domain.resolve_entity_reference(world, &link.target, Some(source.instance_id))
+        else {
+            return Err("processed marker link does not resolve its authored child".into());
+        };
+        let image = world
+            .get::<Sprite>(child)
+            .and_then(|sprite| sprite.material.image)
+            .and_then(|handle| world.resource::<Assets<ImageAsset>>().get(handle))
+            .ok_or("processed marker child did not bind a resident texture")?;
+        if image.product() != Some(marker_image_product())
+            || image.source().is_some()
+            || image.extent() != ImageExtent::new(2, 2)
+            || image.pixels() != [255, 192, 64, 255].repeat(4)
+        {
+            return Err("processed marker child binds the wrong retained Image".into());
+        }
+        Ok(())
     }
 
     fn default_animation_proof() -> serde_json::Value {

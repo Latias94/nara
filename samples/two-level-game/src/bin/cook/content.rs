@@ -22,7 +22,8 @@ use nara::{
         CookedContentBuilder, CookedContentLimits, CookedContentRequest, PreparedRuntimeContent,
     },
     runtime_content::{
-        RuntimeContentDependencyRole, RuntimeContentMemberKind, RuntimeContentTarget,
+        RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentMemberKind,
+        RuntimeContentTarget,
     },
     scene::{
         InMemoryPrefabSourceResolver, PrefabDocumentCandidate, PrefabSourceResolver,
@@ -34,7 +35,7 @@ use two_level_game::{
     animation::{ATLAS_PATH, CLIPS_PATH, atlas_product, clips_product},
     input::{INPUT_PATH, input_product},
     levels::LevelId,
-    markers::{PREFAB_PATH, SCENE_PATH, marker_product},
+    markers::{IMAGE_PATH, PREFAB_PATH, SCENE_PATH, marker_image_product, marker_product},
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
 
@@ -197,7 +198,10 @@ pub(super) fn prepare(
             };
             (path, level.image_product())
         })
-        .chain([(ATLAS_PATH, atlas_product())])
+        .chain([
+            (ATLAS_PATH, atlas_product()),
+            (IMAGE_PATH, marker_image_product()),
+        ])
     {
         let path = AssetPath::new(path).map_err(|error| format!("Image source path: {error}"))?;
         let source = scope.resolve(&path);
@@ -378,7 +382,7 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 9
+    if catalog.members().len() != 10
         || catalog
             .members()
             .iter()
@@ -392,7 +396,7 @@ pub(super) fn prepare(
         || !catalog.addressable_roots().is_empty()
     {
         return Err(
-            "cooked content must contain exactly three Scenes with two travel roots, three Images, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain exactly three Scenes with two travel roots, four Images, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
     }
@@ -405,10 +409,14 @@ pub(super) fn prepare(
         SourceDocumentKind::Scene,
     );
     if marker.products() != [marker_product()]
-        || !marker.dependencies().is_empty()
+        || marker.dependencies()
+            != [RuntimeContentDependency::new(
+                marker_image_product(),
+                RuntimeContentDependencyRole::Required,
+            )]
         || !matches!(marker.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
     {
-        return Err("cooked marker Scene identity or empty resource dependency set changed".into());
+        return Err("cooked marker Scene identity or required Image edge changed".into());
     }
     let input_member = catalog
         .member_for_product(input_product())
@@ -496,7 +504,7 @@ pub(super) fn prepare(
     for product in LevelId::ALL
         .into_iter()
         .map(LevelId::image_product)
-        .chain([atlas_product()])
+        .chain([atlas_product(), marker_image_product()])
     {
         let image = catalog
             .member_for_product(product)

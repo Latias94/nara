@@ -24,7 +24,6 @@ use two_level_game::{
     Scenario,
     animation::{atlas_product, clips_product},
     levels::LevelId,
-    markers::marker_product,
 };
 
 use super::{
@@ -111,7 +110,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 9
+            || base.catalog().members().len() != 10
             || base
                 .catalog()
                 .members()
@@ -124,11 +123,6 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 != Some(two_level_game::input::input_product())
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
-            || base.member(marker_product()).is_none_or(|member| {
-                member.products() != [marker_product()]
-                    || !matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
-                    || !member.dependencies().is_empty()
-            })
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()

@@ -13,8 +13,8 @@ use nara::{
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
-        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependencyRole,
-        RuntimeContentMemberKind,
+        RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependency,
+        RuntimeContentDependencyRole, RuntimeContentMemberKind,
     },
     scene::{SourceDocumentKind, SourceDocumentOrigin},
 };
@@ -24,7 +24,7 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::LevelId,
-    markers::{SCENE_PATH, marker_product},
+    markers::{SCENE_PATH, marker_image_product, marker_product},
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
@@ -142,7 +142,7 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 9);
+    assert_eq!(catalog.members().len(), 10);
     assert_eq!(
         catalog
             .members()
@@ -261,7 +261,7 @@ pub fn inspect(
                     "source_free": true,
                 }),
             );
-        } else if product == atlas_product() {
+        } else if product == atlas_product() || product == marker_image_product() {
             assert!(matches!(
                 member.kind(),
                 RuntimeContentMemberKind::Asset { format, version }
@@ -270,13 +270,20 @@ pub fn inspect(
             ));
             assert!(member.dependencies().is_empty());
             let image = ImageRuntimeCodec::decode_runtime(&bytes[range]).unwrap();
-            assert!(
-                images
-                    .insert(product.to_string(), images::atlas_proof(&image))
-                    .is_none()
-            );
+            let proof = if product == atlas_product() {
+                images::atlas_proof(&image)
+            } else {
+                images::marker_proof(&image)
+            };
+            assert!(images.insert(product.to_string(), proof).is_none());
         } else if product == marker_product() {
-            assert!(member.dependencies().is_empty());
+            assert_eq!(
+                member.dependencies(),
+                [RuntimeContentDependency::new(
+                    marker_image_product(),
+                    RuntimeContentDependencyRole::Required,
+                )]
+            );
             let RuntimeContentMemberKind::Scene { source } = member.kind() else {
                 panic!("marker template must be a real cooked Scene");
             };
@@ -325,7 +332,7 @@ pub fn inspect(
             );
         }
     }
-    assert_eq!(images.len(), 3);
+    assert_eq!(images.len(), 4);
     assert_eq!(
         products,
         LevelId::ALL
@@ -337,6 +344,7 @@ pub fn inspect(
                 clips_product(),
                 input_product(),
                 marker_product(),
+                marker_image_product(),
             ])
             .collect()
     );
