@@ -296,6 +296,20 @@ checks. Cooked baseline execution remains distinct from source win/reset and nat
 interaction. Remaining diagnostics, interactive authoring, foreign execution and full Foundation
 stay open.
 
+The [recipe and compiler diagnostic successor](../research/2026-11-18-engine-architecture-review-reconciliation.md#recipe-and-compiler-diagnostic-successor)
+at `01c25ef` keeps the original compiled-project and Cargo owners while making their failures actionable.
+Known direct recipe errors retain static variant codes and admitted plugin facts; generated and
+collection-game entries share one fallible recipe through tools, runtime, Cook and Player.
+Primary compiler locations retain bounded path/line/column observations. Bootstrap interprets
+the original workspace base before selecting project-relative display, withholding sibling or
+ambiguous paths without erasing the error. The combined owner cohort passes 97/97, actual
+independent compiler/recipe consumers pass 2/2, and the complete two-game author workflow passes
+again after the recipe signature change. Ordinary public regressions pass 35/35; render-enabled
+recipe tests pass 8/8. Affected correctness Clippy, root/sample/independent formatting and
+document checks pass. The linked record retains Windows-only execution, opaque/wrapped error,
+lexical path and missing-sidecar limits. This is tool-boundary work, with no added per-frame
+validation, new authority or performance claim.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

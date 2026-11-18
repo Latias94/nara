@@ -66,8 +66,8 @@ See [the qualified TileSet unit](../plans/2026-10-20-persistent-two-level-game-p
 | --- | --- |
 | Preserve a new game's identity | **Implemented and scoped qualification passes below.** The walkthrough preserves generated manifests, universe, stable-metadata policy, startup sidecar and Cook/Player/build-script entries. It adds the collection contribution and an imported Prefab's own sidecar. Two same-named real external games retain distinct identities, finish/reset source gameplay and run relocated cooked baselines after source removal. [Walkthrough](../guides/first-2d-game.md), [consumer](../../tests/project_author_workflow.rs), [starter](../../src/project_workflow/starter.rs). |
 | First system and subcommand help | **Implemented and scoped qualification passes below.** The generated README teaches an actual fixed-step plugin without adding a game API; its compiled consumer observes gameplay while Check stays silent. Scoped help runs before filesystem/build work, includes syntax/examples and preserves malformed argument rejection. Actual parser/help subprocess tests pass. [CLI parser](../../src/bin/nara/args.rs), [starter guide](../../starters/desktop-2d/v1/README.md), [help controls](../../tests/project_workflow_help.rs). |
-| Recipe composition diagnostics | **Confirmed loss at the tool boundary; open.** The generic factory discards the original error into fieldless `ToolError::Recipe`; the sample also uses `expect`. Preserve bounded known `ProductRecipeError` code/plugin facts through fallible recipe entry, retaining a generic fallback for opaque errors. [Factory](../../src/project_tooling/mod.rs), [recipe errors](../../src/product.rs), [sample recipe](../../samples/collect-game/src/lib.rs). |
-| Compiler and missing-sidecar locations | **Compiler-span loss confirmed; missing-sidecar diagnostic remains a scoped follow-up.** The Cargo model/parser retains code/message but no primary location. Preserve a bounded primary location and let the project owner display a valid relative path; do not expose arbitrary rendered compiler output. Reproduce the missing-sidecar case before choosing its exact projection. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs). |
+| Recipe composition diagnostics | **Implemented and scoped qualification passes below.** Known direct `ProductRecipeError` values retain static variant codes and admitted plugin facts. Generated and collection-game recipes are fallible throughout tool and product entries. Opaque values keep a generic failure without formatting. Actual independent duplicate-plugin and opaque-error consumers pass. [Factory](../../src/project_tooling/mod.rs), [recipe errors](../../src/product.rs), [sample recipe](../../samples/collect-game/src/lib.rs). |
+| Compiler and missing-sidecar locations | **Primary compiler locations implemented and scoped qualification passes below; missing-sidecar diagnostic remains a follow-up.** Cargo retains a bounded primary location; bootstrap interprets its original workspace base before displaying an admitted project-relative path. Actual root/member compiler consumers pass. No rendered output/source/suggestions are retained. Missing-sidecar refusal was exercised in the author workflow, but its specific location projection remains separate. [Cargo messages](../../src/project_workflow/cargo_facts/messages.rs), [bootstrap output](../../src/project_tooling/bootstrap.rs), [tool failure projection](../../src/project_tooling/protocol/failure.rs). |
 | First persistent component | **Confirmed example/admission mismatch; defer interactive qualification.** The opening Vec2 example lacks a complete creation value, while the scalar Collectible can supply one. Teach a creatable scalar first and demonstrate Add/Edit/Undo/Save/Reopen before the vector case. Presence-only records are an explicit ADR0090 restriction, requiring a deliberate contract amendment rather than being called an implementation regression. [Component guide](../guides/persistent-components.md), [data adapter](../../crates/nara_scene/src/authoring_decode.rs), [ADR0090](../architecture/adr/0090-unavailable-schema-and-lossless-authoring.md). |
 | Current component inventory | **Confirmed duplicated sample wiring; local follow-up.** Collect Game lists the same current types in catalog and native registration. Use existing `persistent_components!`; keep predecessor catalogs/migrations explicit and require an unchanged current fingerprint. [Sample plugin](../../samples/collect-game/gameplay-plugin/src/lib.rs), [inventory macro](../../crates/nara_reflect/src/inventory.rs). |
 | Completed command-draft binding | **Concrete repeated caller choreography; local API follow-up.** Three games construct a binding from a cloned type then replace its draft. A constructor accepting the complete draft can reuse existing `ActionCommandMap::bind` validation. No new command registry is needed. [Binding](../../crates/nara_gameplay/src/action.rs), [game caller](../../samples/two-level-game/src/gameplay/input.rs). |
@@ -469,6 +469,127 @@ locks are unchanged. This closes the two receiving author-workflow items, not al
 ergonomics or full R1/R7/R12/Foundation. Next preserve useful recipe-composition and compiler
 location diagnostics at the current tool boundary, and keep the already identified command
 decoder/binding corrections as bounded independent Runtime follow-ups.
+
+## Recipe And Compiler Diagnostic Successor
+
+Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below after
+`93518d9` on November 19, 2026. Full Foundation remains active; Editor/UI work remains paused.
+Implementation: `01c25ef`.
+
+Keep the existing compiled project, Cargo decoder, bounded failure projection and native process
+owners. The recipe factory must preserve a known direct `ProductRecipeError` as a finite static
+classification with admitted plugin facts, instead of replacing every failure with the same
+message. Unknown factory error values keep the generic failure without invoking arbitrary
+formatters. Generated and collection-game entries return a fallible recipe through Check,
+Schema, headless, desktop, Cook and Player; no second infallible definition is retained.
+
+Retain one bounded primary Rust compiler location in the original Cargo diagnostic model.
+Secondary spans, rendered compiler output, source excerpts, suggestions and expansion trees are
+outside this correction. Missing or invalid optional location data must not erase the actual
+compiler diagnostic or turn compilation failure into success. Charge retained path bytes to the
+existing diagnostic limits and expose omission through the existing loss observation. The
+project bootstrap interprets compiler-relative paths against the original Cargo workspace and
+may display an admitted relative location within the selected project; sibling-package, external
+or ambiguous locations remain withheld. These facts carry no file or editor authority.
+
+Qualify actual duplicate-plugin failure through a compiled external project and the original
+public tool caller, with no gameplay or content mutation. Preserve generic fallback for an
+opaque error whose formatter must never run. Strengthen the existing independent compiler
+failure consumer to inspect the actual primary location and CLI-style display without launching
+its invalid executable. Then repeat the complete two-game author workflow because the generated
+recipe signature changes, preserving source identity, win/reset and relocated Cook/Player
+acceptance. Focused decoder, projection and public tooling regressions, correctness Clippy and
+document checks cover the changed owners; unrelated native UI and performance matrices do not.
+
+### Diagnostic Implementation And Qualification
+
+`run_project_tool_mode<E: 'static>` now recognizes direct `ProductRecipeError` values through
+standard `Any` and projects their closed variants to static codes. An admitted plugin identifier
+appears in the bounded summary. Other fields, nested errors and provider vectors are omitted
+without formatting, with explicit top-level field-loss counts. Unknown factory values retain
+the generic recipe failure without requiring or calling Error/Display/Debug/source traits. The
+canonical protocol remains version 1; no general diagnostic field transport is added.
+
+The generated and collection-game recipes return `Result<ProductRecipe, ProductRecipeError>`.
+Their headless tool branch passes that factory directly. Ordinary headless, desktop, Cook and
+Player entries propagate failure through existing result/exit boundaries. The initial generated
+Image codec identity is unchanged. Creation's internal matching recipe also propagates failure
+through the existing published-but-unadmitted owner instead of panicking. The README and guide
+provide complete fallible recipes, and the author consumer reads those actual code blocks.
+
+Cargo's existing message parser retains the first primary path and positive one-based u32
+coordinates, without retaining rendered text, source, suggestions or expansion trees. Missing
+spans remain normal. Invalid/oversize/over-budget or withheld locations preserve the code and
+message and count as truncation, at most once per observed diagnostic. Path bytes share the
+existing 256 KiB / 256-entry diagnostic allowance; native metadata uses the existing conservative
+path accounting. The generic model retains raw bounded observations; only bootstrap projects
+them to its admitted relative display policy.
+
+The first root compile catches an incorrect sink call to nonexistent `RelativePath::as_str`;
+using the existing preflight and observed string fixes it. Initial focused cohorts pass 40/40
+and 56/56. Independent review then identifies a concrete workspace-root error: a relative
+`game/src/bin/headless.rs` must not be interpreted against the selected `game/` project again.
+The actual root-package/compiler consumer passes its first case and reproduces the wrong path
+in its workspace-member case in `ebd6ad91-f6cf-491e-83f5-d30d6144f49c`; that pair is 1/2, with
+the independent real recipe-error consumer passing separately in the same run.
+
+Bootstrap now retains both original invocation roots. It interprets Cargo-relative paths against
+the workspace, then strips the selected manifest directory. Sibling-package and ambiguous paths
+are withheld through existing relative-path admission, with no filesystem scan/canonicalization
+or new path authority. A focused control covers project-relative/absolute observations versus
+sibling and similarly prefixed package names. The final combined root cohort passes 97/97 in
+`d23e7b4a-7e27-414a-89e7-1c45e7d2f163`, including original status/protocol failures, creation
+publication custody and all affected Cargo/projection controls.
+
+The strengthened independently locked consumers pass 2/2 in
+`b578f483-8e6a-4d14-9e88-29a49616583a` (44.475 seconds of test execution, including nested
+builds). The actual compiler test runs both root and workspace-member projects, inspects the
+original typed location and displayed path and proves the invalid tool never launches. The
+recipe consumer actually compiles a duplicate-plugin tool: Check and Export preserve its
+classification and admitted ID. A subsequent Schema call returns a generic opaque error whose
+Display/Debug implementations panic if invoked. Factory-call counts are exact; no plugin build,
+gameplay or export destination is observed, and original manifest/source/lock bytes are retained.
+Both independent reviews have no remaining P1/P2 after the reproduced workspace-root correction.
+All five implementation/review agents are closed.
+
+The complete two-game author consumer passes 1/1 in
+`3e79b118-56b1-4379-aaf3-1c7c5ebbbbc8` (275.591 seconds, including nested builds). Both actual
+external same-named projects use the newly generated fallible recipe and the README/guide code
+blocks. The first system, source win/reset, stable creation identities and unchanged authored
+bytes, exact Image codec, generated Cook/Player/build-script entries, relocated source-free
+headless baselines and original pack-substitution/catalog-corruption controls all remain intact.
+Passing native children return their original empty-containment/stopped-reader/drained-output
+receipts without termination intervention. The outer release build takes 12 minutes 39 seconds;
+that is separate from test execution, with uncontrolled cache/load state, and is not an
+edit-to-result benchmark.
+
+Ordinary parser/help/creation/Check/CLI regressions pass 35/35, with four nested-build or ignored
+cases excluded, in `3e7f6ef1-bdeb-458f-988c-cd039e6fe6d0`. Original immutable-Git coordinates,
+source identity, project publication, startup closure and explicit Repair behavior remain
+covered. This does not execute remote Git publication. The recipe-projection suite also passes
+8/8 with `render-wgpu` enabled in `8a229337-5417-4a10-b3ce-d883a040e26f`, including both
+conditional policy/capture errors. Correctness Clippy passes for the root library, CLI and
+affected public targets with the same render feature, the complete collection-game workspace
+with all targets/features, and the independent bootstrap/recipe/Material-source consumers.
+Root, sample and independently locked consumer formatting checks pass. Material source Export's
+test-owned shared recipe is migrated to the generated fallible entry signature; its full native
+Export trajectory is not rerun for this diagnostic change.
+
+Document links/fragments, workflow YAML, whitespace and paused-file hashes pass. Existing
+advisory warnings remain; this is not a warning-free workspace or compiler-floor claim. Root,
+sample and independent manifests/locks and dependency versions are unchanged. CI adds the two
+actual diagnostic consumers to its Windows serial lane; no remote CI execution, push or
+publication occurs. The fifteen paused UI/Dialogue files remain byte-identical and outside the
+commits. Original process and publication owners are retained, with no new per-frame validation.
+
+The two diagnostic receiving items are closed only within this scope: direct known recipe
+errors and primary Rust compiler locations. Boxed/wrapped factory errors remain opaque. Windows
+UNC ambiguity, compiler path remapping, arbitrary source excerpts and foreign execution remain
+outside the display guarantee; location membership is lexical, not a physical file proof.
+Missing-sidecar location projection remains separate from its already qualified refusal.
+Foundation/R1/R7/R12 and paused interactive work stay open. Next align live movement admission
+with the existing semantic replay decoder, then simplify complete command-draft bindings and
+the sample's duplicated current component inventory without introducing new runtime owners.
 
 ## Calendar dependencies and simulation clocks
 

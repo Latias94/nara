@@ -2294,6 +2294,17 @@ all 29 selected ordinary public tests and five final help subprocess tests pass,
 Clippy and format/document checks. Recipe and compiler diagnostic projection and paused
 interactive authoring remain separate receiving actions.
 
+The [recipe and compiler diagnostic successor](../../research/2026-11-18-engine-architecture-review-reconciliation.md#diagnostic-implementation-and-qualification)
+at `01c25ef` adds finite known recipe classifications and admitted plugin facts to the original protocol,
+with opaque fallback that never invokes arbitrary formatters. Generated and collection-game
+entry points propagate one fallible recipe through tools and products. Cargo retains a bounded
+primary location; original workspace-relative interpretation precedes selected-project display,
+including sibling withholding and existing truncation accounting. The 97 owner tests, two actual
+independent consumers, repeated complete author workflow, 35 ordinary public tests and eight
+render-enabled recipe tests pass, alongside affected correctness Clippy and formatting/document
+checks. The linked record owns exact qualification and Windows-only execution limits. This does
+not complete R1/R7, missing-sidecar location projection, interactive authoring or full Foundation.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

@@ -37,6 +37,15 @@ not repair authority, receipts, rollback evidence or the operation's control-flo
   profile admits through the existing public-identifier policy. Unadmitted values are withheld and
   counted. A withheld selected profile renders a placeholder, never a command silently targeting
   the default profile. This is narrower than general field transport and carries no mutation right.
+- Known direct `ProductRecipeError` values use a closed static classification and an admitted
+  plugin identifier in the bounded summary. Other fields are counted as omitted without
+  traversing nested errors or provider vectors. `run_project_tool_mode` requires a `'static`
+  factory error for exact standard `Any` recognition; wrapped or opaque values retain the generic
+  classification without invoking Error/Display/Debug/source. The generated project propagates
+  its single fallible recipe through tools and products. The separate Cargo diagnostic model
+  retains an optional bounded primary location; bootstrap projects original workspace-relative
+  facts to selected-project display. It does not add compiler spans or arbitrary fields to the
+  compiled-project failure protocol. See the [actual independent qualification](../research/2026-11-18-engine-architecture-review-reconciliation.md#diagnostic-implementation-and-qualification).
 - Keep stdout acquisition at 64 KiB; a failure JSON plus newline is at most 16 KiB. Check actual
   encoded size without cutting JSON. Private input DTOs reject missing/unknown/duplicate named
   fields, invalid severity/identity, oversize and wrong request association. Remote strings remain
