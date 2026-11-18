@@ -1,3 +1,9 @@
+//! The source oracle uses public manifest ingestion, the selected recipe and strict delivery.
+//! Preparation returns the existing prepared-content/observations pair. Raw paths are relative to
+//! the project root; importer and delivery observations may repeat a path with the same digest.
+//! Preparation precedes generated Player bootstrap publication. Source-free Session acceptance
+//! consumes the prepared base after the copied project and import cache have been removed.
+
 #![forbid(unsafe_code)]
 
 #[allow(dead_code)]
@@ -154,7 +160,7 @@ mod two_level_pack;
 #[cfg(any(feature = "development", feature = "cook"))]
 mod atlas_content {
     use std::{
-        collections::BTreeSet,
+        collections::{BTreeMap, BTreeSet},
         fs,
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
@@ -169,6 +175,7 @@ mod atlas_content {
         },
         asset_build::ArtifactBuildObservation,
         ecs::World,
+        fs::{ContentDigest, DirectoryCapability, RelativePath},
         gameplay::{
             GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
             GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
@@ -180,10 +187,18 @@ mod atlas_content {
             InputBinding, KeyCode,
         },
         material::{Material2d, Material2dAsset, Material2dDomain, Material2dRuntimeCodec},
-        project_host::{HeadlessSession, HeadlessSessionClose},
+        project::ProjectManifest,
+        project_host::{
+            HeadlessSession, HeadlessSessionClose, ProjectContentDeliveryReceipt,
+            ProjectContentError, ProjectContentErrorKind, ProjectContentLoader,
+            ProjectContentMemberKind, ingest_project_manifest, resolve_product_recipe,
+        },
         project_tooling::host_fs,
         project_workflow::cooked_content::PreparedRuntimeContent,
-        reflect::{ComponentTypeId, decode_asset_reference_value},
+        reflect::{
+            AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentTypeId,
+            PersistentComponentSchemaOwnerId, decode_asset_reference_value,
+        },
         runtime_content::{
             RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentError,
             RuntimeContentMemberKind,
@@ -206,6 +221,10 @@ mod atlas_content {
     };
 
     use super::{RuntimeKind, content, evidence::Evidence, source::ContentFence, two_level_pack};
+
+    const DEFAULT_SCHEMA: &str = "schema/authoring.bundle.json";
+    const SELECTED_SCHEMA: &str = "authoring/selected.bundle.json";
+    const GENERATED: &str = "src/bin/player/generated.rs";
 
     struct Cache {
         parent: PathBuf,
@@ -282,14 +301,104 @@ mod atlas_content {
         }
     }
 
+    fn select_alternate_schema(project: &Path) {
+        let manifest_path = project.join("nara.toml");
+        let loaded = ProjectManifest::parse_toml_bytes(&fs::read(&manifest_path).unwrap());
+        assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+        let mut manifest = loaded.manifest.unwrap();
+        assert_eq!(
+            manifest.authoring.schema_bundle.as_deref(),
+            Some(DEFAULT_SCHEMA)
+        );
+        manifest.authoring.schema_bundle = Some(SELECTED_SCHEMA.to_owned());
+        let selected = project.join(SELECTED_SCHEMA);
+        fs::create_dir_all(selected.parent().unwrap()).unwrap();
+        fs::rename(project.join(DEFAULT_SCHEMA), selected).unwrap();
+        fs::write(manifest_path, manifest.to_canonical_toml_bytes().unwrap()).unwrap();
+        assert!(!project.join(DEFAULT_SCHEMA).exists());
+    }
+
+    fn source_delivery(
+        root: &DirectoryCapability,
+    ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
+        let manifest = root
+            .open_file(&RelativePath::new("nara.toml").unwrap())
+            .unwrap();
+        let candidate = ingest_project_manifest(&manifest, None).unwrap();
+        let recipe = RuntimeKind::Headless.recipe().unwrap();
+        let plan = resolve_product_recipe(&candidate, recipe.clone()).unwrap();
+        ProjectContentLoader::with_limits(root.share(), recipe.source_content_limits())
+            .unwrap()
+            .load_delivery(&candidate, &plan)
+    }
+
+    fn divergent_bundle(bytes: &[u8]) -> Vec<u8> {
+        let bundle = AuthoringSchemaBundle::from_json_bytes(bytes).unwrap();
+        let mut owners = bundle
+            .owners()
+            .iter()
+            .map(AuthoringSchemaBundleOwner::from)
+            .collect::<Vec<_>>();
+        let owner_id = PersistentComponentSchemaOwnerId::try_new(
+            nara::scene::SCENE_COMPONENTS_SCHEMA_PROVIDER
+                .owner()
+                .as_str(),
+        )
+        .unwrap();
+        let owner = owners
+            .iter_mut()
+            .find(|owner| owner.owner_id() == &owner_id)
+            .unwrap();
+        let mut catalog = owner.current().clone();
+        catalog
+            .type_tombstones
+            .push(ComponentTypeId::new("test.cook.Divergent"));
+        *owner = AuthoringSchemaBundleOwner::new(owner_id, catalog, owner.predecessor().cloned());
+        AuthoringSchemaBundle::new(owners)
+            .unwrap()
+            .to_json_string()
+            .unwrap()
+            .into_bytes()
+    }
+
     #[test]
     fn cooking_shares_atlas_and_clips_preserves_raw_inputs_and_decodes_source_free_player_evidence()
     {
+        assert_source_free_cooked_content(DEFAULT_SCHEMA);
+    }
+
+    #[test]
+    fn selected_alternate_schema_cooks_and_runs_source_free_without_the_default_bundle() {
+        assert_source_free_cooked_content(SELECTED_SCHEMA);
+    }
+
+    fn assert_source_free_cooked_content(schema: &str) {
         let cache = Cache::new();
         let project = cache.project();
+        if schema == SELECTED_SCHEMA {
+            select_alternate_schema(&project);
+        }
         let store = cache.path.join("store");
         fs::create_dir(&store).unwrap();
         let mut fence = ContentFence::capture(&project).unwrap();
+        let delivery = source_delivery(fence.root()).unwrap();
+        assert_eq!(
+            delivery
+                .scene_roots()
+                .iter()
+                .map(|path| path.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["cavern.scene.json", "meadow.scene.json"])
+        );
+        assert_eq!(
+            delivery
+                .members()
+                .iter()
+                .filter(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
+                .map(|member| member.path().as_str())
+                .collect::<Vec<_>>(),
+            [schema]
+        );
         let (prepared, observations) = content::prepare(
             fence.root(),
             &host_fs::writable_directory(&store).unwrap(),
@@ -464,36 +573,69 @@ mod atlas_content {
             catalog.configuration().input.action_map,
             Some(super::input_product())
         );
-        let raw = observations
-            .iter()
-            .map(|observation| match observation {
+        let mut raw = BTreeMap::new();
+        for observation in &observations {
+            let (path, digest) = match observation {
                 ArtifactBuildObservation::Raw {
                     path,
-                    digest: Some(_),
-                } => path.as_str(),
+                    digest: Some(digest),
+                } => (path.as_str(), digest.content()),
                 other => panic!("unexpected source import observation: {other:?}"),
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(observations.len(), raw.len());
-        assert_eq!(
-            raw,
-            BTreeSet::from([
-                "assets/textures/meadow.png",
-                "assets/textures/cavern.png",
-                "assets/textures/explorer.png",
-                "assets/textures/marker.png",
-                "assets/textures/side-room.png",
-                "assets/materials/region.material2d.json",
-                "assets/materials/region.wgsl",
-                "assets/tilesets/region.tileset.ron",
-                "assets/animations/explorer.sprite-animations.json",
-                "assets/audio/game.soundbank.json",
-                "assets/audio/pickup.wav",
-                "assets/audio/travel.wav",
-                super::INPUT_PATH,
-            ])
-        );
+            };
+            if let Some(previous) = raw.insert(path, digest) {
+                assert_eq!(
+                    previous, digest,
+                    "inconsistent source observations for {path}"
+                );
+            }
+        }
+        let mut expected = delivery
+            .members()
+            .iter()
+            .map(|member| (member.path().as_str(), member.digest()))
+            .collect::<BTreeMap<_, _>>();
+        for path in [
+            "assets/textures/meadow.png",
+            "assets/textures/cavern.png",
+            "assets/textures/explorer.png",
+            "assets/textures/marker.png",
+            "assets/textures/side-room.png",
+            "assets/materials/region.material2d.json",
+            "assets/materials/region.wgsl",
+            "assets/tilesets/region.tileset.ron",
+            "assets/animations/explorer.sprite-animations.json",
+            "assets/audio/game.soundbank.json",
+            "assets/audio/pickup.wav",
+            "assets/audio/travel.wav",
+            super::INPUT_PATH,
+        ] {
+            let digest = ContentDigest::of_bytes(&fs::read(project.join(path)).unwrap());
+            if let Some(admitted) = expected.insert(path, digest) {
+                assert_eq!(admitted, digest, "source delivery disagrees with {path}");
+            }
+        }
+        assert_eq!(raw, expected);
+        for path in [
+            "nara.toml",
+            schema,
+            "scenes/meadow.scene.json",
+            "scenes/cavern.scene.json",
+            "scenes/marker.scene.json",
+            "scenes/side-room.scene.json",
+            "scenes/lookout.scene.json",
+            "prefabs/marker.prefab.json",
+            "assets/textures/explorer.png.meta",
+            "assets/materials/region.material2d.json.meta",
+            "assets/tilesets/region.tileset.ron.meta",
+        ] {
+            assert!(
+                raw.contains_key(path),
+                "missing admitted source member {path}"
+            );
+        }
         fence.bind_raw_inputs(&observations).unwrap();
+        fence.verify().unwrap();
+        drop(delivery);
         drop(fence);
         drop(cache);
         assert!(!project.exists() && !store.exists());
@@ -573,11 +715,151 @@ mod atlas_content {
     }
 
     #[test]
+    fn invalid_selected_schema_matches_source_delivery_and_preserves_generated_bootstrap() {
+        for (failure, kind, code) in [
+            (
+                "missing",
+                ProjectContentErrorKind::HostIo,
+                "project.content.host-io",
+            ),
+            (
+                "corrupt",
+                ProjectContentErrorKind::SchemaMismatch,
+                "project.runtime-agreement.bundle-invalid",
+            ),
+            (
+                "divergent",
+                ProjectContentErrorKind::SchemaMismatch,
+                "project.runtime-agreement.selected-owner-divergent",
+            ),
+        ] {
+            let cache = Cache::new();
+            let project = cache.project();
+            select_alternate_schema(&project);
+            let selected = project.join(SELECTED_SCHEMA);
+            match failure {
+                "missing" => fs::remove_file(&selected).unwrap(),
+                "corrupt" => fs::write(&selected, b"invalid authoring schema bundle").unwrap(),
+                "divergent" => {
+                    fs::write(&selected, divergent_bundle(&fs::read(&selected).unwrap())).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let fence = ContentFence::capture(&project).unwrap();
+            let error = source_delivery(fence.root()).unwrap_err();
+            assert_eq!(error.kind(), kind, "{failure}: {error:?}");
+            assert!(
+                error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == code),
+                "{failure}: {error:?}"
+            );
+            let store = cache.path.join("store");
+            fs::create_dir(&store).unwrap();
+            let store = host_fs::writable_directory(&store).unwrap();
+            for existing in [false, true] {
+                let generated = project.join(GENERATED);
+                if existing {
+                    fs::create_dir_all(generated.parent().unwrap()).unwrap();
+                    fs::write(&generated, b"previous admitted Player bootstrap").unwrap();
+                }
+                let before = fs::read(&generated).ok();
+                assert_eq!(before.is_some(), existing);
+                let error = content::prepare(
+                    fence.root(),
+                    &store,
+                    "x86_64-pc-windows-msvc",
+                    RuntimeKind::Headless,
+                )
+                .err()
+                .expect("invalid selected schema must reject before bootstrap generation");
+                assert!(
+                    error.contains("source delivery agreement"),
+                    "{failure}: {error}"
+                );
+                assert!(error.contains(code), "{failure}: {error}");
+                assert_eq!(
+                    fs::read(&generated).ok(),
+                    before,
+                    "{failure}, existing={existing}"
+                );
+                assert!(
+                    fs::read_dir(cache.path.join("store"))
+                        .unwrap()
+                        .next()
+                        .is_none()
+                );
+                assert!(!project.join(DEFAULT_SCHEMA).exists());
+                fence.verify().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn selected_schema_changes_after_prepare_and_binding_cannot_rebaseline_the_original_fence() {
+        for replace_identity in [false, true] {
+            let cache = Cache::new();
+            let project = cache.project();
+            select_alternate_schema(&project);
+            let store = cache.path.join("store");
+            fs::create_dir(&store).unwrap();
+            let mut fence = ContentFence::capture(&project).unwrap();
+            let (prepared, observations) = content::prepare(
+                fence.root(),
+                &host_fs::writable_directory(&store).unwrap(),
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .unwrap();
+            fence.bind_raw_inputs(&observations).unwrap();
+            fence.verify().unwrap();
+            let selected = project.join(SELECTED_SCHEMA);
+            let relative = RelativePath::new(SELECTED_SCHEMA).unwrap();
+            let original = fence.root().open_file(&relative).unwrap();
+            let bytes = fs::read(&selected).unwrap();
+            if replace_identity {
+                fs::rename(&selected, selected.with_extension("original")).unwrap();
+                fs::write(&selected, &bytes).unwrap();
+                let replacement = fence.root().open_file(&relative).unwrap();
+                assert_ne!(original.identity(), replacement.identity());
+                assert_eq!(fs::read(&selected).unwrap(), bytes);
+                source_delivery(fence.root()).unwrap();
+            } else {
+                fs::write(&selected, divergent_bundle(&bytes)).unwrap();
+                let changed = fence.root().open_file(&relative).unwrap();
+                assert_eq!(original.identity(), changed.identity());
+                assert_ne!(fs::read(&selected).unwrap(), bytes);
+                let error = source_delivery(fence.root()).unwrap_err();
+                assert!(
+                    error.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.code().as_str()
+                            == "project.runtime-agreement.selected-owner-divergent"
+                    }),
+                    "{error:?}"
+                );
+            }
+            assert!(fence.verify().unwrap_err().contains(SELECTED_SCHEMA));
+            assert!(
+                fence
+                    .bind_raw_inputs(&observations)
+                    .unwrap_err()
+                    .contains(SELECTED_SCHEMA)
+            );
+            assert!(!project.join(GENERATED).exists());
+            assert_eq!(prepared.base().catalog().members().len(), 15);
+        }
+    }
+
+    #[test]
     fn material_preflight_rejects_corrupt_inputs_and_recovers_without_changing_products() {
-        for name in [
-            "assets/materials/region.material2d.json",
-            "assets/materials/region.material2d.json.meta",
-            "assets/materials/region.wgsl",
+        for (name, code) in [
+            ("assets/materials/region.material2d.json", "material.format"),
+            (
+                "assets/materials/region.material2d.json.meta",
+                "project.content.asset-meta-invalid",
+            ),
+            ("assets/materials/region.wgsl", "material.shader"),
         ] {
             let cache = Cache::new();
             let project = cache.project();
@@ -597,6 +879,14 @@ mod atlas_content {
             let bytes = fs::read(&path).unwrap();
             fs::write(&path, "invalid region Material input").unwrap();
             assert!(fence.verify().unwrap_err().contains(name));
+            let source_error = source_delivery(fence.root()).unwrap_err();
+            assert!(
+                source_error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == code),
+                "{name}: {source_error:?}"
+            );
             let error = content::prepare(
                 fence.root(),
                 &store,
@@ -606,9 +896,10 @@ mod atlas_content {
             .err()
             .expect("invalid source must not reuse the previous cooked Material");
             assert!(
-                error.contains(region_material::MATERIAL_PATH),
+                error.contains("source delivery agreement"),
                 "{name}: {error}"
             );
+            assert!(error.contains(code), "{name}: {error}");
             let retained = original
                 .base()
                 .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
@@ -708,6 +999,22 @@ mod atlas_content {
                 _ => unreachable!(),
             }
             assert!(fence.verify().unwrap_err().contains(name));
+            let source_error = source_delivery(fence.root()).unwrap_err();
+            let code = match failure {
+                "source" => "project.content.tileset-source-invalid",
+                "metadata" => "project.content.asset-meta-invalid",
+                "layout" => "project.content.tileset-image-extent-mismatch",
+                "member" => "project.content.tileset-unavailable",
+                "cells" => "project.content.tile-index-out-of-range",
+                _ => unreachable!(),
+            };
+            assert!(
+                source_error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == code),
+                "{name}, {failure}: {source_error:?}"
+            );
             let error = content::prepare(
                 fence.root(),
                 &store,
@@ -716,15 +1023,11 @@ mod atlas_content {
             )
             .err()
             .expect("invalid TileSet content must refuse the unpublished candidate");
-            match failure {
-                "source" | "metadata" => {
-                    assert!(error.contains(region_tileset::TILESET_PATH), "{error}");
-                }
-                "layout" => assert!(error.contains("TileSet descriptor"), "{error}"),
-                "member" => assert!(error.contains("Tilemap") || error.contains(name), "{error}"),
-                "cells" => assert!(error.contains("Tilemap cells"), "{error}"),
-                _ => unreachable!(),
-            }
+            assert!(
+                error.contains("source delivery agreement"),
+                "{name}: {error}"
+            );
+            assert!(error.contains(code), "{name}, {failure}: {error}");
             two_level_pack::assert_room_tileset(retained.product());
             let original_tileset = original
                 .base()
@@ -910,6 +1213,13 @@ mod atlas_content {
             let mut invalid = metadata.clone();
             invalid["payload"]["asset"][field] = replacement;
             fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            let source_error = source_delivery(&root).unwrap_err();
+            assert!(
+                source_error.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "project.content.asset-identity-conflict"
+                }),
+                "{field}: {source_error:?}"
+            );
             let error = content::prepare(
                 &root,
                 &store,
@@ -919,7 +1229,7 @@ mod atlas_content {
             .err()
             .unwrap();
             assert!(
-                error.contains("conflicts with the intrinsic Input identity"),
+                error.contains("project.content.asset-identity-conflict"),
                 "{field}: {error}"
             );
         }

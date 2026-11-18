@@ -438,6 +438,19 @@ pub mod native {
         assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
         fixture.assert_player_feature_closure(false);
         assert!(fixture.project.join("build.rs").is_file());
+        let selected_bundle = fixture.project.join("schema/release.bundle.json");
+        fs::rename(
+            fixture.project.join("schema/authoring.bundle.json"),
+            &selected_bundle,
+        )
+        .unwrap();
+        let bundle = read_bounded(&selected_bundle, 16 * 1024 * 1024);
+        let manifest = fixture.read("nara.toml");
+        assert_eq!(manifest.matches("schema/authoring.bundle.json").count(), 1);
+        fixture.write(
+            "nara.toml",
+            &manifest.replace("schema/authoring.bundle.json", "schema/release.bundle.json"),
+        );
         let mut source_input: Value = serde_json::from_str(&fixture.read(INPUT_PATH)).unwrap();
         let movement_binding = source_input["payload"]["bindings"]
             .as_array_mut()
@@ -487,6 +500,33 @@ pub mod native {
             fixture: Some(fixture),
             process: None,
         };
+        let generated = custody
+            .fixture()
+            .project
+            .join("src/bin/player/generated.rs");
+        let original_generated = generated
+            .exists()
+            .then(|| read_bounded(&generated, 32 * 1024));
+        fs::write(&selected_bundle, b"not an authoring Schema bundle").unwrap();
+        let rejected = custody.run(
+            SupervisedProcessOwner::spawn(&command, log_limits()).unwrap(),
+            COOK_TIMEOUT,
+        );
+        assert!(!rejected.receipt.exit().success());
+        assert!(
+            rejected
+                .stderr
+                .contains("project.runtime-agreement.bundle-invalid")
+        );
+        assert!(!rejected.stdout.contains(PUBLISHED));
+        assert!(!output_parent.join("TwoLevel").exists());
+        assert_eq!(
+            generated
+                .exists()
+                .then(|| read_bounded(&generated, 32 * 1024)),
+            original_generated,
+        );
+        fs::write(&selected_bundle, &bundle).unwrap();
         let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
         let cooked = custody.run(owner, COOK_TIMEOUT);
         assert!(

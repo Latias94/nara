@@ -10,10 +10,9 @@ use nara::{
     project_tooling::host_fs,
 };
 
-const CONTENT: [&str; 31] = [
+const CONTENT: [&str; 30] = [
     "nara.toml",
     "input/explorer.actions.json",
-    "schema/authoring.bundle.json",
     "scenes/meadow.scene.json",
     "scenes/cavern.scene.json",
     "scenes/marker.scene.json",

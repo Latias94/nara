@@ -14,10 +14,11 @@ use nara::{
     image::ImageRuntimeCodec,
     input::{ActionMapAsset, ActionMapFileCandidate, ActionMapFileLimits, ActionMapRuntimeCodec},
     material::Material2dRuntimeCodec,
-    project::{
-        EffectiveProjectSettings, NativeDocumentIdentity, ProjectAuthoringState, ProjectManifest,
+    project::{EffectiveProjectSettings, NativeDocumentIdentity, ProjectAuthoringState},
+    project_host::{
+        ProjectContentLoader, ProjectSettingsCandidate, ingest_project_manifest,
+        resolve_product_recipe,
     },
-    project_host::resolve_runtime_configuration,
     project_tooling::host_fs,
     project_workflow::cooked_content::{
         CookedContentBuilder, CookedContentLimits, CookedContentRequest, PreparedRuntimeContent,
@@ -60,7 +61,15 @@ pub(super) fn prepare(
     if runtime == RuntimeKind::AudioDesktop && !triple.contains("-windows-") {
         return Err("audio-desktop Player requires an explicit Windows target".into());
     }
-    let settings = project_settings(root, runtime)?;
+    let candidate = project_settings(root, runtime)?;
+    let settings = candidate.settings();
+    let recipe = runtime.recipe()?;
+    let plan = resolve_product_recipe(&candidate, recipe.clone())
+        .map_err(|error| format!("source game composition: {error:?}"))?;
+    let delivery = ProjectContentLoader::with_limits(root.share(), recipe.source_content_limits())
+        .map_err(|error| format!("source content loading: {error:?}"))?
+        .load_delivery(&candidate, &plan)
+        .map_err(|error| format!("source delivery agreement: {error:?}"))?;
     let projection = settings
         .source_runtime_projection()
         .map_err(|error| format!("nara.toml runtime configuration: {error}"))?;
@@ -118,9 +127,6 @@ pub(super) fn prepare(
     let configuration = configuration
         .resolve()
         .map_err(|error| format!("nara.toml processed runtime configuration: {error}"))?;
-    let recipe = runtime.recipe()?;
-    let plan = resolve_runtime_configuration(&configuration, recipe.clone())
-        .map_err(|error| format!("cooked game composition: {error}"))?;
     let mut builder = CookedContentBuilder::new(
         CookedContentRequest {
             target: RuntimeContentTarget::new(triple, runtime.content_profile())
@@ -358,7 +364,7 @@ pub(super) fn prepare(
 
     let mut scenes = LevelId::ALL
         .into_iter()
-        .map(|level| scene_source(&settings, level).map(|source| (level.scene_product(), source)))
+        .map(|level| scene_source(settings, level).map(|source| (level.scene_product(), source)))
         .collect::<Result<Vec<_>, _>>()?;
     scenes.push((marker_product(), marker_source.clone()));
     scenes.extend(regions.iter().cloned());
@@ -409,6 +415,15 @@ pub(super) fn prepare(
     let prepared = builder
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
+    if prepared
+        .base()
+        .plan()
+        .schema_validation()
+        .composition_fingerprint()
+        != delivery.schema_fingerprint()
+    {
+        return Err("cooked content Schema differs from the admitted source delivery".into());
+    }
     let catalog = prepared.base().catalog();
     if catalog.members().len() != 15
         || catalog
@@ -561,7 +576,7 @@ pub(super) fn prepare(
             .ok_or_else(|| format!("missing cooked {level:?} Scene"))?;
         let expected_source = SourceDocumentKey::project_location(
             settings.project.source_universe,
-            scene_source(&settings, level)?,
+            scene_source(settings, level)?,
             SourceDocumentKind::Scene,
         );
         let required = [
@@ -616,6 +631,13 @@ pub(super) fn prepare(
             return Err(format!("cooked Image {product} identity or format changed"));
         }
     }
+    for member in delivery.members() {
+        observations.push(ArtifactBuildObservation::Raw {
+            path: AssetSourcePath::new(member.path().as_str())
+                .map_err(|error| error.to_string())?,
+            digest: Some(ArtifactContentDigest::from_content(member.digest())),
+        });
+    }
     Ok((prepared, observations))
 }
 
@@ -650,20 +672,19 @@ fn register_scene_identity(
 fn project_settings(
     root: &DirectoryCapability,
     runtime: RuntimeKind,
-) -> Result<EffectiveProjectSettings, String> {
-    let bytes = read(root, "nara.toml", DOCUMENT_BYTES)?;
-    let loaded = ProjectManifest::parse_toml_bytes(&bytes);
-    if loaded.has_errors() {
-        return Err(format!("nara.toml: {:?}", loaded.diagnostics));
-    }
-    let settings = loaded
-        .manifest
-        .ok_or_else(|| "nara.toml: project manifest is absent".to_owned())?
-        .resolve_profile(match runtime {
+) -> Result<ProjectSettingsCandidate, String> {
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").map_err(|error| error.to_string())?)
+        .map_err(|error| format!("nara.toml: {error}"))?;
+    let candidate = ingest_project_manifest(
+        &manifest,
+        match runtime {
             RuntimeKind::Headless => None,
             RuntimeKind::Desktop | RuntimeKind::AudioDesktop => Some("desktop"),
-        })
-        .map_err(|error| format!("nara.toml: {error}"))?;
+        },
+    )
+    .map_err(|error| format!("nara.toml: {error:?}"))?;
+    let settings = candidate.settings();
     if settings.window.enabled != (runtime != RuntimeKind::Headless) {
         return Err(format!(
             "nara.toml: the {} Player requires window.enabled={}",
@@ -684,7 +705,7 @@ fn project_settings(
                 .to_owned(),
         );
     }
-    Ok(settings)
+    Ok(candidate)
 }
 
 fn scene_source(

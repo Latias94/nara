@@ -1,3 +1,7 @@
+//! Fence-only fixtures use finite opaque bytes; cook_runtime exercises real source admission.
+//! A selected schema joins the original fence through project-relative Raw delivery observations.
+//! Binding validates the observed digest, then publication checks preserve that file identity.
+
 #![cfg(any(feature = "development", feature = "cook"))]
 
 #[path = "../src/bin/cook/source.rs"]
@@ -35,6 +39,7 @@ use two_level_game::{
 };
 
 const RENAMED_PICKUP: &str = "assets/audio/pickup-v2.wav";
+const SELECTED_SCHEMA: &str = "authoring/selected.bundle.json";
 
 struct Directory(PathBuf);
 
@@ -104,6 +109,19 @@ impl Directory {
             fs::write(target, bytes).unwrap();
         }
         Self(path)
+    }
+
+    fn selected_schema() -> Self {
+        let directory = Self::new();
+        let selected = directory.0.join(SELECTED_SCHEMA);
+        fs::create_dir_all(selected.parent().unwrap()).unwrap();
+        fs::rename(directory.0.join("schema/authoring.bundle.json"), selected).unwrap();
+        fs::write(
+            directory.0.join("nara.toml"),
+            format!("[authoring]\nstate = \"ready\"\nschema_bundle = \"{SELECTED_SCHEMA}\"\n"),
+        )
+        .unwrap();
+        directory
     }
 
     fn renamed_sound_bank() -> Self {
@@ -223,6 +241,64 @@ impl Directory {
 impl Drop for Directory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn selected_schema_is_bound_by_delivery_observations_without_the_default_bundle() {
+    let directory = Directory::selected_schema();
+    let default = directory.0.join("schema/authoring.bundle.json");
+    assert!(!default.exists());
+    let selected = directory.0.join(SELECTED_SCHEMA);
+    let bytes = fs::read(&selected).unwrap();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    fence.verify().unwrap();
+    let observations = [ArtifactBuildObservation::Raw {
+        path: AssetSourcePath::new(SELECTED_SCHEMA).unwrap(),
+        digest: Some(ArtifactContentDigest::of_bytes(&bytes)),
+    }];
+    fence.bind_raw_inputs(&observations).unwrap();
+    fs::write(&default, b"unselected default bundle").unwrap();
+    fs::write(
+        directory.0.join("src/bin/player/generated.rs"),
+        "new catalog",
+    )
+    .unwrap();
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    fence.bind_code(&inputs).unwrap();
+    fence.verify().unwrap();
+    fs::write(&selected, b"changed selected bundle").unwrap();
+    assert!(fence.verify().unwrap_err().contains(SELECTED_SCHEMA));
+    fs::write(&selected, &bytes).unwrap();
+    fence.verify().unwrap();
+    fs::remove_file(&selected).unwrap();
+    assert!(fence.verify().is_err());
+    assert!(default.is_file());
+}
+
+#[test]
+fn selected_schema_absence_or_stale_digest_cannot_be_admitted_at_raw_binding() {
+    for missing in [false, true] {
+        let directory = Directory::selected_schema();
+        let selected = directory.0.join(SELECTED_SCHEMA);
+        let bytes = fs::read(&selected).unwrap();
+        let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+        let observations = [ArtifactBuildObservation::Raw {
+            path: AssetSourcePath::new(SELECTED_SCHEMA).unwrap(),
+            digest: Some(ArtifactContentDigest::of_bytes(&bytes)),
+        }];
+        if missing {
+            fs::remove_file(&selected).unwrap();
+        } else {
+            fs::write(&selected, b"different selected bundle before binding").unwrap();
+        }
+        let error = fence.bind_raw_inputs(&observations).unwrap_err();
+        if !missing {
+            assert!(error.contains(SELECTED_SCHEMA), "{error}");
+        }
+        fs::write(&selected, &bytes).unwrap();
+        fence.bind_raw_inputs(&observations).unwrap();
+        fence.verify().unwrap();
     }
 }
 
