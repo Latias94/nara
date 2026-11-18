@@ -528,12 +528,24 @@ a mismatched recorded result fails. This profile excludes Save/Restore, open sav
 audio/desktop output, cooked Players, arbitrary runtime services and cross-platform determinism.
 
 Input files are limited to 16 MiB. The output parent must already exist and the output must be
-absent; recording never overwrites it. Serialization finishes before output creation, and a failed
-write attempts to remove the incomplete file. Stdout may contain game logs; consume the final
+absent; recording never overwrites it, including if another process creates it during recording.
+The output path must have a Unicode representation for the JSON result; unrepresentable native
+paths refuse before gameplay or publication.
+Serialization finishes before an owned sibling temporary is written and synchronized. Only the
+complete file is published to the final name through the original no-replace filesystem operation.
+Failed temporary cleanup retains its actual owner through CLI exit; a postpublication failure
+never deletes the published target. Stdout may contain game logs; consume the final
 `TWO_LEVEL_REPLAY_RESULT ` line as compact JSON. `ok` agrees with the process exit status.
 Success includes `report.steps`, `report.commands` and `report.final_state` after original Session
-cleanup. Failure includes `error.stage`, `error.message` and `cleanup_pending`; if original cleanup
-remains pending, the CLI retries it for up to ten more seconds before reporting that fact.
+cleanup. Record results also include `publication.status` (`not_published`, `published` or
+`published_uncertain`) and individual data, metadata, name and parent-directory synchronization
+facts. Unsupported parent sync does not turn a complete verified publication into a partial file;
+it limits crash-durability evidence. If publication already happened but verification or parent
+sync fails, inspect the retained destination rather than treating an error as proof of absence.
+Failure includes `error.stage`, `error.message` and `cleanup_pending`. Runtime cleanup keeps its
+original bounded retry; failed temporary cleanup receives an explicit retry and any unresolved
+owner remains retained until process exit. These facts do not promise an atomic project snapshot
+or hostile-writer isolation.
 
 ## Source/Headless Development Host
 

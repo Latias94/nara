@@ -12,7 +12,7 @@ use std::{
 use serde_json::{Value, json};
 use two_level_game::{
     levels::{LevelId, LevelKey},
-    replay::{decode_program, decode_recording},
+    replay::{decode_program, decode_recording, encode_recording},
 };
 
 #[path = "support/child.rs"]
@@ -57,7 +57,9 @@ impl Fixture {
             "nara.toml",
             "input/explorer.actions.json",
             "scenes/meadow.scene.json",
+            "scenes/meadow.scene.json.meta",
             "scenes/cavern.scene.json",
+            "scenes/cavern.scene.json.meta",
             "scenes/marker.scene.json",
             "scenes/marker.scene.json.meta",
             "scenes/side-room.scene.json",
@@ -127,6 +129,10 @@ impl Fixture {
     fn invoke(&self, command: Command) -> (Output, Value) {
         let output = child::run(command, &self.directory, "source-game replay CLI");
         let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.ends_with('\n'),
+            "replay results must end with a newline"
+        );
         let results = stdout
             .lines()
             .filter_map(|line| line.strip_prefix(RESULT_PREFIX))
@@ -177,7 +183,33 @@ fn ordinary_process_records_gameplay_and_a_fresh_process_replays_every_result() 
     let fixture = Fixture::new();
     decode_program(PROGRAM).expect("the shipped finite program must pass production admission");
     let recorded = fixture.record();
-    let recording = decode_recording(&fs::read(&fixture.recording).unwrap()).unwrap();
+    let recorded_bytes = fs::read(&fixture.recording).unwrap();
+    let recording = decode_recording(&recorded_bytes).unwrap();
+    assert_eq!(encode_recording(&recording).unwrap(), recorded_bytes);
+    assert_eq!(recorded["publication"]["status"], "published");
+    assert_eq!(recorded["publication"]["data_synced"], "achieved");
+    assert_eq!(recorded["publication"]["file_metadata_synced"], "achieved");
+    assert_eq!(recorded["publication"]["name_published"], "achieved");
+    #[cfg(windows)]
+    assert_eq!(
+        recorded["publication"]["parent_directory_synced"],
+        "unsupported"
+    );
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        recorded["publication"]["parent_directory_synced"],
+        "achieved"
+    );
+    assert!(
+        !fs::read_dir(&fixture.directory).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".two-level-replay-")
+        }),
+        "complete publication must leave no sibling temporary",
+    );
     let initial = &recording.initial;
     assert_eq!(
         initial.progress.location.level,
@@ -413,6 +445,45 @@ fn all_paths_are_explicit_absolute_and_command_options_are_unambiguous() {
     }
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn an_output_path_that_cannot_be_reported_refuses_before_publication() {
+    let fixture = Fixture::new();
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStringExt;
+
+        OsString::from_vec(b"recording-\xff.json".to_vec())
+    };
+    #[cfg(windows)]
+    let name = {
+        use std::os::windows::ffi::OsStringExt;
+
+        OsString::from_wide(&[b'r' as u16, 0xd800, b'.' as u16, b'j' as u16])
+    };
+    let target = fixture.directory.join(name);
+    assert!(target.to_str().is_none());
+    let mut command = fixture.command("record");
+    command
+        .arg("--program")
+        .arg(&fixture.program)
+        .arg("--output")
+        .arg(&target);
+    let (output, result) = fixture.invoke(command);
+    assert!(!output.status.success(), "{result}");
+    assert_eq!(result["error"]["stage"], "output");
+    assert_eq!(result["publication"]["status"], "not_published");
+    assert!(!target.exists());
+    assert!(!fixture.recording.exists());
+    assert!(!fs::read_dir(&fixture.directory).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".two-level-replay-")
+    }));
+}
+
 #[test]
 fn recording_never_overwrites_an_existing_output() {
     let fixture = Fixture::new();
@@ -421,6 +492,8 @@ fn recording_never_overwrites_an_existing_output() {
     let (output, result) = fixture.invoke(fixture.record_command());
     assert!(!output.status.success(), "{result}");
     assert_eq!(result["error"]["stage"], "output");
+    assert_eq!(result["publication"]["status"], "not_published");
+    assert_eq!(result["publication"]["name_published"], "unknown");
     assert_eq!(fs::read(&fixture.recording).unwrap(), original);
     assert_eq!(fs::read(&fixture.program).unwrap(), PROGRAM);
 }

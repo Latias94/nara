@@ -1,6 +1,6 @@
 use std::{
     ffi::OsString,
-    fs::{self, File},
+    fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -12,6 +12,9 @@ use two_level_game::replay::{
     ReplayError, decode_program, decode_recording, encode_recording, record_program,
     replay_recording,
 };
+
+#[path = "replay/publication.rs"]
+mod publication;
 
 const MAX_INPUT_BYTES: u64 = 16 * 1024 * 1024;
 const RESULT_PREFIX: &str = "TWO_LEVEL_REPLAY_RESULT ";
@@ -34,6 +37,7 @@ struct Failure {
     stage: &'static str,
     message: String,
     runtime: Option<ReplayError>,
+    publication: Option<Box<publication::PublicationFailure>>,
 }
 
 impl Failure {
@@ -43,6 +47,7 @@ impl Failure {
             stage,
             message: message.to_string(),
             runtime: None,
+            publication: None,
         }
     }
 
@@ -59,16 +64,45 @@ impl Failure {
             stage: operation,
             message: error.to_string(),
             runtime: Some(error),
+            publication: None,
+        }
+    }
+
+    fn publication(mut error: publication::PublicationFailure) -> Self {
+        error.retry_cleanup();
+        Self {
+            operation: "record",
+            stage: "output",
+            message: error.to_string(),
+            runtime: None,
+            publication: Some(Box::new(error)),
         }
     }
 
     fn result(&self) -> Value {
-        json!({
+        let mut result = json!({
             "operation": self.operation,
             "ok": false,
-            "cleanup_pending": self.runtime.as_ref().is_some_and(ReplayError::cleanup_pending),
+            "cleanup_pending": self.runtime.as_ref().is_some_and(ReplayError::cleanup_pending)
+                || self.publication.as_ref().is_some_and(|failure| failure.cleanup_pending()),
             "error": { "stage": self.stage, "message": self.message },
-        })
+        });
+        if self.operation == "record" {
+            result["publication"] = self.publication.as_ref().map_or_else(
+                || publication::Publication::not_published().result(),
+                |failure| failure.publication().result(),
+            );
+        }
+        result
+    }
+}
+
+/// Keeps unresolved temporary-file custody alive until process exit, including failed stdout.
+impl Drop for Failure {
+    fn drop(&mut self) {
+        if let Some(publication) = self.publication.take() {
+            (*publication).retain_cleanup_until_exit();
+        }
     }
 }
 
@@ -165,30 +199,6 @@ fn read_input(path: &Path, operation: &'static str) -> Result<Vec<u8>, Failure> 
     Ok(bytes)
 }
 
-fn publish(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
-    let mut file = File::create_new(path).map_err(|error| {
-        Failure::new(
-            "record",
-            "output",
-            format!("create {}: {error}", path.display()),
-        )
-    })?;
-    let written = file.write_all(bytes).and_then(|()| file.sync_all());
-    drop(file);
-    if let Err(error) = written {
-        let cleanup = match fs::remove_file(path) {
-            Ok(()) => String::new(),
-            Err(cleanup) => format!("; remove incomplete output failed: {cleanup}"),
-        };
-        return Err(Failure::new(
-            "record",
-            "output",
-            format!("write {}: {error}{cleanup}", path.display()),
-        ));
-    }
-    Ok(())
-}
-
 fn run(arguments: Arguments) -> Result<Value, Failure> {
     match arguments {
         Arguments::Record {
@@ -196,6 +206,8 @@ fn run(arguments: Arguments) -> Result<Value, Failure> {
             program,
             output,
         } => {
+            let output_value = serde_json::to_value(&output)
+                .map_err(|error| Failure::new("record", "output", error))?;
             let bytes = read_input(&program, "record")?;
             let program = decode_program(&bytes)
                 .map_err(|error| Failure::new("record", "decode_program", error))?;
@@ -207,19 +219,20 @@ fn run(arguments: Arguments) -> Result<Value, Failure> {
                 .steps
                 .last()
                 .map_or(&recording.initial, |step| &step.after);
-            let result = json!({
+            let publication =
+                publication::publish(&output, &bytes).map_err(Failure::publication)?;
+            Ok(json!({
                 "operation": "record",
                 "ok": true,
                 "cleanup_pending": false,
-                "output": output,
+                "output": output_value,
+                "publication": publication.result(),
                 "report": {
                     "steps": recording.steps.len(),
                     "commands": recording.steps.iter().map(|step| step.commands.len()).sum::<usize>(),
                     "final_state": final_state,
                 },
-            });
-            publish(&output, &bytes)?;
-            Ok(result)
+            }))
         }
         Arguments::Play {
             project_root,
@@ -242,20 +255,31 @@ fn run(arguments: Arguments) -> Result<Value, Failure> {
     }
 }
 
-fn main() -> ExitCode {
-    let outcome = Arguments::parse(std::env::args_os().skip(1)).and_then(run);
+fn write_outcome(
+    outcome: &Result<Value, Failure>,
+    stdout: &mut impl Write,
+) -> std::io::Result<ExitCode> {
     let failure_result;
-    let (result, status) = match &outcome {
+    let (result, status) = match outcome {
         Ok(result) => (result, ExitCode::SUCCESS),
         Err(failure) => {
             failure_result = failure.result();
             (&failure_result, ExitCode::FAILURE)
         }
     };
+    writeln!(stdout, "{RESULT_PREFIX}{result}")?;
+    stdout.flush()?;
+    Ok(status)
+}
+
+fn main() -> ExitCode {
+    let outcome = Arguments::parse(std::env::args_os().skip(1)).and_then(run);
     let mut stdout = std::io::stdout().lock();
-    if let Err(error) = writeln!(stdout, "{RESULT_PREFIX}{result}").and_then(|()| stdout.flush()) {
-        eprintln!("write replay result: {error}");
-        return ExitCode::FAILURE;
+    match write_outcome(&outcome, &mut stdout) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("write replay result: {error}");
+            ExitCode::FAILURE
+        }
     }
-    status
 }
