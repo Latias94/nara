@@ -163,6 +163,25 @@ pub(crate) fn occurrence_for_instance<'a>(
     occurrence_entry_for_instance(world, receipt).map(|(key, _)| key)
 }
 
+/// Checks whether both Scene and Identity retirement already completed for a retained receipt.
+#[cfg(feature = "serde")]
+#[doc(hidden)]
+#[must_use]
+pub fn scene_instance_retired(world: &World, receipt: &SpawnedSceneInstance) -> bool {
+    matches!(
+        occurrence_for_instance(world, receipt),
+        Err(OccurrenceError::Missing)
+    ) && world
+        .get_resource::<nara_identity::WorldIdentityDomain>()
+        .is_some_and(|domain| {
+            domain.id() == receipt.domain_id()
+                && matches!(
+                    domain.active_scene_instance(world, receipt.instance_id()),
+                    Err(nara_identity::IdentityDomainError::SceneInstanceNotActive { .. })
+                )
+        })
+}
+
 fn occurrence_entry_for_instance<'a>(
     world: &'a World,
     receipt: &SpawnedSceneInstance,

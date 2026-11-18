@@ -36,6 +36,8 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             "scripted verification is not an interactive resume state",
         ));
     }
+    crate::gameplay::side_room::SideRoom::require_closed(world)
+        .map_err(GameResumeError::Ineligible)?;
     if !world
         .resource::<crate::gameplay::storage::Storage>()
         .permits_resume()

@@ -59,6 +59,7 @@ impl Publications {
                 },
             )]),
             retire: Vec::new(),
+            shared: Vec::new(),
         }
     }
 
@@ -193,6 +194,7 @@ fn state_only_changes_invalidate_owned_image_and_retirement() {
     let retirement = ImagePublications {
         publish: BTreeMap::new(),
         retire: receipts,
+        shared: Vec::new(),
     };
     assert!(
         retirement
@@ -205,6 +207,32 @@ fn state_only_changes_invalidate_owned_image_and_retirement() {
             .validate(&values.server, &values.images, &values.states)
             .is_err()
     );
+}
+
+#[test]
+fn additive_retirement_uses_the_last_good_image_after_reload_failure() {
+    let mut values = Publications::default();
+    let prepared = values.prepare(image(product(SOURCE, true), 1), None);
+    let owned = values.commit(prepared);
+    let handle = owned[0].handle;
+    values
+        .images
+        .record_reload_failure(
+            handle,
+            &mut values.states,
+            &mut values.events,
+            "invalid replacement",
+        )
+        .unwrap();
+    assert_eq!(values.images.get(handle).unwrap().pixels(), [1, 0, 0, 255]);
+    let retirement =
+        ImagePublications::retire(&owned, &values.server, &values.images, &values.states).unwrap();
+    assert!(values.commit(retirement).is_empty());
+    assert!(values.images.get(handle).is_none());
+    assert!(matches!(
+        values.states.state(handle.id()).unwrap().load_state(),
+        LoadState::Removed
+    ));
 }
 
 #[test]
@@ -225,6 +253,7 @@ fn escaped_pixels_retain_the_exact_owner_after_publication_and_retirement() {
     let retirement = ImagePublications {
         publish: BTreeMap::new(),
         retire: receipts,
+        shared: Vec::new(),
     };
     assert!(values.commit(retirement).is_empty());
     assert!(values.images.is_empty());

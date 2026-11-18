@@ -126,6 +126,7 @@ pub(super) fn consume(world: &mut World) {
             }
             RETRY => retry_current(world),
             MARKER => add_marker(world),
+            SIDE_ROOM => super::side_room::toggle(world),
             SAVE => {
                 let checkpoint = world.resource::<Progress>().checkpoint().clone();
                 let result = world.resource::<Storage>().save(&checkpoint);
@@ -158,6 +159,7 @@ pub(super) fn consume(world: &mut World) {
 }
 
 fn retry_current(world: &mut World) -> Result<(), String> {
+    super::side_room::SideRoom::require_closed(world)?;
     let key = world.resource::<ActiveLevel>().key();
     let progress = world.resource::<Progress>().checkpoint().clone();
     let (expected, content) = {
@@ -213,6 +215,7 @@ pub(super) fn begin(
     checkpoint: Checkpoint,
     restore: bool,
 ) -> Result<(), String> {
+    super::side_room::SideRoom::require_closed(world)?;
     checkpoint.validate().map_err(|error| error.to_string())?;
     if world.resource::<Travel>().pending.is_some() {
         return Err("level preparation is already pending".into());

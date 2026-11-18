@@ -25,8 +25,12 @@ use two_level_game::{
     input::input_product,
     levels::LevelId,
     markers::{SCENE_PATH, marker_image_product, marker_product},
+    side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
+
+#[path = "../two_level_pack.rs"]
+mod two_level_pack;
 
 use super::{images, process::read_bounded};
 
@@ -142,14 +146,14 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 10);
+    assert_eq!(catalog.members().len(), 12);
     assert_eq!(
         catalog
             .members()
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count(),
-        3
+        4
     );
     assert_eq!(
         catalog.configuration().input.action_map,
@@ -276,6 +280,11 @@ pub fn inspect(
                 images::marker_proof(&image)
             };
             assert!(images.insert(product.to_string(), proof).is_none());
+        } else if product == side_room::image_product() {
+            assert!(member.dependencies().is_empty());
+            two_level_pack::assert_room_image(
+                &ImageRuntimeCodec::decode_runtime(&bytes[range]).unwrap(),
+            );
         } else if product == marker_product() {
             assert_eq!(
                 member.dependencies(),
@@ -293,6 +302,8 @@ pub fn inspect(
             };
             assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
             assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
+        } else if product == side_room::scene_product() {
+            two_level_pack::assert_room_member(member);
         } else {
             let level = LevelId::ALL
                 .into_iter()
@@ -302,34 +313,7 @@ pub fn inspect(
                 member.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
-            assert!(
-                member
-                    .dependencies()
-                    .iter()
-                    .any(|dependency| dependency.product() == bank_product())
-            );
-            assert_eq!(member.dependencies().len(), 5);
-            assert_eq!(
-                member
-                    .dependencies()
-                    .iter()
-                    .map(|dependency| dependency.product())
-                    .collect::<BTreeSet<_>>(),
-                [
-                    level.image_product(),
-                    atlas_product(),
-                    bank_product(),
-                    clips_product(),
-                    marker_product(),
-                ]
-                .into_iter()
-                .collect()
-            );
-            assert!(
-                member.dependencies().iter().all(|dependency| {
-                    dependency.role() == RuntimeContentDependencyRole::Required
-                })
-            );
+            two_level_pack::assert_level_dependencies(member, level);
         }
     }
     assert_eq!(images.len(), 4);
@@ -345,6 +329,8 @@ pub fn inspect(
                 input_product(),
                 marker_product(),
                 marker_image_product(),
+                side_room::scene_product(),
+                side_room::image_product(),
             ])
             .collect()
     );

@@ -38,6 +38,9 @@ impl StagedProjectSceneReplacement {
             )));
         }
         let current = world.resource::<ProjectSceneResidency>();
+        if current.has_addition() {
+            return Err(rejected(additive::replacement_blocked()));
+        }
         let prepared =
             PreparedResidency::prepare(world, content.into(), Some(current)).map_err(rejected)?;
         let PreparedResidency {
@@ -223,6 +226,7 @@ impl StagedProjectSceneReplacement {
                 .clone(),
         );
         *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
+            addition: None,
             images,
             tilesets,
             materials,
@@ -252,20 +256,7 @@ pub(super) fn commit_publications(
     Vec<TileSetContentReceipt>,
     MaterialResidency,
 ) {
-    let images = if images.is_empty() {
-        Vec::new()
-    } else {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            ResMut<Assets<ImageAsset>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("Scene residency resources passed preflight");
-        images.commit(&server, &mut values, &mut states, &mut events)
-    };
+    let images = commit_images(world, images);
     let tilesets = tilesets.map_or_else(Vec::new, |prepared| {
         let mut access = SystemState::<(
             Res<AssetServer>,
@@ -294,6 +285,22 @@ pub(super) fn commit_publications(
         materials.commit(&server, &mut values, &mut states, &mut events)
     };
     (images, tilesets, materials)
+}
+
+pub(super) fn commit_images(world: &mut World, images: ImagePublications) -> Vec<OwnedImage> {
+    if images.is_empty() {
+        return Vec::new();
+    }
+    let mut access = SystemState::<(
+        Res<AssetServer>,
+        ResMut<Assets<ImageAsset>>,
+        ResMut<AssetStates>,
+        ResMut<AssetEvents>,
+    )>::new(world);
+    let (server, mut values, mut states, mut events) = access
+        .get_mut(world)
+        .expect("Scene residency resources passed preflight");
+    images.commit(&server, &mut values, &mut states, &mut events)
 }
 
 fn share_inputs(

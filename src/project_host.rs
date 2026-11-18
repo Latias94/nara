@@ -72,6 +72,9 @@ pub mod advanced;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod runtime;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) use runtime::has_active_project_scene_addition;
+
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 mod persistence;
 
@@ -257,5 +260,6 @@ pub use runtime::{
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
-    inspect_current_scene_dependency, instantiate_current_scene_dependency,
+    activate_prepared_project_scene, inspect_current_scene_dependency,
+    instantiate_current_scene_dependency, unload_project_scene_addition,
 };

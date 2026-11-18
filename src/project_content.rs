@@ -345,6 +345,16 @@ impl ProjectSourceContent {
             .find(|scene| scene.path() == record.path())
             .map(|scene| &scene.compiled)
     }
+
+    /// The selected closure catalog contains only loaded members and admitted Deferred targets.
+    pub(crate) fn deferred_scene(&self, product: AssetProductRef) -> Option<&AssetSourcePath> {
+        let record = self.database.record_for_stable_id(product.source())?;
+        (product.product() == ImportedProductId::PRIMARY
+            && record.source_kind() == &AssetSourceKind::Scene
+            && record.path() != &self.scenes.selected.path
+            && self.scene_dependency(product).is_none())
+        .then_some(record.path())
+    }
 }
 
 impl ProjectContentSnapshot {
@@ -1499,6 +1509,7 @@ struct NativeSourceSelection {
 enum SourceSceneSelection<'a> {
     Path(&'a nara_project::ProjectPath),
     Product(AssetProductRef),
+    DeferredProduct(AssetProductRef, &'a AssetSourcePath),
 }
 
 struct LoadContext<'a> {
@@ -1702,30 +1713,43 @@ impl<'a> LoadContext<'a> {
         let assets = self.open_directory(&settings.paths.assets)?;
         let mut selected_product_path = None;
         let mut selected_product_path_work = None;
+        let mut selected_reader = 2;
         let scene_path = match selected_scene {
             Some(SourceSceneSelection::Path(path)) => Some(path),
-            Some(SourceSceneSelection::Product(product)) => {
+            Some(
+                SourceSceneSelection::Product(product)
+                | SourceSceneSelection::DeferredProduct(product, _),
+            ) => {
                 let reference = AssetRef::Product(product);
                 let (resolved_source, work) = self.resolve_native_source(
                     &reference,
                     &AssetSourceKind::Scene,
                     &settings.paths.scenes,
                 )?;
-                let local = self
-                    .scene_scope
-                    .relative_path(&resolved_source.path)
-                    .ok_or_else(|| {
-                        ProjectContentError::single(
+                let local = if let Some(SourceSceneSelection::DeferredProduct(_, expected_path)) =
+                    selected_scene
+                {
+                    if &resolved_source.path != expected_path {
+                        return Err(ProjectContentError::single(
                             ProjectContentErrorKind::HostAuthorityRejected,
-                            "project.content.scene-not-declared",
-                            "Scene Product is outside the admitted travel Scene directory",
-                        )
-                    })?;
+                            "project.content.deferred-scene-moved",
+                            "Deferred Scene Product no longer selects its admitted source",
+                        ));
+                    }
+                    selected_reader = resolved_source.reader;
+                    resolved_source.alias.as_str()
+                } else {
+                    self.scene_scope
+                        .relative_path(&resolved_source.path)
+                        .ok_or_else(|| {
+                            ProjectContentError::single(
+                                ProjectContentErrorKind::HostAuthorityRejected,
+                                "project.content.scene-not-declared",
+                                "Scene Product is outside the configured Scene directory",
+                            )
+                        })?
+                };
                 let selected_work = self.reserve_work(string_retained_bytes(local)?)?;
-                let local = self
-                    .scene_scope
-                    .relative_path(&resolved_source.path)
-                    .expect("the travel source relation was checked before admission");
                 selected_product_path = Some(
                     nara_project::ProjectPath::new(local)
                         .map_err(|_| catalogue::identity_conflict(&resolved_source.path))?,
@@ -1736,7 +1760,8 @@ impl<'a> LoadContext<'a> {
                 let resolved = selected_product_path
                     .as_ref()
                     .expect("source Product resolved above");
-                if settings.startup.default_scene.as_ref() != Some(resolved)
+                if matches!(selected_scene, Some(SourceSceneSelection::Product(_)))
+                    && settings.startup.default_scene.as_ref() != Some(resolved)
                     && !settings.content.scenes.contains(resolved)
                 {
                     return Err(ProjectContentError::single(
@@ -1756,7 +1781,15 @@ impl<'a> LoadContext<'a> {
                 "Project manifest does not select a startup scene",
             )
         })?;
-        let is_startup = settings.startup.default_scene.as_ref() == Some(scene_path);
+        let (scene_root, scene_directory) = [
+            (&settings.paths.assets, &assets),
+            (&settings.paths.prefabs, &prefabs),
+            (&settings.paths.scenes, &scenes),
+        ][selected_reader];
+        let is_startup = !matches!(
+            selected_scene,
+            Some(SourceSceneSelection::DeferredProduct(..))
+        ) && settings.startup.default_scene.as_ref() == Some(scene_path);
         let selected_path_work = string_retained_bytes(scene_path.as_str())?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, selected_path_work)?;
         self.content_closure_work_bytes = self
@@ -1764,9 +1797,9 @@ impl<'a> LoadContext<'a> {
             .checked_add(selected_path_work)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
 
-        self.observe_source_read(Some(&settings.paths.scenes), scene_path.as_str())?;
+        self.observe_source_read(Some(scene_root), scene_path.as_str())?;
         let (scene_bytes, scene_digest) = self.read_selected_scene_file(
-            &scenes,
+            scene_directory,
             scene_path.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
             is_startup,
@@ -1783,13 +1816,13 @@ impl<'a> LoadContext<'a> {
         }
         self.record_member(
             ProjectContentMemberKind::Scene,
-            &settings.paths.scenes,
+            scene_root,
             scene_path.as_str(),
             scene_digest,
         )?;
         let selected_scene_source = self.admit_native_source(
-            &scenes,
-            &settings.paths.scenes,
+            scene_directory,
+            scene_root,
             scene_path.as_str(),
             SourceDocumentKind::Scene,
             settings.project.native_document_identity,
@@ -1798,17 +1831,13 @@ impl<'a> LoadContext<'a> {
         let selected_path_work = self.reserve_work(checked_plan_sum(
             ProjectContentBudgetKind::WorkBytes,
             [
-                settings.paths.scenes.as_str().len(),
+                scene_root.as_str().len(),
                 1,
                 string_retained_bytes(scene_path.as_str())?,
             ],
         )?)?;
-        let selected_source_path = AssetSourcePath::new(format!(
-            "{}/{}",
-            settings.paths.scenes.as_str(),
-            scene_path.as_str()
-        ))
-        .map_err(|_| catalogue::identity_conflict(scene_path))?;
+        let selected_source_path = AssetSourcePath::new(format!("{scene_root}/{scene_path}"))
+            .map_err(|_| catalogue::identity_conflict(scene_path))?;
         self.commit_work_as_retained(selected_path_work, selected_path_work.reserved)?;
         let scene = self.decode_scene(scene_path.as_str(), &scene_bytes)?;
 
@@ -1942,8 +1971,8 @@ impl<'a> LoadContext<'a> {
             }
         }
         self.admit_catalogued_native_metadata(
-            &scenes,
-            &settings.paths.scenes,
+            scene_directory,
+            scene_root,
             scene_path.as_str(),
             &selected_source_path,
             &selected_scene_source,
@@ -2015,7 +2044,7 @@ impl<'a> LoadContext<'a> {
             candidate.lineage(),
             self.validation.composition_fingerprint(),
             content_digest,
-            scene_path,
+            &selected_source_path,
         )?;
         let content_closure = self
             .content_closure
@@ -3625,10 +3654,10 @@ fn content_revision(
     lineage: ProjectSettingsLineage,
     schema: SchemaCompositionFingerprint,
     content: ContentDigest,
-    selected_scene_path: &nara_project::ProjectPath,
+    selected_source_path: &AssetSourcePath,
 ) -> Result<ProjectContentRevision, ProjectContentError> {
     let mut framed = Vec::with_capacity(160);
-    framed.extend_from_slice(b"nara.project-content-revision.v2\0");
+    framed.extend_from_slice(b"nara.project-content-revision.v3\0");
     framed.extend_from_slice(&lineage.settings_digest());
     if let Some(root) = lineage.project_root_identity() {
         framed.extend_from_slice(&root.session().get().to_le_bytes());
@@ -3637,7 +3666,7 @@ fn content_revision(
     append_frame(&mut framed, schema.to_hex().as_bytes())?;
     framed.extend_from_slice(&content.length().to_le_bytes());
     framed.extend_from_slice(content.as_bytes());
-    append_frame(&mut framed, selected_scene_path.as_str().as_bytes())?;
+    append_frame(&mut framed, selected_source_path.as_str().as_bytes())?;
     Ok(ProjectContentRevision(
         *ContentDigest::of_bytes(&framed).as_bytes(),
     ))

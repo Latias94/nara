@@ -103,6 +103,22 @@ impl ProjectContentLoader {
         )
     }
 
+    pub(crate) fn load_deferred_scene_observed_reusing_input(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        product: AssetProductRef,
+        path: &AssetSourcePath,
+        input: Option<&ProjectInputContent>,
+    ) -> ProjectSceneLoadAttempt {
+        self.load_travel_observed(
+            candidate,
+            plan,
+            SourceSceneSelection::DeferredProduct(product, path),
+            input,
+        )
+    }
+
     fn load_travel_observed(
         &self,
         candidate: &ProjectSettingsCandidate,

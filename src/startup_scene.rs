@@ -574,6 +574,15 @@ impl CurrentSceneOwner {
     }
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn deferred_source_scene(
+        &self,
+        product: nara_asset::AssetProductRef,
+    ) -> Option<&nara_asset::AssetSourcePath> {
+        self.source.source_content_stamp()?;
+        self.project_sources()?.deferred_scene(product)
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn matches_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
         self.source.matches_component_bindings(bindings)
     }
@@ -591,11 +600,18 @@ impl CurrentSceneOwner {
     pub(crate) fn hosted_runtime_base(
         &self,
     ) -> Option<&crate::runtime_content::RuntimeContentBase> {
+        self.hosted_runtime_scene().map(|scene| scene.base())
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn hosted_runtime_scene(
+        &self,
+    ) -> Option<&crate::runtime_content::RuntimeContentScene> {
         match &self.source.retention {
             SceneRetention::RuntimeContent {
                 content,
                 custody: RuntimeContentCustody::HostManaged,
-            } => Some(content.base()),
+            } => Some(content),
             _ => None,
         }
     }

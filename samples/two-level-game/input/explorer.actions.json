@@ -119,6 +119,16 @@
         },
         "context": "gameplay",
         "transform": "Button"
+      },
+      {
+        "action": "two-level-game.b",
+        "input": {
+          "Key": {
+            "Character": "b"
+          }
+        },
+        "context": "gameplay",
+        "transform": "Button"
       }
     ]
   }

@@ -110,7 +110,14 @@ fn processed_worker_uses_captured_bytes_and_original_definitions_without_source_
     .unwrap();
     let context = Arc::new(Context::Processed { base: base.clone() });
     let pools = pools();
-    let mut preparation = Preparation::start(context, later_product(), &pools, None).unwrap();
+    let mut preparation = Preparation::start(
+        context,
+        later_product(),
+        RequestPurpose::Travel,
+        &pools,
+        None,
+    )
+    .unwrap();
     let PreparedSceneContent::Processed(content) = finish(&mut preparation).unwrap() else {
         panic!("processed requests retain processed acquisitions")
     };
@@ -204,6 +211,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                 id: admission.id,
                 expected: admission.expected.clone(),
                 selection: selected().into(),
+                purpose: RequestPurpose::Travel,
             };
             assert!(!api::content_matches_admission(content, &wrong_mode));
             let current = CurrentScene::get(world).unwrap();
@@ -269,7 +277,14 @@ fn processed_cancellation_keeps_slot_and_original_worker_captures_until_return()
     let context = Arc::new(Context::Processed { base });
     let captured = Arc::downgrade(&context);
     let (gate, control) = TestGate::new(TestPhase::AfterPreparation);
-    let mut preparation = Preparation::start(context, later_product(), &pools, Some(gate)).unwrap();
+    let mut preparation = Preparation::start(
+        context,
+        later_product(),
+        RequestPurpose::Travel,
+        &pools,
+        Some(gate),
+    )
+    .unwrap();
     assert!(control.wait_until_started());
     preparation.cancel();
     assert!(preparation.poll().is_none());
@@ -291,7 +306,14 @@ fn processed_failure_uses_runtime_content_error_and_safe_runtime_diagnostics() {
     );
     let context = Arc::new(Context::Processed { base });
     let pools = pools();
-    let mut preparation = Preparation::start(context, later_product(), &pools, None).unwrap();
+    let mut preparation = Preparation::start(
+        context,
+        later_product(),
+        RequestPurpose::Travel,
+        &pools,
+        None,
+    )
+    .unwrap();
     let failure = finish(&mut preparation).err().unwrap();
     assert_eq!(failure.error, ProjectSceneRequestError::RuntimeContent);
     let copy = failure.error;

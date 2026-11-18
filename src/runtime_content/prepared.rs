@@ -11,9 +11,9 @@ use nara_tilemap::{
 
 use super::{
     DecodeLease, RuntimeCodecRole, RuntimeContentAsset, RuntimeContentBase,
-    RuntimeContentBudgetKind, RuntimeContentError, RuntimeContentLease, RuntimeContentMemberKind,
-    RuntimeContentScene, codecs::DecodedAsset, native::validate_tileset_image,
-    traversal::MemberTraversal,
+    RuntimeContentBudgetKind, RuntimeContentDependencyRole, RuntimeContentError,
+    RuntimeContentLease, RuntimeContentMemberKind, RuntimeContentScene, codecs::DecodedAsset,
+    native::validate_tileset_image, traversal::MemberTraversal,
 };
 use crate::project_content::ProjectDomainAssets;
 
@@ -23,6 +23,7 @@ mod tests;
 pub(crate) struct ProcessedSceneContent {
     pub(crate) scene: RuntimeContentScene,
     pub(crate) dependencies: Vec<RuntimeContentScene>,
+    pub(crate) deferred_scene_products: Vec<AssetProductRef>,
     pub(crate) domains: ProjectDomainAssets,
     pub(crate) images: Vec<RuntimeContentAsset<ImageAsset>>,
     pub(crate) tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
@@ -115,6 +116,14 @@ impl RuntimeContentBase {
         if !self.catalog().scenes().contains(&product) {
             return Err(RuntimeContentError::UndeclaredScene);
         }
+        self.prepare_scene_closure(product)
+    }
+
+    /// Prepares a Scene already selected by the Host's current Deferred dependency authority.
+    pub(crate) fn prepare_scene_closure(
+        &self,
+        product: AssetProductRef,
+    ) -> Result<Arc<ProcessedSceneContent>, RuntimeContentError> {
         let decoded = self.decode_current_closure(product)?;
         let root = self.member_index(product)?;
         let scene = decoded
@@ -125,6 +134,31 @@ impl RuntimeContentBase {
             .1
             .clone();
         let scene_count = decoded.scenes.len() - 1;
+        let members = self.catalog().members();
+        let deferred_scene_products = || {
+            decoded
+                .scenes
+                .iter()
+                .map(|(index, _)| *index)
+                .chain(decoded.assets.iter().map(|asset| asset.member))
+                .flat_map(|index| members[index].dependencies())
+                .filter_map(|dependency| {
+                    if dependency.role() != RuntimeContentDependencyRole::Reference {
+                        return None;
+                    }
+                    let product = dependency.product();
+                    let index = self.catalog().member_index(product)?;
+                    (matches!(
+                        members[index].kind(),
+                        RuntimeContentMemberKind::Scene { .. }
+                    ) && decoded
+                        .scenes
+                        .binary_search_by_key(&index, |(index, _)| *index)
+                        .is_err())
+                    .then_some(product)
+                })
+        };
+        let deferred_count = deferred_scene_products().count();
         let codecs = self.plan().runtime_codecs();
         let image_count = decoded
             .assets
@@ -154,10 +188,17 @@ impl RuntimeContentBase {
             .and_then(|bytes| {
                 bytes.checked_add(scene_count.checked_mul(size_of::<RuntimeContentScene>())?)
             })
+            .and_then(|bytes| {
+                bytes.checked_add(deferred_count.checked_mul(size_of::<AssetProductRef>())?)
+            })
             .and_then(|bytes| bytes.checked_add(size_of::<ProcessedSceneContent>()))
             .and_then(|bytes| bytes.checked_add(crate::scene_retention::ARC_CONTROL_BLOCK_BYTES))
             .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
         let lease = self.reserve_retained(bytes)?;
+        let mut deferred_products = Vec::with_capacity(deferred_count);
+        deferred_products.extend(deferred_scene_products());
+        deferred_products.sort_unstable();
+        deferred_products.dedup();
         let mut dependencies = Vec::with_capacity(scene_count);
         for (index, scene) in &decoded.scenes {
             if *index != root {
@@ -269,6 +310,7 @@ impl RuntimeContentBase {
         Ok(Arc::new(ProcessedSceneContent {
             scene,
             dependencies,
+            deferred_scene_products: deferred_products,
             domains,
             images,
             tilesets,

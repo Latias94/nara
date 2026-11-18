@@ -94,6 +94,13 @@ where
         Ok(bindings) => bindings,
         Err(report) => return report,
     };
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    if crate::project_host::has_active_project_scene_addition(world) {
+        return rejected(
+            "project.scene.addition-active",
+            "Unload the active project Scene addition before replacing the primary Scene",
+        );
+    }
     let owner = world.resource::<CurrentSceneOwner>();
     if source
         .as_ref()

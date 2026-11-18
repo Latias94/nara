@@ -7,9 +7,13 @@ use std::{
 
 use nara::{
     app::{AppExit, FixedTime, FrameExecutionStart, RuntimeGeneration},
+    asset::AssetServer,
     ecs::World,
+    image::{ImageAsset, image_resource_key},
     project_host::{DesktopPresentationControl, DesktopPresentationObservation},
+    render::RenderFrame,
     render_wgpu::{WgpuBackendState, WgpuRenderObservation},
+    sprite_render::__private::SpriteBatches,
     window::{
         WindowId,
         backend::{BackendWindowHandles, WindowTargetPhase},
@@ -38,6 +42,7 @@ pub(super) struct Frame {
     queue_submissions: u64,
     presents: u64,
     adapter: Value,
+    side_room_sprites: Option<usize>,
 }
 
 impl Frame {
@@ -52,6 +57,7 @@ impl Frame {
             "device_epoch": self.device_epoch,
             "queue_submissions": self.queue_submissions,
             "presents": self.presents,
+            "side_room_sprites": self.side_room_sprites,
         })
     }
 }
@@ -136,7 +142,7 @@ impl Presentation {
         if self.failure.is_some() || self.panic.is_some() {
             return Ok(());
         }
-        let Some(frame) = join_presented(observation)? else {
+        let Some(frame) = join_presented(observation, self.observe)? else {
             return Ok(());
         };
         if let Some(previous) = &self.frame
@@ -289,6 +295,7 @@ pub(super) fn panic_detail(panic: &(dyn Any + Send)) -> String {
 
 fn join_presented(
     observation: &DesktopPresentationObservation<'_>,
+    observe: bool,
 ) -> Result<Option<Frame>, String> {
     let Some(receipt) = observation.presented_frame() else {
         return Ok(None);
@@ -352,6 +359,9 @@ fn join_presented(
     let adapter = observation
         .adapter_summary()
         .ok_or("the original presented adapter summary is unavailable")?;
+    let side_room_sprites = observe
+        .then(|| side_room_sprites(world, receipt.render_transaction_frame_index()))
+        .transpose()?;
     Ok(Some(Frame {
         runtime_generation: runtime.get(),
         app_frame: start.frame(),
@@ -362,12 +372,47 @@ fn join_presented(
         device_epoch: receipt.device_epoch(),
         queue_submissions: transaction.queue_submissions(),
         presents: transaction.presents(),
+        side_room_sprites,
         adapter: json!({
             "backend": adapter.backend(),
             "name": adapter.name(),
             "device_type": adapter.device_type(),
         }),
     }))
+}
+
+fn side_room_sprites(world: &World, frame: u64) -> Result<usize, String> {
+    if !world
+        .get_resource::<RenderFrame>()
+        .is_some_and(|render| render.index == frame)
+    {
+        return Err("stock Sprite batches are from a different render frame".into());
+    }
+    let batches = world
+        .get_resource::<SpriteBatches>()
+        .ok_or("original stock Sprite batches are unavailable")?;
+    let Some(relic) = world
+        .get_resource::<AssetServer>()
+        .and_then(|assets| {
+            assets.get_product_handle::<ImageAsset>(two_level_game::side_room::image_product())
+        })
+        .map(image_resource_key)
+    else {
+        return Ok(0);
+    };
+    Ok(batches
+        .as_slice()
+        .iter()
+        .filter(|batch| {
+            batch.target.window_id(Some(WindowId::PRIMARY)) == Some(WindowId::PRIMARY)
+                && batch
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| image.identity().key() == relic)
+        })
+        .flat_map(|batch| &batch.instances)
+        .filter(|sprite| sprite.color.a > 0.0)
+        .count())
 }
 
 fn semantic_state(snapshot: &GameSnapshot) -> Value {
@@ -388,6 +433,7 @@ fn semantic_state(snapshot: &GameSnapshot) -> Value {
         "error": snapshot.error.as_deref().map(output::bounded),
         "current_instance": snapshot.current_instance.map(|id| id.get()),
         "scene_members": snapshot.scene_members,
+        "side_room": snapshot.side_room,
         "held": snapshot.held,
         "restoring": snapshot.restoring,
     })

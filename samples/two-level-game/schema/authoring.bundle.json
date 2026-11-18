@@ -2732,6 +2732,44 @@
               }
             },
             {
+              "id": "two-level-game.SideRoomPortal",
+              "aliases": [
+                "Side room portal"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "room",
+                  "aliases": [
+                    "Side room Scene"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "room"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "asset_ref",
+                    "demand": "deferred"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
               "id": "two-level-game.SoundPalette",
               "aliases": [
                 "Sound palette"

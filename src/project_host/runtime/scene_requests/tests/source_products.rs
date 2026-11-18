@@ -497,6 +497,7 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
                     id: admission.id,
                     expected: admission.expected.clone(),
                     selection: primary(4).into(),
+                    purpose: RequestPurpose::Travel,
                 };
                 assert!(!api::content_matches_admission(content, &other_selection));
                 let foreign = PreparedSceneContent::Source(foreign);

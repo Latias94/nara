@@ -1,0 +1,108 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": { "name": "nara", "version": "0.1.0" },
+  "payload": {
+    "placements": [
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "side-room-floor" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "side-room-relic" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "side-room-sign" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      }
+    ],
+    "entities": [
+      {
+        "id": "side-room-floor",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -120 }, "y": { "type": "f64", "value": 48 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "layer": { "type": "i64", "value": -1 },
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 64 }, "y": { "type": "f64", "value": 40 } } },
+              "material": { "type": "map", "value": {
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 0.13 }, "g": { "type": "f64", "value": 0.26 },
+                  "b": { "type": "f64", "value": 0.20 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      },
+      {
+        "id": "side-room-relic",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -120 }, "y": { "type": "f64", "value": 48 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 12 }, "y": { "type": "f64", "value": 12 } } },
+              "material": { "type": "map", "value": {
+                "image": { "type": "map", "value": {
+                  "kind": { "type": "string", "value": "path" },
+                  "value": { "type": "string", "value": "textures/side-room.png" }
+                } },
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 1 }, "g": { "type": "f64", "value": 1 },
+                  "b": { "type": "f64", "value": 1 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      },
+      {
+        "id": "side-room-sign",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -97 }, "y": { "type": "f64", "value": 55 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 8 }, "y": { "type": "f64", "value": 8 } } },
+              "material": { "type": "map", "value": {
+                "image": { "type": "map", "value": {
+                  "kind": { "type": "string", "value": "path" },
+                  "value": { "type": "string", "value": "textures/meadow.png" }
+                } },
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 1 }, "g": { "type": "f64", "value": 1 },
+                  "b": { "type": "f64", "value": 1 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      }
+    ]
+  }
+}

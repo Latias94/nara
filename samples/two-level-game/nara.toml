@@ -43,7 +43,7 @@ contract = "desktop-supervised-play/v1"
 
 [profiles.desktop.window]
 enabled = true
-title = "Meadow / Cavern | WASD move | E travel | Q instance | M marker | K save | L load | R retry"
+title = "Meadow / Cavern | WASD move | E travel | Q instance | M marker | B side room | K save | L load | R retry"
 width = 960
 height = 540
 present_mode = "fifo"

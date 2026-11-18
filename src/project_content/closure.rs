@@ -110,7 +110,7 @@ impl ProjectSceneContentStamp {
 ///
 /// This receipt retains source facts and their budget, not decoded Scene or Image values. Its
 /// member paths are relative to the exact project root retained privately by the receipt. The
-/// selected Scene path is relative to the project's configured Scenes directory. Neither this
+/// selected Scene path is relative to its bound source directory. Neither this
 /// receipt nor its clonable source authority establishes runtime residency or delivery admission.
 /// These are frozen observations, not a live filesystem validity claim. Bodies needed only by
 /// Deferred references are excluded; a later target request resolves its own current inputs. Strict

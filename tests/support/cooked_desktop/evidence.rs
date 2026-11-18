@@ -25,8 +25,12 @@ use two_level_game::{
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::{SCENE_PATH, marker_image_product, marker_product},
     save::Checkpoint,
+    side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
+
+#[path = "../two_level_pack.rs"]
+mod two_level_pack;
 
 use super::{images, process::read_bounded, walls};
 
@@ -101,8 +105,8 @@ pub fn inspect_package(
     );
     assert_eq!(
         catalog.members().len(),
-        10,
-        "three processed Scenes with two travel roots, four Images, one shared SoundBank, one Sprite animation set and one global Input"
+        12,
+        "four processed Scenes with two travel roots, five Images, one shared SoundBank, one Sprite animation set and one global Input"
     );
     assert_eq!(
         catalog
@@ -110,7 +114,7 @@ pub fn inspect_package(
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count(),
-        3
+        4
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -175,6 +179,9 @@ pub fn inspect_package(
             ));
             assert!(member.dependencies().is_empty());
             images::marker_proof(&ImageRuntimeCodec::decode_runtime(data).unwrap());
+        } else if product == side_room::image_product() {
+            assert!(member.dependencies().is_empty());
+            two_level_pack::assert_room_image(&ImageRuntimeCodec::decode_runtime(data).unwrap());
         } else if product == clips_product() {
             assert!(matches!(
                 member.kind(),
@@ -229,6 +236,8 @@ pub fn inspect_package(
             };
             assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
             assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
+        } else if product == side_room::scene_product() {
+            two_level_pack::assert_room_member(member);
         } else {
             assert!(
                 LevelId::ALL
@@ -243,25 +252,7 @@ pub fn inspect_package(
                 .into_iter()
                 .find(|level| level.scene_product() == product)
                 .unwrap();
-            assert_eq!(
-                member
-                    .dependencies()
-                    .iter()
-                    .map(|dependency| {
-                        assert_eq!(dependency.role(), RuntimeContentDependencyRole::Required);
-                        dependency.product()
-                    })
-                    .collect::<BTreeSet<_>>(),
-                [
-                    level.image_product(),
-                    atlas_product(),
-                    bank_product(),
-                    clips_product(),
-                    marker_product(),
-                ]
-                .into_iter()
-                .collect()
-            );
+            two_level_pack::assert_level_dependencies(member, level);
         }
         offset = end;
     }
@@ -279,6 +270,8 @@ pub fn inspect_package(
                 input_product(),
                 marker_product(),
                 marker_image_product(),
+                side_room::scene_product(),
+                side_room::image_product(),
             ])
             .collect()
     );
@@ -381,13 +374,17 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         assert_eq!(record[field], record["state"][field]);
     }
     let level: LevelKey = serde_json::from_value(record["level"].clone()).unwrap();
-    let resident = [
+    let mut resident = [
         level.level().image_product(),
         atlas_product(),
         marker_image_product(),
     ]
     .into_iter()
     .collect::<BTreeSet<_>>();
+    let side_room = record["state"]["side_room"].as_str().unwrap();
+    if matches!(side_room, "open" | "relic_found") {
+        resident.insert(two_level_game::side_room::image_product());
+    }
     assert_eq!(
         record["resident_images"],
         json!(

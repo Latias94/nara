@@ -1,11 +1,15 @@
 //! Concrete CPU content ownership for one committed project Scene.
 
+mod additive;
 mod catalog;
 mod images;
 mod instances;
 mod materials;
 mod metadata;
 mod replacement;
+pub(super) use additive::activate_addition;
+pub(crate) use additive::has_active_project_scene_addition;
+pub use additive::unload_project_scene_addition;
 pub use instances::{inspect_current_scene_dependency, instantiate_current_scene_dependency};
 pub(super) use replacement::StagedProjectSceneReplacement;
 
@@ -43,17 +47,32 @@ use crate::{
     startup_scene::{CurrentSceneOwner, current_scene_bindings},
 };
 use catalog::CatalogChange;
-use images::{ImagePublications, OwnedImage};
+use images::{ImageChange, ImagePublications, OwnedImage};
 use materials::{MaterialPublications, MaterialResidency};
 use metadata::{PreparedCatalog, ResidencyAuthority};
 
 #[derive(Resource)]
-struct ProjectSceneResidency {
+pub(super) struct ProjectSceneResidency {
+    addition: Option<additive::ActiveAddition>,
     images: Vec<OwnedImage>,
     tilesets: Vec<TileSetContentReceipt>,
     materials: MaterialResidency,
     // Resource values and their receipts retire before their metadata reservation and base.
     authority: ResidencyAuthority,
+}
+
+impl ProjectSceneResidency {
+    pub(super) fn has_addition(&self) -> bool {
+        self.addition.is_some()
+    }
+
+    pub(super) fn admits_processed_addition(
+        &self,
+        current: &CurrentSceneOwner,
+        product: nara_asset::AssetProductRef,
+    ) -> bool {
+        additive::admits_processed_addition(self, current, product)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -243,6 +262,7 @@ impl PreparedResidency {
         let authority = catalog.commit(world);
         world.insert_resource(domains.clone());
         world.insert_resource(ProjectSceneResidency {
+            addition: None,
             images,
             tilesets,
             materials,
@@ -262,30 +282,16 @@ impl PreparedResidency {
         let owned_materials = current.map(|current| &current.materials);
         let material_custody = MaterialPublications::reserve(content, owned_materials)?;
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
-        let catalog = PreparedCatalog::prepare(world, content, current)?;
+        let catalog = PreparedCatalog::prepare(world, content, current, None)?;
         let mut bindings = SceneAssetReservations::from_world(world);
-        let owned_images = current.map_or(&[][..], |current| current.images.as_slice());
-        let no_content = owned_images.is_empty() && content.image_count() == 0;
-        let images = if no_content {
-            // A data-only replacement has no Image resource dependency.
-            ImagePublications::empty()
-        } else {
-            ImagePublications::prepare(
-                content,
-                owned_images,
-                &mut bindings,
-                world
-                    .get_resource::<AssetServer>()
-                    .ok_or_else(resources_missing)?,
-                world
-                    .get_resource::<Assets<ImageAsset>>()
-                    .ok_or_else(resources_missing)?,
-                world
-                    .get_resource::<AssetStates>()
-                    .ok_or_else(resources_missing)?,
-                catalog.runtime_lease(),
-            )?
-        };
+        let owned = current.map_or(&[][..], |current| current.images.as_slice());
+        let images = prepare_images(
+            world,
+            content,
+            ImageChange::Replace(owned),
+            &mut bindings,
+            &catalog,
+        )?;
         let materials = MaterialPublications::prepare(
             world,
             content,
@@ -417,6 +423,37 @@ impl PreparedResidency {
             catalog,
         })
     }
+}
+
+fn prepare_images(
+    world: &World,
+    content: ResidencyInput<'_>,
+    change: ImageChange<'_>,
+    bindings: &mut SceneAssetReservations,
+    catalog: &PreparedCatalog,
+) -> Result<ImagePublications, HostFault> {
+    let retire_or_replace = matches!(change, ImageChange::Replace(owned) if !owned.is_empty());
+    if !retire_or_replace && content.image_count() == 0 {
+        return Ok(ImagePublications::empty());
+    }
+    if !world.contains_resource::<AssetEvents>() {
+        return Err(resources_missing());
+    }
+    ImagePublications::prepare(
+        content,
+        change,
+        bindings,
+        world
+            .get_resource::<AssetServer>()
+            .ok_or_else(resources_missing)?,
+        world
+            .get_resource::<Assets<ImageAsset>>()
+            .ok_or_else(resources_missing)?,
+        world
+            .get_resource::<AssetStates>()
+            .ok_or_else(resources_missing)?,
+        catalog.runtime_lease(),
+    )
 }
 
 /// The admitted Host owns this synchronous convenience wrapper. Managed travel retains the same

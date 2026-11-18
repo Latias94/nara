@@ -6,6 +6,7 @@ pub mod input;
 pub use input::movement_keyboard_bindings;
 mod player_launch;
 pub(crate) mod resume;
+mod side_room;
 mod storage;
 mod travel;
 mod verification;
@@ -40,13 +41,14 @@ pub use collision::CollisionBox;
 use content::Content;
 pub use content::SoundPalette;
 pub use player_launch::{player_launch, player_launch_result};
+pub use side_room::SideRoomPhase;
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("two-level-game.exploration");
 const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-level-game.objects");
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("two-level-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("two-level-game.native", 4),
+    ComponentSchemaProviderBindingId::new("two-level-game.native", 5),
     catalog,
     register,
 );
@@ -112,6 +114,7 @@ pub struct GameSnapshot {
     pub logical_elapsed_nanos: u64,
     pub held: [bool; 4],
     pub restoring: bool,
+    pub side_room: SideRoomPhase,
 }
 
 /// Stable owner identity with a bounded write counter; ordinary mutations never allocate it.
@@ -282,6 +285,7 @@ impl Plugin for ExplorationPlugin {
         .insert_resource(collision::CharacterState::default())?
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
+        .insert_resource(side_room::SideRoom::default())?
         .insert_resource(verification::Verification::new(self.options.scenario))?;
         resume::install(app)?;
         storage::install(app, self.options.save_path.as_deref())?;
@@ -301,7 +305,13 @@ impl Plugin for ExplorationPlugin {
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            (travel::advance, resume::finish, project_animation).chain(),
+            (
+                travel::advance,
+                side_room::advance,
+                resume::finish,
+                project_animation,
+            )
+                .chain(),
         )?;
         app.add_systems(CoreStage::Last, capture)?;
         Ok(())
@@ -391,6 +401,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
             crate::animation::ExplorerAnimation::persistent_component_schema(),
             crate::markers::MarkerPalette::persistent_component_schema(),
             crate::markers::MarkerLink::persistent_component_schema(),
+            crate::side_room::SideRoomPortal::persistent_component_schema(),
         ],
         ..Default::default()
     })
@@ -402,7 +413,8 @@ fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegi
         .register_persistent_component::<collision::CollisionBox>()?
         .register_persistent_component::<crate::animation::ExplorerAnimation>()?
         .register_persistent_component::<crate::markers::MarkerPalette>()?
-        .register_persistent_component::<crate::markers::MarkerLink>()
+        .register_persistent_component::<crate::markers::MarkerLink>()?
+        .register_persistent_component::<crate::side_room::SideRoomPortal>()
         .map(|_| ())
 }
 
@@ -527,6 +539,7 @@ fn simulate(world: &mut World) {
         }
     }
     travel::hide_collected(world);
+    side_room::find_relic(world, position);
 }
 
 fn project_animation(world: &mut World) {
@@ -623,6 +636,7 @@ fn capture(world: &mut World) {
         logical_elapsed_nanos: session.clock.elapsed_nanos,
         held: session.held,
         restoring: resume::is_pending(world),
+        side_room: world.resource::<side_room::SideRoom>().phase(),
     };
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }

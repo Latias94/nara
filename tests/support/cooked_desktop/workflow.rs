@@ -86,6 +86,10 @@ impl<'a> Session<'a> {
             assert_eq!(record["content_target"], self.request.target);
             if running(&record) {
                 evidence::runtime(&record, &self.request.images);
+                assert_eq!(
+                    record["presentation"]["side_room_sprites"],
+                    usize::from(record["state"]["side_room"] == "open")
+                );
             }
             match kind {
                 READY => {
@@ -232,6 +236,48 @@ impl<'a> Session<'a> {
         evidence::progress(&record, level, score, markers, visible);
         assert_eq!(record["state"]["held"], json!([false, false, false, false]));
         record
+    }
+
+    fn play_side_room(&mut self) -> Value {
+        let start = self.snapshot();
+        let instance = &start["state"]["current_instance"];
+        let product = two_level_game::side_room::image_product().to_string();
+        assert_eq!(start["state"]["side_room"], "closed");
+        assert!(
+            !start["resident_images"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(product))
+        );
+        let opened = self.tap(window::B, |record| record["state"]["side_room"] == "open");
+        assert_eq!(&opened["state"]["current_instance"], instance);
+        let images = opened["resident_images"].as_array().unwrap();
+        assert!(images.contains(&json!(product)));
+        assert_eq!(
+            images.len(),
+            start["resident_images"].as_array().unwrap().len() + 1
+        );
+        assert!(
+            start["resident_images"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|image| images.contains(image))
+        );
+        self.input.press(window::W);
+        let found = self.wait(&opened, |record| {
+            record["state"]["side_room"] == "relic_found"
+        });
+        self.input.release();
+        assert_eq!(&found["state"]["current_instance"], instance);
+        assert!(position(&found)[1] > position(&start)[1]);
+        assert_eq!(found["score"], start["score"]);
+        let closed = self.tap(window::B, |record| record["state"]["side_room"] == "closed");
+        assert_eq!(&closed["state"]["current_instance"], instance);
+        assert_eq!(closed["resident_images"], start["resident_images"]);
+        assert_eq!(closed["state"]["held"], json!([false, false, false, false]));
+        json!({"opened": opened["presentation"], "relic_found": found["presentation"],
+            "closed": closed["presentation"], "primary_instance": instance, "released_image": product})
     }
 
     fn walk_and_mark(&mut self, level: LevelKey, score: u32, marker: u64) -> [f32; 2] {
@@ -423,6 +469,7 @@ pub fn run(request: &Request) {
         !request.save.exists(),
         "refused Load must not publish a save"
     );
+    let side_room = first.play_side_room();
     first.travel(window::R, meadow, 0, &[], 2);
     let one = first.walk_and_mark(meadow, 10, 1);
     let meadow_collision = first.collision_excursion(meadow, 10, 1);
@@ -534,6 +581,7 @@ pub fn run(request: &Request) {
         "refused_processes": 1, "refused_initial_save": refused,
         "scripted_controls": scripted,
         "collision_excursions": [meadow_collision, cavern_collision],
+        "side_room": side_room,
         "saved": saved, "continued": continued, "finite": finite_result,
         "native_cleanup": [first_cleanup, fresh_cleanup, finite.native.cleanup_json(), refused_cleanup],
         "checkpoint": decoded.checkpoint, "stored_bytes_unchanged": true,

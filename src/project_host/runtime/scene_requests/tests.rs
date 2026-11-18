@@ -215,8 +215,14 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     let pools = pools();
     let current = loader.load(candidate, plan).unwrap();
     let baseline = loader.budget_snapshot();
-    let mut preparation =
-        Preparation::start(Arc::clone(&context), selected(), &pools, None).unwrap();
+    let mut preparation = Preparation::start(
+        Arc::clone(&context),
+        selected(),
+        RequestPurpose::Travel,
+        &pools,
+        None,
+    )
+    .unwrap();
     let PreparedSceneContent::Source(target) = finish(&mut preparation).unwrap() else {
         panic!("source requests retain their real source snapshot")
     };
@@ -243,7 +249,14 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     )
     .unwrap();
     let expected = loader.load_scene(candidate, plan, &selected()).unwrap_err();
-    let mut rejected = Preparation::start(Arc::clone(&context), selected(), &pools, None).unwrap();
+    let mut rejected = Preparation::start(
+        Arc::clone(&context),
+        selected(),
+        RequestPurpose::Travel,
+        &pools,
+        None,
+    )
+    .unwrap();
     let failure = finish(&mut rejected).err().unwrap();
     assert_eq!(
         failure.error,
@@ -295,8 +308,14 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
     let baseline = loader.budget_snapshot();
     for phase in [TestPhase::BeforeRead, TestPhase::AfterPreparation] {
         let (gate, control) = TestGate::new(phase);
-        let mut preparation =
-            Preparation::start(Arc::clone(&context), selected(), &pools, Some(gate)).unwrap();
+        let mut preparation = Preparation::start(
+            Arc::clone(&context),
+            selected(),
+            RequestPurpose::Travel,
+            &pools,
+            Some(gate),
+        )
+        .unwrap();
         assert!(control.wait_until_started());
         preparation.cancel();
         for _ in 0..3 {
@@ -337,8 +356,14 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     let _current = loader.load(candidate, plan).unwrap();
     let baseline = loader.budget_snapshot();
     let (gate, control) = TestGate::panicking(TestPhase::AfterPreparation);
-    let mut preparation =
-        Preparation::start(Arc::clone(&context), selected(), &pools, Some(gate)).unwrap();
+    let mut preparation = Preparation::start(
+        Arc::clone(&context),
+        selected(),
+        RequestPurpose::Travel,
+        &pools,
+        Some(gate),
+    )
+    .unwrap();
     assert!(control.wait_until_started());
     assert!(preparation.poll().is_none());
     control.release();
@@ -348,7 +373,13 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     assert_active_budget(&context, baseline);
     pools.shutdown_blocking().unwrap();
     assert!(matches!(
-        Preparation::start(Arc::clone(&context), selected(), &pools, None),
+        Preparation::start(
+            Arc::clone(&context),
+            selected(),
+            RequestPurpose::Travel,
+            &pools,
+            None
+        ),
         Err(ProjectSceneRequestError::TaskUnavailable)
     ));
     assert_active_budget(&context, baseline);
@@ -367,7 +398,13 @@ fn inline_pool_rejects_scene_io_without_queuing_or_loading() {
     .unwrap();
     let baseline = loader.budget_snapshot();
     assert!(matches!(
-        Preparation::start(Arc::clone(&context), selected(), &pools, None),
+        Preparation::start(
+            Arc::clone(&context),
+            selected(),
+            RequestPurpose::Travel,
+            &pools,
+            None
+        ),
         Err(ProjectSceneRequestError::TaskUnavailable)
     ));
     assert_eq!(

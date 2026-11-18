@@ -39,7 +39,7 @@ impl MarkerInstance {
         }
     }
 
-    fn validate_geometry(
+    pub(super) fn validate_geometry(
         &self,
         world: &World,
         definition: &MarkerDefinition,

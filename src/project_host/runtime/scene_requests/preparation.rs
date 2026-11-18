@@ -7,8 +7,8 @@ use nara_tasks::{
 
 use super::{
     Context, Diagnostic, DiagnosticCode, DiagnosticReport, PreparedSceneContent,
-    ProjectContentErrorKind, ProjectSceneRequestError, ProjectSceneSelection, SafeSummary,
-    error_diagnostics,
+    ProjectContentErrorKind, ProjectSceneRequestError, ProjectSceneSelection, RequestPurpose,
+    SafeSummary, error_diagnostics,
 };
 
 #[derive(Debug)]
@@ -71,6 +71,7 @@ impl Preparation {
     pub(super) fn start(
         context: Arc<Context>,
         selection: impl Into<ProjectSceneSelection>,
+        purpose: RequestPurpose,
         pools: &TaskPools,
         #[cfg(test)] gate: Option<TestGate>,
     ) -> Result<Self, ProjectSceneRequestError> {
@@ -80,6 +81,7 @@ impl Preparation {
         let work = Arc::new(Mutex::new(Some(Work {
             context,
             selection: selection.into(),
+            purpose,
             result: None,
             #[cfg(test)]
             gate,
@@ -112,21 +114,35 @@ impl Preparation {
                             },
                             selection,
                         ) => {
-                            let attempt = match selection {
-                                ProjectSceneSelection::Source(path) => loader
-                                    .load_scene_observed_reusing_input(
+                            let attempt = match (selection, &work.purpose) {
+                                (ProjectSceneSelection::Source(path), RequestPurpose::Travel) => {
+                                    loader.load_scene_observed_reusing_input(
                                         candidate,
                                         plan,
                                         path,
                                         input.as_ref(),
-                                    ),
-                                ProjectSceneSelection::Product(product) => loader
-                                    .load_scene_product_observed_reusing_input(
-                                        candidate,
-                                        plan,
-                                        *product,
-                                        input.as_ref(),
-                                    ),
+                                    )
+                                }
+                                (
+                                    ProjectSceneSelection::Product(product),
+                                    RequestPurpose::Travel,
+                                ) => loader.load_scene_product_observed_reusing_input(
+                                    candidate,
+                                    plan,
+                                    *product,
+                                    input.as_ref(),
+                                ),
+                                (
+                                    ProjectSceneSelection::Product(product),
+                                    RequestPurpose::AdditiveSource(path),
+                                ) => loader.load_deferred_scene_observed_reusing_input(
+                                    candidate,
+                                    plan,
+                                    *product,
+                                    path,
+                                    input.as_ref(),
+                                ),
+                                _ => unreachable!("source request purpose is selected by the Host"),
                             };
                             attempt
                                 .result
@@ -135,9 +151,10 @@ impl Preparation {
                                 })
                                 .and_then(|snapshot| {
                                     // Required dependencies are data, not public travel roots.
-                                    if !work
-                                        .context
-                                        .declares_source_path(snapshot.selected_scene_path())
+                                    if !work.purpose.is_additive()
+                                        && !work
+                                            .context
+                                            .declares_source_path(snapshot.selected_scene_path())
                                     {
                                         let error = ProjectSceneRequestError::UndeclaredScene;
                                         return Err(PreparationFailure {
@@ -150,7 +167,13 @@ impl Preparation {
                                 })
                         }
                         (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
-                            base.prepare_scene_content(*product)
+                            let prepared =
+                                if matches!(work.purpose, RequestPurpose::AdditiveProcessed) {
+                                    base.prepare_scene_closure(*product)
+                                } else {
+                                    base.prepare_scene_content(*product)
+                                };
+                            prepared
                                 .map(PreparedSceneContent::Processed)
                                 .map_err(PreparationFailure::runtime_content)
                         }
@@ -213,6 +236,7 @@ impl Drop for Preparation {
 struct Work {
     context: Arc<Context>,
     selection: ProjectSceneSelection,
+    purpose: RequestPurpose,
     result: Option<Result<PreparedSceneContent, PreparationFailure>>,
     #[cfg(test)]
     gate: Option<TestGate>,

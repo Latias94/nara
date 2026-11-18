@@ -23,7 +23,7 @@ fn movement_commands_are_semantic_and_do_not_install_physical_bindings() {
     let app = semantic_input_app();
     assert!(!app.world().contains_resource::<ActionMaps>());
     let commands = app.world().resource::<ActionCommandMap>();
-    assert_eq!(commands.bindings().len(), 14);
+    assert_eq!(commands.bindings().len(), 15);
     let context = ActionContext::gameplay();
 
     for (direction, name) in [
@@ -79,6 +79,7 @@ fn one_shot_commands_keep_their_semantic_ids_and_complete_drafts() {
         ("two-level-game.k", "two-level-game.save"),
         ("two-level-game.l", "two-level-game.restore"),
         ("two-level-game.r", "two-level-game.retry"),
+        ("two-level-game.b", "two-level-game.side-room"),
     ]
     .into_iter()
     .enumerate()
@@ -141,6 +142,7 @@ fn authored_defaults_decode_with_intrinsic_primary_identity_and_original_keys() 
         ("two-level-game.k", 'k'),
         ("two-level-game.l", 'l'),
         ("two-level-game.r", 'r'),
+        ("two-level-game.b", 'b'),
     ]
     .map(|(name, key)| ActionBinding::key(ActionId::new(name).unwrap(), KeyCode::Character(key)));
     assert_eq!(candidate.definition().bindings(), expected.as_slice());

@@ -118,6 +118,10 @@ fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
 mod images;
 
 #[cfg(all(feature = "cook", feature = "development"))]
+#[path = "two_level_pack.rs"]
+mod two_level_pack;
+
+#[cfg(all(feature = "cook", feature = "development"))]
 #[path = "cooked_desktop/walls.rs"]
 mod walls;
 
@@ -168,6 +172,7 @@ pub mod native {
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         markers::{SCENE_PATH, marker_image_product, marker_product},
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
+        side_room,
         sound_bank::{SoundBankCodec, bank_product},
     };
 
@@ -538,14 +543,14 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 10);
+        assert_eq!(pack.catalog.members().len(), 12);
         assert_eq!(
             pack.catalog
                 .members()
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count(),
-            3
+            4
         );
         assert_eq!(
             pack.catalog.configuration().input.action_map,
@@ -568,6 +573,8 @@ pub mod native {
                     input_product(),
                     marker_product(),
                     marker_image_product(),
+                    side_room::scene_product(),
+                    side_room::image_product(),
                 ])
                 .collect()
         );
@@ -585,29 +592,23 @@ pub mod native {
                 scene.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
-            assert_eq!(scene.dependencies().len(), 5);
-            assert_eq!(
-                scene
-                    .dependencies()
-                    .iter()
-                    .map(|dependency| dependency.product())
-                    .collect::<BTreeSet<_>>(),
-                [
-                    level.image_product(),
-                    atlas_product(),
-                    bank_product(),
-                    clips_product(),
-                    marker_product(),
-                ]
-                .into_iter()
-                .collect()
-            );
-            assert!(
-                scene.dependencies().iter().all(|dependency| {
-                    dependency.role() == RuntimeContentDependencyRole::Required
-                })
-            );
+            super::two_level_pack::assert_level_dependencies(scene, level);
         }
+        super::two_level_pack::assert_room_member(
+            pack.catalog
+                .member_for_product(side_room::scene_product())
+                .unwrap(),
+        );
+        let room_image = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [side_room::image_product()])
+            .unwrap();
+        super::two_level_pack::assert_room_image(
+            &ImageRuntimeCodec::decode_runtime(&pack_bytes[pack.members[room_image].clone()])
+                .unwrap(),
+        );
         let marker_index = pack
             .catalog
             .members()

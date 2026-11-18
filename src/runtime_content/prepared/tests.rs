@@ -45,6 +45,7 @@ const X: u8 = 1;
 const Y: u8 = 2;
 const Z: u8 = 3;
 const IMAGE: u8 = 4;
+const ROOM: u8 = 5;
 const SCENE_WORK: usize = 1024 * 1024;
 const Y_WORK: usize = 4 * 1024 * 1024;
 const Y_OUTPUT: usize = 2 * 1024 * 1024;
@@ -422,6 +423,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_asset_scene_reference(false)
+    }
+
+    fn with_asset_scene_reference(room: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "{FIXTURE_PREFIX}{}-{}",
             std::process::id(),
@@ -504,6 +509,45 @@ impl Fixture {
             )
             .unwrap(),
         ];
+        if room {
+            let source =
+                SourceDocumentKey::stable_asset(product(ROOM).source(), SourceDocumentKind::Scene);
+            let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                SceneEntityId::new("room").unwrap(),
+            )]);
+            let scene = crate::startup_scene::compile_test_scene(
+                &document,
+                plan.schema_validation().bindings(),
+                source.clone(),
+            );
+            let encoded = RuntimeSceneCandidate::cook(
+                &scene,
+                plan.schema_validation().bindings(),
+                database.resolver(&AssetPathScope::ROOT),
+                scene_limits(),
+            )
+            .unwrap()
+            .to_json_bytes()
+            .unwrap();
+            let path = "40-room.json";
+            fs::write(root.join(path), &encoded).unwrap();
+            members.push(
+                RuntimeContentMember::new(
+                    path,
+                    ContentDigest::of_bytes(&encoded),
+                    RuntimeContentMemberKind::Scene { source },
+                    vec![product(ROOM)],
+                    Vec::new(),
+                )
+                .unwrap(),
+            );
+        }
+        let mut z = ProbeProduct::fixture(Z);
+        if room {
+            z.wire
+                .references
+                .push((product(ROOM), AssetReferenceDemand::Deferred));
+        }
         for (tag, path, kind, target, encoded) in [
             (
                 X,
@@ -524,10 +568,17 @@ impl Fixture {
                 "30-z.json",
                 ZCodec::RUNTIME_KIND,
                 X,
-                ZCodec::encode_runtime(&ProbeProduct::fixture(Z)).unwrap(),
+                ZCodec::encode_runtime(&z).unwrap(),
             ),
         ] {
             fs::write(root.join(path), &encoded).unwrap();
+            let mut dependencies = vec![required(target)];
+            if room && tag == Z {
+                dependencies.push(RuntimeContentDependency::new(
+                    product(ROOM),
+                    RuntimeContentDependencyRole::Reference,
+                ));
+            }
             members.push(
                 RuntimeContentMember::new(
                     path,
@@ -537,7 +588,7 @@ impl Fixture {
                         version: FormatVersion::new(1).unwrap(),
                     },
                     vec![product(tag)],
-                    vec![required(target)],
+                    dependencies,
                 )
                 .unwrap(),
             );
@@ -1020,6 +1071,26 @@ fn assert_prepared_once(content: &ProcessedSceneContent) {
     assert_eq!(
         record.value().field("future").unwrap(),
         &encode_asset_reference_value(&AssetRef::Product(product(X)))
+    );
+}
+
+#[test]
+fn an_admitted_asset_reference_exposes_a_deferred_scene_without_preparing_its_body() {
+    let fixture = Fixture::with_asset_scene_reference(true);
+    let base = fixture.open(false, content_limits());
+    reset_observations();
+    assert!(matches!(
+        base.prepare_scene_content(product(ROOM)),
+        Err(RuntimeContentError::UndeclaredScene)
+    ));
+    let primary = base.prepare_scene_content(product(0)).unwrap();
+    assert_prepared_once(&primary);
+    assert_eq!(primary.deferred_scene_products, [product(ROOM)]);
+    assert!(primary.dependencies.is_empty());
+    let room = base.prepare_scene_closure(product(ROOM)).unwrap();
+    assert_eq!(
+        room.scene.candidate().document().roots(),
+        [SceneEntityId::new("room").unwrap()]
     );
 }
 

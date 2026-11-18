@@ -41,6 +41,8 @@ impl Directory {
             ("scenes/cavern.scene.json", "cavern"),
             ("scenes/marker.scene.json", "marker wrapper"),
             ("scenes/marker.scene.json.meta", "marker metadata"),
+            ("scenes/side-room.scene.json", "side room"),
+            ("scenes/side-room.scene.json.meta", "side room metadata"),
             ("prefabs/marker.prefab.json", "marker prefab"),
             ("assets/textures/meadow.png", "image A"),
             ("assets/textures/meadow.png.meta", "meta A"),
@@ -50,6 +52,11 @@ impl Directory {
             ("assets/textures/explorer.png.meta", "explorer metadata"),
             ("assets/textures/marker.png", "marker badge"),
             ("assets/textures/marker.png.meta", "marker metadata"),
+            ("assets/textures/side-room.png", "side room relic"),
+            (
+                "assets/textures/side-room.png.meta",
+                "side room relic metadata",
+            ),
             ("assets/animations/explorer.sprite-animations.json", "clips"),
             (
                 "assets/animations/explorer.sprite-animations.json.meta",
@@ -161,6 +168,8 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "assets/textures/explorer.png.meta",
         "assets/textures/marker.png",
         "assets/textures/marker.png.meta",
+        "scenes/side-room.scene.json",
+        "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
     ] {
@@ -183,6 +192,10 @@ fn content_fence_requires_input_animation_and_marker_sources_and_metadata() {
         "assets/textures/explorer.png.meta",
         "assets/textures/marker.png",
         "assets/textures/marker.png.meta",
+        "scenes/side-room.scene.json",
+        "scenes/side-room.scene.json.meta",
+        "assets/textures/side-room.png",
+        "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
     ] {

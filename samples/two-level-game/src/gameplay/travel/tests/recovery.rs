@@ -7,6 +7,7 @@ use std::{
 use nara::{
     advanced_prelude::{CurrentScene, SceneProductResource, SceneSourceView},
     app::{PluginCategory, PluginDeclaration, PluginId, RealTime},
+    asset::Assets,
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, LocalGameplayCommands, add_local_gameplay_command_systems},
     hierarchy::{
@@ -17,6 +18,8 @@ use nara::{
         EntityLookup, EntityReference, SpawnedSceneInstance, WorldEntityToken, WorldIdentityDomain,
         spawn_identity_entity,
     },
+    image::ImageAsset,
+    material::SamplerDescriptor,
     prelude::{App, Color, CoreStage, Plugin, PluginError, ResMut, Resource, Transform2d, Vec2},
     project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome},
     scene::{SceneEntitySource, retire_and_despawn_scene_entity},
@@ -368,8 +371,8 @@ fn assert_marker(world: &mut World, id: u64) -> MarkerGraph {
         panic!("the complete marker receipt must resolve its authored child");
     };
     assert_ne!(root, child);
-    definition
-        .validate_world(world, &instance.receipt, Vec2::from_array(record.position))
+    instance
+        .validate_geometry(world, definition, Vec2::from_array(record.position))
         .unwrap();
     assert_eq!(
         *world.get::<Transform2d>(root).unwrap(),
@@ -379,15 +382,23 @@ fn assert_marker(world: &mut World, id: u64) -> MarkerGraph {
         *world.get::<Transform2d>(child).unwrap(),
         Transform2d::from_translation(Vec2::splat(3.0))
     );
-    for (entity, size, color) in [
-        (root, 10.0, Color::rgb(1.0, 0.3, 0.8)),
-        (child, 4.0, Color::WHITE),
-    ] {
-        assert_eq!(
-            world.get::<Sprite>(entity),
-            Some(&Sprite::from_color(Vec2::splat(size), color))
-        );
-    }
+    assert_eq!(
+        world.get::<Sprite>(root),
+        Some(&Sprite::from_color(
+            Vec2::splat(10.0),
+            Color::rgb(1.0, 0.3, 0.8)
+        ))
+    );
+    let child_sprite = world.get::<Sprite>(child).unwrap();
+    let handle = child_sprite.material.image.unwrap();
+    let image = world.resource::<Assets<ImageAsset>>().get(handle).unwrap();
+    assert_eq!(
+        image.product(),
+        Some(crate::markers::marker_image_product())
+    );
+    let mut expected = Sprite::from_texture(handle, Vec2::splat(4.0));
+    expected.material.sampler = SamplerDescriptor::NEAREST_CLAMP;
+    assert_eq!(child_sprite, &expected);
     assert!(world.get::<Parent>(root).is_none());
     assert_eq!(world.get::<Parent>(child).unwrap().parent(), root);
     assert_eq!(world.get::<Children>(root).unwrap().as_slice(), &[child]);

@@ -1,9 +1,9 @@
 use super::input::RuntimeKind;
 use nara::{
     asset::{
-        AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetRef, AssetSourceKind,
-        AssetSourcePath, ProjectAssetDatabase, RuntimeAssetCodec, SourceAssetBuild,
-        SourceAssetImporter,
+        AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef, AssetRef,
+        AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, RuntimeAssetCodec,
+        SourceAssetBuild, SourceAssetImporter,
     },
     asset_build::{
         ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation, ArtifactBuildStore,
@@ -36,6 +36,7 @@ use two_level_game::{
     input::{INPUT_PATH, input_product},
     levels::LevelId,
     markers::{IMAGE_PATH, PREFAB_PATH, SCENE_PATH, marker_image_product, marker_product},
+    side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
 
@@ -155,24 +156,20 @@ pub(super) fn prepare(
         AssetSourcePath::new(settings.paths.scenes.as_str())
             .map_err(|error| format!("Scenes root: {error}"))?,
     );
-    let marker_path = AssetPath::new(SCENE_PATH).map_err(|error| error.to_string())?;
-    let marker_source = scene_scope.resolve(&marker_path);
-    let metadata_path = marker_source.meta_path();
-    let metadata = read(root, &metadata_path, METADATA_BYTES)?;
-    let identity = AssetMetaIdentityCandidate::decode_json_bytes(&metadata)
-        .map_err(|error| format!("{metadata_path}: {error}"))?
-        .into_identity();
-    if identity.path() != &marker_path
-        || identity.source_kind() != &AssetSourceKind::Scene
-        || identity.stable_id() != marker_product().source()
-    {
-        return Err(format!(
-            "{metadata_path}: expected the game's marker Scene identity and path"
-        ));
-    }
-    database
-        .insert_identity(&scene_scope, marker_path, identity)
-        .map_err(|error| format!("{metadata_path}: {error}"))?;
+    let marker_source = register_scene_identity(
+        root,
+        &mut database,
+        &scene_scope,
+        SCENE_PATH,
+        marker_product(),
+    )?;
+    let room_source = register_scene_identity(
+        root,
+        &mut database,
+        &scene_scope,
+        side_room::SCENE_PATH,
+        side_room::scene_product(),
+    )?;
     let prefab_source = AssetSourcePath::new(format!("{}/{}", settings.paths.prefabs, PREFAB_PATH))
         .map_err(|error| format!("marker Prefab source path: {error}"))?;
     let prefab_bytes = read(root, prefab_source.as_str(), DOCUMENT_BYTES)?;
@@ -201,6 +198,7 @@ pub(super) fn prepare(
         .chain([
             (ATLAS_PATH, atlas_product()),
             (IMAGE_PATH, marker_image_product()),
+            (side_room::IMAGE_PATH, side_room::image_product()),
         ])
     {
         let path = AssetPath::new(path).map_err(|error| format!("Image source path: {error}"))?;
@@ -334,6 +332,7 @@ pub(super) fn prepare(
         .map(|level| scene_source(&settings, level).map(|source| (level.scene_product(), source)))
         .collect::<Result<Vec<_>, _>>()?;
     scenes.push((marker_product(), marker_source.clone()));
+    scenes.push((side_room::scene_product(), room_source.clone()));
     for (product, source) in scenes {
         let bytes = read(root, source.as_str(), DOCUMENT_BYTES)?;
         let document = SceneDocumentCandidate::decode_json_bytes(&bytes)
@@ -382,13 +381,13 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 10
+    if catalog.members().len() != 12
         || catalog
             .members()
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count()
-            != 3
+            != 4
         || catalog.scenes().len() != LevelId::ALL.len()
         || LevelId::ALL
             .into_iter()
@@ -396,7 +395,7 @@ pub(super) fn prepare(
         || !catalog.addressable_roots().is_empty()
     {
         return Err(
-            "cooked content must contain exactly three Scenes with two travel roots, four Images, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain four Scenes with two travel roots, five Images, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
     }
@@ -417,6 +416,28 @@ pub(super) fn prepare(
         || !matches!(marker.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
     {
         return Err("cooked marker Scene identity or required Image edge changed".into());
+    }
+    let room = catalog
+        .member_for_product(side_room::scene_product())
+        .ok_or("missing deferred side room Scene")?;
+    let room_key = SourceDocumentKey::project_location(
+        settings.project.source_universe,
+        room_source,
+        SourceDocumentKind::Scene,
+    );
+    if room.products() != [side_room::scene_product()]
+        || !matches!(room.kind(), RuntimeContentMemberKind::Scene { source } if source == &room_key)
+        || room.dependencies().len() != 2
+        || [side_room::image_product(), LevelId::Meadow.image_product()]
+            .into_iter()
+            .any(|product| {
+                !room.dependencies().contains(&RuntimeContentDependency::new(
+                    product,
+                    RuntimeContentDependencyRole::Required,
+                ))
+            })
+    {
+        return Err("cooked side room Scene identity or required Images changed".into());
     }
     let input_member = catalog
         .member_for_product(input_product())
@@ -476,7 +497,14 @@ pub(super) fn prepare(
         );
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
-            || scene.dependencies().len() != 5
+            || scene.dependencies().len() != 5 + usize::from(level == LevelId::Meadow)
+            || (level == LevelId::Meadow)
+                != scene
+                    .dependencies()
+                    .contains(&RuntimeContentDependency::new(
+                        side_room::scene_product(),
+                        RuntimeContentDependencyRole::Reference,
+                    ))
             || scene
                 .dependencies()
                 .iter()
@@ -501,11 +529,11 @@ pub(super) fn prepare(
             ));
         }
     }
-    for product in LevelId::ALL
-        .into_iter()
-        .map(LevelId::image_product)
-        .chain([atlas_product(), marker_image_product()])
-    {
+    for product in LevelId::ALL.into_iter().map(LevelId::image_product).chain([
+        atlas_product(),
+        marker_image_product(),
+        side_room::image_product(),
+    ]) {
         let image = catalog
             .member_for_product(product)
             .ok_or_else(|| format!("missing cooked Image {product}"))?;
@@ -517,6 +545,34 @@ pub(super) fn prepare(
         }
     }
     Ok((prepared, observations))
+}
+
+fn register_scene_identity(
+    root: &DirectoryCapability,
+    database: &mut ProjectAssetDatabase,
+    scope: &AssetPathScope,
+    path: &str,
+    product: AssetProductRef,
+) -> Result<AssetSourcePath, String> {
+    let alias = AssetPath::new(path).map_err(|error| error.to_string())?;
+    let source = scope.resolve(&alias);
+    let metadata_path = source.meta_path();
+    let metadata = read(root, &metadata_path, METADATA_BYTES)?;
+    let identity = AssetMetaIdentityCandidate::decode_json_bytes(&metadata)
+        .map_err(|error| format!("{metadata_path}: {error}"))?
+        .into_identity();
+    if identity.path() != &alias
+        || identity.source_kind() != &AssetSourceKind::Scene
+        || identity.stable_id() != product.source()
+    {
+        return Err(format!(
+            "{metadata_path}: expected the game's declared Scene identity and path"
+        ));
+    }
+    database
+        .insert_identity(scope, alias, identity)
+        .map_err(|error| format!("{metadata_path}: {error}"))?;
+    Ok(source)
 }
 
 fn project_settings(

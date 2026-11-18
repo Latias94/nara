@@ -99,7 +99,7 @@ fn declared_content_provider() -> nara::reflect::ComponentSchemaProviderDefiniti
             registry
                 .register_persistent_component_with_codec::<DeclaredContentValue, _, _>(
                     declared_content_schema(),
-                    |value| Ok(DeclaredContentValue(value.clone())),
+                    |value| Ok(DeclaredContentValue(value.to_owned())),
                     |value| Ok(value.0.clone()),
                 )
                 .map(|_| ())

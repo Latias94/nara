@@ -1,6 +1,7 @@
 //! Public finite request surface and explicit owner-thread commit.
 
 use nara_ecs::bevy_ecs::system::SystemState;
+use nara_scene::SceneOccurrenceKey;
 
 use super::*;
 
@@ -50,6 +51,10 @@ pub enum ProjectSceneRequestError {
     Busy,
     #[error("the Scene is not startup or an explicitly declared delivery root")]
     UndeclaredScene,
+    #[error("the Scene is not a Deferred dependency of the current Scene")]
+    NotDeferredScene,
+    #[error("unload the active Scene addition before requesting another Scene")]
+    AdditionActive,
     #[error("project Scene preparation is unavailable on the I/O task pool")]
     TaskUnavailable,
     #[error("project Scene request identities are exhausted")]
@@ -72,6 +77,8 @@ impl ProjectSceneRequestError {
             Self::Unavailable => "project.scene.request-unavailable",
             Self::Busy => "project.scene.request-busy",
             Self::UndeclaredScene => "project.scene.undeclared-scene",
+            Self::NotDeferredScene => "project.scene.deferred-scene-unavailable",
+            Self::AdditionActive => "project.scene.addition-active",
             Self::TaskUnavailable => "project.scene.preparation-unavailable",
             Self::IdExhausted => "project.scene.request-id-exhausted",
             Self::Stale => "project.scene.request-stale",
@@ -145,7 +152,7 @@ impl PreparedProjectSceneView<'_> {
         self.content.domain_assets()
     }
 
-    /// Admitted target document, matching the document that becomes `CurrentScene::source`.
+    /// Admitted target document for the selected replacement or additive operation.
     #[must_use]
     pub fn scene(&self) -> &CompiledSceneDocument {
         self.content.document()
@@ -167,8 +174,8 @@ impl PreparedProjectSceneView<'_> {
         &self.admission.selection
     }
 
-    /// Returns the actual captured path relative to the configured Scenes directory for source
-    /// content, including requests originally made by Product. Processed content has no source path.
+    /// Returns the captured path relative to its source directory, for source content only.
+    /// Travel uses the configured Scenes directory. Deferred targets use their bound directory.
     #[must_use]
     pub fn selected_scene_path(&self) -> Option<&ProjectPath> {
         match self.content {
@@ -205,6 +212,7 @@ impl PreparedProjectSceneView<'_> {
 pub struct ProjectScenes<'w> {
     owner: Option<ResMut<'w, RequestOwner>>,
     current: Option<Res<'w, CurrentSceneOwner>>,
+    residency: Option<Res<'w, ProjectSceneResidency>>,
     generation: Option<Res<'w, RuntimeGeneration>>,
     pools: Option<Res<'w, TaskPools>>,
     #[cfg(feature = "asset-watch")]
@@ -328,6 +336,10 @@ impl ProjectScenes<'_> {
         };
         if owner.closing.load(Ordering::Acquire)
             || owner.slot.is_some()
+            || self
+                .residency
+                .as_deref()
+                .is_some_and(ProjectSceneResidency::has_addition)
             || owner
                 .source_updates
                 .as_ref()
@@ -478,6 +490,46 @@ impl ProjectScenes<'_> {
         &mut self,
         selection: impl Into<ProjectSceneSelection>,
     ) -> Result<ProjectSceneRequestId, ProjectSceneRequestError> {
+        self.request_with_purpose(selection.into(), RequestPurpose::Travel)
+    }
+
+    /// Prepares a Deferred Scene Product from the current Host's admitted dependency closure.
+    ///
+    /// The request shares the original preparation slot and leaves primary simulation running.
+    /// Once Ready, inspect the content and call [`activate_prepared_project_scene`] at an
+    /// exclusive boundary. A loose pack member, travel root or resident Immediate dependency
+    /// alone cannot authorize additive preparation. Unload the active addition before making
+    /// another Scene request.
+    pub fn request_additive(
+        &mut self,
+        product: AssetProductRef,
+    ) -> Result<ProjectSceneRequestId, ProjectSceneRequestError> {
+        let current = self
+            .current
+            .as_deref()
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        let residency = self
+            .residency
+            .as_deref()
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        let purpose = if current.is_project_backed() {
+            let path = current
+                .deferred_source_scene(product)
+                .ok_or(ProjectSceneRequestError::NotDeferredScene)?;
+            RequestPurpose::AdditiveSource(path.clone())
+        } else if residency.admits_processed_addition(current, product) {
+            RequestPurpose::AdditiveProcessed
+        } else {
+            return Err(ProjectSceneRequestError::NotDeferredScene);
+        };
+        self.request_with_purpose(ProjectSceneSelection::Product(product), purpose)
+    }
+
+    fn request_with_purpose(
+        &mut self,
+        selection: ProjectSceneSelection,
+        purpose: RequestPurpose,
+    ) -> Result<ProjectSceneRequestId, ProjectSceneRequestError> {
         let current = self
             .current
             .as_deref()
@@ -500,7 +552,14 @@ impl ProjectScenes<'_> {
         if !owner.context.matches_current(current) {
             return Err(ProjectSceneRequestError::Stale);
         }
-        owner.request(selection.into(), generation, current.receipt(), pools)
+        if self
+            .residency
+            .as_deref()
+            .is_some_and(ProjectSceneResidency::has_addition)
+        {
+            return Err(ProjectSceneRequestError::AdditionActive);
+        }
+        owner.request(selection, purpose, generation, current.receipt(), pools)
     }
 
     /// Observes exactly this request using the current generation and expected-receipt predicates.
@@ -613,6 +672,45 @@ where
             "Installed native domains require begin_prepared_project_scene_travel",
         );
     }
+    commit_ready_project_scene(world, request, false, |world, admission, content| {
+        super::super::content_residency::replace_scene(
+            world,
+            &admission.expected,
+            content,
+            limits,
+            additional_retirements,
+            configure,
+        )
+    })
+}
+
+/// Activates exactly one ready additive request alongside the primary Scene.
+///
+/// The occurrence names the new Scene's lifetime and the returned receipt selects its later
+/// unload. The Host keeps its original primary receipt and resource publications. Invoke from an
+/// exclusive simulation boundary. Additive activation has the ordinary Image residency contract.
+pub fn activate_prepared_project_scene(
+    world: &mut World,
+    request: ProjectSceneRequestId,
+    occurrence: &SceneOccurrenceKey,
+) -> SceneSpawnReport {
+    commit_ready_project_scene(world, request, true, |world, admission, content| {
+        super::super::content_residency::activate_addition(
+            world,
+            &admission.expected,
+            content,
+            occurrence,
+        )
+        .unwrap_or_else(|report| report)
+    })
+}
+
+fn commit_ready_project_scene(
+    world: &mut World,
+    request: ProjectSceneRequestId,
+    additive: bool,
+    publish: impl FnOnce(&mut World, &Admission, &PreparedSceneContent) -> SceneSpawnReport,
+) -> SceneSpawnReport {
     if !world.contains_resource::<RequestOwner>() {
         return rejected(
             "project.scene.request-unavailable",
@@ -656,6 +754,14 @@ where
                 "Project Scene preparation has not returned ready content",
             );
         }
+        if owner
+            .slot
+            .as_ref()
+            .and_then(Slot::admission)
+            .is_some_and(|admission| admission.purpose.is_additive() != additive)
+        {
+            return wrong_publication();
+        }
         let Some(Slot::Ready { admission, content }) = owner.slot.take() else {
             unreachable!()
         };
@@ -665,21 +771,16 @@ where
                 "Prepared Scene does not match its captured Host authority",
             )
         } else {
-            super::super::content_residency::replace_scene(
-                world,
-                &admission.expected,
-                &content,
-                limits,
-                additional_retirements,
-                configure,
-            )
+            publish(world, &admission, &content)
         };
         let state = if !report.diagnostics.has_errors() && report.instance.is_some() {
-            if let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) = (
-                &mut owner.source_updates,
-                &content,
-                report.instance.as_ref(),
-            ) {
+            if !additive
+                && let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) = (
+                    &mut owner.source_updates,
+                    &content,
+                    report.instance.as_ref(),
+                )
+            {
                 updates.publish(snapshot.content_closure(), instance);
             }
             ProjectSceneRequestState::Committed
@@ -693,6 +794,13 @@ where
         });
         report
     })
+}
+
+fn wrong_publication() -> SceneSpawnReport {
+    rejected(
+        "project.scene.request-purpose-mismatch",
+        "Scene request must be published through the operation that admitted it",
+    )
 }
 
 /// Prepares the complete candidate and queues managed Scene travel at the next TaskUpdate boundary.
@@ -734,6 +842,12 @@ where
                 "project.scene.request-not-ready",
                 "Project Scene preparation has not returned ready content",
             ));
+        }
+        if slot
+            .admission()
+            .is_some_and(|admission| admission.purpose.is_additive())
+        {
+            return Err(wrong_publication());
         }
         let valid = slot.admission().is_some_and(|admission| {
             owner.matches(
@@ -856,9 +970,20 @@ pub(super) fn content_matches_admission(
                 && snapshot.lineage() == candidate.lineage()
                 && plan.lineage() == candidate.lineage()
                 && snapshot.content_closure().manifest_digest() == candidate.manifest_digest()
-                && admission
-                    .context
-                    .declares_source_path(snapshot.selected_scene_path())
+                && match &admission.purpose {
+                    RequestPurpose::Travel => admission
+                        .context
+                        .declares_source_path(snapshot.selected_scene_path()),
+                    RequestPurpose::AdditiveSource(path) => {
+                        snapshot.selected_scene_product().is_some_and(|product| {
+                            snapshot
+                                .asset_database()
+                                .record_for_stable_id(product.source())
+                                .is_some_and(|record| record.path() == path)
+                        })
+                    }
+                    RequestPurpose::AdditiveProcessed => false,
+                }
                 && snapshot.shares_component_bindings(plan.schema_validation().bindings())
                 && snapshot.matches_asset_domains(plan)
         }
@@ -869,7 +994,13 @@ pub(super) fn content_matches_admission(
         ) => {
             base.same_base(content.base())
                 && content.product() == *product
-                && admission.context.admits_request(&admission.selection)
+                && match admission.purpose {
+                    RequestPurpose::Travel => {
+                        admission.context.admits_request(&admission.selection)
+                    }
+                    RequestPurpose::AdditiveProcessed => true,
+                    RequestPurpose::AdditiveSource(_) => false,
+                }
                 && content
                     .scene
                     .candidate()

@@ -211,6 +211,7 @@ pub mod __private {
         project_published_authoring_scene_preview,
     };
     pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
+    pub use crate::occurrence::scene_instance_retired;
     pub use crate::prefab::extraction::{
         CapturedExtractionSource, PrefabExtractionAssets, PrefabExtractionBinding,
         PrefabExtractionEnvironment,

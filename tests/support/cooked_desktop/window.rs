@@ -20,7 +20,9 @@ use windows_sys::Win32::{
 
 use super::process::POLL;
 
-const KEYS: [u16; 10] = [0x1e, 0x20, 0x11, 0x1f, 0x12, 0x10, 0x32, 0x25, 0x26, 0x13];
+const KEYS: [u16; 11] = [
+    0x1e, 0x20, 0x11, 0x1f, 0x12, 0x10, 0x32, 0x25, 0x26, 0x13, B,
+];
 pub const D: u16 = 0x20;
 pub const J: u16 = 0x24;
 pub const W: u16 = 0x11;
@@ -30,6 +32,7 @@ pub const M: u16 = 0x32;
 pub const K: u16 = 0x25;
 pub const L: u16 = 0x26;
 pub const R: u16 = 0x13;
+pub const B: u16 = 0x30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Window {
@@ -184,7 +187,7 @@ impl Input {
         for scan in KEYS {
             assert!(
                 unsafe { GetAsyncKeyState(Self::virtual_key(scan, thread)) } >= 0,
-                "all A/D/W/S/E/Q/M/K/L/R keys must initially be Up: scan={scan:x}"
+                "all A/D/W/S/E/Q/M/K/L/R/B keys must initially be Up: scan={scan:x}"
             );
         }
     }

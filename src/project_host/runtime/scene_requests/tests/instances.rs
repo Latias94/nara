@@ -35,14 +35,17 @@ use nara_scene::{
 
 use super::super::super::{CleanupDriveOutcome, ProjectHost};
 use super::{
-    Context, Fixture, RequestOwner, assert_active_budget, with_context_world,
-    with_context_world_and_startup,
+    Context, Fixture, PreparedSceneContent, ProjectSceneRequestError, ProjectSceneRequestState,
+    ProjectScenes, RequestOwner, Slot, activate_prepared_project_scene, assert_active_budget,
+    commit_prepared_project_scene, poll_project_scene_requests, pools,
+    preparation::{TestGate, TestPhase},
+    wait_for_request, with_context_world, with_context_world_and_startup,
 };
 use crate::{
     project_host::{
         ProjectContentSnapshot, inspect_current_scene_dependency,
         instantiate_current_scene_dependency, open_explicit_product_project_root,
-        resolve_runtime_configuration,
+        resolve_runtime_configuration, unload_project_scene_addition,
     },
     runtime_content::{
         RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentBase, RuntimeContentBudgetKind,
@@ -57,6 +60,100 @@ use crate::{
 const IMMEDIATE: &str = "test.scene-dependency.Immediate";
 const DEFERRED: &str = "test.scene-dependency.Deferred";
 const LINK: &str = "test.scene-dependency.Link";
+
+#[test]
+fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
+    let (_fixture, context, snapshot) = source_fixture();
+    with_context_world_and_startup(context, snapshot.scene_source(), Some(snapshot), |world| {
+        world.insert_resource(pools());
+        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let Context::Source { loader, .. } = context.as_ref() else {
+            unreachable!()
+        };
+        let original_budget = loader.budget_snapshot();
+        let (gate, control) = TestGate::new(TestPhase::AfterPreparation);
+        world.resource_mut::<RequestOwner>().gate = Some(gate);
+        let primary = CurrentScene::get(world).unwrap().receipt().clone();
+        let request = ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.request_additive(product(3)),
+                Err(ProjectSceneRequestError::NotDeferredScene)
+            );
+            assert_eq!(
+                scenes.request_additive(product(2)),
+                Err(ProjectSceneRequestError::NotDeferredScene)
+            );
+            scenes.request_additive(product(4)).unwrap()
+        });
+        assert!(control.wait_until_started());
+        ProjectScenes::scope(world, |scenes| assert!(scenes.cancel(request)));
+        poll_project_scene_requests(world);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Cancelling)
+            );
+            assert!(!scenes.acknowledge(request));
+            assert_eq!(
+                scenes.request_additive(product(4)),
+                Err(ProjectSceneRequestError::Busy)
+            );
+        });
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+        control.release();
+        wait_for_request(world, request, ProjectSceneRequestState::Cancelled);
+        assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+        assert_active_budget(&context, original_budget);
+        let request =
+            ProjectScenes::scope(world, |scenes| scenes.request_additive(product(4))).unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        assert!(matches!(
+            world.resource::<RequestOwner>().slot.as_ref(),
+            Some(Slot::Ready {content: PreparedSceneContent::Source(snapshot), .. })
+                if matches!(snapshot.selected_scene_source_key().origin(),
+                    nara_scene::SourceDocumentOrigin::ProjectLocation { path, .. }
+                        if path.as_str() == "assets/deferred.scene.json")
+        ));
+        assert_error(
+            &commit_prepared_project_scene(world, request, limits(), &[], |_| {}),
+            "project.scene.request-purpose-mismatch",
+        );
+        let occurrence = SceneOccurrenceKey::new("test.scene-dependency", "deferred").unwrap();
+        let report = activate_prepared_project_scene(world, request, &occurrence);
+        let receipt = report
+            .instance
+            .unwrap_or_else(|| panic!("{:?}", report.diagnostics));
+        assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+        assert!(unload_project_scene_addition(world, &primary).is_err());
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+        assert_eq!(
+            ProjectScenes::scope(world, |scenes| scenes.request(product(2))),
+            Err(ProjectSceneRequestError::AdditionActive)
+        );
+        assert_error(
+            &restart_current_scene_with_product(world, &primary, limits(), &[], |_| {}),
+            "project.scene.addition-active",
+        );
+        assert_eq!(unload_project_scene_addition(world, &receipt).unwrap(), 1);
+        assert!(unload_project_scene_addition(world, &receipt).is_err());
+        assert_active_budget(&context, original_budget);
+
+        let request =
+            ProjectScenes::scope(world, |scenes| scenes.request_additive(product(4))).unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let receipt = activate_prepared_project_scene(world, request, &occurrence)
+            .instance
+            .unwrap();
+        assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+        assert_eq!(
+            retire_and_despawn_scene_instance(world, &receipt).unwrap(),
+            1
+        );
+        assert_eq!(unload_project_scene_addition(world, &receipt).unwrap(), 0);
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+        assert_active_budget(&context, original_budget);
+    });
+}
 
 #[test]
 fn source_dependency_instances_share_capture_and_isolate_hierarchy_references_and_occurrences() {
@@ -437,11 +534,8 @@ fn source_fixture() -> (Fixture, Arc<Context>, ProjectContentSnapshot) {
     );
     fs::write(&manifest, settings).unwrap();
     for (id, path, document) in documents() {
-        fs::write(
-            fixture.root.join("scenes").join(path),
-            document.to_json_string().unwrap(),
-        )
-        .unwrap();
+        let directory = fixture.root.join(if id == 4 { "assets" } else { "scenes" });
+        fs::write(directory.join(path), document.to_json_string().unwrap()).unwrap();
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 product(id).source(),
@@ -451,7 +545,7 @@ fn source_fixture() -> (Fixture, Arc<Context>, ProjectContentSnapshot) {
             (),
         );
         fs::write(
-            fixture.root.join("scenes").join(format!("{path}.meta")),
+            directory.join(format!("{path}.meta")),
             metadata.to_json_string().unwrap(),
         )
         .unwrap();

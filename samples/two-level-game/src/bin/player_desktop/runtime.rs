@@ -110,14 +110,14 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 10
+            || base.catalog().members().len() != 12
             || base
                 .catalog()
                 .members()
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count()
-                != 3
+                != 4
             || !base.catalog().addressable_roots().is_empty()
             || base.plan().settings().input().action_map
                 != Some(two_level_game::input::input_product())

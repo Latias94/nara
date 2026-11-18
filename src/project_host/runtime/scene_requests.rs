@@ -8,7 +8,8 @@ mod source_updates;
 pub use api::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
-    begin_prepared_project_scene_travel, commit_prepared_project_scene,
+    activate_prepared_project_scene, begin_prepared_project_scene_travel,
+    commit_prepared_project_scene,
 };
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -23,7 +24,7 @@ use nara_app::{
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
     RuntimeGeneration,
 };
-use nara_asset::AssetProductRef;
+use nara_asset::{AssetProductRef, AssetSourcePath};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
 use nara_identity::SpawnedSceneInstance;
@@ -34,7 +35,7 @@ use nara_scene::{
 };
 use nara_tasks::TaskPools;
 
-use super::content::PreparedSceneContent;
+use super::{content::PreparedSceneContent, content_residency::ProjectSceneResidency};
 use crate::{
     project_host::{
         ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
@@ -102,6 +103,20 @@ struct Admission {
     id: ProjectSceneRequestId,
     expected: SpawnedSceneInstance,
     selection: ProjectSceneSelection,
+    purpose: RequestPurpose,
+}
+
+#[derive(Clone)]
+enum RequestPurpose {
+    Travel,
+    AdditiveSource(AssetSourcePath),
+    AdditiveProcessed,
+}
+
+impl RequestPurpose {
+    fn is_additive(&self) -> bool {
+        !matches!(self, Self::Travel)
+    }
 }
 
 #[derive(Resource)]
@@ -213,6 +228,7 @@ impl RequestOwner {
     fn request(
         &mut self,
         selection: ProjectSceneSelection,
+        purpose: RequestPurpose,
         generation: RuntimeGeneration,
         expected: &SpawnedSceneInstance,
         pools: &TaskPools,
@@ -223,7 +239,7 @@ impl RequestOwner {
         if self.slot.is_some() {
             return Err(ProjectSceneRequestError::Busy);
         }
-        if !self.context.admits_request(&selection) {
+        if !purpose.is_additive() && !self.context.admits_request(&selection) {
             return Err(ProjectSceneRequestError::UndeclaredScene);
         }
         let sequence = NEXT_REQUEST
@@ -238,6 +254,7 @@ impl RequestOwner {
         let preparation = Preparation::start(
             Arc::clone(&self.context),
             selection.clone(),
+            purpose.clone(),
             pools,
             #[cfg(test)]
             self.gate.take(),
@@ -248,6 +265,7 @@ impl RequestOwner {
                 id,
                 expected: expected.clone(),
                 selection,
+                purpose,
             },
             preparation,
             discard: None,
@@ -422,7 +440,8 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
                 .source_updates
                 .as_ref()
                 .is_some_and(|updates| updates.status().pending)
-    }) {
+    }) && !super::content_residency::has_active_project_scene_addition(world)
+    {
         ProjectScenes::scope(world, |scenes| scenes.start_source_update());
     }
     if world

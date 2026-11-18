@@ -23,6 +23,7 @@ pub(super) enum ResidencyAuthority {
     Processed {
         _tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
         scenes: Vec<RuntimeContentScene>,
+        deferred_scene_products: Vec<AssetProductRef>,
         _lease: Arc<RuntimeContentLease>,
         base: RuntimeContentBase,
     },
@@ -65,6 +66,7 @@ pub(super) enum PreparedCatalog {
     Processed {
         tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
         scenes: Vec<RuntimeContentScene>,
+        deferred_scene_products: Vec<AssetProductRef>,
         lease: Arc<RuntimeContentLease>,
         base: RuntimeContentBase,
     },
@@ -75,8 +77,9 @@ impl PreparedCatalog {
         world: &World,
         content: ResidencyInput<'_>,
         current: Option<&ProjectSceneResidency>,
+        shared_images: Option<usize>,
     ) -> Result<Self, HostFault> {
-        let bytes = metadata_bytes(world, content, current)?;
+        let bytes = metadata_bytes(world, content, current, shared_images)?;
         match content {
             ResidencyInput::Source(snapshot) => {
                 let lease = snapshot
@@ -111,6 +114,7 @@ impl PreparedCatalog {
                 Ok(Self::Processed {
                     tilesets: content.tilesets.clone(),
                     scenes: content.dependencies.clone(),
+                    deferred_scene_products: content.deferred_scene_products.clone(),
                     lease: Arc::new(lease),
                     base: content.base().clone(),
                 })
@@ -164,11 +168,13 @@ impl PreparedCatalog {
             Self::Processed {
                 tilesets,
                 scenes,
+                deferred_scene_products,
                 lease,
                 base,
             } => ResidencyAuthority::Processed {
                 _tilesets: tilesets,
                 scenes,
+                deferred_scene_products,
                 _lease: lease,
                 base,
             },
@@ -180,6 +186,7 @@ fn metadata_bytes(
     world: &World,
     content: ResidencyInput<'_>,
     current: Option<&ProjectSceneResidency>,
+    shared_images: Option<usize>,
 ) -> Result<usize, HostFault> {
     // One conservative logical reservation covers both preparation and its committed receipts.
     // Pixel payloads retain their original acquisition/import charge; native TileSet owners keep
@@ -196,8 +203,9 @@ fn metadata_bytes(
             .ok_or_else(metadata_overflow)?,
         None => size_of::<AssetServer>(),
     };
-    add_entries(&mut bytes, 3, catalogue_bytes)?;
-    // Only the two staged copies grow. A complete new binding is a conservative upper bound
+    let staged_copies = if shared_images.is_some() { 1 } else { 2 };
+    add_entries(&mut bytes, 1 + staged_copies, catalogue_bytes)?;
+    // Only the staged copies grow. A complete new binding is a conservative upper bound
     // even when the target reuses an existing identity; current-only bindings are already above.
     match content {
         ResidencyInput::Source(snapshot) => {
@@ -205,7 +213,7 @@ fn metadata_bytes(
                 let growth =
                     AssetServer::checked_product_binding_retained_bytes(Some(record.path()))
                         .ok_or_else(metadata_overflow)?;
-                add_entries(&mut bytes, 2, growth)?;
+                add_entries(&mut bytes, staged_copies, growth)?;
             }
         }
         ResidencyInput::Processed(content) => {
@@ -219,7 +227,9 @@ fn metadata_bytes(
             add_entries(
                 &mut bytes,
                 products,
-                growth.checked_mul(2).ok_or_else(metadata_overflow)?,
+                growth
+                    .checked_mul(staged_copies)
+                    .ok_or_else(metadata_overflow)?,
             )?;
         }
     }
@@ -230,6 +240,14 @@ fn metadata_bytes(
         + 5 * ARC_CONTROL_BLOCK_BYTES
         + size_of::<RuntimeContentAsset<ImageAsset>>();
     add_entries(&mut bytes, content.image_count(), image_metadata)?;
+    add_entries(
+        &mut bytes,
+        shared_images.unwrap_or(0),
+        size_of::<OwnedImage>()
+            + size_of::<AssetId>()
+            + size_of::<&OwnedImage>()
+            + BTREE_ENTRY_OVERHEAD,
+    )?;
     let tileset_metadata = 3 * size_of::<TileSetPublicationInput>()
         + 3 * size_of::<TileSetContentReceipt>()
         + size_of::<RuntimeContentAsset<TileSetDescriptor>>()
@@ -323,6 +341,11 @@ fn metadata_bytes(
             &mut bytes,
             content.dependencies.len(),
             size_of::<RuntimeContentScene>(),
+        )?;
+        add_entries(
+            &mut bytes,
+            content.deferred_scene_products.len(),
+            size_of::<AssetProductRef>(),
         )?;
         add_entries(
             &mut bytes,

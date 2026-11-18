@@ -148,6 +148,10 @@ fn an_unknown_runtime_cannot_select_a_player() {
 }
 
 #[cfg(any(feature = "development", feature = "cook"))]
+#[path = "../../../tests/support/two_level_pack.rs"]
+mod two_level_pack;
+
+#[cfg(any(feature = "development", feature = "cook"))]
 mod atlas_content {
     use std::{
         collections::BTreeSet,
@@ -184,14 +188,15 @@ mod atlas_content {
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
-        Scenario,
+        GameSnapshot, Scenario, SideRoomPhase,
         animation::{atlas_product, clips_product},
         levels::LevelId,
         markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
+        side_room,
         sound_bank::bank_product,
     };
 
-    use super::{RuntimeKind, content, evidence::Evidence, source::ContentFence};
+    use super::{RuntimeKind, content, evidence::Evidence, source::ContentFence, two_level_pack};
 
     struct Cache {
         parent: PathBuf,
@@ -222,6 +227,8 @@ mod atlas_content {
                 "scenes/cavern.scene.json",
                 "scenes/marker.scene.json",
                 "scenes/marker.scene.json.meta",
+                "scenes/side-room.scene.json",
+                "scenes/side-room.scene.json.meta",
                 "prefabs/marker.prefab.json",
                 "assets/textures/meadow.png",
                 "assets/textures/meadow.png.meta",
@@ -231,6 +238,8 @@ mod atlas_content {
                 "assets/textures/explorer.png.meta",
                 "assets/textures/marker.png",
                 "assets/textures/marker.png.meta",
+                "assets/textures/side-room.png",
+                "assets/textures/side-room.png.meta",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/animations/explorer.sprite-animations.json.meta",
                 "assets/audio/game.soundbank.json",
@@ -271,7 +280,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 10);
+        assert_eq!(catalog.members().len(), 12);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
         scenes.sort();
         assert_eq!(catalog.scenes(), scenes);
@@ -282,7 +291,7 @@ mod atlas_content {
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count(),
-            3
+            4
         );
         let marker = catalog.member_for_product(marker_product()).unwrap();
         assert_eq!(marker.products(), [marker_product()]);
@@ -306,6 +315,15 @@ mod atlas_content {
             prepared.base().acquire_scene(marker_product()),
             Err(RuntimeContentError::UndeclaredScene)
         ));
+        two_level_pack::assert_room_member(
+            catalog
+                .member_for_product(side_room::scene_product())
+                .unwrap(),
+        );
+        assert!(matches!(
+            prepared.base().acquire_scene(side_room::scene_product()),
+            Err(RuntimeContentError::UndeclaredScene)
+        ));
         assert_eq!(
             catalog
                 .members()
@@ -322,6 +340,8 @@ mod atlas_content {
                     super::input_product(),
                     marker_product(),
                     marker_image_product(),
+                    side_room::scene_product(),
+                    side_room::image_product(),
                 ])
                 .collect::<BTreeSet<_>>()
         );
@@ -339,23 +359,7 @@ mod atlas_content {
                 scene.kind(),
                 RuntimeContentMemberKind::Scene { .. }
             ));
-            assert_eq!(
-                scene
-                    .dependencies()
-                    .iter()
-                    .map(|dependency| (dependency.product(), dependency.role()))
-                    .collect::<BTreeSet<_>>(),
-                [
-                    level.image_product(),
-                    atlas_product(),
-                    bank_product(),
-                    clips_product(),
-                    marker_product(),
-                ]
-                .into_iter()
-                .map(|product| (product, RuntimeContentDependencyRole::Required))
-                .collect::<BTreeSet<_>>()
-            );
+            two_level_pack::assert_level_dependencies(scene, level);
             let cooked = prepared
                 .base()
                 .acquire_scene(level.scene_product())
@@ -423,6 +427,7 @@ mod atlas_content {
                 "assets/textures/cavern.png",
                 "assets/textures/explorer.png",
                 "assets/textures/marker.png",
+                "assets/textures/side-room.png",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
@@ -556,25 +561,13 @@ mod atlas_content {
             original.definition().bindings()
         );
         for level in LevelId::ALL {
-            assert_eq!(
+            two_level_pack::assert_level_dependencies(
                 prepared
                     .base()
                     .catalog()
                     .member_for_product(level.scene_product())
-                    .unwrap()
-                    .dependencies()
-                    .iter()
-                    .map(|dependency| dependency.product())
-                    .collect::<BTreeSet<_>>(),
-                [
-                    level.image_product(),
-                    atlas_product(),
-                    bank_product(),
-                    clips_product(),
-                    marker_product(),
-                ]
-                .into_iter()
-                .collect()
+                    .unwrap(),
+                level,
             );
         }
         fs::write(&input_path, original.to_json_string().unwrap()).unwrap();
@@ -673,20 +666,11 @@ mod atlas_content {
             evidence.observe(&session)?;
             let initial = evidence.result(Scenario::Interactive, None, None);
             session.pause().map_err(|error| error.to_string())?;
-            session
-                .submit(GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(1).unwrap(),
-                    GameplayCommandIngressSource::external("test.cooked-marker").unwrap(),
-                    GameplayCommandSourceSequence::new(1).unwrap(),
-                    GameplayCommandDraft::new(
-                        GameplayCommandTypeId::new("two-level-game.marker").unwrap(),
-                    ),
-                ))
-                .map_err(|error| error.to_string())?;
-            session.step().map_err(|error| error.to_string())?;
+            step_command(&mut session, 1, "two-level-game.marker")?;
             session
                 .observe(assert_cooked_marker_image)
                 .map_err(|error| error.to_string())??;
+            check_cooked_side_room(&mut session)?;
             Ok(initial)
         })();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -700,6 +684,80 @@ mod atlas_content {
         };
         assert_eq!(closed, HeadlessSessionClose::Complete);
         observed.unwrap()
+    }
+
+    fn step_command(session: &mut HeadlessSession, tick: u64, command: &str) -> Result<(), String> {
+        session
+            .submit(GameplayCommandSubmission::new(
+                GameplayCommandTick::new(tick).unwrap(),
+                GameplayCommandIngressSource::external("test.cooked-content").unwrap(),
+                GameplayCommandSourceSequence::new(tick).unwrap(),
+                GameplayCommandDraft::new(GameplayCommandTypeId::new(command).unwrap()),
+            ))
+            .map_err(|error| error.to_string())?;
+        session.step().map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn check_cooked_side_room(session: &mut HeadlessSession) -> Result<(), String> {
+        const COMMAND: &str = "two-level-game.side-room";
+        let initial = session
+            .observe(|world| world.resource::<GameSnapshot>().current_instance)
+            .map_err(|error| error.to_string())?;
+        step_command(session, 2, COMMAND)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = session
+                .observe(|world| world.resource::<GameSnapshot>().clone())
+                .map_err(|error| error.to_string())?;
+            assert_eq!(snapshot.current_instance, initial);
+            if let Some(error) = snapshot.error {
+                return Err(error);
+            }
+            if snapshot.side_room == SideRoomPhase::Open {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err("cooked side room did not open".into());
+            }
+            session
+                .frame(Duration::ZERO)
+                .map_err(|error| error.to_string())?;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        session
+            .observe(|world| {
+                let relic = world
+                    .iter_entities()
+                    .find(|entity| {
+                        entity
+                            .get::<SceneEntitySource>()
+                            .is_some_and(|source| source.entity_id.as_str() == side_room::RELIC)
+                    })
+                    .expect("the cooked room publishes its actual relic");
+                let sprite = relic.get::<Sprite>().unwrap();
+                let image = world
+                    .resource::<Assets<ImageAsset>>()
+                    .get(sprite.material.image.unwrap())
+                    .unwrap();
+                two_level_pack::assert_room_image(image);
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 3, COMMAND)?;
+        session
+            .observe(|world| {
+                let snapshot = world.resource::<GameSnapshot>();
+                assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
+                assert_eq!(snapshot.current_instance, initial);
+                assert!(
+                    world
+                        .resource::<Assets<ImageAsset>>()
+                        .iter()
+                        .all(|(_, image)| image.product() != Some(side_room::image_product()))
+                );
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     fn assert_cooked_marker_image(world: &World) -> Result<(), String> {

@@ -50,8 +50,10 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 mod action;
 mod content;
 mod content_residency;
+pub(crate) use content_residency::has_active_project_scene_addition;
 pub use content_residency::{
     inspect_current_scene_dependency, instantiate_current_scene_dependency,
+    unload_project_scene_addition,
 };
 #[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
 mod desktop_poll_tests;
@@ -69,7 +71,8 @@ pub(crate) use scene_requests::{
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
-    begin_prepared_project_scene_travel, commit_prepared_project_scene,
+    activate_prepared_project_scene, begin_prepared_project_scene_travel,
+    commit_prepared_project_scene,
 };
 #[cfg(feature = "asset-watch")]
 pub use source_watch::{

@@ -147,7 +147,7 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
     let input = ResidencyInput::Processed(&content);
     let mut world = World::new();
     world.insert_resource(AssetServer::new());
-    let small_bytes = metadata_bytes(&world, input, None).unwrap();
+    let small_bytes = metadata_bytes(&world, input, None, None).unwrap();
     let before = active_retained_bytes(&base);
     let prepared = PreparedResidency::prepare(&world, input, None).unwrap();
     assert_eq!(active_retained_bytes(&base) - before, small_bytes);
@@ -171,7 +171,7 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
         .resource::<AssetServer>()
         .checked_retained_bytes()
         .unwrap();
-    let large_bytes = metadata_bytes(&world, input, None).unwrap();
+    let large_bytes = metadata_bytes(&world, input, None, None).unwrap();
     assert_eq!(
         large_bytes - small_bytes,
         3 * (large_catalogue - empty_catalogue),

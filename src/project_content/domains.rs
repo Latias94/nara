@@ -267,6 +267,12 @@ enum DomainAssetsCustody {
 }
 
 impl ProjectDomainAssets {
+    pub(crate) fn contains_non_image_collections(&self) -> bool {
+        self.inner.collections.iter().any(|collection| {
+            collection.domain_type() != std::any::TypeId::of::<nara_image::ImageDomain>()
+        })
+    }
+
     pub(crate) fn runtime_metadata_bytes(collections: usize) -> Option<usize> {
         std::mem::size_of::<DomainAssetsInner>()
             .checked_add(crate::scene_retention::ARC_CONTROL_BLOCK_BYTES)?

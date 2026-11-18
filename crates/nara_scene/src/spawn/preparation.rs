@@ -333,6 +333,7 @@ impl SceneComponentBindings {
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
+        let reservations = SceneAssetReservations::from_world(world);
         self.prepare_selected_scene(
             world,
             SceneMaterializationInput::Compiled(candidate),
@@ -340,6 +341,28 @@ impl SceneComponentBindings {
             asset_resolution,
             SceneIdentityCommit::Register,
             limits,
+            reservations,
+        )
+    }
+
+    /// Prepares an additive Scene with asset identities staged by the same receiving World.
+    /// The content owner publishes the corresponding resource values after Scene commit.
+    pub fn prepare_scene_with_reservations(
+        &self,
+        world: &mut World,
+        candidate: &CompiledSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
+        reservations: SceneAssetReservations,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        self.prepare_selected_scene(
+            world,
+            SceneMaterializationInput::Compiled(candidate),
+            occurrence,
+            asset_resolution,
+            SceneIdentityCommit::Register,
+            ComponentValueMaterializationLimits::default(),
+            reservations,
         )
     }
 
@@ -372,6 +395,7 @@ impl SceneComponentBindings {
         let occurrence = occurrence_for_instance(world, current)
             .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
             .clone();
+        let reservations = SceneAssetReservations::from_world(world);
         self.prepare_selected_scene(
             world,
             SceneMaterializationInput::Compiled(candidate),
@@ -379,6 +403,7 @@ impl SceneComponentBindings {
             asset_resolution,
             SceneIdentityCommit::Replace(current),
             limits,
+            reservations,
         )
     }
 
@@ -393,6 +418,19 @@ impl SceneComponentBindings {
         candidate: &crate::runtime_scene::RuntimeSceneCandidate,
         occurrence: &SceneOccurrenceKey,
     ) -> Result<PreparedScene, SceneSpawnReport> {
+        let reservations = SceneAssetReservations::from_world(world);
+        self.prepare_runtime_scene_with_reservations(world, candidate, occurrence, reservations)
+    }
+
+    /// Prepares an additive Runtime Scene with the content owner's staged Product identities.
+    #[cfg(feature = "serde")]
+    pub fn prepare_runtime_scene_with_reservations(
+        &self,
+        world: &mut World,
+        candidate: &crate::runtime_scene::RuntimeSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        reservations: SceneAssetReservations,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_selected_scene(
             world,
             SceneMaterializationInput::Runtime(candidate),
@@ -400,6 +438,7 @@ impl SceneComponentBindings {
             None,
             SceneIdentityCommit::Register,
             candidate.limits().value_limits(),
+            reservations,
         )
     }
 
@@ -417,6 +456,7 @@ impl SceneComponentBindings {
         let occurrence = occurrence_for_instance(world, current)
             .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
             .clone();
+        let reservations = SceneAssetReservations::from_world(world);
         self.prepare_selected_scene(
             world,
             SceneMaterializationInput::Runtime(candidate),
@@ -424,6 +464,7 @@ impl SceneComponentBindings {
             None,
             SceneIdentityCommit::Replace(current),
             candidate.limits().value_limits(),
+            reservations,
         )
     }
 
@@ -435,10 +476,10 @@ impl SceneComponentBindings {
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         target: SceneIdentityCommit<'_>,
         limits: ComponentValueMaterializationLimits,
+        reservations: SceneAssetReservations,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         let definition =
             ScenePreparationDefinition::capture_with_bindings(world, self.native_snapshot(), self)?;
-        let reservations = SceneAssetReservations::from_world(world);
         let unbound = SceneSpawner::new()
             .prepare_unbound_with_asset_context_and_product_reservations(
                 world,

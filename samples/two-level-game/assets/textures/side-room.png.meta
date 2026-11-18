@@ -1,0 +1,14 @@
+{
+  "kind": "asset_meta",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": { "name": "nara", "version": "0.1.0" },
+  "payload": {
+    "asset": {
+      "stable_id": "7adc6278-30bd-4660-92ed-6012fbbe178b",
+      "path": "textures/side-room.png",
+      "source_kind": "image"
+    },
+    "settings": { "color_space": "srgb" }
+  }
+}

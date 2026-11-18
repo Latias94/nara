@@ -516,6 +516,7 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
         "textures/cavern.png",
         "textures/explorer.png",
         two_level_game::markers::IMAGE_PATH,
+        two_level_game::side_room::IMAGE_PATH,
     ] {
         let request = fixture.request(
             path,
@@ -611,6 +612,39 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
             )
             .unwrap();
     }
+    let room = loader
+        .load_scene(
+            &candidate,
+            &plan,
+            &nara::project::ProjectPath::new(two_level_game::side_room::SCENE_PATH).unwrap(),
+        )
+        .unwrap();
+    let room_scene = plan
+        .schema_validation()
+        .bindings()
+        .try_compile_scene_with_loader(
+            room.scene(),
+            Default::default(),
+            Some(room.asset_resolution()),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+    assert!(
+        !room_scene.diagnostics.has_errors(),
+        "{:?}",
+        room_scene.diagnostics
+    );
+    let room_scene = room_scene
+        .candidate
+        .unwrap()
+        .bind_source(room.selected_scene_source_key().clone());
+    builder
+        .add_scene(
+            two_level_game::side_room::scene_product(),
+            &room_scene,
+            room.asset_resolution(),
+        )
+        .unwrap();
     builder.finish().unwrap()
 }
 
@@ -686,7 +720,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 10);
+    assert_eq!(prepared.base().catalog().members().len(), 12);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())
