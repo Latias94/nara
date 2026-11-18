@@ -83,6 +83,11 @@ The product contract is:
   full interval, existing fixed debt/phase stay intact, and virtual advancement starts with the
   next interval. Stop creates no settling frame, and exact-step semantics remain unchanged.
   Neither path resets the native sampling baseline or silently drops elapsed time.
+- `RuntimeFrameStatus::simulation_paused` records the pause mode actually used to settle that
+  transaction. Publish it with the fixed status before variable update and Extract. Control
+  settings may already describe a resumed next interval; presentation consumes the settled fact.
+  An exact fixed step reports active simulation while retaining paused control settings and
+  remaining a dedicated transaction without Extract.
 - The managed path calls the same App-owned frame transactions through `RuntimeInstance::drive`.
   Platform adapters do not reconstruct clocks or invoke `App::run_once` behind runtime lifecycle
   state.
@@ -118,6 +123,11 @@ The product contract is:
   extraction, and rendering.
 - A successfully completed frame consumes exit requests and then calls `World::clear_trackers()`
   exactly once after `Last`, establishing Bevy removal/change tracker retention at the app boundary.
+- App consumes required frame resources through fallible access after user schedules. A resource
+  removed before its next App use returns the existing missing-resource time error through managed
+  first-fault reporting and leaves Stop available. Completed user work is not rolled back. No
+  blanket schedule-exit audit is required: removing a resource after its final use preserves the
+  current frame's success and lets a later consumer report its absence.
 - Runtime state is ordinary typed ECS state plus an explicit transition queue/stage. State
   transitions may run `OnExit`, transition, and `OnEnter` schedules, but they must not be coupled to
   a Godot-style scene tree or object lifecycle.

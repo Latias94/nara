@@ -58,6 +58,8 @@ impl CapturedRenderTime {
         self.render
     }
 
+    /// Captured control settings, which can already request running during an elapsed Resume.
+    /// Actual clock deltas and spatial interpolation describe the interval that was rendered.
     #[must_use]
     pub const fn settings(&self) -> RuntimeTimeSettings {
         self.settings

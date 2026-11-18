@@ -198,6 +198,51 @@ fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
 }
 
 #[test]
+fn elapsed_resume_after_exact_step_captures_the_settled_pose_and_retains_it() {
+    let mut runtime = RuntimeInstance::start(moving_camera_app()).unwrap();
+    runtime.drive(TIMESTEP * 2 + TIMESTEP / 2).unwrap();
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::StepFixedTick),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Resume),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    let outcome = runtime.drive_elapsed(Duration::from_millis(5)).unwrap();
+    assert!(outcome.frame().unwrap().status.simulation_paused);
+    let sample = assert_current_sample(&runtime);
+    assert!(!sample.settings().paused());
+    assert_eq!(sample.virtual_time().delta, Duration::ZERO);
+    assert_eq!(sample.fixed().tick(), 3);
+    assert_eq!(sample.fixed().remainder(), TIMESTEP / 2);
+    assert_eq!(sample.render().interpolation_alpha, 0.5);
+    assert!(!sample.spatial_interpolated());
+    let packet = capture_packet(&runtime);
+    assert_eq!(packet.captured_time(), Some(sample));
+    let center = packet.views()[0].mapping.clip_to_world(Vec2::ZERO);
+    assert!(center.abs_diff_eq(Vec2::new(3.0, 0.0), 1.0e-5));
+
+    let next = runtime.drive_elapsed(TIMESTEP / 2).unwrap();
+    assert!(!next.frame().unwrap().status.simulation_paused);
+    assert_eq!(next.frame().unwrap().status.fixed_tick, 4);
+    assert_eq!(next.frame().unwrap().status.fixed_remainder, Duration::ZERO);
+    assert_ne!(
+        capture_packet(&runtime).captured_time(),
+        packet.captured_time()
+    );
+    runtime.finish().unwrap();
+    assert_eq!(packet.captured_time(), Some(sample));
+    assert_eq!(packet.views()[0].mapping.clip_to_world(Vec2::ZERO), center);
+}
+
+#[test]
 fn delayed_packet_build_and_target_adaptation_preserve_the_original_sample() {
     let mut app = moving_camera_app();
     let canvas = WorldCanvas::new(320, 180).unwrap();

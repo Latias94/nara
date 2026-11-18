@@ -821,6 +821,161 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
     runtime.finish().unwrap();
 }
 
+#[test]
+fn elapsed_resume_after_exact_step_presents_current_pose_without_paused_maintenance() {
+    let moving_runtime = || {
+        let mut app = spatial_app().unwrap();
+        let entity = app.world_mut().unwrap().spawn(Transform2d::default()).id();
+        app.insert_resource(FixedTime::new(Duration::from_millis(20)).unwrap())
+            .unwrap();
+        app.insert_resource(FixedTransformInterpolation).unwrap();
+        app.insert_resource(PhaseProbe {
+            entity,
+            historical_ticks: Vec::new(),
+            fixed_ticks: Vec::new(),
+            captured_ticks: Vec::new(),
+            positions: Vec::new(),
+            interpolated: Vec::new(),
+        })
+        .unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            move_using_history.in_set(FixedUpdateSet::Simulate),
+        )
+        .unwrap();
+        add_fixed_transform_projection_systems(&mut app, observe_fixed).unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            capture_fixed.in_set(FixedUpdateSet::Finalize),
+        )
+        .unwrap();
+        add_presented_transform_projection_systems(&mut app, observe_presented).unwrap();
+        RuntimeInstance::start(app).unwrap()
+    };
+    let mut immediate = moving_runtime();
+    let mut maintained = moving_runtime();
+
+    for runtime in [&mut immediate, &mut maintained] {
+        let status = runtime
+            .drive(Duration::from_millis(50))
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status;
+        assert_eq!(status.fixed_tick, 2);
+        assert_eq!(status.fixed_steps, 2);
+        assert!(!status.simulation_paused);
+        assert_eq!(status.fixed_remainder, Duration::from_millis(10));
+        let probe = runtime.world().resource::<PhaseProbe>();
+        assert_eq!(probe.positions, [Vec2::new(1.5, 0.0)]);
+        assert_eq!(probe.interpolated, [true]);
+
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Pause),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::StepFixedTick),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        let status = runtime
+            .drive(Duration::ZERO)
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status;
+        assert_eq!(status.fixed_tick, 3);
+        assert_eq!(status.fixed_steps, 1);
+        assert!(!status.simulation_paused);
+        assert!(
+            runtime
+                .world()
+                .resource::<nara_app::RuntimeTimeSettings>()
+                .paused()
+        );
+        assert_eq!(status.virtual_delta, Duration::from_millis(20));
+        assert_eq!(status.fixed_remainder, Duration::from_millis(10));
+        let probe = runtime.world().resource::<PhaseProbe>();
+        assert_eq!(probe.historical_ticks, [0, 1, 2]);
+        assert_eq!(probe.fixed_ticks, [1, 2, 3]);
+        assert_eq!(probe.captured_ticks, [1, 2, 3]);
+    }
+
+    maintained.drive(Duration::ZERO).unwrap();
+    let resumed = [&mut immediate, &mut maintained].map(|runtime| {
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Resume),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        let status = runtime
+            .drive_elapsed(Duration::from_millis(5))
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status;
+        let world = runtime.world();
+        let probe = world.resource::<PhaseProbe>();
+        let current = historical_spatial_snapshot(world).unwrap();
+        let presented = presented_spatial_snapshot(world).unwrap();
+        assert!(status.simulation_paused);
+        assert!(!world.resource::<nara_app::RuntimeTimeSettings>().paused());
+        (
+            current.global(probe.entity).unwrap().translation(),
+            presented.global(probe.entity).unwrap().translation(),
+            *probe.interpolated.last().unwrap(),
+            status.fixed_tick,
+            status.fixed_steps,
+            status.virtual_delta,
+            status.fixed_remainder,
+            world.resource::<nara_app::RenderTime>().interpolation_alpha,
+        )
+    });
+    assert_eq!(resumed[0], resumed[1]);
+    assert_eq!(
+        resumed[0],
+        (
+            Vec2::new(3.0, 0.0),
+            Vec2::new(3.0, 0.0),
+            false,
+            3,
+            0,
+            Duration::ZERO,
+            Duration::from_millis(10),
+            0.5,
+        )
+    );
+
+    for runtime in [&mut immediate, &mut maintained] {
+        let status = runtime
+            .drive_elapsed(Duration::from_millis(10))
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status;
+        assert_eq!(status.fixed_tick, 4);
+        assert_eq!(status.fixed_steps, 1);
+        assert!(!status.simulation_paused);
+        assert_eq!(status.virtual_delta, Duration::from_millis(10));
+        assert_eq!(status.fixed_remainder, Duration::ZERO);
+        let world = runtime.world();
+        let probe = world.resource::<PhaseProbe>();
+        assert_eq!(probe.historical_ticks, [0, 1, 2, 3]);
+        assert_eq!(probe.fixed_ticks, [1, 2, 3, 4]);
+        assert_eq!(probe.captured_ticks, [1, 2, 3, 4]);
+        assert_eq!(
+            historical_spatial_snapshot(world)
+                .unwrap()
+                .global(probe.entity)
+                .unwrap()
+                .translation(),
+            Vec2::new(4.0, 0.0)
+        );
+    }
+    immediate.finish().unwrap();
+    maintained.finish().unwrap();
+}
+
 #[derive(Resource)]
 struct LateEdit {
     parent: Entity,

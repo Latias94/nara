@@ -113,7 +113,9 @@ flowchart LR
   commands; edits made before simulation are the starting frame, not artificial motion from an
   earlier publication. History and uncommitted starting samples retain World/runtime provenance;
   foreign or mismatched history is discarded before it can authorize a local publication.
-  Paused and edited sources reset their history to the captured current value. Zero or multiple
+  Paused and edited sources reset their history to the captured current value. Presentation reads
+  the App frame status's settled simulation-pause fact, including an elapsed Resume interval that
+  began paused; requested control settings do not override that completed interval. Zero or multiple
   fixed steps retain the established fixed-pair policy. Presentation never combines live locals
   with earlier simulation matrices. New renderable entities absent from its cut have no spatial
   value and cannot fall back to local or identity transforms.

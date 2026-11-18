@@ -40,6 +40,19 @@ queue. Paused drives still maintain real-time tasks, rendering and cleanup witho
 simulation time. After startup, use Runtime controls to keep lifecycle state and time policy
 in agreement rather than treating the settings resource as a second control queue.
 
+Use `drive_elapsed` for wall time already sampled by a native runner. A Resume applied to an
+interval that began paused settles that interval without virtual advancement.
+`RuntimeFrameStatus::simulation_paused` reports this actual settlement; requested settings can
+already say running. Transform presentation uses the settled fact, so an exact Step followed
+immediately by Resume shows the current pose without an extra maintenance call. Explicit
+`drive` keeps its next-interval semantics. Exact Step advances one simulation tick, reports
+`simulation_paused == false`, preserves the remainder and does not run Extract.
+
+If a system removes a resource that App still needs in the frame, the drive returns its existing
+missing-resource fault. Stop and physical retirement remain available; work already completed in
+that frame is not undone. Removing a resource after its final frame use does not trigger another
+clock audit or automatically recreate it.
+
 An exact-tick `HeadlessRun` performs one paused maintenance frame before its requested fixed
 transactions, including when Startup already paused the Runtime. This entry frame lets real-time
 tasks publish readiness without running variable gameplay or advancing simulation. An exit from

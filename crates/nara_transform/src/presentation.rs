@@ -1,6 +1,6 @@
 use nara_app::{
-    App, CoreStage, FixedUpdateSet, PluginError, RenderTime, RuntimeGeneration,
-    RuntimeTimeSettings, StartupStage,
+    App, CoreStage, FixedUpdateSet, PluginError, RenderTime, RuntimeFrameStatus, RuntimeGeneration,
+    StartupStage,
 };
 use nara_ecs::{
     Entity, FromWorld, Mut, QueryState, Resource, World, bevy_ecs::entity::EntityHashMap,
@@ -197,7 +197,7 @@ pub(super) fn derive_render_projection(world: &mut World) -> Result<(), BevyErro
         .and_then(|snapshot| snapshot.stamp())
         .map_err(BevyError::error)?;
     let interpolate_enabled = world.contains_resource::<FixedTransformInterpolation>();
-    let paused = world.resource::<RuntimeTimeSettings>().paused();
+    let paused = world.resource::<RuntimeFrameStatus>().simulation_paused;
     let alpha = if paused {
         1.0
     } else {

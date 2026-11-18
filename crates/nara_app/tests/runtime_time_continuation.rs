@@ -236,6 +236,9 @@ fn explicit_next_interval_resume_and_elapsed_resume_keep_distinct_existing_polic
             result.frame().unwrap().status.fixed_steps,
             u32::from(!elapsed)
         );
+        assert_eq!(result.frame().unwrap().status.simulation_paused, elapsed);
+        assert_eq!(runtime.state(), RuntimeState::Running);
+        assert!(!runtime.world().resource::<RuntimeTimeSettings>().paused());
         assert_eq!(
             runtime.control_status(ticket),
             Some(RuntimeControlStatus::Applied)

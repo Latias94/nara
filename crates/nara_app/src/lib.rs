@@ -1028,6 +1028,7 @@ struct TimeFramePlan {
     real_delta: Duration,
     virtual_delta: Duration,
     real_delta_clamped: bool,
+    simulation_paused: bool,
     fixed_steps_to_run: u32,
 }
 
@@ -1070,6 +1071,7 @@ impl TimeFramePlan {
             real_delta,
             virtual_delta,
             real_delta_clamped,
+            simulation_paused: settings.paused(),
             fixed_steps_to_run: fixed_frame.steps_to_run,
         })
     }
@@ -1114,6 +1116,11 @@ pub struct RuntimeFrameStatus {
     pub real_delta: Duration,
     pub virtual_delta: Duration,
     pub real_delta_clamped: bool,
+    /// Whether this transaction settled simulation time as paused.
+    ///
+    /// Elapsed Resume can settle a paused interval while control settings already say running.
+    /// Exact fixed stepping advances simulation and reports false without running Extract.
+    pub simulation_paused: bool,
     pub fixed_steps: u32,
     pub fixed_steps_capped: bool,
     pub fixed_tick: u64,
@@ -2081,6 +2088,7 @@ impl runtime::RuntimeOwnerState {
                     real_delta: time_frame_plan.real_delta,
                     virtual_delta: time_frame_plan.virtual_delta,
                     real_delta_clamped: time_frame_plan.real_delta_clamped,
+                    simulation_paused: time_frame_plan.simulation_paused,
                     fixed_steps: fixed_time.steps_this_frame(),
                     fixed_steps_capped: fixed_time.capped_this_frame(),
                     fixed_tick: fixed_time.tick(),
@@ -2163,6 +2171,7 @@ impl runtime::RuntimeOwnerState {
             real_delta,
             virtual_delta,
             real_delta_clamped: false,
+            simulation_paused: false,
             fixed_steps: 1,
             fixed_steps_capped: false,
             fixed_tick: fixed_time.tick(),
