@@ -714,6 +714,49 @@ mod atlas_content {
         );
     }
 
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn desktop_cooker_profiles_prepare_against_the_admitted_source_schema() {
+        let runtimes = &[
+            RuntimeKind::Desktop,
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            RuntimeKind::AudioDesktop,
+        ];
+        for &runtime in runtimes {
+            let cache = Cache::new();
+            let project = cache.project();
+            let store = cache.path.join("store");
+            fs::create_dir(&store).unwrap();
+            let mut fence = ContentFence::capture(&project).unwrap();
+            let (prepared, observations) = content::prepare(
+                fence.root(),
+                &host_fs::writable_directory(&store).unwrap(),
+                "x86_64-pc-windows-msvc",
+                runtime,
+            )
+            .unwrap_or_else(|error| panic!("{runtime:?}: {error}"));
+            assert!(prepared.base().plan().settings().window().enabled);
+            assert_eq!(prepared.base().catalog().members().len(), 15);
+            let manifest = fence
+                .root()
+                .open_file(&RelativePath::new("nara.toml").unwrap())
+                .unwrap();
+            let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
+            let plan = resolve_product_recipe(&candidate, runtime.recipe().unwrap()).unwrap();
+            assert_eq!(
+                prepared
+                    .base()
+                    .plan()
+                    .schema_validation()
+                    .composition_fingerprint(),
+                plan.schema_validation().composition_fingerprint(),
+            );
+            fence.bind_raw_inputs(&observations).unwrap();
+            fence.verify().unwrap();
+            assert!(!project.join(GENERATED).exists());
+        }
+    }
+
     #[test]
     fn invalid_selected_schema_matches_source_delivery_and_preserves_generated_bootstrap() {
         for (failure, kind, code) in [
