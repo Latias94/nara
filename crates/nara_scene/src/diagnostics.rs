@@ -562,6 +562,15 @@ pub(crate) fn with_identity_error(
             "scene-instance",
             instance.get(),
         ),
+        IdentityDomainError::DuplicateSceneInstance { instance } => with_public_u64(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "duplicate-scene-instance",
+            ),
+            "scene-instance",
+            instance.get(),
+        ),
         IdentityDomainError::SceneInstanceNotActive { instance } => with_public_u64(
             with_public_identifier(
                 diagnostic,

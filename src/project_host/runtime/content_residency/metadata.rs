@@ -22,7 +22,7 @@ pub(super) enum ResidencyAuthority {
     },
     Processed {
         _tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
-        _scenes: Vec<RuntimeContentScene>,
+        scenes: Vec<RuntimeContentScene>,
         _lease: Arc<RuntimeContentLease>,
         base: RuntimeContentBase,
     },
@@ -168,7 +168,7 @@ impl PreparedCatalog {
                 base,
             } => ResidencyAuthority::Processed {
                 _tilesets: tilesets,
-                _scenes: scenes,
+                scenes,
                 _lease: lease,
                 base,
             },

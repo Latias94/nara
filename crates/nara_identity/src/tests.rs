@@ -985,6 +985,8 @@ fn prepared_exact_scene_replacement_preserves_authority_until_commit() {
     let prepared = prepare_exact_scene_instance_replacement(
         &mut world,
         &current,
+        &[],
+        &[],
         &[(entity_id.clone(), new_token)],
         TombstoneCause::Replaced,
     )

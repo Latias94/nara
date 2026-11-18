@@ -22,6 +22,8 @@ use nara_identity::{
 use nara_reflect::{ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentValue};
 use std::sync::Arc;
 
+mod multi_activation;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 struct RuntimeValue(u32);
 
@@ -260,7 +262,7 @@ fn product_replacement_commits_one_coherent_scene_generation() {
         None,
         &current,
         transaction_limits(2, 1),
-        &[additional],
+        &[SceneProductRetirement::Entity(additional)],
         |overlay| {
             overlay
                 .insert_component(child_id.clone(), RuntimeValue(7))
@@ -807,7 +809,10 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[first, second],
+        &[
+            SceneProductRetirement::Entity(first),
+            SceneProductRetirement::Entity(second),
+        ],
         |_| {},
     );
     assert!(has_diagnostic(
@@ -823,7 +828,10 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
         None,
         &fixture.current,
         transaction_limits(1, 2),
-        &[first, first],
+        &[
+            SceneProductRetirement::Entity(first),
+            SceneProductRetirement::Entity(first),
+        ],
         |_| {},
     );
     assert!(has_diagnostic(
@@ -840,7 +848,7 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[scene_owned_token],
+        &[SceneProductRetirement::Entity(scene_owned_token)],
         |_| {},
     );
     assert!(has_diagnostic(
@@ -868,7 +876,7 @@ fn additional_retirement_rejects_a_foreign_token_with_matching_entity_bits() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[foreign],
+        &[SceneProductRetirement::Entity(foreign)],
         |_| {},
     );
 
@@ -900,7 +908,7 @@ fn deferred_persistent_registration_is_part_of_the_validated_baseline() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[retirement],
+        &[SceneProductRetirement::Entity(retirement)],
         |_| {},
     );
 
@@ -936,7 +944,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[missing],
+        &[SceneProductRetirement::Entity(missing)],
         |_| {},
     );
     assert!(has_diagnostic(
@@ -957,7 +965,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[persistent],
+        &[SceneProductRetirement::Entity(persistent)],
         |_| {},
     );
     assert!(has_diagnostic(
@@ -983,14 +991,11 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[lifecycle],
+        &[SceneProductRetirement::Entity(lifecycle)],
         |_| {},
     );
     assert!(
-        has_diagnostic(
-            &lifecycle_report,
-            "scene.product-retirement-lifecycle-active"
-        ),
+        has_diagnostic(&lifecycle_report, "scene.identity-replacement-failed"),
         "lifecycle rejection diagnostics: {:#?}",
         lifecycle_report.diagnostics
     );
@@ -1026,7 +1031,7 @@ fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
         None,
         &fixture.current,
         transaction_limits(1, 1),
-        &[runtime_root],
+        &[SceneProductRetirement::Entity(runtime_root)],
         |_| {},
     );
 

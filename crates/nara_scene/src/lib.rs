@@ -149,7 +149,8 @@ pub use source_hierarchy::SourceLocalSceneHierarchy;
 pub mod advanced {
     pub use crate::asset_reservations::SceneAssetReservations;
     pub use crate::product_transaction::{
-        SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
+        SceneProductOverlayWriter, SceneProductResource, SceneProductRetirement,
+        SceneProductTransactionLimits,
     };
     pub use crate::spawn::{
         SceneNativeRetirementClaims, StagedSceneReplacement, replace_expanded_scene_with_product,

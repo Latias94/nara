@@ -116,6 +116,7 @@ struct ActiveOccurrence {
     domain: WorldIdentityDomainId,
     instance: SceneInstanceId,
     retained_bytes: usize,
+    original_members: usize,
 }
 
 #[derive(Resource)]
@@ -159,6 +160,13 @@ pub(crate) fn occurrence_for_instance<'a>(
     world: &'a World,
     receipt: &SpawnedSceneInstance,
 ) -> Result<&'a SceneOccurrenceKey, OccurrenceError> {
+    occurrence_entry_for_instance(world, receipt).map(|(key, _)| key)
+}
+
+fn occurrence_entry_for_instance<'a>(
+    world: &'a World,
+    receipt: &SpawnedSceneInstance,
+) -> Result<(&'a SceneOccurrenceKey, &'a ActiveOccurrence), OccurrenceError> {
     validate_state(world)?
         .ok_or(OccurrenceError::Missing)?
         .entries
@@ -166,8 +174,30 @@ pub(crate) fn occurrence_for_instance<'a>(
         .find(|(_, entry)| {
             entry.domain == receipt.domain_id() && entry.instance == receipt.instance_id()
         })
-        .map(|(key, _)| key)
         .ok_or(OccurrenceError::Missing)
+}
+
+pub(crate) fn capture_occurrence_retirement(
+    world: &World,
+    receipt: &SpawnedSceneInstance,
+) -> Result<(SceneOccurrenceKey, usize), OccurrenceError> {
+    let (key, entry) = occurrence_entry_for_instance(world, receipt)?;
+    Ok((key.clone(), entry.original_members.max(1)))
+}
+
+pub(crate) fn validate_occurrence_retirement(
+    world: &World,
+    occurrence: &SceneOccurrenceKey,
+    receipt: &SpawnedSceneInstance,
+) -> Result<(), OccurrenceError> {
+    let entry = validate_state(world)?
+        .and_then(|state| state.entries.get(occurrence))
+        .ok_or(OccurrenceError::Missing)?;
+    if entry.domain == receipt.domain_id() && entry.instance == receipt.instance_id() {
+        Ok(())
+    } else {
+        Err(OccurrenceError::Changed)
+    }
 }
 
 pub(crate) fn validate_projection_occurrence(
@@ -193,6 +223,7 @@ impl PreparedSceneOccurrence {
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
         current: Option<&SpawnedSceneInstance>,
+        retiring: &[SceneOccurrenceKey],
         projection: bool,
     ) -> Result<Self, OccurrenceError> {
         world.register_component::<ActiveSceneOccurrences>();
@@ -231,7 +262,13 @@ impl PreparedSceneOccurrence {
             .and_then(|bytes| bytes.checked_add(occurrence.retained_bytes()?))
             .and_then(|bytes| bytes.checked_add(occurrence.retained_bytes()?))
             .ok_or(OccurrenceError::Budget)?;
-        Self::validate_admission(world, occurrence, predecessor.as_ref(), retained_bytes)?;
+        Self::validate_admission(
+            world,
+            occurrence,
+            predecessor.as_ref(),
+            retiring,
+            retained_bytes,
+        )?;
         Ok(Self {
             world: world.id(),
             context: Arc::new(SceneSourceContext {
@@ -252,6 +289,7 @@ impl PreparedSceneOccurrence {
             SceneInstanceId,
             Arc<SceneSourceContext>,
         )>,
+        retiring: &[SceneOccurrenceKey],
         new_bytes: usize,
     ) -> Result<(), OccurrenceError> {
         let state = validate_state(world)?;
@@ -271,12 +309,23 @@ impl PreparedSceneOccurrence {
             .unwrap_or_default();
         let count = state
             .map_or(0, |state| state.entries.len())
-            .checked_add(usize::from(existing.is_none()))
+            .checked_sub(retiring.len())
+            .and_then(|count| count.checked_add(usize::from(existing.is_none())))
             .ok_or(OccurrenceError::Budget)?;
-        let bytes = state
+        let mut bytes = state
             .map_or(0, |state| state.retained_bytes)
             .checked_sub(existing.map_or(0, |entry| entry.retained_bytes))
-            .and_then(|bytes| bytes.checked_add(new_bytes))
+            .ok_or(OccurrenceError::Budget)?;
+        for key in retiring {
+            let entry = state
+                .and_then(|state| state.entries.get(key))
+                .ok_or(OccurrenceError::Changed)?;
+            bytes = bytes
+                .checked_sub(entry.retained_bytes)
+                .ok_or(OccurrenceError::Budget)?;
+        }
+        let bytes = bytes
+            .checked_add(new_bytes)
             .ok_or(OccurrenceError::Budget)?;
         if count > limits.active_occurrences || bytes > limits.retained_bytes {
             return Err(OccurrenceError::Budget);
@@ -292,6 +341,7 @@ impl PreparedSceneOccurrence {
         &self,
         world: &World,
         current: Option<&SpawnedSceneInstance>,
+        retiring: &[SceneOccurrenceKey],
     ) -> Result<(), OccurrenceError> {
         if world.id() != self.world {
             return Err(OccurrenceError::WrongWorld);
@@ -303,6 +353,7 @@ impl PreparedSceneOccurrence {
             world,
             &self.context.occurrence,
             self.predecessor.as_ref(),
+            retiring,
             self.retained_bytes,
         )
     }
@@ -322,6 +373,7 @@ impl PreparedSceneOccurrence {
             domain: receipt.domain_id(),
             instance: receipt.instance_id(),
             retained_bytes: self.retained_bytes,
+            original_members: receipt.len(),
         };
         let old = state.entries.insert(self.context.occurrence.clone(), entry);
         state.retained_bytes = state.retained_bytes - old.map_or(0, |entry| entry.retained_bytes)

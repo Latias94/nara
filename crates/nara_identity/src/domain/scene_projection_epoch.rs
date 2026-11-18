@@ -37,7 +37,14 @@ pub fn prepare_registered_scene_projection_epoch_retirement(
                 world,
                 current,
                 TombstoneCause::Replaced,
-            )?;
+            )
+            .map_err(|error| match error {
+                IdentityDomainError::SceneInstanceMembershipMismatch { .. } => {
+                    IdentityDomainError::ProjectionEpochNotExclusive
+                }
+                IdentityDomainError::StaleRegistration => IdentityDomainError::EntityTokenNotOwned,
+                error => error,
+            })?;
             validate_registered_identity_support_topology(
                 world,
                 prepared.retiring_entities().iter().copied(),

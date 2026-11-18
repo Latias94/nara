@@ -23,6 +23,8 @@ use crate::{
     allocator::MonotonicNonZeroU64Allocator,
 };
 
+#[cfg(test)]
+mod replacement_tests;
 mod scene_projection_epoch;
 
 pub use scene_projection_epoch::{
@@ -508,7 +510,7 @@ struct EntityIdentityAxes {
 }
 
 struct PreparedRetirement {
-    instance: Option<SceneInstanceId>,
+    instances: Vec<SceneInstanceId>,
     entities: Vec<Entity>,
     identities: Vec<EntityIdentityAxes>,
     sequence_allocator: MonotonicNonZeroU64Allocator,
@@ -636,7 +638,7 @@ impl PreparedSceneInstanceReplacement {
         self.instance
     }
 
-    /// Returns the exact active Scene Instance membership proven during preparation.
+    /// Returns the complete primary, additional-instance and runtime-only entity retirement union.
     #[must_use]
     pub fn retiring_entities(&self) -> &[Entity] {
         &self.retirement.entities
@@ -876,7 +878,7 @@ impl WorldIdentityDomain {
             .map_err(|_| IdentityDomainError::SceneInstanceExhausted)
     }
 
-    /// Prepares the complete identity half of one exact Scene Instance replacement.
+    /// Prepares replacement of one Scene Instance and retirement of the complete supplied union.
     ///
     /// This validates the concrete entries and current live membership rather than only their
     /// counts. It leaves the installed domain authoritative until the scene owner enters its
@@ -885,26 +887,37 @@ impl WorldIdentityDomain {
     pub(crate) fn prepare_exact_scene_instance_replacement(
         world: &mut World,
         current: &SpawnedSceneInstance,
+        additional_instances: &[SpawnedSceneInstance],
+        additional_entities: &[WorldEntityToken],
         entries: &[(SceneEntityId, WorldEntityToken)],
         cause: TombstoneCause,
     ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
         validate_identity_support_topology(world, entries.iter().map(|(_, token)| token.entity()))
             .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        Self::prepare_registered_scene_instance_replacement(world, current, entries, cause)
+        Self::prepare_registered_scene_instance_replacement(
+            world,
+            current,
+            additional_instances,
+            additional_entities,
+            entries,
+            cause,
+        )
     }
 
     fn prepare_registered_scene_instance_replacement(
         world: &World,
         current: &SpawnedSceneInstance,
+        additional_instances: &[SpawnedSceneInstance],
+        additional_entities: &[WorldEntityToken],
         entries: &[(SceneEntityId, WorldEntityToken)],
         cause: TombstoneCause,
     ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
+        let domain = installed_domain(world)?;
         validate_registered_identity_support_topology(
             world,
             entries.iter().map(|(_, token)| token.entity()),
         )
         .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        let domain = installed_domain(world)?;
         let instance = SceneInstanceId::from_non_zero(
             domain
                 .scene_instance_allocator
@@ -917,8 +930,24 @@ impl WorldIdentityDomain {
             maximum_entries,
             domain.settings.lifetime_claims.get(),
         )?;
+        let retirement = domain.prepare_scene_instances_retirement(
+            world,
+            current,
+            additional_instances,
+            additional_entities,
+            cause,
+        )?;
+        if entries.iter().any(|(_, token)| {
+            retirement
+                .entities
+                .binary_search_by_key(&token.entity().to_bits(), |entity| entity.to_bits())
+                .is_ok()
+        }) {
+            return Err(IdentityDomainError::DuplicateRuntimeEntity);
+        }
         domain.preflight_scene_instance(world, instance, &entries)?;
-        let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
+        validate_registered_identity_support_topology(world, retirement.entities.iter().copied())
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
         Ok(PreparedSceneInstanceReplacement {
             domain: domain.id,
             instance,
@@ -1421,6 +1450,68 @@ impl WorldIdentityDomain {
         instance: &SpawnedSceneInstance,
         cause: TombstoneCause,
     ) -> Result<PreparedRetirement, IdentityDomainError> {
+        self.prepare_scene_instances_retirement(world, instance, &[], &[], cause)
+    }
+
+    fn prepare_scene_instances_retirement(
+        &self,
+        world: &World,
+        current: &SpawnedSceneInstance,
+        additional_instances: &[SpawnedSceneInstance],
+        additional_entities: &[WorldEntityToken],
+        cause: TombstoneCause,
+    ) -> Result<PreparedRetirement, IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let mut instances = BTreeSet::new();
+        let mut entities = BTreeSet::new();
+        for receipt in std::iter::once(current).chain(additional_instances) {
+            if receipt.domain_id() != self.id {
+                return Err(IdentityDomainError::WrongDomain {
+                    expected: self.id,
+                    actual: receipt.domain_id(),
+                });
+            }
+            if !instances.insert(receipt.instance_id()) {
+                return Err(IdentityDomainError::DuplicateSceneInstance {
+                    instance: receipt.instance_id(),
+                });
+            }
+            for entity in self.scene_instance_retirement_entities(world, receipt)? {
+                if !entities.insert(entity) {
+                    return Err(IdentityDomainError::DuplicateRuntimeEntity);
+                }
+            }
+        }
+        for token in additional_entities {
+            self.validate_live_token(world, *token)?;
+            if !entities.insert(token.entity()) {
+                return Err(IdentityDomainError::DuplicateRuntimeEntity);
+            }
+            if let Some(identity) = self.identities_by_entity.get(&token.entity()) {
+                if identity.scene.is_some() {
+                    return Err(IdentityDomainError::EntityAxisAlreadyRegistered {
+                        axis: EntityIdentityAxis::Scene,
+                    });
+                }
+                if identity.persistent.is_some() {
+                    return Err(IdentityDomainError::EntityAxisAlreadyRegistered {
+                        axis: EntityIdentityAxis::Persistent,
+                    });
+                }
+            }
+        }
+        self.prepare_retirement(
+            instances.into_iter().collect(),
+            entities.into_iter().collect(),
+            cause,
+        )
+    }
+
+    fn scene_instance_retirement_entities(
+        &self,
+        world: &World,
+        instance: &SpawnedSceneInstance,
+    ) -> Result<Vec<Entity>, IdentityDomainError> {
         self.validate_world_binding(world)?;
         if instance.domain_id() != self.id {
             return Err(IdentityDomainError::WrongDomain {
@@ -1433,16 +1524,17 @@ impl WorldIdentityDomain {
                 instance: instance.instance,
             });
         };
-        if active_ids
-            .keys()
-            .any(|entity_id| !instance.contains(entity_id))
+        if !instance.entity_ids.iter().eq(instance.incarnations.keys())
+            || active_ids
+                .iter()
+                .any(|(id, incarnation)| instance.incarnations.get(id) != Some(incarnation))
         {
             return Err(IdentityDomainError::SceneInstanceMembershipMismatch {
                 instance: instance.instance,
             });
         }
 
-        let entities = active_ids
+        active_ids
             .iter()
             .map(|(entity_id, incarnation)| {
                 let reference = RuntimeEntityReference::scene(
@@ -1450,14 +1542,32 @@ impl WorldIdentityDomain {
                     entity_id.clone(),
                     *incarnation,
                 );
-                self.scene_entities.get(&reference).copied().ok_or(
+                let entity = self.scene_entities.get(&reference).copied().ok_or(
                     IdentityDomainError::SceneInstanceMembershipMismatch {
                         instance: instance.instance,
                     },
-                )
+                )?;
+                if !self.is_live_owned_incarnation(world, entity, *incarnation) {
+                    return Err(IdentityDomainError::StaleRegistration);
+                }
+                let identity = self.identities_by_entity.get(&entity).ok_or(
+                    IdentityDomainError::SceneInstanceMembershipMismatch {
+                        instance: instance.instance,
+                    },
+                )?;
+                if identity.scene.as_ref() != Some(&reference)
+                    || identity.persistent.as_ref().is_some_and(|persistent| {
+                        persistent.incarnation() != *incarnation
+                            || self.persistent_entities.get(persistent) != Some(&entity)
+                    })
+                {
+                    return Err(IdentityDomainError::SceneInstanceMembershipMismatch {
+                        instance: instance.instance,
+                    });
+                }
+                Ok(entity)
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        self.prepare_retirement(Some(instance.instance), entities, cause)
+            .collect()
     }
 
     /// Retires an entity in a detached domain.
@@ -1515,7 +1625,7 @@ impl WorldIdentityDomain {
         ) {
             return Err(IdentityDomainError::StaleRegistration);
         }
-        self.prepare_retirement(None, vec![entity], cause)
+        self.prepare_retirement(Vec::new(), vec![entity], cause)
     }
 
     fn preflight_scene_instance(
@@ -1795,7 +1905,7 @@ impl WorldIdentityDomain {
 
     fn prepare_retirement(
         &self,
-        instance: Option<SceneInstanceId>,
+        instances: Vec<SceneInstanceId>,
         mut entities: Vec<Entity>,
         cause: TombstoneCause,
     ) -> Result<PreparedRetirement, IdentityDomainError> {
@@ -1808,14 +1918,15 @@ impl WorldIdentityDomain {
                 self.identities_by_entity
                     .get(entity)
                     .cloned()
-                    .ok_or(IdentityDomainError::EntityNotRegistered)
+                    .unwrap_or_default()
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
 
-        let mut subjects = BTreeSet::new();
-        if let Some(instance) = instance {
-            subjects.insert(IdentityTombstoneSubject::SceneInstance(instance));
-        }
+        let mut subjects = instances
+            .iter()
+            .copied()
+            .map(IdentityTombstoneSubject::SceneInstance)
+            .collect::<BTreeSet<_>>();
         for identity in &identities {
             if let Some(reference) = &identity.scene {
                 subjects.insert(IdentityTombstoneSubject::Entity(reference.clone()));
@@ -1837,7 +1948,7 @@ impl WorldIdentityDomain {
             .collect::<Result<Vec<_>, IdentityDomainError>>()?;
 
         Ok(PreparedRetirement {
-            instance,
+            instances,
             entities,
             identities,
             sequence_allocator,
@@ -1848,25 +1959,24 @@ impl WorldIdentityDomain {
 
     fn commit_retirement(&mut self, retirement: PreparedRetirement) -> Vec<Entity> {
         let PreparedRetirement {
-            instance,
+            instances,
             entities,
             identities,
             sequence_allocator,
             tombstones,
             persistent_disposition,
         } = retirement;
-        if let Some(instance) = instance {
+        for instance in instances {
             self.active_scene_instances.remove(&instance);
         }
         for (entity, identity) in entities.iter().copied().zip(identities) {
             if let Some(reference) = identity.scene {
                 self.scene_entities.remove(&reference);
-                if instance.is_none()
-                    && let RuntimeEntityReference::Scene {
-                        instance,
-                        entity: entity_id,
-                        ..
-                    } = reference
+                if let RuntimeEntityReference::Scene {
+                    instance,
+                    entity: entity_id,
+                    ..
+                } = reference
                     && let Some(active_ids) = self.active_scene_instances.get_mut(&instance)
                 {
                     active_ids.remove(&entity_id);
@@ -2032,7 +2142,7 @@ impl WorldIdentityDomain {
         {
             return Err(IdentityDomainError::StaleRegistration);
         }
-        let mut retirement = self.prepare_retirement(None, vec![token.entity()], cause)?;
+        let mut retirement = self.prepare_retirement(Vec::new(), vec![token.entity()], cause)?;
         retirement.persistent_disposition = disposition;
         Ok(retirement)
     }
@@ -2146,15 +2256,27 @@ pub fn prepare_exact_scene_instance_registration(
     domain.prepare_exact_scene_instance_registration(world, entries)
 }
 
-/// Workspace-internal preparation for one exact Scene Instance replacement.
+/// Prepares one replacement and the complete retirement union in one identity transaction.
+///
+/// Additional instances retain their exact receipts; additional entities must have no semantic
+/// identity axes. The Scene owner owns occurrence release, native cleanup and entity despawn.
 #[doc(hidden)]
 pub fn prepare_exact_scene_instance_replacement(
     world: &mut World,
     current: &SpawnedSceneInstance,
+    additional_instances: &[SpawnedSceneInstance],
+    additional_entities: &[WorldEntityToken],
     entries: &[(SceneEntityId, WorldEntityToken)],
     cause: TombstoneCause,
 ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
-    WorldIdentityDomain::prepare_exact_scene_instance_replacement(world, current, entries, cause)
+    WorldIdentityDomain::prepare_exact_scene_instance_replacement(
+        world,
+        current,
+        additional_instances,
+        additional_entities,
+        entries,
+        cause,
+    )
 }
 
 /// Workspace-internal preparation for one exact Scene Instance retirement.
@@ -2172,11 +2294,18 @@ pub fn prepare_exact_scene_instance_retirement(
 pub fn prepare_registered_scene_instance_replacement(
     world: &World,
     current: &SpawnedSceneInstance,
+    additional_instances: &[SpawnedSceneInstance],
+    additional_entities: &[WorldEntityToken],
     entries: &[(SceneEntityId, WorldEntityToken)],
     cause: TombstoneCause,
 ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
     WorldIdentityDomain::prepare_registered_scene_instance_replacement(
-        world, current, entries, cause,
+        world,
+        current,
+        additional_instances,
+        additional_entities,
+        entries,
+        cause,
     )
 }
 
@@ -2504,6 +2633,8 @@ pub enum IdentityDomainError {
     SceneInstanceNotActive { instance: SceneInstanceId },
     #[error("scene instance membership does not match the identity domain")]
     SceneInstanceMembershipMismatch { instance: SceneInstanceId },
+    #[error("scene identity retirement contains a duplicate scene instance")]
+    DuplicateSceneInstance { instance: SceneInstanceId },
     #[error("identity domain is not exclusive to the disposable scene projection epoch")]
     ProjectionEpochNotExclusive,
     #[error("entity reference identity was already claimed")]

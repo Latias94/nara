@@ -30,9 +30,9 @@ use nara_identity::{
         prepare_registered_scene_projection_epoch_retirement,
         validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
-    IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
-    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainId,
-    WorldIdentityDomainSettings, adopt_identity_entity,
+    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
+    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
+    WorldIdentityDomainId, WorldIdentityDomainSettings, adopt_identity_entity,
 };
 use nara_reflect::{
     __private::{
@@ -51,12 +51,13 @@ use crate::{
     candidate::SceneMaterializationInput,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     occurrence::{
-        OccurrenceError, PreparedSceneOccurrence, SceneSourceContext, occurrence_for_instance,
-        release_occurrence,
+        OccurrenceError, PreparedSceneOccurrence, SceneSourceContext,
+        capture_occurrence_retirement, occurrence_for_instance, release_occurrence,
+        validate_occurrence_retirement,
     },
     product_transaction::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
-        SceneProductTransactionLimits,
+        SceneProductRetirement, SceneProductTransactionLimits,
     },
     runtime_hierarchy::{
         PreparedSceneEntityRetirement, build_scene_hierarchy_operations,
@@ -191,18 +192,70 @@ pub(crate) struct SceneSpawner;
 
 struct SceneProductTransactionInput<'a> {
     limits: SceneProductTransactionLimits,
-    additional_retirements: &'a [WorldEntityToken],
+    additional_retirements: &'a [SceneProductRetirement],
     configure: Box<dyn FnOnce(&mut SceneProductOverlayWriter<'_>) + 'a>,
 }
 
 struct PendingSceneProductTransaction {
     overlay: PreparedSceneProductOverlay,
-    additional_retirements: Vec<WorldEntityToken>,
+    retirements: SceneProductRetirements,
 }
 
 struct PreparedSceneProductTransaction {
     overlay: PreparedSceneProductOverlay,
-    additional_retirements: Vec<WorldEntityToken>,
+    retirements: SceneProductRetirements,
+}
+
+#[derive(Default)]
+struct SceneProductRetirements {
+    tokens: Vec<WorldEntityToken>,
+    instances: Vec<SpawnedSceneInstance>,
+    occurrences: Vec<SceneOccurrenceKey>,
+}
+
+impl SceneProductRetirements {
+    fn authored_entities(&self, world: &World) -> Vec<Entity> {
+        self.instances
+            .iter()
+            .flat_map(|instance| scene_instance_entities(world, instance))
+            .collect()
+    }
+
+    fn entities(&self, world: &World) -> Vec<Entity> {
+        let mut entities = self.authored_entities(world);
+        entities.extend(self.tokens.iter().map(|token| token.entity()));
+        entities
+    }
+
+    fn validate(&self, world: &World) -> Result<(), PrepareSceneProductTransactionError> {
+        if !self.tokens.is_empty() {
+            validate_additional_retirement_identity_axes(world, self.tokens.iter().copied())
+                .map_err(PrepareSceneProductTransactionError::Identity)?;
+        }
+        if self
+            .tokens
+            .iter()
+            .any(|token| world.get::<SceneEntitySource>(token.entity()).is_some())
+        {
+            return Err(PrepareSceneProductTransactionError::SceneOwnedRetirement);
+        }
+        for (instance, occurrence) in self.instances.iter().zip(&self.occurrences) {
+            validate_occurrence_retirement(world, occurrence, instance)
+                .map_err(PrepareSceneProductTransactionError::Occurrence)?;
+        }
+        Ok(())
+    }
+}
+
+fn scene_instance_entities(world: &World, instance: &SpawnedSceneInstance) -> Vec<Entity> {
+    instance
+        .entity_ids()
+        .iter()
+        .filter_map(|entity_id| match instance.resolve(world, entity_id) {
+            EntityLookup::Resolved(entity) => Some(entity),
+            _ => None,
+        })
+        .collect()
 }
 
 enum PrepareSceneProductTransactionError {
@@ -211,6 +264,8 @@ enum PrepareSceneProductTransactionError {
     AdditionalRetirementLimitExceeded,
     Overlay(SceneProductOverlayError),
     Identity(AdditionalRetirementIdentityError),
+    Occurrence(OccurrenceError),
+    InstanceTargetUnsupported,
     SceneOwnedRetirement,
 }
 
@@ -473,7 +528,9 @@ impl SceneSpawner {
         let mut diagnostics = std::mem::take(&mut preflight.diagnostics);
         let pending_product = match product {
             Some(product) => {
-                match prepare_scene_product_transaction(world, registry, &preflight, product) {
+                match prepare_scene_product_transaction(
+                    world, registry, &preflight, commit, product,
+                ) {
                     Ok(product) => Some(product),
                     Err(error) => return Err(scene_product_rejection(diagnostics, error)),
                 }
@@ -576,6 +633,9 @@ impl SceneSpawner {
             candidate.source_key(),
             occurrence,
             predecessor,
+            prepared_product.as_ref().map_or(&[][..], |product| {
+                product.retirements.occurrences.as_slice()
+            }),
             matches!(commit, SceneIdentityCommit::Projection(_)),
         )
         .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?;
@@ -671,9 +731,10 @@ impl SceneSpawner {
 ///
 /// This provisional advanced path keeps the candidate World and stable-ID-to-Entity mapping
 /// private. The callback can only enqueue owned typed values through its scoped writer. All limits
-/// and additional retirement tokens are validated before candidate entities are allocated. Each
-/// token binds its entity to the active World identity domain; a bare ECS `Entity` is insufficient
-/// authority for product-owned retirement. Receipt-owning product state can be held outside the
+/// and additional retirement selections are validated before candidate entities are allocated.
+/// Runtime-only entities require an original World token; additional authored activations require
+/// their complete original receipt and release their logical occurrence on commit.
+/// Receipt-owning product state can be held outside the
 /// World with `World::resource_scope` and updated from the successful report before the exclusive
 /// caller returns; a rejected replacement leaves that state unchanged.
 /// The asset resolver must come from the admitted source, as with initial spawning; `None` is
@@ -688,7 +749,7 @@ pub fn replace_expanded_scene_with_product<F>(
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -727,7 +788,7 @@ pub fn replace_expanded_scene_with_product_and_reservations<F>(
     current: &SpawnedSceneInstance,
     reservations: SceneAssetReservations,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -770,7 +831,7 @@ pub fn stage_expanded_scene_replacement_with_claims<F>(
     reservations: SceneAssetReservations,
     claims: &SceneNativeRetirementClaims,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> Result<StagedSceneReplacement, SceneSpawnReport>
 where
@@ -817,7 +878,7 @@ impl SceneComponentBindings {
         reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[WorldEntityToken],
+        additional_retirements: &[SceneProductRetirement],
         configure: F,
     ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
@@ -856,7 +917,7 @@ impl SceneComponentBindings {
         reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[WorldEntityToken],
+        additional_retirements: &[SceneProductRetirement],
         configure: F,
     ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
@@ -929,12 +990,35 @@ fn validate_scene_predecessor(
     if let SceneIdentityCommit::Replace(current) | SceneIdentityCommit::Projection(Some(current)) =
         commit
     {
-        let retirement = match prepare_registered_scene_instance_retirement(
-            world,
-            current,
-            TombstoneCause::Replaced,
-        ) {
-            Ok(retirement) => retirement,
+        let retirements = prepared_product.map(|product| &product.retirements);
+        let additional_instances =
+            retirements.map_or(&[][..], |retirements| retirements.instances.as_slice());
+        let additional_tokens =
+            retirements.map_or(&[][..], |retirements| retirements.tokens.as_slice());
+        let all_entities = match commit {
+            SceneIdentityCommit::Replace(_) => prepare_registered_scene_instance_replacement(
+                world,
+                current,
+                additional_instances,
+                additional_tokens,
+                &[],
+                TombstoneCause::Replaced,
+            )
+            .map(|replacement| replacement.retiring_entities().to_vec()),
+            SceneIdentityCommit::Projection(_) => prepare_registered_scene_instance_retirement(
+                world,
+                current,
+                TombstoneCause::Replaced,
+            )
+            .map(|retirement| {
+                let mut entities = retirement.retiring_entities().to_vec();
+                entities.extend(additional_tokens.iter().map(|token| token.entity()));
+                entities
+            }),
+            SceneIdentityCommit::Register => unreachable!("registration has no predecessor"),
+        };
+        let all_entities = match all_entities {
+            Ok(entities) => entities,
             Err(error) => {
                 diagnostics.push(crate::diagnostics::with_identity_error(
                     diagnostic_error(
@@ -950,35 +1034,47 @@ fn validate_scene_predecessor(
                 });
             }
         };
-        let old_entities = retirement.retiring_entities();
-        if let Err(error) =
-            validate_registered_persistent_apply_targets(world, old_entities.iter().copied())
-        {
+        let old_entities = scene_instance_entities(world, current);
+        let mut authored_entities = old_entities.clone();
+        if let Some(retirements) = retirements {
+            authored_entities.extend(retirements.authored_entities(world));
+        }
+        if let Err(error) = validate_registered_persistent_apply_targets(world, authored_entities) {
             return Err(persistent_apply_rejection(diagnostics, &error));
         }
-        let mut all_entities = old_entities.to_vec();
-        if let Some(product) = prepared_product {
-            all_entities.extend(
-                product
-                    .additional_retirements
-                    .iter()
-                    .map(|token| token.entity()),
-            );
-        }
-        let eligible =
-            prepare_scene_hierarchy_retirement(world, &all_entities).is_ok_and(|hierarchy| {
-                validate_scene_entity_retirement_admission(
-                    world,
-                    old_entities,
-                    &hierarchy,
-                    claims.component_ids(),
-                )
-                .is_ok()
-            });
-        if !eligible {
+        let hierarchy = prepare_scene_hierarchy_retirement(world, &all_entities);
+        if !hierarchy.as_ref().is_ok_and(|hierarchy| {
+            validate_scene_entity_retirement_admission(
+                world,
+                &old_entities,
+                hierarchy,
+                claims.component_ids(),
+            )
+            .is_ok()
+        }) {
             diagnostics.push(diagnostic_error(
                 "scene.identity-replacement-ineligible",
                 "Scene replacement would run unsupported lifecycle work",
+            ));
+            return Err(SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            });
+        }
+        if retirements.is_some_and(|retirements| {
+            PreparedSceneEntityRetirement::prepare(
+                world,
+                &retirements.entities(world),
+                hierarchy
+                    .as_ref()
+                    .expect("primary retirement admitted the hierarchy"),
+            )
+            .is_err()
+        }) {
+            diagnostics.push(diagnostic_error(
+                "scene.product-retirement-lifecycle-active",
+                "Scene product retirement would run unsupported lifecycle work",
             ));
             return Err(SceneSpawnReport {
                 instance: None,
@@ -994,6 +1090,7 @@ fn prepare_scene_product_transaction(
     world: &World,
     registry: &ComponentRegistrySnapshot,
     scene: &PreflightScene,
+    commit: SceneIdentityCommit<'_>,
     product: SceneProductTransactionInput<'_>,
 ) -> Result<PendingSceneProductTransaction, PrepareSceneProductTransactionError> {
     if product.limits.overlay_writes().get() > SceneProductTransactionLimits::MAX_OVERLAY_WRITES {
@@ -1004,8 +1101,31 @@ fn prepare_scene_product_transaction(
     {
         return Err(PrepareSceneProductTransactionError::AdditionalRetirementCeilingExceeded);
     }
-    if product.additional_retirements.len() > product.limits.additional_retirements().get() {
-        return Err(PrepareSceneProductTransactionError::AdditionalRetirementLimitExceeded);
+    let mut retirements = SceneProductRetirements::default();
+    let mut retirement_units = 0usize;
+    for retirement in product.additional_retirements {
+        let units = match retirement {
+            SceneProductRetirement::Entity(token) => {
+                retirements.tokens.push(*token);
+                1
+            }
+            SceneProductRetirement::Instance(instance) => {
+                if !matches!(commit, SceneIdentityCommit::Replace(_)) {
+                    return Err(PrepareSceneProductTransactionError::InstanceTargetUnsupported);
+                }
+                let (occurrence, units) = capture_occurrence_retirement(world, instance)
+                    .map_err(PrepareSceneProductTransactionError::Occurrence)?;
+                retirements.instances.push(instance.clone());
+                retirements.occurrences.push(occurrence);
+                units
+            }
+        };
+        retirement_units = retirement_units
+            .checked_add(units)
+            .ok_or(PrepareSceneProductTransactionError::AdditionalRetirementLimitExceeded)?;
+        if retirement_units > product.limits.additional_retirements().get() {
+            return Err(PrepareSceneProductTransactionError::AdditionalRetirementLimitExceeded);
+        }
     }
 
     let mut overlay =
@@ -1016,33 +1136,27 @@ fn prepare_scene_product_transaction(
         .map_err(PrepareSceneProductTransactionError::Overlay)?;
     Ok(PendingSceneProductTransaction {
         overlay,
-        additional_retirements: product.additional_retirements.to_vec(),
+        retirements,
     })
 }
 
 fn validate_scene_product_baseline(
-    world: &mut World,
+    world: &World,
     product: PendingSceneProductTransaction,
 ) -> Result<PreparedSceneProductTransaction, PrepareSceneProductTransactionError> {
-    validate_scene_product_current(world, &product.overlay, &product.additional_retirements)?;
+    validate_scene_product_current(world, &product.overlay, &product.retirements)?;
     Ok(PreparedSceneProductTransaction {
         overlay: product.overlay,
-        additional_retirements: product.additional_retirements,
+        retirements: product.retirements,
     })
 }
 
 fn validate_scene_product_current(
     world: &World,
     overlay: &PreparedSceneProductOverlay,
-    additional_retirements: &[WorldEntityToken],
+    retirements: &SceneProductRetirements,
 ) -> Result<(), PrepareSceneProductTransactionError> {
-    validate_additional_retirement_identity_axes(world, additional_retirements.iter().copied())
-        .map_err(PrepareSceneProductTransactionError::Identity)?;
-    for token in additional_retirements {
-        if world.get::<SceneEntitySource>(token.entity()).is_some() {
-            return Err(PrepareSceneProductTransactionError::SceneOwnedRetirement);
-        }
-    }
+    retirements.validate(world)?;
     overlay
         .validate_resources(world)
         .map_err(PrepareSceneProductTransactionError::Overlay)?;
@@ -1053,7 +1167,16 @@ fn scene_product_rejection(
     mut diagnostics: DiagnosticReport,
     error: PrepareSceneProductTransactionError,
 ) -> SceneSpawnReport {
+    if let PrepareSceneProductTransactionError::Occurrence(error) = error {
+        return occurrence_rejection(diagnostics, error);
+    }
     let (code, summary, entity_id) = match error {
+        PrepareSceneProductTransactionError::Occurrence(_) => unreachable!(),
+        PrepareSceneProductTransactionError::InstanceTargetUnsupported => (
+            "scene.product-retirement-instance-target-unsupported",
+            "Additional Scene activations require ordinary Scene replacement",
+            None,
+        ),
         PrepareSceneProductTransactionError::OverlayCeilingExceeded => (
             "scene.product-overlay-ceiling-exceeded",
             "Scene product overlay exceeds the engine item ceiling",
@@ -1523,6 +1646,7 @@ fn prepare_scene_identity_commit(
     world: &mut World,
     identity_tokens: &BTreeMap<SceneEntityId, WorldEntityToken>,
     commit: SceneIdentityCommit<'_>,
+    retirements: &SceneProductRetirements,
     new_domain: Option<WorldIdentityDomain>,
 ) -> Result<PreparedSceneIdentityCommit, IdentityDomainError> {
     #[cfg(feature = "work-observation")]
@@ -1559,6 +1683,8 @@ fn prepare_scene_identity_commit(
             let replacement = prepare_registered_scene_instance_replacement(
                 world,
                 current,
+                &retirements.instances,
+                &retirements.tokens,
                 &entries,
                 TombstoneCause::Replaced,
             )?;

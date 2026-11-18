@@ -10,16 +10,31 @@ use nara_ecs::{
     bevy_ecs::component::{ComponentId, Mutable},
 };
 use nara_hierarchy::{Children, Parent};
-use nara_identity::SceneEntityId;
+use nara_identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken};
 use nara_reflect::{ComponentRegistrySnapshot, ComponentTypeId};
 
 use crate::{spawn::SceneEntitySource, validation::PreparedScene};
+
+/// One original product-owned selection retired with a replacement Scene.
+///
+/// Runtime-only entities retain their World identity token. A Scene receipt ends the whole
+/// activation and releases its logical occurrence on successful commit, including activations
+/// with members already retired through the ordinary Scene APIs.
+#[derive(Clone, Debug)]
+pub enum SceneProductRetirement {
+    /// Retires one runtime-only entity without Scene or persistent identity ownership.
+    Entity(WorldEntityToken),
+    /// Ends one additional complete Scene activation in the same World.
+    Instance(SpawnedSceneInstance),
+}
 
 /// Required item limits for one provisional product-scene replacement transaction.
 ///
 /// Overlay writes count owned component insertions and product-resource replacements. The limits
 /// bound retained entries, not the byte size of arbitrary Rust values. Engine ceilings are
-/// enforced before the transaction creates scratch entities.
+/// enforced before the transaction creates scratch entities. Additional retirements count one
+/// unit per runtime token and each Scene activation's original member count, with at least one
+/// unit per empty activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneProductTransactionLimits {
     overlay_writes: ItemLimit,
@@ -30,7 +45,7 @@ impl SceneProductTransactionLimits {
     /// Maximum overlay entries accepted by the engine for one transaction.
     pub const MAX_OVERLAY_WRITES: usize = 100_000;
 
-    /// Maximum additional retirement tokens accepted by the engine for one transaction.
+    /// Maximum additional retirement membership units accepted for one transaction.
     pub const MAX_ADDITIONAL_RETIREMENTS: usize = 100_000;
 
     /// Creates the required caller limits for one transaction.
@@ -48,7 +63,7 @@ impl SceneProductTransactionLimits {
         self.overlay_writes
     }
 
-    /// Returns the caller limit for additional product-owned retirement tokens.
+    /// Returns the caller limit for additional product-owned retirement membership units.
     #[must_use]
     pub(crate) const fn additional_retirements(self) -> ItemLimit {
         self.additional_retirements

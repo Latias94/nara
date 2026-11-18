@@ -157,12 +157,29 @@ pub(crate) fn combine_scene_hierarchy_operations(
     retirement: &PreparedSceneHierarchyRetirement,
     new_operations: &[HierarchyOperation],
     retiring_entities: &[Entity],
+    all_retiring_entities: &[Entity],
 ) -> Vec<HierarchyOperation> {
     let retiring_entities = retiring_entities.iter().copied().collect::<EntityHashSet>();
-    let replacement_root_placement = world
-        .get_resource::<HierarchyRoots>()
-        .and_then(|roots| roots.iter().find(|root| retiring_entities.contains(root)))
-        .and_then(|root| HierarchyPlacement::current(world, root));
+    let all_retiring_entities = all_retiring_entities
+        .iter()
+        .copied()
+        .collect::<EntityHashSet>();
+    let replacement_root_placement = world.get_resource::<HierarchyRoots>().and_then(|roots| {
+        let index = roots
+            .as_slice()
+            .iter()
+            .position(|root| retiring_entities.contains(root))?;
+        Some(
+            roots.as_slice()[..index]
+                .iter()
+                .rev()
+                .find(|root| !all_retiring_entities.contains(*root))
+                .map_or_else(
+                    || HierarchyPlacement::first(HierarchyPlacementOwner::Root),
+                    |root| HierarchyPlacement::after(HierarchyPlacementOwner::Root, *root),
+                ),
+        )
+    });
 
     let mut operations = Vec::with_capacity(retirement.operations().len() + new_operations.len());
     operations.extend(retirement.operations().iter().copied());

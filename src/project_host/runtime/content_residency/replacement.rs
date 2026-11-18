@@ -22,7 +22,7 @@ impl StagedProjectSceneReplacement {
         content: &PreparedSceneContent,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[WorldEntityToken],
+        additional_retirements: &[nara_scene::advanced::SceneProductRetirement],
         configure: F,
     ) -> Result<Self, SceneSpawnReport>
     where

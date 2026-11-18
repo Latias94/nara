@@ -1,11 +1,11 @@
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, World};
-use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
+use nara_identity::SpawnedSceneInstance;
 use nara_scene::{
     SceneComponentBindings, SceneSpawnReport,
     advanced::{
         SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
-        SceneProductTransactionLimits,
+        SceneProductRetirement, SceneProductTransactionLimits,
     },
     scene_component_bindings, validate_scene_component_bindings_authority,
 };
@@ -30,7 +30,7 @@ pub fn restart_current_scene_with_product<F>(
     world: &mut World,
     expected: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -63,7 +63,7 @@ pub fn replace_current_scene_with_product<F>(
     expected: &SpawnedSceneInstance,
     source: SceneSource,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -84,7 +84,7 @@ fn replace_current<F>(
     expected: &SpawnedSceneInstance,
     source: Option<SceneSource>,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where

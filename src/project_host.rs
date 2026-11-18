@@ -257,4 +257,5 @@ pub use runtime::{
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
+    inspect_current_scene_dependency, instantiate_current_scene_dependency,
 };

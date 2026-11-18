@@ -26,11 +26,11 @@ use nara_app::{
 use nara_asset::AssetProductRef;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
-use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
+use nara_identity::SpawnedSceneInstance;
 use nara_project::ProjectPath;
 use nara_scene::{
     CompiledSceneDocument, SceneSpawnReport,
-    advanced::{SceneProductOverlayWriter, SceneProductTransactionLimits},
+    advanced::{SceneProductOverlayWriter, SceneProductRetirement, SceneProductTransactionLimits},
 };
 use nara_tasks::TaskPools;
 

@@ -22,7 +22,7 @@ use nara::{
     },
     scene::{
         CompiledSceneDocument, CompiledSceneEntity, SceneEntitySource,
-        retire_and_despawn_scene_entity,
+        advanced::SceneProductRetirement, retire_and_despawn_scene_entity,
     },
     transform::{FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, fixed_spatial_snapshot},
 };
@@ -465,7 +465,12 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
             ItemLimit::new(MAX_WAVE_PROJECTILES)
                 .expect("the reference projectile limit is non-zero"),
         );
-        let retirements = owner.projectile_tokens().to_vec();
+        let retirements = owner
+            .projectile_tokens()
+            .iter()
+            .copied()
+            .map(SceneProductRetirement::Entity)
+            .collect::<Vec<_>>();
         let mut report =
             restart_current_scene_with_product(world, &expected, limits, &retirements, |writer| {
                 prepared.write_overlay(writer);

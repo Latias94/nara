@@ -327,6 +327,24 @@ impl ProjectSourceContent {
     pub(crate) fn resolution(&self) -> AssetReferenceResolver<'_> {
         self.database.resolver(&self.asset_scope)
     }
+
+    pub(crate) fn scene_dependency(
+        &self,
+        product: AssetProductRef,
+    ) -> Option<&Arc<CompiledSceneCandidate>> {
+        if product.product() != ImportedProductId::PRIMARY {
+            return None;
+        }
+        let record = self.database.record_for_stable_id(product.source())?;
+        if record.source_kind() != &AssetSourceKind::Scene {
+            return None;
+        }
+        self.scenes
+            .dependencies
+            .iter()
+            .find(|scene| scene.path() == record.path())
+            .map(|scene| &scene.compiled)
+    }
 }
 
 impl ProjectContentSnapshot {

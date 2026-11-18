@@ -561,12 +561,8 @@ impl UnboundScenePublication {
             ));
         }
         if let Some(product) = &self.prepared_product {
-            validate_scene_product_current(
-                world,
-                &product.overlay,
-                &product.additional_retirements,
-            )
-            .map_err(|error| scene_product_rejection(self.diagnostics.clone(), error))?;
+            validate_scene_product_current(world, &product.overlay, &product.retirements)
+                .map_err(|error| scene_product_rejection(self.diagnostics.clone(), error))?;
         }
         self.diagnostics = validate_scene_predecessor(
             world,
@@ -605,7 +601,13 @@ impl UnboundScenePublication {
             })?;
         }
         self.prepared_occurrence
-            .validate(world, self.target.predecessor())
+            .validate(
+                world,
+                self.target.predecessor(),
+                self.prepared_product.as_ref().map_or(&[][..], |product| {
+                    product.retirements.occurrences.as_slice()
+                }),
+            )
             .map_err(|error| occurrence_rejection(self.diagnostics.clone(), error))?;
         prepare_scene_identity(
             world,
@@ -698,13 +700,17 @@ impl UnboundScenePublication {
                     });
                 }
             };
-        let (mut component_insertion, product_resources, additional_retirements) =
+        let (mut component_insertion, product_resources, product_retirements) =
             match prepared_product {
                 Some(product) => {
                     let (insertion, resources) = product.overlay.lower_components(&spawned_by_id);
-                    (insertion, Some(resources), product.additional_retirements)
+                    (insertion, Some(resources), product.retirements)
                 }
-                None => (LifecycleFreeInsertionPlan::new(), None, Vec::new()),
+                None => (
+                    LifecycleFreeInsertionPlan::new(),
+                    None,
+                    SceneProductRetirements::default(),
+                ),
             };
         for entity in &mut preflight.entities {
             if entity.data_components.is_empty() {
@@ -719,10 +725,7 @@ impl UnboundScenePublication {
                 crate::SceneDataComponents::new(world, target, records),
             );
         }
-        let additional_retirement_entities = additional_retirements
-            .iter()
-            .map(|token| token.entity())
-            .collect::<Vec<_>>();
+        let additional_retirement_entities = product_retirements.entities(world);
 
         let mut component_targets = Vec::with_capacity(component_locations.len());
         for (entity_index, _) in &component_locations {
@@ -833,6 +836,7 @@ impl UnboundScenePublication {
             world,
             &identity_tokens,
             commit,
+            &product_retirements,
             new_identity_domain,
         ) {
             Ok(prepared) => prepared,
@@ -863,9 +867,20 @@ impl UnboundScenePublication {
             }
         };
 
-        let scene_retirements = prepared_identity.retiring_entities().to_vec();
-        let mut retired_entities = scene_retirements.clone();
-        retired_entities.extend(additional_retirements.iter().map(|token| token.entity()));
+        let scene_retirements = match commit {
+            SceneIdentityCommit::Replace(current) => scene_instance_entities(world, current),
+            SceneIdentityCommit::Projection(_) => prepared_identity.retiring_entities().to_vec(),
+            _ => Vec::new(),
+        };
+        let mut retired_entities = prepared_identity.retiring_entities().to_vec();
+        if matches!(commit, SceneIdentityCommit::Projection(_)) {
+            retired_entities.extend(
+                product_retirements
+                    .tokens
+                    .iter()
+                    .map(|token| token.entity()),
+            );
+        }
         let prepared_hierarchy_retirement = if prepared_identity.replaces_instance() {
             match prepare_scene_hierarchy_retirement(world, &retired_entities) {
                 Ok(retirement) => Some(retirement),
@@ -885,19 +900,20 @@ impl UnboundScenePublication {
         } else {
             None
         };
-        let hierarchy_operations = if prepared_identity.replaces_instance() {
-            combine_scene_hierarchy_operations(
+        let replacement_hierarchy_operations;
+        let hierarchy_operations = if let Some(retirement) = &prepared_hierarchy_retirement {
+            replacement_hierarchy_operations = combine_scene_hierarchy_operations(
                 world,
-                prepared_hierarchy_retirement
-                    .as_ref()
-                    .expect("prepared scene replacement requires hierarchy retirement"),
+                retirement,
                 &new_hierarchy_operations,
                 &scene_retirements,
-            )
+                &retired_entities,
+            );
+            replacement_hierarchy_operations.as_slice()
         } else {
-            new_hierarchy_operations.clone()
+            new_hierarchy_operations.as_slice()
         };
-        if !additional_retirements.is_empty()
+        if !additional_retirement_entities.is_empty()
             && PreparedSceneEntityRetirement::prepare(
                 world,
                 &additional_retirement_entities,
@@ -933,7 +949,9 @@ impl UnboundScenePublication {
                 retired_entities: 0,
             });
         }
-        if let Err(error) = validate_existing_scene_persistent_apply(world, &scene_retirements) {
+        let mut authored_retirements = scene_retirements.clone();
+        authored_retirements.extend(product_retirements.authored_entities(world));
+        if let Err(error) = validate_existing_scene_persistent_apply(world, &authored_retirements) {
             let report = persistent_apply_rejection(diagnostics, &error);
             rollback_spawn_transaction(world, &spawned_entities);
             return Err(report);
@@ -955,7 +973,7 @@ impl UnboundScenePublication {
         if prepared_identity.replaces_instance()
             && validate_scene_entity_retirement_admission(
                 world,
-                &retired_entities,
+                &scene_retirements,
                 prepared_hierarchy_retirement
                     .as_ref()
                     .expect("prepared scene replacement requires hierarchy retirement"),
@@ -995,7 +1013,7 @@ impl UnboundScenePublication {
             }
         };
 
-        let _prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_operations) {
+        let _prepared_hierarchy = match prepare_construction_batch(world, hierarchy_operations) {
             Ok(prepared) => prepared,
             Err(error) => {
                 diagnostics.push(if error == nara_hierarchy::HierarchyError::LifecycleWork {
@@ -1042,9 +1060,9 @@ impl UnboundScenePublication {
             prepared_components,
             component_insertion,
             product_resources,
-            hierarchy_operations,
+            new_hierarchy_operations,
             scene_retirements,
-            additional_retirement_tokens: additional_retirements,
+            product_retirements,
             retired_entities,
             spawned_by_id,
             provenance,

@@ -565,6 +565,27 @@ impl CurrentSceneOwner {
         self.source.is_content_managed()
     }
 
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn project_sources(&self) -> Option<&Arc<ProjectSourceContent>> {
+        match &self.source.retention {
+            SceneRetention::Project { sources, .. } => Some(sources),
+            _ => None,
+        }
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn matches_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
+        self.source.matches_component_bindings(bindings)
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn source_key(&self) -> &nara_scene::SourceDocumentKey {
+        match &self.source.candidate {
+            RetainedSceneCandidate::Compiled(candidate) => candidate.source_key(),
+            RetainedSceneCandidate::Runtime(candidate) => candidate.source_key(),
+        }
+    }
+
     /// Identifies only first-party hosted processed content, retaining the original base identity.
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn hosted_runtime_base(
@@ -671,6 +692,52 @@ enum StartupSceneActivationPhase {
     Open,
     Materialized,
     Finalized,
+}
+
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) fn current_scene_inspection_bindings(
+    world: &World,
+    expected: &SpawnedSceneInstance,
+) -> Result<SceneComponentBindings, nara_scene::SceneSpawnReport> {
+    if !world
+        .get_resource::<StartupSceneActivationAuthority>()
+        .is_some_and(|authority| authority.phase == StartupSceneActivationPhase::Materialized)
+        || world.contains_resource::<StartupSceneActivationInput>()
+    {
+        return current_scene_bindings(world, expected);
+    }
+    let rejected = |code: &'static str, summary: &'static str| {
+        let mut report = nara_scene::SceneSpawnReport::default();
+        report.diagnostics.push(Diagnostic::error(
+            DiagnosticCode::new(code).expect("engine-owned diagnostic codes are valid"),
+            SafeSummary::new(summary).expect("engine-owned diagnostic summaries are safe"),
+        ));
+        report
+    };
+    let owner = world.get_resource::<CurrentSceneOwner>().ok_or_else(|| {
+        rejected(
+            "scene.current.owner-missing",
+            "Current Scene ownership is unavailable",
+        )
+    })?;
+    if owner.receipt != *expected {
+        return Err(rejected(
+            "scene.current.expected-instance-mismatch",
+            "Current Scene no longer matches the expected instance",
+        ));
+    }
+    validate_scene_component_bindings_authority(world).map_err(|_| {
+        rejected(
+            "scene.current.component-bindings-authority-invalid",
+            "Current Scene component bindings authority is invalid",
+        )
+    })?;
+    scene_component_bindings(world).cloned().ok_or_else(|| {
+        rejected(
+            "scene.current.component-bindings-unavailable",
+            "Current Scene component bindings are unavailable",
+        )
+    })
 }
 
 /// Provisional ordering anchor for product systems that consume startup-scene activation.

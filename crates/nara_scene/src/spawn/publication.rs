@@ -33,9 +33,9 @@ pub(super) struct PreparedScenePublication {
     pub(super) prepared_components: PreparedComponentApplyBatch,
     pub(super) component_insertion: LifecycleFreeInsertionPlan,
     pub(super) product_resources: Option<PreparedSceneProductResources>,
-    pub(super) hierarchy_operations: Vec<HierarchyOperation>,
+    pub(super) new_hierarchy_operations: Vec<HierarchyOperation>,
     pub(super) scene_retirements: Vec<Entity>,
-    pub(super) additional_retirement_tokens: Vec<WorldEntityToken>,
+    pub(super) product_retirements: SceneProductRetirements,
     pub(super) retired_entities: Vec<Entity>,
     pub(super) spawned_by_id: BTreeMap<SceneEntityId, Entity>,
     pub(super) provenance: SceneEntityProvenanceMap,
@@ -109,8 +109,15 @@ impl PreparedScenePublication {
                 "Prepared Scene World facts changed before publication",
             )
         };
+        self.product_retirements
+            .validate(world)
+            .map_err(|_| changed())?;
         self.occurrence
-            .validate(world, self.expected.as_ref())
+            .validate(
+                world,
+                self.expected.as_ref(),
+                &self.product_retirements.occurrences,
+            )
             .map_err(|error| occurrence_rejection(self.diagnostics.clone(), error))?;
         self.prepared_components
             .validate_commit(world)
@@ -132,22 +139,14 @@ impl PreparedScenePublication {
             self.retired_entities.iter().copied(),
         )
         .map_err(|_| changed())?;
-        validate_registered_persistent_apply_targets(world, self.scene_retirements.iter().copied())
-            .map_err(|_| changed())?;
-        if !self.additional_retirement_tokens.is_empty() {
-            validate_additional_retirement_identity_axes(
-                world,
-                self.additional_retirement_tokens.iter().copied(),
-            )
-            .map_err(|_| changed())?;
-            if self
-                .additional_retirement_tokens
+        validate_registered_persistent_apply_targets(
+            world,
+            self.scene_retirements
                 .iter()
-                .any(|token| world.get::<SceneEntitySource>(token.entity()).is_some())
-            {
-                return Err(changed());
-            }
-        }
+                .copied()
+                .chain(self.product_retirements.authored_entities(world)),
+        )
+        .map_err(|_| changed())?;
         for candidate in self.spawned_by_id.values().copied() {
             validate_registered_persistent_component_apply::<SceneEntitySource>(
                 world,
@@ -195,12 +194,14 @@ impl PreparedScenePublication {
                 let replacement = prepare_registered_scene_instance_replacement(
                     world,
                     expected,
+                    &self.product_retirements.instances,
+                    &self.product_retirements.tokens,
                     &entries,
                     TombstoneCause::Replaced,
                 )
                 .map_err(|_| changed())?;
                 if replacement.instance_id() != self.prepared_identity.instance_id()
-                    || replacement.retiring_entities() != self.scene_retirements
+                    || replacement.retiring_entities() != self.retired_entities
                 {
                     return Err(changed());
                 }
@@ -241,7 +242,8 @@ impl PreparedScenePublication {
             }
         };
         let mut retirement = None;
-        if self.expected.is_some() {
+        let replacement_hierarchy_operations;
+        let hierarchy_operations = if self.expected.is_some() {
             let hierarchy = prepare_scene_hierarchy_retirement(world, &self.retired_entities)
                 .map_err(|_| changed())?;
             if finalize {
@@ -274,17 +276,23 @@ impl PreparedScenePublication {
                     self.claims.component_ids(),
                 )
                 .map_err(|_| changed())?;
-                let additional_entities = self
-                    .additional_retirement_tokens
-                    .iter()
-                    .map(|token| token.entity())
-                    .collect::<Vec<_>>();
+                let additional_entities = self.product_retirements.entities(world);
                 PreparedSceneEntityRetirement::prepare(world, &additional_entities, &hierarchy)
                     .map_err(|_| changed())?;
             }
-        }
+            replacement_hierarchy_operations = combine_scene_hierarchy_operations(
+                world,
+                &hierarchy,
+                &self.new_hierarchy_operations,
+                &self.scene_retirements,
+                &self.retired_entities,
+            );
+            replacement_hierarchy_operations.as_slice()
+        } else {
+            self.new_hierarchy_operations.as_slice()
+        };
         let hierarchy =
-            prepare_construction_batch(world, &self.hierarchy_operations).map_err(|_| changed())?;
+            prepare_construction_batch(world, hierarchy_operations).map_err(|_| changed())?;
         self.definition.validate(world)?;
         Ok(FinalScenePublication {
             identity,
@@ -314,6 +322,7 @@ impl PreparedScenePublication {
             prepared_components,
             component_insertion,
             product_resources,
+            product_retirements,
             scene_retirements,
             retired_entities,
             spawned_by_id,
@@ -372,12 +381,15 @@ impl PreparedScenePublication {
                     let mut domain = world
                         .remove_resource::<WorldIdentityDomain>()
                         .expect("prepared Scene replacement retains its identity domain");
-                    let (instance, retired_scene_entities) = replacement.commit(&mut domain);
-                    debug_assert_eq!(retired_scene_entities, scene_retirements);
+                    let (instance, retired) = replacement.commit(&mut domain);
+                    debug_assert_eq!(retired, retired_entities);
                     finalization
                         .retirement
                         .expect("replacement prepared exact retirement")
                         .commit(world);
+                    for receipt in &product_retirements.instances {
+                        release_occurrence(world, receipt);
+                    }
                     world.insert_resource(domain);
                     instance
                 }
@@ -896,7 +908,7 @@ mod tests {
             reservations,
             &claims,
             limits(),
-            &[retirement],
+            &[SceneProductRetirement::Entity(retirement)],
             |_| {},
         )
         .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics));
@@ -915,6 +927,80 @@ mod tests {
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert!(prepared.discard(&mut world).is_ok());
         assert!(world.get::<NativeState>(retirement.entity()).is_some());
+    }
+
+    #[test]
+    fn additional_instance_native_hooks_never_inherit_primary_claims() {
+        for late_hook in [false, true] {
+            let (mut world, registry, candidate, current, old, id) = fixture();
+            let additional = spawn_scene(
+                &mut world,
+                &registry,
+                &candidate,
+                &SceneOccurrenceKey::new("publication-tests", "additional").unwrap(),
+                None,
+            )
+            .instance
+            .unwrap();
+            let EntityLookup::Resolved(marker) = additional.resolve(&world, &id) else {
+                panic!("additional activation must resolve");
+            };
+            if !late_hook {
+                world.entity_mut(marker).insert(NativeState);
+            }
+            let claims = SceneNativeRetirementClaims::from_component_ids([world
+                .component_id::<NativeState>()
+                .unwrap()]);
+            let entities = world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<BTreeSet<_>>();
+            let identity = world.resource::<WorldIdentityDomain>().stats();
+            let reservations = SceneAssetReservations::from_world(&world);
+            let staged = stage_expanded_scene_replacement_with_claims(
+                &mut world,
+                &registry,
+                &candidate,
+                None,
+                &current,
+                reservations,
+                &claims,
+                limits(),
+                &[SceneProductRetirement::Instance(additional.clone())],
+                |overlay| {
+                    overlay.replace_resource(ProductValue::new(2));
+                },
+            );
+            if late_hook {
+                let staged = staged.unwrap_or_else(|report| panic!("{:?}", report.diagnostics));
+                world.commands().queue(move |world: &mut World| {
+                    world.entity_mut(marker).insert(NativeState);
+                });
+                assert!(staged.validate_baseline(&mut world).is_err());
+                let (staged, report) = staged.commit(&mut world).unwrap_err();
+                assert!(report.instance.is_none());
+                assert!(staged.discard(&mut world).is_ok());
+            } else {
+                assert!(staged.is_err());
+            }
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                entities
+            );
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
+            assert_eq!(world.resource::<Removed>().0, 0);
+            assert_eq!(world.resource::<ProductValue>().0, 1);
+            assert!(world.get::<NativeState>(old).is_some());
+            assert!(world.get::<NativeState>(marker).is_some());
+            assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
+            assert_eq!(
+                additional.resolve(&world, &id),
+                EntityLookup::Resolved(marker)
+            );
+        }
     }
 
     #[test]
@@ -1139,7 +1225,7 @@ mod tests {
             reservations,
             &claims,
             limits(),
-            &[retirement],
+            &[SceneProductRetirement::Entity(retirement)],
             |_| {},
         )
         .unwrap_or_else(|report| panic!("staging failed: {:?}", report.diagnostics));

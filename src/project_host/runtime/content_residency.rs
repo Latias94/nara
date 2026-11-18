@@ -2,9 +2,11 @@
 
 mod catalog;
 mod images;
+mod instances;
 mod materials;
 mod metadata;
 mod replacement;
+pub use instances::{inspect_current_scene_dependency, instantiate_current_scene_dependency};
 pub(super) use replacement::StagedProjectSceneReplacement;
 
 use std::{
@@ -18,14 +20,14 @@ use nara_asset::{
 };
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, Res, ResMut, Resource, World, bevy_ecs::system::SystemState};
-use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
+use nara_identity::SpawnedSceneInstance;
 use nara_image::ImageAsset;
 use nara_material::{Material2dAsset, Material2dDomain};
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
         SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
-        SceneProductTransactionLimits, StagedSceneReplacement,
+        SceneProductRetirement, SceneProductTransactionLimits, StagedSceneReplacement,
     },
 };
 use nara_tilemap::{
@@ -424,7 +426,7 @@ pub(super) fn replace_scene<F>(
     expected: &SpawnedSceneInstance,
     content: &PreparedSceneContent,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where

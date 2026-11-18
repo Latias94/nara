@@ -30,7 +30,9 @@ use nara_engine::{
     },
     scene::{
         SceneDocument, SceneEntityId, SceneEntityRecord,
-        advanced::{SceneNativeRetirementClaims, SceneProductTransactionLimits},
+        advanced::{
+            SceneNativeRetirementClaims, SceneProductRetirement, SceneProductTransactionLimits,
+        },
     },
 };
 use nara_engine::{
@@ -460,11 +462,16 @@ fn maintenance(world: &mut World) {
             .collect::<Vec<_>>();
         let entities_before_begin = u32::try_from(before_begin.len()).unwrap();
         let effects = Arc::clone(&control.effects);
+        let retirements = additional_retirements
+            .iter()
+            .copied()
+            .map(SceneProductRetirement::Entity)
+            .collect::<Vec<_>>();
         let result = begin_prepared_project_scene_travel(
             world,
             request,
             SceneProductTransactionLimits::new(ItemLimit::new(limit).unwrap(), ItemLimit::ONE),
-            &additional_retirements,
+            &retirements,
             move |_| {
                 effects.lock().unwrap().configured += 1;
             },

@@ -50,6 +50,9 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 mod action;
 mod content;
 mod content_residency;
+pub use content_residency::{
+    inspect_current_scene_dependency, instantiate_current_scene_dependency,
+};
 #[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
 mod desktop_poll_tests;
 mod scene_requests;

@@ -598,7 +598,7 @@ pub fn commit_prepared_project_scene<F>(
     world: &mut World,
     request: ProjectSceneRequestId,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -704,7 +704,7 @@ pub fn begin_prepared_project_scene_travel<F>(
     world: &mut World,
     request: ProjectSceneRequestId,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
+    additional_retirements: &[SceneProductRetirement],
     configure: F,
 ) -> Result<(), SceneSpawnReport>
 where

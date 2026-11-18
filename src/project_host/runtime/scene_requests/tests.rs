@@ -27,6 +27,7 @@ use crate::project_host::{
 };
 use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materialize_startup_scene};
 
+mod instances;
 mod processed;
 mod source_products;
 mod source_updates;

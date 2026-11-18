@@ -73,6 +73,62 @@ fn occurrence(slot: &str) -> SceneOccurrenceKey {
     SceneOccurrenceKey::new("projection-tests", slot).unwrap()
 }
 
+#[test]
+fn additional_instance_selection_explicitly_rejects_projection_before_allocation() {
+    let registry = registry();
+    let candidate = bound_scene(&registry, named_scene("projection"));
+    let mut world = World::new();
+    let current = spawn_scene(
+        &mut world,
+        &registry,
+        &candidate,
+        &occurrence("current"),
+        None,
+    )
+    .instance
+    .unwrap();
+    let original_root = resolved_entity(&world, &current, &scene_id("root"));
+    let entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let stats = world.resource::<WorldIdentityDomain>().stats();
+    let called = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&called);
+    let report = SceneSpawner::new().spawn_with_asset_context_and_product(
+        &mut world,
+        &registry,
+        &candidate,
+        &occurrence("current"),
+        None,
+        SceneIdentityCommit::Projection(Some(&current)),
+        Some(SceneProductTransactionInput {
+            limits: SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
+            additional_retirements: &[SceneProductRetirement::Instance(current.clone())],
+            configure: Box::new(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }),
+        }),
+    );
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.product-retirement-instance-target-unsupported"
+    }));
+    assert_eq!(called.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        entities
+    );
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+    assert_eq!(
+        current.resolve(&world, &scene_id("root")),
+        EntityLookup::Resolved(original_root)
+    );
+}
+
 fn resolved_entity(world: &World, instance: &SpawnedSceneInstance, id: &SceneEntityId) -> Entity {
     match instance.resolve(world, id) {
         EntityLookup::Resolved(entity) => entity,
