@@ -216,3 +216,24 @@ success. Use a process deadline for automated execution; its internal poll deadl
 cooperative. It verifies present/complete/retirement identity, while the separate offscreen
 workflow owns actual pixel comparisons and retained-input replay. See the
 [windowed control guide](../../../docs/guides/materials.md#windowed-source-update-control).
+
+## Extracted Material Texture Captures
+
+The Material member's `captured_textures` target uses the existing `native-source-watch-gpu`
+feature without installing a watcher. Default tests exercise its exact full-image oracle.
+The three ignored native controls use actual stock capture and an external original GPU Host:
+authored publication/omission/recovery, direct code-first capture, and a deliberate panic after a
+submitted/read-back frame. Both successful paths replay A after B and source-World retirement;
+all controls retain original prefix, pixel-lifetime and physical cleanup assertions.
+
+Set `WGPU_BACKEND=dx12` and explicitly select `NARA_WGPU_FORCE_FALLBACK=0` for hardware or `1`
+for the software control. The test requires the actual adapter type to match and fails if that
+prerequisite is unavailable; it does not convert missing native support into a passing skip.
+
+```text
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --offline -p nara-material-module-consumer --features native-source-watch-gpu --test captured_textures --run-ignored all --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The [Material plan](../../../docs/plans/2026-11-14-durable-material-and-shader-plan.md#extracted-material-texture-custody-successor)
+records actual hardware/software execution and limits. This is offscreen rendering, not window
+presentation, scanout or a numerical performance qualification.

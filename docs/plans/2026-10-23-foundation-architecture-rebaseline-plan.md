@@ -228,7 +228,18 @@ one Desktop/AudioDesktop preparation control,
 independently encoded Material 4 and the actual relocated source-free package trajectory 1 pass;
 the [receiving record](../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction)
 retains complete execution evidence and limits. Generated-input isolation, a shared starter
-cooked entry, extracted Material pixel custody and the other review findings remain open.
+cooked entry and the other review findings remain open.
+
+The [extracted Material custody correction](2026-11-14-durable-material-and-shader-plan.md#material-texture-capture-implementation-and-qualification)
+now implements F4 at original Extract/Queue in `163dffd`, with native controls at `10ee433`.
+One shared prepared binding holds exact effective
+Image snapshots across Sprite/Tilemap cells, Views and batches; Queue's additional-texture latest
+lookup is removed. Managed authored publication and code-first typed capture retain their own
+admission rules. Owning CPU 57, public Material 9, hardware DX12 4 and software DX12 3 pass,
+including raw inter-stage replacement, current authored refusal, actual B recovery, old A replay
+after World retirement and injected-panic physical cleanup. The study records fixed-source
+comparisons, exact run IDs and the corrected cleanup-evidence gap. These are scoped Windows
+offscreen results, not numerical performance, foreign execution or completed R9b/Foundation.
 
 ## Dependency Shape
 

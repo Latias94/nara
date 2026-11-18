@@ -45,7 +45,7 @@ benchmark program.
 | --- | --- |
 | F2: source Check and Cook disagree on the selected Schema | **Scoped correction implemented and qualified below.** Cook consumes original manifest-selected source delivery, compiles with its admitted bindings and carries actual member observations through build/publication. Alternate-path, invalid/divergent selection, later replacement and actual relocated source-free package controls pass. [Cook inventory](../../samples/two-level-game/src/bin/cook/source.rs), [assembly](../../samples/two-level-game/src/bin/cook/content.rs), [existing agreement](../../src/project_host/runtime_agreement.rs). |
 | F3: independent desktop UI can resolve incompatible Winit sources | **Confirmed source-selection gap; defer with paused desktop UI work.** The root selects vendored Winit while AccessKit's dependency uses registry Winit. Root patches are application-owned; the generated project does not emit one. The sprite-only shipping game does not exercise this combination. Qualify local and pinned-Git template selections separately; retain the native DPI repair until its own retirement criteria pass. [Starter manifest](../../src/project_workflow/starter/product_contract.rs), [AccessKit adapter](../../crates/nara_winit/src/accessibility/platform.rs), [vendor contract](../../vendor/winit/NARA-PATCH.md). |
-| F4: Material texture generation can change between Extract and Queue | **Confirmed by current source; open.** Extract validates the managed Image but retains a texture handle. Queue can select a later prepared slot. Capture effective textures with existing `ImageContentSnapshot` values in the renderer's extracted binding and project those snapshots in Queue. Share the binding across cells/views. Prove inter-stage unmanaged replacement, published recovery and replay of an old capture after World retirement. [Extract](../../crates/nara_sprite_render/src/extract.rs), [Queue](../../crates/nara_sprite_render/src/queue.rs), [Image snapshot](../../crates/nara_image/src/content.rs). |
+| F4: Material texture generation can change between Extract and Queue | **Scoped correction implemented and qualified below.** Original Extract freezes complete Material/Image captures, shared across cells/Views/batches. Queue no longer chooses later additional-texture cache entries. Real inter-stage replacement, current authored refusal, publication recovery, post-World old-pixel replay and panic cleanup pass through the original public GPU Host. [Extract](../../crates/nara_sprite_render/src/extract.rs), [Queue](../../crates/nara_sprite_render/src/queue.rs), [Image snapshot](../../crates/nara_image/src/content.rs). |
 | F5: processed Material texture membership omits Image kind | **Scoped correction implemented and qualified below.** Original deep validation joins decoded Material slots to selected Image codec roles. Builder and independently encoded/reopened wrong-kind bases reject before gameplay; valid and missing-Image controls pass. [Deep validation](../../src/runtime_content/deep.rs), [Material texture facts](../../crates/nara_material/src/asset/runtime.rs), [independent consumer](../../tests/fixtures/module-consumer/material-consumer/tests/processed_workflow.rs). |
 | F6: explicit PNG Reimport omits a current PNG check at adoption | **Confirmed source gap; queued for Editor correctness work.** Completion compares the worker observation and checks current metadata, then publishes. The hydration path already verifies current PNG and metadata. Reuse that bounded observation at adoption, keeping the original capability and last-good value. A watcher event alone is insufficient. [Explicit adoption](../../src/project_host/runtime/editor/image_import/transaction.rs), [hydration control](../../src/project_host/runtime/editor/image_import/hydration.rs). |
 | F7: dirty Reopen lacks explicit discard intent | **Confirmed interactive gap; queued while UI is paused.** Both frontends submit the intentional discard operation directly. Keep that exact programmatic operation, but require a document/revision-bound discard-or-cancel decision for dirty interactive use. Preserve failed-read behavior and history on Cancel. [Reference action](../../editor/src/frontend/imgui/authoring.rs), [drawn action](../../editor/src/frontend/drawn/shell.rs), [Accepted discard contract](../architecture/adr/0047-editor-workspace-and-scene-document-state.md). |
@@ -150,10 +150,34 @@ workspace claim. Root/sample and affected independent-package formatting pass, a
 link/fragment, TOML/lock and whitespace checks. The paused UI/Dialogue files remain byte-for-byte
 unchanged. Generated-source isolation and the shared external-game cooked entry remain open.
 
+## Extracted Material Texture Correction
+
+The renderer replacement lands at `163dffd`, followed by public native/CI controls at `10ee433`.
+
+F4 reuses `PreparedMaterial2d` as one immutable shared binding/image value created during
+Sprite/Tilemap Extract. Managed authored and direct code-first paths retain their existing
+Image admission rules. Queue consumes the captured snapshots, removing the later handle/cache
+resolution. It does not acquire another World/resource owner or repeat full validation per View.
+The ordinary stock Sprite Image path retains its existing preparation owner.
+
+The [owning Material plan](../plans/2026-11-14-durable-material-and-shader-plan.md#material-texture-capture-implementation-and-qualification)
+records pinned Bevy/Godot evidence, exact tests and limits. Mature engines support centralized
+binding preparation and invalidation; their retained texture references do not establish immutable
+historical pixels. Nara's existing content snapshot supplies that requirement. Owning CPU tests
+57/57 and existing public workflows 9/9 pass. Final hardware DX12 4/4 includes the new
+authored/direct replay and post-submit panic cleanup plus the original live source-update path;
+the explicit software DX12 control passes 3/3. Both use the same original Host for B followed by
+A after source-World retirement, verify exact full images and release the original pixel owner.
+
+Independent production review reports no P1/P2. Testing review's P2 cleanup-evidence gap is fixed
+with one typed sentinel after a genuine submitted/read-back frame, and bounded rereview closes it.
+Correctness Clippy and affected formatting pass. CI is configured locally; no remote execution,
+foreign-platform, scanout or numerical performance qualification follows from this unit.
+
 ## Delivery order and larger refactors
 
 TileSet delivery and the managed F1/F8 App/Transform corrections have landed. The F2/F5 admission
-corrections above precede expanding ordinary cooking. Next, F4 preserves exact admitted pixels
+corrections above precede expanding ordinary cooking. F4 now preserves exact admitted pixels
 through its original renderer owner. F9, F11, shared movement decoding and
 bounded diagnostics are independent corrections. Desktop UI source selection, Editor import,
 discard intent, keyboard parity and installed-tool activation remain queued with the paused UI work.

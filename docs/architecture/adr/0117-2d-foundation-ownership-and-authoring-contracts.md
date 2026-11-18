@@ -267,6 +267,14 @@ managed Image publication must also match the exact storage slot: raw mutable st
 authorize retained derived content. Resolved TileSet fields are private; changing its Image/atlas
 through a code-first builder discards the admitted content snapshot.
 
+Material rendering freezes its effective binding and complete texture Image snapshots during
+the original Extract. Authored Material textures use managed Image publication admission;
+direct code-first bindings use the existing typed Image snapshot without a catalog requirement.
+One immutable prepared Material is shared across Sprite, Tilemap cells, Views and batches. Queue
+uses these exact snapshots instead of resolving original handles against a later Image cache.
+Later replacement or retirement does not redirect an already captured draw. The next Extract
+still admits current authored publication facts and refuses an unmanaged slot substitution.
+
 The concrete TileSet asset owner keeps one latest Source or source-independent Product declaration
 separately from its published Image dependency. ADR 0033 owns their shared admission and publication
 contract. A Product descriptor names complete TileSet/Image identities and actual atlas/material

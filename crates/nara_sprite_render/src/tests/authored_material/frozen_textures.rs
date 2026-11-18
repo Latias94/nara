@@ -89,7 +89,6 @@ fn authored_textures_freeze_before_prepare_share_across_cells_and_views_and_reco
         CoreStage::Extract,
         (move |time: Res<nara_app::RealTime>, mut images: ResMut<Assets<ImageAsset>>| {
             if time.frame == 1 {
-                // Prepare will see B, after this entity has already captured authorized A.
                 assert!(
                     images
                         .insert(palette_handle, replacement_palette(palette))

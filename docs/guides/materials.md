@@ -124,6 +124,19 @@ matching captures. Shader compilation proves the CPU interface; successful GPU p
 device lifetime and physical submission completion remain separate original render authorities.
 Uniform values and ordinary texture-content changes are not pipeline specialization inputs.
 
+Extract freezes each effective Material binding together with the exact Image contents of its
+texture slots. The immutable prepared value is shared across an entity's Sprite/Tilemap cells
+and its Views; Queue uses those snapshots directly. Replacing an Image between Extract and
+Prepare cannot redirect that frame to newer pixels. A retained render input keeps the original
+texture content after the source World is retired.
+
+For authored `Material2d`, capture requires the current managed Product/publication and typed
+Image slot. A raw storage replacement refuses the next Extract until actual publication recovers.
+Direct code-first `Material2dBinding` uses the existing typed Image store and usable state without
+requiring a managed catalog. Missing direct texture content is omitted at Extract and contributes
+to `SpriteRenderStats::unprepared_textures`. These checks run once per effective binding, not once
+per Tilemap cell or View.
+
 Project-backed additive Scenes may share an identical original Material publication. The Host
 tracks its use with each committed Scene occurrence, and unload releases the publication only
 after its final live user leaves. A prepared primary replacement joins those live occurrences

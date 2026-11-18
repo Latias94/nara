@@ -16,6 +16,119 @@ qualified below; complete R9b and the foundation Goal are not finished.
 The persistent implementation/migration is `2535b46`; independent/public and real executable
 delivery consumers are `d091151`. Both are local commits on the original foundation branch.
 
+## Extracted Material Texture Custody Successor
+
+Repair external-review F4 through the existing Sprite/Tilemap renderer. Extract currently checks
+managed Material textures but carries only handles; Queue can then choose a different Image
+slot. Freeze each effective binding and its complete Image snapshots in original Extract.
+Reuse `PreparedMaterial2d` and share one immutable value across the entity's Sprite, Tilemap cells,
+Views and batches. Queue projects that value instead of resolving its texture handles again.
+
+Authored `Material2d` captures through `ImageContentSnapshot`, preserving the managed Product,
+usable publication and typed slot admission. Direct code-first `Material2dBinding` captures through
+the existing `PreparedImageSnapshot` without inventing a catalog requirement. A later source
+replacement or retirement cannot change an already captured draw. The next Extract still checks
+its current inputs: unmanaged authored replacement refuses, and actual managed publication
+recovers. Missing direct textures retain their diagnostic count at the original per-frame owner.
+This is not a new asset/version registry, per-View audit, image copy or GPU owner.
+
+Qualify inter-stage raw replacement, published recovery, shared bindings across real cells/Views,
+and exact A/B pixels through an independent public native consumer. Replay an old captured input
+after Runtime/World retirement using the original GPU Host and declared readback. Preserve prior
+Material, ordering, missing-texture, last-good and cleanup controls. Compare the selected mechanism
+against pinned Bevy/Godot source without attributing Nara's exact retained replay semantics to
+those engines. Editor work and numerical micro-optimization remain paused/deferred respectively.
+
+### Pinned Resource Ownership Evidence
+
+Bevy's generated material bindings resolve an Image handle through render-world `RenderAssets`
+and retain its texture view; unavailable selected Images request a later update. That is a
+render-side preparation contract, not an immutable pixel capture at material extraction.
+Its Image preparation can reuse a matching previous GPU texture and write new pixels into it.
+Therefore a live texture/view reference alone cannot prove Nara's old-input replay requirement.
+Godot similarly keeps Resource references in material parameters, passes texture RIDs to the
+RenderingServer and refreshes dirty/invalid bindings through its material owner. A RID identifies
+a rendering resource; it does not authenticate its historical pixel contents.
+
+Use the existing Nara Image snapshot for exact content/identity/retention, then share the complete
+effective Material value. Current publication admission belongs at Extract; captured-input
+consumption must not require the old World to remain current. Native device, target, allocation
+and submission checks remain at their original Host owner. These references justify keeping
+those responsibilities separate, not another full audit per View or an upstream parity claim.
+
+- [Bevy material Image resolution](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_render/macros/src/as_bind_group.rs#L632)
+- [Bevy render asset lifetime](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_render/src/render_asset.rs#L331)
+- [Bevy reusable GPU Image storage](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_render/src/texture/gpu_image.rs#L73)
+- [Godot material Resource/RID handoff](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/material.cpp#L422)
+- [Godot material binding invalidation](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/servers/rendering/renderer_rd/storage_rd/material_storage.cpp#L1236)
+
+### Material Texture Capture Implementation And Qualification
+
+The renderer replacement lands at `163dffd`; the independent native consumer and CI integration
+land at `10ee433`.
+
+Original Extract now creates one `Arc<PreparedMaterial2d>` containing the exact effective binding
+and binding-ordered Image snapshots. Sprite/Tilemap cells and later Views/batches share that value.
+Authored textures use `ImageContentSnapshot::capture`; direct code-first textures use
+`PreparedImageSnapshot::capture`. Queue's additional-texture latest lookup and per-item capture
+allocation are removed. The normal stock Sprite image path retains its existing Image preparation
+owner. Missing direct Material content is counted during Extract; Queue no longer clears that
+already collected frame statistic. No new global cache, mutation authority or per-View admission
+is added, and no numerical performance improvement is claimed.
+
+The production Sprite/WGPU libraries pass their all-feature check, and stock-Sprite production
+correctness Clippy passes. Existing public declaration, persistent source and processed controls
+pass 9/9 in `e5942470-cadd-494a-a95b-3653bee08e7f`, including current source-free Material controls.
+
+Initial independent hardware DX12 acceptance passes 3/3 in
+`12cac467-542b-4ae9-bf77-6a654c702152`: one exact pixel-oracle control and two actual authored/direct
+trajectories on NVIDIA GeForce RTX 4090. Real Prepare already contains B while the first submitted
+frame still samples A. Authored input then omits its unpublished replacement and recovers only
+after actual publication. The same Host/device first renders B, retires the source World, then
+replays retained A through another original producer. Four authored and three direct outputs
+retain exact full-image bytes after producer retirement. Initial native cleanup and original pixel
+retention/release assertions pass. Final owner, panic-control and CI-software qualification follow
+below; the initial result does not establish those later gates.
+
+The complete owning Sprite/Tilemap CPU suite passes 57/57 in
+`ef9ebdc5-60cd-4293-91f7-6a97361f3a74`. Its registered `authored_material::frozen_textures` consumer
+uses real Runtime stages: raw B is inserted after Extract, current Prepare contains B, but
+extracted cells, two queued Views and batches all share original A. The next frame omits the
+unpublished authored entity while stock drawing continues; actual `commit_loaded(B)` restores
+it. Original Material defaults/overrides, missing resources, painter order, visibility, spatial
+failure preservation and retained-source controls remain covered. This includes the existing
+Image preparation behavior for ordinary stock Sprite textures, which this correction does not
+replace.
+
+Independent testing review identified one P2 evidence gap: successful native trajectories alone
+did not exercise assertion/panic cleanup. The same harness now injects a typed sentinel after an
+actual submitted and read-back first frame, with the original input and output still held. It
+accepts only that sentinel, runs original Runtime/producer/prefix/Host retirement, then requires
+the World and original pixel owner to be dropped with zero native/candidate bytes and cleanup
+faults. Unexpected panics retain their original payload after cleanup. Bounded rereview closes
+the finding and reports no remaining P1/P2.
+
+Final hardware DX12 acceptance passes 4/4, with five default controls excluded, in
+`29554986-a66a-4a2f-b3bb-06f5ed951f24`. It includes both new pixel trajectories, the injected-panic
+control and the existing complete live-file/Shader/Image update trajectory. The observed adapter
+is NVIDIA GeForce RTX 4090. The old live workflow retains eight commits, three refusals,
+Shader/Image replays, fourteen outputs and physical watcher retirement; this run observes 107
+submissions with eleven watcher sessions started and joined, none active or retiring. These are
+fixture observations, not throughput or resource budgets.
+
+The explicit software DX12 control passes 3/3, with its default oracle excluded, in
+`3b56c4f8-ce2c-4afd-aaf9-860817c1eafb`. The actual Microsoft Basic Render Driver reports CPU;
+hardware selection separately requires an integrated or discrete adapter. Both modes exercise
+the same pixels, replay and panic/lifetime assertions. Missing adapters fail their prerequisite.
+The existing Windows software-DX12 CI command now includes `captured_textures`; CI configuration
+is local and no remote run is claimed.
+
+Affected production, owner-test and independent-native correctness Clippy pass. Root and affected
+independent-package formatting pass. This unit qualifies Windows Rust 1.95.0 CPU and offscreen
+DX12 behavior. It does not qualify OS presentation/scanout, foreign execution, numerical costs,
+UI Material rendering or all R9b. Generated-input isolation and shared external-game cooking
+remain next Runtime delivery work.
+
 ## Product Outcome
 
 The Palette material is authored with stable typed parameters and resource references, saved

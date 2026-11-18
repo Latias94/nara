@@ -2226,6 +2226,16 @@ cleanup. This closes the scoped F2/F5 implementation paths; package qualificatio
 [review receiving record](../../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction).
 General cooked-entry extraction and isolated generated build inputs remain open.
 
+The [Material texture custody successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#material-texture-capture-implementation-and-qualification)
+at `163dffd` and `10ee433` freezes each complete Material/Image binding during original Extract
+and shares it across Sprite/Tilemap cells, Views and batches. Queue consumes these exact textures.
+Managed and code-first admission remain distinct existing Image paths.
+Owning CPU 57 and public Material 9 pass; hardware DX12 4 and software DX12 3 prove exact A/B
+pixels, authored omission/recovery, same-Host replay after World retirement and post-submit panic
+cleanup. Both independent production and corrected testing review have no remaining P1/P2.
+The record distinguishes live GPU references from immutable content, local CI configuration from
+remote execution, and offscreen Windows qualification from full R9b or performance claims.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each
