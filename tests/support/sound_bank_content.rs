@@ -10,21 +10,22 @@ use std::{
 
 use nara::{
     asset::{
-        AssetDomain, AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef,
-        AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId, RuntimeAssetCodec,
-        SourceAssetBuild, SourceAssetImporter, StableAssetId,
+        AssetDomain, AssetImportSource, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
+        AssetProductRef, AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId,
+        RuntimeAssetCodec, SourceAssetBuild, SourceAssetImporter, StableAssetId,
     },
     asset_build::{
         ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation,
         ArtifactBuildReason, ArtifactBuildStatus, ArtifactBuildStore, ArtifactContentDigest,
         ArtifactSourceRequest, VerifiedArtifactGroup, build_image_import, build_source,
     },
-    core::FormatVersion,
+    core::{ByteLimit, FormatVersion},
     fs::{
         CapabilityRights, DirectoryCapability, FileCapability, HostCapabilityOptions, RelativePath,
         TrustMode,
     },
     input::{ActionMapAsset, ActionMapFileCandidate, ActionMaps, InputSeatId},
+    material::{Material2dDomain, Material2dRuntimeCodec},
     project_host::{
         HeadlessSession, HeadlessSessionClose, ProjectContentBudgetKind,
         ProjectContentBudgetSnapshot, ProjectContentLoader, ProjectDomainAssets,
@@ -47,7 +48,7 @@ use two_level_game::{
     animation::{CLIPS_PATH, clips_product},
     input::{INPUT_PATH, input_product},
     levels::LevelId,
-    side_room,
+    region_material, side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
 };
 
@@ -627,6 +628,61 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
                 &nara::project::ProjectPath::new(path).unwrap(),
             )
             .unwrap();
+        if product == side_room::scene_product() {
+            let metadata = AssetMetaIdentityCandidate::decode_json_bytes(
+                &fs::read(
+                    fixture
+                        .project
+                        .join(format!("assets/{}.meta", region_material::MATERIAL_PATH)),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let assets = fixture
+                .root_capability()
+                .open_directory(&RelativePath::new("assets").unwrap())
+                .unwrap();
+            let mut reader = |path: &AssetPath, limit: ByteLimit| {
+                assets
+                    .open_file(&RelativePath::new(path.as_str()).unwrap())
+                    .and_then(|file| file.read_to_end_bounded(limit.get() as u64))
+                    .map(Into::into)
+            };
+            let imported = Material2dDomain::prepare(&mut AssetImportSource::new(
+                &metadata,
+                fs::read(
+                    fixture
+                        .project
+                        .join(format!("assets/{}", region_material::MATERIAL_PATH)),
+                )
+                .unwrap()
+                .into(),
+                &mut reader,
+            ))
+            .unwrap();
+            assert_eq!(
+                imported.textures()[region_material::PALETTE_ID],
+                AssetRef::path(region_material::PALETTE_PATH).unwrap()
+            );
+            let resolver = room.asset_resolution();
+            let material = imported
+                .resolve_texture_references(|reference| {
+                    let record = resolver.resolve_ref(reference)?;
+                    assert_eq!(record.source_kind(), &AssetSourceKind::Image);
+                    match reference {
+                        AssetRef::Product(product) => Ok(*product),
+                        AssetRef::Path(_) | AssetRef::StableId(_) => Ok::<
+                            _,
+                            nara::asset::AssetDatabaseError,
+                        >(
+                            AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+                                .unwrap(),
+                        ),
+                    }
+                })
+                .unwrap();
+            builder.add_material(&material).unwrap();
+        }
         let room_scene = plan
             .schema_validation()
             .bindings()
@@ -725,7 +781,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 13);
+    assert_eq!(prepared.base().catalog().members().len(), 14);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())
@@ -806,6 +862,21 @@ pub fn processed_and_membership() {
         );
     }
     fixture.retire_source();
+    let material = prepared
+        .base()
+        .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
+            region_material::material_product(),
+        )
+        .unwrap();
+    assert_eq!(
+        material.product().product(),
+        region_material::material_product()
+    );
+    assert!(material.product().generation().inputs().is_empty());
+    assert_eq!(
+        material.product().generation().shader().user_source(),
+        format!("{}\n", region_material::SHADER)
+    );
     exact_samples(acquired.product(), &expected);
     let decoded_clips = prepared
         .base()

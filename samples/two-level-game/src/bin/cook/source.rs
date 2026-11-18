@@ -10,7 +10,7 @@ use nara::{
     project_tooling::host_fs,
 };
 
-const CONTENT: [&str; 26] = [
+const CONTENT: [&str; 29] = [
     "nara.toml",
     "input/explorer.actions.json",
     "schema/authoring.bundle.json",
@@ -33,6 +33,9 @@ const CONTENT: [&str; 26] = [
     "assets/textures/marker.png.meta",
     "assets/textures/side-room.png",
     "assets/textures/side-room.png.meta",
+    "assets/materials/region.material2d.json",
+    "assets/materials/region.material2d.json.meta",
+    "assets/materials/region.wgsl",
     "assets/animations/explorer.sprite-animations.json",
     "assets/animations/explorer.sprite-animations.json.meta",
     "assets/audio/game.soundbank.json",
@@ -150,14 +153,20 @@ impl ContentFence {
                 .open_file(path)
                 .map_err(|error| error.to_string())?;
             let digest = file.digest(MAX_BYTES).map_err(|error| error.to_string())?;
+            let name = portable(path)?;
+            if let Some((identity, captured)) = self.files.get(&name) {
+                if file.identity() != *identity || digest != *captured {
+                    return Err(format!("content selection changed: {name}"));
+                }
+                continue;
+            }
             total = total
                 .checked_add(digest.length())
                 .ok_or("source inventory overflow")?;
             if total > MAX_BYTES {
                 return Err("complete source inventory exceeds 64 MiB".into());
             }
-            self.files
-                .insert(portable(path)?, (file.identity(), digest));
+            self.files.insert(name, (file.identity(), digest));
         }
         self.code = Some(inputs.to_vec());
         self.verify()
@@ -228,7 +237,12 @@ fn observe_input_metadata(
 
 pub(super) fn code_inventory(root: &Path) -> Result<Vec<RelativePath>, String> {
     let mut inputs = Vec::new();
-    for name in ["Cargo.toml", "Cargo.lock", "build.rs"] {
+    for name in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+        "assets/materials/region.wgsl",
+    ] {
         let metadata = fs::symlink_metadata(root.join(name)).map_err(|error| error.to_string())?;
         if linked(&metadata) || !metadata.is_file() {
             return Err(format!("code input is not a regular file: {name}"));

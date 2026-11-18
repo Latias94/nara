@@ -374,6 +374,15 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.input", 1),
         )
         .expect("the game's Input Runtime codec is valid")
+        .add_asset_domain::<nara::material::Material2dDomain>()
+        .expect("the region Material source importer is valid")
+        .add_runtime_asset_codec::<
+            nara::material::Material2dDomain,
+            nara::material::Material2dRuntimeCodec,
+        >(nara::runtime_content::RuntimeCodecDefinitionId::new(
+            "two-level-game.region-material", 1,
+        ))
+        .expect("the region Material Runtime codec is valid")
         .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
         .expect("the game's Sound Bank source importer is valid")
         .add_runtime_asset_codec::<

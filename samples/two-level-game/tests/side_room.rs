@@ -8,7 +8,7 @@
 mod support;
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs, thread,
     time::{Duration, Instant},
 };
@@ -17,8 +17,8 @@ use nara::{
     advanced_prelude::CurrentScene,
     app::{CoreStage, PluginCategory, PluginDeclaration, PluginId},
     asset::{
-        AssetProductRef, AssetRecord, AssetSourceKind, AssetStates, AssetVersion, Assets, Handle,
-        ProjectAssetDatabase,
+        AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetStates,
+        AssetVersion, Assets, Handle, ProjectAssetDatabase,
     },
     ecs::{
         World,
@@ -28,6 +28,7 @@ use nara::{
     gameplay::{GameplayCommandBatch, GameplayCommandSet},
     identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain},
     image::ImageAsset,
+    material::{Material2d, Material2dAsset, Material2dBinding, Material2dSource},
     prelude::{App, Component, Plugin, PluginError, Resource, Transform2d, Vec2},
     scene::{SceneEntitySource, retire_and_despawn_scene_instance},
     sprite::Sprite,
@@ -36,12 +37,13 @@ use support::{DEADLINE, Game, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, actio
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, SideRoomPhase, capture_resume, configured_recipe,
     levels::{LevelId, LevelKey},
+    region_material,
     side_room::{LOOKOUT_RELIC, RELIC, image_product},
 };
 
 const SIDE_ROOM: &str = "two-level-game.side-room";
 const LOOKOUT: &str = "two-level-game.lookout";
-const RELIC_PIXEL: [u8; 4] = [64, 224, 180, 255];
+const RELIC_PIXEL: [u8; 4] = region_material::SOURCE_PIXEL;
 
 #[test]
 fn a_live_side_room_takes_input_collects_a_relic_and_unloads_only_its_own_image() {
@@ -281,6 +283,235 @@ fn both_rooms_share_images_but_collect_and_unload_independently() {
     assert_retired(&game, &lookout);
     assert!(resident(&game, image_product()).is_none());
     assert_eq!(resident(&game, meadow), Some(primary_image));
+    game.close();
+}
+
+#[test]
+fn both_rooms_share_one_authored_material_until_either_last_user_closes() {
+    for close_side_first in [true, false] {
+        let mut game = Game::source();
+        let primary_image = resident(&game, region_material::palette_product()).unwrap();
+        assert!(resident_material(&game).is_none());
+        let (side, side_relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+        let publication = resident_material(&game).unwrap();
+        let binding = room_material(&game, &side, &side_relic);
+        let generation = binding.generation().clone();
+        let shader = generation.shader().clone();
+        let (lookout, lookout_relic) =
+            open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+        assert_eq!(resident_material(&game), Some(publication));
+        assert_eq!(room_material(&game, &lookout, &lookout_relic), binding);
+        assert_eq!(
+            binding.textures()[region_material::PALETTE_ID],
+            primary_image.0
+        );
+        assert_eq!(
+            binding.generation().declaration(),
+            &region_material::declaration()
+        );
+        assert_eq!(binding.parameters(), &region_material::parameters());
+        let uniform = region_material::GRADE
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(binding.uniform_bytes(), uniform);
+        assert_eq!(shader.user_source().trim(), region_material::SHADER.trim());
+        let relic_image = resident(&game, image_product()).unwrap();
+        let (pixels, palette, record) = game
+            .session
+            .observe(|world| {
+                let images = world.resource::<Assets<ImageAsset>>();
+                (
+                    images.get(relic_image.0).unwrap().share_retained().unwrap(),
+                    images
+                        .get(primary_image.0)
+                        .unwrap()
+                        .share_retained()
+                        .unwrap(),
+                    world
+                        .resource::<ProjectAssetDatabase>()
+                        .record_for_stable_id(region_material::material_product().source())
+                        .unwrap()
+                        .clone(),
+                )
+            })
+            .unwrap();
+        assert_eq!(pixels.pixels(), RELIC_PIXEL.repeat(4));
+        assert_eq!(&palette.pixels()[..4], &region_material::PALETTE_PIXEL);
+
+        let (first, last, retired, survivor, relic) = if close_side_first {
+            (SIDE_ROOM, LOOKOUT, &side, &lookout, &lookout_relic)
+        } else {
+            (LOOKOUT, SIDE_ROOM, &lookout, &side, &side_relic)
+        };
+        game.command(action(first));
+        assert_retired(&game, retired);
+        assert_eq!(resident_material(&game), Some(publication));
+        assert_eq!(resident(&game, image_product()), Some(relic_image));
+        assert_eq!(room_material(&game, survivor, relic), binding);
+        game.session
+            .observe(|world| {
+                assert_eq!(
+                    world
+                        .resource::<ProjectAssetDatabase>()
+                        .record_for_path(record.path()),
+                    Some(&record)
+                );
+            })
+            .unwrap();
+
+        let closed = game.command(action(last));
+        assert_eq!(
+            room_phases(&closed),
+            (SideRoomPhase::Closed, SideRoomPhase::Closed)
+        );
+        assert_retired(&game, survivor);
+        assert!(resident_material(&game).is_none());
+        assert!(resident(&game, image_product()).is_none());
+        assert_eq!(
+            resident(&game, region_material::palette_product()),
+            Some(primary_image)
+        );
+        game.session
+            .observe(|world| {
+                assert!(
+                    world
+                        .resource::<Assets<Material2dAsset>>()
+                        .get(publication.0)
+                        .is_none()
+                );
+                assert!(
+                    world
+                        .resource::<AssetStates>()
+                        .state(publication.0.id())
+                        .unwrap()
+                        .usable_version()
+                        .is_none()
+                );
+                let database = world.resource::<ProjectAssetDatabase>();
+                assert!(database.record_for_stable_id(record.stable_id()).is_none());
+                assert!(database.record_for_path(record.path()).is_none());
+            })
+            .unwrap();
+        let retained = generation
+            .bind_values(region_material::parameters(), binding.textures().clone())
+            .unwrap();
+        assert_eq!(retained, binding);
+        assert_eq!(retained.generation().shader(), &shader);
+        assert_eq!(retained.uniform_bytes(), uniform);
+        assert_eq!(pixels.pixels(), RELIC_PIXEL.repeat(4));
+        assert_eq!(&palette.pixels()[..4], &region_material::PALETTE_PIXEL);
+
+        let (reopened, relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+        let next = resident_material(&game).unwrap();
+        assert_eq!(next.0, publication.0);
+        assert!(next.1 > publication.1);
+        let fresh = room_material(&game, &reopened, &relic);
+        assert_ne!(fresh.generation(), retained.generation());
+        assert_eq!(retained.generation().shader(), &shader);
+        game.command(action(SIDE_ROOM));
+        assert!(resident_material(&game).is_none());
+        game.close();
+    }
+}
+
+#[test]
+fn changed_live_shader_or_material_rejects_another_room_and_repair_retries_exactly() {
+    let source = ProjectCopy::new();
+    let mut game = Game::from_project(source.root());
+    let (side, side_relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let publication = resident_material(&game).unwrap();
+    let binding = room_material(&game, &side, &side_relic);
+    let relic_image = resident(&game, image_product()).unwrap();
+    let primary_image = resident(&game, region_material::palette_product()).unwrap();
+
+    for relative in [region_material::SHADER_PATH, region_material::MATERIAL_PATH] {
+        let path = source.root().join("assets").join(relative);
+        let original = fs::read(&path).unwrap();
+        let changed = if relative == region_material::SHADER_PATH {
+            let shader = String::from_utf8(original.clone()).unwrap();
+            let replacement = shader.replace("sampled.rgb *", "sampled.bgr *");
+            assert_ne!(replacement, shader);
+            replacement.into_bytes()
+        } else {
+            let mut material: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            material["params"][region_material::GRADE_ID]["vec4"][0] = serde_json::json!(0.5);
+            let replacement = serde_json::to_vec_pretty(&material).unwrap();
+            assert!(Material2dSource::decode(&replacement).is_ok());
+            replacement
+        };
+        let before = game.snapshot();
+        let (entities, identities, catalog) = game
+            .session
+            .observe(|world| {
+                (
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    world.resource::<WorldIdentityDomain>().stats(),
+                    world.resource::<ProjectAssetDatabase>().clone(),
+                )
+            })
+            .unwrap();
+        fs::write(&path, changed).unwrap();
+
+        game.submit(action(LOOKOUT));
+        assert_eq!(game.session.step().unwrap(), None);
+        let rejected = wait_for(&mut game, |state| state.lookout != SideRoomPhase::Preparing);
+        assert_eq!(
+            room_phases(&rejected),
+            (SideRoomPhase::Open, SideRoomPhase::Closed)
+        );
+        assert_eq!(rejected.phase, GamePhase::Running);
+        assert_eq!(rejected.current_instance, before.current_instance);
+        assert_eq!(rejected.player, before.player);
+        assert_eq!(rejected.score, before.score);
+        assert_eq!(rejected.travel_count, before.travel_count);
+        assert!(
+            rejected.error.as_deref().is_some_and(|error| {
+                error.contains("lookout activation rejected")
+                    && error.contains("project.scene.material-ownership-changed")
+            }),
+            "{relative}: {rejected:?}"
+        );
+        game.session
+            .observe(|world| {
+                assert_eq!(
+                    world
+                        .iter_entities()
+                        .map(|entity| entity.id())
+                        .collect::<BTreeSet<_>>(),
+                    entities
+                );
+                assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+                assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+            })
+            .unwrap();
+        assert_eq!(room_receipt(&game, RELIC).0, side);
+        assert_eq!(resident_material(&game), Some(publication));
+        assert_eq!(room_material(&game, &side, &side_relic), binding);
+        assert_eq!(resident(&game, image_product()), Some(relic_image));
+        assert_eq!(
+            resident(&game, region_material::palette_product()),
+            Some(primary_image)
+        );
+
+        fs::write(path, original).unwrap();
+        let (lookout, lookout_relic) =
+            open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+        assert_eq!(resident_material(&game), Some(publication));
+        assert_eq!(room_material(&game, &lookout, &lookout_relic), binding);
+        let closed = game.command(action(LOOKOUT));
+        assert_eq!(
+            room_phases(&closed),
+            (SideRoomPhase::Open, SideRoomPhase::Closed)
+        );
+        assert_retired(&game, &lookout);
+        assert_eq!(resident_material(&game), Some(publication));
+    }
+    game.command(action(SIDE_ROOM));
+    assert!(resident_material(&game).is_none());
     game.close();
 }
 
@@ -540,6 +771,7 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     let relic_image = resident(&game, image_product()).unwrap();
     let meadow = LevelId::Meadow.image_product();
     let primary_image = resident(&game, meadow).unwrap();
+    let material = resident_material(&game).unwrap();
     let assert_retained = |game: &Game, state: GameSnapshot| {
         assert_eq!(state.level, incumbent.level);
         assert_eq!(state.current_instance, incumbent.current_instance);
@@ -551,6 +783,7 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
         assert_eq!(room_receipt(game, LOOKOUT_RELIC).0, lookout);
         assert_eq!(resident(game, image_product()), Some(relic_image));
         assert_eq!(resident(game, meadow), Some(primary_image));
+        assert_eq!(resident_material(game), Some(material));
     };
 
     let saved = game.command(action("two-level-game.save"));
@@ -582,6 +815,7 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     }
     assert!(resident(&game, image_product()).is_none());
     assert!(resident(&game, meadow).is_none());
+    assert!(resident_material(&game).is_none());
     assert_eq!(
         game.command(action("two-level-game.save")).saves,
         room_saves + 1
@@ -600,6 +834,13 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     assert_ne!(new_lookout.instance_id(), lookout.instance_id());
     assert_eq!(sprite_facts(&game, &new_side, &new_side_relic).2, 1.0);
     assert_eq!(sprite_facts(&game, &new_lookout, &new_lookout_relic).2, 1.0);
+    let reopened_material = resident_material(&game).unwrap();
+    assert_eq!(reopened_material.0, material.0);
+    assert!(reopened_material.1 > material.1);
+    assert_eq!(
+        room_material(&game, &new_side, &new_side_relic),
+        room_material(&game, &new_lookout, &new_lookout_relic)
+    );
 
     let restored = game.command(action("two-level-game.restore"));
     assert_eq!(restored.level, cavern);
@@ -611,6 +852,7 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
         assert_retired(&game, receipt);
     }
     assert!(resident(&game, image_product()).is_none());
+    assert!(resident_material(&game).is_none());
     game.close();
 }
 
@@ -850,6 +1092,77 @@ fn resident(game: &Game, product: AssetProductRef) -> Option<(Handle<ImageAsset>
                     .state(handle.id())?
                     .usable_version()?,
             ))
+        })
+        .unwrap()
+}
+
+fn resident_material(game: &Game) -> Option<(Handle<Material2dAsset>, AssetVersion)> {
+    game.session
+        .observe(|world| {
+            let (handle, _) = world
+                .resource::<Assets<Material2dAsset>>()
+                .iter()
+                .find(|(_, material)| material.product() == region_material::material_product())?;
+            Some((
+                handle,
+                world
+                    .resource::<AssetStates>()
+                    .state(handle.id())?
+                    .usable_version()?,
+            ))
+        })
+        .unwrap()
+}
+
+fn room_material(
+    game: &Game,
+    receipt: &SpawnedSceneInstance,
+    relic: &SceneEntityId,
+) -> Material2dBinding {
+    let publication = resident_material(game).unwrap();
+    game.session
+        .observe(|world| {
+            let EntityLookup::Resolved(entity) = receipt.resolve(world, relic) else {
+                panic!("the authored relic must remain live")
+            };
+            let material = world.get::<Material2d>(entity).unwrap();
+            assert_eq!(material.handle(), publication.0);
+            assert_eq!(material.declaration_id(), region_material::MATERIAL_ID);
+            assert_eq!(
+                material.declaration_version(),
+                region_material::MATERIAL_VERSION
+            );
+            assert_eq!(material.parameters(), &region_material::parameters());
+            assert!(material.texture_overrides().is_empty());
+            let asset = world
+                .resource::<Assets<Material2dAsset>>()
+                .get(material.handle())
+                .unwrap();
+            assert_eq!(asset.product(), region_material::material_product());
+            assert_eq!(
+                asset.generation().declaration(),
+                &region_material::declaration()
+            );
+            assert_eq!(
+                asset.default_parameters(),
+                &region_material::default_parameters()
+            );
+            assert_eq!(
+                asset.textures(),
+                &BTreeMap::from([(
+                    region_material::PALETTE_ID.to_owned(),
+                    AssetRef::Product(region_material::palette_product()),
+                )])
+            );
+            let server = world.resource::<AssetServer>();
+            material
+                .bind(asset, |reference| {
+                    let AssetRef::Product(product) = reference else {
+                        panic!("resident Material textures must select complete Products")
+                    };
+                    server.get_product_handle::<ImageAsset>(*product)
+                })
+                .unwrap()
         })
         .unwrap()
 }

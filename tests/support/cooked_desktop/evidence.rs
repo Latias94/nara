@@ -9,6 +9,7 @@ use nara::{
     fs::ContentDigest,
     image::{ImageExtent, ImageRuntimeCodec},
     input::ActionMapRuntimeCodec,
+    material::Material2dRuntimeCodec,
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
@@ -24,6 +25,7 @@ use two_level_game::{
     input::input_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::{SCENE_PATH, marker_image_product, marker_product},
+    region_material,
     save::Checkpoint,
     side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
@@ -105,8 +107,8 @@ pub fn inspect_package(
     );
     assert_eq!(
         catalog.members().len(),
-        13,
-        "five processed Scenes with two travel roots, five Images, one shared SoundBank, one Sprite animation set and one global Input"
+        14,
+        "five processed Scenes with two travel roots, five Images, one shared Material, one shared SoundBank, one Sprite animation set and one global Input"
     );
     assert_eq!(
         catalog
@@ -132,6 +134,21 @@ pub fn inspect_package(
         5
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
+    assert_eq!(
+        catalog
+            .members()
+            .iter()
+            .filter(|member| {
+                matches!(
+                    member.kind(),
+                    RuntimeContentMemberKind::Asset { format, version }
+                        if format.as_str() == Material2dRuntimeCodec::RUNTIME_KIND
+                            && version.get() == Material2dRuntimeCodec::RUNTIME_VERSION
+                )
+            })
+            .count(),
+        1
+    );
     assert_eq!(payload["pack_file"], "content.pack");
     assert_eq!(
         payload["catalog_digest"],
@@ -197,6 +214,9 @@ pub fn inspect_package(
         } else if product == side_room::image_product() {
             assert!(member.dependencies().is_empty());
             two_level_pack::assert_room_image(&ImageRuntimeCodec::decode_runtime(data).unwrap());
+        } else if product == region_material::material_product() {
+            let material = Material2dRuntimeCodec::decode_runtime(data).unwrap();
+            two_level_pack::assert_room_material_member(member, &material);
         } else if product == clips_product() {
             assert!(matches!(
                 member.kind(),
@@ -290,6 +310,7 @@ pub fn inspect_package(
                 input_product(),
                 marker_product(),
                 marker_image_product(),
+                region_material::material_product(),
                 side_room::scene_product(),
                 side_room::lookout_scene_product(),
                 side_room::image_product(),

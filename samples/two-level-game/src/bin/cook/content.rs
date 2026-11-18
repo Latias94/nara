@@ -13,6 +13,7 @@ use nara::{
     fs::{DirectoryCapability, RelativePath},
     image::ImageRuntimeCodec,
     input::{ActionMapAsset, ActionMapFileCandidate, ActionMapFileLimits, ActionMapRuntimeCodec},
+    material::Material2dRuntimeCodec,
     project::{
         EffectiveProjectSettings, NativeDocumentIdentity, ProjectAuthoringState, ProjectManifest,
     },
@@ -36,13 +37,16 @@ use two_level_game::{
     input::{INPUT_PATH, input_product},
     levels::LevelId,
     markers::{IMAGE_PATH, PREFAB_PATH, SCENE_PATH, marker_image_product, marker_product},
-    side_room,
+    region_material, side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, bank_product},
 };
 
 const DOCUMENT_BYTES: u64 = 1024 * 1024;
 const METADATA_BYTES: u64 = 64 * 1024;
 const COOKER_BYTES: u64 = 512 * 1024 * 1024;
+
+#[path = "material.rs"]
+mod material;
 
 pub(super) fn prepare(
     root: &DirectoryCapability,
@@ -245,6 +249,14 @@ pub(super) fn prepare(
         observations.extend_from_slice(imported.observations());
     }
 
+    let material = material::prepare(root, &scope, &mut database, &mut observations)?;
+    builder.add_material(&material).map_err(|error| {
+        format!(
+            "{}: Material cooking failed: {error}",
+            region_material::MATERIAL_PATH
+        )
+    })?;
+
     let path =
         AssetPath::new(BANK_PATH).map_err(|error| format!("SoundBank source path: {error}"))?;
     let source = scope.resolve(&path);
@@ -387,7 +399,7 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 13
+    if catalog.members().len() != 14
         || catalog
             .members()
             .iter()
@@ -401,7 +413,7 @@ pub(super) fn prepare(
         || !catalog.addressable_roots().is_empty()
     {
         return Err(
-            "cooked content must contain five Scenes with two travel roots, five Images, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain five Scenes with two travel roots, five Images, one shared Material, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
     }
@@ -423,7 +435,11 @@ pub(super) fn prepare(
     {
         return Err("cooked marker Scene identity or required Image edge changed".into());
     }
-    let region_images = [side_room::image_product(), LevelId::Meadow.image_product()];
+    let region_required = [
+        side_room::image_product(),
+        LevelId::Meadow.image_product(),
+        region_material::material_product(),
+    ];
     for (product, source) in &regions {
         let member = catalog
             .member_for_product(*product)
@@ -435,8 +451,8 @@ pub(super) fn prepare(
         );
         if member.products() != [*product]
             || !matches!(member.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
-            || member.dependencies().len() != region_images.len()
-            || region_images.into_iter().any(|product| {
+            || member.dependencies().len() != region_required.len()
+            || region_required.into_iter().any(|product| {
                 !member
                     .dependencies()
                     .contains(&RuntimeContentDependency::new(
@@ -446,9 +462,24 @@ pub(super) fn prepare(
             })
         {
             return Err(format!(
-                "{source}: cooked Scene identity or required Images changed"
+                "{source}: cooked Scene identity or required Images and shared Material changed"
             ));
         }
+    }
+    let material = catalog
+        .member_for_product(region_material::material_product())
+        .ok_or("missing cooked shared region Material")?;
+    if material.products() != [region_material::material_product()]
+        || !matches!(material.kind(), RuntimeContentMemberKind::Asset { format, version }
+            if format.as_str() == Material2dRuntimeCodec::RUNTIME_KIND
+                && version.get() == Material2dRuntimeCodec::RUNTIME_VERSION)
+        || material.dependencies()
+            != [RuntimeContentDependency::new(
+                region_material::palette_product(),
+                RuntimeContentDependencyRole::Required,
+            )]
+    {
+        return Err("cooked shared Material identity, format or required palette changed".into());
     }
     let input_member = catalog
         .member_for_product(input_product())

@@ -144,6 +144,7 @@ pub mod native {
         identity::EntityReference,
         image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
         input::ActionMapRuntimeCodec,
+        material::Material2dRuntimeCodec,
         project_tooling::{
             cargo_build::CargoBuildTools,
             host_fs,
@@ -171,6 +172,7 @@ pub mod native {
         input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         markers::{SCENE_PATH, marker_image_product, marker_product},
+        region_material,
         save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
         side_room,
         sound_bank::{SoundBankCodec, bank_product},
@@ -543,7 +545,7 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 13);
+        assert_eq!(pack.catalog.members().len(), 14);
         assert_eq!(
             pack.catalog
                 .members()
@@ -576,6 +578,7 @@ pub mod native {
                     side_room::scene_product(),
                     side_room::lookout_scene_product(),
                     side_room::image_product(),
+                    region_material::material_product(),
                 ])
                 .collect()
         );
@@ -612,6 +615,19 @@ pub mod native {
         super::two_level_pack::assert_room_image(
             &ImageRuntimeCodec::decode_runtime(&pack_bytes[pack.members[room_image].clone()])
                 .unwrap(),
+        );
+        let material_index = pack
+            .catalog
+            .members()
+            .iter()
+            .position(|member| member.products() == [region_material::material_product()])
+            .unwrap();
+        super::two_level_pack::assert_room_material_member(
+            &pack.catalog.members()[material_index],
+            &Material2dRuntimeCodec::decode_runtime(
+                &pack_bytes[pack.members[material_index].clone()],
+            )
+            .unwrap(),
         );
         let marker_index = pack
             .catalog
@@ -758,6 +774,8 @@ pub mod native {
             "src/gameplay/verification.rs",
             "src/animation.rs",
             "src/levels.rs",
+            "src/region_material.rs",
+            "assets/materials/region.wgsl",
             bootstrap,
         ] {
             assert!(
@@ -1327,6 +1345,9 @@ pub mod native {
             "Cargo.lock",
             "build.rs",
             "src/bin/player/generated.rs",
+            "assets/materials/region.material2d.json",
+            "assets/materials/region.material2d.json.meta",
+            "assets/materials/region.wgsl",
         ] {
             assert!(
                 !project.join(member).exists(),

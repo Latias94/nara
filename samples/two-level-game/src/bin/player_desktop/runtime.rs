@@ -8,7 +8,10 @@ use std::{
 
 use nara::{
     app::{FixedTime, FrameExecutionStart, RuntimeControl, RuntimeControlStatus, RuntimeState},
+    asset::RuntimeAssetCodec,
     fs::{ContentDigest, RelativePath},
+    image::ImageRuntimeCodec,
+    material::Material2dRuntimeCodec,
     project_host::{
         DesktopControlError, DesktopPresentationObservation, DesktopRun, DesktopRunOptions,
         DesktopRunOutcome, DesktopRunProgress, DesktopRunReport, WinitInputActivation,
@@ -26,7 +29,7 @@ use two_level_game::{
     input::input_product,
     levels::LevelId,
     markers::{marker_image_product, marker_product},
-    side_room,
+    region_material, side_room,
     sound_bank::bank_product,
 };
 
@@ -114,7 +117,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 13
+            || base.catalog().members().len() != 14
             || base
                 .catalog()
                 .members()
@@ -122,6 +125,28 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count()
                 != 5
+            || base
+                .catalog()
+                .members()
+                .iter()
+                .filter(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                        && version.get() == ImageRuntimeCodec::RUNTIME_VERSION)
+                })
+                .count()
+                != 5
+            || base
+                .catalog()
+                .members()
+                .iter()
+                .filter(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Asset { format, version }
+                    if format.as_str() == Material2dRuntimeCodec::RUNTIME_KIND
+                        && version.get() == Material2dRuntimeCodec::RUNTIME_VERSION)
+                })
+                .count()
+                != 1
             || !base.catalog().addressable_roots().is_empty()
             || base.plan().settings().input().action_map != Some(input_product())
             || [
@@ -131,6 +156,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 input_product(),
                 marker_product(),
                 marker_image_product(),
+                region_material::material_product(),
                 side_room::scene_product(),
                 side_room::lookout_scene_product(),
                 side_room::image_product(),

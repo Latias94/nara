@@ -71,6 +71,36 @@
                 } }
               } }
             } }
+          },
+          "nara.material2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "material": { "type": "map", "value": {
+                "kind": { "type": "string", "value": "product" },
+                "value": { "type": "map", "value": {
+                  "source": { "type": "string", "value": "89cdbf37-e72e-4de4-a2cd-cfb9df526f6d" },
+                  "product": { "type": "map", "value": { "kind": { "type": "string", "value": "primary" } } }
+                } }
+              } },
+              "declaration_id": { "type": "string", "value": "two-level-game.region" },
+              "declaration_version": { "type": "u64", "value": 1 },
+              "parameters": { "type": "map", "value": {
+                "f32": { "type": "map", "value": {} },
+                "i32": { "type": "map", "value": {} },
+                "u32": { "type": "map", "value": {} },
+                "vec2": { "type": "map", "value": {} },
+                "vec3": { "type": "map", "value": {} },
+                "vec4": { "type": "map", "value": {
+                  "region.grade": { "type": "list", "value": [
+                    { "type": "f64", "value": 1.0 },
+                    { "type": "f64", "value": 0.5 },
+                    { "type": "f64", "value": 0.25 },
+                    { "type": "f64", "value": 0.125 }
+                  ] }
+                } }
+              } },
+              "texture_overrides": { "type": "map", "value": {} }
+            } }
           }
         }
       },

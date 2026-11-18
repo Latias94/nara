@@ -78,7 +78,7 @@ placement creates its own entities, and all occurrences share the level's reside
 Edit the badge PNG to change its appearance. A fresh load reads the authored image. Retry uses
 the committed image and template, including when the files have changed since loading.
 
-The cooked catalog has thirteen members, including five Scenes and five Images. Meadow and Cavern
+The cooked catalog has fourteen members, including five Scenes, five Images and one Material. Meadow and Cavern
 are the two travel roots. The marker Scene declares its badge Image. Meadow declares the side room
 and Lookout as Deferred dependencies. Regenerate older authoring bundles with native binding
 revision 6 and recook existing installations. Checkpoint and resume retain their wire formats.
@@ -89,11 +89,20 @@ Exact resume requires a compatible authored source and executable schema.
 Press **B** in Meadow to open the north side room and **G** to open the south Lookout. Keep
 moving during loading. Walk toward either turquoise relic and touch it to collect it for that visit.
 Press the room's key again to close it, or cancel while it is still loading. The two rooms can stay
-open together and share a relic Image. Open either room again for a fresh visit.
+open together and share a relic Image and the authored
+[region Material](assets/materials/region.material2d.json). Its [Shader](assets/materials/region.wgsl)
+grades the relic in linear color and samples the existing Meadow palette Image. Both relics use
+the same Material publication with authored parameter overrides. Open either room again for a
+fresh visit.
 
 Travel and checkpoint restore close the active rooms when the destination commits. If the
 destination fails to load, the current rooms remain playable. Normal checkpoints record the main
 game's progress. Close the rooms before Retry or exact game capture.
+
+Editing the Material or its Shader while one room is open cannot silently replace its live shared
+definition. A conflicting second activation refuses and leaves the original room playable. Close
+the live users before loading a changed definition, or restore the authored inputs and retry.
+Cooked Players carry the Material and its Image dependency and need no source WGSL files.
 
 ## Build And Run
 

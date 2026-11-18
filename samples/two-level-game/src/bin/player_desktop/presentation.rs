@@ -7,9 +7,10 @@ use std::{
 
 use nara::{
     app::{AppExit, FixedTime, FrameExecutionStart, RuntimeGeneration},
-    asset::{AssetServer, Assets},
+    asset::{AssetServer, AssetStates, Assets},
     ecs::World,
     image::{ImageAsset, PreparedImages, image_resource_key},
+    material::Material2dAsset,
     project_host::{DesktopPresentationControl, DesktopPresentationObservation},
     render::RenderFrame,
     render_wgpu::{WgpuBackendState, WgpuRenderObservation},
@@ -20,7 +21,7 @@ use nara::{
     },
 };
 use serde_json::{Value, json};
-use two_level_game::{GamePhase, GameSnapshot, Scenario};
+use two_level_game::{GamePhase, GameSnapshot, Scenario, region_material};
 
 use super::{
     desktop_output::{Emitter, Record},
@@ -49,12 +50,26 @@ pub(super) struct Frame {
 struct RoomFrame {
     sprites: usize,
     image: Option<RoomImage>,
+    material: Option<RoomMaterial>,
 }
 
 #[derive(serde::Serialize)]
 struct RoomImage {
     asset_id: u64,
     version: u64,
+}
+
+#[derive(serde::Serialize)]
+struct RoomMaterial {
+    product: String,
+    asset_id: u64,
+    version: u64,
+    declaration: String,
+    declaration_version: u32,
+    generation_sequence: u64,
+    shader_digest: [u8; 32],
+    interface_digest: [u8; 32],
+    source_inputs_available: bool,
 }
 
 impl Frame {
@@ -71,6 +86,7 @@ impl Frame {
             "presents": self.presents,
             "side_room_sprites": self.side_rooms.as_ref().map(|rooms| rooms.sprites),
             "side_room_image": self.side_rooms.as_ref().and_then(|rooms| rooms.image.as_ref()),
+            "side_room_material": self.side_rooms.as_ref().and_then(|rooms| rooms.material.as_ref()),
         })
     }
 }
@@ -404,11 +420,62 @@ fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {
     let batches = world
         .get_resource::<SpriteBatches>()
         .ok_or("original stock Sprite batches are unavailable")?;
-    let product = two_level_game::side_room::image_product();
-    let Some(handle) = world
+    let server = world
         .get_resource::<AssetServer>()
-        .and_then(|assets| assets.get_product_handle::<ImageAsset>(product))
-    else {
+        .ok_or("original resident Product bindings are unavailable")?;
+    let materials = world
+        .get_resource::<Assets<Material2dAsset>>()
+        .ok_or("original resident Materials are unavailable")?;
+    let states = world
+        .get_resource::<AssetStates>()
+        .ok_or("original resident Asset versions are unavailable")?;
+    let material_product = region_material::material_product();
+    let material = server
+        .get_product_handle::<Material2dAsset>(material_product)
+        .and_then(|handle| materials.get(handle).map(|asset| (handle, asset)));
+    let material_facts = material
+        .map(|(handle, asset)| -> Result<RoomMaterial, String> {
+            let generation = asset.generation();
+            let version = states
+                .state(handle.id())
+                .and_then(|state| state.usable_version())
+                .ok_or("resident region Material has no AssetVersion")?;
+            if asset.product() != material_product
+                || generation.declaration() != &region_material::declaration()
+                || !generation.inputs().is_empty()
+                || version.raw() == 0
+                || states.published_slot_revision(handle.id())
+                    != Some(&materials.slot_revision(handle))
+            {
+                return Err(
+                    "resident region Material is not the source-free compiled Product".into(),
+                );
+            }
+            Ok(RoomMaterial {
+                product: material_product.to_string(),
+                asset_id: handle.id().raw(),
+                version: version.raw(),
+                declaration: generation.declaration().id().to_owned(),
+                declaration_version: generation.declaration().version(),
+                generation_sequence: generation.sequence(),
+                shader_digest: generation.shader().digest(),
+                interface_digest: generation.shader().interface_digest(),
+                source_inputs_available: !generation.inputs().is_empty(),
+            })
+        })
+        .transpose()?;
+    let product = two_level_game::side_room::image_product();
+    let Some(handle) = server.get_product_handle::<ImageAsset>(product) else {
+        if material.is_some()
+            || batches.as_slice().iter().any(|batch| {
+                batch.material_extension.as_ref().is_some_and(|extension| {
+                    extension.binding.generation().declaration().id()
+                        == region_material::MATERIAL_ID
+                })
+            })
+        {
+            return Err("region Material outlived its resident relic Image".into());
+        }
         return Ok(RoomFrame::default());
     };
     let relic = image_resource_key(handle);
@@ -428,6 +495,9 @@ fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {
         (None, None) => {}
         _ => return Err("Meadow region Image capture disagrees with its resident Product".into()),
     }
+    if prepared.is_some() != material.is_some() {
+        return Err("Meadow region Image and Material residency disagree".into());
+    }
     let mut sprites = 0;
     for batch in batches.as_slice() {
         let Some(image) = batch
@@ -440,6 +510,38 @@ fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {
         if Some(image.identity()) != prepared {
             return Err(
                 "presented Sprite batch retained a stale Meadow region Image capture".into(),
+            );
+        }
+        let (_, resident) = material.ok_or("presented relic has no resident Material Product")?;
+        let extension = batch
+            .material_extension
+            .as_ref()
+            .ok_or("presented relic lost its original Material binding")?;
+        if extension.binding.generation() != resident.generation()
+            || extension.binding.parameters() != &region_material::parameters()
+        {
+            return Err(
+                "presented relic Material differs from its exact resident generation".into(),
+            );
+        }
+        let palette = server
+            .get_product_handle::<ImageAsset>(region_material::palette_product())
+            .ok_or("presented region Material has no resident palette Image")?;
+        let palette_capture = world
+            .resource::<PreparedImages>()
+            .get(image_resource_key(palette))
+            .ok_or("presented region Material palette has no prepared capture")?;
+        if extension
+            .binding
+            .textures()
+            .get(region_material::PALETTE_ID)
+            != Some(&palette)
+            || extension.textures.len() != 1
+            || extension.textures[0].0 != 1
+            || extension.textures[0].1.identity() != palette_capture.identity()
+        {
+            return Err(
+                "presented region Material palette differs from its resident Image capture".into(),
             );
         }
         if batch.target.window_id(Some(WindowId::PRIMARY)) == Some(WindowId::PRIMARY) {
@@ -456,6 +558,7 @@ fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {
             asset_id: relic.asset_id().raw(),
             version: capture.asset_version().raw(),
         }),
+        material: material_facts,
     })
 }
 

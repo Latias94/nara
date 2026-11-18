@@ -10,6 +10,7 @@ use nara::{
     fs::ContentDigest,
     image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
     input::ActionMapRuntimeCodec,
+    material::Material2dRuntimeCodec,
     project::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
@@ -25,7 +26,7 @@ use two_level_game::{
     input::input_product,
     levels::LevelId,
     markers::{SCENE_PATH, marker_image_product, marker_product},
-    side_room,
+    region_material, side_room,
     sound_bank::{SoundBankCodec, SoundCue, bank_product},
 };
 
@@ -146,7 +147,7 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 13);
+    assert_eq!(catalog.members().len(), 14);
     assert_eq!(
         catalog
             .members()
@@ -206,6 +207,11 @@ pub fn inspect(
             assert_eq!(bank.product(), bank_product());
             assert_eq!(bank.samples(SoundCue::Pickup), expected[0]);
             assert_eq!(bank.samples(SoundCue::Travel), expected[1]);
+        } else if product == region_material::material_product() {
+            two_level_pack::assert_room_material_member(
+                member,
+                &Material2dRuntimeCodec::decode_runtime(&bytes[range]).unwrap(),
+            );
         } else if product == clips_product() {
             assert!(matches!(
                 member.kind(),
@@ -337,6 +343,7 @@ pub fn inspect(
                 side_room::scene_product(),
                 side_room::lookout_scene_product(),
                 side_room::image_product(),
+                region_material::material_product(),
             ])
             .collect()
     );

@@ -163,7 +163,10 @@ mod atlas_content {
 
     use nara::{
         advanced_prelude::CurrentScene,
-        asset::{AssetProductRef, AssetRef, Assets, Handle, RuntimeAssetCodec},
+        asset::{
+            AssetProductRef, AssetRef, AssetServer, AssetStates, AssetVersion, Assets, Handle,
+            RuntimeAssetCodec,
+        },
         asset_build::ArtifactBuildObservation,
         ecs::World,
         gameplay::{
@@ -176,6 +179,7 @@ mod atlas_content {
             ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec,
             InputBinding, KeyCode,
         },
+        material::{Material2d, Material2dAsset, Material2dDomain, Material2dRuntimeCodec},
         project_host::{HeadlessSession, HeadlessSessionClose},
         project_tooling::host_fs,
         project_workflow::cooked_content::PreparedRuntimeContent,
@@ -193,7 +197,7 @@ mod atlas_content {
         animation::{atlas_product, clips_product},
         levels::{LevelId, LevelKey},
         markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
-        side_room,
+        region_material, side_room,
         sound_bank::bank_product,
     };
 
@@ -243,6 +247,9 @@ mod atlas_content {
                 "assets/textures/marker.png.meta",
                 "assets/textures/side-room.png",
                 "assets/textures/side-room.png.meta",
+                "assets/materials/region.material2d.json",
+                "assets/materials/region.material2d.json.meta",
+                "assets/materials/region.wgsl",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/animations/explorer.sprite-animations.json.meta",
                 "assets/audio/game.soundbank.json",
@@ -285,7 +292,7 @@ mod atlas_content {
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 13);
+        assert_eq!(catalog.members().len(), 14);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
         scenes.sort();
         assert_eq!(catalog.scenes(), scenes);
@@ -360,6 +367,7 @@ mod atlas_content {
                     side_room::scene_product(),
                     side_room::lookout_scene_product(),
                     side_room::image_product(),
+                    region_material::material_product(),
                 ])
                 .collect::<BTreeSet<_>>()
         );
@@ -414,6 +422,18 @@ mod atlas_content {
             .acquire_asset::<SpriteAnimationDomain, SpriteAnimationCodec>(clips_product())
             .unwrap();
         assert_eq!(acquired.product().product(), clips_product());
+        let material = prepared
+            .base()
+            .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
+                region_material::material_product(),
+            )
+            .unwrap();
+        two_level_pack::assert_room_material_member(
+            catalog
+                .member_for_product(region_material::material_product())
+                .unwrap(),
+            material.product(),
+        );
         let input = catalog.member_for_product(super::input_product()).unwrap();
         assert_eq!(input.products(), [super::input_product()]);
         assert!(input.dependencies().is_empty());
@@ -446,6 +466,8 @@ mod atlas_content {
                 "assets/textures/explorer.png",
                 "assets/textures/marker.png",
                 "assets/textures/side-room.png",
+                "assets/materials/region.material2d.json",
+                "assets/materials/region.wgsl",
                 "assets/animations/explorer.sprite-animations.json",
                 "assets/audio/game.soundbank.json",
                 "assets/audio/pickup.wav",
@@ -457,6 +479,14 @@ mod atlas_content {
         drop(fence);
         drop(cache);
         assert!(!project.exists() && !store.exists());
+        two_level_pack::assert_room_material(material.product());
+        let decoded = prepared
+            .base()
+            .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
+                region_material::material_product(),
+            )
+            .unwrap();
+        two_level_pack::assert_room_material(decoded.product());
         let result = observe_startup(prepared, check_cooked_regions);
         let source: serde_json::Value =
             serde_json::from_slice(include_bytes!("../input/explorer.actions.json")).unwrap();
@@ -516,6 +546,79 @@ mod atlas_content {
             .map(|product| product.to_string())
             .collect::<BTreeSet<_>>()
         );
+    }
+
+    #[test]
+    fn material_preflight_rejects_corrupt_inputs_and_recovers_without_changing_products() {
+        for name in [
+            "assets/materials/region.material2d.json",
+            "assets/materials/region.material2d.json.meta",
+            "assets/materials/region.wgsl",
+        ] {
+            let cache = Cache::new();
+            let project = cache.project();
+            let store = cache.path.join("store");
+            fs::create_dir(&store).unwrap();
+            let store = host_fs::writable_directory(&store).unwrap();
+            let mut fence = ContentFence::capture(&project).unwrap();
+            let (original, observations) = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .unwrap();
+            fence.bind_raw_inputs(&observations).unwrap();
+            let path = project.join(name);
+            let bytes = fs::read(&path).unwrap();
+            fs::write(&path, "invalid region Material input").unwrap();
+            assert!(fence.verify().unwrap_err().contains(name));
+            let error = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .err()
+            .expect("invalid source must not reuse the previous cooked Material");
+            assert!(
+                error.contains(region_material::MATERIAL_PATH),
+                "{name}: {error}"
+            );
+            let retained = original
+                .base()
+                .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
+                    region_material::material_product(),
+                )
+                .unwrap();
+            two_level_pack::assert_room_material(retained.product());
+            fs::write(&path, bytes).unwrap();
+            fence.verify().unwrap();
+            let (repaired, repaired_observations) = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .unwrap();
+            fence.bind_raw_inputs(&repaired_observations).unwrap();
+            assert_eq!(
+                original.base().catalog().to_json_bytes().unwrap(),
+                repaired.base().catalog().to_json_bytes().unwrap()
+            );
+            drop(fence);
+            drop(store);
+            drop(cache);
+            assert!(!project.exists());
+            let material = repaired
+                .base()
+                .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(
+                    region_material::material_product(),
+                )
+                .unwrap();
+            two_level_pack::assert_room_material(material.product());
+            two_level_pack::assert_room_material(retained.product());
+        }
     }
 
     #[test]
@@ -736,6 +839,7 @@ mod atlas_content {
                 assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
                 assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
                 assert_resident_images(world, LevelId::Meadow, None);
+                assert!(world.resource::<Assets<Material2dAsset>>().is_empty());
                 CurrentScene::get(world).unwrap().receipt().clone()
             })
             .map_err(|error| error.to_string())?;
@@ -752,22 +856,37 @@ mod atlas_content {
             snapshot.lookout == SideRoomPhase::Open
         })?;
         let relic_product = Some(side_room::image_product());
-        let (room, lookout, shared_image) = session
+        let (room, lookout, shared_image, shared_material, shared_version, retained_material) =
+            session
+                .observe(|world| {
+                    assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+                    let (room, room_image, material, version) =
+                        cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC);
+                    let (lookout, lookout_image, lookout_material, lookout_version) = cooked_relic(
+                        world,
+                        side_room::LOOKOUT_SCENE_PATH,
+                        side_room::LOOKOUT_RELIC,
+                    );
+                    assert_ne!(room.instance_id(), lookout.instance_id());
+                    assert_ne!(room.instance_id(), primary.instance_id());
+                    assert_ne!(lookout.instance_id(), primary.instance_id());
+                    assert_eq!(room_image, lookout_image);
+                    assert_eq!(material, lookout_material);
+                    assert_eq!(version, lookout_version);
+                    assert_resident_images(world, LevelId::Meadow, relic_product);
+                    let retained = world
+                        .resource::<Assets<Material2dAsset>>()
+                        .get(material)
+                        .unwrap()
+                        .clone();
+                    (room, lookout, room_image, material, version, retained)
+                })
+                .map_err(|error| error.to_string())?;
+        let original_slot = session
             .observe(|world| {
-                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
-                let (room, room_image) =
-                    cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC);
-                let (lookout, lookout_image) = cooked_relic(
-                    world,
-                    side_room::LOOKOUT_SCENE_PATH,
-                    side_room::LOOKOUT_RELIC,
-                );
-                assert_ne!(room.instance_id(), lookout.instance_id());
-                assert_ne!(room.instance_id(), primary.instance_id());
-                assert_ne!(lookout.instance_id(), primary.instance_id());
-                assert_eq!(room_image, lookout_image);
-                assert_resident_images(world, LevelId::Meadow, relic_product);
-                (room, lookout, room_image)
+                world
+                    .resource::<Assets<Material2dAsset>>()
+                    .slot_revision(shared_material)
             })
             .map_err(|error| error.to_string())?;
         step_command(session, 4, SIDE_ROOM)?;
@@ -785,7 +904,20 @@ mod atlas_content {
                         side_room::LOOKOUT_SCENE_PATH,
                         side_room::LOOKOUT_RELIC
                     ),
-                    (lookout.clone(), shared_image)
+                    (
+                        lookout.clone(),
+                        shared_image,
+                        shared_material,
+                        shared_version
+                    )
+                );
+                assert_eq!(
+                    world
+                        .resource::<Assets<Material2dAsset>>()
+                        .get(shared_material)
+                        .unwrap()
+                        .generation(),
+                    retained_material.generation()
                 );
                 assert_resident_images(world, LevelId::Meadow, relic_product);
             })
@@ -798,14 +930,75 @@ mod atlas_content {
         })?;
         let reopened = session
             .observe(|world| {
-                let (reopened, image) =
+                let (reopened, image, material, version) =
                     cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC);
                 assert_ne!(reopened.instance_id(), room.instance_id());
                 assert_eq!(image, shared_image);
+                assert_eq!(material, shared_material);
+                assert_eq!(version, shared_version);
+                assert_eq!(
+                    world
+                        .resource::<Assets<Material2dAsset>>()
+                        .slot_revision(material),
+                    original_slot
+                );
                 reopened
             })
             .map_err(|error| error.to_string())?;
-        step_command(session, 6, TRAVEL)?;
+        step_command(session, 6, LOOKOUT)?;
+        session
+            .observe(|world| {
+                let snapshot = world.resource::<GameSnapshot>();
+                assert_eq!(snapshot.side_room, SideRoomPhase::Open);
+                assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
+                assert_eq!(snapshot.current_instance, primary_id);
+                assert_retired(world, &lookout);
+                assert_eq!(
+                    cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC),
+                    (
+                        reopened.clone(),
+                        shared_image,
+                        shared_material,
+                        shared_version
+                    )
+                );
+                assert_eq!(
+                    world
+                        .resource::<Assets<Material2dAsset>>()
+                        .get(shared_material)
+                        .unwrap()
+                        .generation(),
+                    retained_material.generation()
+                );
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 7, LOOKOUT)?;
+        wait_for_snapshot(session, "cooked lookout did not reopen", |snapshot| {
+            assert_eq!(snapshot.current_instance, primary_id);
+            assert_eq!(snapshot.side_room, SideRoomPhase::Open);
+            snapshot.lookout == SideRoomPhase::Open
+        })?;
+        let reopened_lookout = session
+            .observe(|world| {
+                let (reopened, image, material, version) = cooked_relic(
+                    world,
+                    side_room::LOOKOUT_SCENE_PATH,
+                    side_room::LOOKOUT_RELIC,
+                );
+                assert_ne!(reopened.instance_id(), lookout.instance_id());
+                assert_eq!(image, shared_image);
+                assert_eq!(material, shared_material);
+                assert_eq!(version, shared_version);
+                let materials = world.resource::<Assets<Material2dAsset>>();
+                assert_eq!(materials.slot_revision(material), original_slot);
+                assert_eq!(
+                    materials.get(material).unwrap().generation(),
+                    retained_material.generation()
+                );
+                reopened
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 8, TRAVEL)?;
         wait_for_snapshot(session, "cooked travel did not reach Cavern", |snapshot| {
             if snapshot.travel_count == 0 {
                 assert_eq!(snapshot.current_instance, primary_id);
@@ -835,7 +1028,7 @@ mod atlas_content {
                 assert_eq!(is_cooked_cavern, Some(true));
                 assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
                 assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
-                for retired in [&primary, &reopened, &lookout] {
+                for retired in [&primary, &room, &reopened, &lookout, &reopened_lookout] {
                     assert_ne!(current.receipt().instance_id(), retired.instance_id());
                     assert_retired(world, retired);
                 }
@@ -845,9 +1038,23 @@ mod atlas_content {
                         .get(shared_image)
                         .is_none()
                 );
+                assert!(world.resource::<Assets<Material2dAsset>>().is_empty());
+                assert!(
+                    world
+                        .resource::<Assets<Material2dAsset>>()
+                        .get(shared_material)
+                        .is_none()
+                );
+                assert!(
+                    world
+                        .resource::<AssetStates>()
+                        .state(shared_material.id())
+                        .is_none_or(|state| state.usable_version().is_none())
+                );
                 assert_resident_images(world, LevelId::Cavern, None);
             })
             .map_err(|error| error.to_string())?;
+        two_level_pack::assert_room_material(&retained_material);
         Ok(())
     }
 
@@ -881,7 +1088,12 @@ mod atlas_content {
         world: &World,
         scene_path: &str,
         relic_id: &str,
-    ) -> (SpawnedSceneInstance, Handle<ImageAsset>) {
+    ) -> (
+        SpawnedSceneInstance,
+        Handle<ImageAsset>,
+        Handle<Material2dAsset>,
+        AssetVersion,
+    ) {
         let scene_path = format!("scenes/{scene_path}");
         let mut relics = world.iter_entities().filter(|entity| {
             entity.get::<SceneEntitySource>().is_some_and(|source| {
@@ -907,7 +1119,61 @@ mod atlas_content {
         let handle = relic.get::<Sprite>().unwrap().material.image.unwrap();
         let image = world.resource::<Assets<ImageAsset>>().get(handle).unwrap();
         two_level_pack::assert_room_image(image);
-        (receipt, handle)
+        let material = relic
+            .get::<Material2d>()
+            .expect("the cooked relic uses the authored Material");
+        assert_eq!(material.declaration_id(), region_material::MATERIAL_ID);
+        assert_eq!(
+            material.declaration_version(),
+            region_material::MATERIAL_VERSION
+        );
+        assert_eq!(material.parameters(), &region_material::parameters());
+        assert!(material.texture_overrides().is_empty());
+        let materials = world.resource::<Assets<Material2dAsset>>();
+        assert_eq!(materials.len(), 1);
+        let asset = materials.get(material.handle()).unwrap();
+        two_level_pack::assert_room_material(asset);
+        let server = world.resource::<AssetServer>();
+        assert_eq!(
+            server.product(material.handle().id()),
+            Some(region_material::material_product())
+        );
+        assert_eq!(
+            server.get_product_handle::<Material2dAsset>(region_material::material_product()),
+            Some(material.handle())
+        );
+        assert!(server.path(material.handle().id()).is_none());
+        let binding = material
+            .bind(asset, |reference| {
+                let AssetRef::Product(product) = reference else {
+                    panic!("cooked Material textures must retain their original Image Products");
+                };
+                server.get_product_handle::<ImageAsset>(*product)
+            })
+            .unwrap();
+        assert_eq!(binding.generation(), asset.generation());
+        assert_eq!(binding.parameters(), &region_material::parameters());
+        let palette = binding.textures()[region_material::PALETTE_ID];
+        assert_eq!(
+            server.product(palette.id()),
+            Some(region_material::palette_product())
+        );
+        assert!(
+            world
+                .resource::<Assets<ImageAsset>>()
+                .get(palette)
+                .is_some()
+        );
+        let state = world
+            .resource::<AssetStates>()
+            .state(material.handle().id())
+            .unwrap();
+        assert!(state.source_hash().is_none());
+        assert!(state.import_recipe_digest().is_none());
+        let version = state
+            .usable_version()
+            .expect("the cooked shared Material is usable");
+        (receipt, handle, material.handle(), version)
     }
 
     fn assert_retired(world: &World, receipt: &SpawnedSceneInstance) {

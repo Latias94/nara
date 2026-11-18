@@ -1,0 +1,19 @@
+{
+  "kind": "material2d",
+  "version": 1,
+  "declaration": {
+    "id": "two-level-game.region",
+    "version": 1,
+    "alpha": "blend",
+    "uniform_size": 16,
+    "fields": [
+      { "id": "region.grade", "name": "grade", "kind": "vec4", "offset": 0 }
+    ],
+    "textures": [
+      { "id": "palette", "name": "region_palette", "binding": 1 }
+    ]
+  },
+  "shaders": ["materials/region.wgsl"],
+  "params": { "region.grade": { "vec4": [1.0, 1.0, 1.0, 0.0] } },
+  "textures": { "palette": { "kind": "path", "value": "textures/meadow.png" } }
+}

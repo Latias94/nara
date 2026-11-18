@@ -156,5 +156,7 @@ owns source-free frame selection and native pixel evidence.
 
 The marker Prefab uses a separate badge Image reached through the retained marker Scene. The three
 Player placements package two travel Scenes, the marker Scene, two Deferred rooms, five Images,
-the Sound Bank, Sprite clips and global startup Input. Both rooms prepare when requested from
-Meadow and use the same relic Image. [Marker Prefab workflow](../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor) · [Play the side rooms](../../samples/two-level-game/README.md#play-the-side-room)
+the shared region Material, Sound Bank, Sprite clips and global startup Input. Both rooms prepare
+when requested from Meadow and use the same relic Image and Material. The Material requires the
+existing Meadow Image as a palette; the source-free closure retains that edge.
+[Marker Prefab workflow](../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor) · [Play the side rooms](../../samples/two-level-game/README.md#play-the-side-room)

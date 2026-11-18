@@ -9,6 +9,7 @@ use nara::project_tooling::process::SupervisedProcessCommand;
 use serde_json::{Value, json};
 use two_level_game::{
     levels::{LevelId, LevelKey},
+    region_material,
     save::{Checkpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint},
 };
 
@@ -93,6 +94,14 @@ impl<'a> Session<'a> {
                 assert_eq!(
                     record["presentation"]["side_room_sprites"], visible_rooms,
                     "visible Meadow region Sprites disagree with their presented game state: {record}"
+                );
+                let resident_room = ["side_room", "lookout"].into_iter().any(|room| {
+                    matches!(record["state"][room].as_str(), Some("open" | "relic_found"))
+                });
+                assert_eq!(
+                    record["presentation"]["side_room_material"].is_object(),
+                    resident_room,
+                    "presented region Material residency disagrees with the live rooms: {record}"
                 );
             }
             match kind {
@@ -248,6 +257,7 @@ impl<'a> Session<'a> {
         assert_eq!(start["state"]["side_room"], "closed");
         assert_eq!(start["state"]["lookout"], "closed");
         assert!(start["presentation"]["side_room_image"].is_null());
+        assert!(start["presentation"]["side_room_material"].is_null());
         assert!(
             !start["resident_images"]
                 .as_array()
@@ -260,6 +270,27 @@ impl<'a> Session<'a> {
         let publication = &opened["presentation"]["side_room_image"];
         assert!(evidence::number(publication, "asset_id") > 0);
         assert!(evidence::number(publication, "version") > 0);
+        let material = &opened["presentation"]["side_room_material"];
+        assert_eq!(
+            material["product"],
+            region_material::material_product().to_string()
+        );
+        assert!(evidence::number(material, "asset_id") > 0);
+        assert!(evidence::number(material, "version") > 0);
+        assert_eq!(material["declaration"], region_material::MATERIAL_ID);
+        assert_eq!(
+            material["declaration_version"],
+            region_material::MATERIAL_VERSION
+        );
+        assert_eq!(material["generation_sequence"], 0);
+        assert_eq!(material["source_inputs_available"], false);
+        for field in ["shader_digest", "interface_digest"] {
+            let digest = material[field]
+                .as_array()
+                .expect("actual compiled Shader digest");
+            assert_eq!(digest.len(), 32);
+            assert!(digest.iter().any(|byte| byte.as_u64().unwrap() != 0));
+        }
         let images = opened["resident_images"].as_array().unwrap();
         assert!(images.contains(&json!(product)));
         assert_eq!(
@@ -295,12 +326,14 @@ impl<'a> Session<'a> {
             assert_eq!(stage["current_receipt"], start["current_receipt"]);
             assert_eq!(stage["resident_images"], opened["resident_images"]);
             assert_eq!(&stage["presentation"]["side_room_image"], publication);
+            assert_eq!(&stage["presentation"]["side_room_material"], material);
         }
         let traveled = self.travel(window::E, main(LevelId::Cavern), 0, &[], 2);
         assert_eq!(traveled["state"]["side_room"], "closed");
         assert_eq!(traveled["state"]["lookout"], "closed");
         assert_eq!(traveled["presentation"]["side_room_sprites"], 0);
         assert!(traveled["presentation"]["side_room_image"].is_null());
+        assert!(traveled["presentation"]["side_room_material"].is_null());
         assert!(
             !traveled["resident_images"]
                 .as_array()
@@ -319,6 +352,7 @@ impl<'a> Session<'a> {
             "traveled": room_sample(&traveled),
             "primary_instance": start["state"]["current_instance"],
             "released_image": product,
+            "released_material": region_material::material_product().to_string(),
         })
     }
 

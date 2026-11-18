@@ -3,6 +3,9 @@
 #[path = "../src/bin/cook/source.rs"]
 mod source;
 
+#[path = "../src/bin/cook/material.rs"]
+mod material;
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -10,15 +13,23 @@ use std::{
 };
 
 use nara::{
-    asset::{AssetPath, AssetPathScope, AssetSourcePath, SourceAssetBuild},
+    asset::{
+        AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetRef,
+        AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, RuntimeAssetCodec,
+        SourceAssetBuild,
+    },
     asset_build::{
         ArtifactBuildDefinition, ArtifactBuildLimits, ArtifactBuildObservation, ArtifactBuildStore,
         ArtifactContentDigest, ArtifactSourceRequest, VerifiedArtifactGroup, build_source,
     },
     core::FormatVersion,
+    material::{Material2dAsset, Material2dRuntimeCodec, Material2dSource},
     project_tooling::host_fs,
 };
-use two_level_game::sound_bank::{BANK_PATH, SoundBankDomain};
+use two_level_game::{
+    region_material,
+    sound_bank::{BANK_PATH, SoundBankDomain},
+};
 
 const RENAMED_PICKUP: &str = "assets/audio/pickup-v2.wav";
 
@@ -59,6 +70,12 @@ impl Directory {
                 "assets/textures/side-room.png.meta",
                 "side room relic metadata",
             ),
+            ("assets/materials/region.material2d.json", "material"),
+            (
+                "assets/materials/region.material2d.json.meta",
+                "material metadata",
+            ),
+            ("assets/materials/region.wgsl", "shader"),
             ("assets/animations/explorer.sprite-animations.json", "clips"),
             (
                 "assets/animations/explorer.sprite-animations.json.meta",
@@ -126,6 +143,40 @@ impl Directory {
             .unwrap()
             .into_group()
     }
+
+    fn material() -> Self {
+        let directory = Self::new();
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for name in [
+            "assets/materials/region.material2d.json",
+            "assets/materials/region.material2d.json.meta",
+            "assets/materials/region.wgsl",
+            "assets/textures/meadow.png.meta",
+        ] {
+            fs::copy(sample.join(name), directory.0.join(name)).unwrap();
+        }
+        directory
+    }
+
+    fn import_material(&self) -> (Material2dAsset, Vec<ArtifactBuildObservation>) {
+        let root = host_fs::readable_directory(&self.0).unwrap();
+        let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
+        let metadata = AssetMetaIdentityCandidate::decode_json_bytes(
+            &fs::read(self.0.join("assets/textures/meadow.png.meta")).unwrap(),
+        )
+        .unwrap();
+        let mut database = ProjectAssetDatabase::default();
+        database
+            .insert_identity(
+                &scope,
+                AssetPath::new(region_material::PALETTE_PATH).unwrap(),
+                metadata.into_identity(),
+            )
+            .unwrap();
+        let mut observations = Vec::new();
+        let material = material::prepare(&root, &scope, &mut database, &mut observations).unwrap();
+        (material, observations)
+    }
 }
 
 impl Drop for Directory {
@@ -176,6 +227,9 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
+        "assets/materials/region.material2d.json",
+        "assets/materials/region.material2d.json.meta",
+        "assets/materials/region.wgsl",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();
@@ -204,6 +258,9 @@ fn content_fence_requires_authored_sources_and_metadata() {
         "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
+        "assets/materials/region.material2d.json",
+        "assets/materials/region.material2d.json.meta",
+        "assets/materials/region.wgsl",
     ] {
         let directory = Directory::new();
         fs::remove_file(directory.0.join(name)).unwrap();
@@ -223,6 +280,9 @@ fn code_and_generated_bootstrap_stay_fenced_through_later_publication_checks() {
         "src/lib.rs",
         "src/bin/player/generated.rs",
         "prefabs/marker.prefab.json",
+        "assets/materials/region.material2d.json",
+        "assets/materials/region.material2d.json.meta",
+        "assets/materials/region.wgsl",
     ] {
         let directory = Directory::new();
         let mut fence = source::ContentFence::capture(&directory.0).unwrap();
@@ -319,4 +379,163 @@ fn binding_raw_observations_preserves_prebuild_source_file_identity() {
             .contains("assets/audio/game.soundbank.json")
     );
     assert!(fence.verify().is_err());
+}
+
+#[test]
+fn material_texture_path_requires_an_admitted_image_identity() {
+    let directory = Directory::material();
+    let root = host_fs::readable_directory(&directory.0).unwrap();
+    let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
+    for kind in [None, Some(AssetSourceKind::Scene)] {
+        let mut database = ProjectAssetDatabase::default();
+        if let Some(kind) = kind {
+            let path = AssetPath::new(region_material::PALETTE_PATH).unwrap();
+            database
+                .insert_identity(
+                    &scope,
+                    path.clone(),
+                    AssetMetaIdentity::new(region_material::palette_product().source(), path, kind),
+                )
+                .unwrap();
+        }
+        let error = material::prepare(&root, &scope, &mut database, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("Material texture"), "{error}");
+    }
+}
+
+#[test]
+fn material_shader_observations_stay_fenced_through_bootstrap_and_publication() {
+    let directory = Directory::material();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let authored = Material2dSource::decode(
+        &fs::read(directory.0.join("assets/materials/region.material2d.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        authored.textures()[region_material::PALETTE_ID],
+        AssetRef::path(region_material::PALETTE_PATH).unwrap()
+    );
+    let (imported, observations) = directory.import_material();
+    assert_eq!(imported.generation().inputs().len(), 1);
+    assert_eq!(
+        imported.generation().inputs()[0].path().as_str(),
+        region_material::SHADER_PATH
+    );
+    assert_eq!(
+        imported.generation().inputs()[0].source(),
+        region_material::SHADER
+    );
+    let material = Material2dRuntimeCodec::decode_runtime(
+        &Material2dRuntimeCodec::encode_runtime(&imported).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(material.product(), region_material::material_product());
+    assert_eq!(
+        material.textures()[region_material::PALETTE_ID],
+        AssetRef::Product(region_material::palette_product())
+    );
+    assert!(material.generation().inputs().is_empty());
+    assert_eq!(
+        material.generation().shader().user_source(),
+        format!("{}\n", region_material::SHADER)
+    );
+    let expected = [
+        "assets/materials/region.material2d.json",
+        "assets/materials/region.wgsl",
+    ]
+    .into_iter()
+    .map(|path| {
+        (
+            path.to_owned(),
+            ArtifactContentDigest::of_bytes(&fs::read(directory.0.join(path)).unwrap()),
+        )
+    })
+    .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(observations.len(), expected.len());
+    assert_eq!(
+        observations
+            .iter()
+            .map(|observation| match observation {
+                ArtifactBuildObservation::Raw {
+                    path,
+                    digest: Some(digest),
+                } => (path.as_str().to_owned(), *digest),
+                other => panic!("expected the original Material and WGSL observations: {other:?}"),
+            })
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        expected
+    );
+    fence.bind_raw_inputs(&observations).unwrap();
+    fs::write(
+        directory.0.join("src/bin/player/generated.rs"),
+        "new catalog",
+    )
+    .unwrap();
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    assert!(inputs.iter().any(|path| {
+        path == &nara::fs::RelativePath::new("assets/materials/region.wgsl").unwrap()
+    }));
+    fence.bind_code(&inputs).unwrap();
+    fence.verify().unwrap();
+    let shader_path = directory.0.join("assets/materials/region.wgsl");
+    fs::write(&shader_path, "changed shader after capture").unwrap();
+    assert!(
+        fence
+            .verify()
+            .unwrap_err()
+            .contains("assets/materials/region.wgsl")
+    );
+    assert_eq!(
+        material.generation().shader().user_source(),
+        format!("{}\n", region_material::SHADER)
+    );
+}
+
+#[test]
+fn shader_changed_before_import_cannot_rebaseline_the_original_capture() {
+    let directory = Directory::material();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    fs::write(
+        directory.0.join("assets/materials/region.wgsl"),
+        format!("{}\n", region_material::SHADER),
+    )
+    .unwrap();
+    let (_, observations) = directory.import_material();
+    assert!(
+        fence
+            .bind_raw_inputs(&observations)
+            .unwrap_err()
+            .contains("assets/materials/region.wgsl")
+    );
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    assert!(
+        fence
+            .bind_code(&inputs)
+            .unwrap_err()
+            .contains("assets/materials/region.wgsl")
+    );
+}
+
+#[test]
+fn shader_replacement_with_identical_bytes_cannot_replace_the_original_file_identity() {
+    let directory = Directory::material();
+    let mut fence = source::ContentFence::capture(&directory.0).unwrap();
+    let (_, observations) = directory.import_material();
+    let shader = directory.0.join("assets/materials/region.wgsl");
+    let bytes = fs::read(&shader).unwrap();
+    fs::rename(&shader, shader.with_extension("original")).unwrap();
+    fs::write(&shader, bytes).unwrap();
+    assert!(
+        fence
+            .bind_raw_inputs(&observations)
+            .unwrap_err()
+            .contains("assets/materials/region.wgsl")
+    );
+    let inputs = source::code_inventory(&directory.0).unwrap();
+    assert!(
+        fence
+            .bind_code(&inputs)
+            .unwrap_err()
+            .contains("assets/materials/region.wgsl")
+    );
 }
