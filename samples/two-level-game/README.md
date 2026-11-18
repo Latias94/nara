@@ -279,7 +279,7 @@ The optional `cook` binary builds and publishes the same game as a native headle
 Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
 domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
 publisher. The pack contains both levels, the marker Scene, two Deferred rooms, five Images, one
-shared Sound Bank, Sprite clips and startup Input.
+shared Material, one shared TileSet, Sound Bank, Sprite clips and startup Input.
 Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
 `LevelId`, separate from logical level instances.
 
@@ -290,6 +290,13 @@ triple and absolute Cargo/rustc executables from the selected toolchain:
 ```text
 cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
 ```
+
+Before generating code, the cooker uses the original source-delivery loader to check the
+manifest-selected authoring Schema against its compiled definitions. A valid alternate bundle
+path works without `schema/authoring.bundle.json`; missing, corrupt or divergent selected bundles
+reject before bootstrap changes. The completed processed Schema must match the admitted source
+Schema. Deep content validation also requires each Material texture to target an Image member
+with a selected Image codec.
 
 The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
 has the `desktop` feature enabled. The cooker writes the ignored `src/bin/player/generated.rs`
@@ -305,8 +312,9 @@ no source, metadata, import cache, Cargo or rustc available. The cooker keeps it
 `two-level-cook-cache` separately under the output parent; that cache is not an installation
 member. Publication refuses an existing destination rather than replacing it.
 
-The source fence keeps the actual verified Image/Sound Bank/Sprite clip import observations through code
-generation, Cargo build and publication. Renaming a raw WAV and changing its bank descriptor is
+The source fence keeps actual admitted delivery members, including the selected Schema, together
+with verified Image/Sound Bank/Sprite clip/Material/TileSet observations through code generation,
+Cargo build and publication. Renaming a raw WAV and changing its bank descriptor is
 valid; no hardcoded old filename is required. A later change to the actual observed dependency
 refuses publication instead of silently relabeling the previously prepared PCM.
 

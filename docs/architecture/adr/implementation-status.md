@@ -2212,6 +2212,20 @@ The record retains the processed whitelist correction and identity-versus-reside
 These changes qualify the concrete Image/Material/TileSet region workflow; general additive
 native services, destination sets and full ADR 0089 remain open.
 
+The [source/processed admission successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#source-agreement-and-processed-material-kind-successor)
+uses original source delivery for the manifest-selected Schema and carries admitted member
+observations into the existing cooker fence. The completed processed plan must match that Schema.
+The original deep validator checks each decoded Material texture against its selected Image
+codec role; a present Scene Product with a matching edge rejects before World/native creation.
+Content/builder owners 81, Cook/source 31 plus one desktop/audio preparation control and the
+independent Material 4 pass, including
+source-free gameplay, absent default bundle, selected-source replacement and independently opened
+wrong-kind content. The actual nested-Cargo package trajectory also passes 1/1 with relocated
+source-free execution, checkpoint Restore, damaged-content refusal and physical native-process
+cleanup. This closes the scoped F2/F5 implementation paths; package qualification and limits live in the
+[review receiving record](../../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction).
+General cooked-entry extraction and isolated generated build inputs remain open.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

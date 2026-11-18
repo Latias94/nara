@@ -217,6 +217,19 @@ actual camera/captured-packet 7 pass after recorded red reproductions. Correctne
 root Runtime/tooling library and formatting checks pass. These focused Windows CPU corrections
 do not requalify native timing, finish the remaining review findings or complete R10/R12.
 
+The [source/cooked admission successor](2026-10-20-persistent-two-level-game-plan.md#source-agreement-and-processed-material-kind-successor)
+implements F2 at `2f4e4be` and F5 at `0464be5` through existing owners. The cooker consumes
+manifest-selected source delivery and its actual observations, compiles with admitted bindings,
+and compares the completed processed Schema. The original source fence protects those inputs
+through package publication.
+Deep validation joins decoded Material texture slots to the selected Image codec role, without
+another decoder or per-frame audit. Affected content/builder owners 81, Cook/source 31 plus
+one Desktop/AudioDesktop preparation control,
+independently encoded Material 4 and the actual relocated source-free package trajectory 1 pass;
+the [receiving record](../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction)
+retains complete execution evidence and limits. Generated-input isolation, a shared starter
+cooked entry, extracted Material pixel custody and the other review findings remain open.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous

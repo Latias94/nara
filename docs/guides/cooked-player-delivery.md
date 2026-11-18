@@ -28,6 +28,15 @@ the Player, bind actual build provenance, then publish the whole directory. The 
 contains the final executable digest. The final manifest records code, catalog and pack facts,
 and cannot authorize its own expected identity.
 
+For source projects, first ingest the selected manifest/profile, resolve the game's recipe and
+call `ProjectContentLoader::load_delivery`. That original source path checks the selected
+authoring Schema against the compiled owners and returns the complete admitted delivery members.
+Carry their actual paths and digests into the cooker's existing source fence, together with its
+importer observations, and revalidate them at the original build/publication boundaries. Do not
+assume the bundle lives at the starter's default path. A valid bundle at another manifest-selected
+location is supported; missing, corrupt or divergent selected bundles reject before generating
+the Player bootstrap. These source checks do not run in the installed source-free Player.
+
 ## Assemble Complete Content
 
 The cooker uses `project_workflow::cooked_content` under the `project-workflow` feature.
@@ -44,7 +53,9 @@ belongs to this delivery. Surplus members reject rather than silently evade vali
 implicit roots. A compound member preserves all of its Products without duplicating its bytes.
 
 Deep validation runs the selected production decoders and actual reference inventories, including
-Image/TileSet/Tilemap CPU constraints. A target Image transform that invalidates an atlas rejects;
+Image/TileSet/Tilemap CPU constraints. A decoded Material's texture slots must target members
+selected with the Image codec role; a present Scene Product and matching dependency edge do not
+satisfy that requirement. A target Image transform that invalidates an atlas rejects;
 the assembler does not repair authored data implicitly. This work publishes no native resource or
 World. Pack startup later admits the catalog/extents and current demand, rather than repeating
 the entire producer validation eagerly. Later original-file corruption can reject a Deferred

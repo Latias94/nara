@@ -43,10 +43,10 @@ benchmark program.
 
 | Finding | Receiving disposition and owning action |
 | --- | --- |
-| F2: source Check and Cook disagree on the selected Schema | **Confirmed by current source; open.** The cooker fences a fixed bundle path and compiles with recipe bindings. It does not consume the manifest-selected bundle agreement from the Source Host. Reuse the existing agreement and admitted source facts; bind the actual cooked inputs through publication. A byte fence alone cannot establish semantic agreement. Cover a valid alternate path, missing/corrupt/obsolete bundle and replacement after preparation. [Cook inventory](../../samples/two-level-game/src/bin/cook/source.rs), [assembly](../../samples/two-level-game/src/bin/cook/content.rs), [existing agreement](../../src/project_host/runtime_agreement.rs). |
+| F2: source Check and Cook disagree on the selected Schema | **Scoped correction implemented and qualified below.** Cook consumes original manifest-selected source delivery, compiles with its admitted bindings and carries actual member observations through build/publication. Alternate-path, invalid/divergent selection, later replacement and actual relocated source-free package controls pass. [Cook inventory](../../samples/two-level-game/src/bin/cook/source.rs), [assembly](../../samples/two-level-game/src/bin/cook/content.rs), [existing agreement](../../src/project_host/runtime_agreement.rs). |
 | F3: independent desktop UI can resolve incompatible Winit sources | **Confirmed source-selection gap; defer with paused desktop UI work.** The root selects vendored Winit while AccessKit's dependency uses registry Winit. Root patches are application-owned; the generated project does not emit one. The sprite-only shipping game does not exercise this combination. Qualify local and pinned-Git template selections separately; retain the native DPI repair until its own retirement criteria pass. [Starter manifest](../../src/project_workflow/starter/product_contract.rs), [AccessKit adapter](../../crates/nara_winit/src/accessibility/platform.rs), [vendor contract](../../vendor/winit/NARA-PATCH.md). |
 | F4: Material texture generation can change between Extract and Queue | **Confirmed by current source; open.** Extract validates the managed Image but retains a texture handle. Queue can select a later prepared slot. Capture effective textures with existing `ImageContentSnapshot` values in the renderer's extracted binding and project those snapshots in Queue. Share the binding across cells/views. Prove inter-stage unmanaged replacement, published recovery and replay of an old capture after World retirement. [Extract](../../crates/nara_sprite_render/src/extract.rs), [Queue](../../crates/nara_sprite_render/src/queue.rs), [Image snapshot](../../crates/nara_image/src/content.rs). |
-| F5: processed Material texture membership omits Image kind | **Confirmed by current source; open.** Source import requires Image, but generic processed dependency traversal can accept a present Scene Product as a texture. Add a Material-specific join while the decoded asset is already available, using existing work limits and Image codec facts. Diagnose Material, slot, target and expected kind before World/GPU allocation. Keep valid, missing and present-but-wrong-kind controls in the independent palette fixture. [Deep validation](../../src/runtime_content/deep.rs), [Material texture facts](../../crates/nara_material/src/asset/runtime.rs), [independent consumer](../../tests/fixtures/module-consumer/material-consumer/tests/processed_workflow.rs). |
+| F5: processed Material texture membership omits Image kind | **Scoped correction implemented and qualified below.** Original deep validation joins decoded Material slots to selected Image codec roles. Builder and independently encoded/reopened wrong-kind bases reject before gameplay; valid and missing-Image controls pass. [Deep validation](../../src/runtime_content/deep.rs), [Material texture facts](../../crates/nara_material/src/asset/runtime.rs), [independent consumer](../../tests/fixtures/module-consumer/material-consumer/tests/processed_workflow.rs). |
 | F6: explicit PNG Reimport omits a current PNG check at adoption | **Confirmed source gap; queued for Editor correctness work.** Completion compares the worker observation and checks current metadata, then publishes. The hydration path already verifies current PNG and metadata. Reuse that bounded observation at adoption, keeping the original capability and last-good value. A watcher event alone is insufficient. [Explicit adoption](../../src/project_host/runtime/editor/image_import/transaction.rs), [hydration control](../../src/project_host/runtime/editor/image_import/hydration.rs). |
 | F7: dirty Reopen lacks explicit discard intent | **Confirmed interactive gap; queued while UI is paused.** Both frontends submit the intentional discard operation directly. Keep that exact programmatic operation, but require a document/revision-bound discard-or-cancel decision for dirty interactive use. Preserve failed-read behavior and history on Cancel. [Reference action](../../editor/src/frontend/imgui/authoring.rs), [drawn action](../../editor/src/frontend/drawn/shell.rs), [Accepted discard contract](../architecture/adr/0047-editor-workspace-and-scene-document-state.md). |
 | F9: ordered task results accept different completion owners | **Confirmed result-admission defect; open.** `push` checks duplicate keys while retrieval requires one cutoff owner. Mixed sibling scopes cannot drain this collection. Bind a nonempty collection to its first completion owner and return a mismatched handle intact; release that binding when empty. The trace does not prove callback loss or physical worker leakage. [Result collection](../../crates/nara_tasks/src/runtime.rs), [scope ownership](../../crates/nara_tasks/src/runtime/scope.rs). |
@@ -74,12 +74,87 @@ See [the qualified TileSet unit](../plans/2026-10-20-persistent-two-level-game-p
 | Live movement versus replay admission | **Confirmed game-owned inconsistency; open.** The live MOVE branch accepts extra payload fields while `SemanticCommand::from_envelope` requires exactly two. Share the typed decoder and require equal valid behavior and equal rejection through both public paths. [Live consumer](../../samples/two-level-game/src/gameplay/travel.rs), [recording decoder](../../samples/two-level-game/src/command.rs). |
 | Play and Restart feedback | **Concrete paused-UI follow-up.** Preserve explicit Save and accepted-generation behavior. At the controls, identify the dirty document and explain that Restart replays the accepted generation. Qualify using two camera values through real controls when UI work resumes. [Game panel](../../editor/src/frontend/imgui/project.rs), [Play controls](../../editor/src/frontend/imgui/mod.rs). |
 
+## Source agreement and processed Material correction
+
+F5 lands at `0464be5`, and F2 at `2f4e4be`. The independent workspace lock prerequisite lands at
+`aa8d1ab` without changing any previously locked package version.
+
+The F2 cooker now uses public manifest ingestion, recipe resolution and the original
+`ProjectContentLoader::load_delivery` before assembling content or writing generated Player
+source. Scene compilation consumes those admitted source bindings. The completed processed plan
+must have the same Schema fingerprint. The delivery receipt's actual members join importer raw
+observations in the original `ContentFence`; the manifest-selected bundle is no longer a fixed
+inventory path. Build and directory publication retain their existing source revalidation.
+
+F5 uses `typed::<Material2dDomain>()` while the original CPU acquisition is still live. Each
+texture slot requires its target member's selected Image codec role. This adds no decoder call,
+secondary reference graph, retained success-path collection or per-frame audit. A wrong target
+returns `MaterialTextureKindMismatch` with the Material, slot and target Product. Host fault
+lowering preserves a separate `material-texture-kind-mismatch` reason.
+
+The independently locked Material consumer passes 4/4 in
+`91fb2f2c-458e-42a3-b43c-884d6ef82a51`. Its wrong-kind case first requires builder rejection, then
+directly encodes a Material targeting a present Scene and updates the actual catalog digest and
+declared dependency. After source and encoded directories are removed, captured-base admission
+and Material acquisition succeed, while `validate_deep` rejects the actual texture kind before
+gameplay. Valid and missing-Image controls retain their original behavior. The independent lock
+needed the existing Two-Level physics/animation closure; no previously locked package version
+was removed or upgraded, and unrelated Windows dependency-edge churn was removed.
+
+The first cooker check exposed an exhaustive Host error match missing the new variant. Adding
+the concrete reason fixes that compilation failure, and the selected `cook,desktop,audio-cpal`
+cooker feature-closure check passes. Independent bounded source/cooker and Material reviews
+report no P1/P2 in their reviewed
+production paths. These static reviews alone do not establish functional or package qualification.
+
+Release Cook/source tests pass 31/31 in `a3db0fe5-f855-4876-9fec-8b8ae01a2c7e`. A selected
+alternate bundle works with the default absent, and the full original source-free Session,
+Marker and concurrent-region path runs after source/cache removal. Missing, corrupt and
+semantically divergent selected bundles agree with public source delivery and preserve absent
+or existing bootstrap bytes. Original fences reject changed selected bytes and a new file
+identity carrying identical bytes. Importer and complete delivery observations agree on shared
+paths. The earlier source loader now owns Material/TileSet/Input-sidecar rejections; their
+original precise failure, repair and retained prepared-content controls are preserved.
+
+An additional focused profile control passes 1/1 in
+`be516c23-a84f-4c28-97df-02d14cdabd84`. It executes actual `content::prepare` for both Desktop
+and AudioDesktop, checks the completed content Schema against source recipe resolution and binds
+the returned observations into the original fence. It creates no generated bootstrap, Window or
+audio device. This closes the shared-entry profile coverage gap without repeating native desktop
+execution. Correctness Clippy and sample formatting also pass after this test addition.
+
+The real nested-Cargo package trajectory passes 1/1 in
+`0656cfc8-e6e4-4ab3-a630-3e75ed466319`, with five unrelated cases excluded. Its actual cooker
+first rejects a corrupt selected bundle before changing bootstrap absence/bytes or publishing a
+directory. After repair, the default bundle remains absent; the selected alternate location cooks
+and publishes. The original relocated source-free Player runs with authoring source removed and
+Cargo/rustc unavailable. Original content-corruption, gameplay, checkpoint/fresh Restore and
+native containment/readers/output cleanup assertions remain intact. The 426.580-second case
+includes serial release compilation and is not a runtime performance measurement.
+
+The first package attempt, `b96c31b5-71ba-423f-8c97-6168b5fab228`, fails in the newly added test
+because it assumes the copied project already has generated bootstrap source. The original
+project has none. The corrected control preserves both absent and existing source states; the
+final run above passes. This is a fixture correction, not a relaxed delivery assertion.
+
+The affected `runtime_content` and `CookedContentBuilder` owner cohort passes 81/81, with 876
+unrelated tests excluded, in `19f860e9-49ea-4b1b-83d8-b71691d799c5`. Original once-decoded deep
+validation, decoder/output lifetime, exact and one-short budgets, retained-pack corruption,
+codec roles and complete builder closure controls remain intact. This unit qualifies Windows
+Rust 1.95.0 CPU/source delivery and native headless package execution, not new desktop GPU,
+foreign-platform execution, compiler-floor or performance guarantees.
+
+Correctness Clippy passes for the selected sample library, cooker, Cook/source/package tests and
+independent Material integration. Existing unrelated warnings remain; this is not a warning-free
+workspace claim. Root/sample and affected independent-package formatting pass, as do document
+link/fragment, TOML/lock and whitespace checks. The paused UI/Dialogue files remain byte-for-byte
+unchanged. Generated-source isolation and the shared external-game cooked entry remain open.
+
 ## Delivery order and larger refactors
 
-Finish the current TileSet delivery and commit its evidence before starting a new implementation
-unit. Then repair F1 and F8 through App/Transform, separately qualifying managed fault and settled
-presentation behavior. F2 and F5 precede expanding ordinary cooking; F4 preserves exact admitted
-pixels and can proceed through its original renderer owner. F9, F11, shared movement decoding and
+TileSet delivery and the managed F1/F8 App/Transform corrections have landed. The F2/F5 admission
+corrections above precede expanding ordinary cooking. Next, F4 preserves exact admitted pixels
+through its original renderer owner. F9, F11, shared movement decoding and
 bounded diagnostics are independent corrections. Desktop UI source selection, Editor import,
 discard intent, keyboard parity and installed-tool activation remain queued with the paused UI work.
 

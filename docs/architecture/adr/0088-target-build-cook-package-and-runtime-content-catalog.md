@@ -176,6 +176,12 @@ large allocation, member decode, or mount publication.
   when demanded. Producer pre-publication deep validation covers every delivered payload through
   its selected decoder. Neither original-file availability nor deferred residency follows from
   catalog admission.
+- Source cooking uses the source Host's manifest-selected Schema agreement and admitted delivery
+  members before generating a Player bootstrap. Retain those actual source observations through
+  the existing build and publication checks; a fixed file-path inventory does not establish
+  Schema agreement. Deep processed validation joins concrete typed dependencies to their required
+  codec role while the decoded value is available. In particular, a Material texture requires an
+  Image member, not merely a present Product with a matching dependency edge.
 - Wrong target/profile, incompatible engine/schema/plugin range, missing mandatory catalog member
   or catalog collision rejects the base. Demanded payload failures reject the corresponding
   startup/acquisition before publication; a later Deferred corruption need not be observed at boot.

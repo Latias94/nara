@@ -16,6 +16,64 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Source Agreement And Processed Material Kind Successor
+
+Before extracting a shared cooked entry, repair the two confirmed delivery gaps from the
+[external review reconciliation](../research/2026-11-18-engine-architecture-review-reconciliation.md).
+The game cooker must use the manifest-selected Schema agreement already owned by the source
+Host. Use public manifest ingestion, recipe resolution and `ProjectContentLoader::load_delivery`;
+retain their actual member observations through the existing source fence and final package
+publication checks. Remove the fixed Schema path from the game inventory. Keep game-specific
+catalog expectations and codec/import selection with this consumer. This operation runs during
+preparation, not during gameplay, and introduces no additional Schema validator.
+
+At the existing processed-content decode boundary, join each decoded Material texture slot to
+the selected Image codec role. A present Scene Product must not satisfy an Image requirement.
+Use the original decoded value and work budgets, and report the Material, slot and target Product.
+Qualify valid and missing Images, present wrong-kind targets, independently reopened encoded
+content, valid alternate Schema paths, rejected missing/corrupt/divergent bundles and actual
+source drift through publication. Preserve relocated source-free gameplay. Generated-source
+isolation and a general starter/Two-Level cooked entry remain separate successors.
+
+### Source And Processed Admission Implementation
+
+The Material-kind correction lands at `0464be5`; source/cooker agreement lands at `2f4e4be`.
+
+The cooker now compiles Scenes through the admitted source plan, then compares the completed
+processed Schema with the original delivery receipt. Its raw observations include the actual
+delivery members alongside importer inputs; `ContentFence` retains their identities and digests
+through the existing build/publication checks. The original fixed game content list no longer
+chooses a Schema path. Alternate-path qualification uses the full existing source-free Session,
+Marker and concurrent-region workflow, rather than stopping at receipt construction.
+
+The decoded Material check uses the existing typed acquisition and selected Image codec role.
+Independent Material controls pass 4/4 in `91fb2f2c-458e-42a3-b43c-884d6ef82a51`, including a
+directly encoded wrong-kind base admitted after its source and encoded directories are removed.
+Both builder completion and explicit deep validation refuse its Scene-valued texture. Valid
+source-free gameplay and missing-Image rejection remain intact. See the
+[receiving record](../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction)
+for integration corrections and the complete qualification scope.
+
+The selected release Cook/source cohort passes 31/31 in
+`a3db0fe5-f855-4876-9fec-8b8ae01a2c7e`. It covers absent default bundle with a valid selected
+alternate, public source-delivery agreement on missing/corrupt/divergent selections, preserved
+bootstrap absence/bytes, post-preparation source/name drift, complete delivery/raw observations,
+and the original Material/TileSet/Input rejection-and-repair controls. Valid prepared content
+continues through the existing source-free Session, Marker and two-region workflow after source
+and cache removal. This is CPU/source delivery evidence; actual package execution remains a
+separately recorded result. The actual package trajectory passes 1/1 in
+`0656cfc8-e6e4-4ab3-a630-3e75ed466319`, preserving the original Player/gameplay, checkpoint,
+fresh Restore, damaged-content and physical-process cleanup controls. It first runs a real
+rejected cooker for the corrupt selected bundle, then repairs and delivers from the alternate
+path with the default absent. The relocated Player runs after source deletion with Cargo/rustc
+unavailable. The receiving record retains the initial absent-bootstrap fixture correction.
+The affected `runtime_content`/builder owners also pass 81/81 in
+`19f860e9-49ea-4b1b-83d8-b71691d799c5`, preserving once-decoded work and original budget/lifetime
+controls. No new desktop GPU or foreign-platform qualification is claimed by this unit.
+An additional Desktop/AudioDesktop preparation control passes 1/1 in
+`be516c23-a84f-4c28-97df-02d14cdabd84`, checking actual prepared content and source Schema
+agreement without creating a generated bootstrap, Window or audio device.
+
 ## TileSet-Backed Concurrent Regions Successor
 
 Replace the two region floor Sprites with authored Tilemaps using one shared TileSet and the
