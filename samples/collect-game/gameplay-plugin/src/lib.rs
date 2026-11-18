@@ -17,13 +17,11 @@ use nara::{
         GameplayCommandValue,
     },
     prelude::{
-        App, Color, Component, CoreStage, FixedTime, FixedUpdateSet, PersistentComponent,
-        PersistentComponentProvider, Plugin, Query, Res, ResMut, Resource, Transform2d, Vec2,
-        add_fixed_transform_projection_systems,
+        App, Color, Component, CoreStage, FixedTime, FixedUpdateSet, PersistentComponent, Plugin,
+        Query, Res, ResMut, Resource, Transform2d, Vec2, add_fixed_transform_projection_systems,
     },
     reflect::{
-        ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
-        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
     },
     render::Camera2d,
@@ -38,7 +36,7 @@ const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefin
     PROVIDER_ID,
     ComponentSchemaProviderBindingId::new("collect-game.native", 2),
     catalog,
-    register,
+    current_components::register,
 )
 .with_predecessor(predecessor_catalog);
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
@@ -82,6 +80,8 @@ pub struct Collectible {
     #[nara(id = "radius", alias = "Collection radius", initial = 20.0)]
     pub radius: f32,
 }
+
+nara::persistent_components! { mod current_components = [PlayerConfig, Collectible]; }
 
 /// Observable game outcome, shared by desktop and bounded headless execution.
 #[derive(Resource, Debug, Default, Clone, PartialEq)]
@@ -156,10 +156,9 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
     let predecessor = predecessor_catalog()?;
     let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
         .expect("the fixed generation-one sample catalog has a successor");
-    current.components = vec![
-        PlayerConfig::persistent_component_schema(),
-        Collectible::persistent_component_schema(),
-    ];
+    current.components = current_components::schemas().map_err(|_| {
+        ComponentSchemaProviderSourceError::new("collect-game.current-catalog-invalid")
+    })?;
     Ok(current)
 }
 
@@ -171,12 +170,6 @@ fn predecessor_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProvid
     .map_err(|_| {
         ComponentSchemaProviderSourceError::new("collect-game.predecessor-catalog-invalid")
     })
-}
-
-fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component::<PlayerConfig>()?;
-    registry.register_persistent_component::<Collectible>()?;
-    Ok(())
 }
 
 fn initialize(
@@ -390,3 +383,6 @@ pub fn demonstration_commands(with_reset: bool) -> Vec<GameplayCommandSubmission
 
 #[cfg(feature = "desktop")]
 pub use input::DesktopInputPlugin;
+
+#[cfg(test)]
+mod inventory_tests;
