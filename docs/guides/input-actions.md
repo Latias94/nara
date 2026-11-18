@@ -312,6 +312,12 @@ scope. Ordinary source Hosts perform this step as part of startup.
 ## Commands And Recording
 
 `ActionCommandBinding::new` selects PRIMARY by default; use `with_seat` for another seat.
+When a game already has a complete `GameplayCommandDraft`, use
+`ActionCommandBinding::from_command(action, phase, draft)` to move its type, target and payload
+directly into the binding. This replaces constructing a type-only binding and then calling the
+removed `with_command` setter. Both constructors retain the same seat/context defaults. The
+original `ActionCommandMap::bind` still admits the complete binding, rejects runtime Entity
+targets in authoring data and enforces its existing count limit; serde uses the same wire shape.
 Static mappings match the complete `(seat, action, context, phase)` identity. For changing analog
 values or game-owned player targets, an ordinary game adapter may read semantic outcomes and
 construct payloads through `LocalGameplayCommands`. The original `GameplayCommandQueue` still
@@ -322,6 +328,13 @@ well as input: Pause, exact Step and Resume do not have interchangeable staging 
 semantic recording can preserve meaning after a physical rebind, but must validate its own
 bounded vocabulary, version and value kinds before submission. Runtime resources are not
 recording artifacts.
+
+The two-level game shares its movement decoder between live consumption and semantic recording:
+two payload fields (`direction: i64` in `0..4`, `pressed: bool`) and no target. A malformed live
+movement reports a recoverable game error without changing held input. Game phase still gates
+new presses, while valid releases clear existing holds during preparation or reconstruction.
+This is a game-owned vocabulary, not a new engine-wide payload validator. Other game actions
+keep their current independent commands.
 
 Register a dynamic game mapper with `nara_gameplay::add_local_gameplay_command_systems`.
 Its systems run once after ordinary input resolution, including zero-tick frames, and once

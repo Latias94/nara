@@ -152,10 +152,7 @@ fn bind(
 ) -> Result<(), PluginError> {
     app.world_mut()?
         .resource_mut::<ActionCommandMap>()
-        .bind(
-            ActionCommandBinding::new(id, phase, command.command_type().clone())
-                .with_command(command),
-        )
+        .bind(ActionCommandBinding::from_command(id, phase, command))
         .map_err(|error| PluginError::SetupFailed {
             plugin: ID,
             message: error.to_string(),

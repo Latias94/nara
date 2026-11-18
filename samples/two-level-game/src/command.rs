@@ -65,42 +65,43 @@ impl SemanticCommand {
 
     /// Decodes only exact game commands, with no target or unrepresented payload fields.
     pub(crate) fn from_envelope(envelope: &GameplayCommandEnvelope) -> Result<Self, String> {
+        if envelope.command_type().as_str() == commands::MOVE {
+            let (direction, pressed) = decode_movement(envelope)?;
+            return Ok(Self::Move { direction, pressed });
+        }
         if envelope.target().is_some() {
             return Err("semantic game commands cannot have a target".into());
         }
         let payload = envelope.payload();
-        let command = match envelope.command_type().as_str() {
-            commands::MOVE => {
-                let (
-                    Some(GameplayCommandValue::I64(direction)),
-                    Some(GameplayCommandValue::Bool(pressed)),
-                ) = (payload.get("direction"), payload.get("pressed"))
-                else {
-                    return Err("movement requires an integer direction and boolean pressed".into());
-                };
-                if payload.len() != 2 {
-                    return Err("movement contains unrepresented payload fields".into());
-                }
-                Self::Move {
-                    direction: usize::try_from(*direction)
-                        .map_err(|_| "movement direction must be in 0..4".to_owned())?,
-                    pressed: *pressed,
-                }
-            }
-            kind => {
-                if !payload.is_empty() {
-                    return Err("semantic game actions require an empty payload".into());
-                }
-                match kind {
-                    commands::MARKER => Self::Marker,
-                    commands::TRAVEL => Self::Travel,
-                    commands::INSTANCE => Self::Instance,
-                    commands::RETRY => Self::Retry,
-                    _ => return Err(format!("unsupported semantic game command {kind}")),
-                }
-            }
-        };
-        command.validate()?;
-        Ok(command)
+        if !payload.is_empty() {
+            return Err("semantic game actions require an empty payload".into());
+        }
+        match envelope.command_type().as_str() {
+            commands::MARKER => Ok(Self::Marker),
+            commands::TRAVEL => Ok(Self::Travel),
+            commands::INSTANCE => Ok(Self::Instance),
+            commands::RETRY => Ok(Self::Retry),
+            kind => Err(format!("unsupported semantic game command {kind}")),
+        }
     }
+}
+
+pub(crate) fn decode_movement(envelope: &GameplayCommandEnvelope) -> Result<(usize, bool), String> {
+    if envelope.target().is_some() {
+        return Err("semantic game commands cannot have a target".into());
+    }
+    let payload = envelope.payload();
+    let (Some(GameplayCommandValue::I64(direction)), Some(GameplayCommandValue::Bool(pressed))) =
+        (payload.get("direction"), payload.get("pressed"))
+    else {
+        return Err("movement requires an integer direction and boolean pressed".into());
+    };
+    if payload.len() != 2 {
+        return Err("movement contains unrepresented payload fields".into());
+    }
+    let direction = usize::try_from(*direction)
+        .ok()
+        .filter(|direction| *direction < 4)
+        .ok_or_else(|| "movement direction must be in 0..4".to_owned())?;
+    Ok((direction, *pressed))
 }

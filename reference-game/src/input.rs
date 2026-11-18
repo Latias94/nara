@@ -100,11 +100,12 @@ fn bind_movement(
     phase: ActionPhase,
     command: nara::gameplay::GameplayCommandDraft,
 ) -> Result<(), PluginError> {
-    let command_type = command.command_type().clone();
     command_map
-        .bind(
-            ActionCommandBinding::new(action_id(action), phase, command_type).with_command(command),
-        )
+        .bind(ActionCommandBinding::from_command(
+            action_id(action),
+            phase,
+            command,
+        ))
         .map_err(|_| PluginError::SetupFailed {
             plugin: REFERENCE_DESKTOP_PLUGIN_ID,
             message: "desktop action-command mapping was rejected".to_owned(),

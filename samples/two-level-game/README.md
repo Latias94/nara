@@ -273,6 +273,14 @@ checks, interruption before publication, and pure bounded format/migration cases
 `--verify-first-present` proves presentation only; it does not prove that a human exercised every
 key or that a particular platform has passed the full interactive trajectory.
 
+When sharing `CARGO_TARGET_DIR` with another independent workspace that also builds a `headless`
+binary, explicitly build this package's `headless` before running these process tests. Use the
+same profile/features as the test run, for example `cargo build --manifest-path
+samples/two-level-game/Cargo.toml --bin headless` for the command above, adding `--release` for
+release tests. Cargo's reused test artifacts alone may leave the shared top-level executable
+alias belonging to the other workspace. Keep the shared target; select the intended binary
+through Cargo before launch.
+
 ## Source-Free Cooked Player
 
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
@@ -518,6 +526,12 @@ replay play --project-root ABS_PROJECT_ROOT --recording ABS_RECORDING_JSON
 Use [the supplied program](replays/two-level.program.json) for a complete Meadow/Cavern trajectory:
 movement and releases, three pickups and markers, a distinct Cavern instance, Retry and return to
 Meadow. Programs use `{"format":1,"steps":[[{"operation":"move","direction":1,"pressed":true}],[],[{"operation":"move","direction":1,"pressed":false}]]}`.
+Live and recorded movement share one game-owned decoder: no target, exactly `direction: i64`
+in `0..4` and `pressed: bool`, with no additional fields. Malformed live movement reports a game
+error without changing held input; the original queue still captures and acknowledges the consumed
+batch. Valid releases clear holds during preparation or reconstruction, while new presses wait
+for Running. Save/Restore and room commands keep their separate current vocabularies.
+
 Each row advances exactly one fixed tick; `[]` continues held intent. Directions `0..3` mean
 left, right, up and down. Other operations are `marker`, `travel`, `instance` and `retry`.
 

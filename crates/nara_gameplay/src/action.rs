@@ -34,12 +34,22 @@ pub struct ActionCommandBinding {
 impl ActionCommandBinding {
     #[must_use]
     pub fn new(action: ActionId, phase: ActionPhase, command_type: GameplayCommandTypeId) -> Self {
+        Self::from_command(action, phase, GameplayCommandDraft::new(command_type))
+    }
+
+    /// Binds an action phase to a complete command draft without changing its target or payload.
+    #[must_use]
+    pub fn from_command(
+        action: ActionId,
+        phase: ActionPhase,
+        command: GameplayCommandDraft,
+    ) -> Self {
         Self {
             seat: InputSeatId::PRIMARY,
             action,
             context: ActionContext::gameplay(),
             phase,
-            command: GameplayCommandDraft::new(command_type),
+            command,
         }
     }
 
@@ -57,12 +67,6 @@ impl ActionCommandBinding {
     #[must_use]
     pub fn with_context(mut self, context: ActionContext) -> Self {
         self.context = context;
-        self
-    }
-
-    #[must_use]
-    pub fn with_command(mut self, command: GameplayCommandDraft) -> Self {
-        self.command = command;
         self
     }
 

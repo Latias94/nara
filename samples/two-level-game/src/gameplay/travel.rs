@@ -13,7 +13,7 @@ use nara::{
     },
     core::ItemLimit,
     ecs::World,
-    gameplay::{GameplayCommandBatch, GameplayCommandValue},
+    gameplay::{GameplayCommandBatch, GameplayCommandPayload},
     identity::SceneEntityId,
     prelude::Resource,
     project_host::{
@@ -31,6 +31,7 @@ use super::{
     storage::Storage,
 };
 use crate::{
+    command::decode_movement,
     levels::{LevelId, LevelKey},
     save::{Checkpoint, CheckpointLocation, MAX_MARKERS},
 };
@@ -52,6 +53,11 @@ struct Pending {
     restore: bool,
 }
 
+enum ConsumedInput {
+    Movement(Result<(usize, bool), String>),
+    Action(String, GameplayCommandPayload),
+}
+
 pub(super) fn consume(world: &mut World) {
     let launch_error = super::player_launch::consume(world).err();
     if let Some(error) = &launch_error {
@@ -63,27 +69,32 @@ pub(super) fn consume(world: &mut World) {
         .commands()
         .iter()
         .map(|command| {
-            (
-                command.command_type().as_str().to_owned(),
-                command.payload().clone(),
-            )
+            if command.command_type().as_str() == MOVE {
+                ConsumedInput::Movement(decode_movement(command))
+            } else {
+                ConsumedInput::Action(
+                    command.command_type().as_str().to_owned(),
+                    command.payload().clone(),
+                )
+            }
         })
         .collect::<Vec<_>>();
-    for (kind, payload) in commands {
-        if kind == PLAYER_LAUNCH {
-            continue;
-        }
-        if kind == MOVE {
-            if let (
-                Some(GameplayCommandValue::I64(direction)),
-                Some(GameplayCommandValue::Bool(pressed)),
-            ) = (payload.get("direction"), payload.get("pressed"))
-                && let Ok(index) = usize::try_from(*direction)
-                && (!*pressed || world.resource::<Session>().phase == GamePhase::Running)
-                && let Some(held) = world.resource_mut::<Session>().held.get_mut(index)
-            {
-                *held = *pressed;
+    for command in commands {
+        let (kind, payload) = match command {
+            ConsumedInput::Movement(Ok((direction, pressed))) => {
+                if !pressed || world.resource::<Session>().phase == GamePhase::Running {
+                    world.resource_mut::<Session>().held[direction] = pressed;
+                }
+                continue;
             }
+            ConsumedInput::Movement(Err(error)) => {
+                eprintln!("two_level_game: action rejected: {error}");
+                world.resource_mut::<Session>().error = Some(error);
+                continue;
+            }
+            ConsumedInput::Action(kind, payload) => (kind, payload),
+        };
+        if kind == PLAYER_LAUNCH {
             continue;
         }
         if kind == RETRY && world.resource::<Session>().phase == GamePhase::Degraded {
