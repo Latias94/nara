@@ -2224,7 +2224,8 @@ wrong-kind content. The actual nested-Cargo package trajectory also passes 1/1 w
 source-free execution, checkpoint Restore, damaged-content refusal and physical native-process
 cleanup. This closes the scoped F2/F5 implementation paths; package qualification and limits live in the
 [review receiving record](../../research/2026-11-18-engine-architecture-review-reconciliation.md#source-agreement-and-processed-material-correction).
-General cooked-entry extraction and isolated generated build inputs remain open.
+General cooked-entry extraction remains open. The request-owned generated-input successor below
+replaces the former shared-source bootstrap write.
 
 The [Material texture custody successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#material-texture-capture-implementation-and-qualification)
 at `163dffd` and `10ee433` freezes each complete Material/Image binding during original Extract
@@ -2235,6 +2236,19 @@ pixels, authored omission/recovery, same-Host replay after World retirement and 
 cleanup. Both independent production and corrected testing review have no remaining P1/P2.
 The record distinguishes live GPU references from immutable content, local CI configuration from
 remote execution, and offscreen Windows qualification from full R9b or performance claims.
+
+The [request-owned generated-input successor](../../plans/2026-10-31-cooked-player-delivery-plan.md#generated-input-implementation-and-qualification)
+at `ebc50da` places immutable generated Rust source on the original Cargo request. Trusted build
+scripts write only Cargo's `OUT_DIR`, and absence retains ordinary Player refusal despite stale
+generated output.
+The original target lease, process custody and content/code fences remain authoritative. Package
+binding requires separate generated name/digest provenance; canonical unpublished v1 fields and
+current APIs replace their physical-source forms without compatibility fallback. Owning 17,
+independent actual A/B/A plus Palette 2 and affected Two-Level 36 pass. The strengthened parent-env
+control and all three actual source-free headless/desktop/WASAPI package trajectories pass.
+The failed physical attempts, diagnosis, final Windows Rust 1.95.0 native evidence and
+reserved-variable/configuration constraint live in that owner plan. Shared cooking for a
+generated starter and a new external game remains open.
 
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`

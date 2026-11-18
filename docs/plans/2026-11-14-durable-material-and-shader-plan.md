@@ -126,8 +126,9 @@ is local and no remote run is claimed.
 Affected production, owner-test and independent-native correctness Clippy pass. Root and affected
 independent-package formatting pass. This unit qualifies Windows Rust 1.95.0 CPU and offscreen
 DX12 behavior. It does not qualify OS presentation/scanout, foreign execution, numerical costs,
-UI Material rendering or all R9b. Generated-input isolation and shared external-game cooking
-remain next Runtime delivery work.
+UI Material rendering or all R9b. The [request-owned generated-input successor](2026-10-31-cooked-player-delivery-plan.md#request-owned-generated-rust-input-successor)
+replaces the shared-source bootstrap write; shared external-game cooking remains next Runtime
+delivery work.
 
 ## Product Outcome
 

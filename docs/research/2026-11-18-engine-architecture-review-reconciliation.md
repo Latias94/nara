@@ -174,6 +174,28 @@ with one typed sentinel after a genuine submitted/read-back frame, and bounded r
 Correctness Clippy and affected formatting pass. CI is configured locally; no remote execution,
 foreign-platform, scanout or numerical performance qualification follows from this unit.
 
+## Request-Owned Player Bootstrap
+
+At `ebc50da`, the shared `generated.rs` write is removed. The original native Cargo request owns
+one bounded generated Rust input, supplies its reserved environment value and captures its logical
+name/digest separately from ordinary source files. Trusted build scripts track that environment dependency
+and write only Cargo's `OUT_DIR`. Package binding requires the actual generated fact and offers
+no physical-source fallback. Three Two-Level Player entry points and independent renamed-engine
+consumers use the same mechanism; stale output alone does not activate an ordinary Player.
+
+The [owning delivery plan](../plans/2026-10-31-cooked-player-delivery-plan.md#generated-input-implementation-and-qualification)
+records the canonical v1 manifest/API correction, reserved Cargo-configuration constraint,
+budget and review corrections, and full execution evidence. Owning tests pass 17/17 and the
+independent real A/B/A plus Palette delivery passes 2/2. A/B requests exist before either native
+build and reuse one workspace/target; original captures run after relocation/source removal,
+both wrong packs refuse, and the ordinary no-input build refuses with old Cargo output present.
+The strengthened inherited-environment control also passes. All three actual Two-Level packages
+pass source-free execution: headless gameplay, physical desktop Save/fresh Restore and WASAPI
+callback/PCM plus physical input/close. Earlier foreground interference and script interruption
+remain recorded alongside their later passing reruns rather than being treated as a green aggregate.
+This is request isolation through the existing target lease and trusted build-script contract,
+not another workspace copier, configuration resolver, process authority or hermetic-build claim.
+
 ## Delivery order and larger refactors
 
 TileSet delivery and the managed F1/F8 App/Transform corrections have landed. The F2/F5 admission
@@ -182,11 +204,10 @@ through its original renderer owner. F9, F11, shared movement decoding and
 bounded diagnostics are independent corrections. Desktop UI source selection, Editor import,
 discard intent, keyboard parity and installed-tool activation remain queued with the paused UI work.
 
-The cooker currently writes `src/bin/player/generated.rs` in shared project source before Cargo
-captures it. This is a real shared mutable build input, not proof of a successfully published wrong
-package. Isolate generated code per build while preserving canonical internal path/digest binding
-and explicit local dependencies. Compare two interleaved preparations with serial native builds,
-relocated execution and cross-pack refusal. Do not build a new Cargo resolver.
+The cooker now owns its generated source per request. The former shared-source write was a real
+mutable build input, not evidence of a successfully published wrong package. Keep generated facts
+and ordinary code observations separate when extracting the next shared delivery entry. Cargo
+continues to own dependency resolution and incremental build decisions.
 
 Once source agreement and processed-kind validation pass, give a generated starter and Two-Level
 one compiled cooked-delivery entry using the existing admitted Scene roots/source facts and
