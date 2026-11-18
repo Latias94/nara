@@ -130,12 +130,27 @@ impl NativeProcess {
     }
 
     pub fn assert_clean(&self) {
+        self.assert_physical_cleanup();
+        assert!(
+            !self.receipt().termination_requested(),
+            "{}",
+            self.diagnostics()
+        );
+    }
+
+    pub fn assert_cooker_clean(&self) {
+        assert!(self.title.is_none() && self.window.is_none());
+        self.assert_physical_cleanup();
+        assert!(self.receipt().exit().success(), "{}", self.diagnostics());
+        eprintln!("COOKED_PLAYER_COOKER_CLEANUP {}", self.cleanup_json());
+    }
+
+    fn assert_physical_cleanup(&self) {
         let receipt = self.receipt();
         assert!(
             receipt.containment_empty()
                 && receipt.readers_stopped()
                 && receipt.output_drained()
-                && !receipt.termination_requested()
                 && !receipt.force_killed(),
             "{}",
             self.diagnostics()

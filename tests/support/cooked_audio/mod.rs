@@ -72,12 +72,17 @@ struct Custody {
     process: Option<NativeProcess>,
 }
 
+enum Operation {
+    Cooker,
+    PlayerWorker,
+}
+
 impl Custody {
     fn fixture(&self) -> &Fixture {
         self.fixture.as_ref().unwrap()
     }
 
-    fn run(&mut self, process: NativeProcess, timeout: Duration) -> String {
+    fn run(&mut self, process: NativeProcess, timeout: Duration, operation: Operation) -> String {
         assert!(
             self.process.is_none(),
             "nested Cargo and native Players are serial"
@@ -85,7 +90,10 @@ impl Custody {
         self.process = Some(process);
         let process = self.process.as_mut().unwrap();
         process.finish(timeout);
-        process.assert_clean();
+        match operation {
+            Operation::Cooker => process.assert_cooker_clean(),
+            Operation::PlayerWorker => process.assert_clean(),
+        }
         assert!(
             process.receipt().exit().success(),
             "{}",
@@ -216,6 +224,7 @@ pub fn accept(cooker: &Path) {
     let cooked = custody.run(
         NativeProcess::spawn(&command, None),
         Duration::from_secs(30 * 60),
+        Operation::Cooker,
     );
     let fixture = custody.fixture();
     assert_eq!(
@@ -364,7 +373,11 @@ pub fn accept(cooker: &Path) {
     ]);
     let owner =
         SupervisedProcessOwner::spawn_exact(authority, &command, process::log_limits()).unwrap();
-    let text = custody.run(NativeProcess::new(owner, None), Duration::from_secs(5 * 60));
+    let text = custody.run(
+        NativeProcess::new(owner, None),
+        Duration::from_secs(5 * 60),
+        Operation::PlayerWorker,
+    );
     let report = process::record(&text, REPORT);
     assert_eq!(report["success"], true);
     assert_eq!(report["verified_processes"], 1);
