@@ -56,8 +56,35 @@ fn compiled_palette_player_runs_relocated_with_only_cooked_content() {
     assert_eq!(manifest["build"]["selection"]["bin"], PLAYER);
     assert_eq!(manifest["build"]["selection"]["target_triple"], tools.host);
     assert_eq!(manifest["build"]["selection"]["default_features"], false);
-    assert_eq!(manifest["generated_input_path"], GENERATED);
+    assert_eq!(
+        manifest["build"]["selection"]["requested_features"],
+        serde_json::json!(["player"])
+    );
+    assert_eq!(
+        manifest["build"]["resolved_features"],
+        serde_json::json!(["player"])
+    );
+    assert_eq!(manifest["generated_input_name"], GENERATED);
     assert_eq!(manifest["content_target"]["profile"], "palette-shipping");
+    assert!(
+        manifest["build"]["declared_inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|input| input["path"] != GENERATED)
+    );
+    let generated = &manifest["build"]["generated_rust_input"];
+    assert_eq!(generated["path"], GENERATED);
+    assert_eq!(
+        generated["digest"][0],
+        manifest["generated_input_digest"]["length"]
+    );
+    assert_eq!(
+        generated["digest"][1],
+        manifest["generated_input_digest"]["hash"]
+    );
+    assert!(!project.root.join(GENERATED).exists());
+    assert!(!project.root.join("src/player/generated.rs").exists());
 
     let installation = directory.root.join("unrelated-installation");
     fs::create_dir(&installation).unwrap();

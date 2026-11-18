@@ -1,4 +1,4 @@
-//! Three conventional Cargo packages; the generated expectation is a normal declared Rust input.
+//! Three conventional Cargo packages; request-owned Player expectations enter through OUT_DIR.
 
 use std::{
     fs,
@@ -17,6 +17,7 @@ use super::workspace::{PROFILE, Tools};
 pub const HOST_PACKAGE: &str = "aurora-author-tools";
 pub const HOST_BIN: &str = "aurora-cook-station";
 pub const PLAYER_BIN: &str = "aurora-portable-player";
+pub const GENERATED: &str = "player-bootstrap.rs";
 
 const HOST_INPUTS: &[&str] = &[
     "Cargo.toml",
@@ -28,6 +29,7 @@ const HOST_INPUTS: &[&str] = &[
     "game/src/lib.rs",
     "game/src/probe.rs",
     "player/Cargo.toml",
+    "player/build.rs",
     "player/src/main.rs",
 ];
 
@@ -80,7 +82,23 @@ impl CookedWorkspace {
              aurora-game = {{ path = '../game' }}\n",
         ));
         result.write("player/src/main.rs", include_str!("cooked_player.rs"));
-        result.write("player/src/generated.rs", "compile_error!(\"the cooker must generate the Player expectation before building it\");\n");
+        result.write(
+            "player/build.rs",
+            r#"fn main() {
+    println!("cargo::rerun-if-env-changed=NARA_CARGO_GENERATED_RUST_SOURCE");
+    println!("cargo::rerun-if-changed=build.rs");
+    let source = match std::env::var("NARA_CARGO_GENERATED_RUST_SOURCE") {
+        Ok(source) => source,
+        Err(std::env::VarError::NotPresent) => {
+            "compile_error!(\"the cooker must supply a generated Player expectation\");\n".to_owned()
+        }
+        Err(error) => panic!("invalid generated Player expectation: {error}"),
+    };
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(output.join("nara-player-bootstrap.rs"), source).unwrap();
+}
+"#,
+        );
         fs::create_dir(result.root.join("source")).unwrap();
         fs::write(result.root.join("source/stripe.png"), rgba_png()).unwrap();
         // This is preparation, before either production owner starts a locked build. No Cargo
@@ -92,6 +110,7 @@ impl CookedWorkspace {
             .env("RUSTC", &tools.rustc)
             .env("CARGO_TARGET_DIR", &tools.target)
             .env("CARGO_BUILD_JOBS", "1")
+            .env_remove("NARA_CARGO_GENERATED_RUST_SOURCE")
             .stdin(Stdio::null())
             .output()
             .unwrap();

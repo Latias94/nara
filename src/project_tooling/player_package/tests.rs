@@ -92,7 +92,7 @@ fn bootstrap_byte_and_overlapping_content_retention_limits_are_exact() {
         work_bytes: ByteLimit::new(retained).unwrap(),
         ..limits
     };
-    let admitted = GeneratedPlayerBootstrap::new(&content, baseline.path(), exact).unwrap();
+    let admitted = GeneratedPlayerBootstrap::new(&content, baseline.name(), exact).unwrap();
     assert_eq!(admitted.digest(), baseline.digest());
     assert_eq!(admitted.bytes(), baseline.bytes());
     for one_short in [
@@ -110,7 +110,7 @@ fn bootstrap_byte_and_overlapping_content_retention_limits_are_exact() {
         },
     ] {
         assert!(matches!(
-            GeneratedPlayerBootstrap::new(&content, baseline.path(), one_short),
+            GeneratedPlayerBootstrap::new(&content, baseline.name(), one_short),
             Err(PlayerPackageError::Limit { .. }),
         ));
         assert_eq!(content.base().validate_deep().unwrap().members(), 1);
@@ -127,9 +127,9 @@ fn generated_input_rejects_alternate_or_nonportable_path_spellings() {
         "src\\expected.rs",
         "/expected.rs",
     ] {
-        assert!(validate_input_path(path).is_err(), "accepted {path:?}");
+        assert!(validate_input_name(path).is_err(), "accepted {path:?}");
     }
-    validate_input_path("src/expected.rs").unwrap();
+    validate_input_name("src/expected.rs").unwrap();
 }
 
 #[test]
@@ -146,6 +146,56 @@ fn changed_content_expectation_cannot_reuse_the_original_generated_input() {
     assert!(matches!(
         check_bootstrap(&first, &bootstrap),
         Err(PlayerPackageError::BootstrapMismatch)
+    ));
+}
+
+#[test]
+fn ordinary_file_fact_cannot_replace_request_owned_generated_input_at_binding() {
+    let content = content();
+    let limits = PlayerPackageLimits::default();
+    let bootstrap = GeneratedPlayerBootstrap::new(&content, "player-bootstrap.rs", limits).unwrap();
+    let selection = CargoBuildSelection::new(
+        "fixture",
+        "player",
+        "dev",
+        content.expectation().target().triple(),
+        Vec::<String>::new(),
+        false,
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "nara-generated-bind-{}-{}.bin",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(b"bounded capture for missing-provenance injection")
+        .unwrap();
+    drop(file);
+    let capture = CapturedCargoExecutable::with_declared_input_for_test(
+        &path,
+        selection.clone(),
+        bootstrap.name(),
+        bootstrap.digest(),
+    );
+    assert!(capture.provenance().generated_rust_input().is_none());
+    assert!(
+        capture.provenance().declared_inputs().iter().any(|input| {
+            input.path() == bootstrap.name() && input.digest() == bootstrap.digest()
+        })
+    );
+    let result = PreparedPlayerPackage::bind(content, bootstrap, &selection, capture, limits);
+    std::fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        result,
+        Err(PlayerPackageError::BuildInputMismatch)
     ));
 }
 

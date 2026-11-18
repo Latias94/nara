@@ -299,11 +299,20 @@ Schema. Deep content validation also requires each Material texture to target an
 with a selected Image codec.
 
 The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
-has the `desktop` feature enabled. The cooker writes the ignored `src/bin/player/generated.rs`
-before building `player` with only `cooked-player`. These compiled
-constants independently select the exact catalog and pack; the Player accepts no expectation,
+has the `desktop` feature enabled. The cooker owns `player-bootstrap.rs` as an immutable logical
+input to the original Cargo request, then builds `player` with only `cooked-player`. Its trusted
+build script tracks `NARA_CARGO_GENERATED_RUST_SOURCE` and writes only
+`OUT_DIR/nara-player-bootstrap.rs`. It never writes a generated file into this source project.
+These compiled constants independently select the exact catalog and pack; the Player accepts no expectation,
 pack path or source-project override. An ordinary `player` build without this generated input
 refuses execution. Do not copy bootstrap constants from another package.
+
+An ordinary request removes inherited generated-source selection and cannot activate the cooked
+branch merely because an older `OUT_DIR` or source file exists. Cargo configuration must not
+define or override the reserved variable. Cooperating builds retain the existing target lease;
+serial A/B/A requests can reuse the same target without sharing mutable source input. The
+version-one package manifest records `generated_input_name` and its separate build-provenance
+fact; the code-file inventory remains independent.
 
 The published directory contains exactly `player` (with the platform's executable suffix),
 `content.pack` and `package.json`. Move the whole directory to its installation path. The Player

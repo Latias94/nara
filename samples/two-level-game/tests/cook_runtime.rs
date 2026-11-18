@@ -1,7 +1,7 @@
 //! The source oracle uses public manifest ingestion, the selected recipe and strict delivery.
 //! Preparation returns the existing prepared-content/observations pair. Raw paths are relative to
 //! the project root; importer and delivery observations may repeat a path with the same digest.
-//! Preparation precedes generated Player bootstrap publication. Source-free Session acceptance
+//! Preparation precedes logical Player bootstrap generation. Source-free Session acceptance
 //! consumes the prepared base after the copied project and import cache have been removed.
 
 #![forbid(unsafe_code)]
@@ -193,7 +193,10 @@ mod atlas_content {
             ProjectContentError, ProjectContentErrorKind, ProjectContentLoader,
             ProjectContentMemberKind, ingest_project_manifest, resolve_product_recipe,
         },
-        project_tooling::host_fs,
+        project_tooling::{
+            host_fs,
+            player_package::{GeneratedPlayerBootstrap, PlayerPackageLimits},
+        },
         project_workflow::cooked_content::PreparedRuntimeContent,
         reflect::{
             AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentTypeId,
@@ -224,7 +227,7 @@ mod atlas_content {
 
     const DEFAULT_SCHEMA: &str = "schema/authoring.bundle.json";
     const SELECTED_SCHEMA: &str = "authoring/selected.bundle.json";
-    const GENERATED: &str = "src/bin/player/generated.rs";
+    const GENERATED: &str = "player-bootstrap.rs";
 
     struct Cache {
         parent: PathBuf,
@@ -359,6 +362,23 @@ mod atlas_content {
             .to_json_string()
             .unwrap()
             .into_bytes()
+    }
+
+    fn generate_bootstrap(
+        project: &Path,
+        content: &PreparedRuntimeContent,
+    ) -> GeneratedPlayerBootstrap {
+        let bootstrap =
+            GeneratedPlayerBootstrap::new(content, GENERATED, PlayerPackageLimits::default())
+                .unwrap();
+        assert_eq!(bootstrap.name(), GENERATED);
+        assert_eq!(
+            bootstrap.digest(),
+            ContentDigest::of_bytes(bootstrap.bytes())
+        );
+        assert!(!project.join(bootstrap.name()).exists());
+        assert!(!project.join("src/bin/player/generated.rs").exists());
+        bootstrap
     }
 
     #[test]
@@ -634,11 +654,17 @@ mod atlas_content {
             );
         }
         fence.bind_raw_inputs(&observations).unwrap();
+        let bootstrap = generate_bootstrap(&project, &prepared);
         fence.verify().unwrap();
         drop(delivery);
         drop(fence);
         drop(cache);
         assert!(!project.exists() && !store.exists());
+        assert_eq!(bootstrap.name(), GENERATED);
+        assert_eq!(
+            bootstrap.digest(),
+            ContentDigest::of_bytes(bootstrap.bytes())
+        );
         two_level_pack::assert_room_material(material.product());
         two_level_pack::assert_room_tileset(tileset.product());
         let decoded_tileset = prepared
@@ -752,13 +778,13 @@ mod atlas_content {
                 plan.schema_validation().composition_fingerprint(),
             );
             fence.bind_raw_inputs(&observations).unwrap();
+            let _bootstrap = generate_bootstrap(&project, &prepared);
             fence.verify().unwrap();
-            assert!(!project.join(GENERATED).exists());
         }
     }
 
     #[test]
-    fn invalid_selected_schema_matches_source_delivery_and_preserves_generated_bootstrap() {
+    fn invalid_selected_schema_matches_source_delivery_before_bootstrap_generation() {
         for (failure, kind, code) in [
             (
                 "missing",
@@ -801,41 +827,34 @@ mod atlas_content {
             let store = cache.path.join("store");
             fs::create_dir(&store).unwrap();
             let store = host_fs::writable_directory(&store).unwrap();
-            for existing in [false, true] {
-                let generated = project.join(GENERATED);
-                if existing {
-                    fs::create_dir_all(generated.parent().unwrap()).unwrap();
-                    fs::write(&generated, b"previous admitted Player bootstrap").unwrap();
-                }
-                let before = fs::read(&generated).ok();
-                assert_eq!(before.is_some(), existing);
-                let error = content::prepare(
-                    fence.root(),
-                    &store,
-                    "x86_64-pc-windows-msvc",
-                    RuntimeKind::Headless,
-                )
-                .err()
-                .expect("invalid selected schema must reject before bootstrap generation");
-                assert!(
-                    error.contains("source delivery agreement"),
-                    "{failure}: {error}"
-                );
-                assert!(error.contains(code), "{failure}: {error}");
-                assert_eq!(
-                    fs::read(&generated).ok(),
-                    before,
-                    "{failure}, existing={existing}"
-                );
-                assert!(
-                    fs::read_dir(cache.path.join("store"))
-                        .unwrap()
-                        .next()
-                        .is_none()
-                );
-                assert!(!project.join(DEFAULT_SCHEMA).exists());
-                fence.verify().unwrap();
-            }
+            let mut generated = None;
+            let error = content::prepare(
+                fence.root(),
+                &store,
+                "x86_64-pc-windows-msvc",
+                RuntimeKind::Headless,
+            )
+            .map(|(prepared, _)| {
+                let bootstrap = generate_bootstrap(&project, &prepared);
+                generated = Some((bootstrap.name().to_owned(), bootstrap.digest()));
+            })
+            .expect_err("invalid selected schema must reject before bootstrap generation");
+            assert!(
+                error.contains("source delivery agreement"),
+                "{failure}: {error}"
+            );
+            assert!(error.contains(code), "{failure}: {error}");
+            assert!(generated.is_none(), "{failure}: {generated:?}");
+            assert!(!project.join(GENERATED).exists());
+            assert!(!project.join("src/bin/player/generated.rs").exists());
+            assert!(
+                fs::read_dir(cache.path.join("store"))
+                    .unwrap()
+                    .next()
+                    .is_none()
+            );
+            assert!(!project.join(DEFAULT_SCHEMA).exists());
+            fence.verify().unwrap();
         }
     }
 
@@ -856,6 +875,7 @@ mod atlas_content {
             )
             .unwrap();
             fence.bind_raw_inputs(&observations).unwrap();
+            let bootstrap = generate_bootstrap(&project, &prepared);
             fence.verify().unwrap();
             let selected = project.join(SELECTED_SCHEMA);
             let relative = RelativePath::new(SELECTED_SCHEMA).unwrap();
@@ -889,7 +909,11 @@ mod atlas_content {
                     .unwrap_err()
                     .contains(SELECTED_SCHEMA)
             );
-            assert!(!project.join(GENERATED).exists());
+            assert_eq!(bootstrap.name(), GENERATED);
+            assert_eq!(
+                bootstrap.digest(),
+                ContentDigest::of_bytes(bootstrap.bytes())
+            );
             assert_eq!(prepared.base().catalog().members().len(), 15);
         }
     }
@@ -918,6 +942,7 @@ mod atlas_content {
             )
             .unwrap();
             fence.bind_raw_inputs(&observations).unwrap();
+            let bootstrap = generate_bootstrap(&project, &original);
             let path = project.join(name);
             let bytes = fs::read(&path).unwrap();
             fs::write(&path, "invalid region Material input").unwrap();
@@ -964,6 +989,8 @@ mod atlas_content {
                 original.base().catalog().to_json_bytes().unwrap(),
                 repaired.base().catalog().to_json_bytes().unwrap()
             );
+            let repaired_bootstrap = generate_bootstrap(&project, &repaired);
+            assert_eq!(bootstrap.bytes(), repaired_bootstrap.bytes());
             drop(fence);
             drop(store);
             drop(cache);
@@ -1003,6 +1030,7 @@ mod atlas_content {
             )
             .unwrap();
             fence.bind_raw_inputs(&observations).unwrap();
+            let bootstrap = generate_bootstrap(&project, &original);
             let retained = original
                 .base()
                 .acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(
@@ -1100,6 +1128,8 @@ mod atlas_content {
                 original.base().catalog().to_json_bytes().unwrap(),
                 repaired.base().catalog().to_json_bytes().unwrap()
             );
+            let repaired_bootstrap = generate_bootstrap(&project, &repaired);
+            assert_eq!(bootstrap.bytes(), repaired_bootstrap.bytes());
             drop(fence);
             drop(store);
             drop(cache);

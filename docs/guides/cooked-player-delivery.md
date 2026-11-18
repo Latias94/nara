@@ -18,7 +18,7 @@ separate explicit selection. A content profile need not equal a Cargo profile.
 | `VerifiedArtifactGroup` | Original encoded member bytes, Product mappings, formats, dependencies and build facts; its original retained lease survives cache deletion. It can be historically valid without being the current selection. |
 | `CookedContentBuilder` | Finite concrete assembly through Scene, Input and TileSet production encoders plus verified groups; no importer registry or directory publication. |
 | `PreparedRuntimeContent` | Original admitted captured base and independent expected catalog facts; every delivered member is covered by deep validation. |
-| `GeneratedPlayerBootstrap` | Exact Rust input bytes/path/digest carrying independent expected catalog identity and fixed pack location. The Host writes this ordinary source input before Cargo starts. |
+| `GeneratedPlayerBootstrap` | Exact Rust source bytes, logical name and digest carrying independent expected catalog identity and fixed pack location. The original Cargo request owns and supplies this input without writing project source. |
 | `CapturedCargoExecutable` | Actual selected executable bytes and checked finite code-input/tool provenance. Building does not execute it. |
 | `PreparedPlayerPackage` | Exact content/bootstrap/code binding and bounded three-file candidate; no Runtime activation. |
 | `PlayerPackageReceipt` | Actual complete directory publication and filesystem guarantee tiers. A later callback failure cannot erase this physical result. |
@@ -65,15 +65,19 @@ acquisition while preserving the current Scene.
 
 Native construction and publication live in `project_tooling::player_package`:
 
-1. Create `GeneratedPlayerBootstrap::new(&content, canonical_input_path, limits)`.
-2. Write its bytes at that exact workspace-relative Rust path. Include the path in the
-   `CargoBuildRequest` declared inventory along with the other actual code inputs.
-3. Make the Player compile this module and use its constants with its own game recipe.
+1. Create `GeneratedPlayerBootstrap::new(&content, canonical_input_name, limits)`.
+2. Keep ordinary code files in the `CargoBuildRequest` inventory. Select its single generated
+   source with `with_generated_rust_input(bootstrap.name(), bootstrap.bytes())`.
+3. Make the trusted build script read `NARA_CARGO_GENERATED_RUST_SOURCE`, always declare
+   `cargo::rerun-if-env-changed` for it and write only Cargo's `OUT_DIR`. The Player includes that
+   module and uses its constants with its own game recipe. No input must preserve an explicit
+   refusal, even when an older `OUT_DIR` file exists.
 4. Call `build_player_package(content, bootstrap, &request, limits, control)`. The wrapper retains
    content through Cargo, reserves the next owner's work promise and binds the actual capture.
 
 The binder compares the whole requested Cargo selection and the generated input's exact canonical
-path/digest/length in actual captured provenance. Resolved compiler features and tool observations
+logical name/digest/length in the separate generated-input provenance fact. A matching ordinary
+source-file observation cannot replace it. Resolved compiler features and tool observations
 remain separate facts. Old Player A cannot bind content B by sharing a startup Product or label.
 The separately available `PreparedPlayerPackage::bind` accepts already captured historical facts
 without asserting that mutable authoring inputs remain current.
@@ -83,6 +87,18 @@ The binder does not analyze Rust inclusion, scan executable code or prove execut
 Do not offer command-line or manifest overrides of the compiled expected catalog/target. This
 finite workflow does not establish hermetic compilation, remote authenticity or a reusable
 prebuilt-Player trust scheme.
+
+The generated source slot is invocation-wide, nonempty NUL-free UTF-8 and bounded to 16 KiB,
+in addition to the request's existing total input and work limits. It is immutable after selection;
+there is no general environment-variable or package-routing API. The command clears an inherited
+reserved value for ordinary requests. Trusted Cargo configuration must not define or override
+this variable. Native environment/spawn errors retain the original process failure contract.
+The existing target-directory lease serializes cooperating builds; `rerun-if-env-changed` makes
+serial A/B/A content selections invalidate the actual build script without another target tree.
+
+The canonical unpublished `player_package` version-one payload now records `generated_input_name`
+and `build.generated_rust_input`. The superseded `generated_input_path` shape and physical-source
+proof are removed. The separate code inventory and source/content publication fences remain.
 
 ## Keep Current Selection With The Host
 

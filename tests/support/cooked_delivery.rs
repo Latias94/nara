@@ -114,6 +114,11 @@ fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
 }
 
 #[cfg(all(feature = "cook", feature = "development"))]
+#[path = "../../samples/two-level-game/src/bin/cook/source.rs"]
+#[allow(dead_code)]
+mod game_source;
+
+#[cfg(all(feature = "cook", feature = "development"))]
 #[path = "cooked_audio/images.rs"]
 mod images;
 
@@ -131,7 +136,7 @@ pub mod native {
         collections::{BTreeMap, BTreeSet},
         ffi::OsString,
         fs::{self, File},
-        io::Read,
+        io::{Read, Write},
         num::NonZeroUsize,
         path::{Path, PathBuf},
         thread,
@@ -140,13 +145,16 @@ pub mod native {
 
     use nara::{
         asset::{AssetProductRef, RuntimeAssetCodec},
-        fs::{ContentDigest, RelativePath},
+        fs::{ContentDigest, RelativeComponent, RelativePath},
         identity::EntityReference,
         image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
         input::ActionMapRuntimeCodec,
         material::Material2dRuntimeCodec,
         project_tooling::{
-            cargo_build::CargoBuildTools,
+            cargo_build::{
+                CargoBuildFailure, CargoBuildLimits, CargoBuildProcessCustody, CargoBuildRequest,
+                CargoBuildTools, build_executable,
+            },
             host_fs,
             process::{
                 ExactExecutableLaunchAuthority, ProcessLogLimits, ProcessOutputStream,
@@ -155,6 +163,7 @@ pub mod native {
                 SupervisedProductProcessCommand,
             },
         },
+        project_workflow::cargo::CargoBuildSelection,
         reflect::ComponentTypeId,
         runtime_content::{
             RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentMemberKind,
@@ -182,8 +191,8 @@ pub mod native {
     use crate::continuity::Fixture;
 
     use super::{
-        HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene, images,
-        inspect_pack, record, walls,
+        HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene, game_source,
+        images, inspect_pack, record, walls,
     };
 
     const OUTPUT_BYTES: usize = 2 * 1024 * 1024;
@@ -258,6 +267,7 @@ pub mod native {
     struct Custody {
         fixture: Option<Fixture>,
         process: Option<SupervisedProcessOwner>,
+        build_cleanup: Option<Box<CargoBuildProcessCustody>>,
     }
 
     impl Custody {
@@ -356,6 +366,26 @@ pub mod native {
 
     impl Drop for Custody {
         fn drop(&mut self) {
+            if let Some(build) = self.build_cleanup.as_mut() {
+                let deadline = Instant::now() + CLEANUP_TIMEOUT;
+                while build.retry_cleanup().is_err() {
+                    if Instant::now() >= deadline {
+                        eprintln!(
+                            "Two-Level delivery retains original build custody: pid={:?}",
+                            build.process_id(),
+                        );
+                        std::mem::forget((self.build_cleanup.take(), self.fixture.take()));
+                        if !thread::panicking() {
+                            panic!(
+                                "build cleanup is incomplete; the owned source/package tree was retained"
+                            );
+                        }
+                        return;
+                    }
+                    thread::sleep(POLL);
+                }
+                self.build_cleanup.take();
+            }
             let Some(owner) = self.process.as_mut() else {
                 return;
             };
@@ -421,6 +451,7 @@ pub mod native {
         let mut custody = Custody {
             fixture: None,
             process: None,
+            build_cleanup: None,
         };
         let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
         let output = custody.run(owner, PLAYER_TIMEOUT);
@@ -499,6 +530,7 @@ pub mod native {
         let mut custody = Custody {
             fixture: Some(fixture),
             process: None,
+            build_cleanup: None,
         };
         let generated = custody
             .fixture()
@@ -806,13 +838,31 @@ pub mod native {
             );
         }
         let expected_images = expected_images(&pack, &pack_bytes);
-        let bootstrap = payload["generated_input_path"].as_str().unwrap();
+        let bootstrap = payload["generated_input_name"].as_str().unwrap();
         assert!(RelativePath::new(bootstrap).is_ok());
-        assert_eq!(bootstrap, "src/bin/player/generated.rs");
-        let bootstrap_bytes = read_bounded(&custody.fixture().project.join(bootstrap), 32 * 1024);
+        assert_eq!(bootstrap, "player-bootstrap.rs");
+        assert!(!custody.fixture().project.join(bootstrap).exists());
         assert_eq!(
-            payload["generated_input_digest"],
-            digest_json(ContentDigest::of_bytes(&bootstrap_bytes))
+            generated
+                .exists()
+                .then(|| read_bounded(&generated, 32 * 1024)),
+            original_generated,
+        );
+        let generated_input = &payload["build"]["generated_rust_input"];
+        assert_eq!(generated_input["path"], bootstrap);
+        assert_eq!(
+            generated_input["digest"][0],
+            payload["generated_input_digest"]["length"]
+        );
+        assert_eq!(
+            generated_input["digest"][1],
+            payload["generated_input_digest"]["hash"]
+        );
+        assert!(
+            payload["generated_input_digest"]["length"]
+                .as_u64()
+                .unwrap()
+                > 0
         );
         let inputs = payload["build"]["declared_inputs"].as_array().unwrap();
         for required in [
@@ -830,13 +880,13 @@ pub mod native {
             "src/region_material.rs",
             "src/region_tileset.rs",
             "assets/materials/region.wgsl",
-            bootstrap,
         ] {
             assert!(
                 inputs.iter().any(|input| input["path"] == required),
                 "missing actual code input {required}",
             );
         }
+        assert!(inputs.iter().all(|input| input["path"] != bootstrap));
         let installation = custody.fixture().directory("relocated-installation");
         let relocated = installation.join("TwoLevel");
         assert_eq!(published.parent(), Some(output_parent.as_path()));
@@ -854,6 +904,7 @@ pub mod native {
             .canonicalize()
             .unwrap();
         assert!(cache.is_dir());
+        assert_no_input_player(&mut custody, &target, &triple, tools, payload);
         remove_owned_tree(custody.fixture(), &project, &target);
         remove_owned_tree(custody.fixture(), &cache, &target);
         assert_sources_gone(&project, &cache);
@@ -1075,6 +1126,141 @@ pub mod native {
         assert_payload(&relocated, &executable_name);
         assert_sources_gone(&project, &cache);
         assert!(target.is_dir());
+    }
+
+    fn assert_no_input_player(
+        custody: &mut Custody,
+        target: &Path,
+        triple: &str,
+        tools: CargoBuildTools,
+        payload: &Value,
+    ) {
+        let project = &custody.fixture().project;
+        let inputs = game_source::code_inventory(project).unwrap();
+        let mut fence = game_source::ContentFence::capture(project).unwrap();
+        fence.bind_code(&inputs).unwrap();
+        let selection = CargoBuildSelection::new(
+            "two-level-game",
+            "player",
+            "release",
+            triple,
+            ["cooked-player"],
+            false,
+        )
+        .unwrap();
+        let request = CargoBuildRequest::new(
+            project,
+            RelativePath::new("Cargo.toml").unwrap(),
+            selection,
+            tools,
+            inputs,
+            CargoBuildLimits::default(),
+        )
+        .unwrap()
+        .with_target_directory(target)
+        .unwrap();
+        assert!(request.generated_rust_input().is_none());
+        let stale_bootstraps = fs::read_dir(target.join(triple).join("release/build"))
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("two-level-game-")
+            })
+            .map(|entry| entry.path().join("out/nara-player-bootstrap.rs"))
+            .filter(|path| {
+                path.is_file()
+                    && digest_json(ContentDigest::of_bytes(&read_bounded(path, 32 * 1024)))
+                        == payload["generated_input_digest"]
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !stale_bootstraps.is_empty(),
+            "the cooked OUT_DIR bootstrap must remain"
+        );
+        let captured = match build_executable(&request, |_| {
+            fence.verify().map_err(|_| CargoBuildFailure::Stale)
+        }) {
+            Ok(captured) => captured,
+            Err(CargoBuildFailure::CleanupIncomplete(build)) => {
+                custody.build_cleanup = Some(build);
+                panic!("ordinary Player build retained its original cleanup custody");
+            }
+            Err(error) => panic!("build the actual ordinary Two-Level Player: {error:?}"),
+        };
+        assert_eq!(captured.provenance().selection(), request.selection());
+        assert!(captured.provenance().generated_rust_input().is_none());
+        assert_eq!(
+            serde_json::to_value(captured.provenance().declared_inputs()).unwrap(),
+            payload["build"]["declared_inputs"]
+        );
+        for path in stale_bootstraps {
+            assert_eq!(
+                digest_json(ContentDigest::of_bytes(&read_bounded(&path, 32 * 1024))),
+                payload["generated_input_digest"]
+            );
+        }
+        fence.verify().unwrap();
+        let installation = custody.fixture().directory("no-input-installation");
+        let name =
+            RelativeComponent::new(format!("player{}", std::env::consts::EXE_SUFFIX)).unwrap();
+        let directory = host_fs::writable_directory(&installation).unwrap();
+        let mut file = directory.create_child_executable_file(&name).unwrap();
+        file.writer().unwrap().write_all(captured.bytes()).unwrap();
+        file.sync().unwrap();
+        drop(file);
+        drop(directory);
+        let executable = installation.join(name.to_str().unwrap());
+        host_fs::readable_file(&executable)
+            .unwrap()
+            .verify_digest(captured.digest(), captured.bytes().len() as u64)
+            .unwrap();
+        let output = custody.player(&executable, vec![], "no-input-player");
+        let exit: NativeExit = record(&output.stdout, CLEANUP).unwrap();
+        exit.assert_clean();
+        assert!(!exit.success && exit.code != Some(0));
+        let rejected: Value = record(&output.stdout, RESULT).unwrap();
+        assert_eq!(rejected["success"], false);
+        assert_eq!(rejected["scenario"], "interactive");
+        assert_eq!(rejected["source_free"], true);
+        assert_eq!(rejected["processed_runtime"], false);
+        assert_eq!(rejected["cleanup_complete"], true);
+        assert!(
+            rejected["message"]
+                .as_str()
+                .unwrap()
+                .contains("without a generated cooked-content expectation"),
+            "{rejected}"
+        );
+        for missing in [
+            "level",
+            "score",
+            "collected",
+            "state",
+            "startup_receipt",
+            "current_receipt",
+        ] {
+            assert!(
+                rejected[missing].is_null(),
+                "ordinary Player activated gameplay: {rejected}"
+            );
+        }
+        for empty in [
+            "markers",
+            "visited_levels",
+            "observed_image_products",
+            "resident_images",
+            "image_proofs",
+            "scene_receipts",
+        ] {
+            assert_eq!(rejected[empty], json!([]));
+        }
+        assert!(
+            !output.stdout.contains("RuntimeStartup") && !output.stderr.contains("RuntimeStartup")
+        );
+        fence.verify().unwrap();
     }
 
     fn assert_player(output: &Output, scenario: &str, success: bool) -> Value {

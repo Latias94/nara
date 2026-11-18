@@ -182,6 +182,11 @@ large allocation, member decode, or mount publication.
   Schema agreement. Deep processed validation joins concrete typed dependencies to their required
   codec role while the decoded value is available. In particular, a Material texture requires an
   Image member, not merely a present Product with a matching dependency edge.
+- The selected native Cargo request owns generated Player expectation source independently of
+  mutable workspace files. The trusted build script uses Cargo's environment dependency tracking
+  and `OUT_DIR`; the package binder requires the distinct generated-input provenance fact.
+  Ordinary source paths and their observation checks remain separate. ADR 0110 owns the consumed
+  workflow and the reserved-variable/configuration constraint.
 - Wrong target/profile, incompatible engine/schema/plugin range, missing mandatory catalog member
   or catalog collision rejects the base. Demanded payload failures reject the corresponding
   startup/acquisition before publication; a later Deferred corruption need not be observed at boot.

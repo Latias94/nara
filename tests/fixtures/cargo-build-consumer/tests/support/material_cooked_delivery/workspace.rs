@@ -14,17 +14,17 @@ use super::workspace::{PROFILE, Tools, install_native, selection};
 pub const PACKAGE: &str = "palette-cooked-game";
 pub const COOKER: &str = "palette-cooked-cooker";
 pub const PLAYER: &str = "palette-cooked-player";
-pub const GENERATED: &str = "src/player/generated.rs";
+pub const GENERATED: &str = "player-bootstrap.rs";
 const INPUTS: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",
     ".cargo/config.toml",
+    "build.rs",
     "src/lib.rs",
     "src/probe.rs",
     "src/palette.wgsl",
     "src/cooker.rs",
     "src/player/main.rs",
-    GENERATED,
 ];
 
 pub struct MaterialWorkspace {
@@ -84,16 +84,29 @@ overflow-checks = true
                 serde_json::to_string(tools.target.to_str().unwrap()).unwrap(),
             ),
         );
+        result.write(
+            "build.rs",
+            r#"fn main() {
+    println!("cargo::rerun-if-env-changed=NARA_CARGO_GENERATED_RUST_SOURCE");
+    println!("cargo::rerun-if-changed=build.rs");
+    let source = match std::env::var("NARA_CARGO_GENERATED_RUST_SOURCE") {
+        Ok(source) => source,
+        Err(std::env::VarError::NotPresent) => {
+            "compile_error!(\"the cooker must supply a generated Player expectation\");\n".to_owned()
+        }
+        Err(error) => panic!("invalid generated Player expectation: {error}"),
+    };
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(output.join("nara-player-bootstrap.rs"), source).unwrap();
+}
+"#,
+        );
         for (path, contents) in [
             ("src/lib.rs", include_str!("game.rs")),
             ("src/probe.rs", include_str!("probe.rs")),
             ("src/palette.wgsl", include_str!("palette.wgsl")),
             ("src/cooker.rs", include_str!("cooker.rs")),
             ("src/player/main.rs", include_str!("player.rs")),
-            (
-                GENERATED,
-                "compile_error!(\"the cooker must generate the Player expectation\");\n",
-            ),
         ] {
             result.write(path, contents);
         }
@@ -124,6 +137,7 @@ pub fn build_cooker(root: &Path, tools: &Tools) {
         .env("RUSTC", &tools.rustc)
         .env("CARGO_TARGET_DIR", &tools.target)
         .env("CARGO_BUILD_JOBS", "1")
+        .env_remove("NARA_CARGO_GENERATED_RUST_SOURCE")
         .stdin(Stdio::null())
         .status()
         .unwrap();
@@ -144,6 +158,7 @@ pub fn build_cooker(root: &Path, tools: &Tools) {
     assert_eq!(captured.provenance().selection(), &selected);
     assert_eq!(captured.provenance().resolved_features(), ["cook"]);
     assert_eq!(captured.provenance().declared_inputs().len(), INPUTS.len());
+    assert!(captured.provenance().generated_rust_input().is_none());
     let directory = cooker_directory(root.parent().unwrap());
     fs::create_dir(&directory).unwrap();
     install_native(

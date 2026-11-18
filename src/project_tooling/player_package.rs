@@ -70,13 +70,15 @@ impl Default for PlayerPackageLimits {
     }
 }
 
-/// Exact Rust input to place at one canonical declared Cargo input path before building.
+/// Exact Rust input selected under one canonical logical Cargo input name before building.
 ///
 /// The generated constants do not name a crate, so renamed engine dependencies work normally.
 /// Neither command-line arguments nor the delivery manifest may override these expected facts in
-/// the trusted Player implementation. This value does not write or authorize a workspace path.
+/// the trusted Player implementation. Pass the bytes through the Cargo request's generated-input
+/// slot; the trusted build script emits them in Cargo's `OUT_DIR`. This value grants no source
+/// workspace write authority.
 pub struct GeneratedPlayerBootstrap {
-    path: String,
+    name: String,
     bytes: Box<[u8]>,
     digest: ContentDigest,
     expected: RuntimeContentExpectation,
@@ -87,7 +89,7 @@ impl fmt::Debug for GeneratedPlayerBootstrap {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("GeneratedPlayerBootstrap")
-            .field("path", &self.path)
+            .field("name", &self.name)
             .field("digest", &self.digest)
             .field("expected", &self.expected)
             .field("retained_bytes", &self.retained_bytes)
@@ -98,10 +100,10 @@ impl fmt::Debug for GeneratedPlayerBootstrap {
 impl GeneratedPlayerBootstrap {
     pub fn new(
         content: &PreparedRuntimeContent,
-        input_path: &str,
+        input_name: &str,
         limits: PlayerPackageLimits,
     ) -> Result<Self, PlayerPackageError> {
-        validate_input_path(input_path)?;
+        validate_input_name(input_name)?;
         let mut counter = TextCount(0);
         write_bootstrap(&mut counter, content.expectation())
             .map_err(|_| PlayerPackageError::Overflow)?;
@@ -109,7 +111,7 @@ impl GeneratedPlayerBootstrap {
         let expected = content.expectation();
         let retained_bytes = sum(&[
             size_of::<Self>(),
-            input_path.len(),
+            input_name.len(),
             counter.0,
             expected.target().triple().len(),
             expected.target().profile().len(),
@@ -121,7 +123,7 @@ impl GeneratedPlayerBootstrap {
         write_bootstrap(&mut text, expected).expect("writing admitted Rust constants to String");
         let bytes = text.into_bytes().into_boxed_slice();
         Ok(Self {
-            path: input_path.to_owned(),
+            name: input_name.to_owned(),
             digest: ContentDigest::of_bytes(&bytes),
             bytes,
             expected: expected.clone(),
@@ -130,8 +132,8 @@ impl GeneratedPlayerBootstrap {
     }
 
     #[must_use]
-    pub fn path(&self) -> &str {
-        &self.path
+    pub fn name(&self) -> &str {
+        &self.name
     }
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
@@ -176,8 +178,8 @@ pub enum PlayerPackageError {
     },
     #[error("Player package ownership or encoded extent arithmetic overflowed")]
     Overflow,
-    #[error("generated Player input requires one canonical portable relative path")]
-    InputPath,
+    #[error("generated Player input requires one canonical portable logical name")]
+    InputName,
     #[error("generated Player input does not describe the prepared content")]
     BootstrapMismatch,
     #[error("captured Cargo provenance omits or disagrees with the exact generated input")]
@@ -217,7 +219,7 @@ pub enum PlayerPackageError {
 
 /// Builds the selected Player while keeping content and generated-input costs in the work bound.
 ///
-/// Write `bootstrap.bytes()` at `bootstrap.path()` first, and include it in `request`'s inventory.
+/// Select `bootstrap.name()` and `bootstrap.bytes()` through the request's generated Rust input.
 /// The control closure revalidates the actual source/metadata/auxiliary and processed selections;
 /// it is not replaced by Cargo's separate code inventory. All callback panics become finite
 /// failures. Cargo cleanup failures retain their original process/target-directory custody.
@@ -230,6 +232,11 @@ pub fn build_player_package(
 ) -> Result<PreparedPlayerPackage, PlayerPackageError> {
     check_bootstrap(&content, &bootstrap)?;
     check_target(&content, request.selection())?;
+    if request.generated_rust_input().is_none_or(|input| {
+        input.path() != bootstrap.name() || input.digest() != bootstrap.digest()
+    }) {
+        return Err(PlayerPackageError::BuildInputMismatch);
+    }
     let resident = sum(&[content.retained_bytes(), bootstrap.retained_bytes()])?;
     check(
         sum(&[resident, request.limits().work_bytes.get()])?,
@@ -303,11 +310,9 @@ impl PreparedPlayerPackage {
         if provenance.selection() != expected_selection {
             return Err(PlayerPackageError::BuildSelectionMismatch);
         }
-        if !provenance
-            .declared_inputs()
-            .iter()
-            .any(|input| input.path() == bootstrap.path() && input.digest() == bootstrap.digest())
-        {
+        if provenance.generated_rust_input().is_none_or(|input| {
+            input.path() != bootstrap.name() || input.digest() != bootstrap.digest()
+        }) {
             return Err(PlayerPackageError::BuildInputMismatch);
         }
         let filename = executable
@@ -653,14 +658,14 @@ fn check_target(
     Ok(())
 }
 
-fn validate_input_path(path: &str) -> Result<(), PlayerPackageError> {
+fn validate_input_name(path: &str) -> Result<(), PlayerPackageError> {
     if path.len() > 4096
         || path.contains('\\')
         || path.split('/').any(|part| matches!(part, "" | "." | ".."))
     {
-        return Err(PlayerPackageError::InputPath);
+        return Err(PlayerPackageError::InputName);
     }
-    RelativePath::new(path).map_err(|_| PlayerPackageError::InputPath)?;
+    RelativePath::new(path).map_err(|_| PlayerPackageError::InputName)?;
     Ok(())
 }
 
@@ -796,6 +801,7 @@ struct BuildWire<'a> {
     provenance_digest: DigestWire,
     metadata_digest: DigestWire,
     declared_inputs: &'a [CargoDeclaredInput],
+    generated_rust_input: Option<&'a CargoDeclaredInput>,
 }
 #[derive(Serialize)]
 struct ManifestWire<'a> {
@@ -805,7 +811,7 @@ struct ManifestWire<'a> {
     content_target: &'a RuntimeContentTarget,
     pack_file: &'static str,
     pack_digest: DigestWire,
-    generated_input_path: &'a str,
+    generated_input_name: &'a str,
     generated_input_digest: DigestWire,
     build: BuildWire<'a>,
 }
@@ -826,7 +832,7 @@ fn manifest<'a>(
         content_target: content.expectation().target(),
         pack_file: PLAYER_PACK_FILE,
         pack_digest: pack.into(),
-        generated_input_path: input.path(),
+        generated_input_name: input.name(),
         generated_input_digest: input.digest().into(),
         build: BuildWire {
             selection: SelectionWire {
@@ -842,6 +848,7 @@ fn manifest<'a>(
             provenance_digest: provenance.digest().into(),
             metadata_digest: provenance.metadata_digest().into(),
             declared_inputs: provenance.declared_inputs(),
+            generated_rust_input: provenance.generated_rust_input(),
         },
     };
     let version = EngineVersion::parse(env!("CARGO_PKG_VERSION"))

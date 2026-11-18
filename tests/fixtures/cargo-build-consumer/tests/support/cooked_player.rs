@@ -4,7 +4,7 @@
 
 use std::{
     num::NonZeroU32,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -18,7 +18,9 @@ use engine::{
     runtime_content::{RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget},
 };
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/nara-player-bootstrap.rs"));
+}
 
 fn main() {
     assert!(!cfg!(feature = "unwanted-default"));
@@ -28,6 +30,7 @@ fn main() {
         1,
         "no CLI expectation override exists"
     );
+    assert!(!Path::new(env!("CARGO_MANIFEST_DIR")).exists());
     let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
     let directory = executable.parent().unwrap();
     let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
@@ -44,6 +47,10 @@ fn main() {
         "CARGO_HOME",
         "HOME",
         "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "RUSTUP_TOOLCHAIN",
+        "CARGO_TARGET_DIR",
+        "NARA_CARGO_GENERATED_RUST_SOURCE",
     ] {
         assert!(
             std::env::var_os(variable).is_none(),
@@ -72,7 +79,10 @@ fn main() {
         ContentDigest::from_parts(generated::CATALOG_LENGTH, generated::CATALOG_HASH),
         RuntimeContentTarget::new(generated::CONTENT_TARGET, generated::CONTENT_PROFILE).unwrap(),
     );
-    assert_eq!(generated::CONTENT_PROFILE, "cpu4-shipping");
+    assert!(matches!(
+        generated::CONTENT_PROFILE,
+        "cpu4-shipping" | "cpu4-alternate-content"
+    ));
     let pack_path = RelativePath::new(generated::PACK_FILE).unwrap();
     let base = open_executable_relative_runtime_pack(
         &pack_path,
@@ -80,7 +90,10 @@ fn main() {
         game::recipe(),
         RuntimeContentLimits::default(),
     )
-    .unwrap();
+    .unwrap_or_else(|error| {
+        eprintln!("cooked-player rejected {error:?}");
+        std::process::exit(1);
+    });
     assert_eq!(base.catalog().members().len(), 7);
     assert_eq!(
         base.plan().settings().input().action_map,

@@ -163,7 +163,7 @@ pub enum CargoJsonMessageError {
 }
 
 /// Bounded structured diagnostics observed while decoding Cargo JSON messages.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CargoDiagnostics {
     pub(super) entries: Box<[CargoCompilerDiagnostic]>,
     pub(super) dropped_count: u64,

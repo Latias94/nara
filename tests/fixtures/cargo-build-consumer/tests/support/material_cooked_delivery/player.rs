@@ -15,7 +15,9 @@ use engine::{
 };
 use palette_cooked_game::{self as game, probe::Outcome};
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/nara-player-bootstrap.rs"));
+}
 
 fn main() {
     assert!(cfg!(feature = "player"));
@@ -37,6 +39,7 @@ fn main() {
         "LD_PRELOAD",
         "RUSTUP_TOOLCHAIN",
         "CARGO_TARGET_DIR",
+        "NARA_CARGO_GENERATED_RUST_SOURCE",
     ] {
         assert!(
             std::env::var_os(name).is_none(),

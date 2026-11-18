@@ -137,8 +137,14 @@ import execution, a universal cooker, a build scheduler or another Runtime loade
 Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
 an independently expected catalog digest/length, content target/profile and relative pack location.
 The trusted Player explicitly compiles and uses that input with its own selected recipe. The
-package binder finds its exact canonical relative path in captured Cargo provenance and compares
-digest/length with this content preparation. It compares the complete expected Cargo package,
+original Cargo request owns that immutable source under one canonical logical name, supplies its
+reserved invocation environment and retains its existing target-directory lease. A trusted build
+script declares `rerun-if-env-changed` and emits the source only in Cargo's `OUT_DIR`; shared
+project-source generation and source-file-presence activation are removed. Requests without a
+generated input remove the inherited value. Trusted Cargo configuration must not define or
+override the reserved variable. The package binder requires the separately captured generated
+name/digest, not a matching ordinary source-file observation, and compares its digest/length with
+this content preparation. It compares the complete expected Cargo package,
 binary, profile, target, default-feature policy and requested features; actual compiled features
 and tool observations remain separate recorded facts. Cargo and content profiles stay independent.
 The Player does not accept a manifest or argument that overrides its compiled expectation.

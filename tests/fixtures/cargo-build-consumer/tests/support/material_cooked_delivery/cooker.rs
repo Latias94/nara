@@ -56,17 +56,17 @@ use engine::{
 };
 use palette_cooked_game as game;
 
-const GENERATED: &str = "src/player/generated.rs";
+const GENERATED: &str = "player-bootstrap.rs";
 const PLAYER_INPUTS: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",
     ".cargo/config.toml",
+    "build.rs",
     "src/lib.rs",
     "src/probe.rs",
     "src/palette.wgsl",
     "src/cooker.rs",
     "src/player/main.rs",
-    GENERATED,
 ];
 const SOURCE_INPUTS: &[&str] = &[
     "indices.png",
@@ -278,7 +278,8 @@ fn main() {
     inputs.package_fence().unwrap();
     let limits = PlayerPackageLimits::default();
     let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits).unwrap();
-    fs::write(workspace.join(GENERATED), bootstrap.bytes()).unwrap();
+    assert!(!workspace.join(GENERATED).exists());
+    assert!(!workspace.join("src/player/generated.rs").exists());
     let selection = CargoBuildSelection::new(
         "palette-cooked-game",
         "palette-cooked-player",
@@ -298,6 +299,8 @@ fn main() {
     )
     .unwrap()
     .with_target_directory(&target)
+    .unwrap()
+    .with_generated_rust_input(bootstrap.name(), bootstrap.bytes())
     .unwrap();
     let executable = build_executable(&request, |_| {
         inputs.package_fence().map_err(|_| CargoBuildFailure::Stale)
@@ -309,13 +312,18 @@ fn main() {
         executable.provenance().declared_inputs().len(),
         PLAYER_INPUTS.len()
     );
-    assert!(
-        executable
-            .provenance()
-            .declared_inputs()
-            .iter()
-            .any(|input| input.path() == GENERATED && input.digest() == bootstrap.digest())
-    );
+    let generated = executable.provenance().generated_rust_input().unwrap();
+    assert_eq!(generated.path(), bootstrap.name());
+    assert_eq!(generated.digest(), bootstrap.digest());
+    for input in executable.provenance().declared_inputs() {
+        assert!(PLAYER_INPUTS.contains(&input.path()));
+        assert_eq!(
+            input.digest(),
+            ContentDigest::of_bytes(&fs::read(workspace.join(input.path())).unwrap())
+        );
+    }
+    assert!(!workspace.join(GENERATED).exists());
+    assert!(!workspace.join("src/player/generated.rs").exists());
     let prepared =
         PreparedPlayerPackage::bind(content, bootstrap, &selection, executable, limits).unwrap();
     let mut points = Vec::new();

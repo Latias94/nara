@@ -56,7 +56,8 @@ impl Default for CargoBuildLimits {
     }
 }
 
-/// A finite declared source inventory and explicit target selection, never project-file policy.
+/// A finite source inventory, optional request-owned Rust input and explicit target selection.
+/// Project-file policy and dependency resolution remain with their existing owners.
 pub struct CargoBuildRequest {
     workspace: PathBuf,
     package_manifest: RelativePath,
@@ -65,6 +66,18 @@ pub struct CargoBuildRequest {
     inputs: Vec<RelativePath>,
     limits: CargoBuildLimits,
     target_directory: Option<PathBuf>,
+    generated_rust_input: Option<GeneratedRustInput>,
+}
+
+/// Reserved environment carrying the request-owned generated Rust source to a trusted build script.
+pub const GENERATED_RUST_SOURCE_ENV: &str = "NARA_CARGO_GENERATED_RUST_SOURCE";
+
+/// Maximum UTF-8 source bytes transported by the single generated Rust input.
+pub const MAX_GENERATED_RUST_SOURCE_BYTES: usize = 16 * 1024;
+
+struct GeneratedRustInput {
+    fact: CargoDeclaredInput,
+    source: Box<str>,
 }
 
 impl CargoBuildRequest {
@@ -110,6 +123,7 @@ impl CargoBuildRequest {
             inputs: admitted,
             limits,
             target_directory: None,
+            generated_rust_input: None,
         })
     }
 
@@ -139,6 +153,72 @@ impl CargoBuildRequest {
         }
         self.target_directory = Some(directory);
         Ok(self)
+    }
+
+    /// Selects one immutable generated Rust input without writing the source workspace.
+    ///
+    /// `name` is a canonical logical input path, distinct from declared filesystem inputs.
+    /// The trusted build script reads [`GENERATED_RUST_SOURCE_ENV`], declares its rerun dependency
+    /// and writes only Cargo's `OUT_DIR`. Trusted Cargo configuration must not define or override
+    /// that reserved variable. Provenance records the name/digest, not Rust inclusion.
+    pub fn with_generated_rust_input(
+        mut self,
+        name: &str,
+        source: &[u8],
+    ) -> Result<Self, CargoBuildFailure> {
+        if self.generated_rust_input.is_some()
+            || self
+                .inputs
+                .iter()
+                .any(|path| input_spelling(path).is_ok_and(|path| path == name))
+        {
+            return Err(CargoBuildFailure::DuplicateDeclaredInput);
+        }
+        if self.inputs.len() >= self.limits.input_count.get() {
+            return Err(CargoBuildFailure::Limit("declared input count"));
+        }
+        if source.len() > MAX_GENERATED_RUST_SOURCE_BYTES
+            || source.len() > self.limits.input_bytes.get()
+        {
+            return Err(CargoBuildFailure::Limit("generated Rust source bytes"));
+        }
+        let source = std::str::from_utf8(source)
+            .map_err(|_| CargoBuildFailure::InvalidGeneratedRustInput)?;
+        let path =
+            RelativePath::new(name).map_err(|_| CargoBuildFailure::InvalidGeneratedRustInput)?;
+        if source.is_empty()
+            || source.contains('\0')
+            || name.len() > 4096
+            || name.contains('\\')
+            || name.split('/').any(|part| matches!(part, "" | "." | ".."))
+            || input_spelling(&path)? != name
+        {
+            return Err(CargoBuildFailure::InvalidGeneratedRustInput);
+        }
+        let work = generated_source_work(source.len(), name.len())?;
+        check(
+            Some(work),
+            self.limits.work_bytes,
+            "generated Rust input work",
+        )?;
+        check(
+            Some(source.len().saturating_add(name.len())),
+            self.limits.retained_bytes,
+            "generated Rust input retention",
+        )?;
+        self.generated_rust_input = Some(GeneratedRustInput {
+            fact: CargoDeclaredInput {
+                path: name.to_owned(),
+                digest: ContentDigest::of_bytes(source.as_bytes()),
+            },
+            source: source.into(),
+        });
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn generated_rust_input(&self) -> Option<&CargoDeclaredInput> {
+        self.generated_rust_input.as_ref().map(|input| &input.fact)
     }
 }
 
@@ -180,6 +260,8 @@ impl CargoToolchainObservation {
     }
 }
 
+/// One exact input name and digest. File facts and the optional generated fact occupy separate
+/// provenance fields; a generated fact's path is a logical name, not a filesystem authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CargoDeclaredInput {
     path: String,
@@ -208,6 +290,7 @@ pub struct CargoBuildProvenance {
     resolved_features: Box<[String]>,
     toolchain: CargoToolchainObservation,
     inputs: Vec<CargoDeclaredInput>,
+    generated_rust_input: Option<CargoDeclaredInput>,
     metadata: ContentDigest,
     digest: ContentDigest,
 }
@@ -228,6 +311,12 @@ impl CargoBuildProvenance {
     #[must_use]
     pub fn declared_inputs(&self) -> &[CargoDeclaredInput] {
         &self.inputs
+    }
+    /// Exact generated bytes injected by this request, separately from filesystem observations.
+    /// The fact's path is its logical name, not a source-workspace or `OUT_DIR` location.
+    #[must_use]
+    pub fn generated_rust_input(&self) -> Option<&CargoDeclaredInput> {
+        self.generated_rust_input.as_ref()
     }
     /// Digest of the exact declaration-only metadata returned for this build preparation.
     #[must_use]
@@ -267,6 +356,45 @@ impl std::fmt::Debug for CapturedCargoExecutable {
 }
 
 impl CapturedCargoExecutable {
+    #[cfg(test)]
+    pub(super) fn with_declared_input_for_test(
+        path: &Path,
+        selection: CargoBuildSelection,
+        input_name: &str,
+        input_digest: ContentDigest,
+    ) -> Self {
+        let original = host_fs::readable_file(path).unwrap();
+        let bytes = original.read_to_end_bounded(1024).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        let provenance = CargoBuildProvenance {
+            selection,
+            resolved_features: Box::default(),
+            toolchain: CargoToolchainObservation {
+                cargo: digest,
+                rustc: digest,
+                cargo_version: digest,
+                rustc_version: digest,
+                host_target: "x86_64-pc-windows-msvc".to_owned(),
+            },
+            inputs: vec![CargoDeclaredInput {
+                path: input_name.to_owned(),
+                digest: input_digest,
+            }],
+            generated_rust_input: None,
+            metadata: digest,
+            digest,
+        };
+        Self(Arc::new(CapturedExecutableInner {
+            retained_bytes: bytes.len(),
+            bytes: bytes.into(),
+            digest,
+            provenance,
+            diagnostics: CargoDiagnostics::default(),
+            original,
+            original_path: path.to_path_buf(),
+        }))
+    }
+
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.0.bytes
@@ -324,6 +452,8 @@ pub enum CargoBuildFailure {
     MissingDeclaredInput,
     #[error("the build inventory repeats a declared input")]
     DuplicateDeclaredInput,
+    #[error("generated Rust input requires a canonical name and nonempty NUL-free UTF-8 source")]
+    InvalidGeneratedRustInput,
     #[error("the build exceeded its {0} limit")]
     Limit(&'static str),
     #[error("the actual Cargo or rustc tool identity was invalid")]
@@ -495,10 +625,25 @@ fn build_executable_inner(
 ) -> Result<CapturedCargoExecutable, CargoBuildFailure> {
     let root = host_fs::readable_directory(&request.workspace)?;
     let inputs = capture_inputs(&root, request)?;
-    let input_work = input_allocation(&inputs)?;
+    let generated_metadata = request
+        .generated_rust_input()
+        .map_or(0, |input| input.path.len());
+    let input_work = input_allocation(&inputs)?
+        .checked_add(generated_metadata)
+        .ok_or(CargoBuildFailure::Limit("generated input metadata"))?;
+    let request_work = input_work
+        .checked_add(
+            request
+                .generated_rust_input
+                .as_ref()
+                .map_or(Ok(0), |input| {
+                    generated_source_work(input.source.len(), input.fact.path.len())
+                })?,
+        )
+        .ok_or(CargoBuildFailure::Limit("generated input work"))?;
     let tool_bound = request.limits.tool_bytes.get() as u64;
     check(
-        input_work.checked_add(request.limits.tool_identity_bytes.get().saturating_mul(4)),
+        request_work.checked_add(request.limits.tool_identity_bytes.get().saturating_mul(4)),
         request.limits.work_bytes,
         "tool identity work",
     )?;
@@ -530,7 +675,7 @@ fn build_executable_inner(
             .metadata_bytes
             .get()
             .checked_mul(2)
-            .and_then(|bytes| bytes.checked_add(input_work)),
+            .and_then(|bytes| bytes.checked_add(request_work)),
         request.limits.work_bytes,
         "metadata input work",
     )?;
@@ -542,7 +687,7 @@ fn build_executable_inner(
         metadata
             .len()
             .checked_mul(64)
-            .and_then(|bytes| bytes.checked_add(input_work)),
+            .and_then(|bytes| bytes.checked_add(request_work)),
         request.limits.work_bytes,
         "metadata interpretation work",
     )?;
@@ -567,7 +712,7 @@ fn build_executable_inner(
     }) {
         return Err(CargoBuildFailure::MissingDeclaredInput);
     }
-    let build_work = input_work
+    let build_work = request_work
         .checked_add(invocation_allocation(&invocation)?)
         .and_then(|bytes| {
             bytes.checked_add(
@@ -719,6 +864,7 @@ fn build_executable_inner(
         resolved_features: observed.artifact().features().to_vec().into_boxed_slice(),
         toolchain,
         inputs: declared,
+        generated_rust_input: request.generated_rust_input().cloned(),
         metadata: metadata_digest,
         digest: ContentDigest::of_bytes(&[]),
     };
@@ -750,7 +896,11 @@ fn command(request: &CargoBuildRequest, tool: &Path) -> Command {
         .env("RUSTC", request.tools.rustc_path())
         .env("CARGO_BUILD_JOBS", "1")
         .env("CARGO_TERM_COLOR", "never")
+        .env_remove(GENERATED_RUST_SOURCE_ENV)
         .stdin(Stdio::null());
+    if let Some(input) = &request.generated_rust_input {
+        command.env(GENERATED_RUST_SOURCE_ENV, input.source.as_ref());
+    }
     command
 }
 
@@ -780,9 +930,21 @@ fn capture_inputs(
             .and_then(|bytes| bytes.checked_mul(4))
             .and_then(|path| bytes.checked_add(path + std::mem::size_of::<ObservedInput>()))
     });
-    check(work, request.limits.work_bytes, "declared input work")?;
+    let generated_work = request
+        .generated_rust_input
+        .as_ref()
+        .map_or(Ok(0), |input| {
+            generated_source_work(input.source.len(), input.fact.path.len())
+        })?;
+    check(
+        work.and_then(|bytes| bytes.checked_add(generated_work)),
+        request.limits.work_bytes,
+        "declared input work",
+    )?;
     let mut observed = Vec::with_capacity(request.inputs.len());
-    let mut bytes = 0_u64;
+    let mut bytes = request
+        .generated_rust_input()
+        .map_or(0, |input| input.digest.length());
     for path in &request.inputs {
         let file = root.open_file_exact(path)?;
         let digest = file.digest(request.limits.input_bytes.get() as u64)?;
@@ -943,6 +1105,7 @@ fn provenance_digest(
         resolved_features: &'a [String],
         toolchain: &'a CargoToolchainObservation,
         inputs: &'a [CargoDeclaredInput],
+        generated_rust_input: Option<&'a CargoDeclaredInput>,
         #[serde(serialize_with = "serialize_digest")]
         metadata: ContentDigest,
         #[serde(serialize_with = "serialize_digest")]
@@ -961,9 +1124,10 @@ fn provenance_digest(
         resolved_features: &provenance.resolved_features,
         toolchain: &provenance.toolchain,
         inputs: &provenance.inputs,
+        generated_rust_input: provenance.generated_rust_input(),
         metadata: provenance.metadata,
         executable,
-        consistency: "revalidated-declared-inputs; ambient-trusted-cargo-and-native-inputs",
+        consistency: "revalidated-declared-inputs; request-owned-generated-rust; ambient-trusted-cargo-and-native-inputs",
     };
     struct DigestWriter {
         hasher: blake3::Hasher,
@@ -1071,6 +1235,17 @@ fn input_allocation(inputs: &[ObservedInput]) -> Result<usize, CargoBuildFailure
                 .checked_add(input.fact.path.len())
                 .ok_or(CargoBuildFailure::Limit("input metadata"))
         })
+}
+
+fn generated_source_work(
+    source_bytes: usize,
+    name_bytes: usize,
+) -> Result<usize, CargoBuildFailure> {
+    source_bytes
+        .checked_mul(6)
+        .and_then(|bytes| bytes.checked_add(name_bytes.saturating_mul(2)))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<GeneratedRustInput>()))
+        .ok_or(CargoBuildFailure::Limit("generated Rust input work"))
 }
 
 fn invocation_allocation(

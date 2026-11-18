@@ -14,7 +14,7 @@ mod desktop_output;
 mod evidence;
 #[cfg(nara_cooked_player)]
 mod generated {
-    include!("player/generated.rs");
+    include!(concat!(env!("OUT_DIR"), "/nara-player-bootstrap.rs"));
 }
 #[path = "player/output.rs"]
 #[allow(dead_code)]

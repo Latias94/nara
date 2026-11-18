@@ -71,6 +71,15 @@ The inventory must include the workspace manifest, lockfile, selected package ma
 metadata-selected binary source. Include other source, configuration and dependency files needed
 for the caller's declared revision.
 
+For one generated Rust source, call `with_generated_rust_input(logical_name, source_bytes)` on the
+request. Keep that logical name separate from its filesystem inventory. The request owns immutable
+UTF-8 bytes, with a 16 KiB ceiling and the existing combined input/work allowances. Its command
+sets `NARA_CARGO_GENERATED_RUST_SOURCE`; a request without the input clears the inherited value.
+The trusted build script must track that environment dependency and write only Cargo's `OUT_DIR`.
+Trusted Cargo configuration must not define or override the reserved variable. The
+[cooked Player workflow](cooked-player-delivery.md#bind-the-player) demonstrates actual A/B/A
+reuse and ordinary-build refusal with stale outputs; this is not a general environment API.
+
 ## Interpret The Result
 
 `CapturedCargoExecutable` owns exact executable bytes and their digest, independently of Cargo's
@@ -79,7 +88,9 @@ output cannot change `bytes()`. Building does not run the result, activate a Hos
 Ready or package game content.
 
 Its provenance records the requested selection, actual compiled features, selected tool
-observations, declared input digests and metadata digest. Metadata's workspace feature observation
+observations, declared file-input digests, a separate optional `generated_rust_input()` fact and
+the metadata digest. Generated provenance records a logical name/digest, not Rust inclusion.
+Metadata's workspace feature observation
 can include features absent from the selected compiler unit. Only the selected compiler artifact
 supplies the built feature set. Dependency-qualified `required-features` are left to Cargo.
 
@@ -142,8 +153,8 @@ after source removal. See [ADR 0110](../architecture/adr/0110-first-party-projec
 for the contract and the [unit plan](../plans/2026-10-31-explicit-cargo-build-selection-plan.md)
 for qualification scope.
 
-For complete cooked content plus a Player whose expectation is compiled as an exact declared
-input, use the separate [cooked Player workflow](cooked-player-delivery.md). Content preparation,
+For complete cooked content plus a Player whose expectation is compiled from an exact request-owned
+generated input, use the separate [cooked Player workflow](cooked-player-delivery.md). Content preparation,
 code/content binding, package publication and Runtime/native qualification remain distinct.
 
 ## Run A Product With Native Process Custody

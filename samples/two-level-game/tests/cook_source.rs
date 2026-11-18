@@ -102,7 +102,7 @@ impl Directory {
             ("Cargo.lock", "lock"),
             ("build.rs", "fn main() {}"),
             ("src/lib.rs", "pub fn game() {}"),
-            ("src/bin/player/generated.rs", "expected catalog"),
+            ("src/bin/player.rs", "fn main() {}"),
         ] {
             let target = path.join(name);
             fs::create_dir_all(target.parent().unwrap()).unwrap();
@@ -259,11 +259,6 @@ fn selected_schema_is_bound_by_delivery_observations_without_the_default_bundle(
     }];
     fence.bind_raw_inputs(&observations).unwrap();
     fs::write(&default, b"unselected default bundle").unwrap();
-    fs::write(
-        directory.0.join("src/bin/player/generated.rs"),
-        "new catalog",
-    )
-    .unwrap();
     let inputs = source::code_inventory(&directory.0).unwrap();
     fence.bind_code(&inputs).unwrap();
     fence.verify().unwrap();
@@ -393,13 +388,13 @@ fn content_fence_requires_authored_sources_and_metadata() {
 }
 
 #[test]
-fn code_and_generated_bootstrap_stay_fenced_through_later_publication_checks() {
+fn original_code_stays_fenced_through_later_publication_checks() {
     for name in [
         "Cargo.toml",
         "Cargo.lock",
         "build.rs",
         "src/lib.rs",
-        "src/bin/player/generated.rs",
+        "src/bin/player.rs",
         "prefabs/marker.prefab.json",
         "assets/materials/region.material2d.json",
         "assets/materials/region.material2d.json.meta",
@@ -431,7 +426,22 @@ fn code_set_changes_and_rebinding_are_refused() {
     let directory = Directory::new();
     let mut fence = source::ContentFence::capture(&directory.0).unwrap();
     let inputs = source::code_inventory(&directory.0).unwrap();
+    assert_eq!(
+        inputs,
+        [
+            "Cargo.toml",
+            "Cargo.lock",
+            "build.rs",
+            "assets/materials/region.wgsl",
+            "src/bin/player.rs",
+            "src/lib.rs",
+        ]
+        .map(|path| nara::fs::RelativePath::new(path).unwrap())
+    );
+    assert!(!directory.0.join("player-bootstrap.rs").exists());
+    assert!(!directory.0.join("src/bin/player/generated.rs").exists());
     fence.bind_code(&inputs).unwrap();
+    fence.verify().unwrap();
     assert!(fence.bind_code(&inputs).is_err());
     fs::write(directory.0.join("src/later.rs"), "new code").unwrap();
     assert!(fence.verify().is_err());
@@ -589,11 +599,6 @@ fn material_shader_observations_stay_fenced_through_bootstrap_and_publication() 
         expected
     );
     fence.bind_raw_inputs(&observations).unwrap();
-    fs::write(
-        directory.0.join("src/bin/player/generated.rs"),
-        "new catalog",
-    )
-    .unwrap();
     let inputs = source::code_inventory(&directory.0).unwrap();
     assert!(inputs.iter().any(|path| {
         path == &nara::fs::RelativePath::new("assets/materials/region.wgsl").unwrap()
@@ -726,11 +731,6 @@ fn tileset_source_resolves_the_actual_required_image_and_stays_fenced_through_pu
         )]
     );
     fence.bind_raw_inputs(&observations).unwrap();
-    fs::write(
-        directory.0.join("src/bin/player/generated.rs"),
-        "new TileSet catalog",
-    )
-    .unwrap();
     let inputs = source::code_inventory(&directory.0).unwrap();
     fence.bind_code(&inputs).unwrap();
     fence.verify().unwrap();

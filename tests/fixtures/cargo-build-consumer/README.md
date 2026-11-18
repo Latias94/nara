@@ -78,7 +78,9 @@ Cargo foreign-build evidence only; it does not qualify Nara's WASI Runtime, targ
 package owners. It generates a conventional three-package workspace with custom-named Host and
 Player binaries and one shared game library/recipe. The Host selects `project-tooling`; the Player
 selects only `runtime-2d` and `serde`. Its expectation constants are generated from the prepared
-content, listed as an exact declared Cargo input and compiled by the Player. The Player accepts no
+content, retained as the original request's immutable generated Rust input and compiled by the
+Player through its trusted build script and Cargo `OUT_DIR`. No generated source file is written
+into the workspace. The Player accepts no
 expectation arguments, never reads its delivery manifest, and opens the generated relative pack
 path through `project_host::open_executable_relative_runtime_pack`.
 
@@ -92,9 +94,16 @@ The production builder supplies the catalog/member inventory and full prepublica
 Two independent cold stores rebuild the real imports/cooks and produce equal group, catalog and
 pack bytes. This does not require Rust executable byte reproducibility.
 
-Its negative checks reject distinct content/bootstrap A/B, a different full requested Cargo
-selection, an actual alternate processed Image selection, a generated input changed after
-compilation, changed metadata, and an auxiliary file changed at the publication fence. A callback
+The Host prepares distinct A/B expectations and requests before building either, then performs
+serial A/B/A builds in the same workspace with the same package/bin/features/profile/target.
+Each captured executable retains its own exact generated fact. All three published captures run
+after relocation/source removal, and A/B packages reject each other's installed pack. A no-input
+request after those builds refuses instead of consuming stale `OUT_DIR` output. Missing or wrong
+generated facts reject before Cargo, while a matching ordinary file fact cannot substitute for
+generated provenance at package binding.
+
+Other negative checks reject a different full requested Cargo selection, an actual alternate
+processed Image selection, changed metadata and an auxiliary file changed at the publication fence. A callback
 failure after publication must retain both the actual directory and its publication receipt.
 The failed nonempty candidate keeps the existing orphan outcome; the fixture makes no production
 recursive-cleanup claim.

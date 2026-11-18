@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara::{
-    fs::{ContentDigest, RelativePath},
+    fs::RelativePath,
     project::ProjectManifest,
     project_tooling::{
         cargo_build::CargoBuildTools,
@@ -245,13 +245,20 @@ pub fn accept(cooker: &Path) {
         json!(["cooked-player", "desktop"])
     );
     let images = evidence::inspect_package(&published, payload, &triple, &configuration);
-    let bootstrap = payload["generated_input_path"].as_str().unwrap();
+    let bootstrap = payload["generated_input_name"].as_str().unwrap();
     assert!(RelativePath::new(bootstrap).is_ok());
-    assert_eq!(bootstrap, "src/bin/player/generated.rs");
-    let generated = read_bounded(&fixture.project.join(bootstrap), 32 * 1024);
+    assert_eq!(bootstrap, "player-bootstrap.rs");
+    assert!(!fixture.project.join(bootstrap).exists());
+    assert!(!fixture.project.join("src/bin/player/generated.rs").exists());
+    let generated_input = &payload["build"]["generated_rust_input"];
+    assert_eq!(generated_input["path"], bootstrap);
     assert_eq!(
-        payload["generated_input_digest"],
-        evidence::digest(ContentDigest::of_bytes(&generated))
+        generated_input["digest"][0],
+        payload["generated_input_digest"]["length"]
+    );
+    assert_eq!(
+        generated_input["digest"][1],
+        payload["generated_input_digest"]["hash"]
     );
     let inputs = payload["build"]["declared_inputs"].as_array().unwrap();
     for required in [
@@ -268,13 +275,13 @@ pub fn accept(cooker: &Path) {
         "src/bin/player_desktop/output.rs",
         "src/bin/player_desktop/verification.rs",
         "src/bin/player/evidence.rs",
-        bootstrap,
     ] {
         assert!(
             inputs.iter().any(|input| input["path"] == required),
             "missing actual build input: {required}"
         );
     }
+    assert!(inputs.iter().all(|input| input["path"] != bootstrap));
     let relocated = fixture
         .directory("relocated-installation")
         .join("TwoLevelDesktop");

@@ -60,9 +60,10 @@ use engine::{
 };
 use nara_asset_domain_consumer::{TextBundleDomain, TextBundleSettings};
 
-const GENERATED: &str = "player/src/generated.rs";
+const GENERATED: &str = "player-bootstrap.rs";
 const CARGO_PROFILE: &str = "consumer-checked";
 const CONTENT_PROFILE: &str = "cpu4-shipping";
+const ALTERNATE_CONTENT_PROFILE: &str = "cpu4-alternate-content";
 const PLAYER_PACKAGE: &str = "aurora-native-game";
 const PLAYER_BIN: &str = "aurora-portable-player";
 const BUNDLE_RAW: &[u8] =
@@ -90,8 +91,8 @@ const PLAYER_INPUTS: &[&str] = &[
     ".cargo/config.toml",
     "host/Cargo.toml",
     "player/Cargo.toml",
+    "player/build.rs",
     "player/src/main.rs",
-    GENERATED,
     "game/Cargo.toml",
     "game/src/lib.rs",
     "game/src/probe.rs",
@@ -210,37 +211,113 @@ fn main() {
     drop((a_pack, repeat_pack, repeat));
     drop((repeat_inputs, repeat_import, repeat_store));
     let bootstrap = GeneratedPlayerBootstrap::new(&a, GENERATED, limits).unwrap();
-    fs::write(workspace.join(GENERATED), bootstrap.bytes()).unwrap();
+    let original_bootstrap = bootstrap.bytes().to_vec();
+    let b = assemble(&inputs, &triple, ALTERNATE_CONTENT_PROFILE);
+    let bootstrap_b = GeneratedPlayerBootstrap::new(&b, GENERATED, limits).unwrap();
+    assert_eq!(bootstrap.name(), bootstrap_b.name());
+    assert_ne!(bootstrap.digest(), bootstrap_b.digest());
+    assert_ne!(a.base().catalog_digest(), b.base().catalog_digest());
+    assert!(!workspace.join(GENERATED).exists());
+    assert!(!workspace.join("player/src/generated.rs").exists());
     let selection = player_selection(&triple, ["ship"]);
-    let request = CargoBuildRequest::new(
-        &workspace,
-        RelativePath::new("player/Cargo.toml").unwrap(),
-        selection.clone(),
-        CargoBuildTools::new(&cargo, &rustc).unwrap(),
-        PLAYER_INPUTS
-            .iter()
-            .map(|path| RelativePath::new(path).unwrap()),
-        CargoBuildLimits::default(),
-    )
-    .unwrap()
-    .with_target_directory(&target)
-    .unwrap();
+    let player_request = || {
+        CargoBuildRequest::new(
+            &workspace,
+            RelativePath::new("player/Cargo.toml").unwrap(),
+            selection.clone(),
+            CargoBuildTools::new(&cargo, &rustc).unwrap(),
+            PLAYER_INPUTS
+                .iter()
+                .map(|path| RelativePath::new(path).unwrap()),
+            CargoBuildLimits::default(),
+        )
+        .unwrap()
+        .with_target_directory(&target)
+        .unwrap()
+    };
+    let request = player_request()
+        .with_generated_rust_input(bootstrap.name(), bootstrap.bytes())
+        .unwrap();
+    let request_b = player_request()
+        .with_generated_rust_input(bootstrap_b.name(), bootstrap_b.bytes())
+        .unwrap();
+    let ordinary_request = player_request();
+    let wrong_name_request = player_request()
+        .with_generated_rust_input("unrelated-bootstrap.rs", bootstrap.bytes())
+        .unwrap();
+    assert_eq!(request.workspace(), request_b.workspace());
+    assert_eq!(request.selection(), request_b.selection());
+    for (request, bootstrap) in [(&request, &bootstrap), (&request_b, &bootstrap_b)] {
+        let generated = request.generated_rust_input().unwrap();
+        assert_eq!(generated.path(), bootstrap.name());
+        assert_eq!(generated.digest(), bootstrap.digest());
+    }
+    assert!(ordinary_request.generated_rust_input().is_none());
+    for wrong_request in [&ordinary_request, &request_b, &wrong_name_request] {
+        let content = assemble(&inputs, &triple, CONTENT_PROFILE);
+        let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits).unwrap();
+        let mut reached = false;
+        let rejected = build_player_package(content, bootstrap, wrong_request, limits, |_| {
+            reached = true;
+            inputs.fence()
+        })
+        .unwrap_err();
+        assert!(matches!(rejected, PlayerPackageError::BuildInputMismatch));
+        assert!(
+            !reached,
+            "wrong generated facts reject before Cargo or Host callbacks"
+        );
+    }
     let captured = build_executable(&request, |_| {
         inputs.fence().map_err(|_| CargoBuildFailure::Stale)
     })
     .unwrap();
-    assert_eq!(captured.provenance().selection(), &selection);
+    assert_player_capture(&captured, &workspace, &selection, &bootstrap);
+    let original_executable = captured.digest();
+    let original_provenance = captured.provenance().digest();
+    let captured_b = build_executable(&request_b, |_| {
+        inputs.fence().map_err(|_| CargoBuildFailure::Stale)
+    })
+    .unwrap();
+    assert_player_capture(&captured_b, &workspace, &selection, &bootstrap_b);
+    let captured_a_repeat = build_executable(&request, |_| {
+        inputs.fence().map_err(|_| CargoBuildFailure::Stale)
+    })
+    .unwrap();
+    assert_player_capture(&captured_a_repeat, &workspace, &selection, &bootstrap);
+    assert_player_capture(&captured, &workspace, &selection, &bootstrap);
+    assert_player_capture(&captured_b, &workspace, &selection, &bootstrap_b);
     assert_eq!(
-        captured.provenance().resolved_features(),
-        ["player-entry", "quality", "ship"]
+        captured.provenance().declared_inputs(),
+        captured_b.provenance().declared_inputs()
     );
+    assert_eq!(
+        captured.provenance().declared_inputs(),
+        captured_a_repeat.provenance().declared_inputs()
+    );
+    assert_ne!(captured.digest(), captured_b.digest());
+    assert_ne!(captured_a_repeat.digest(), captured_b.digest());
+    assert_ne!(
+        captured.provenance().digest(),
+        captured_b.provenance().digest()
+    );
+    let no_input = build_executable(&ordinary_request, |_| {
+        inputs.fence().map_err(|_| CargoBuildFailure::Stale)
+    })
+    .unwrap_err();
     assert!(
-        captured
-            .provenance()
-            .declared_inputs()
-            .iter()
-            .any(|input| input.path() == GENERATED && input.digest() == bootstrap.digest())
+        matches!(&no_input, CargoBuildFailure::Compilation { status, diagnostics, .. }
+            if !status.success() && diagnostics.entries().iter().any(|diagnostic|
+                diagnostic.message() == "the cooker must supply a generated Player expectation")),
+        "{no_input:?}"
     );
+    assert_player_capture(&captured, &workspace, &selection, &bootstrap);
+    assert_player_capture(&captured_b, &workspace, &selection, &bootstrap_b);
+    assert_player_capture(&captured_a_repeat, &workspace, &selection, &bootstrap);
+    assert_eq!(captured.digest(), original_executable);
+    assert_eq!(captured.provenance().digest(), original_provenance);
+    assert!(!workspace.join(GENERATED).exists());
+    assert!(!workspace.join("player/src/generated.rs").exists());
     let bounded_a = qualify_binding_limits(&inputs, &triple, &selection, &captured, limits);
     assert!(matches!(
         PreparedPlayerPackage::bind(
@@ -253,21 +330,62 @@ fn main() {
         Err(PlayerPackageError::BuildSelectionMismatch)
     ));
 
-    // Same source identities and exact startup root, but a distinct content profile is still B.
-    let b = assemble(&inputs, &triple, "cpu4-alternate-content");
-    let bootstrap_b = GeneratedPlayerBootstrap::new(&b, GENERATED, limits).unwrap();
     assert!(matches!(
         PreparedPlayerPackage::bind(b, bootstrap_b, &selection, captured.clone(), limits),
         Err(PlayerPackageError::BuildInputMismatch)
     ));
     let a = assemble(&inputs, &triple, CONTENT_PROFILE);
     let bootstrap_a = GeneratedPlayerBootstrap::new(&a, GENERATED, limits).unwrap();
-    let b = assemble(&inputs, &triple, "cpu4-alternate-content");
+    assert!(matches!(
+        PreparedPlayerPackage::bind(a, bootstrap_a, &selection, captured_b.clone(), limits),
+        Err(PlayerPackageError::BuildInputMismatch)
+    ));
+    let a = assemble(&inputs, &triple, CONTENT_PROFILE);
+    let bootstrap_a = GeneratedPlayerBootstrap::new(&a, GENERATED, limits).unwrap();
+    let b = assemble(&inputs, &triple, ALTERNATE_CONTENT_PROFILE);
     assert!(matches!(
         PreparedPlayerPackage::bind(b, bootstrap_a, &selection, captured.clone(), limits),
         Err(PlayerPackageError::BootstrapMismatch)
     ));
     drop(a);
+    let a = assemble(&inputs, &triple, CONTENT_PROFILE);
+    let wrong_input =
+        GeneratedPlayerBootstrap::new(&a, "unrelated-bootstrap.rs", limits).unwrap();
+    assert_eq!(wrong_input.bytes(), original_bootstrap);
+    assert!(matches!(
+        PreparedPlayerPackage::bind(a, wrong_input, &selection, captured.clone(), limits),
+        Err(PlayerPackageError::BuildInputMismatch)
+    ));
+    for (profile, executable, name) in [
+        (ALTERNATE_CONTENT_PROFILE, &captured_b, "captured-b"),
+        (CONTENT_PROFILE, &captured_a_repeat, "captured-a-repeat"),
+    ] {
+        let content = assemble(&inputs, &triple, profile);
+        let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits).unwrap();
+        assert_player_capture(executable, &workspace, &selection, &bootstrap);
+        let prepared =
+            PreparedPlayerPackage::bind(content, bootstrap, &selection, executable.clone(), limits)
+                .unwrap();
+        let outcome = prepared.publish(
+            &host_fs::writable_directory(&output).unwrap(),
+            &RelativeComponent::new(name).unwrap(),
+            |_| inputs.fence(),
+        );
+        let PlayerPackageOutcome::Published {
+            receipt,
+            error: None,
+        } = outcome
+        else {
+            panic!("{outcome:?}")
+        };
+        assert_eq!(receipt.files.executable, executable.digest());
+        assert_eq!(
+            ContentDigest::of_bytes(
+                &fs::read(output.join(name).join(&receipt.files.executable_name)).unwrap()
+            ),
+            executable.digest()
+        );
+    }
 
     // A different *actual* processed target output is selected without changing raw inputs.
     let content = assemble(&inputs, &triple, CONTENT_PROFILE);
@@ -310,24 +428,24 @@ fn main() {
 
     let content = assemble(&inputs, &triple, CONTENT_PROFILE);
     let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits).unwrap();
-    let original_bootstrap = bootstrap.bytes().to_vec();
     let mut changed = false;
     let stale = build_player_package(content, bootstrap, &request, limits, |point| {
-        inputs.fence()?;
         if point == PlayerPackagePoint::Cargo(CargoBuildPoint::BeforeReturn) {
-            let mut bytes = original_bootstrap.clone();
-            bytes.extend_from_slice(b"// changed after compilation\n");
-            fs::write(workspace.join(GENERATED), bytes).unwrap();
+            inputs.selected_image.set(full.digest());
             changed = true;
         }
-        Ok(())
+        inputs.fence()
     })
     .unwrap_err();
     assert!(changed);
-    assert!(
-        matches!(stale, PlayerPackageError::Build { source, .. } if matches!(source.as_ref(), CargoBuildFailure::Stale))
-    );
-    fs::write(workspace.join(GENERATED), &original_bootstrap).unwrap();
+    assert!(matches!(stale, PlayerPackageError::Build {
+        source,
+        control: Some((
+            PlayerPackagePoint::Cargo(CargoBuildPoint::BeforeReturn),
+            PlayerPackageControlFailure::SelectionChanged,
+        )),
+    } if matches!(source.as_ref(), CargoBuildFailure::Aborted)));
+    inputs.selected_image.set(inputs.image.digest());
 
     // Current auxiliary input is rechecked at publication, not inferred from a valid old group.
     let content = assemble(&inputs, &triple, CONTENT_PROFILE);
@@ -533,6 +651,17 @@ fn main() {
         CARGO_PROFILE
     );
     assert_eq!(manifest["content_target"]["profile"], CONTENT_PROFILE);
+    assert_eq!(manifest["generated_input_name"], GENERATED);
+    let generated = &manifest["build"]["generated_rust_input"];
+    assert_eq!(generated["path"], GENERATED);
+    assert_eq!(
+        generated["digest"],
+        serde_json::to_value((
+            original_bootstrap.len(),
+            ContentDigest::of_bytes(&original_bootstrap).as_bytes(),
+        ))
+        .unwrap()
+    );
     let output_authority = host_fs::writable_directory(&output).unwrap();
     let published = prepared.publish(
         &output_authority,
@@ -564,18 +693,70 @@ fn main() {
         receipt.files.executable_name,
         format!("{PLAYER_BIN}{}", std::env::consts::EXE_SUFFIX)
     );
+    for (profile, executable) in [
+        (CONTENT_PROFILE, &captured),
+        (ALTERNATE_CONTENT_PROFILE, &captured_b),
+        (CONTENT_PROFILE, &captured_a_repeat),
+    ] {
+        let content = assemble(&inputs, &triple, profile);
+        let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits).unwrap();
+        assert_player_capture(executable, &workspace, &selection, &bootstrap);
+    }
+    assert_eq!(captured.digest(), original_executable);
+    assert_eq!(captured.provenance().digest(), original_provenance);
+    assert!(!workspace.join(GENERATED).exists());
+    assert!(!workspace.join("player/src/generated.rs").exists());
     drop((
         receipt,
         output_authority,
         captured,
+        captured_b,
+        captured_a_repeat,
         inputs,
         full,
         imported,
         store,
     ));
     println!(
-        "cooked-host ok actual-import cpu-target compound-aux deterministic-pack binding-fences published"
+        "cooked-host ok actual-import cpu-target compound-aux deterministic-pack request-generated-a-b-a no-input-refused binding-fences published"
     );
+}
+
+fn assert_player_capture(
+    executable: &CapturedCargoExecutable,
+    workspace: &Path,
+    selection: &CargoBuildSelection,
+    bootstrap: &GeneratedPlayerBootstrap,
+) {
+    assert_eq!(
+        ContentDigest::of_bytes(executable.bytes()),
+        executable.digest()
+    );
+    let provenance = executable.provenance();
+    assert_eq!(provenance.selection(), selection);
+    assert_eq!(
+        provenance.resolved_features(),
+        ["player-entry", "quality", "ship"]
+    );
+    let generated = provenance.generated_rust_input().unwrap();
+    assert_eq!(generated.path(), bootstrap.name());
+    assert_eq!(generated.digest(), bootstrap.digest());
+    let mut expected = PLAYER_INPUTS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        provenance
+            .declared_inputs()
+            .iter()
+            .map(|input| input.path())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    for input in provenance.declared_inputs() {
+        assert_eq!(
+            input.digest(),
+            ContentDigest::of_bytes(&fs::read(workspace.join(input.path())).unwrap())
+        );
+    }
 }
 
 fn qualify_binding_limits(

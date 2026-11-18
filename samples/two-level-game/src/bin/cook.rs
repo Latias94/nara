@@ -8,7 +8,6 @@ mod input;
 mod source;
 
 use std::{
-    fs,
     io::Write,
     process::ExitCode,
     time::{Duration, Instant},
@@ -27,7 +26,7 @@ use nara::{
     project_workflow::cargo::CargoBuildSelection,
 };
 
-const GENERATED: &str = "src/bin/player/generated.rs";
+const GENERATED: &str = "player-bootstrap.rs";
 
 fn main() -> ExitCode {
     match input::Options::read().and_then(run) {
@@ -74,31 +73,6 @@ fn run(options: input::Options) -> Result<(), String> {
     let limits = PlayerPackageLimits::default();
     let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits)
         .map_err(|error| error.to_string())?;
-    let generated_directory = project.join("src/bin/player");
-    let generated = project.join(GENERATED);
-    fs::create_dir_all(&generated_directory).map_err(|error| error.to_string())?;
-    if generated_directory
-        .canonicalize()
-        .map_err(|error| error.to_string())?
-        != generated_directory
-    {
-        return Err("generated directory must retain its original source path".into());
-    }
-    if let Ok(metadata) = fs::symlink_metadata(&generated) {
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err("generated bootstrap must be a regular source file".into());
-        }
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&generated)
-        .map_err(|error| error.to_string())?;
-    file.write_all(bootstrap.bytes())
-        .map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
-    drop(file);
     let inputs = source::code_inventory(&project)?;
     fence.bind_code(&inputs)?;
     let selection = CargoBuildSelection::new(
@@ -121,6 +95,7 @@ fn run(options: input::Options) -> Result<(), String> {
         CargoBuildLimits::default(),
     )
     .and_then(|request| request.with_target_directory(&target))
+    .and_then(|request| request.with_generated_rust_input(bootstrap.name(), bootstrap.bytes()))
     .map_err(|error| error.to_string())?;
     let check = || {
         fence

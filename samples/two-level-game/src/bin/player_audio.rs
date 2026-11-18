@@ -46,7 +46,7 @@ mod output;
     feature = "audio-cpal"
 ))]
 mod generated {
-    include!("player/generated.rs");
+    include!(concat!(env!("OUT_DIR"), "/nara-player-bootstrap.rs"));
 }
 #[cfg(all(
     nara_cooked_player,

@@ -8,7 +8,7 @@ use std::{
 };
 
 use nara::{
-    fs::{ContentDigest, RelativePath},
+    fs::RelativePath,
     project::ProjectManifest,
     project_tooling::{
         cargo_build::CargoBuildTools,
@@ -253,15 +253,20 @@ pub fn accept(cooker: &Path) {
         &configuration,
         &source_samples,
     );
-    let bootstrap = payload["generated_input_path"].as_str().unwrap();
-    assert_eq!(bootstrap, "src/bin/player/generated.rs");
+    let bootstrap = payload["generated_input_name"].as_str().unwrap();
+    assert_eq!(bootstrap, "player-bootstrap.rs");
     assert!(RelativePath::new(bootstrap).is_ok());
+    assert!(!fixture.project.join(bootstrap).exists());
+    assert!(!fixture.project.join("src/bin/player/generated.rs").exists());
+    let generated_input = &payload["build"]["generated_rust_input"];
+    assert_eq!(generated_input["path"], bootstrap);
     assert_eq!(
-        payload["generated_input_digest"],
-        package::digest(ContentDigest::of_bytes(&read_bounded(
-            &fixture.project.join(bootstrap),
-            32 * 1024
-        )))
+        generated_input["digest"][0],
+        payload["generated_input_digest"]["length"]
+    );
+    assert_eq!(
+        generated_input["digest"][1],
+        payload["generated_input_digest"]["hash"]
     );
     let inputs = payload["build"]["declared_inputs"].as_array().unwrap();
     for required in [
@@ -281,13 +286,13 @@ pub fn accept(cooker: &Path) {
         "src/bin/player_audio/observation.rs",
         "src/bin/player_audio/oracle.rs",
         "src/bin/player_desktop/runtime.rs",
-        bootstrap,
     ] {
         assert!(
             inputs.iter().any(|input| input["path"] == required),
             "missing actual cooked audio build input: {required}"
         );
     }
+    assert!(inputs.iter().all(|input| input["path"] != bootstrap));
     let package_digests = ["player_audio.exe", "content.pack", "package.json"].map(|name| {
         host_fs::readable_file(&published.join(name))
             .unwrap()
