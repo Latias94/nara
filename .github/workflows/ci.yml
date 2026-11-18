@@ -143,13 +143,13 @@ jobs:
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
         run: cargo nextest run -p nara_render_wgpu --locked --features stock-sprite,stock-ui --lib --run-ignored only -E 'test(host::runtime::maintenance_tests::)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test live physical Scene updates through an external DX12 Host
+      - name: Test live Scene updates and captured Material textures through an external DX12 Host
         if: runner.os == 'Windows'
         env:
           CARGO_TARGET_DIR: "${{ github.workspace }}/target"
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
+        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --test captured_textures --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test original Sprite and Tile captures through an external DX12 Host
         if: runner.os == 'Windows'
         env:
