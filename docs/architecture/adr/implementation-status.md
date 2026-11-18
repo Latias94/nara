@@ -2151,6 +2151,16 @@ playback, correctness Clippy, minimal cooked-player compilation and formatting/d
 It retains ordinary versus quarantined-startup cleanup limits. This
 does not qualify cooked/native replay, SaveSlot/audio effects, arbitrary live recording or
 cross-platform determinism, and adds no validation to ordinary gameplay frames.
+
+The [authored Prefab instantiation successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#authored-marker-instantiation-successor)
+at `6fd0135` and `895bb3c` qualifies explicit placement from the current Host's retained Immediate
+Scene dependency under ADR 0117. The Identity and Scene owners retire the original level and additional authored
+occurrences in one product replacement. The game uses this for marker placement, Retry, travel,
+checkpoint reconstruction and exact source resume. Its [execution evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#authored-marker-execution-evidence)
+covers four authored workflows, two relocated source-free Players and two Windows/DX12 source
+reconstruction paths. Activation lifetime remains tied to the Host's content custody. This
+unit leaves independently retained activation resources, streaming and hardware audio open.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

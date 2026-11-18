@@ -275,11 +275,27 @@ the successful shared publication tail. Failed preparation or native retirement 
 last-good and retry/discard owners as the source path. Cancellation waits for physical worker return.
 
 `prepared.scene_dependency(scene_product)` on a `PreparedProjectSceneView` returns a borrowed
-`Option<&SceneDocument>` for an Immediate Scene data dependency already prepared for that request.
+`Option<&CompiledSceneDocument>` for an Immediate Scene data dependency already prepared for that request.
 For example, an encounter/rule Scene can supply CPU data without being instantiated. The selected
 root, Deferred-only targets and unrelated members return `None`; the query performs no loading
 and grants no travel authority. The borrow is limited to the prepared view and its actual content
 owner. An independent declared-root check still governs `ProjectScenes::request`.
+
+After publication, `inspect_current_scene_dependency(world, expected, product, inspect)` borrows
+an Immediate dependency from the original current content. The full expected root receipt must
+match. `instantiate_current_scene_dependency(world, expected, product, occurrence)` explicitly
+creates a separate activation through the installed Scene component bindings. Source content
+reuses its admitted candidate and resolver, and processed content reuses the residency-owned
+decoded Scene. Declare travel roots through the existing Host configuration.
+
+Keep the returned `SpawnedSceneInstance` for explicit retirement of the activation and its
+logical occurrence. Use the ordinary retirement API or include
+`SceneProductRetirement::Instance(receipt)` in the original containing Scene's product replacement.
+`SceneProductRetirement::Entity(token)` remains the runtime-only entity selection. The transaction
+admits the complete retirement union before publication and counts original instance members
+against the caller's retirement limit, with at least one unit for an empty activation. End all
+dependent activations before, or atomically with, replacement of their containing resource owner.
+The containing Scene holds the resource residency for the activation.
 
 `ProjectAssetCollection::get` requires an exact complete Product for processed auxiliary values;
 it never substitutes a primary product. `iter()` visits each stored decoded value once, even when

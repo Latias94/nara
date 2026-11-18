@@ -71,11 +71,13 @@ wall mutations are outside that format and make exact capture ineligible. The wi
 accept finite zero scale while collision admission refuses it. Placement checks happen at
 admission; the movement path does not rescan the Scene or reconstruct wall geometry each tick.
 
-Each shipped Scene has eleven authored members. The cooked catalog has eight content members:
-two Scenes, three Images, the Sound Bank, shared Sprite clips and global startup Input. Refresh
-the authoring bundle for `CollisionBox`, `ExplorerAnimation` and native binding revision 3;
-recook older installations to include the authored Input selection. The Input successor adds
-no Schema field or binding revision.
+Each level has eleven authored members. Its Immediate marker Scene dependency contains a real
+two-entity Prefab with a pink root, white child and an occurrence-local entity reference. Placing
+a marker creates a separate full Scene activation; its appearance and hierarchy come from the
+authored Prefab. The cooked catalog has nine content members: three Scenes, three Images, the
+Sound Bank, shared Sprite clips and global startup Input. Only Meadow and Cavern are travel roots.
+Refresh the authoring bundle for `MarkerPalette`, `MarkerLink` and native binding revision 4, then
+recook older installations. Game checkpoint and resume wire formats remain unchanged.
 
 ## Build And Run
 
@@ -1012,26 +1014,21 @@ for raw observations, complete endpoints, finite sample limits and the next attr
 
 ## Ownership And Limits
 
-- `CurrentScene` is the only source/Scene-instance authority. Gameplay retains a logical `LevelKey`
-  and bounded marker tokens for its own dynamic entities; it never maintains another Scene receipt.
-  Normal R uses the retained committed source even if its disk file has changed; it is not Reload.
+- `CurrentScene` owns the loaded level source and its root activation. Gameplay retains the logical
+  `LevelKey` and the separate activation receipt for each authored marker. Normal R uses the retained
+  committed level and marker sources even if their disk files have changed.
 - `ProjectScenes` prepares only startup or declared content through the original Host loader and
   budget. The game inspects a read-only target, validates all checkpoint-referenced level sources
   one at a time, then explicitly commits the final target with the existing protected overlay.
 - Collected authored pickups remain Scene members. Their game-owned collected facts make them
   inactive and set their actual Sprite alpha to zero. They are logically removed, not despawned.
-- Dynamic marker IDs are game-owned serials. Live marker entities have ordinary engine identities
-  and hierarchy placement. Travel supplies their exact retirement tokens and reconstructs target
-  markers after commit. A reconstruction failure reports `Degraded`; it does not claim that the old
-  World was rolled back. R retries reconstruction without reusing a stale Scene receipt.
-  The automated trajectory verifies ordinary current-level Retry, including changed source files.
-  Separate complete-frame CPU tests remove a committed marker's Sprite/root placement and alter
-  its Transform, or legally retire its entity. Degraded Retry restores the exact checkpoint-backed
-  marker while preserving the original `CurrentScene` receipt/source and logical progress; later
-  travel retires the recovered marker and leaves unrelated runtime entities intact. These cases
-  do not qualify native physics/audio reconstruction or arbitrary missing authored components.
-  The [recovery qualification](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
-  records the original failures, consumer checks and execution scope.
+- Dynamic marker IDs and positions are game-owned. Each authored tree has its own engine
+  activation and internal references. Travel retires the current marker activations in the level
+  replacement, then reconstructs the target markers. A reconstruction failure reports `Degraded`.
+  R can reconstruct missing marker geometry or a legally retired child while preserving the
+  current level receipt and checkpoint facts. See the
+  [authored marker workflow](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#authored-marker-instantiation-successor)
+  for the supported reconstruction cases.
 - The versioned slot contains only explicit checkpoint/progress facts. Restore rebuilds movement,
   player position and dynamic entities at the authored checkpoint; it is not arbitrary-tick replay
   or serialization of World entities, tasks, handles, native resources or every component.

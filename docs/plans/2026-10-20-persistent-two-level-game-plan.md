@@ -16,6 +16,147 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Authored Marker Instantiation Successor
+
+This unit serves the active Foundation Goal and the Runtime delivery priority.
+
+Replace the game's code-generated marker with a real multi-entity authored Prefab referenced by
+a genuine wrapper Scene. Both levels declare that wrapper as an Immediate Scene data dependency.
+Only the two levels are travel roots. Source preparation uses the already admitted dependency
+candidate within the current content generation. Processed execution uses the original
+residency-owned Runtime Scene acquisition. Both paths reuse the prepared value.
+
+The original Host exposes scoped dependency inspection and explicit instantiation against the
+complete expected current receipt and original component definitions. Normal Scene preparation,
+reference remapping, hierarchy publication, World identity and occurrence ownership remain
+authoritative. A caller explicitly places a dependency. The first game template uses untextured
+Sprite data and internal entity references. The original asset residency contracts govern
+resource-bearing consumers.
+
+The game owns durable MarkerId/LevelKey facts and retains each full activation receipt and its
+logical occurrence. Authored hierarchy, appearance and internal references come from the Prefab.
+Placement adds the saved position to the authored spatial root without accumulating offsets or
+overwriting authored rotation/scale. Retry restores the whole authored occurrence, including
+missing ordinary components and legally retired members. The owner rejects stale Scene identity
+left by raw ECS despawn.
+
+Preserve rejection-before-mutation for ordinary current-level Restart and prepared travel. Extend
+the existing product replacement transaction to accept both runtime-only entities and additional
+complete activation receipts. Identity prepares one aggregate retirement and tombstone sequence;
+Scene preflights the complete hierarchy/lifecycle/persistent-apply union and releases all original
+occurrences in the exclusive commit tail. The transaction retains the authored activation
+receipts and the original exclusive lifetime and native-effect contract.
+
+The cooker consumes the actual wrapper Scene and Prefab through existing compilation and Runtime
+Scene flattening. Shipping gains a ninth member and third Scene member while retaining only the
+two level travel roots. Every level has its actual Required wrapper edge. Original source fences,
+generated Schema/expectation, catalog and relocated source-free Player remain authoritative.
+
+Acceptance covers repeated complete occurrences and internal-reference isolation, authored edit
+visibility, multiple level instances, A-to-B-to-A, Retry, rejected replacement preservation,
+Save/fresh-process Restore, original source-game resume and semantic recording/replay. The
+source-free headless and desktop Players cover actual child geometry, pixels and original cleanup.
+Original audio delivery receives its affected catalog checks. Focus verification on changed
+owners and these gameplay paths. Full Foundation, R10/R12, foreign execution and numerical
+performance budgets remain open.
+
+### Authored Marker Implementation Checkpoint
+
+The original Host now inspects and instantiates retained Immediate dependencies against the
+expected current receipt. Source candidates share their original resolver/captured generation;
+processed candidates reuse existing residency acquisitions. The product transaction now takes
+explicit `SceneProductRetirement::{Entity, Instance}` values. Identity prepares one retirement
+union, and Scene ends additional occurrences in its exclusive tail. The game retains whole marker
+receipts and derives geometry/hierarchy/reference expectations from the original compiled template
+using the receiving component registry. Native binding revision4 adds MarkerPalette/MarkerLink;
+the existing project Schema command regenerates the actual authoring bundle.
+
+The first production identity/Scene gate exposes one missing exhaustive diagnostic for the new
+duplicate-instance error; the corrected gate passes. The sample library/headless compile gate
+also passes. Initial game run `fdf1977c-d2cc-40dc-96ce-7b61312a083b` passes18/54: most failures
+are the deliberately strict old authoring-bundle/native-Schema disagreement, before gameplay.
+After refreshing the bundle and extending fixture inventories, the actual project Check succeeds
+with twenty source-content members. An actual startup then exposes an empty-selection regression:
+the additional-token helper demanded an installed identity domain while initial Scene publication
+still owned its detached domain. Empty selections now preserve the original registration path.
+
+Initial all-feature owner run `cc0cc62a-da5d-49bf-8855-54f19895455a` passes916/921. Corrections
+preserve original wrong-World and projection error contracts, remove an invalid assumption that
+the first ECS entity is the Scene root, and retain the aggregate owner's earlier lifecycle refusal
+without another whole-hierarchy scan solely to preserve an internal diagnostic classification.
+Independent review also identifies a removed root used as the new Scene's insertion anchor. The
+hierarchy owner now preserves the primary Scene's slot relative to the nearest surviving root.
+An interleaved additional-activation regression covers that case.
+
+The first complete game cohort reaches 153/207. The marker camera check compared the authored
+stable-ID selection to an explicit Product value, although both forms name the same primary
+product. The game now accepts that exact primary identity in either form. Marker snapshot
+collection queries the marker component directly and shares its graph check with explicit resume
+capture. This removes the previous whole-World marker scan and a duplicate resume ID comparison.
+The corrected ordinary cohort passes 206/207 in `78e99c49-99b1-4ddd-bd56-2b39725e4687`.
+The remaining test used a success-only settling helper after an expected refusal. It now observes
+the original movement, key release, level and marker receipts directly, then uses retained-source
+Retry to reestablish the exact capture boundary. The cooker leaves tree shape to Scene compilation
+and the same game-side admission used by source execution.
+
+A final review identifies two different resource bounds and a hierarchy fact that can change after
+staging. The Scene occurrence metadata records the original member count, even after partial
+retirement. Admission projects the count and bytes retained after the complete retirement union.
+The final composition uses current hierarchy placements, so a surviving child attached after
+staging is promoted before its retiring parent is removed. Focused regressions exercise all
+three cases.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`
+[`WorldSceneExt`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/spawn.rs)
+separates immediate resolve/spawn from dependency-aware queued spawning. Pinned Godot
+`7a37606a433c0e7735525037cdf774f043146a21`
+[`SceneState::instantiate`](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/packed_scene.cpp)
+constructs the authored hierarchy and local ownership, checking structural failures at that
+operation. These mechanisms support acquisition/preparation and explicit instantiation as
+separate responsibilities. Nara's exact expected receipt, occurrence and aggregate retirement
+are its own contracts. The game's bounded snapshot health projection checks its owned marker
+graphs so it can expose degradation and allow Retry. No numerical cost has been established.
+
+### Authored Marker Execution Evidence
+
+The engine implementation is `6fd0135` and the game and delivery consumer is `895bb3c`.
+
+The final ordinary sample selection passes 207/207 in
+`9006314d-dc17-4813-b126-3c6f928055df`, covering gameplay, exact resume, recording and replay,
+authored Input, cooker source and Runtime controls, and SoundBank content.
+
+The final marker, native and delivery selection passes 13/13 on Windows with Rust 1.95.0
+(`dfdfdf23-d651-4429-9da7-2c8b651f93f5`). All four authored marker cases pass, including
+the corrected malformed-Prefab refusal. The actual release cooker produces the nine-member
+catalog with three Scenes and two declared travel roots. The relocated headless and desktop
+Players launch after the source and cook cache are removed, execute travel and Save/fresh
+Restore, and return their original cleanup receipts. The headless case also exercises damaged
+Immediate marker content. The desktop case covers Windows/DX12 physical game input and original
+presentation. Two independent source desktop reconstruction paths verify marker-root and child
+pixels, held input, reconstruction and physical close with default and edited arrow bindings.
+The five audio oracle controls pass and the changed audio package fixture compiles. Hardware
+audio execution was outside this selection. These are Windows workflow results.
+
+The all-feature Identity and Scene library cohort passes 924/924 in
+`bd823b52-657c-40ad-95fb-a6404b0f5630`. It covers first registration, ordinary and projection
+replacement, native claims, interleaved root order, promotion after staging, original membership
+limits and post-replacement occurrence budgets.
+
+The focused public Host cohort passes 3/3 in `104bb9f1-96c5-43bb-b60c-17aac5e75724`.
+The source and processed paths exercise repeated placement and occurrence reuse, with actual
+resident document borrowing and independent local references. The first fixtures counted allocated
+ECS indices and selected a minimal profile. Host startup requires a strict Schema agreement and
+a semantic queue. The final fixtures count spawned entities, generate the actual bundle and
+select the original local-headless profile. The Reference Game library and the sample's
+all-target correctness Clippy gate pass. Formatting passes for the root, sample, Reference Game
+and affected independent package.
+
+The independent Scene, source-reference and managed-domain consumer selection passes 31/31 in
+`a607b6b5-73f3-4a6f-9555-48cb9ca18a14`. The checked-in consumer lock predates the game's Sprite
+animation and Rapier dependencies. An offline refresh in a temporary fixture copy adds those
+dependencies while preserving existing package versions. The checked-in lock is outside this
+unit's change scope.
+
 ## Existing Contracts And Pressure
 
 - Strategy selects a Rust-first integrated production path, generalized from complete consumers.

@@ -172,10 +172,12 @@ including relevant failure and cleanup behavior, before starting another prerequ
 Editor/UI/Dialogue product work remains paused.
 
 Correctness failures, unusable stalls and clear large repeated work can still justify an owning
-fix. Small measured costs, speculative caches and compact wire-format experiments are deferred
-unless they block the selected workflow. The cross-engine comparisons supply scale and design
-context; their provisional targets are not mandatory gates for every Runtime feature. Do not add
-another validation pass or framework merely to prepare for a hypothetical optimization.
+fix. Defer small measured costs, speculative caches and compact wire-format experiments until a
+representative player workload exposes a material cost or they block the selected workflow.
+Use the [Godot and Bevy module timings](../benchmarks/2026-11-17-runtime-module-comparison.md) for
+order-of-magnitude context. Keep their provisional targets out of feature acceptance. Validate
+authored and saved input where its owner admits it, and recheck live facts at publication when
+they can change after preparation. Add a hot-path check only when the consuming behavior needs it.
 
 Match verification to the changed behavior. Use focused owner and real-consumer checks; extend
 native, cooked or rebuild acceptance where their contract changes. Unchanged official mechanisms
@@ -1592,6 +1594,14 @@ actual-build skips. Separate CLI processes execute the real recording and playba
 Clippy, minimal cooked-player compilation and formatting/document checks pass. The linked unit
 owns exact runs, initial corrections and the startup-quarantine boundary. Cooked/native replay, SaveSlot/audio effects,
 arbitrary live input, cross-platform determinism and complete R10/R12/Foundation remain open.
+
+The [authored Prefab instantiation successor](2026-10-20-persistent-two-level-game-plan.md#authored-marker-instantiation-successor)
+uses the existing level's retained Immediate Scene dependency for repeated game-owned
+activations. Each marker keeps its authored hierarchy and references within its own occurrence.
+Retry and travel retire exact activation receipts through the original product transaction.
+The linked [execution evidence](2026-10-20-persistent-two-level-game-plan.md#authored-marker-execution-evidence)
+covers Save/fresh Restore through relocated headless and Windows/DX12 Players, along with native
+source pixel readback. Independent asset residency and cross-platform execution remain open.
 
 The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
 installed compiler's relevant changes and a passing Input/Gameplay production-library check.

@@ -84,6 +84,25 @@ project-host successor composition.
 
 ### Identity and resource state remain independently meaningful
 
+The [authored marker consumer](../../plans/2026-10-20-persistent-two-level-game-plan.md#authored-marker-instantiation-successor)
+requires explicit instantiation of an already resident Immediate Scene dependency. Hosted
+inspection and instantiation use the original current content generation, exact component
+definitions and full expected current receipt. The declared travel roots govern travel. Source
+and processed candidates borrow or reuse their retained content. Callers retain each resulting
+activation receipt and retire it before its containing Scene resource owner ends. The first
+concrete marker graph contains untextured Sprites and internal entity references.
+
+The existing lifecycle-free product replacement transaction accepts explicit runtime-only entity
+tokens and additional complete Scene activation receipts. Its identity owner prepares one aggregate
+retirement/tombstone sequence. The Scene owner preflights the complete membership, hierarchy,
+persistent apply and lifecycle union before mutation, then ends every original occurrence in the
+same exclusive publication tail. Duplicate, stale, foreign and overlapping selections refuse.
+The retirement limit uses each activation's original membership. Occurrence admission budgets
+the activations retained after commit, and final hierarchy publication uses the live placements
+and the same admitted retirement union.
+Native retirement claims apply only to the original primary activation. Runtime repair uses the
+original receipt and legal retirement. The owner rejects stale identity left by raw ECS despawn.
+
 Logical asset UUID, content locator, derivation key, and process-local handle identify different facts.
 The initial supported profile has one principal durable product and one entity-bearing document per
 source; importer-private auxiliaries do not imply a public product graph. Authored entity IDs remain
