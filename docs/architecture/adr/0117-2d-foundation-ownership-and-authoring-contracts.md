@@ -148,7 +148,7 @@ its canonical path. The processed request uses a validated `Reference` edge of t
 primary closure. Each committed addition has its own occurrence and exact unload receipt in the
 same World. Additions coexist within the Host's original content and Scene limits.
 
-The Host publishes one identical Image, Material or source catalog record for all live Scenes that use it.
+The Host publishes one identical Image, Material, TileSet or source catalog record for all live Scenes that use it.
 Unload retires the exact occurrence and releases publications whose last live Scene leaves.
 A failed reload of the same last-good Image or Material still permits retirement. After lower-level occurrence
 retirement, the Host can finish only the outstanding resource release. Prepared primary travel
@@ -158,10 +158,14 @@ Restart still requires closed additions. Retained render inputs keep their captu
 Material use retains the complete Shader/declaration/defaults and resolved texture selections.
 Sharing requires the original live slot and matching definition; edited Material or WGSL content
 does not silently replace another Scene's publication. Binding and prepared drawing lifetimes
-remain with their original captured generation. TileSet and native service lifetimes still require
-additive contracts under ADR 0089.
+remain with their original captured generation. TileSet sharing uses the original declaration
+claim and exact Image capture through `TileSetAssets`; it does not republish the live slot or
+version. A changed declaration refuses a new region, and the existing atlas rebuild barrier
+remains. The last live user ends the owned declaration through that same owner. General native
+service lifetimes still require additive contracts under ADR 0089.
 [Concurrent regions workflow](../../plans/2026-10-20-persistent-two-level-game-plan.md#concurrent-regions-and-coordinated-travel-successor)
 [Material region workflow](../../plans/2026-10-20-persistent-two-level-game-plan.md#material-backed-concurrent-regions-successor)
+[TileSet region workflow](../../plans/2026-10-20-persistent-two-level-game-plan.md#tileset-backed-concurrent-regions-successor)
 
 Source component values may use component-local immutable storage, independent of raw documents,
 resolvers and snapshots. Public source record/document cloning preserves independent values;

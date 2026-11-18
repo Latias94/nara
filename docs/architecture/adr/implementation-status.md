@@ -2200,6 +2200,18 @@ actual travel and Runtime close. Headless, physical desktop and WASAPI packages 
 The record distinguishes the corrected shipping-only trait import from final native evidence.
 No runtime per-frame definition audit or universal additive-service contract is introduced.
 
+The [TileSet-backed region successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#tileset-region-implementation-and-qualification)
+at `759daae` and `c32d2ad` adds explicit shared declaration admission to the original `TileSetAssets` transaction. The Host
+pools only owned receipts, records each region's use and retires the last live user's declaration.
+The original atlas rebuild barrier and current Image capture remain authoritative. Both authored
+rooms draw eight-cell Tilemaps from one TileSet without republishing its handle/version. Tilemap
+119, Host/public 107 and affected game/cook 313 pass. The hardware DX12 pixel trajectory checks
+both floor patterns and disappearance, then replays four complete original captures after travel
+and Runtime close. All three actual source-free headless/desktop/WASAPI delivery cases pass.
+The record retains the processed whitelist correction and identity-versus-residency fixture failure.
+These changes qualify the concrete Image/Material/TileSet region workflow; general additive
+native services, destination sets and full ADR 0089 remain open.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

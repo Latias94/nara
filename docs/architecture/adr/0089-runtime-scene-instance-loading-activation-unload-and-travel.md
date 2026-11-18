@@ -82,7 +82,7 @@ the last collection owner drops. This allows a Runtime-persistent sound bank to 
 current/prepared Scene generations. A domain product that owns an Image or Material view still
 retains that view's independently required generation custody; collection escape cannot remove it.
 
-ADR 0117 covers multiple Image/Material companions from the primary Scene's admitted Deferred targets.
+ADR 0117 covers multiple Image/Material/TileSet companions from the primary Scene's admitted Deferred targets.
 They prepare asynchronously, activate by occurrence, and share eligible publications. Prepared
 primary travel retires the live Host additions in the same publication as the primary Scene.
 This ADR remains Proposed for explicit destination sets, general scene-scoped service retirement,

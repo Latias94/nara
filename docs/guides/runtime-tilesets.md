@@ -58,6 +58,20 @@ claims, capacity and the existing atlas rebuild barrier. Publish the exact stage
 consuming `PreparedTileSetPublications::commit` in the same exclusive transaction. Its synchronous
 commit requires the prevalidated bindings, slots and Image allocation to remain unchanged.
 
+Use `with_shared_receipt` on an input only when the caller already owns the original declaration
+claim and wants reuse without publication. The original `TileSetAssets` owner checks the complete
+declaration, current TileSet and exact Image input. An accepted shared input returns its original
+receipt and leaves slot, state, version, events and pixel retention unchanged. A mismatched live
+declaration or Image refuses before effects. `with_receipt` retains ordinary replacement semantics.
+Sharing grants no independent residency ownership: the caller tracks actual consumers and retires
+the original declaration only after their final use ends.
+
+The first-party Host applies that use tracking to primary and additive Scenes. Each region retains
+its TileSet handles; the Host pools only its owned receipts and ends them at the final live user.
+Primary travel includes the full group in its existing replacement. Source and cooked Tilemaps
+still use ordinary cell-membership admission and the original atlas rebuild barrier.
+[Playable TileSet regions](../plans/2026-10-20-persistent-two-level-game-plan.md#tileset-backed-concurrent-regions-successor)
+
 An independent application can prepare its complete product-owned aggregate privately, then move
 it through the existing Scene product-resource overlay together with the staged bindings and
 processed Scene. The aggregate's concrete `SceneProductResource` baseline protects its installed

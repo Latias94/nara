@@ -16,6 +16,106 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## TileSet-Backed Concurrent Regions Successor
+
+Replace the two region floor Sprites with authored Tilemaps using one shared TileSet and the
+existing relic Image atlas. Preserve the room entities, collectible Material, primary game,
+independent close and coordinated travel. The visible floor uses real cells and per-cell colors,
+so TileSet loading and drawing are exercised by the ordinary game rather than a private fixture.
+
+Keep publication authority in `TileSetAssets`. Add an explicit shared-input choice to its existing
+finite prepare/commit path. Sharing requires the original declaration claim, complete matching
+declaration, current value/state association and captured Image allocation. It returns the original
+receipt without publishing another slot or version. Existing replacement and atlas-rebuild behavior
+remain available for their original owners. The Host tracks TileSet use per region and pools only
+its owned receipts; independent unload releases the final live user's declaration through that
+same owner. Primary travel retires the primary/addition union in its original transaction.
+
+Qualify source and processed loading, shared handle/version, changed live declaration refusal and
+repair, invalid persisted cell membership, exact unload, retained old pixels and real source-free
+delivery. Extend the existing cooked catalog by one TileSet with its Required Image edge. Use
+the original source reader, codec, render capture and GPU Host, and preserve all Material, Save,
+fresh Restore and native cleanup controls. Run checks at load/activation/publication; ordinary
+gameplay gains no complete Scene or asset audit. Arbitrary native-service regions and full ADR
+0089 stay open. This is functional Runtime delivery, not a performance experiment.
+
+Godot's pinned `TileMapLayer` retains a `Ref<TileSet>` rather than giving each layer another
+resource publication owner. Nara keeps that separation between map use and resource ownership;
+its existing Host remains responsible for transactional activation and retirement. The source
+reference does not establish Nara's transaction semantics or a performance comparison.
+[Godot TileMapLayer](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/modules/tilemap/tile_map_layer.h)
+
+### TileSet Region Implementation And Qualification
+
+The original owner/Host changes land at `759daae`; the authored game, cooker and actual source-free
+consumers land at `c32d2ad`.
+
+The original `TileSetPublicationInput` adds an explicit `with_shared_receipt` choice. Preparation
+checks the retained declaration claim, complete declaration including floating-point bits,
+current TileSet/value association and captured Image. A shared input does not request a new
+version or consume additional pixel retention. The Host tracks TileSet handles per region and
+pools only newly owned receipts. Primary replacement uses the original primary/addition union;
+independent unload retires a declaration only after its final live user. The existing atlas
+rebuild barrier remains in effect. Source and cooked content use the same publication owner.
+
+The first production check catches an unload closure whose inferred lifetime escapes the
+original resource scope. Moving that concrete tail into `PreparedUnload::commit` resolves it
+without cloning an owner or adding unsafe code. The Host selection then passes 75/75 in
+`91c322e1-2ace-4a78-ac40-39c35329e19d`. The complete original Tilemap library selection passes
+119/119 in `56feee97-cc7a-4361-923e-1e0e52f3cad0`, including the new source/processed sharing
+controls, capacity reuse, unchanged slot/version and stale-baseline refusal.
+
+The ordinary game replaces both floor Sprites with authored eight-cell Tilemaps using distinct
+checkerboard colors and one shared TileSet/relic Image atlas. The collectible Material remains
+unchanged. The cooked catalog has fifteen members: five Scenes, five Images, one Material, one
+TileSet, Sound Bank, Sprite clips and startup Input; Meadow and Cavern remain the two travel roots.
+Schema generation reports no change to native binding revision 6, and strict Check passes with
+33 content members. Independent review catches a missing TileSet domain allowance in processed
+additive admission. That whitelist now includes TileSet alongside Image and Material; other
+unsupported domains still refuse. Bounded rereview reports no remaining P1/P2.
+
+The source/cooked selection passes 42/42 with the hardware pixel case excluded in
+`1131d79d-03a7-4548-a8f7-41377a979736`. It covers both close orders, unchanged TileSet slot/version,
+escaped Image content, changed definition refusal and repair, invalid cell preflight, processed
+dependency closure, primary travel and checkpoint restoration. The first hardware pixel run
+`40426127-30de-405e-ac28-1371803d1266` reaches actual travel after its drawing checks, then fails a
+new fixture assertion that assumes retiring TileSet residency removes its Product identity.
+`AssetServer` keeps that original identity binding. The corrected control requires the same
+binding alongside absent live TileSet value, claim and usable version; old captured pixels must
+still replay. No production behavior changes for this fixture correction.
+
+The corrected complete hardware DX12 trajectory passes 1/1 in
+`5f19f462-e7dd-4432-81d0-9593cbfe37c4`. It checks both eight-cell floors' independently computed
+checkerboard colors and their disappearance, preserves the relic Material controls, and replays
+four original complete images after actual travel and Runtime close. Linear RGBA8 floor
+expectations are north `[3,76,41,255]` / `[4,114,58,255]` and south `[3,67,70,255]` /
+`[5,95,87,255]`. Original GPU resource retirement completes without retained bytes or cleanup
+faults. This is captured image-output evidence, not frontbuffer scanout or a performance claim.
+
+The actual source-free selection passes 3/3, with seven unrelated cases excluded, in
+`dcd251d0-b92d-45a8-85de-7de30c8f933f`. It cooks, relocates and runs the headless, Windows hardware
+DX12 desktop and WASAPI Players. Physical B/G opens the two eight-cell floors under one TileSet
+version; pickup and independent close retain the surviving region. Coordinated travel releases
+the declaration. Save, fresh-process Restore, the original software control, collision excursions,
+twenty later travels and original native retirement remain intact. Each cooker reports complete
+cleanup without termination in this run; Player cleanup retains its existing stricter contract.
+
+The final affected release-profile selection passes 313/313, with seven excluded cases, in
+`fced251b-26f3-430f-8899-63216b147548`. The final Host/public content selection passes 107/107 in
+`3d0d7855-c08e-41e7-ad8d-d8c28b5ce7f4`. These include the corrected processed domain allowance,
+source/cooked regions, configured content budgets, animation, collision, command recording,
+checkpoint and exact-resume controls. They do not establish the absence of unrelated defects
+identified by the separate November 18 external reviews.
+
+Correctness Clippy passes for the Tilemap owner, selected root Runtime/tooling library and the
+sample's all-target `cook,desktop,audio-cpal,cooked-player` closure. Existing advisory lints remain;
+this is not a warning-free build claim. Root/sample formatting checks pass after formatting only
+the new whitelist line and corrected fixture call. Local document links/headings, authored JSON,
+TOML and whitespace checks pass. All fifteen paused UI/Dialogue files retain their original bytes.
+Editor/UI work, arbitrary native-service regions, foreign-platform execution, numeric performance
+budgets and full R9/R10/R12 remain outside this scoped unit. Runtime delivery takes priority over
+small performance experiments; unchanged official implementations are not requalified here.
+
 ## Material-Backed Concurrent Regions Successor
 
 Give both playable Meadow regions one authored Material Product and real Shader input. The relic

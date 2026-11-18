@@ -186,6 +186,27 @@ not supported behavior or the existing publication, identity and physical-retire
 The [compact Tilemap candidate](2026-11-13-rust-state-reconstruction-plan.md#compact-inline-tilemap-source-successor)
 is deferred with no production switch or scheduled benchmark campaign. Full Foundation remains active.
 
+### November 18 External Review Disposition
+
+The [combined receiving study](../research/2026-11-18-engine-architecture-review-reconciliation.md)
+reconciles the user-supplied architecture and author-usability reviews of `4111cb9` against the
+current runtime. Later Material and TileSet sharing supersede their Image-only additive description.
+Their clock consumption, settled pause mode, source-to-cook Schema agreement, extracted Material
+texture custody and processed texture-kind findings remain actionable at their original owners.
+Implement F1/F8 first with focused managed-runtime and presented-transform consumers, then F2/F5
+before expanding ordinary cooked delivery; F4 requires exact captured pixels rather than another
+late handle lookup. Task-result owner admission, replay publication and duplicated move decoding
+are independent follow-ups. Repair diagnostic and starter workflow gaps through real external
+projects, preserving generated identity and existing plugin/command owners.
+
+Use a starter and Two-Level as the two consumers for a compiled cooked-delivery entry after source
+agreement is sound. Isolate generated build inputs without a new dependency resolver, preserve
+importer observations and independent Player expectations, and move game-specific exact counts
+to qualification controls. This is runtime/author delivery work. UI, installed-tool activation,
+AccessKit source selection and interactive import/discard fixes remain queued with the paused
+Editor program. The study records fresh source confirmation separately from external historical
+reproductions; it does not claim those defects are already repaired or reopen micro-benchmarks.
+
 ## Dependency Shape
 
 R numbers identify responsibilities, not a mandatory linear implementation order. The previous
@@ -5239,7 +5260,20 @@ an authored grading Material and Meadow palette Image through source and cooked 
 Host/public 107 and affected game/cook 305 pass; hardware DX12 verifies positive and negative
 pixels and replays four original inputs after actual travel and Runtime retirement. Source-free
 headless, desktop Save/fresh Restore and WASAPI delivery pass. All definition comparisons remain
-in preparation/publication. General additive TileSet/native services and full R9/R10/R12 stay open.
+in preparation/publication. General additive TileSet/native services and full R9/R10/R12 remain
+open at that historical checkpoint.
+
+The [TileSet-backed region successor](2026-10-20-persistent-two-level-game-plan.md#tileset-region-implementation-and-qualification)
+at `759daae` and `c32d2ad` extends the original `TileSetAssets` publication transaction with explicit exact-definition reuse.
+The Host tracks use per region, shares the original slot/version and retires the final live user's
+declaration. Both source and cooked rooms now draw authored eight-cell Tilemaps while retaining
+the collectible Material workflow. The catalog has fifteen members. Tilemap 119, Host/public 107,
+affected gameplay/cook 313 and all three actual source-free delivery trajectories pass. Hardware
+DX12 verifies distinct floor pixels, independent disappearance and four original packet replays
+after real travel and Runtime close. The owning record distinguishes the missing processed-domain
+allowance and incorrect identity-versus-residency fixture assertion from final qualification.
+No per-frame definition audit, new resource owner or performance claim is added. General additive
+native services, destination sets and full R9/R10/R12 remain open.
 
 R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
 UI, semantic-command and future agent use through the same domain owners and exact outcomes.

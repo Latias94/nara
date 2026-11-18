@@ -72,7 +72,11 @@ their last user leaves. Material-backed additions use the same rule for a comple
 definition, its Shader and resolved Image references. An identical live Material reuses the
 original handle and version. Changed defaults, Shader inputs or texture selections refuse the
 new activation while another Scene owns that publication. Retained bindings keep their exact
-generation after live assets retire. Prepared primary travel retires the prior primary and all live Host
+generation after live assets retire. TileSet-backed additions share through the original
+`TileSetAssets` declaration claim. The complete declaration and captured Image must match;
+sharing keeps the original handle, slot and version. Each region records its use, and the
+final live user releases the declaration through the same owner. Atlas dependency rebuilds
+retain their existing publication barrier. Prepared primary travel retires the prior primary and all live Host
 additions in its original transaction. The additional retirement limit covers these additions
 and any further retirements supplied by the product. Retained-source Restart requires closed
 additions. For source play, configure the original loader with
@@ -80,6 +84,7 @@ additions. For source play, configure the original loader with
 destination when selecting `ProjectContentLimits::with_retained_generations`.
 [Ordinary game workflow](../../samples/two-level-game/README.md#play-the-side-room)
 [Material-backed regions](../plans/2026-10-20-persistent-two-level-game-plan.md#material-backed-concurrent-regions-successor)
+[TileSet-backed regions](../plans/2026-10-20-persistent-two-level-game-plan.md#tileset-backed-concurrent-regions-successor)
 
 ## Capture And Acquisition
 
