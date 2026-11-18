@@ -139,6 +139,102 @@
         },
         "context": "gameplay",
         "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-a",
+        "input": {
+          "GamepadButton": 15
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-d",
+        "input": {
+          "GamepadButton": 16
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-w",
+        "input": {
+          "GamepadButton": 13
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.move-s",
+        "input": {
+          "GamepadButton": 14
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.e",
+        "input": {
+          "GamepadButton": 0
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.q",
+        "input": {
+          "GamepadButton": 2
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.m",
+        "input": {
+          "GamepadButton": 3
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.k",
+        "input": {
+          "GamepadButton": 4
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.l",
+        "input": {
+          "GamepadButton": 5
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.r",
+        "input": {
+          "GamepadButton": 9
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.b",
+        "input": {
+          "GamepadButton": 8
+        },
+        "context": "gameplay",
+        "transform": "Button"
+      },
+      {
+        "action": "two-level-game.g",
+        "input": {
+          "GamepadButton": 1
+        },
+        "context": "gameplay",
+        "transform": "Button"
       }
     ]
   }

@@ -44,8 +44,9 @@ pub fn input_product() -> AssetProductRef {
 
 /// Resolves left, right, up and down from the installed PRIMARY map for exact continuation.
 ///
-/// Each action must have one keyboard Button source in the enabled gameplay context. Keys must
-/// be distinct and have no other bindings. Native adapters decide their own platform support.
+/// Each action must have one keyboard Button source in the enabled gameplay context; gamepad
+/// Button alternatives are allowed. Keys must be distinct and have no other bindings. Native
+/// adapters decide their own platform support.
 /// Other valid gameplay mappings remain usable but cannot provide this exact keyboard capture.
 pub fn movement_bindings(world: &World) -> Result<[KeyboardActionBinding; 4], String> {
     let map = world
@@ -61,21 +62,34 @@ pub fn movement_bindings(world: &World) -> Result<[KeyboardActionBinding; 4], St
         let mut sources = map
             .bindings()
             .iter()
-            .filter(|binding| binding.action == action && binding.context == context);
-        let binding = sources
-            .next()
-            .ok_or_else(|| format!("movement action {action} is missing in gameplay context"))?;
-        if sources.next().is_some() {
+            .filter(|binding| binding.action == action && binding.context == context)
+            .peekable();
+        if sources.peek().is_none() {
             return Err(format!(
-                "movement action {action} has multiple sources in gameplay context"
+                "movement action {action} is missing in gameplay context"
             ));
         }
-        let (InputBinding::Key(key), ActionTransform::Button) = (binding.input, binding.transform)
-        else {
-            return Err(format!(
-                "movement action {action} requires one keyboard Button source"
-            ));
-        };
+        let mut key = None;
+        for binding in sources {
+            match (binding.input, binding.transform) {
+                (InputBinding::Key(source), ActionTransform::Button) => {
+                    if key.replace(source).is_some() {
+                        return Err(format!(
+                            "movement action {action} has multiple keyboard Button sources in gameplay context"
+                        ));
+                    }
+                }
+                (InputBinding::GamepadButton(_), ActionTransform::Button) => {}
+                _ => {
+                    return Err(format!(
+                        "movement action {action} requires one keyboard Button source and only gamepad Button alternatives"
+                    ));
+                }
+            }
+        }
+        let key = key.ok_or_else(|| {
+            format!("movement action {action} requires one keyboard Button source")
+        })?;
         Ok(KeyboardActionBinding {
             key,
             action,

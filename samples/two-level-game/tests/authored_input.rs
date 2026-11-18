@@ -132,6 +132,9 @@ fn write(project: &ProjectCopy, value: &Value) {
 fn rebound(project: &ProjectCopy) -> Value {
     let mut value = source(project);
     for binding in value["payload"]["bindings"].as_array_mut().unwrap() {
+        if binding["input"].get("Key").is_none() {
+            continue;
+        }
         let input = match binding["action"].as_str().unwrap() {
             "two-level-game.move-a" => json!({"Key": "ArrowLeft"}),
             "two-level-game.move-d" => json!({"Key": "ArrowRight"}),

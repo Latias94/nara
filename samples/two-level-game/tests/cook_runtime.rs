@@ -1232,7 +1232,9 @@ mod atlas_content {
         }
         let mut changed = false;
         for mut binding in original.definition().bindings().iter().cloned() {
-            if binding.action.as_str() == "two-level-game.move-w" {
+            if binding.action.as_str() == "two-level-game.move-w"
+                && matches!(binding.input, InputBinding::Key(_))
+            {
                 binding.input = InputBinding::Key(KeyCode::Character('i'));
                 changed = true;
             }

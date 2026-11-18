@@ -137,7 +137,7 @@ impl Fixture {
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
         let mut manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
-        for dependency in ["nara_rapier2d", "nara_sprite_animation"] {
+        for dependency in ["nara_rapier2d", "nara_sprite_animation", "nara_gilrs"] {
             let original = format!("path = \"../../crates/{dependency}\"");
             assert_eq!(
                 manifest.matches(&original).count(),

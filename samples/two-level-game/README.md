@@ -22,7 +22,8 @@ different global input rather than silently adopting the edit.
 
 Exact keyboard reconstruction reads the original Runtime's installed PRIMARY movement bindings.
 It requires one enabled keyboard Button source for each direction, with distinct keys and no key
-fanout. Ordinary valid multi-binding maps remain playable but can be ineligible for exact keyboard
+fanout. Gamepad Button alternatives can coexist with that keyboard inventory; actual extra held
+members or native services still need the original capture eligibility. Other valid multi-binding maps remain playable but can be ineligible for exact keyboard
 continuation. Native Windows reconciliation supports the same named keys, lowercase ASCII letters
 and digits as ordinary physical ingress. It does not guess uppercase or Unicode key positions.
 The original pre-Startup selection remains the reconstruction baseline; later runtime context or
@@ -113,6 +114,39 @@ The same rule applies to a changed TileSet atlas, sampler or tint. Cooked Player
 processed descriptor and actual Image dependency without requiring the source RON file.
 
 ## Build And Run
+
+### Optional Native Controller
+
+The source desktop executable can collect native controllers through the independently consumed
+[`nara_gilrs`](../../crates/nara_gilrs/README.md) package. Select both the build feature and runtime
+option explicitly:
+
+```text
+cargo run --features desktop,gamepad --bin desktop -- --gamepad
+```
+
+WASD remains available. The authored action map binds the D-pad to movement, South to travel,
+West to instance switching, North to marker placement, East to Lookout, Select to the north
+side room, Start to Retry, and the left/right shoulder buttons to Save/Restore. Save still
+requires an explicit `--save ABSOLUTE_PATH`. These are mapped positional buttons, independent
+of the glyphs printed on a particular controller. Analog stick samples are supported by the
+backend but are not movement bindings in this game's Button-based control scheme.
+
+Each current controller uses the explicitly selected PRIMARY window/seat. The same ActionMap
+combines keyboard and controller contributions, so releasing one source does not release another
+held source. Focus loss and physical disconnection terminate accepted controls through Input's
+original lifetime. Known controls held across reassignment/refocus wait for release or neutral;
+cached holds are not replayed. Gilrs's event cache is not an instantaneous hardware snapshot.
+
+Compiling `gamepad` without passing `--gamepad` does not initialize the backend. The optional
+source selection does not enable a cooked Player backend or add native controller state to the
+resume format. Exact development reconstruction can refuse the unrepresented native service.
+The existing keyboard-only continuation path remains independently supported. Managed native
+controller acquisition currently requires Windows WGI. Other platforms refuse before native
+acquisition until their backend's physical retirement contract is implemented. Native hardware
+and platform execution scope is recorded in the [owning unit](../../docs/plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor).
+
+### Ordinary Source Commands
 
 Run commands from this package directory. The optional desktop target needs the platform's normal
 native window and GPU support. Reuse the engine target directory and one build job when developing

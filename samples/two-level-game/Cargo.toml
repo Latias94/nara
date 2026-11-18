@@ -13,6 +13,7 @@ resolver = "3"
 
 [dependencies]
 nara = { path = "../..", default-features = false, features = ["runtime-2d", "serde"] }
+nara_gilrs = { path = "../../crates/nara_gilrs", optional = true }
 nara_rapier2d = { path = "../../crates/nara_rapier2d" }
 nara_sprite_animation = { path = "../../crates/nara_sprite_animation" }
 notify = { version = "=8.2.0", optional = true }
@@ -45,6 +46,7 @@ default = ["development"]
 development = ["nara/project-tooling", "dep:notify"]
 audio-cpal = ["dep:cpal", "dep:rtrb"]
 desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]
+gamepad = ["desktop", "dep:nara_gilrs"]
 cost-measurement = ["dep:windows-sys"]
 scene-work-observation = ["nara/scene-work-observation", "dep:tracing", "dep:tracing-subscriber"]
 cook = ["nara/project-tooling"]

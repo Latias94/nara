@@ -34,6 +34,9 @@ fn authored_arrow_bindings_reconstruct_and_reconcile_through_the_original_native
     let mut value: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     for binding in value["payload"]["bindings"].as_array_mut().unwrap() {
+        if binding["input"].get("Key").is_none() {
+            continue;
+        }
         let key = match binding["action"].as_str().unwrap() {
             "two-level-game.move-a" => "ArrowLeft",
             "two-level-game.move-d" => "ArrowRight",
@@ -48,6 +51,30 @@ fn authored_arrow_bindings_reconstruct_and_reconcile_through_the_original_native
     assert!(output.contains(
         "two_level_desktop_reconstruction_input: keys=[ArrowLeft, ArrowRight, ArrowUp, ArrowDown]"
     ));
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+#[ignore = "requires Windows hardware presentation; initializes actual WGI with no controller required, run serially"]
+fn optional_native_controller_reaches_first_present_and_retires_with_the_original_runtime() {
+    let backend = std::env::var("WGPU_BACKEND").expect("select exactly one native backend");
+    assert!(matches!(backend.as_str(), "dx12" | "vulkan"));
+    assert_eq!(
+        std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref(),
+        Ok("0")
+    );
+    let command = SupervisedProcessCommand::new(
+        env!("CARGO_BIN_EXE_desktop"),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+    .arguments(["--gamepad", "--verify-first-present"])
+    .environment("WGPU_BACKEND", backend)
+    .environment("NARA_WGPU_FORCE_FALLBACK", "0");
+    let output = run_native(&command);
+    assert!(
+        output.contains("two_level_desktop: ok first_present_verified=true"),
+        "{output}"
+    );
 }
 
 fn qualify(project: Option<&Path>) -> String {
@@ -66,8 +93,27 @@ fn qualify(project: Option<&Path>) -> String {
     if let Some(project) = project {
         command = command.arguments(["--project".as_ref(), project.as_os_str()]);
     }
+    let output = run_native(&command);
+    for expected in [
+        "two_level_desktop_reconstruction_source: ok canonical_bytes=",
+        "two_level_desktop_reconstruction_preflight: ok deadline_refused=true configuration_refused=true fresh_capture_unchanged=true",
+        "two_level_desktop_reconstruction_retired: role=original native_destroyed=true surface_retired=true provider_released=true physical_loop_recovered=true",
+        "two_level_desktop_reconstruction_retired: role=candidate native_destroyed=true surface_retired=true provider_released=true physical_loop_recovered=true",
+        "two_level_desktop_reconstruction_continuation: ok held_steps=3 new_started_commands=0 release_gap_stop=true no_stuck_hold=true",
+        "two_level_desktop_reconstruction_pixels: ok original_app_frame=",
+        "two_level_desktop_reconstruction_animation: ok atlas_frames=4 paused_equal=true retained_replays=6 restored_first_frame=true",
+        "two_level_desktop_reconstruction_collision: ok wall_stop=true blocked_animation=true diagonal_slide=true original_step=true retained_replays=2 native_retired_before_replay=true",
+        "equal_replays=true",
+        "two_level_desktop_reconstruction: ok sequential_runtimes=true shared_physical_loop=true canonical_bytes=true fresh_owners=true restored_presentation=true native_cleanup=true",
+    ] {
+        assert!(output.contains(expected), "missing {expected:?}:\n{output}");
+    }
+    output
+}
+
+fn run_native(command: &SupervisedProcessCommand) -> String {
     let mut process = SupervisedProcessOwner::spawn(
-        &command,
+        command,
         ProcessLogLimits::try_from_counts(512, 256 * 1024).unwrap(),
     )
     .unwrap();
@@ -120,19 +166,5 @@ fn qualify(project: Option<&Path>) -> String {
     assert!(receipt.containment_empty() && receipt.readers_stopped() && receipt.output_drained());
     assert!(!receipt.force_killed());
     assert!(!process.output_loss_observed());
-    for expected in [
-        "two_level_desktop_reconstruction_source: ok canonical_bytes=",
-        "two_level_desktop_reconstruction_preflight: ok deadline_refused=true configuration_refused=true fresh_capture_unchanged=true",
-        "two_level_desktop_reconstruction_retired: role=original native_destroyed=true surface_retired=true provider_released=true physical_loop_recovered=true",
-        "two_level_desktop_reconstruction_retired: role=candidate native_destroyed=true surface_retired=true provider_released=true physical_loop_recovered=true",
-        "two_level_desktop_reconstruction_continuation: ok held_steps=3 new_started_commands=0 release_gap_stop=true no_stuck_hold=true",
-        "two_level_desktop_reconstruction_pixels: ok original_app_frame=",
-        "two_level_desktop_reconstruction_animation: ok atlas_frames=4 paused_equal=true retained_replays=6 restored_first_frame=true",
-        "two_level_desktop_reconstruction_collision: ok wall_stop=true blocked_animation=true diagonal_slide=true original_step=true retained_replays=2 native_retired_before_replay=true",
-        "equal_replays=true",
-        "two_level_desktop_reconstruction: ok sequential_runtimes=true shared_physical_loop=true canonical_bytes=true fresh_owners=true restored_presentation=true native_cleanup=true",
-    ] {
-        assert!(output.contains(expected), "missing {expected:?}:\n{output}");
-    }
     output
 }

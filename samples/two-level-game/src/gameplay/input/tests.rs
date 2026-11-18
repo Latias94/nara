@@ -117,6 +117,11 @@ fn source_and_cooked_recipes_share_game_input_composition() {
         1,
     );
     assert_eq!(ID, PluginId::new("two-level-game.input"));
+    assert!(
+        source
+            .entries()
+            .all(|entry| entry.plugin_id() != PluginId::new("nara.gilrs"))
+    );
 }
 
 #[test]
@@ -147,7 +152,28 @@ fn authored_defaults_decode_with_intrinsic_primary_identity_and_original_keys() 
         ("two-level-game.g", 'g'),
     ]
     .map(|(name, key)| ActionBinding::key(ActionId::new(name).unwrap(), KeyCode::Character(key)));
-    assert_eq!(candidate.definition().bindings(), expected.as_slice());
+    let bindings = candidate.definition().bindings();
+    assert_eq!(bindings.len(), expected.len() * 2);
+    assert_eq!(
+        bindings
+            .iter()
+            .filter(|binding| matches!(binding.input, InputBinding::Key(_)))
+            .cloned()
+            .collect::<Vec<_>>(),
+        expected,
+    );
+    for keyboard in &expected {
+        let alternatives = bindings
+            .iter()
+            .filter(|binding| {
+                binding.action == keyboard.action
+                    && matches!(binding.input, InputBinding::GamepadButton(_))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(alternatives.len(), 1);
+        assert_eq!(alternatives[0].transform, ActionTransform::Button);
+        assert_eq!(alternatives[0].context, keyboard.context);
+    }
     let world = world_with_candidate(candidate);
     assert_eq!(
         movement_bindings(&world)
@@ -155,6 +181,38 @@ fn authored_defaults_decode_with_intrinsic_primary_identity_and_original_keys() 
             .map(|binding| binding.key),
         ['a', 'd', 'w', 's'].map(KeyCode::Character),
     );
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn authored_controller_buttons_use_the_backend_portable_codes() {
+    use nara_gilrs::GamepadButton;
+
+    let candidate = default_candidate();
+    for (name, button) in [
+        ("two-level-game.move-a", GamepadButton::DPadLeft),
+        ("two-level-game.move-d", GamepadButton::DPadRight),
+        ("two-level-game.move-w", GamepadButton::DPadUp),
+        ("two-level-game.move-s", GamepadButton::DPadDown),
+        ("two-level-game.e", GamepadButton::South),
+        ("two-level-game.q", GamepadButton::West),
+        ("two-level-game.m", GamepadButton::North),
+        ("two-level-game.k", GamepadButton::LeftShoulder),
+        ("two-level-game.l", GamepadButton::RightShoulder),
+        ("two-level-game.r", GamepadButton::Start),
+        ("two-level-game.b", GamepadButton::Select),
+        ("two-level-game.g", GamepadButton::East),
+    ] {
+        assert!(
+            candidate
+                .definition()
+                .bindings()
+                .contains(&ActionBinding::gamepad_button(
+                    ActionId::new(name).unwrap(),
+                    button.code()
+                ))
+        );
+    }
 }
 
 #[test]
@@ -244,13 +302,16 @@ fn capture_requires_primary_mapping_and_never_borrows_another_seat() {
 fn capture_requires_each_semantic_movement_action_in_gameplay_context() {
     for replacement in [None, Some(json!("two-level-game.foreign"))] {
         let candidate = edited_candidate(|value| {
+            let bindings = value["payload"]["bindings"].as_array_mut().unwrap();
             if let Some(name) = replacement {
-                value["payload"]["bindings"][0]["action"] = name;
+                for binding in bindings
+                    .iter_mut()
+                    .filter(|binding| binding["action"] == "two-level-game.move-a")
+                {
+                    binding["action"] = name.clone();
+                }
             } else {
-                value["payload"]["bindings"]
-                    .as_array_mut()
-                    .unwrap()
-                    .remove(0);
+                bindings.retain(|binding| binding["action"] != "two-level-game.move-a");
             }
         });
         assert_capture_refused(&world_with_candidate(candidate), "move-a is missing");
@@ -263,7 +324,14 @@ fn capture_requires_each_semantic_movement_action_in_gameplay_context() {
                 "context": "menu",
                 "enabled": true
             }));
-        value["payload"]["bindings"][0]["context"] = json!("menu");
+        for binding in value["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .filter(|binding| binding["action"] == "two-level-game.move-a")
+        {
+            binding["context"] = json!("menu");
+        }
     });
     assert_capture_refused(&world_with_candidate(candidate), "move-a is missing");
 }
@@ -288,7 +356,7 @@ fn capture_reads_live_context_state_and_does_not_reenable_it() {
 }
 
 #[test]
-fn multiple_sources_start_and_drive_gameplay_but_refuse_exact_capture() {
+fn multiple_keyboard_sources_start_and_drive_gameplay_but_refuse_exact_capture() {
     let candidate = edited_candidate(|value| {
         let mut alternative = value["payload"]["bindings"][0].clone();
         alternative["input"]["Key"]["Character"] = json!("j");
@@ -305,7 +373,7 @@ fn multiple_sources_start_and_drive_gameplay_but_refuse_exact_capture() {
     GameInputPlugin.build(&mut app).unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
-    assert_capture_refused(runtime.world(), "multiple sources");
+    assert_capture_refused(runtime.world(), "multiple keyboard Button sources");
 
     let admitted = runtime
         .with_driver_scope(|scope| {
@@ -328,7 +396,36 @@ fn multiple_sources_start_and_drive_gameplay_but_refuse_exact_capture() {
             .accepted,
         1,
     );
-    assert_capture_refused(runtime.world(), "multiple sources");
+    assert_capture_refused(runtime.world(), "multiple keyboard Button sources");
+}
+
+#[test]
+fn capture_accepts_one_keyboard_source_with_gamepad_button_alternatives_in_any_order() {
+    let candidate = edited_candidate(|value| {
+        let mut alternative = value["payload"]["bindings"][0].clone();
+        alternative["input"] = json!({ "GamepadButton": 65535 });
+        let bindings = value["payload"]["bindings"].as_array_mut().unwrap();
+        bindings.push(alternative);
+        bindings.reverse();
+    });
+    let world = world_with_candidate(candidate);
+    assert_eq!(
+        movement_bindings(&world)
+            .unwrap()
+            .map(|binding| binding.key),
+        ['a', 'd', 'w', 's'].map(KeyCode::Character),
+    );
+}
+
+#[test]
+fn capture_still_accepts_keyboard_only_definitions() {
+    let candidate = edited_candidate(|value| {
+        value["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|binding| binding["input"].get("Key").is_some());
+    });
+    assert!(movement_bindings(&world_with_candidate(candidate)).is_ok());
 }
 
 #[test]
@@ -340,18 +437,19 @@ fn capture_refuses_duplicate_movement_keys() {
 }
 
 #[test]
-fn capture_refuses_additional_nonkeyboard_sources_for_movement() {
-    for input in [json!({ "Mouse": "Left" }), json!({ "GamepadButton": 0 })] {
-        let candidate = edited_candidate(|value| {
-            let mut alternative = value["payload"]["bindings"][0].clone();
-            alternative["input"] = input;
-            value["payload"]["bindings"]
-                .as_array_mut()
-                .unwrap()
-                .push(alternative);
-        });
-        assert_capture_refused(&world_with_candidate(candidate), "multiple sources");
-    }
+fn capture_refuses_additional_mouse_sources_for_movement() {
+    let candidate = edited_candidate(|value| {
+        let mut alternative = value["payload"]["bindings"][0].clone();
+        alternative["input"] = json!({ "Mouse": "Left" });
+        value["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .push(alternative);
+    });
+    assert_capture_refused(
+        &world_with_candidate(candidate),
+        "only gamepad Button alternatives",
+    );
 }
 
 #[test]
@@ -378,30 +476,31 @@ fn capture_refuses_foreign_key_fanout_even_in_a_disabled_context() {
 }
 
 #[test]
-fn capture_refuses_nonkeyboard_sources_and_nonbutton_transforms() {
-    for (input, transform, error) in [
-        (
-            json!({ "Mouse": "Left" }),
-            json!("Button"),
-            "keyboard Button",
-        ),
-        (
-            json!({ "GamepadButton": 0 }),
-            json!("Button"),
-            "keyboard Button",
-        ),
-        (
-            json!({ "Key": { "Character": "a" } }),
-            json!({ "AxisButton": { "direction": "Negative" } }),
-            "keyboard Button",
-        ),
+fn capture_refuses_movement_without_a_keyboard_source() {
+    for input in [
+        json!({ "Mouse": "Left" }),
+        json!({ "GamepadButton": 65535 }),
     ] {
         let candidate = edited_candidate(|value| {
             value["payload"]["bindings"][0]["input"] = input;
-            value["payload"]["bindings"][0]["transform"] = transform;
         });
-        assert_capture_refused(&world_with_candidate(candidate), error);
+        assert_capture_refused(&world_with_candidate(candidate), "keyboard Button");
     }
+}
+
+#[test]
+fn capture_refuses_nonbutton_movement_transforms_with_gamepad_alternatives() {
+    let candidate = edited_candidate(|value| {
+        for binding in value["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .filter(|binding| binding["action"] == "two-level-game.move-a")
+        {
+            binding["transform"] = json!({ "AxisButton": { "direction": "Negative" } });
+        }
+    });
+    assert_capture_refused(&world_with_candidate(candidate), "keyboard Button");
 }
 
 fn semantic_input_app() -> App {
