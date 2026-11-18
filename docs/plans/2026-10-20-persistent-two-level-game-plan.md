@@ -16,6 +16,80 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Deferred Additive Region Successor
+
+Add a playable side room admitted through a Deferred Scene reference from Meadow. The player
+can keep moving while the original Scene request worker prepares the room. Its authored Sprite
+and local interaction become visible together at an exclusive boundary. Closing the room ends
+its exact occurrence and releases its own Image publication. The same room can then load again
+with a fresh instance identity. Preserve the original level, simulation clock, input and game
+progress around the complete operation.
+
+Use the original hosted request slot, World, Scene materializer, asset catalogue and CPU Image
+publication path in both source and cooked play. The deferred target belongs to the current
+admitted closure. A product that is merely present in the pack grants no activation authority.
+Preparation and cancellation keep their original physical task custody. An active addition
+retains its own data and resource receipts. Identical Images may reuse the current level's
+publication. A conflict on a live Image refuses before the first mutation.
+
+The first consumer has one open side room. Close it before primary replacement or exact game
+capture. Ordinary checkpoint restoration continues to reconstruct permanent game progress. Test
+the cooperative load, cancellation or refusal with incumbent play, exact unload, fresh reopen,
+and packaged execution without source files. This unit leaves coordinated multi-region travel,
+scene-scoped native services and complete ADR 0089 acceptance open.
+
+Godot separates threaded resource requests and polling from `PackedScene` instantiation. Bevy's
+Scene spawn writes an admitted scene into the receiving World through its ordinary spawn path.
+Nara uses those ownership boundaries with its existing task custody and product-scoped receipt.
+[Godot resource loading](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/io/resource_loader.cpp#L887)
+[Godot scene instantiation](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/scene/resources/packed_scene.cpp#L2582)
+[Bevy scheduled Scene spawn](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_scene/src/spawn.rs#L690)
+
+### Deferred Additive Region Execution Evidence
+
+Implementation and the source-free consumer land at `81d1b6b`.
+
+The focused host and source-loading selection passes 94/94 in
+`2a9bee30-c617-4738-bf47-28b1423a7b22` on Windows with Rust 1.95.0. It covers physical cancellation,
+an admitted Deferred source under `assets/`, cooked admission through a verified codec edge,
+the last-good Image after failed reload, and asset cleanup after the original occurrence has
+already retired. The existing public startup fixture uses the current borrowed codec input API.
+
+The gameplay and cooked-content selection passes 240/240 in
+`dfddf780-3179-4a87-88ac-4ea2c5faa7f8`, with seven explicitly excluded tests. This release-profile
+run covers the sample library, source game, side room, cooked input and asset definitions, Sound
+Bank, exact state capture and replay. The source game keeps movement and the original Scene
+while the room prepares, refuses corrupt pixels and a conflicting shared Image, closes the room,
+and reopens it with a fresh instance. The cooked in-process game opens and unloads the same room
+after the source disappears. The retained pixel control keeps the old value usable after unload.
+
+Independent review confirms the canonical source path is part of the decoded-generation identity.
+Cooked admission retains Deferred targets reached through verified Scene or asset-codec edges.
+The Host can finish exact unload after the previous Image reload attempt fails or after the
+same Scene was fully retired through the lower-level operation. Invalid live facts continue to
+refuse before publication. These checks run in the original load/activate/unload operations.
+
+The actual release cooker passes the relocated headless and WASAPI Player trajectories in
+`ea5fda6e-131c-4dcf-95f6-8c1b180cdd24`. The same selection first stops in the desktop scripted
+control because the fixture requires the opt-in Sprite field on a process launched without
+`--observe`. The physical side-room trajectory has already run at that point. The desktop rerun
+restricts the Sprite assertion to observation-enabled windows and keeps the shared runtime checks
+for every Player mode.
+
+The final desktop trajectory passes 1/1 in `0debe7dd-483a-4ceb-ac36-9f13b64b7940`. The
+ordinary hardware DX12 Player receives physical `B`, `W` and `B` from a relocated source-free
+release. The opened room adds one visible relic Sprite to the stock draw batches joined to the
+original native presentation receipt. Pickup hides that draw, and unload removes the relic Image
+from live residency while keeping the same primary Scene instance. The same process continues
+through travel and Save. A fresh process restores and continues the original game, including
+twenty more travels. The existing software first-present and physical retirement controls pass.
+This covers same-frame stock draw inputs and native submission on Windows. GPU scanout, broader
+multi-region streaming, non-Image companion assets and foreign-platform execution remain open.
+
+Scoped correctness Clippy, both formatting checks, the changed document links, and the authored
+JSON/TOML checks pass. The work follows the Foundation
+[runtime delivery priority](2026-10-23-foundation-architecture-rebaseline-plan.md#november-17-runtime-delivery-priority).
+
 ## Textured Prefab Runtime Successor
 
 The marker's child declares a dedicated Image in the authored Prefab. The owning level declares

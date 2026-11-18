@@ -82,12 +82,13 @@ the last collection owner drops. This allows a Runtime-persistent sound bank to 
 current/prepared Scene generations. A domain product that owns an Image or Material view still
 retains that view's independently required generation custody; collection escape cannot remove it.
 
-This Trial does not change this ADR's `Proposed` status and does not accept asynchronous loading,
-additive scenes, multiple active instances, a public scene manager/session, a provider registry,
-active-set revisions, retained-entity travel, or scene-scoped service retirement. Scratch entities
-may continue to exist only inside an exclusive, unpublished `World` transaction; that is not the
-World-free asynchronous candidate described by the broader proposal. Full ADR acceptance still
-requires all Admission Evidence below.
+ADR 0117 also covers the bounded additive side room.
+Its authored Deferred target prepares asynchronously while the primary Scene remains playable.
+One companion activates and unloads explicitly through the original Scene and Image owners.
+The primary Scene is replaced only after the companion closes. This ADR remains Proposed for
+active-set authority and coordinated travel, general service retirement and additional worlds.
+Full admission still requires the evidence below.
+[Side room implementation and evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-successor)
 
 ## Decision
 

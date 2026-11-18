@@ -2170,6 +2170,14 @@ records 77 passing release regressions and five Windows paths for source-free pa
 Restore, WASAPI and DX12 readback. Resource residency and retirement stay with the containing
 Scene and retained render inputs.
 
+The [Deferred additive region](../../plans/2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-execution-evidence)
+at `81d1b6b` adds one Image-only companion to the original source and cooked Host under ADR 0117.
+It keeps the primary Scene and clock active during preparation, then activates and unloads by exact
+occurrence. The room can share a primary Image and release its separate relic Image while retained
+render inputs remain valid. Host/source 94, sample 240 and all three Windows cooked Player paths
+pass. The broader active-set, cross-region travel and native service lifetime design remains
+Proposed in ADR 0089.
+
 The normalized seat/replay unit's final API review also removes the ordinary consumer's hidden Input scheduling and raw UI
 completion calls. Public `InputSet` documents existing ordering; `route_pending_ui_input`
 synchronously lets a custom policy return decisions while the original owner finalizes each

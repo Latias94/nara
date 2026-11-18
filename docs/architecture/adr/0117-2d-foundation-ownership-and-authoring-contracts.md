@@ -135,12 +135,26 @@ Image allocation, rather than retaining the predecessor's decoded generation ind
 a finite current-level receipt, not a general asset reference-counting service or native rollback.
 
 Hosted Scene preparation uses the original candidate, frozen RuntimePlan and shared content-loader
-budget. Admit only startup or declared delivery roots. Existing I/O task workers prepare content
+budget. Travel admits startup or declared delivery roots. Existing I/O task workers prepare content
 without the World; the owner exposes a read-only target before an explicit protected commit. One
 request/result slot remains occupied until cancellation physically returns, and terminal results
 require exact-ID acknowledgement. Runtime close revokes publication interest and existing Tasks
 retain physical worker custody. A later selected closure is not another executable startup
 agreement: its records decode against the already admitted frozen native schema authority.
+
+The additive side room uses the same request slot for one companion selected from the primary
+Scene's admitted Deferred dependencies. The source request binds the captured target Product
+and its canonical path. The processed request uses a validated `Reference` edge of the retained
+primary closure. A Scene added through this route has its own occurrence and exact unload
+receipt in the same World. Travel and Retry require the companion to close first.
+
+The companion retains ordinary Image publications and may reuse an identical publication owned
+by the primary Scene. Unload retires the exact occurrence and its own publications. A failed
+reload with the same last-good Image leaves the publication eligible for retirement. An already
+retired original occurrence permits the Host to finish its remaining Image and catalog cleanup.
+Retained render inputs keep their captured allocations. TileSet, Material and native service
+lifetimes require their own additive contracts under the broader ADR 0089 proposal.
+[Side room implementation and evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-successor)
 
 Source component values may use component-local immutable storage, independent of raw documents,
 resolvers and snapshots. Public source record/document cloning preserves independent values;

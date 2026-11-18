@@ -60,6 +60,17 @@ actual Scene sidecars. Ordinary source preparation retains its Immediate documen
 resolved Deferred target facts; strict saved-source Check/Export validates both demands. Those
 source receipts and declared-root checks remain separate from this immutable processed base.
 
+Use `ProjectScenes::request_additive(product)` in a first-party Host to prepare a Deferred Scene
+from the current primary Scene's admitted closure. The ordinary travel roots remain separate.
+Continue simulation while the request is Preparing. At an exclusive boundary, inspect the Ready
+candidate through `ProjectScenes::scope`, then call `activate_prepared_project_scene` with an
+explicit `SceneOccurrenceKey`. Retain the resulting `SpawnedSceneInstance` for unload and
+acknowledge the original terminal request. To cancel, wait for physical return before releasing
+the slot. `unload_project_scene_addition` takes the exact receipt. It removes the companion's
+entities and owned Image publications. The primary remains live, including any shared Image
+publication. The Host admits one companion alongside the primary. Unload it before requesting
+another Scene. See the [ordinary game workflow](../../samples/two-level-game/README.md#play-the-side-room).
+
 ## Capture And Acquisition
 
 Construct the content catalog from a resolved executable configuration and processed member

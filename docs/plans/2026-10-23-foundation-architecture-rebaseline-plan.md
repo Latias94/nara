@@ -1612,6 +1612,13 @@ The ten-member catalog retains two travel roots. The
 records 77 passing release-profile regressions and five Windows native acceptance paths spanning
 source-free delivery, Save/Restore, WASAPI and hardware DX12 readback.
 
+The [Deferred additive region](2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-successor)
+uses the original request slot for Meadow's optional side room. One companion prepares while the
+primary Scene keeps running. Activation installs its own occurrence and Image, then unload
+retires those exact publications. Source and cooked execution share the game action. The cooked
+catalog has twelve members and keeps Meadow and Cavern as its travel roots. Coordinated active-set
+travel, native domain lifetimes and broader ADR 0089 acceptance remain open.
+
 The separate [Rust 1.100 impact note](../research/2026-11-13-rust-1-100-impact.md) records the newly
 installed compiler's relevant changes and a passing Input/Gameplay production-library check.
 The complete unit retains its Rust 1.95 runtime qualification baseline; the bounded 1.100 probe
@@ -5206,6 +5213,11 @@ the registry ownership sub-unit is qualified; the complete production/consolidat
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
+
+The [Two-Level Game side room](2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-execution-evidence)
+extends the existing source and cooked Players through the same Deferred Scene and Image owners.
+Its catalog distinguishes optional room data from startup and travel roots. Its execution record owns
+the selected platform and Player package evidence for this limited additive workflow.
 
 R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
 UI, semantic-command and future agent use through the same domain owners and exact outcomes.

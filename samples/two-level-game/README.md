@@ -78,10 +78,19 @@ placement creates its own entities, and all occurrences share the level's reside
 Edit the badge PNG to change its appearance. A fresh load reads the authored image. Retry uses
 the committed image and template, including when the files have changed since loading.
 
-The cooked catalog has ten members, including three Scenes and four Images. The marker Scene
-declares its Image dependency. Meadow and Cavern are the two travel roots. Regenerate authoring
-bundles that predate native binding revision 4 for `MarkerPalette` and `MarkerLink`, then recook
-existing installations. Existing checkpoint and resume files retain their wire formats.
+The cooked catalog has twelve members, including four Scenes and five Images. Meadow and Cavern
+are the two travel roots. The marker Scene declares its badge Image. Meadow declares the side
+room as a Deferred dependency. Regenerate authoring bundles that predate native binding revision
+5 and recook existing installations. Checkpoint and resume retain their wire formats. Exact resume
+still requires a compatible authored source and executable schema.
+
+### Play The Side Room
+
+Press **B** in Meadow to open the side room. Keep moving during loading. From the starting point,
+walk north toward the turquoise relic. Touch it to collect it for that visit. Press **B** again to
+close the room, or cancel while it is still loading. Open it again for a fresh visit. The quest is
+transient. Normal checkpoints record the main game's progress. Close the room before travel,
+Retry, checkpoint restore or exact game capture.
 
 ## Build And Run
 
@@ -181,8 +190,8 @@ cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --lo
 Select `--runtime audio-desktop` on the existing cooker built with `cook,desktop,audio-cpal`.
 Use the same explicit project/output/target/tool paths documented for the desktop Player below.
 This selects binary `player_audio`, content profile `two-level-audio-desktop-shipping` and exactly
-`cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain three
-Scenes, four Images, one shared Sound Bank, one Sprite clip resource and global Input. Both travel
+`cooked-player,desktop,audio-cpal` with defaults disabled. All three placements contain four
+Scenes, five Images, one shared Sound Bank, one Sprite clip resource and global Input. Both travel
 Scenes require the atlas and clip Product. The marker Scene requires its badge Image. Input is a
 separate global startup root. The finite content fence includes the action map, the clip and bank
 descriptors, their metadata and both raw WAVs. Cook and Check prepare CPU content without opening
@@ -249,8 +258,8 @@ key or that a particular platform has passed the full interactive trajectory.
 The optional `cook` binary builds and publishes the same game as a native headless or desktop
 Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
 domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
-publisher. The pack contains both levels, the marker Scene, four Images, one shared Sound Bank,
-Sprite clips and startup Input.
+publisher. The pack contains both levels, the marker Scene, Meadow's side room, five Images, one
+shared Sound Bank, Sprite clips and startup Input.
 Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
 `LevelId`, separate from logical level instances.
 
