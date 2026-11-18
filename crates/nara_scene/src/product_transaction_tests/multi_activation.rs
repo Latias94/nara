@@ -115,8 +115,8 @@ fn replacement_preserves_the_primary_root_slot_after_retiring_a_preceding_activa
         })
         .unwrap();
     let second = fixture.entity(1, &scene_id("marker"));
-    let selections = [SceneProductRetirement::Instance(fixture.markers[0].clone())];
-    let report = fixture.replace(&selections, 2);
+    let selections = [SceneProductRetirement::Instance(&fixture.markers[0])];
+    let report = fixture.base.replace(&selections, 2);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let replacement = spawned_entity(&fixture.base.world, &report, &fixture.base.target);
     assert_eq!(
@@ -189,14 +189,20 @@ impl MultiActivationFixture {
             })
             .unwrap()
     }
+}
 
-    fn replace(&mut self, selections: &[SceneProductRetirement], limit: usize) -> SceneSpawnReport {
+impl ReplacementFixture {
+    fn replace(
+        &mut self,
+        selections: &[SceneProductRetirement<'_>],
+        limit: usize,
+    ) -> SceneSpawnReport {
         replace_expanded_scene_with_product(
-            &mut self.base.world,
-            &self.base.registry,
-            &self.base.replacement,
+            &mut self.world,
+            &self.registry,
+            &self.replacement,
             None,
-            &self.base.current,
+            &self.current,
             transaction_limits(1, limit),
             selections,
             |overlay| {
@@ -269,11 +275,11 @@ fn complete_markers_and_runtime_entity_retire_in_one_original_product_replacemen
     );
     let runtime = spawn_retirement_token(&mut fixture.base.world);
     let selections = [
-        SceneProductRetirement::Instance(fixture.markers[0].clone()),
-        SceneProductRetirement::Instance(fixture.markers[1].clone()),
+        SceneProductRetirement::Instance(&fixture.markers[0]),
+        SceneProductRetirement::Instance(&fixture.markers[1]),
         SceneProductRetirement::Entity(runtime),
     ];
-    let report = fixture.replace(&selections, 5);
+    let report = fixture.base.replace(&selections, 5);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 6);
     assert_eq!(fixture.base.world.resource::<RunState>().0, 2);
@@ -345,8 +351,6 @@ fn complete_markers_and_runtime_entity_retire_in_one_original_product_replacemen
 #[test]
 fn duplicate_foreign_stale_and_overlapping_selections_preserve_original_product() {
     let mut fixture = MultiActivationFixture::new();
-    let duplicate = SceneProductRetirement::Instance(fixture.markers[0].clone());
-    let primary = SceneProductRetirement::Instance(fixture.base.current.clone());
     let overlap_entity = fixture.entity(0, &scene_id("marker"));
     let overlap = adopt_token(&mut fixture.base.world, overlap_entity);
     let mut foreign_world = World::new();
@@ -359,9 +363,8 @@ fn duplicate_foreign_stale_and_overlapping_selections_preserve_original_product(
     )
     .instance
     .unwrap();
-    let stale = fixture.markers[1].clone();
-    retire_and_despawn_scene_instance(&mut fixture.base.world, &stale).unwrap();
-    fixture.markers[1] = spawn_scene(
+    retire_and_despawn_scene_instance(&mut fixture.base.world, &fixture.markers[1]).unwrap();
+    let replacement_marker = spawn_scene(
         &mut fixture.base.world,
         &fixture.base.registry,
         &fixture.marker,
@@ -370,16 +373,30 @@ fn duplicate_foreign_stale_and_overlapping_selections_preserve_original_product(
     )
     .instance
     .unwrap();
+    let stale = std::mem::replace(&mut fixture.markers[1], replacement_marker);
+    let duplicate = SceneProductRetirement::Instance(&fixture.markers[0]);
+    let primary = SceneProductRetirement::Instance(&fixture.base.current);
     for selections in [
-        vec![duplicate.clone(), duplicate.clone()],
+        vec![duplicate, duplicate],
         vec![primary],
-        vec![SceneProductRetirement::Instance(foreign)],
-        vec![SceneProductRetirement::Instance(stale)],
+        vec![SceneProductRetirement::Instance(&foreign)],
+        vec![SceneProductRetirement::Instance(&stale)],
         vec![duplicate, SceneProductRetirement::Entity(overlap)],
     ] {
         let entities = fixture.base.entity_ids();
         let stats = fixture.base.world.resource::<WorldIdentityDomain>().stats();
-        let report = fixture.replace(&selections, 6);
+        let report = replace_expanded_scene_with_product(
+            &mut fixture.base.world,
+            &fixture.base.registry,
+            &fixture.base.replacement,
+            None,
+            &fixture.base.current,
+            transaction_limits(1, 6),
+            &selections,
+            |overlay| {
+                overlay.replace_resource(RunState::new(2));
+            },
+        );
         assert!(report.instance.is_none(), "{:?}", report.diagnostics);
         assert_eq!(report.retired_entities(), 0);
         fixture.base.assert_unchanged(&entities, stats);
@@ -400,7 +417,7 @@ fn original_membership_and_empty_activation_units_bound_retained_selections() {
     let mut fixture = MultiActivationFixture::new();
     let child = fixture.entity(0, &fixture.child());
     retire_and_despawn_scene_entity(&mut fixture.base.world, child).unwrap();
-    let original = SceneProductRetirement::Instance(fixture.markers[0].clone());
+    let original = SceneProductRetirement::Instance(&fixture.markers[0]);
     let active = fixture
         .base
         .world
@@ -410,8 +427,8 @@ fn original_membership_and_empty_activation_units_bound_retained_selections() {
     assert_eq!(active.len(), 1);
     let entities = fixture.base.entity_ids();
     let stats = fixture.base.world.resource::<WorldIdentityDomain>().stats();
-    for selection in [original, SceneProductRetirement::Instance(active)] {
-        let report = fixture.replace(&[selection], 1);
+    for selection in [original, SceneProductRetirement::Instance(&active)] {
+        let report = fixture.base.replace(&[selection], 1);
         assert!(has_diagnostic(
             &report,
             "scene.product-retirement-limit-exceeded"
@@ -423,28 +440,29 @@ fn original_membership_and_empty_activation_units_bound_retained_selections() {
         &fixture.base.registry,
         "empty.marker",
     );
-    let empties = ["empty/left", "empty/right"].map(|slot| {
-        SceneProductRetirement::Instance(
-            spawn_scene(
-                &mut fixture.base.world,
-                &fixture.base.registry,
-                &empty_candidate,
-                &scene_occurrence(slot),
-                None,
-            )
-            .instance
-            .unwrap(),
+    let empty_instances = ["empty/left", "empty/right"].map(|slot| {
+        spawn_scene(
+            &mut fixture.base.world,
+            &fixture.base.registry,
+            &empty_candidate,
+            &scene_occurrence(slot),
+            None,
         )
+        .instance
+        .unwrap()
     });
+    let empties = empty_instances
+        .each_ref()
+        .map(SceneProductRetirement::Instance);
     let entities = fixture.base.entity_ids();
     let stats = fixture.base.world.resource::<WorldIdentityDomain>().stats();
-    let report = fixture.replace(&empties, 1);
+    let report = fixture.base.replace(&empties, 1);
     assert!(has_diagnostic(
         &report,
         "scene.product-retirement-limit-exceeded"
     ));
     fixture.base.assert_unchanged(&entities, stats);
-    let report = fixture.replace(&empties, 2);
+    let report = fixture.base.replace(&empties, 2);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 1);
     for slot in ["empty/left", "empty/right"] {
@@ -479,12 +497,11 @@ fn aggregate_replacement_budgets_only_occurrences_retained_after_commit() {
         .with_active_occurrences(ItemLimit::ONE)
         .with_retained_bytes(ByteLimit::new(16 * 1024).unwrap());
     fixture.base.world.insert_resource(limits);
-    let markers = fixture.markers.clone();
     let selections =
-        [markers[0].clone(), markers[1].clone(), large].map(SceneProductRetirement::Instance);
-    let refused = fixture.replace(&selections[..2], 4);
+        [&fixture.markers[0], &fixture.markers[1], &large].map(SceneProductRetirement::Instance);
+    let refused = fixture.base.replace(&selections[..2], 4);
     assert!(has_diagnostic(&refused, "scene.occurrence-budget-exceeded"));
-    let report = fixture.replace(&selections, 6);
+    let report = fixture.base.replace(&selections, 6);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 7);
     let domain = fixture.base.world.resource::<WorldIdentityDomain>();
@@ -514,6 +531,7 @@ fn staged_replacement_promotes_surviving_children_added_after_staging() {
         .unwrap()
         .entity();
     let reservations = SceneAssetReservations::from_world(&fixture.base.world);
+    let extra_instance = extra.instance.unwrap();
     let staged = stage_expanded_scene_replacement_with_claims(
         &mut fixture.base.world,
         &fixture.base.registry,
@@ -523,7 +541,7 @@ fn staged_replacement_promotes_surviving_children_added_after_staging() {
         reservations,
         &SceneNativeRetirementClaims::default(),
         transaction_limits(1, 1),
-        &[SceneProductRetirement::Instance(extra.instance.unwrap())],
+        &[SceneProductRetirement::Instance(&extra_instance)],
         |overlay| {
             overlay.replace_resource(RunState::new(2));
         },
@@ -569,8 +587,8 @@ fn original_receipts_end_partially_and_fully_retired_activations() {
             let root = fixture.entity(0, &scene_id("marker"));
             retire_and_despawn_scene_entity(&mut fixture.base.world, root).unwrap();
         }
-        let selection = SceneProductRetirement::Instance(fixture.markers[0].clone());
-        let report = fixture.replace(&[selection], 2);
+        let selection = SceneProductRetirement::Instance(&fixture.markers[0]);
+        let report = fixture.base.replace(&[selection], 2);
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         assert_eq!(report.retired_entities(), if retire_all { 1 } else { 2 });
         assert!(
@@ -608,8 +626,8 @@ fn retained_multi_activation_replacement_rejects_resource_aba_without_retirement
     let mut fixture = MultiActivationFixture::new();
     let runtime = spawn_retirement_token(&mut fixture.base.world);
     let selections = [
-        SceneProductRetirement::Instance(fixture.markers[0].clone()),
-        SceneProductRetirement::Instance(fixture.markers[1].clone()),
+        SceneProductRetirement::Instance(&fixture.markers[0]),
+        SceneProductRetirement::Instance(&fixture.markers[1]),
         SceneProductRetirement::Entity(runtime),
     ];
     let original_entities = fixture.base.entity_ids();
@@ -646,7 +664,7 @@ fn retained_multi_activation_replacement_rejects_resource_aba_without_retirement
 #[test]
 fn retained_replacement_rejects_ended_additional_receipt_after_slot_reuse() {
     let mut fixture = MultiActivationFixture::new();
-    let selections = [SceneProductRetirement::Instance(fixture.markers[0].clone())];
+    let selections = [SceneProductRetirement::Instance(&fixture.markers[0])];
     let reservations = SceneAssetReservations::from_world(&fixture.base.world);
     let staged = stage_expanded_scene_replacement_with_claims(
         &mut fixture.base.world,

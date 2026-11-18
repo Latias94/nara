@@ -657,7 +657,7 @@ fn drive_managed_travel(world: &mut World) {
                         .prepared
                         .as_ref()
                         .expect("unpublished travel retains its candidate");
-                    candidate.validate_baseline(world)?;
+                    candidate.begin_native_retirement(world)?;
                     travel.native_started = true;
                 }
                 travel

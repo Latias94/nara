@@ -12,8 +12,6 @@ use nara_scene::{SceneCompilationLimits, SceneFileLimits};
 
 use super::ProjectContentRevision;
 
-pub(super) const MAX_RETAINED_CONTENT_GENERATIONS: usize = 2;
-
 macro_rules! define_project_content_budget_kinds {
     (
         tracked {
@@ -86,6 +84,7 @@ const TRACKED_KIND_COUNT: usize = ProjectContentBudgetKind::TRACKED.len();
 pub struct ProjectContentLimits {
     values: [usize; TRACKED_KIND_COUNT],
     aggregate_bytes: usize,
+    retained_generations: ItemLimit,
     scene_file: SceneFileLimits,
     scene_compilation: SceneCompilationLimits,
     image_import: ImageImportLimits,
@@ -112,6 +111,7 @@ impl Default for ProjectContentLimits {
                 bytes(512 * 1024 * 1024).get(),
             ],
             aggregate_bytes: bytes(1024 * 1024 * 1024).get(),
+            retained_generations: item(2),
             scene_file: SceneFileLimits::default(),
             scene_compilation: SceneCompilationLimits::default(),
             image_import: ImageImportLimits::default(),
@@ -138,6 +138,11 @@ impl ProjectContentLimits {
             Some(index) => self.values[index],
             None => self.aggregate_bytes,
         }
+    }
+
+    #[must_use]
+    pub const fn retained_generations(self) -> ItemLimit {
+        self.retained_generations
     }
 
     #[must_use]
@@ -169,6 +174,13 @@ impl ProjectContentLimits {
             None => self.aggregate_bytes = limit,
         }
         Some(self)
+    }
+
+    /// Limits the distinct decoded generations retained by one budget host.
+    #[must_use]
+    pub const fn with_retained_generations(mut self, limit: ItemLimit) -> Self {
+        self.retained_generations = limit;
+        self
     }
 
     #[must_use]
@@ -257,6 +269,7 @@ pub struct ProjectContentBudgetSnapshot {
     active_reservations: usize,
     active_generations: usize,
     generation_high_water: usize,
+    generation_limit: usize,
 }
 
 impl ProjectContentBudgetSnapshot {
@@ -294,7 +307,7 @@ impl ProjectContentBudgetSnapshot {
 
     #[must_use]
     pub const fn generation_limit(self) -> usize {
-        MAX_RETAINED_CONTENT_GENERATIONS
+        self.generation_limit
     }
 }
 
@@ -350,6 +363,7 @@ impl ProjectContentBudgetHost {
             active_reservations: state.active_reservations,
             active_generations: state.active_generations.len(),
             generation_high_water: state.generation_high_water,
+            generation_limit: self.inner.limits.retained_generations().get(),
         }
     }
 
@@ -362,13 +376,10 @@ impl ProjectContentBudgetHost {
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if !state.active_generations.contains_key(&revision)
-            && state.active_generations.len() >= MAX_RETAINED_CONTENT_GENERATIONS
-        {
-            return Err(ProjectContentGenerationCapacityError {
-                active: state.active_generations.len(),
-                limit: MAX_RETAINED_CONTENT_GENERATIONS,
-            });
+        let active = state.active_generations.len();
+        let limit = self.inner.limits.retained_generations().get();
+        if active >= limit && !state.active_generations.contains_key(&revision) {
+            return Err(ProjectContentGenerationCapacityError { active, limit });
         }
         let retained = state.active_generations.entry(revision).or_default();
         *retained = retained
@@ -729,12 +740,17 @@ fn aggregate_bytes(charge: &[usize; TRACKED_KIND_COUNT]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentLimits};
+    use nara_core::ItemLimit;
+
+    use super::{
+        ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentGenerationCapacityError,
+        ProjectContentLimits, ProjectContentRevision,
+    };
 
     #[test]
     fn generation_token_clones_share_one_claim_and_independent_loads_release_separately() {
         let host = ProjectContentBudgetHost::new(ProjectContentLimits::default());
-        let revision = super::super::ProjectContentRevision([1; 32]);
+        let revision = ProjectContentRevision([1; 32]);
         let first = host.retain_generation(revision).unwrap();
         let cloned = first.clone();
         let independent = host.retain_generation(revision).unwrap();
@@ -745,6 +761,43 @@ mod tests {
         drop(independent);
         assert_eq!(host.snapshot().active_generations(), 0);
         assert_eq!(host.snapshot().generation_high_water(), 1);
+    }
+
+    #[test]
+    fn configured_generation_limit_releases_capacity_on_last_owner() {
+        let limits =
+            ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap());
+        let host = ProjectContentBudgetHost::new(limits);
+        let first_revision = ProjectContentRevision([1; 32]);
+        let first = host.retain_generation(first_revision).unwrap();
+        let others = [2, 3, 4].map(|id| {
+            host.retain_generation(ProjectContentRevision([id; 32]))
+                .unwrap()
+        });
+        let fifth_revision = ProjectContentRevision([5; 32]);
+
+        let snapshot = host.snapshot();
+        assert_eq!(snapshot.generation_limit(), 4);
+        assert_eq!(snapshot.active_generations(), 4);
+        assert_eq!(
+            host.retain_generation(fifth_revision).err(),
+            Some(ProjectContentGenerationCapacityError {
+                active: 4,
+                limit: 4,
+            })
+        );
+
+        let same_generation = host.retain_generation(first_revision).unwrap();
+        drop(same_generation);
+        assert_eq!(host.snapshot().active_generations(), 4);
+        drop(first);
+        assert_eq!(host.snapshot().active_generations(), 3);
+        let fifth = host.retain_generation(fifth_revision).unwrap();
+        assert_eq!(host.snapshot().active_generations(), 4);
+        drop((others, fifth));
+        let snapshot = host.snapshot();
+        assert_eq!(snapshot.active_generations(), 0);
+        assert_eq!(snapshot.generation_high_water(), 4);
     }
 
     #[test]

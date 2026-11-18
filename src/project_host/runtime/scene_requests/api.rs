@@ -53,8 +53,6 @@ pub enum ProjectSceneRequestError {
     UndeclaredScene,
     #[error("the Scene is not a Deferred dependency of the current Scene")]
     NotDeferredScene,
-    #[error("unload the active Scene addition before requesting another Scene")]
-    AdditionActive,
     #[error("project Scene preparation is unavailable on the I/O task pool")]
     TaskUnavailable,
     #[error("project Scene request identities are exhausted")]
@@ -78,7 +76,6 @@ impl ProjectSceneRequestError {
             Self::Busy => "project.scene.request-busy",
             Self::UndeclaredScene => "project.scene.undeclared-scene",
             Self::NotDeferredScene => "project.scene.deferred-scene-unavailable",
-            Self::AdditionActive => "project.scene.addition-active",
             Self::TaskUnavailable => "project.scene.preparation-unavailable",
             Self::IdExhausted => "project.scene.request-id-exhausted",
             Self::Stale => "project.scene.request-stale",
@@ -498,8 +495,8 @@ impl ProjectScenes<'_> {
     /// The request shares the original preparation slot and leaves primary simulation running.
     /// Once Ready, inspect the content and call [`activate_prepared_project_scene`] at an
     /// exclusive boundary. A loose pack member, travel root or resident Immediate dependency
-    /// alone cannot authorize additive preparation. Unload the active addition before making
-    /// another Scene request.
+    /// alone cannot authorize additive preparation. Committed additions may coexist. Each new
+    /// activation needs its own occurrence and remains subject to the original content limits.
     pub fn request_additive(
         &mut self,
         product: AssetProductRef,
@@ -551,13 +548,6 @@ impl ProjectScenes<'_> {
             .ok_or(ProjectSceneRequestError::Unavailable)?;
         if !owner.context.matches_current(current) {
             return Err(ProjectSceneRequestError::Stale);
-        }
-        if self
-            .residency
-            .as_deref()
-            .is_some_and(ProjectSceneResidency::has_addition)
-        {
-            return Err(ProjectSceneRequestError::AdditionActive);
         }
         owner.request(selection, purpose, generation, current.receipt(), pools)
     }
@@ -657,7 +647,7 @@ pub fn commit_prepared_project_scene<F>(
     world: &mut World,
     request: ProjectSceneRequestId,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -812,7 +802,7 @@ pub fn begin_prepared_project_scene_travel<F>(
     world: &mut World,
     request: ProjectSceneRequestId,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> Result<(), SceneSpawnReport>
 where

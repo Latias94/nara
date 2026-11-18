@@ -543,14 +543,14 @@ pub mod native {
             LevelId::Meadow.scene_product()
         );
         assert!(pack.catalog.addressable_roots().is_empty());
-        assert_eq!(pack.catalog.members().len(), 12);
+        assert_eq!(pack.catalog.members().len(), 13);
         assert_eq!(
             pack.catalog
                 .members()
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count(),
-            4
+            5
         );
         assert_eq!(
             pack.catalog.configuration().input.action_map,
@@ -574,6 +574,7 @@ pub mod native {
                     marker_product(),
                     marker_image_product(),
                     side_room::scene_product(),
+                    side_room::lookout_scene_product(),
                     side_room::image_product(),
                 ])
                 .collect()
@@ -594,11 +595,14 @@ pub mod native {
             ));
             super::two_level_pack::assert_level_dependencies(scene, level);
         }
-        super::two_level_pack::assert_room_member(
-            pack.catalog
-                .member_for_product(side_room::scene_product())
-                .unwrap(),
-        );
+        for product in [
+            side_room::scene_product(),
+            side_room::lookout_scene_product(),
+        ] {
+            super::two_level_pack::assert_room_member(
+                pack.catalog.member_for_product(product).unwrap(),
+            );
+        }
         let room_image = pack
             .catalog
             .members()

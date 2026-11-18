@@ -135,6 +135,7 @@ impl Plugin for GameInputPlugin {
             ("two-level-game.l", RESTORE),
             ("two-level-game.r", RETRY),
             ("two-level-game.b", SIDE_ROOM),
+            ("two-level-game.g", LOOKOUT),
         ] {
             let id = ActionId::new(name).expect("static game action");
             bind(app, id, ActionPhase::Started, action(command))?;

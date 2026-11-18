@@ -192,7 +192,7 @@ pub(crate) struct SceneSpawner;
 
 struct SceneProductTransactionInput<'a> {
     limits: SceneProductTransactionLimits,
-    additional_retirements: &'a [SceneProductRetirement],
+    additional_retirements: &'a [SceneProductRetirement<'a>],
     configure: Box<dyn FnOnce(&mut SceneProductOverlayWriter<'_>) + 'a>,
 }
 
@@ -749,7 +749,7 @@ pub fn replace_expanded_scene_with_product<F>(
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -788,7 +788,7 @@ pub fn replace_expanded_scene_with_product_and_reservations<F>(
     current: &SpawnedSceneInstance,
     reservations: SceneAssetReservations,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -831,7 +831,7 @@ pub fn stage_expanded_scene_replacement_with_claims<F>(
     reservations: SceneAssetReservations,
     claims: &SceneNativeRetirementClaims,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> Result<StagedSceneReplacement, SceneSpawnReport>
 where
@@ -878,7 +878,7 @@ impl SceneComponentBindings {
         reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[SceneProductRetirement],
+        additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
     ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
@@ -917,7 +917,7 @@ impl SceneComponentBindings {
         reservations: SceneAssetReservations,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[SceneProductRetirement],
+        additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
     ) -> Result<StagedSceneReplacement, SceneSpawnReport>
     where
@@ -1115,7 +1115,6 @@ fn prepare_scene_product_transaction(
                 }
                 let (occurrence, units) = capture_occurrence_retirement(world, instance)
                     .map_err(PrepareSceneProductTransactionError::Occurrence)?;
-                retirements.instances.push(instance.clone());
                 retirements.occurrences.push(occurrence);
                 units
             }
@@ -1127,6 +1126,15 @@ fn prepare_scene_product_transaction(
             return Err(PrepareSceneProductTransactionError::AdditionalRetirementLimitExceeded);
         }
     }
+    retirements.instances.extend(
+        product
+            .additional_retirements
+            .iter()
+            .filter_map(|retirement| match *retirement {
+                SceneProductRetirement::Entity(_) => None,
+                SceneProductRetirement::Instance(instance) => Some(instance.clone()),
+            }),
+    );
 
     let mut overlay =
         SceneProductOverlayWriter::new(world, registry, scene, product.limits.overlay_writes());

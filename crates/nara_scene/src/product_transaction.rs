@@ -20,12 +20,12 @@ use crate::{spawn::SceneEntitySource, validation::PreparedScene};
 /// Runtime-only entities retain their World identity token. A Scene receipt ends the whole
 /// activation and releases its logical occurrence on successful commit, including activations
 /// with members already retired through the ordinary Scene APIs.
-#[derive(Clone, Debug)]
-pub enum SceneProductRetirement {
+#[derive(Clone, Copy, Debug)]
+pub enum SceneProductRetirement<'a> {
     /// Retires one runtime-only entity without Scene or persistent identity ownership.
     Entity(WorldEntityToken),
     /// Ends one additional complete Scene activation in the same World.
-    Instance(SpawnedSceneInstance),
+    Instance(&'a SpawnedSceneInstance),
 }
 
 /// Required item limits for one provisional product-scene replacement transaction.
@@ -65,7 +65,7 @@ impl SceneProductTransactionLimits {
 
     /// Returns the caller limit for additional product-owned retirement membership units.
     #[must_use]
-    pub(crate) const fn additional_retirements(self) -> ItemLimit {
+    pub const fn additional_retirements(self) -> ItemLimit {
         self.additional_retirements
     }
 }

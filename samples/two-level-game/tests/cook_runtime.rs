@@ -162,15 +162,16 @@ mod atlas_content {
     };
 
     use nara::{
-        asset::{AssetRef, Assets, RuntimeAssetCodec},
+        advanced_prelude::CurrentScene,
+        asset::{AssetProductRef, AssetRef, Assets, Handle, RuntimeAssetCodec},
         asset_build::ArtifactBuildObservation,
         ecs::World,
         gameplay::{
             GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
             GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
         },
-        identity::{EntityLookup, WorldIdentityDomain},
-        image::{ImageAsset, ImageExtent},
+        identity::{EntityLookup, IdentityDomainError, SpawnedSceneInstance, WorldIdentityDomain},
+        image::{ImageAsset, ImageExtent, ImageRuntimeCodec},
         input::{
             ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec,
             InputBinding, KeyCode,
@@ -188,9 +189,9 @@ mod atlas_content {
     };
     use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
-        GameSnapshot, Scenario, SideRoomPhase,
+        GamePhase, GameSnapshot, Scenario, SideRoomPhase,
         animation::{atlas_product, clips_product},
-        levels::LevelId,
+        levels::{LevelId, LevelKey},
         markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
         side_room,
         sound_bank::bank_product,
@@ -229,6 +230,8 @@ mod atlas_content {
                 "scenes/marker.scene.json.meta",
                 "scenes/side-room.scene.json",
                 "scenes/side-room.scene.json.meta",
+                "scenes/lookout.scene.json",
+                "scenes/lookout.scene.json.meta",
                 "prefabs/marker.prefab.json",
                 "assets/textures/meadow.png",
                 "assets/textures/meadow.png.meta",
@@ -269,18 +272,20 @@ mod atlas_content {
     #[test]
     fn cooking_shares_atlas_and_clips_preserves_raw_inputs_and_decodes_source_free_player_evidence()
     {
-        let project = Path::new(env!("CARGO_MANIFEST_DIR"));
         let cache = Cache::new();
-        let mut fence = ContentFence::capture(project).unwrap();
+        let project = cache.project();
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let mut fence = ContentFence::capture(&project).unwrap();
         let (prepared, observations) = content::prepare(
             fence.root(),
-            &host_fs::writable_directory(&cache.path).unwrap(),
+            &host_fs::writable_directory(&store).unwrap(),
             "x86_64-pc-windows-msvc",
             RuntimeKind::Headless,
         )
         .unwrap();
         let catalog = prepared.base().catalog();
-        assert_eq!(catalog.members().len(), 12);
+        assert_eq!(catalog.members().len(), 13);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
         scenes.sort();
         assert_eq!(catalog.scenes(), scenes);
@@ -291,7 +296,18 @@ mod atlas_content {
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count(),
-            4
+            5
+        );
+        assert_eq!(
+            catalog
+                .members()
+                .iter()
+                .filter(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Asset { format, .. }
+                        if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND)
+                })
+                .count(),
+            5
         );
         let marker = catalog.member_for_product(marker_product()).unwrap();
         assert_eq!(marker.products(), [marker_product()]);
@@ -315,15 +331,16 @@ mod atlas_content {
             prepared.base().acquire_scene(marker_product()),
             Err(RuntimeContentError::UndeclaredScene)
         ));
-        two_level_pack::assert_room_member(
-            catalog
-                .member_for_product(side_room::scene_product())
-                .unwrap(),
-        );
-        assert!(matches!(
-            prepared.base().acquire_scene(side_room::scene_product()),
-            Err(RuntimeContentError::UndeclaredScene)
-        ));
+        for product in [
+            side_room::scene_product(),
+            side_room::lookout_scene_product(),
+        ] {
+            two_level_pack::assert_room_member(catalog.member_for_product(product).unwrap());
+            assert!(matches!(
+                prepared.base().acquire_scene(product),
+                Err(RuntimeContentError::UndeclaredScene)
+            ));
+        }
         assert_eq!(
             catalog
                 .members()
@@ -341,6 +358,7 @@ mod atlas_content {
                     marker_product(),
                     marker_image_product(),
                     side_room::scene_product(),
+                    side_room::lookout_scene_product(),
                     side_room::image_product(),
                 ])
                 .collect::<BTreeSet<_>>()
@@ -436,7 +454,10 @@ mod atlas_content {
             ])
         );
         fence.bind_raw_inputs(&observations).unwrap();
-        let result = observe_startup(prepared);
+        drop(fence);
+        drop(cache);
+        assert!(!project.exists() && !store.exists());
+        let result = observe_startup(prepared, check_cooked_regions);
         let source: serde_json::Value =
             serde_json::from_slice(include_bytes!("../input/explorer.actions.json")).unwrap();
         assert_eq!(
@@ -574,7 +595,7 @@ mod atlas_content {
         assert!(fence.verify().unwrap_err().contains(super::INPUT_PATH));
         fs::remove_file(&input_path).unwrap();
         assert!(!input_path.exists());
-        let result = observe_startup(prepared);
+        let result = observe_startup(prepared, |_| Ok(()));
         let expected: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
             result["input_proof"],
@@ -653,7 +674,10 @@ mod atlas_content {
         }
     }
 
-    fn observe_startup(prepared: PreparedRuntimeContent) -> serde_json::Value {
+    fn observe_startup(
+        prepared: PreparedRuntimeContent,
+        exercise: impl FnOnce(&mut HeadlessSession) -> Result<(), String>,
+    ) -> serde_json::Value {
         let input = prepared.base().acquire_startup_input().unwrap().unwrap();
         let mut evidence = Evidence::default();
         evidence.expect_input(&input).unwrap();
@@ -670,7 +694,7 @@ mod atlas_content {
             session
                 .observe(assert_cooked_marker_image)
                 .map_err(|error| error.to_string())??;
-            check_cooked_side_room(&mut session)?;
+            exercise(&mut session)?;
             Ok(initial)
         })();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -699,65 +723,233 @@ mod atlas_content {
         Ok(())
     }
 
-    fn check_cooked_side_room(session: &mut HeadlessSession) -> Result<(), String> {
-        const COMMAND: &str = "two-level-game.side-room";
-        let initial = session
-            .observe(|world| world.resource::<GameSnapshot>().current_instance)
+    fn check_cooked_regions(session: &mut HeadlessSession) -> Result<(), String> {
+        const SIDE_ROOM: &str = "two-level-game.side-room";
+        const LOOKOUT: &str = "two-level-game.lookout";
+        const TRAVEL: &str = "two-level-game.travel";
+        let meadow = LevelKey::main(LevelId::Meadow);
+        let cavern = LevelKey::main(LevelId::Cavern);
+        let primary = session
+            .observe(|world| {
+                let snapshot = world.resource::<GameSnapshot>();
+                assert_eq!(snapshot.level, Some(meadow));
+                assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
+                assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
+                assert_resident_images(world, LevelId::Meadow, None);
+                CurrentScene::get(world).unwrap().receipt().clone()
+            })
             .map_err(|error| error.to_string())?;
-        step_command(session, 2, COMMAND)?;
+        let primary_id = Some(primary.instance_id());
+        step_command(session, 2, SIDE_ROOM)?;
+        wait_for_snapshot(session, "cooked side room did not open", |snapshot| {
+            assert_eq!(snapshot.current_instance, primary_id);
+            snapshot.side_room == SideRoomPhase::Open
+        })?;
+        step_command(session, 3, LOOKOUT)?;
+        wait_for_snapshot(session, "cooked lookout did not open", |snapshot| {
+            assert_eq!(snapshot.current_instance, primary_id);
+            assert_eq!(snapshot.side_room, SideRoomPhase::Open);
+            snapshot.lookout == SideRoomPhase::Open
+        })?;
+        let relic_product = Some(side_room::image_product());
+        let (room, lookout, shared_image) = session
+            .observe(|world| {
+                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+                let (room, room_image) =
+                    cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC);
+                let (lookout, lookout_image) = cooked_relic(
+                    world,
+                    side_room::LOOKOUT_SCENE_PATH,
+                    side_room::LOOKOUT_RELIC,
+                );
+                assert_ne!(room.instance_id(), lookout.instance_id());
+                assert_ne!(room.instance_id(), primary.instance_id());
+                assert_ne!(lookout.instance_id(), primary.instance_id());
+                assert_eq!(room_image, lookout_image);
+                assert_resident_images(world, LevelId::Meadow, relic_product);
+                (room, lookout, room_image)
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 4, SIDE_ROOM)?;
+        session
+            .observe(|world| {
+                let snapshot = world.resource::<GameSnapshot>();
+                assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
+                assert_eq!(snapshot.lookout, SideRoomPhase::Open);
+                assert_eq!(snapshot.current_instance, primary_id);
+                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+                assert_retired(world, &room);
+                assert_eq!(
+                    cooked_relic(
+                        world,
+                        side_room::LOOKOUT_SCENE_PATH,
+                        side_room::LOOKOUT_RELIC
+                    ),
+                    (lookout.clone(), shared_image)
+                );
+                assert_resident_images(world, LevelId::Meadow, relic_product);
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 5, SIDE_ROOM)?;
+        wait_for_snapshot(session, "cooked side room did not reopen", |snapshot| {
+            assert_eq!(snapshot.current_instance, primary_id);
+            assert_eq!(snapshot.lookout, SideRoomPhase::Open);
+            snapshot.side_room == SideRoomPhase::Open
+        })?;
+        let reopened = session
+            .observe(|world| {
+                let (reopened, image) =
+                    cooked_relic(world, side_room::SCENE_PATH, side_room::RELIC);
+                assert_ne!(reopened.instance_id(), room.instance_id());
+                assert_eq!(image, shared_image);
+                reopened
+            })
+            .map_err(|error| error.to_string())?;
+        step_command(session, 6, TRAVEL)?;
+        wait_for_snapshot(session, "cooked travel did not reach Cavern", |snapshot| {
+            if snapshot.travel_count == 0 {
+                assert_eq!(snapshot.current_instance, primary_id);
+                assert_eq!(snapshot.side_room, SideRoomPhase::Open);
+                assert_eq!(snapshot.lookout, SideRoomPhase::Open);
+            }
+            snapshot.level == Some(cavern) && snapshot.phase == GamePhase::Running
+        })?;
+        session
+            .observe(|world| {
+                let snapshot = world.resource::<GameSnapshot>();
+                let current = CurrentScene::get(world).unwrap();
+                assert_eq!(snapshot.travel_count, 1);
+                assert_eq!(
+                    snapshot.current_instance,
+                    Some(current.receipt().instance_id())
+                );
+                assert_eq!(current.receipt().domain_id(), primary.domain_id());
+                let cavern_path = format!("scenes/{}", LevelId::Cavern.scene_path());
+                let is_cooked_cavern = current.source_view().with_runtime_scene(|scene| {
+                    matches!(
+                        scene.source_key().origin(),
+                        SourceDocumentOrigin::ProjectLocation { path, .. }
+                            if path.as_str() == cavern_path
+                    )
+                });
+                assert_eq!(is_cooked_cavern, Some(true));
+                assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
+                assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
+                for retired in [&primary, &reopened, &lookout] {
+                    assert_ne!(current.receipt().instance_id(), retired.instance_id());
+                    assert_retired(world, retired);
+                }
+                assert!(
+                    world
+                        .resource::<Assets<ImageAsset>>()
+                        .get(shared_image)
+                        .is_none()
+                );
+                assert_resident_images(world, LevelId::Cavern, None);
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn wait_for_snapshot(
+        session: &mut HeadlessSession,
+        timeout: &str,
+        ready: impl Fn(&GameSnapshot) -> bool,
+    ) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = session
                 .observe(|world| world.resource::<GameSnapshot>().clone())
                 .map_err(|error| error.to_string())?;
-            assert_eq!(snapshot.current_instance, initial);
-            if let Some(error) = snapshot.error {
-                return Err(error);
+            if let Some(error) = &snapshot.error {
+                return Err(error.clone());
             }
-            if snapshot.side_room == SideRoomPhase::Open {
-                break;
+            if ready(&snapshot) {
+                return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err("cooked side room did not open".into());
+                return Err(timeout.into());
             }
             session
                 .frame(Duration::ZERO)
                 .map_err(|error| error.to_string())?;
             std::thread::sleep(Duration::from_millis(1));
         }
-        session
-            .observe(|world| {
-                let relic = world
-                    .iter_entities()
-                    .find(|entity| {
-                        entity
-                            .get::<SceneEntitySource>()
-                            .is_some_and(|source| source.entity_id.as_str() == side_room::RELIC)
-                    })
-                    .expect("the cooked room publishes its actual relic");
-                let sprite = relic.get::<Sprite>().unwrap();
-                let image = world
-                    .resource::<Assets<ImageAsset>>()
-                    .get(sprite.material.image.unwrap())
-                    .unwrap();
-                two_level_pack::assert_room_image(image);
+    }
+
+    fn cooked_relic(
+        world: &World,
+        scene_path: &str,
+        relic_id: &str,
+    ) -> (SpawnedSceneInstance, Handle<ImageAsset>) {
+        let scene_path = format!("scenes/{scene_path}");
+        let mut relics = world.iter_entities().filter(|entity| {
+            entity.get::<SceneEntitySource>().is_some_and(|source| {
+                source.entity_id.as_str() == relic_id
+                    && matches!(source.containing_source().origin(),
+                        SourceDocumentOrigin::ProjectLocation { path, .. }
+                            if path.as_str() == scene_path)
             })
-            .map_err(|error| error.to_string())?;
-        step_command(session, 3, COMMAND)?;
-        session
-            .observe(|world| {
-                let snapshot = world.resource::<GameSnapshot>();
-                assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
-                assert_eq!(snapshot.current_instance, initial);
-                assert!(
-                    world
-                        .resource::<Assets<ImageAsset>>()
-                        .iter()
-                        .all(|(_, image)| image.product() != Some(side_room::image_product()))
-                );
+        });
+        let relic = relics
+            .next()
+            .expect("the cooked region publishes its relic");
+        assert!(relics.next().is_none());
+        let source = relic.get::<SceneEntitySource>().unwrap();
+        let receipt = world
+            .resource::<WorldIdentityDomain>()
+            .active_scene_instance(world, source.instance_id)
+            .unwrap();
+        assert_eq!(
+            receipt.resolve(world, &source.entity_id),
+            EntityLookup::Resolved(relic.id())
+        );
+        let handle = relic.get::<Sprite>().unwrap().material.image.unwrap();
+        let image = world.resource::<Assets<ImageAsset>>().get(handle).unwrap();
+        two_level_pack::assert_room_image(image);
+        (receipt, handle)
+    }
+
+    fn assert_retired(world: &World, receipt: &SpawnedSceneInstance) {
+        assert!(matches!(
+            world
+                .resource::<WorldIdentityDomain>()
+                .active_scene_instance(world, receipt.instance_id()),
+            Err(IdentityDomainError::SceneInstanceNotActive { instance })
+                if instance == receipt.instance_id()
+        ));
+        for id in receipt.entity_ids() {
+            assert!(matches!(
+                receipt.resolve(world, id),
+                EntityLookup::Tombstoned(_)
+            ));
+        }
+        assert!(world.iter_entities().all(|entity| {
+            entity
+                .get::<SceneEntitySource>()
+                .is_none_or(|source| source.instance_id != receipt.instance_id())
+        }));
+    }
+
+    fn assert_resident_images(world: &World, level: LevelId, extra: Option<AssetProductRef>) {
+        let images = world.resource::<Assets<ImageAsset>>();
+        let actual = images
+            .iter()
+            .map(|(_, image)| {
+                assert!(image.source().is_none());
+                image.product().expect("a cooked Image retains its Product")
             })
-            .map_err(|error| error.to_string())?;
-        Ok(())
+            .collect::<BTreeSet<_>>();
+        let expected = [
+            level.image_product(),
+            atlas_product(),
+            marker_image_product(),
+        ]
+        .into_iter()
+        .chain(extra)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(images.len(), actual.len());
+        assert_eq!(actual, expected);
     }
 
     fn assert_cooked_marker_image(world: &World) -> Result<(), String> {

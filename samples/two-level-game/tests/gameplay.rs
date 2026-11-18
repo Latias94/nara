@@ -50,6 +50,8 @@ impl Directory {
             "scenes/marker.scene.json.meta",
             "scenes/side-room.scene.json",
             "scenes/side-room.scene.json.meta",
+            "scenes/lookout.scene.json",
+            "scenes/lookout.scene.json.meta",
             "prefabs/marker.prefab.json",
             "assets/textures/meadow.png",
             "assets/textures/meadow.png.meta",

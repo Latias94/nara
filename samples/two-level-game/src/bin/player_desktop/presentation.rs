@@ -7,9 +7,9 @@ use std::{
 
 use nara::{
     app::{AppExit, FixedTime, FrameExecutionStart, RuntimeGeneration},
-    asset::AssetServer,
+    asset::{AssetServer, Assets},
     ecs::World,
-    image::{ImageAsset, image_resource_key},
+    image::{ImageAsset, PreparedImages, image_resource_key},
     project_host::{DesktopPresentationControl, DesktopPresentationObservation},
     render::RenderFrame,
     render_wgpu::{WgpuBackendState, WgpuRenderObservation},
@@ -42,7 +42,19 @@ pub(super) struct Frame {
     queue_submissions: u64,
     presents: u64,
     adapter: Value,
-    side_room_sprites: Option<usize>,
+    side_rooms: Option<RoomFrame>,
+}
+
+#[derive(Default)]
+struct RoomFrame {
+    sprites: usize,
+    image: Option<RoomImage>,
+}
+
+#[derive(serde::Serialize)]
+struct RoomImage {
+    asset_id: u64,
+    version: u64,
 }
 
 impl Frame {
@@ -57,7 +69,8 @@ impl Frame {
             "device_epoch": self.device_epoch,
             "queue_submissions": self.queue_submissions,
             "presents": self.presents,
-            "side_room_sprites": self.side_room_sprites,
+            "side_room_sprites": self.side_rooms.as_ref().map(|rooms| rooms.sprites),
+            "side_room_image": self.side_rooms.as_ref().and_then(|rooms| rooms.image.as_ref()),
         })
     }
 }
@@ -359,8 +372,8 @@ fn join_presented(
     let adapter = observation
         .adapter_summary()
         .ok_or("the original presented adapter summary is unavailable")?;
-    let side_room_sprites = observe
-        .then(|| side_room_sprites(world, receipt.render_transaction_frame_index()))
+    let side_rooms = observe
+        .then(|| observe_side_rooms(world, receipt.render_transaction_frame_index()))
         .transpose()?;
     Ok(Some(Frame {
         runtime_generation: runtime.get(),
@@ -372,7 +385,7 @@ fn join_presented(
         device_epoch: receipt.device_epoch(),
         queue_submissions: transaction.queue_submissions(),
         presents: transaction.presents(),
-        side_room_sprites,
+        side_rooms,
         adapter: json!({
             "backend": adapter.backend(),
             "name": adapter.name(),
@@ -381,7 +394,7 @@ fn join_presented(
     }))
 }
 
-fn side_room_sprites(world: &World, frame: u64) -> Result<usize, String> {
+fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {
     if !world
         .get_resource::<RenderFrame>()
         .is_some_and(|render| render.index == frame)
@@ -391,28 +404,59 @@ fn side_room_sprites(world: &World, frame: u64) -> Result<usize, String> {
     let batches = world
         .get_resource::<SpriteBatches>()
         .ok_or("original stock Sprite batches are unavailable")?;
-    let Some(relic) = world
+    let product = two_level_game::side_room::image_product();
+    let Some(handle) = world
         .get_resource::<AssetServer>()
-        .and_then(|assets| {
-            assets.get_product_handle::<ImageAsset>(two_level_game::side_room::image_product())
-        })
-        .map(image_resource_key)
+        .and_then(|assets| assets.get_product_handle::<ImageAsset>(product))
     else {
-        return Ok(0);
+        return Ok(RoomFrame::default());
     };
-    Ok(batches
-        .as_slice()
-        .iter()
-        .filter(|batch| {
-            batch.target.window_id(Some(WindowId::PRIMARY)) == Some(WindowId::PRIMARY)
-                && batch
-                    .image
-                    .as_ref()
-                    .is_some_and(|image| image.identity().key() == relic)
-        })
-        .flat_map(|batch| &batch.instances)
-        .filter(|sprite| sprite.color.a > 0.0)
-        .count())
+    let relic = image_resource_key(handle);
+    let assets = world
+        .get_resource::<Assets<ImageAsset>>()
+        .ok_or("original resident Images are unavailable")?;
+    let prepared = world
+        .get_resource::<PreparedImages>()
+        .ok_or("original prepared Images are unavailable")?
+        .get(relic)
+        .map(|image| image.identity());
+    match (assets.get(handle), prepared) {
+        (Some(image), Some(capture))
+            if image.product() == Some(product)
+                && image.source().is_none()
+                && capture.slot_revision() == &assets.slot_revision(handle) => {}
+        (None, None) => {}
+        _ => return Err("Meadow region Image capture disagrees with its resident Product".into()),
+    }
+    let mut sprites = 0;
+    for batch in batches.as_slice() {
+        let Some(image) = batch
+            .image
+            .as_ref()
+            .filter(|image| image.identity().key() == relic)
+        else {
+            continue;
+        };
+        if Some(image.identity()) != prepared {
+            return Err(
+                "presented Sprite batch retained a stale Meadow region Image capture".into(),
+            );
+        }
+        if batch.target.window_id(Some(WindowId::PRIMARY)) == Some(WindowId::PRIMARY) {
+            sprites += batch
+                .instances
+                .iter()
+                .filter(|sprite| sprite.color.a > 0.0)
+                .count();
+        }
+    }
+    Ok(RoomFrame {
+        sprites,
+        image: prepared.map(|capture| RoomImage {
+            asset_id: relic.asset_id().raw(),
+            version: capture.asset_version().raw(),
+        }),
+    })
 }
 
 fn semantic_state(snapshot: &GameSnapshot) -> Value {
@@ -434,6 +478,7 @@ fn semantic_state(snapshot: &GameSnapshot) -> Value {
         "current_instance": snapshot.current_instance.map(|id| id.get()),
         "scene_members": snapshot.scene_members,
         "side_room": snapshot.side_room,
+        "lookout": snapshot.lookout,
         "held": snapshot.held,
         "restoring": snapshot.restoring,
     })

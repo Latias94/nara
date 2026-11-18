@@ -163,13 +163,19 @@ pub(super) fn prepare(
         SCENE_PATH,
         marker_product(),
     )?;
-    let room_source = register_scene_identity(
-        root,
-        &mut database,
-        &scene_scope,
-        side_room::SCENE_PATH,
-        side_room::scene_product(),
-    )?;
+    let regions = [
+        (side_room::SCENE_PATH, side_room::scene_product()),
+        (
+            side_room::LOOKOUT_SCENE_PATH,
+            side_room::lookout_scene_product(),
+        ),
+    ]
+    .into_iter()
+    .map(|(path, product)| {
+        register_scene_identity(root, &mut database, &scene_scope, path, product)
+            .map(|source| (product, source))
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     let prefab_source = AssetSourcePath::new(format!("{}/{}", settings.paths.prefabs, PREFAB_PATH))
         .map_err(|error| format!("marker Prefab source path: {error}"))?;
     let prefab_bytes = read(root, prefab_source.as_str(), DOCUMENT_BYTES)?;
@@ -332,7 +338,7 @@ pub(super) fn prepare(
         .map(|level| scene_source(&settings, level).map(|source| (level.scene_product(), source)))
         .collect::<Result<Vec<_>, _>>()?;
     scenes.push((marker_product(), marker_source.clone()));
-    scenes.push((side_room::scene_product(), room_source.clone()));
+    scenes.extend(regions.iter().cloned());
     for (product, source) in scenes {
         let bytes = read(root, source.as_str(), DOCUMENT_BYTES)?;
         let document = SceneDocumentCandidate::decode_json_bytes(&bytes)
@@ -381,13 +387,13 @@ pub(super) fn prepare(
         .finish()
         .map_err(|error| format!("cooked content closure: {error}"))?;
     let catalog = prepared.base().catalog();
-    if catalog.members().len() != 12
+    if catalog.members().len() != 13
         || catalog
             .members()
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count()
-            != 4
+            != 5
         || catalog.scenes().len() != LevelId::ALL.len()
         || LevelId::ALL
             .into_iter()
@@ -395,7 +401,7 @@ pub(super) fn prepare(
         || !catalog.addressable_roots().is_empty()
     {
         return Err(
-            "cooked content must contain four Scenes with two travel roots, five Images, one SoundBank, one Sprite animation set and one global Input"
+            "cooked content must contain five Scenes with two travel roots, five Images, one SoundBank, one Sprite animation set and one global Input"
                 .to_owned(),
         );
     }
@@ -417,27 +423,32 @@ pub(super) fn prepare(
     {
         return Err("cooked marker Scene identity or required Image edge changed".into());
     }
-    let room = catalog
-        .member_for_product(side_room::scene_product())
-        .ok_or("missing deferred side room Scene")?;
-    let room_key = SourceDocumentKey::project_location(
-        settings.project.source_universe,
-        room_source,
-        SourceDocumentKind::Scene,
-    );
-    if room.products() != [side_room::scene_product()]
-        || !matches!(room.kind(), RuntimeContentMemberKind::Scene { source } if source == &room_key)
-        || room.dependencies().len() != 2
-        || [side_room::image_product(), LevelId::Meadow.image_product()]
-            .into_iter()
-            .any(|product| {
-                !room.dependencies().contains(&RuntimeContentDependency::new(
-                    product,
-                    RuntimeContentDependencyRole::Required,
-                ))
+    let region_images = [side_room::image_product(), LevelId::Meadow.image_product()];
+    for (product, source) in &regions {
+        let member = catalog
+            .member_for_product(*product)
+            .ok_or_else(|| format!("missing cooked deferred Scene {source}"))?;
+        let expected_source = SourceDocumentKey::project_location(
+            settings.project.source_universe,
+            source.clone(),
+            SourceDocumentKind::Scene,
+        );
+        if member.products() != [*product]
+            || !matches!(member.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
+            || member.dependencies().len() != region_images.len()
+            || region_images.into_iter().any(|product| {
+                !member
+                    .dependencies()
+                    .contains(&RuntimeContentDependency::new(
+                        product,
+                        RuntimeContentDependencyRole::Required,
+                    ))
             })
-    {
-        return Err("cooked side room Scene identity or required Images changed".into());
+        {
+            return Err(format!(
+                "{source}: cooked Scene identity or required Images changed"
+            ));
+        }
     }
     let input_member = catalog
         .member_for_product(input_product())
@@ -495,37 +506,40 @@ pub(super) fn prepare(
             scene_source(&settings, level)?,
             SourceDocumentKind::Scene,
         );
+        let required = [
+            level.image_product(),
+            atlas_product(),
+            bank_product(),
+            clips_product(),
+            marker_product(),
+        ];
+        let deferred = if level == LevelId::Meadow {
+            regions.as_slice()
+        } else {
+            &[]
+        };
         if scene.products() != [level.scene_product()]
             || !matches!(scene.kind(), RuntimeContentMemberKind::Scene { source } if source == &expected_source)
-            || scene.dependencies().len() != 5 + usize::from(level == LevelId::Meadow)
-            || (level == LevelId::Meadow)
-                != scene
+            || scene.dependencies().len() != required.len() + deferred.len()
+            || required.into_iter().any(|product| {
+                !scene
                     .dependencies()
                     .contains(&RuntimeContentDependency::new(
-                        side_room::scene_product(),
+                        product,
+                        RuntimeContentDependencyRole::Required,
+                    ))
+            })
+            || deferred.iter().any(|(product, _)| {
+                !scene
+                    .dependencies()
+                    .contains(&RuntimeContentDependency::new(
+                        *product,
                         RuntimeContentDependencyRole::Reference,
                     ))
-            || scene
-                .dependencies()
-                .iter()
-                .any(|dependency| dependency.product() == input_product())
-            || [
-                level.image_product(),
-                atlas_product(),
-                bank_product(),
-                clips_product(),
-                marker_product(),
-            ]
-            .into_iter()
-            .any(|product| {
-                !scene.dependencies().iter().any(|dependency| {
-                    dependency.product() == product
-                        && dependency.role() == RuntimeContentDependencyRole::Required
-                })
             })
         {
             return Err(format!(
-                "cooked {level:?} Scene identity or required Image, atlas, SoundBank, Sprite animation or marker Scene changed"
+                "cooked {level:?} Scene identity, required content or deferred Scene references changed"
             ));
         }
     }

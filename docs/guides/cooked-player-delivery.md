@@ -155,6 +155,6 @@ derived from the existing logical clock and held intent. The
 owns source-free frame selection and native pixel evidence.
 
 The marker Prefab uses a separate badge Image reached through the retained marker Scene. The three
-Player placements package two travel Scenes, the marker Scene, the Deferred side room, five Images,
-the Sound Bank, Sprite clips and global startup Input. The side room prepares when requested from
-Meadow. [Marker Prefab workflow](../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor) · [Play the side room](../../samples/two-level-game/README.md#play-the-side-room)
+Player placements package two travel Scenes, the marker Scene, two Deferred rooms, five Images,
+the Sound Bank, Sprite clips and global startup Input. Both rooms prepare when requested from
+Meadow and use the same relic Image. [Marker Prefab workflow](../plans/2026-10-20-persistent-two-level-game-plan.md#textured-prefab-runtime-successor) · [Play the side rooms](../../samples/two-level-game/README.md#play-the-side-room)

@@ -966,7 +966,7 @@ mod tests {
                 reservations,
                 &claims,
                 limits(),
-                &[SceneProductRetirement::Instance(additional.clone())],
+                &[SceneProductRetirement::Instance(&additional)],
                 |overlay| {
                     overlay.replace_resource(ProductValue::new(2));
                 },

@@ -104,7 +104,7 @@ fn additional_instance_selection_explicitly_rejects_projection_before_allocation
         SceneIdentityCommit::Projection(Some(&current)),
         Some(SceneProductTransactionInput {
             limits: SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
-            additional_retirements: &[SceneProductRetirement::Instance(current.clone())],
+            additional_retirements: &[SceneProductRetirement::Instance(&current)],
             configure: Box::new(move |_| {
                 observed.fetch_add(1, Ordering::Relaxed);
             }),

@@ -405,6 +405,7 @@ impl Evidence {
                 "scene_members": snapshot.scene_members,
                 "logical_tick": snapshot.logical_tick,
                 "side_room": snapshot.side_room,
+                "lookout": snapshot.lookout,
                 "logical_elapsed_nanos": snapshot.logical_elapsed_nanos,
                 "held": snapshot.held,
                 "restoring": snapshot.restoring,

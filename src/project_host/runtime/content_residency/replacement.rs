@@ -1,10 +1,13 @@
 //! Owned CPU residency and Scene candidate for managed travel.
 
+use std::borrow::Cow;
+
 use super::*;
 
 pub(crate) struct StagedProjectSceneReplacement {
     scene: Option<StagedSceneReplacement>,
     expected: SpawnedSceneInstance,
+    additions_revision: u64,
     content: PreparedSceneContent,
     staged_server: AssetServer,
     images: ImagePublications,
@@ -22,7 +25,7 @@ impl StagedProjectSceneReplacement {
         content: &PreparedSceneContent,
         claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
-        additional_retirements: &[nara_scene::advanced::SceneProductRetirement],
+        additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
     ) -> Result<Self, SceneSpawnReport>
     where
@@ -37,74 +40,80 @@ impl StagedProjectSceneReplacement {
                 "Prepared Scene uses another schema authority",
             )));
         }
-        let current = world.resource::<ProjectSceneResidency>();
-        if current.has_addition() {
-            return Err(rejected(additive::replacement_blocked()));
-        }
-        let prepared =
-            PreparedResidency::prepare(world, content.into(), Some(current)).map_err(rejected)?;
-        let PreparedResidency {
-            // Bind the reservation first so every fallible local drops its catalogue copies
-            // and publication scratch before this metadata owner is released.
-            catalog,
-            bindings,
-            staged_server,
-            images,
-            materials,
-            inputs,
-            retirements,
-            tileset_slots,
-        } = prepared;
-        probe_tilesets(
-            world,
-            &inputs,
-            &retirements,
-            &staged_server,
-            catalog
-                .asset_resolution()
-                .map(|resolver| resolver.database()),
-        )
-        .map_err(rejected)?;
-        let scene = match content {
-            PreparedSceneContent::Source(snapshot) => component_bindings
-                .stage_scene_replacement_with_claims(
-                    world,
-                    snapshot.compiled_candidate(),
-                    Some(snapshot.asset_resolution()),
-                    expected,
-                    bindings,
-                    claims,
-                    limits,
-                    additional_retirements,
-                    configure,
-                ),
-            PreparedSceneContent::Processed(content) => component_bindings
-                .stage_runtime_scene_replacement_with_claims(
-                    world,
-                    content.scene.candidate(),
-                    expected,
-                    bindings,
-                    claims,
-                    limits,
-                    additional_retirements,
-                    configure,
-                ),
-        }?;
-        Ok(Self {
-            scene: Some(scene),
-            expected: expected.clone(),
-            content: content.clone(),
-            staged_server,
-            images,
-            materials,
-            inputs,
-            retirements,
-            tileset_slots,
-            catalog,
+        world.resource_scope(|world, current: Mut<ProjectSceneResidency>| {
+            let additions_revision = current.additions.revision;
+            let scene_retirements =
+                scene_retirements(world, &current, limits, additional_retirements)
+                    .map_err(rejected)?;
+            let prepared = PreparedResidency::prepare(world, content.into(), Some(&current))
+                .map_err(rejected)?;
+            let PreparedResidency {
+                // Bind the reservation first so every fallible local drops its catalogue copies
+                // and publication scratch before this metadata owner is released.
+                catalog,
+                bindings,
+                staged_server,
+                images,
+                materials,
+                inputs,
+                retirements,
+                tileset_slots,
+            } = prepared;
+            probe_tilesets(
+                world,
+                &inputs,
+                &retirements,
+                &staged_server,
+                catalog
+                    .asset_resolution()
+                    .map(|resolver| resolver.database()),
+            )
+            .map_err(rejected)?;
+            let scene = match content {
+                PreparedSceneContent::Source(snapshot) => component_bindings
+                    .stage_scene_replacement_with_claims(
+                        world,
+                        snapshot.compiled_candidate(),
+                        Some(snapshot.asset_resolution()),
+                        expected,
+                        bindings,
+                        claims,
+                        limits,
+                        &scene_retirements,
+                        configure,
+                    ),
+                PreparedSceneContent::Processed(content) => component_bindings
+                    .stage_runtime_scene_replacement_with_claims(
+                        world,
+                        content.scene.candidate(),
+                        expected,
+                        bindings,
+                        claims,
+                        limits,
+                        &scene_retirements,
+                        configure,
+                    ),
+            }?;
+            Ok(Self {
+                scene: Some(scene),
+                expected: expected.clone(),
+                additions_revision,
+                content: content.clone(),
+                staged_server,
+                images,
+                materials,
+                inputs,
+                retirements,
+                tileset_slots,
+                catalog,
+            })
         })
     }
 
-    pub(crate) fn validate_baseline(&self, world: &mut World) -> Result<(), SceneSpawnReport> {
+    pub(crate) fn begin_native_retirement(
+        &self,
+        world: &mut World,
+    ) -> Result<(), SceneSpawnReport> {
         world.flush();
         self.validate_content(world)?;
         self.scene
@@ -120,7 +129,14 @@ impl StagedProjectSceneReplacement {
                 .asset_resolution()
                 .map(|resolver| resolver.database()),
         )
-        .map_err(rejected)
+        .map_err(rejected)?;
+        if world.resource::<ProjectSceneResidency>().has_addition() {
+            world
+                .resource_mut::<ProjectSceneResidency>()
+                .additions
+                .retiring = true;
+        }
+        Ok(())
     }
 
     fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
@@ -132,8 +148,14 @@ impl StagedProjectSceneReplacement {
             )));
         }
         validate_resources(world, &self.content).map_err(rejected)?;
-        world
-            .resource::<ProjectSceneResidency>()
+        let residency = world.resource::<ProjectSceneResidency>();
+        if residency.additions.revision != self.additions_revision {
+            return Err(rejected(failure(
+                "project.scene.additions-changed",
+                "Active project Scene additions changed after travel preparation",
+            )));
+        }
+        residency
             .authority
             .validate((&self.content).into())
             .map_err(rejected)?;
@@ -226,7 +248,7 @@ impl StagedProjectSceneReplacement {
                 .clone(),
         );
         *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
-            addition: None,
+            additions: additive::Additions::default(),
             images,
             tilesets,
             materials,
@@ -244,6 +266,39 @@ impl StagedProjectSceneReplacement {
         }
         Ok(())
     }
+}
+
+fn scene_retirements<'a>(
+    world: &World,
+    current: &'a ProjectSceneResidency,
+    limits: SceneProductTransactionLimits,
+    product: &'a [SceneProductRetirement<'a>],
+) -> Result<Cow<'a, [SceneProductRetirement<'a>]>, HostFault> {
+    if !current.has_addition() {
+        return Ok(Cow::Borrowed(product));
+    }
+    let additions = current.additions.active.iter().filter(|addition| {
+        !nara_scene::__private::scene_instance_retired(world, &addition.receipt)
+    });
+    let entries = product.len().saturating_add(additions.clone().count());
+    if entries
+        > limits
+            .additional_retirements()
+            .get()
+            .min(SceneProductTransactionLimits::MAX_ADDITIONAL_RETIREMENTS)
+    {
+        return Err(failure(
+            "scene.product-retirement-limit-exceeded",
+            "Travel exceeds its additional Scene retirement limit",
+        ));
+    }
+    Ok(Cow::Owned(
+        product
+            .iter()
+            .copied()
+            .chain(additions.map(|addition| SceneProductRetirement::Instance(&addition.receipt)))
+            .collect(),
+    ))
 }
 
 pub(super) fn commit_publications(
@@ -382,7 +437,7 @@ pub(super) fn validate_native_resources(
         content.tileset_count() != 0 || current.is_some_and(|current| !current.tilesets.is_empty());
     let uses_images = uses_tilesets
         || content.image_count() != 0
-        || current.is_some_and(|current| !current.images.is_empty());
+        || current.is_some_and(|current| current.image_count() != 0);
     let uses_materials = content.material_count() != 0
         || current.is_some_and(|current| !current.materials.is_empty());
     if uses_images

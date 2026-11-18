@@ -10,9 +10,9 @@ pub(super) struct CatalogChange {
 }
 
 impl CatalogChange {
-    pub(super) fn prepare(
+    pub(super) fn prepare<'a>(
         current: &ProjectAssetDatabase,
-        owned: &[AssetRecord],
+        owned: impl Iterator<Item = &'a AssetRecord>,
         target: impl IntoIterator<Item = AssetRecord>,
     ) -> Result<Self, HostFault> {
         let mut target_by_path = BTreeMap::<AssetSourcePath, AssetRecord>::new();
@@ -26,11 +26,9 @@ impl CatalogChange {
             }
         }
         let mut database = current.clone();
-        let prior_owned = owned
-            .iter()
-            .map(|record| record.path())
-            .collect::<BTreeSet<_>>();
+        let mut prior_owned = BTreeSet::new();
         for record in owned {
+            prior_owned.insert(record.path());
             if current.record_for_path(record.path()) != Some(record) {
                 return Err(conflict());
             }

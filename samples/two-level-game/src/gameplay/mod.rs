@@ -17,10 +17,12 @@ use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
+    core::ItemLimit,
     ecs::{World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
+    project_host::ProjectContentLimits,
     reflect::{
         ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
         ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
@@ -42,13 +44,14 @@ use content::Content;
 pub use content::SoundPalette;
 pub use player_launch::{player_launch, player_launch_result};
 pub use side_room::SideRoomPhase;
+use side_room::{Room, Rooms};
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("two-level-game.exploration");
 const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("two-level-game.objects");
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("two-level-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("two-level-game.native", 5),
+    ComponentSchemaProviderBindingId::new("two-level-game.native", 6),
     catalog,
     register,
 );
@@ -115,6 +118,7 @@ pub struct GameSnapshot {
     pub held: [bool; 4],
     pub restoring: bool,
     pub side_room: SideRoomPhase,
+    pub lookout: SideRoomPhase,
 }
 
 /// Stable owner identity with a bounded write counter; ordinary mutations never allocate it.
@@ -285,7 +289,7 @@ impl Plugin for ExplorationPlugin {
         .insert_resource(collision::CharacterState::default())?
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
-        .insert_resource(side_room::SideRoom::default())?
+        .insert_resource(Rooms::default())?
         .insert_resource(verification::Verification::new(self.options.scenario))?;
         resume::install(app)?;
         storage::install(app, self.options.save_path.as_deref())?;
@@ -363,6 +367,9 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
     )
     .expect("static game schema and composition");
     ProductRecipe::new()
+        .with_source_content_limits(
+            ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
+        )
         .add_runtime_asset_codec::<nara::input::ActionMapDomain, nara::input::ActionMapRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.input", 1),
         )
@@ -402,6 +409,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
             crate::markers::MarkerPalette::persistent_component_schema(),
             crate::markers::MarkerLink::persistent_component_schema(),
             crate::side_room::SideRoomPortal::persistent_component_schema(),
+            crate::side_room::LookoutPortal::persistent_component_schema(),
         ],
         ..Default::default()
     })
@@ -414,7 +422,8 @@ fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegi
         .register_persistent_component::<crate::animation::ExplorerAnimation>()?
         .register_persistent_component::<crate::markers::MarkerPalette>()?
         .register_persistent_component::<crate::markers::MarkerLink>()?
-        .register_persistent_component::<crate::side_room::SideRoomPortal>()
+        .register_persistent_component::<crate::side_room::SideRoomPortal>()?
+        .register_persistent_component::<crate::side_room::LookoutPortal>()
         .map(|_| ())
 }
 
@@ -539,7 +548,7 @@ fn simulate(world: &mut World) {
         }
     }
     travel::hide_collected(world);
-    side_room::find_relic(world, position);
+    side_room::find_relics(world, position);
 }
 
 fn project_animation(world: &mut World) {
@@ -591,6 +600,7 @@ fn capture(world: &mut World) {
     let progress = world.resource::<Progress>().checkpoint();
     let level = world.resource::<ActiveLevel>();
     let session = world.resource::<Session>();
+    let rooms = world.resource::<Rooms>();
     let visible = level.content().map_or(0, |content| {
         content
             .pickups
@@ -636,7 +646,8 @@ fn capture(world: &mut World) {
         logical_elapsed_nanos: session.clock.elapsed_nanos,
         held: session.held,
         restoring: resume::is_pending(world),
-        side_room: world.resource::<side_room::SideRoom>().phase(),
+        side_room: rooms.phase(Room::SideRoom),
+        lookout: rooms.phase(Room::Lookout),
     };
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }

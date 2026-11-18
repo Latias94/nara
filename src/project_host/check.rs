@@ -242,6 +242,7 @@ fn load_checked_candidate(
     candidate: ProjectSettingsCandidate,
     manifest_identity: Option<FileIdentity>,
 ) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
+    let source_content_limits = recipe.source_content_limits();
     let plan = match options.host_policy {
         Some(host_policy) => resolve_product_recipe_with_host_policy(
             &candidate,
@@ -254,12 +255,12 @@ fn load_checked_candidate(
     .map_err(ProjectSourceCheckError::ProductComposition)?;
     let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
         .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
-    let loader = ProjectContentLoader::new(project_root).map_err(|error| {
-        ProjectSourceCheckError::StartupContent {
+    let loader = ProjectContentLoader::with_limits(project_root, source_content_limits).map_err(
+        |error| ProjectSourceCheckError::StartupContent {
             error,
             missing_startup_scene: None,
-        }
-    })?;
+        },
+    )?;
     let (snapshot, delivery_catalogue) = if options.delivery {
         loader.load_startup_for_delivery(
             &candidate,

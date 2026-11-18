@@ -73,7 +73,7 @@ commit; the request does not publish automatically. This does not admit additive
 arbitrary native rollback or this ADR's complete lifecycle proposal. The Host retains startup admission
 facts for Editor freshness, not the decoded startup snapshot forever. Snapshots, retained project
 sources and escaped immutable Images share an acyclic decoded-generation lease; source-only closure
-and delivery receipts do not hold that generation. The existing two-generation ceiling follows the
+and delivery receipts do not hold that generation. The configured ceiling defaults to two and follows the
 last real decoded owner, including old render packets after a future Scene commit.
 
 Escaped immutable CPU domain collections retain their original byte/reservation lease without
@@ -82,13 +82,12 @@ the last collection owner drops. This allows a Runtime-persistent sound bank to 
 current/prepared Scene generations. A domain product that owns an Image or Material view still
 retains that view's independently required generation custody; collection escape cannot remove it.
 
-ADR 0117 also covers the bounded additive side room.
-Its authored Deferred target prepares asynchronously while the primary Scene remains playable.
-One companion activates and unloads explicitly through the original Scene and Image owners.
-The primary Scene is replaced only after the companion closes. This ADR remains Proposed for
-active-set authority and coordinated travel, general service retirement and additional worlds.
-Full admission still requires the evidence below.
-[Side room implementation and evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-successor)
+ADR 0117 covers multiple Image-only companions from the primary Scene's admitted Deferred targets.
+They prepare asynchronously, activate by occurrence, and share eligible publications. Prepared
+primary travel retires the live Host additions in the same publication as the primary Scene.
+This ADR remains Proposed for explicit destination sets, general scene-scoped service retirement,
+additional worlds and the full Admission Evidence below.
+[Concurrent regions workflow](../../plans/2026-10-20-persistent-two-level-game-plan.md#concurrent-regions-and-coordinated-travel-successor)
 
 ## Decision
 

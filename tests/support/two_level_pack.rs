@@ -5,7 +5,7 @@ use nara::{
     runtime_content::{
         RuntimeContentDependencyRole, RuntimeContentMember, RuntimeContentMemberKind,
     },
-    scene::SourceDocumentOrigin,
+    scene::{SourceDocumentKind, SourceDocumentOrigin},
 };
 use two_level_game::{
     animation::{atlas_product, clips_product},
@@ -27,10 +27,12 @@ pub fn assert_level_dependencies(member: &RuntimeContentMember, level: LevelId) 
         (marker_product(), RuntimeContentDependencyRole::Required),
     ]);
     if level == LevelId::Meadow {
-        expected.insert(
+        for product in [
             side_room::scene_product(),
-            RuntimeContentDependencyRole::Reference,
-        );
+            side_room::lookout_scene_product(),
+        ] {
+            expected.insert(product, RuntimeContentDependencyRole::Reference);
+        }
     }
     assert_eq!(member.dependencies().len(), expected.len());
     assert_eq!(
@@ -44,15 +46,25 @@ pub fn assert_level_dependencies(member: &RuntimeContentMember, level: LevelId) 
 }
 
 pub fn assert_room_member(member: &RuntimeContentMember) {
-    assert_eq!(member.products(), [side_room::scene_product()]);
+    let (_, scene_path) = [
+        (side_room::scene_product(), side_room::SCENE_PATH),
+        (
+            side_room::lookout_scene_product(),
+            side_room::LOOKOUT_SCENE_PATH,
+        ),
+    ]
+    .into_iter()
+    .find(|(product, _)| member.products() == [*product])
+    .expect("expected one authored Meadow region Product");
     let RuntimeContentMemberKind::Scene { source } = member.kind() else {
-        panic!("side room requires a processed Scene member");
+        panic!("region requires a processed Scene member");
     };
+    assert_eq!(source.kind(), SourceDocumentKind::Scene);
     let SourceDocumentOrigin::ProjectLocation { universe, path } = source.origin() else {
-        panic!("side room retains its ProjectLocation identity");
+        panic!("region retains its ProjectLocation identity");
     };
     assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
-    assert_eq!(path.as_str(), format!("scenes/{}", side_room::SCENE_PATH));
+    assert_eq!(path.as_str(), format!("scenes/{scene_path}"));
     assert_eq!(member.dependencies().len(), 2);
     assert_eq!(
         member

@@ -2610,6 +2610,44 @@
               "field_tombstones": []
             },
             {
+              "id": "two-level-game.LookoutPortal",
+              "aliases": [
+                "Lookout portal"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "room",
+                  "aliases": [
+                    "Lookout Scene"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "room"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "asset_ref",
+                    "demand": "deferred"
+                  },
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
               "id": "two-level-game.MarkerLink",
               "aliases": [
                 "Marker link"

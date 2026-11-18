@@ -1887,8 +1887,9 @@ impl EditorProjectSession {
             .open_directory_exact(&prefabs_path)
             .map_err(|_| editor_open_error("project.editor.prefabs-open-failed"))?;
 
-        let loader = ProjectContentLoader::new(project_root.share())
-            .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
+        let loader =
+            ProjectContentLoader::with_limits(project_root.share(), recipe.source_content_limits())
+                .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
         let snapshot = loader
             .load_with_runtime_agreement(&candidate, &plan, runtime_agreement)
             .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;

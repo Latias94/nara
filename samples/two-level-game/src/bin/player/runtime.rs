@@ -18,7 +18,9 @@ use two_level_game::{
     animation::{atlas_product, clips_product},
     input::input_product,
     levels::{LevelId, LevelKey},
+    markers::marker_product,
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
+    side_room,
 };
 
 use super::{evidence::Evidence, generated, output};
@@ -41,26 +43,38 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
             RuntimeContentLimits::default(),
         )
         .map_err(|error| error.to_string())?;
-        if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
-            || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 12
-            || base
-                .catalog()
+        let catalog = base.catalog();
+        if catalog.startup_scene() != LevelId::STARTUP.scene_product()
+            || catalog.scenes().len() != LevelId::ALL.len()
+            || catalog.members().len() != 13
+            || catalog
                 .members()
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count()
-                != 4
-            || !base.catalog().addressable_roots().is_empty()
+                != 5
+            || [
+                marker_product(),
+                side_room::scene_product(),
+                side_room::lookout_scene_product(),
+            ]
+            .into_iter()
+            .any(|product| {
+                !base.member(product).is_some_and(|member| {
+                    matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
+                })
+            })
+            || !catalog.addressable_roots().is_empty()
             || base.plan().settings().input().action_map != Some(input_product())
             || base.member(input_product()).is_none()
             || base.member(atlas_product()).is_none()
             || base.member(clips_product()).is_none()
+            || base.member(side_room::image_product()).is_none()
             || base
                 .member(two_level_game::sound_bank::bank_product())
                 .is_none()
             || LevelId::ALL.into_iter().any(|level| {
-                !base.catalog().scenes().contains(&level.scene_product())
+                !catalog.scenes().contains(&level.scene_product())
                     || base.member(level.image_product()).is_none()
             })
         {

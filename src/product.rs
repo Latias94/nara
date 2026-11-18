@@ -18,6 +18,9 @@ use nara_reflect::{
 };
 use thiserror::Error;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use crate::project_content::ProjectContentLimits;
+
 mod default_settings;
 mod profile;
 mod runtime_time;
@@ -356,6 +359,8 @@ pub struct ProductRecipe {
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    source_content_limits: Option<ProjectContentLimits>,
 }
 
 #[cfg(feature = "render-wgpu")]
@@ -385,6 +390,8 @@ impl fmt::Debug for ProductRecipe {
         debug.field("asset_domains", &self.asset_domains);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug.field("runtime_codecs", &self.runtime_codecs);
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        debug.field("source_content_limits", &self.source_content_limits);
         debug.finish()
     }
 }
@@ -401,11 +408,13 @@ impl ProductRecipe {
             asset_domains: crate::project_content::ProjectAssetDomains::new(),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             runtime_codecs: crate::runtime_content::RuntimeCodecs::new(),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            source_content_limits: None,
         }
     }
 
     #[must_use]
-    /// Returns the number of explicit plugin entries, excluding defaults and asset operation facets.
+    /// Returns the number of explicit plugin entries.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -414,8 +423,26 @@ impl ProductRecipe {
     pub fn is_empty(&self) -> bool {
         let empty = self.entries.is_empty() && self.defaults.is_empty();
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-        let empty = empty && self.asset_domains.is_empty() && self.runtime_codecs.is_empty();
+        let empty = empty
+            && self.asset_domains.is_empty()
+            && self.runtime_codecs.is_empty()
+            && self.source_content_limits.is_none();
         empty
+    }
+
+    /// Sets the limits for file-backed Hosts loading source project content.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[must_use]
+    pub const fn with_source_content_limits(mut self, limits: ProjectContentLimits) -> Self {
+        self.source_content_limits = Some(limits);
+        self
+    }
+
+    /// Returns the configured source project content limits or their defaults.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[must_use]
+    pub fn source_content_limits(&self) -> ProjectContentLimits {
+        self.source_content_limits.unwrap_or_default()
     }
 
     /// Selects one compiled source domain for file-backed Check and Play. Settings live in metadata.

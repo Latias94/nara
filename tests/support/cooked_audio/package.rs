@@ -146,14 +146,14 @@ pub fn inspect(
     scenes.sort();
     assert_eq!(catalog.scenes(), scenes);
     assert!(catalog.addressable_roots().is_empty());
-    assert_eq!(catalog.members().len(), 12);
+    assert_eq!(catalog.members().len(), 13);
     assert_eq!(
         catalog
             .members()
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count(),
-        4
+        5
     );
     assert_eq!(
         catalog.configuration().input.action_map,
@@ -302,7 +302,12 @@ pub fn inspect(
             };
             assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
             assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
-        } else if product == side_room::scene_product() {
+        } else if [
+            side_room::scene_product(),
+            side_room::lookout_scene_product(),
+        ]
+        .contains(&product)
+        {
             two_level_pack::assert_room_member(member);
         } else {
             let level = LevelId::ALL
@@ -330,6 +335,7 @@ pub fn inspect(
                 marker_product(),
                 marker_image_product(),
                 side_room::scene_product(),
+                side_room::lookout_scene_product(),
                 side_room::image_product(),
             ])
             .collect()

@@ -645,6 +645,15 @@
       {
         "id": "portal",
         "components": {
+          "two-level-game.LookoutPortal": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "room": { "type": "map", "value": {
+                "kind": { "type": "string", "value": "stable_id" },
+                "value": { "type": "string", "value": "8e175ab1-593a-447e-91a5-17dac5157380" }
+              } }
+            } }
+          },
           "two-level-game.SideRoomPortal": {
             "version": 1,
             "value": { "type": "map", "value": {

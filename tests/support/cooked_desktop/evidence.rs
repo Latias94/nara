@@ -105,8 +105,8 @@ pub fn inspect_package(
     );
     assert_eq!(
         catalog.members().len(),
-        12,
-        "four processed Scenes with two travel roots, five Images, one shared SoundBank, one Sprite animation set and one global Input"
+        13,
+        "five processed Scenes with two travel roots, five Images, one shared SoundBank, one Sprite animation set and one global Input"
     );
     assert_eq!(
         catalog
@@ -114,7 +114,22 @@ pub fn inspect_package(
             .iter()
             .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
             .count(),
-        4
+        5
+    );
+    assert_eq!(
+        catalog
+            .members()
+            .iter()
+            .filter(|member| {
+                matches!(
+                    member.kind(),
+                    RuntimeContentMemberKind::Asset { format, version }
+                        if format.as_str() == ImageRuntimeCodec::RUNTIME_KIND
+                            && version.get() == ImageRuntimeCodec::RUNTIME_VERSION
+                )
+            })
+            .count(),
+        5
     );
     assert_eq!(payload["executable_name"], "player_desktop.exe");
     assert_eq!(payload["pack_file"], "content.pack");
@@ -236,7 +251,12 @@ pub fn inspect_package(
             };
             assert_eq!(universe.to_string(), "be3dea0c-93ef-5607-ab84-af715a1f98b3");
             assert_eq!(path.as_str(), format!("scenes/{SCENE_PATH}"));
-        } else if product == side_room::scene_product() {
+        } else if [
+            side_room::scene_product(),
+            side_room::lookout_scene_product(),
+        ]
+        .contains(&product)
+        {
             two_level_pack::assert_room_member(member);
         } else {
             assert!(
@@ -271,6 +291,7 @@ pub fn inspect_package(
                 marker_product(),
                 marker_image_product(),
                 side_room::scene_product(),
+                side_room::lookout_scene_product(),
                 side_room::image_product(),
             ])
             .collect()
@@ -381,9 +402,13 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
     ]
     .into_iter()
     .collect::<BTreeSet<_>>();
-    let side_room = record["state"]["side_room"].as_str().unwrap();
-    if matches!(side_room, "open" | "relic_found") {
-        resident.insert(two_level_game::side_room::image_product());
+    if ["side_room", "lookout"].into_iter().any(|room| {
+        matches!(
+            record["state"][room].as_str().unwrap(),
+            "open" | "relic_found"
+        )
+    }) {
+        resident.insert(side_room::image_product());
     }
     assert_eq!(
         record["resident_images"],

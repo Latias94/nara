@@ -23,7 +23,11 @@ use nara::{
 };
 
 use super::{
-    ActiveLevel, GamePhase, Progress, Session, commands::*, content::Content, fail,
+    ActiveLevel, GamePhase, Progress, Session,
+    commands::*,
+    content::Content,
+    fail,
+    side_room::{self, Room, Rooms},
     storage::Storage,
 };
 use crate::{
@@ -126,7 +130,8 @@ pub(super) fn consume(world: &mut World) {
             }
             RETRY => retry_current(world),
             MARKER => add_marker(world),
-            SIDE_ROOM => super::side_room::toggle(world),
+            SIDE_ROOM => side_room::toggle(world, Room::SideRoom),
+            LOOKOUT => side_room::toggle(world, Room::Lookout),
             SAVE => {
                 let checkpoint = world.resource::<Progress>().checkpoint().clone();
                 let result = world.resource::<Storage>().save(&checkpoint);
@@ -159,7 +164,7 @@ pub(super) fn consume(world: &mut World) {
 }
 
 fn retry_current(world: &mut World) -> Result<(), String> {
-    super::side_room::SideRoom::require_closed(world)?;
+    Rooms::require_closed(world)?;
     let key = world.resource::<ActiveLevel>().key();
     let progress = world.resource::<Progress>().checkpoint().clone();
     let (expected, content) = {
@@ -168,11 +173,15 @@ fn retry_current(world: &mut World) -> Result<(), String> {
         content.validate_progress(key.level(), &progress)?;
         (current.receipt().clone(), content)
     };
-    let markers = world
+    let marker_receipts = world
         .resource::<Session>()
         .markers
         .iter()
-        .map(|marker| SceneProductRetirement::Instance(marker.receipt.clone()))
+        .map(|marker| marker.receipt.clone())
+        .collect::<Vec<_>>();
+    let markers = marker_receipts
+        .iter()
+        .map(SceneProductRetirement::Instance)
         .collect::<Vec<_>>();
     let report = restart_current_scene_with_product(
         world,
@@ -215,7 +224,6 @@ pub(super) fn begin(
     checkpoint: Checkpoint,
     restore: bool,
 ) -> Result<(), String> {
-    super::side_room::SideRoom::require_closed(world)?;
     checkpoint.validate().map_err(|error| error.to_string())?;
     if world.resource::<Travel>().pending.is_some() {
         return Err("level preparation is already pending".into());
@@ -327,26 +335,29 @@ pub(super) fn advance(world: &mut World) {
         return;
     }
     if !pending.validate.is_empty() {
-        // Only ordinary owned IDs/positions survive this inspection. Drop the decoded generation
-        // before requesting the next source, preserving the Host's two-generation budget.
         cancel_ack(world, request);
         pending.validate.pop();
         pending.request = None;
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
     }
-    let old_markers = world
+    let marker_receipts = world
         .resource::<Session>()
         .markers
         .iter()
-        .map(|marker| SceneProductRetirement::Instance(marker.receipt.clone()))
+        .map(|marker| marker.receipt.clone())
         .collect::<Vec<_>>();
+    let old_markers = marker_receipts
+        .iter()
+        .map(SceneProductRetirement::Instance)
+        .collect::<Vec<_>>();
+    let retirement_members = MAX_MARKERS * 16 + world.resource::<Rooms>().live_members();
     let report = commit_prepared_project_scene(
         world,
         request,
         SceneProductTransactionLimits::new(
             ItemLimit::new(4).unwrap(),
-            ItemLimit::new(MAX_MARKERS * 16).unwrap(),
+            ItemLimit::new(retirement_members).unwrap(),
         ),
         &old_markers,
         |writer| {
@@ -365,6 +376,7 @@ pub(super) fn advance(world: &mut World) {
         );
         return;
     }
+    *world.resource_mut::<Rooms>() = Rooms::default();
     #[cfg(all(windows, feature = "audio-cpal"))]
     crate::audio::scene_replaced(world);
     ack(world, request);

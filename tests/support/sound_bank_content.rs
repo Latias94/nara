@@ -47,6 +47,7 @@ use two_level_game::{
     animation::{CLIPS_PATH, clips_product},
     input::{INPUT_PATH, input_product},
     levels::LevelId,
+    side_room,
     sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
 };
 
@@ -612,39 +613,43 @@ fn prepared(fixture: &Fixture) -> PreparedRuntimeContent {
             )
             .unwrap();
     }
-    let room = loader
-        .load_scene(
-            &candidate,
-            &plan,
-            &nara::project::ProjectPath::new(two_level_game::side_room::SCENE_PATH).unwrap(),
-        )
-        .unwrap();
-    let room_scene = plan
-        .schema_validation()
-        .bindings()
-        .try_compile_scene_with_loader(
-            room.scene(),
-            Default::default(),
-            Some(room.asset_resolution()),
-            |_, _| Ok::<_, std::convert::Infallible>(None),
-        )
-        .unwrap();
-    assert!(
-        !room_scene.diagnostics.has_errors(),
-        "{:?}",
-        room_scene.diagnostics
-    );
-    let room_scene = room_scene
-        .candidate
-        .unwrap()
-        .bind_source(room.selected_scene_source_key().clone());
-    builder
-        .add_scene(
-            two_level_game::side_room::scene_product(),
-            &room_scene,
-            room.asset_resolution(),
-        )
-        .unwrap();
+    for (path, product) in [
+        (side_room::SCENE_PATH, side_room::scene_product()),
+        (
+            side_room::LOOKOUT_SCENE_PATH,
+            side_room::lookout_scene_product(),
+        ),
+    ] {
+        let room = loader
+            .load_scene(
+                &candidate,
+                &plan,
+                &nara::project::ProjectPath::new(path).unwrap(),
+            )
+            .unwrap();
+        let room_scene = plan
+            .schema_validation()
+            .bindings()
+            .try_compile_scene_with_loader(
+                room.scene(),
+                Default::default(),
+                Some(room.asset_resolution()),
+                |_, _| Ok::<_, std::convert::Infallible>(None),
+            )
+            .unwrap();
+        assert!(
+            !room_scene.diagnostics.has_errors(),
+            "{:?}",
+            room_scene.diagnostics
+        );
+        let room_scene = room_scene
+            .candidate
+            .unwrap()
+            .bind_source(room.selected_scene_source_key().clone());
+        builder
+            .add_scene(product, &room_scene, room.asset_resolution())
+            .unwrap();
+    }
     builder.finish().unwrap()
 }
 
@@ -720,7 +725,7 @@ pub fn processed_and_membership() {
     let fixture = Fixture::new();
     let expected = fixture.samples();
     let prepared = prepared(&fixture);
-    assert_eq!(prepared.base().catalog().members().len(), 12);
+    assert_eq!(prepared.base().catalog().members().len(), 13);
     assert_eq!(
         prepared.base().catalog().configuration().input.action_map,
         Some(input_product())

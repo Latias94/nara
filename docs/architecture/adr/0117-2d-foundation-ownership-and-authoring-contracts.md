@@ -142,19 +142,21 @@ require exact-ID acknowledgement. Runtime close revokes publication interest and
 retain physical worker custody. A later selected closure is not another executable startup
 agreement: its records decode against the already admitted frozen native schema authority.
 
-The additive side room uses the same request slot for one companion selected from the primary
-Scene's admitted Deferred dependencies. The source request binds the captured target Product
-and its canonical path. The processed request uses a validated `Reference` edge of the retained
-primary closure. A Scene added through this route has its own occurrence and exact unload
-receipt in the same World. Travel and Retry require the companion to close first.
+Additive activation uses the same request slot for companion Scenes selected from the primary
+Scene's admitted Deferred dependencies. The source request binds the captured target Product and
+its canonical path. The processed request uses a validated `Reference` edge of the retained
+primary closure. Each committed addition has its own occurrence and exact unload receipt in the
+same World. Additions coexist within the Host's original content and Scene limits.
 
-The companion retains ordinary Image publications and may reuse an identical publication owned
-by the primary Scene. Unload retires the exact occurrence and its own publications. A failed
-reload with the same last-good Image leaves the publication eligible for retirement. An already
-retired original occurrence permits the Host to finish its remaining Image and catalog cleanup.
-Retained render inputs keep their captured allocations. TileSet, Material and native service
-lifetimes require their own additive contracts under the broader ADR 0089 proposal.
-[Side room implementation and evidence](../../plans/2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-successor)
+The Host publishes one identical Image or source catalog record for all live Scenes that use it.
+Unload retires the exact occurrence and releases publications whose last live Scene leaves.
+A failed reload of the same last-good Image still permits retirement. After lower-level occurrence
+retirement, the Host can finish only the outstanding resource release. Prepared primary travel
+includes all live Host additions in its existing retirement and resource publication transaction.
+Managed travel revalidates that group before native work and at commit. The retained-source
+Restart still requires closed additions. Retained render inputs keep their captured allocations.
+TileSet, Material and native service lifetimes require additive contracts under ADR 0089.
+[Concurrent regions workflow](../../plans/2026-10-20-persistent-two-level-game-plan.md#concurrent-regions-and-coordinated-travel-successor)
 
 Source component values may use component-local immutable storage, independent of raw documents,
 resolvers and snapshots. Public source record/document cloning preserves independent values;
@@ -225,8 +227,9 @@ remain ineligible for Scene replacement admission.
 
 Decoded project snapshots, retained Scene sources and escaped immutable Images share an acyclic
 generation lease. Source-only closure and delivery receipts retain source facts independently.
-The existing decoded-generation ceiling follows the last real decoded owner, including prepared
-render packets. Hosts retain separate startup admission facts for freshness comparisons and release
+The selected decoded-generation ceiling follows the last real decoded owner, including prepared
+render packets. The source recipe may set the ceiling and the default is two. Hosts retain separate
+startup admission facts for freshness comparisons and release
 their decoded startup snapshots once ownership transfers to live sources and resource values.
 Saved dynamic identity and an explicit authored-instance binding do not establish a universal save format.
 

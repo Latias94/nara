@@ -236,6 +236,35 @@ fn additive_retirement_uses_the_last_good_image_after_reload_failure() {
 }
 
 #[test]
+fn prepared_retirement_keeps_the_last_good_publication_after_a_failed_reload() {
+    let mut values = Publications::default();
+    let prepared = values.prepare(image(product(SOURCE, true), 1), None);
+    let owned = values.commit(prepared);
+    let handle = owned[0].handle;
+    let retirement =
+        ImagePublications::retire(&owned, &values.server, &values.images, &values.states).unwrap();
+    values
+        .images
+        .record_reload_failure(
+            handle,
+            &mut values.states,
+            &mut values.events,
+            "invalid replacement while retirement is pending",
+        )
+        .unwrap();
+    assert_eq!(values.images.get(handle).unwrap().pixels(), [1, 0, 0, 255]);
+    retirement
+        .validate(&values.server, &values.images, &values.states)
+        .unwrap();
+    assert!(values.commit(retirement).is_empty());
+    assert!(values.images.get(handle).is_none());
+    assert!(matches!(
+        values.states.state(handle.id()).unwrap().load_state(),
+        LoadState::Removed
+    ));
+}
+
+#[test]
 fn escaped_pixels_retain_the_exact_owner_after_publication_and_retirement() {
     let mut values = Publications::default();
     let owner = Arc::new(());

@@ -12,9 +12,14 @@ use nara::{
     sprite::Sprite,
 };
 
-use crate::side_room::{RELIC, SideRoomPortal, scene_product};
+use crate::side_room::{
+    LOOKOUT_RELIC, LookoutPortal, RELIC, SideRoomPortal, lookout_scene_product, scene_product,
+};
 
-use super::Session;
+use super::{
+    Session,
+    commands::{LOOKOUT, SIDE_ROOM},
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,8 +31,28 @@ pub enum SideRoomPhase {
     RelicFound,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Room {
+    SideRoom,
+    Lookout,
+}
+
+impl Room {
+    const ALL: [Self; 2] = [Self::SideRoom, Self::Lookout];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::SideRoom => "side room",
+            Self::Lookout => "lookout",
+        }
+    }
+}
+
 #[derive(Resource, Default)]
-pub(super) enum SideRoom {
+pub(super) struct Rooms([RoomState; 2]);
+
+#[derive(Default)]
+enum RoomState {
     #[default]
     Closed,
     Preparing(ProjectSceneRequestId),
@@ -38,71 +63,113 @@ pub(super) enum SideRoom {
     },
 }
 
-impl SideRoom {
-    pub(super) fn phase(&self) -> SideRoomPhase {
-        match self {
-            Self::Closed => SideRoomPhase::Closed,
-            Self::Preparing(_) => SideRoomPhase::Preparing,
-            Self::Open { found: false, .. } => SideRoomPhase::Open,
-            Self::Open { found: true, .. } => SideRoomPhase::RelicFound,
+impl Rooms {
+    pub(super) fn phase(&self, room: Room) -> SideRoomPhase {
+        match self.0[room as usize] {
+            RoomState::Closed => SideRoomPhase::Closed,
+            RoomState::Preparing(_) => SideRoomPhase::Preparing,
+            RoomState::Open { found: false, .. } => SideRoomPhase::Open,
+            RoomState::Open { found: true, .. } => SideRoomPhase::RelicFound,
         }
     }
 
     pub(super) fn require_closed(world: &World) -> Result<(), String> {
-        if matches!(world.resource::<Self>(), Self::Closed) {
-            Ok(())
-        } else {
-            Err("close the side room before replacing or capturing the main level".into())
+        let rooms = world.resource::<Self>();
+        for room in Room::ALL {
+            if rooms.phase(room) != SideRoomPhase::Closed {
+                return Err(format!(
+                    "close the {} before retry or exact capture",
+                    room.name()
+                ));
+            }
         }
+        Ok(())
+    }
+
+    pub(super) fn live_members(&self) -> usize {
+        self.0
+            .iter()
+            .map(|state| match state {
+                RoomState::Open { receipt, .. } => receipt.len(),
+                _ => 0,
+            })
+            .sum()
     }
 }
 
-pub(super) fn toggle(world: &mut World) -> Result<(), String> {
-    match world.resource::<SideRoom>() {
-        SideRoom::Closed => {
-            let product = portal_product(world)?;
+pub(super) fn toggle(world: &mut World, room: Room) -> Result<(), String> {
+    let index = room as usize;
+    match &world.resource::<Rooms>().0[index] {
+        RoomState::Closed => {
+            let product = portal_product(world, room)?;
             let request = ProjectScenes::scope(world, |scenes| scenes.request_additive(product))
                 .map_err(|error| error.to_string())?;
-            *world.resource_mut::<SideRoom>() = SideRoom::Preparing(request);
+            world.resource_mut::<Rooms>().0[index] = RoomState::Preparing(request);
         }
-        SideRoom::Preparing(request) => {
+        RoomState::Preparing(request) => {
             let request = *request;
             ProjectScenes::scope(world, |scenes| scenes.cancel(request));
         }
-        SideRoom::Open { receipt, .. } => {
+        RoomState::Open { receipt, .. } => {
             let receipt = receipt.clone();
-            unload_project_scene_addition(world, &receipt)
-                .map_err(|diagnostics| format!("side room unload rejected: {diagnostics:?}"))?;
-            *world.resource_mut::<SideRoom>() = SideRoom::Closed;
+            unload_project_scene_addition(world, &receipt).map_err(|diagnostics| {
+                format!("{} unload rejected: {diagnostics:?}", room.name())
+            })?;
+            world.resource_mut::<Rooms>().0[index] = RoomState::Closed;
         }
     }
     Ok(())
 }
 
-fn portal_product(world: &World) -> Result<AssetProductRef, String> {
+fn portal_product(world: &World, room: Room) -> Result<AssetProductRef, String> {
     let current = CurrentScene::get(world).ok_or("the main level is unavailable")?;
     let gate = SceneEntityId::new("portal").expect("static portal ID");
+    let missing_portal = || format!("the current level has no {} portal", room.name());
     let EntityLookup::Resolved(gate) = current.receipt().resolve(world, &gate) else {
-        return Err("the current level has no side room portal".into());
+        return Err(missing_portal());
     };
-    let portal = world
-        .get::<SideRoomPortal>(gate)
-        .ok_or("the current level has no side room portal")?;
-    let product = match &portal.room {
+    let (reference, expected) = match room {
+        Room::SideRoom => (
+            world.get::<SideRoomPortal>(gate).map(|portal| &portal.room),
+            scene_product(),
+        ),
+        Room::Lookout => (
+            world.get::<LookoutPortal>(gate).map(|portal| &portal.room),
+            lookout_scene_product(),
+        ),
+    };
+    let product = match reference.ok_or_else(missing_portal)? {
         AssetRef::Product(product) => Some(*product),
         AssetRef::StableId(id) => AssetProductRef::new(*id, ImportedProductId::PRIMARY).ok(),
         _ => None,
     };
     product
-        .filter(|product| *product == scene_product())
-        .ok_or("the side room portal must select the authored Scene Product".into())
+        .filter(|product| *product == expected)
+        .ok_or_else(|| {
+            format!(
+                "the {} portal must select the authored Scene Product",
+                room.name()
+            )
+        })
 }
 
 pub(super) fn advance(world: &mut World) {
-    let SideRoom::Preparing(request) = *world.resource::<SideRoom>() else {
+    let rooms = world.resource::<Rooms>();
+    let Some((room, request)) = Room::ALL.into_iter().find_map(|room| {
+        if let RoomState::Preparing(request) = rooms.0[room as usize] {
+            Some((room, request))
+        } else {
+            None
+        }
+    }) else {
         return;
     };
-    let relic = SceneEntityId::new(RELIC).expect("static relic ID");
+    let (owner, relic) = match room {
+        Room::SideRoom => (SIDE_ROOM, RELIC),
+        Room::Lookout => (LOOKOUT, LOOKOUT_RELIC),
+    };
+    let name = room.name();
+    let relic = SceneEntityId::new(relic).expect("static relic ID");
     let ready = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         Some(ProjectSceneRequestState::Ready) => Some(
@@ -122,26 +189,25 @@ pub(super) fn advance(world: &mut World) {
                     })
                 })
                 .map(|_| true)
-                .ok_or_else(|| "the side room requires its authored relic".into()),
+                .ok_or_else(|| format!("the {name} requires its authored relic")),
         ),
         Some(ProjectSceneRequestState::Cancelled) => Some(Ok(false)),
         state => Some(Err(format!(
-            "side room preparation rejected: {state:?}; {:?}",
+            "{name} preparation rejected: {state:?}; {:?}",
             scenes.diagnostics(request)
         ))),
     });
     let Some(ready) = ready else { return };
     let result = ready.and_then(|activate| {
         if !activate {
-            return Ok(SideRoom::Closed);
+            return Ok(RoomState::Closed);
         }
-        let occurrence = SceneOccurrenceKey::new("two-level-game.side-room", "meadow")
-            .expect("static side room occurrence");
+        let occurrence = SceneOccurrenceKey::new(owner, "meadow").expect("static room occurrence");
         let report = activate_prepared_project_scene(world, request, &occurrence);
         let receipt = report
             .instance
-            .ok_or_else(|| format!("side room activation rejected: {:?}", report.diagnostics))?;
-        Ok(SideRoom::Open {
+            .ok_or_else(|| format!("{name} activation rejected: {:?}", report.diagnostics))?;
+        Ok(RoomState::Open {
             receipt,
             relic,
             found: false,
@@ -153,35 +219,38 @@ pub(super) fn advance(world: &mut World) {
         }
         scenes.acknowledge(request);
     });
-    match result {
-        Ok(state) => *world.resource_mut::<SideRoom>() = state,
+    let state = match result {
+        Ok(state) => state,
         Err(error) => {
-            *world.resource_mut::<SideRoom>() = SideRoom::Closed;
             world.resource_mut::<Session>().error = Some(error);
+            RoomState::Closed
         }
-    }
+    };
+    world.resource_mut::<Rooms>().0[room as usize] = state;
 }
 
-pub(super) fn find_relic(world: &mut World, position: Vec2) {
-    let SideRoom::Open {
-        receipt,
-        relic,
-        found: false,
-    } = world.resource::<SideRoom>()
-    else {
-        return;
-    };
-    let EntityLookup::Resolved(entity) = receipt.resolve(world, relic) else {
-        return;
-    };
-    if world
-        .get::<Transform2d>(entity)
-        .is_some_and(|transform| transform.translation.distance_squared(position) <= 10.0 * 10.0)
-        && let Some(mut sprite) = world.get_mut::<Sprite>(entity)
-    {
-        sprite.material.tint.a = 0.0;
-        if let SideRoom::Open { found, .. } = &mut *world.resource_mut::<SideRoom>() {
-            *found = true;
+pub(super) fn find_relics(world: &mut World, position: Vec2) {
+    for room in Room::ALL {
+        let index = room as usize;
+        let RoomState::Open {
+            receipt,
+            relic,
+            found: false,
+        } = &world.resource::<Rooms>().0[index]
+        else {
+            continue;
+        };
+        let EntityLookup::Resolved(entity) = receipt.resolve(world, relic) else {
+            continue;
+        };
+        if world.get::<Transform2d>(entity).is_some_and(|transform| {
+            transform.translation.distance_squared(position) <= 10.0 * 10.0
+        }) && let Some(mut sprite) = world.get_mut::<Sprite>(entity)
+        {
+            sprite.material.tint.a = 0.0;
+            if let RoomState::Open { found, .. } = &mut world.resource_mut::<Rooms>().0[index] {
+                *found = true;
+            }
         }
     }
 }

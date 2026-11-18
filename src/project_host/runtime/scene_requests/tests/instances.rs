@@ -37,7 +37,8 @@ use super::super::super::{CleanupDriveOutcome, ProjectHost};
 use super::{
     Context, Fixture, PreparedSceneContent, ProjectSceneRequestError, ProjectSceneRequestState,
     ProjectScenes, RequestOwner, Slot, activate_prepared_project_scene, assert_active_budget,
-    commit_prepared_project_scene, poll_project_scene_requests, pools,
+    begin_prepared_project_scene_travel, commit_prepared_project_scene,
+    poll_project_scene_requests, pools,
     preparation::{TestGate, TestPhase},
     wait_for_request, with_context_world, with_context_world_and_startup,
 };
@@ -126,10 +127,6 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
         assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
         assert!(unload_project_scene_addition(world, &primary).is_err());
         assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
-        assert_eq!(
-            ProjectScenes::scope(world, |scenes| scenes.request(product(2))),
-            Err(ProjectSceneRequestError::AdditionActive)
-        );
         assert_error(
             &restart_current_scene_with_product(world, &primary, limits(), &[], |_| {}),
             "project.scene.addition-active",
@@ -153,6 +150,180 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
         assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
         assert_active_budget(&context, original_budget);
     });
+}
+
+#[test]
+fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferred_scene() {
+    let fixture = Fixture::new();
+    let base = processed_base(&fixture);
+    let source = crate::startup_scene::SceneSource::from_hosted_runtime_content(
+        base.acquire_startup_scene().unwrap(),
+    );
+    with_context_world(Arc::new(Context::Processed { base }), source, |world| {
+        world.insert_resource(pools());
+        let primary = CurrentScene::get(world).unwrap().receipt().clone();
+        let activate = |world: &mut World, slot| {
+            let request =
+                ProjectScenes::scope(world, |scenes| scenes.request_additive(product(4))).unwrap();
+            wait_for_request(world, request, ProjectSceneRequestState::Ready);
+            let report = activate_prepared_project_scene(world, request, &occurrence(slot));
+            let receipt = report
+                .instance
+                .unwrap_or_else(|| panic!("{:?}", report.diagnostics));
+            assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+            receipt
+        };
+        let travel = |world: &mut World| {
+            let request = ProjectScenes::scope(world, |scenes| scenes.request(product(2))).unwrap();
+            wait_for_request(world, request, ProjectSceneRequestState::Ready);
+            request
+        };
+        let original = activate(world, "first");
+        let second = activate(world, "second");
+        let deferred = entity("deferred");
+        assert_ne!(original.instance_id(), second.instance_id());
+        let EntityLookup::Resolved(first_entity) = original.resolve(world, &deferred) else {
+            panic!("missing first occurrence")
+        };
+        let EntityLookup::Resolved(second_entity) = second.resolve(world, &deferred) else {
+            panic!("missing second occurrence")
+        };
+        assert_ne!(first_entity, second_entity);
+        let request = travel(world);
+        assert_error(
+            &commit_prepared_project_scene(world, request, limits(), &[], |_| {
+                panic!("unadmitted overlay")
+            }),
+            "scene.product-retirement-limit-exceeded",
+        );
+        assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+        assert_eq!(
+            original.resolve(world, &deferred),
+            EntityLookup::Resolved(first_entity)
+        );
+        assert_eq!(
+            second.resolve(world, &deferred),
+            EntityLookup::Resolved(second_entity)
+        );
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+
+        let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::new(2).unwrap());
+        let request = travel(world);
+        begin_prepared_project_scene_travel(world, request, limits, &[], |_| {}).unwrap();
+        assert_eq!(unload_project_scene_addition(world, &original).unwrap(), 1);
+        world.resource_mut::<nara_app::RealTime>().frame += 1;
+        poll_project_scene_requests(world);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Rejected(
+                    ProjectSceneRequestError::CommitRejected
+                ))
+            );
+            assert!(
+                scenes
+                    .diagnostics(request)
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry.code().as_str() == "project.scene.additions-changed")
+            );
+            assert!(scenes.acknowledge(request));
+        });
+        assert_eq!(
+            second.resolve(world, &deferred),
+            EntityLookup::Resolved(second_entity)
+        );
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
+        let fresh = activate(world, "first");
+        assert_ne!(fresh.instance_id(), original.instance_id());
+
+        let request = travel(world);
+        world
+            .resource_mut::<super::super::domains::ManagedSceneDomains>()
+            .register(Box::new(RetireOnce))
+            .unwrap();
+        begin_prepared_project_scene_travel(world, request, limits, &[], |_| {}).unwrap();
+        world.resource_mut::<nara_app::RealTime>().frame += 1;
+        poll_project_scene_requests(world);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Degraded)
+            );
+        });
+        let error = unload_project_scene_addition(world, &second).unwrap_err();
+        assert!(
+            error
+                .iter()
+                .any(|entry| entry.code().as_str() == "project.scene.additions-retiring")
+        );
+        assert_eq!(
+            second.resolve(world, &deferred),
+            EntityLookup::Resolved(second_entity)
+        );
+        assert!(ProjectScenes::scope(world, |scenes| scenes.retry(request)));
+        poll_project_scene_requests(world);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Committed)
+            );
+            assert!(scenes.acknowledge(request));
+        });
+        assert_ne!(CurrentScene::get(world).unwrap().receipt(), &primary);
+        for receipt in [fresh, second] {
+            assert!(matches!(
+                receipt.resolve(world, &deferred),
+                EntityLookup::Tombstoned(_)
+            ));
+            assert!(unload_project_scene_addition(world, &receipt).is_err());
+        }
+    });
+}
+
+struct RetireOnce;
+impl super::super::domains::ManagedSceneDomain for RetireOnce {
+    fn id(&self) -> super::super::domains::ManagedSceneDomainId {
+        super::super::domains::ManagedSceneDomainId::new("test.concurrent-room-retire")
+    }
+
+    fn prepare(
+        &self,
+        _: &World,
+        _: &super::super::PreparedProjectSceneView<'_>,
+    ) -> Result<
+        super::super::domains::ManagedSceneDomainPreparation,
+        super::super::domains::ManagedSceneDomainError,
+    > {
+        Ok(super::super::domains::ManagedSceneDomainPreparation::new(
+            nara_scene::advanced::SceneNativeRetirementClaims::default(),
+            FailFirstRetirement(false),
+        ))
+    }
+}
+
+struct FailFirstRetirement(bool);
+impl super::super::domains::ManagedSceneDomainAttempt for FailFirstRetirement {
+    fn retire(
+        &mut self,
+        _: &mut World,
+        _: &SpawnedSceneInstance,
+    ) -> Result<(), super::super::domains::ManagedSceneDomainError> {
+        if std::mem::replace(&mut self.0, true) {
+            return Ok(());
+        }
+        Err(super::super::domains::ManagedSceneDomainError::new(
+            nara_diagnostic::DiagnosticCode::new("test.concurrent-room-retire-failed").unwrap(),
+        ))
+    }
+
+    fn reconcile(
+        &mut self,
+        _: &mut World,
+        _: &SpawnedSceneInstance,
+    ) -> Result<(), super::super::domains::ManagedSceneDomainError> {
+        Ok(())
+    }
 }
 
 #[test]

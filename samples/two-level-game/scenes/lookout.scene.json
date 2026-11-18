@@ -1,0 +1,108 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": { "name": "nara", "version": "0.1.0" },
+  "payload": {
+    "placements": [
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "lookout-floor" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "lookout-relic" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "lookout-sign" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      }
+    ],
+    "entities": [
+      {
+        "id": "lookout-floor",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -120 }, "y": { "type": "f64", "value": -48 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "layer": { "type": "i64", "value": -1 },
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 56 }, "y": { "type": "f64", "value": 40 } } },
+              "material": { "type": "map", "value": {
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 0.12 }, "g": { "type": "f64", "value": 0.23 },
+                  "b": { "type": "f64", "value": 0.32 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      },
+      {
+        "id": "lookout-relic",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -120 }, "y": { "type": "f64", "value": -48 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 12 }, "y": { "type": "f64", "value": 12 } } },
+              "material": { "type": "map", "value": {
+                "image": { "type": "map", "value": {
+                  "kind": { "type": "string", "value": "path" },
+                  "value": { "type": "string", "value": "textures/side-room.png" }
+                } },
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 1 }, "g": { "type": "f64", "value": 1 },
+                  "b": { "type": "f64", "value": 1 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      },
+      {
+        "id": "lookout-sign",
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "translation": { "type": "map", "value": { "x": { "type": "f64", "value": -141 }, "y": { "type": "f64", "value": -41 } } },
+              "rotation": { "type": "f64", "value": 0 },
+              "scale": { "type": "map", "value": { "x": { "type": "f64", "value": 1 }, "y": { "type": "f64", "value": 1 } } }
+            } }
+          },
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": { "type": "map", "value": {
+              "size": { "type": "map", "value": { "x": { "type": "f64", "value": 8 }, "y": { "type": "f64", "value": 8 } } },
+              "material": { "type": "map", "value": {
+                "image": { "type": "map", "value": {
+                  "kind": { "type": "string", "value": "path" },
+                  "value": { "type": "string", "value": "textures/meadow.png" }
+                } },
+                "tint": { "type": "map", "value": {
+                  "r": { "type": "f64", "value": 1 }, "g": { "type": "f64", "value": 1 },
+                  "b": { "type": "f64", "value": 1 }, "a": { "type": "f64", "value": 1 }
+                } }
+              } }
+            } }
+          }
+        }
+      }
+    ]
+  }
+}

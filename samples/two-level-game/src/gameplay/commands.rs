@@ -10,6 +10,7 @@ pub(crate) const SAVE: &str = "two-level-game.save";
 pub(crate) const RESTORE: &str = "two-level-game.restore";
 pub(crate) const RETRY: &str = "two-level-game.retry";
 pub(crate) const SIDE_ROOM: &str = "two-level-game.side-room";
+pub(crate) const LOOKOUT: &str = "two-level-game.lookout";
 pub(crate) const PLAYER_LAUNCH: &str = "two-level-game.player-launch";
 
 pub(crate) fn action(id: &str) -> GameplayCommandDraft {

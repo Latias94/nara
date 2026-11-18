@@ -12,7 +12,7 @@ use nara_image::ImageAsset;
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::super::{HostFault, single_error};
-use super::ResidencyInput;
+use super::{ProjectSceneResidency, ResidencyInput};
 use crate::runtime_content::{RuntimeContentAsset, RuntimeContentLease};
 
 #[cfg(test)]
@@ -78,6 +78,21 @@ impl OwnedImage {
                 .state(self.handle.id())
                 .is_some_and(|state| state.usable_version().is_some())
     }
+
+    fn matches_retirement(
+        &self,
+        server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> bool {
+        let id = self.handle.id();
+        self.matches_slot(server, images, states)
+            && states.publication_revision(id) == self.publication
+            && (states.state_revision(id) == self.state
+                || states
+                    .state(id)
+                    .is_some_and(|state| matches!(state.load_state(), LoadState::Failed { .. })))
+    }
 }
 
 pub(super) struct ImagePublication {
@@ -97,8 +112,8 @@ pub(super) struct ImagePublications {
 
 #[derive(Clone, Copy)]
 pub(super) enum ImageChange<'a> {
-    Replace(&'a [OwnedImage]),
-    Add(&'a [OwnedImage]),
+    Replace(Option<&'a ProjectSceneResidency>),
+    Add(&'a ProjectSceneResidency),
 }
 
 impl ImagePublications {
@@ -122,19 +137,22 @@ impl ImagePublications {
         states: &AssetStates,
         runtime_lease: Option<&Arc<RuntimeContentLease>>,
     ) -> Result<Self, HostFault> {
-        let (owned, additive) = match change {
-            ImageChange::Replace(owned) => (owned, false),
-            ImageChange::Add(shared) => (shared, true),
+        let (current, additive) = match change {
+            ImageChange::Replace(current) => (current, false),
+            ImageChange::Add(current) => (Some(current), true),
         };
+        let owned = current
+            .into_iter()
+            .flat_map(ProjectSceneResidency::owned_images);
         if !additive
             && owned
-                .iter()
-                .any(|image| !image.matches(server, images, states))
+                .clone()
+                .any(|image| !image.matches_retirement(server, images, states))
         {
             return Err(superseded());
         }
         let owned_by_id = owned
-            .iter()
+            .clone()
             .map(|image| (image.handle.id(), image))
             .collect::<BTreeMap<_, _>>();
         let mut publish = BTreeMap::new();
@@ -240,18 +258,17 @@ impl ImagePublications {
                 }
             }
         }
-        let mut retire = Vec::new();
-        if !additive {
-            for image in owned
-                .iter()
-                .filter(|image| !next_ids.contains(&image.handle.id()))
-            {
-                states
-                    .next_version(image.handle.id())
-                    .map_err(|_| version_exhausted())?;
-                retire.push(image.clone());
-            }
-        }
+        let retire = if additive {
+            Vec::new()
+        } else {
+            Self::retire(
+                owned.filter(|image| !next_ids.contains(&image.handle.id())),
+                server,
+                images,
+                states,
+            )?
+            .retire
+        };
         Ok(Self {
             publish,
             retire,
@@ -259,37 +276,40 @@ impl ImagePublications {
         })
     }
 
-    pub(super) fn retire(
-        owned: &[OwnedImage],
+    pub(super) fn retire<'a>(
+        owned: impl IntoIterator<Item = &'a OwnedImage>,
         server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
     ) -> Result<Self, HostFault> {
-        let mut retire = Vec::with_capacity(owned.len());
+        let mut retire = Vec::new();
         for image in owned {
             let id = image.handle.id();
-            let state = states.state_revision(id);
-            if !image.matches_slot(server, images, states)
-                || states.publication_revision(id) != image.publication
-                || (image.state != state
-                    && !states.state(id).is_some_and(|status| {
-                        matches!(status.load_state(), LoadState::Failed { .. })
-                    }))
-            {
+            if !image.matches_retirement(server, images, states) {
                 return Err(superseded());
             }
             images
                 .prepare_mutation(image.handle, states)
                 .map_err(|_| superseded())?;
             states.next_version(id).map_err(|_| version_exhausted())?;
-            let mut receipt = image.clone();
-            receipt.state = state;
-            retire.push(receipt);
+            retire.push(image.clone());
         }
         Ok(Self {
             retire,
             ..Self::empty()
         })
+    }
+
+    pub(super) fn additive_products(&self) -> Vec<AssetProductRef> {
+        self.publish
+            .keys()
+            .copied()
+            .chain(self.shared.iter().map(|image| image.product))
+            .collect()
+    }
+
+    pub(super) fn retiring_products(&self) -> impl Iterator<Item = AssetProductRef> + '_ {
+        self.retire.iter().map(|image| image.product)
     }
 
     pub(super) fn image_for_product(
@@ -311,10 +331,16 @@ impl ImagePublications {
                 .validate(images, states)
                 .map_err(|_| superseded())?;
         }
-        for image in self.retire.iter().chain(&self.shared) {
-            if !image.matches(server, images, states) {
-                return Err(superseded());
-            }
+        if self
+            .retire
+            .iter()
+            .any(|image| !image.matches_retirement(server, images, states))
+            || self
+                .shared
+                .iter()
+                .any(|image| !image.matches(server, images, states))
+        {
+            return Err(superseded());
         }
         Ok(())
     }
@@ -339,7 +365,10 @@ impl ImagePublications {
                 server
             ));
         }
-        for image in self.retire.iter().chain(&self.shared) {
+        for image in &self.retire {
+            assert!(image.matches_retirement(server, images, states));
+        }
+        for image in &self.shared {
             assert!(image.matches(server, images, states));
         }
         let mut receipts = Vec::with_capacity(self.publish.len());

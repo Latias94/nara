@@ -67,9 +67,14 @@ candidate through `ProjectScenes::scope`, then call `activate_prepared_project_s
 explicit `SceneOccurrenceKey`. Retain the resulting `SpawnedSceneInstance` for unload and
 acknowledge the original terminal request. To cancel, wait for physical return before releasing
 the slot. `unload_project_scene_addition` takes the exact receipt. It removes the companion's
-entities and owned Image publications. The primary remains live, including any shared Image
-publication. The Host admits one companion alongside the primary. Unload it before requesting
-another Scene. See the [ordinary game workflow](../../samples/two-level-game/README.md#play-the-side-room).
+entities and releases its resource use. Other active Scenes keep shared Image publications until
+their last user leaves. Prepared primary travel retires the prior primary and all live Host
+additions in its original transaction. The additional retirement limit covers these additions
+and any further retirements supplied by the product. Retained-source Restart requires closed
+additions. For source play, configure the original loader with
+`ProductRecipe::with_source_content_limits` and count the live generations and the prepared
+destination when selecting `ProjectContentLimits::with_retained_generations`.
+[Ordinary game workflow](../../samples/two-level-game/README.md#play-the-side-room)
 
 ## Capture And Acquisition
 
@@ -301,11 +306,12 @@ decoded Scene. Declare travel roots through the existing Host configuration.
 
 Keep the returned `SpawnedSceneInstance` for explicit retirement of the activation and its
 logical occurrence. Use the ordinary retirement API or include
-`SceneProductRetirement::Instance(receipt)` in the original containing Scene's product replacement.
+`SceneProductRetirement::Instance(&receipt)` in the original containing Scene's product replacement.
 `SceneProductRetirement::Entity(token)` remains the runtime-only entity selection. The transaction
 admits the complete retirement union before publication and counts original instance members
-against the caller's retirement limit, with at least one unit for an empty activation. End all
-dependent activations before, or atomically with, replacement of their containing resource owner.
+against the caller's retirement limit, with at least one unit for an empty activation. Retirement
+selections borrow their receipts for preparation; the accepted candidate retains its own copies.
+End all dependent activations before, or atomically with, replacement of their containing resource owner.
 The containing Scene holds the resource residency for the activation.
 
 `ProjectAssetCollection::get` requires an exact complete Product for processed auxiliary values;

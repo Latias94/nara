@@ -23,7 +23,11 @@ use serde_json::{Value, json};
 use two_level_game::{
     Scenario,
     animation::{atlas_product, clips_product},
+    input::input_product,
     levels::LevelId,
+    markers::{marker_image_product, marker_product},
+    side_room,
+    sound_bank::bank_product,
 };
 
 use super::{
@@ -110,22 +114,29 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map_err(|error| error.to_string())?;
         if base.catalog().startup_scene() != LevelId::STARTUP.scene_product()
             || base.catalog().scenes().len() != LevelId::ALL.len()
-            || base.catalog().members().len() != 12
+            || base.catalog().members().len() != 13
             || base
                 .catalog()
                 .members()
                 .iter()
                 .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
                 .count()
-                != 4
+                != 5
             || !base.catalog().addressable_roots().is_empty()
-            || base.plan().settings().input().action_map
-                != Some(two_level_game::input::input_product())
-            || base.member(atlas_product()).is_none()
-            || base.member(clips_product()).is_none()
-            || base
-                .member(two_level_game::sound_bank::bank_product())
-                .is_none()
+            || base.plan().settings().input().action_map != Some(input_product())
+            || [
+                atlas_product(),
+                bank_product(),
+                clips_product(),
+                input_product(),
+                marker_product(),
+                marker_image_product(),
+                side_room::scene_product(),
+                side_room::lookout_scene_product(),
+                side_room::image_product(),
+            ]
+            .into_iter()
+            .any(|product| base.member(product).is_none())
             || LevelId::ALL.into_iter().any(|level| {
                 !base.catalog().scenes().contains(&level.scene_product())
                     || base.member(level.image_product()).is_none()

@@ -1,4 +1,4 @@
-//! Concrete CPU content ownership for one committed project Scene.
+//! Concrete CPU content ownership for the committed project Scene group.
 
 mod additive;
 mod catalog;
@@ -53,7 +53,7 @@ use metadata::{PreparedCatalog, ResidencyAuthority};
 
 #[derive(Resource)]
 pub(super) struct ProjectSceneResidency {
-    addition: Option<additive::ActiveAddition>,
+    additions: additive::Additions,
     images: Vec<OwnedImage>,
     tilesets: Vec<TileSetContentReceipt>,
     materials: MaterialResidency,
@@ -63,7 +63,23 @@ pub(super) struct ProjectSceneResidency {
 
 impl ProjectSceneResidency {
     pub(super) fn has_addition(&self) -> bool {
-        self.addition.is_some()
+        !self.additions.active.is_empty()
+    }
+
+    fn owned_images(&self) -> impl Iterator<Item = &OwnedImage> + Clone {
+        self.images.iter().chain(&self.additions.images)
+    }
+
+    fn image_count(&self) -> usize {
+        self.images.len() + self.additions.images.len()
+    }
+
+    fn owned_catalog_records(&self) -> impl Iterator<Item = &AssetRecord> {
+        let primary = match &self.authority {
+            ResidencyAuthority::Source { catalog, .. } => catalog.as_slice(),
+            ResidencyAuthority::Processed { .. } => &[],
+        };
+        primary.iter().chain(&self.additions.catalog)
     }
 
     pub(super) fn admits_processed_addition(
@@ -262,7 +278,7 @@ impl PreparedResidency {
         let authority = catalog.commit(world);
         world.insert_resource(domains.clone());
         world.insert_resource(ProjectSceneResidency {
-            addition: None,
+            additions: additive::Additions::default(),
             images,
             tilesets,
             materials,
@@ -284,11 +300,10 @@ impl PreparedResidency {
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
         let catalog = PreparedCatalog::prepare(world, content, current, None)?;
         let mut bindings = SceneAssetReservations::from_world(world);
-        let owned = current.map_or(&[][..], |current| current.images.as_slice());
         let images = prepare_images(
             world,
             content,
-            ImageChange::Replace(owned),
+            ImageChange::Replace(current),
             &mut bindings,
             &catalog,
         )?;
@@ -432,7 +447,8 @@ fn prepare_images(
     bindings: &mut SceneAssetReservations,
     catalog: &PreparedCatalog,
 ) -> Result<ImagePublications, HostFault> {
-    let retire_or_replace = matches!(change, ImageChange::Replace(owned) if !owned.is_empty());
+    let retire_or_replace =
+        matches!(change, ImageChange::Replace(Some(current)) if current.image_count() != 0);
     if !retire_or_replace && content.image_count() == 0 {
         return Ok(ImagePublications::empty());
     }
@@ -463,7 +479,7 @@ pub(super) fn replace_scene<F>(
     expected: &SpawnedSceneInstance,
     content: &PreparedSceneContent,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where

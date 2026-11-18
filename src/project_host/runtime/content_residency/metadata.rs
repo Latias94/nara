@@ -87,13 +87,11 @@ impl PreparedCatalog {
                     .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
                 let original = world.get_resource::<ProjectAssetDatabase>().cloned();
                 let empty = ProjectAssetDatabase::default();
-                let owned = match current.map(|current| &current.authority) {
-                    Some(ResidencyAuthority::Source { catalog, .. }) => catalog.as_slice(),
-                    _ => &[],
-                };
                 let change = CatalogChange::prepare(
                     original.as_ref().unwrap_or(&empty),
-                    owned,
+                    current
+                        .into_iter()
+                        .flat_map(ProjectSceneResidency::owned_catalog_records),
                     snapshot.asset_database().records().cloned(),
                 )?;
                 Ok(Self::Source {
@@ -233,6 +231,14 @@ fn metadata_bytes(
             )?;
         }
     }
+    if shared_images.is_some() {
+        add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
+        add_entries(
+            &mut bytes,
+            content.image_count(),
+            size_of::<AssetProductRef>(),
+        )?;
+    }
     let image_metadata = size_of::<images::ImagePublication>()
         + size_of::<OwnedImage>()
         + size_of::<AssetProductRef>()
@@ -258,7 +264,7 @@ fn metadata_bytes(
     if let Some(current) = current {
         add_entries(
             &mut bytes,
-            current.images.len(),
+            current.image_count(),
             2 * size_of::<OwnedImage>()
                 + size_of::<AssetId>()
                 + size_of::<&OwnedImage>()

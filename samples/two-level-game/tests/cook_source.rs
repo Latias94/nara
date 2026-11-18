@@ -43,6 +43,8 @@ impl Directory {
             ("scenes/marker.scene.json.meta", "marker metadata"),
             ("scenes/side-room.scene.json", "side room"),
             ("scenes/side-room.scene.json.meta", "side room metadata"),
+            ("scenes/lookout.scene.json", "lookout"),
+            ("scenes/lookout.scene.json.meta", "lookout metadata"),
             ("prefabs/marker.prefab.json", "marker prefab"),
             ("assets/textures/meadow.png", "image A"),
             ("assets/textures/meadow.png.meta", "meta A"),
@@ -169,6 +171,8 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
         "assets/textures/marker.png",
         "assets/textures/marker.png.meta",
         "scenes/side-room.scene.json",
+        "scenes/lookout.scene.json",
+        "scenes/lookout.scene.json.meta",
         "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",
         "assets/animations/explorer.sprite-animations.json.meta",
@@ -182,7 +186,7 @@ fn content_fence_remains_original_when_code_is_bound_after_generation() {
 }
 
 #[test]
-fn content_fence_requires_input_animation_and_marker_sources_and_metadata() {
+fn content_fence_requires_authored_sources_and_metadata() {
     for name in [
         "input/explorer.actions.json",
         "scenes/marker.scene.json",
@@ -194,6 +198,8 @@ fn content_fence_requires_input_animation_and_marker_sources_and_metadata() {
         "assets/textures/marker.png.meta",
         "scenes/side-room.scene.json",
         "scenes/side-room.scene.json.meta",
+        "scenes/lookout.scene.json",
+        "scenes/lookout.scene.json.meta",
         "assets/textures/side-room.png",
         "assets/textures/side-room.png.meta",
         "assets/animations/explorer.sprite-animations.json",

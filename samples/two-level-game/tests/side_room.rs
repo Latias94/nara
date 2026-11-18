@@ -8,26 +8,39 @@
 mod support;
 
 use std::{
+    collections::BTreeSet,
     fs, thread,
     time::{Duration, Instant},
 };
 
 use nara::{
     advanced_prelude::CurrentScene,
-    asset::{AssetProductRef, AssetStates, AssetVersion, Assets, Handle},
+    app::{CoreStage, PluginCategory, PluginDeclaration, PluginId},
+    asset::{
+        AssetProductRef, AssetRecord, AssetSourceKind, AssetStates, AssetVersion, Assets, Handle,
+        ProjectAssetDatabase,
+    },
+    ecs::{
+        World,
+        bevy_ecs::{lifecycle::HookContext, world::DeferredWorld},
+        schedule::IntoScheduleConfigs,
+    },
+    gameplay::{GameplayCommandBatch, GameplayCommandSet},
     identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain},
     image::ImageAsset,
-    scene::SceneEntitySource,
+    prelude::{App, Component, Plugin, PluginError, Resource, Transform2d, Vec2},
+    scene::{SceneEntitySource, retire_and_despawn_scene_instance},
     sprite::Sprite,
 };
-use support::{DEADLINE, Game, ProjectCopy, action, movement};
+use support::{DEADLINE, Game, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, action, movement};
 use two_level_game::{
-    GamePhase, GameSnapshot, SideRoomPhase, capture_resume,
-    levels::LevelId,
-    side_room::{RELIC, image_product},
+    GamePhase, GameSnapshot, RunOptions, SideRoomPhase, capture_resume, configured_recipe,
+    levels::{LevelId, LevelKey},
+    side_room::{LOOKOUT_RELIC, RELIC, image_product},
 };
 
 const SIDE_ROOM: &str = "two-level-game.side-room";
+const LOOKOUT: &str = "two-level-game.lookout";
 const RELIC_PIXEL: [u8; 4] = [64, 224, 180, 255];
 
 #[test]
@@ -60,7 +73,7 @@ fn a_live_side_room_takes_input_collects_a_relic_and_unloads_only_its_own_image(
             .contains("close the side room")
     );
 
-    let (receipt, relic) = room_receipt(&game);
+    let (receipt, relic) = room_receipt(&game, RELIC);
     let (badge, version) = resident(&game, image_product()).unwrap();
     let pixels = game
         .session
@@ -121,7 +134,7 @@ fn a_live_side_room_takes_input_collects_a_relic_and_unloads_only_its_own_image(
         wait_until_prepared(&mut game).side_room,
         SideRoomPhase::Open
     );
-    let (fresh, _) = room_receipt(&game);
+    let (fresh, _) = room_receipt(&game, RELIC);
     assert_ne!(fresh.instance_id(), receipt.instance_id());
     let (reopened, next_version) = resident(&game, image_product()).unwrap();
     assert_eq!(reopened, badge);
@@ -202,11 +215,619 @@ fn damaged_deferred_pixels_leave_meadow_running_and_a_later_request_can_recover(
     game.close();
 }
 
+#[test]
+fn both_rooms_share_images_but_collect_and_unload_independently() {
+    use SideRoomPhase::{Closed, Open, RelicFound};
+
+    let mut game = Game::source();
+    let before = game.snapshot();
+    let meadow = LevelId::Meadow.image_product();
+    let primary_image = resident(&game, meadow).unwrap();
+    assert!(resident(&game, image_product()).is_none());
+    let (side, side_relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let relic_image = resident(&game, image_product()).unwrap();
+    let (lookout, lookout_relic) =
+        open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    assert_ne!(side.instance_id(), lookout.instance_id());
+    for receipt in [&side, &lookout] {
+        assert_ne!(Some(receipt.instance_id()), before.current_instance);
+    }
+    assert_eq!(game.snapshot().current_instance, before.current_instance);
+    assert_eq!(room_phases(&game.snapshot()), (Open, Open));
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+    assert_eq!(
+        sprite_facts(&game, &side, &side_relic),
+        (Vec2::new(-120.0, 48.0), Some(relic_image.0), 1.0)
+    );
+    assert_eq!(
+        sprite_facts(&game, &lookout, &lookout_relic),
+        (Vec2::new(-120.0, -48.0), Some(relic_image.0), 1.0)
+    );
+    for (receipt, sign) in [(&side, "side-room-sign"), (&lookout, "lookout-sign")] {
+        assert_eq!(
+            sprite_facts(&game, receipt, &SceneEntityId::new(sign).unwrap()).1,
+            Some(primary_image.0)
+        );
+    }
+
+    let north = collect_relic(&mut game, 2, |state| state.side_room);
+    assert_eq!(room_phases(&north), (RelicFound, Open));
+    assert_eq!(sprite_facts(&game, &side, &side_relic).2, 0.0);
+    assert_eq!(sprite_facts(&game, &lookout, &lookout_relic).2, 1.0);
+    let south = collect_relic(&mut game, 3, |state| state.lookout);
+    assert_eq!(room_phases(&south), (RelicFound, RelicFound));
+    assert_eq!(south.score, before.score);
+    assert_eq!(sprite_facts(&game, &lookout, &lookout_relic).2, 0.0);
+
+    let closed = game.command(action(SIDE_ROOM));
+    assert_eq!(room_phases(&closed), (Closed, RelicFound));
+    assert_eq!(closed.current_instance, before.current_instance);
+    assert_retired(&game, &side);
+    assert_eq!(room_receipt(&game, LOOKOUT_RELIC).0, lookout);
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+    assert!(
+        capture_resume(&game.session)
+            .unwrap_err()
+            .to_string()
+            .contains("close the lookout")
+    );
+
+    assert_eq!(
+        room_phases(&game.command(action(LOOKOUT))),
+        (Closed, Closed)
+    );
+    assert_retired(&game, &lookout);
+    assert!(resident(&game, image_product()).is_none());
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+    game.close();
+}
+
+#[test]
+fn a_missing_shared_image_catalog_record_rejects_a_second_room_without_publication() {
+    use SideRoomPhase::{Closed, Open};
+
+    let recipe = configured_recipe(RunOptions::default())
+        .add_plugin::<RetirementProbe>()
+        .unwrap();
+    let mut game = Game::with_recipe(recipe);
+    let before = game.snapshot();
+    let meadow = LevelId::Meadow.image_product();
+    let primary_image = resident(&game, meadow).unwrap();
+    let (side, side_relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let relic_image = resident(&game, image_product()).unwrap();
+    let (entities, identities, catalog) = game
+        .session
+        .observe(|world| {
+            (
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                world.resource::<WorldIdentityDomain>().stats(),
+                world.resource::<ProjectAssetDatabase>().clone(),
+            )
+        })
+        .unwrap();
+    let record = catalog
+        .record_for_stable_id(image_product().source())
+        .unwrap()
+        .clone();
+    assert_eq!(record.source_kind(), &AssetSourceKind::Image);
+    let mut missing_catalog = catalog.clone();
+    assert!(missing_catalog.remove_exact(&record));
+    game.command(action(REMOVE_ROOM_IMAGE_RECORD));
+    game.session
+        .observe(|world| {
+            assert_eq!(
+                world.resource::<RetirementProbe>().removed_image.as_ref(),
+                Some(&record)
+            );
+            assert_eq!(world.resource::<ProjectAssetDatabase>(), &missing_catalog);
+        })
+        .unwrap();
+
+    game.submit(action(LOOKOUT));
+    assert_eq!(game.session.step().unwrap(), None);
+    let rejected = wait_for(&mut game, |state| state.lookout != SideRoomPhase::Preparing);
+    assert_eq!(room_phases(&rejected), (Open, Closed));
+    assert_eq!(rejected.phase, GamePhase::Running);
+    assert_eq!(rejected.current_instance, before.current_instance);
+    assert!(
+        rejected.error.as_deref().is_some_and(|error| {
+            error.contains("lookout activation rejected")
+                && error.contains("project.scene.asset-catalog-changed")
+        }),
+        "{rejected:?}"
+    );
+    game.session
+        .observe(|world| {
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                entities
+            );
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+            assert_eq!(world.resource::<ProjectAssetDatabase>(), &missing_catalog);
+        })
+        .unwrap();
+    assert_eq!(room_receipt(&game, RELIC).0, side);
+    assert_eq!(
+        sprite_facts(&game, &side, &side_relic).1,
+        Some(relic_image.0)
+    );
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+
+    game.command(action(RESTORE_ROOM_IMAGE_RECORD));
+    game.session
+        .observe(|world| assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog))
+        .unwrap();
+    let (lookout, lookout_relic) =
+        open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    assert_eq!(room_phases(&game.snapshot()), (Open, Open));
+    assert_eq!(
+        sprite_facts(&game, &lookout, &lookout_relic).1,
+        Some(relic_image.0)
+    );
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    game.command(action(LOOKOUT));
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    assert_eq!(
+        room_phases(&game.command(action(SIDE_ROOM))),
+        (Closed, Closed)
+    );
+    for receipt in [&side, &lookout] {
+        assert_retired(&game, receipt);
+    }
+    assert!(resident(&game, image_product()).is_none());
+    game.close();
+}
+
+#[test]
+fn host_close_releases_shared_images_after_another_room_is_retired_directly() {
+    use SideRoomPhase::{Closed, Open};
+
+    let recipe = configured_recipe(RunOptions::default())
+        .add_plugin::<RetirementProbe>()
+        .unwrap();
+    let mut game = Game::with_recipe(recipe);
+    let before = game.snapshot();
+    let meadow = LevelId::Meadow.image_product();
+    let primary_image = resident(&game, meadow).unwrap();
+    let (entities, catalog, active_instances, active_entities) = game
+        .session
+        .observe(|world| {
+            let identities = world.resource::<WorldIdentityDomain>().stats();
+            (
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                world.resource::<ProjectAssetDatabase>().clone(),
+                identities.active_scene_instances,
+                identities.active_scene_entities,
+            )
+        })
+        .unwrap();
+    let (side, side_relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let (lookout, lookout_relic) =
+        open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    let relic_image = resident(&game, image_product()).unwrap();
+    for (receipt, relic) in [(&side, &side_relic), (&lookout, &lookout_relic)] {
+        assert_eq!(sprite_facts(&game, receipt, relic).1, Some(relic_image.0));
+    }
+    let (record, pixels) = game
+        .session
+        .observe(|world| {
+            (
+                world
+                    .resource::<ProjectAssetDatabase>()
+                    .record_for_stable_id(image_product().source())
+                    .unwrap()
+                    .clone(),
+                world
+                    .resource::<Assets<ImageAsset>>()
+                    .get(relic_image.0)
+                    .unwrap()
+                    .share_retained()
+                    .unwrap(),
+            )
+        })
+        .unwrap();
+
+    let retired = game.command(action(RETIRE_SIDE_ROOM));
+    assert_eq!(room_phases(&retired), (Open, Open));
+    assert_retired(&game, &side);
+    assert_eq!(room_receipt(&game, LOOKOUT_RELIC).0, lookout);
+    assert_eq!(resident(&game, image_product()), Some(relic_image));
+    game.session
+        .observe(|world| {
+            assert_eq!(
+                world.resource::<RetirementProbe>().retired.as_ref(),
+                Some(&side)
+            );
+            assert_eq!(
+                world
+                    .resource::<ProjectAssetDatabase>()
+                    .record_for_path(record.path()),
+                Some(&record)
+            );
+        })
+        .unwrap();
+
+    let closed = game.command(action(LOOKOUT));
+    assert_eq!(room_phases(&closed), (Open, Closed));
+    assert_eq!(closed.current_instance, before.current_instance);
+    assert_retired(&game, &lookout);
+    assert!(resident(&game, image_product()).is_none());
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+    game.session
+        .observe(|world| {
+            let database = world.resource::<ProjectAssetDatabase>();
+            assert!(database.record_for_stable_id(record.stable_id()).is_none());
+            assert!(database.record_for_path(record.path()).is_none());
+            assert!(
+                world
+                    .resource::<Assets<ImageAsset>>()
+                    .get(relic_image.0)
+                    .is_none()
+            );
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                entities
+            );
+        })
+        .unwrap();
+    assert_eq!(pixels.pixels(), RELIC_PIXEL.repeat(4));
+
+    let closed = game.command(action(SIDE_ROOM));
+    assert_eq!(room_phases(&closed), (Closed, Closed));
+    assert_eq!(closed.scene_members, before.scene_members);
+    assert_eq!(closed.current_instance, before.current_instance);
+    assert_retired(&game, &side);
+    assert!(resident(&game, image_product()).is_none());
+    assert_eq!(resident(&game, meadow), Some(primary_image));
+    game.session
+        .observe(|world| {
+            let identities = world.resource::<WorldIdentityDomain>().stats();
+            assert_eq!(identities.active_scene_instances, active_instances);
+            assert_eq!(identities.active_scene_entities, active_entities);
+            assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+            assert!(
+                world
+                    .resource::<Assets<ImageAsset>>()
+                    .get(relic_image.0)
+                    .is_none()
+            );
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                entities
+            );
+        })
+        .unwrap();
+    assert_eq!(pixels.pixels(), RELIC_PIXEL.repeat(4));
+    drop(pixels);
+    game.close();
+}
+
+#[test]
+fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_them() {
+    use SideRoomPhase::{Closed, Open, RelicFound};
+
+    let source = ProjectCopy::new();
+    let recipe = configured_recipe(RunOptions {
+        save_path: Some(source.save_path()),
+        ..RunOptions::default()
+    })
+    .add_plugin::<RetirementProbe>()
+    .unwrap();
+    let mut game = Game::from_project_with_recipe(source.root(), recipe);
+    let (side, _) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let (lookout, _) = open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    collect_relic(&mut game, 2, |state| state.side_room);
+    let incumbent = game.command(action(MARKER));
+    assert_eq!(incumbent.markers.len(), 1);
+    let relic_image = resident(&game, image_product()).unwrap();
+    let meadow = LevelId::Meadow.image_product();
+    let primary_image = resident(&game, meadow).unwrap();
+    let assert_retained = |game: &Game, state: GameSnapshot| {
+        assert_eq!(state.level, incumbent.level);
+        assert_eq!(state.current_instance, incumbent.current_instance);
+        assert_eq!(state.player, incumbent.player);
+        assert_eq!(state.travel_count, 0);
+        assert_eq!(state.markers, incumbent.markers);
+        assert_eq!(room_phases(&state), (RelicFound, Open));
+        assert_eq!(room_receipt(game, RELIC).0, side);
+        assert_eq!(room_receipt(game, LOOKOUT_RELIC).0, lookout);
+        assert_eq!(resident(game, image_product()), Some(relic_image));
+        assert_eq!(resident(game, meadow), Some(primary_image));
+    };
+
+    let saved = game.command(action("two-level-game.save"));
+    assert_eq!(saved.saves, incumbent.saves + 1);
+    let room_saves = saved.saves;
+    assert_retained(&game, saved);
+
+    let cavern_file = source.root().join("scenes/cavern.scene.json");
+    let cavern_bytes = fs::read(&cavern_file).unwrap();
+    fs::write(&cavern_file, b"{ damaged destination").unwrap();
+    let rejected = rejected_travel(&mut game, "level preparation rejected");
+    assert_retained(&game, rejected);
+    fs::write(cavern_file, cavern_bytes).unwrap();
+
+    game.command(action(TOGGLE_RETIREMENT_BLOCK));
+    let rejected = rejected_travel(&mut game, "level commit rejected");
+    assert_retained(&game, rejected);
+    game.command(action(TOGGLE_RETIREMENT_BLOCK));
+
+    let cavern = Some(LevelKey::main(LevelId::Cavern));
+    let entered = game.command(action(TRAVEL));
+    assert_eq!(entered.level, cavern);
+    assert_eq!(entered.travel_count, 1);
+    assert_eq!(room_phases(&entered), (Closed, Closed));
+    assert_ne!(entered.current_instance, incumbent.current_instance);
+    assert!(entered.markers.is_empty());
+    for receipt in [&side, &lookout] {
+        assert_retired(&game, receipt);
+    }
+    assert!(resident(&game, image_product()).is_none());
+    assert!(resident(&game, meadow).is_none());
+    assert_eq!(
+        game.command(action("two-level-game.save")).saves,
+        room_saves + 1
+    );
+
+    let returned = game.command(action(TRAVEL));
+    assert_eq!(returned.level, incumbent.level);
+    assert_eq!(returned.travel_count, 2);
+    assert_eq!(room_phases(&returned), (Closed, Closed));
+    assert_eq!(returned.markers, incumbent.markers);
+    let (new_side, new_side_relic) =
+        open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let (new_lookout, new_lookout_relic) =
+        open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    assert_ne!(new_side.instance_id(), side.instance_id());
+    assert_ne!(new_lookout.instance_id(), lookout.instance_id());
+    assert_eq!(sprite_facts(&game, &new_side, &new_side_relic).2, 1.0);
+    assert_eq!(sprite_facts(&game, &new_lookout, &new_lookout_relic).2, 1.0);
+
+    let restored = game.command(action("two-level-game.restore"));
+    assert_eq!(restored.level, cavern);
+    assert_eq!(restored.travel_count, 3);
+    assert_eq!(restored.restores, 1);
+    assert_eq!(restored.saves, room_saves + 1);
+    assert_eq!(room_phases(&restored), (Closed, Closed));
+    for receipt in [&new_side, &new_lookout] {
+        assert_retired(&game, receipt);
+    }
+    assert!(resident(&game, image_product()).is_none());
+    game.close();
+}
+
+const TOGGLE_RETIREMENT_BLOCK: &str = "two-level-game.test-toggle-retirement-block";
+const REMOVE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-remove-room-image-record";
+const RESTORE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-restore-room-image-record";
+const RETIRE_SIDE_ROOM: &str = "two-level-game.test-retire-side-room";
+
+#[derive(Default, Resource)]
+struct RetirementProbe {
+    removed_image: Option<AssetRecord>,
+    retired: Option<SpawnedSceneInstance>,
+}
+
+impl Plugin for RetirementProbe {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("two-level-game.test-room-retirement"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[PluginId::new("two-level-game.exploration")]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<RetirementProbe>()?;
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (toggle_retirement_block, edit_room_residency)
+                .chain()
+                .in_set(GameplayCommandSet::Capture),
+        )?;
+        Ok(())
+    }
+}
+
+fn edit_room_residency(world: &mut World) {
+    let commands = world
+        .resource::<GameplayCommandBatch>()
+        .commands()
+        .iter()
+        .map(|command| command.command_type().as_str().to_owned())
+        .collect::<Vec<_>>();
+    for command in commands {
+        match command.as_str() {
+            REMOVE_ROOM_IMAGE_RECORD => {
+                assert!(world.resource::<RetirementProbe>().removed_image.is_none());
+                let record = world
+                    .resource::<ProjectAssetDatabase>()
+                    .record_for_stable_id(image_product().source())
+                    .unwrap()
+                    .clone();
+                assert_eq!(record.source_kind(), &AssetSourceKind::Image);
+                assert!(
+                    world
+                        .resource_mut::<ProjectAssetDatabase>()
+                        .remove_exact(&record)
+                );
+                world.resource_mut::<RetirementProbe>().removed_image = Some(record);
+            }
+            RESTORE_ROOM_IMAGE_RECORD => {
+                let record = world
+                    .resource_mut::<RetirementProbe>()
+                    .removed_image
+                    .take()
+                    .unwrap();
+                world
+                    .resource_mut::<ProjectAssetDatabase>()
+                    .insert(record)
+                    .unwrap();
+            }
+            RETIRE_SIDE_ROOM => {
+                let instance = world
+                    .iter_entities()
+                    .filter_map(|entity| entity.get::<SceneEntitySource>())
+                    .find(|source| source.entity_id.as_str() == RELIC)
+                    .unwrap()
+                    .instance_id;
+                let receipt = world
+                    .resource::<WorldIdentityDomain>()
+                    .active_scene_instance(world, instance)
+                    .unwrap();
+                assert_eq!(
+                    retire_and_despawn_scene_instance(world, &receipt).unwrap(),
+                    receipt.len()
+                );
+                world.resource_mut::<RetirementProbe>().retired = Some(receipt);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[derive(Component)]
+#[component(on_remove = retirement_hook)]
+struct RetirementBlock;
+
+fn retirement_hook(_: DeferredWorld<'_>, _: HookContext) {}
+
+fn toggle_retirement_block(world: &mut World) {
+    if !world
+        .resource::<GameplayCommandBatch>()
+        .commands()
+        .iter()
+        .any(|command| command.command_type().as_str() == TOGGLE_RETIREMENT_BLOCK)
+    {
+        return;
+    }
+    let lookout = world
+        .iter_entities()
+        .find(|entity| {
+            entity
+                .get::<SceneEntitySource>()
+                .is_some_and(|source| source.entity_id.as_str() == LOOKOUT_RELIC)
+        })
+        .unwrap()
+        .id();
+    let mut lookout = world.entity_mut(lookout);
+    if lookout.contains::<RetirementBlock>() {
+        lookout.remove::<RetirementBlock>();
+    } else {
+        lookout.insert(RetirementBlock);
+    }
+}
+
+fn room_phases(state: &GameSnapshot) -> (SideRoomPhase, SideRoomPhase) {
+    (state.side_room, state.lookout)
+}
+
+fn open_room(
+    game: &mut Game,
+    command: &str,
+    relic: &str,
+    phase: fn(&GameSnapshot) -> SideRoomPhase,
+) -> (SpawnedSceneInstance, SceneEntityId) {
+    game.submit(action(command));
+    assert_eq!(game.session.step().unwrap(), None);
+    let opened = wait_for(game, |state| phase(state) != SideRoomPhase::Preparing);
+    assert!(opened.error.is_none(), "{opened:?}");
+    assert_eq!(phase(&opened), SideRoomPhase::Open);
+    room_receipt(game, relic)
+}
+
+fn collect_relic(
+    game: &mut Game,
+    direction: i64,
+    phase: fn(&GameSnapshot) -> SideRoomPhase,
+) -> GameSnapshot {
+    game.submit(movement(direction, true));
+    for _ in 0..MAX_WALK_STEPS {
+        if phase(&game.step()) == SideRoomPhase::RelicFound {
+            return game.command(movement(direction, false));
+        }
+    }
+    panic!(
+        "the explorer did not reach the relic: {:?}",
+        game.snapshot()
+    );
+}
+
+fn rejected_travel(game: &mut Game, expected: &str) -> GameSnapshot {
+    game.submit(action(TRAVEL));
+    assert_eq!(game.session.step().unwrap(), None);
+    let rejected = wait_for(game, |state| state.phase == GamePhase::Running);
+    assert!(
+        rejected
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains(expected)),
+        "{rejected:?}"
+    );
+    rejected
+}
+
+fn sprite_facts(
+    game: &Game,
+    receipt: &SpawnedSceneInstance,
+    id: &SceneEntityId,
+) -> (Vec2, Option<Handle<ImageAsset>>, f32) {
+    game.session
+        .observe(|world| {
+            let EntityLookup::Resolved(entity) = receipt.resolve(world, id) else {
+                panic!("{id} must be live in its own Scene instance")
+            };
+            let transform = world.get::<Transform2d>(entity).unwrap();
+            let sprite = world.get::<Sprite>(entity).unwrap();
+            (
+                transform.translation,
+                sprite.material.image,
+                sprite.material.tint.a,
+            )
+        })
+        .unwrap()
+}
+
+fn assert_retired(game: &Game, receipt: &SpawnedSceneInstance) {
+    game.session
+        .observe(|world| {
+            for id in receipt.entity_ids() {
+                assert!(matches!(
+                    receipt.resolve(world, id),
+                    EntityLookup::Tombstoned(_)
+                ));
+            }
+        })
+        .unwrap();
+}
+
 fn wait_until_prepared(game: &mut Game) -> GameSnapshot {
+    wait_for(game, |state| state.side_room != SideRoomPhase::Preparing)
+}
+
+fn wait_for(game: &mut Game, finished: impl Fn(&GameSnapshot) -> bool) -> GameSnapshot {
     let deadline = Instant::now() + DEADLINE;
     loop {
         let snapshot = game.snapshot();
-        if snapshot.side_room != SideRoomPhase::Preparing {
+        if finished(&snapshot) {
             return snapshot;
         }
         assert!(Instant::now() < deadline, "{snapshot:?}");
@@ -233,10 +854,10 @@ fn resident(game: &Game, product: AssetProductRef) -> Option<(Handle<ImageAsset>
         .unwrap()
 }
 
-fn room_receipt(game: &Game) -> (SpawnedSceneInstance, SceneEntityId) {
+fn room_receipt(game: &Game, relic: &str) -> (SpawnedSceneInstance, SceneEntityId) {
     game.session
         .observe(|world| {
-            let relic = SceneEntityId::new(RELIC).unwrap();
+            let relic = SceneEntityId::new(relic).unwrap();
             let source = world
                 .iter_entities()
                 .filter_map(|entity| entity.get::<SceneEntitySource>())

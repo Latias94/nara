@@ -30,7 +30,7 @@ pub fn restart_current_scene_with_product<F>(
     world: &mut World,
     expected: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -63,7 +63,7 @@ pub fn replace_current_scene_with_product<F>(
     expected: &SpawnedSceneInstance,
     source: SceneSource,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -84,7 +84,7 @@ fn replace_current<F>(
     expected: &SpawnedSceneInstance,
     source: Option<SceneSource>,
     limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement],
+    additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
 ) -> SceneSpawnReport
 where
@@ -98,7 +98,7 @@ where
     if crate::project_host::has_active_project_scene_addition(world) {
         return rejected(
             "project.scene.addition-active",
-            "Unload the active project Scene addition before replacing the primary Scene",
+            "Unload active project Scene additions before restarting the retained primary Scene",
         );
     }
     let owner = world.resource::<CurrentSceneOwner>();
