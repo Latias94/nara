@@ -6,6 +6,7 @@ use nara::project_workflow::ProjectCreationOutcome;
 mod args;
 mod check;
 mod export;
+mod help;
 mod new;
 mod repair;
 mod schema;
@@ -28,6 +29,10 @@ fn main() -> ExitCode {
     match args::parse(std::env::args_os().skip(1)) {
         Ok(args::Command::Help) => {
             print!("{HELP}");
+            ExitCode::SUCCESS
+        }
+        Ok(args::Command::ScopedHelp(topic)) => {
+            print!("{}", help::text(topic));
             ExitCode::SUCCESS
         }
         Ok(args::Command::Version) => {
