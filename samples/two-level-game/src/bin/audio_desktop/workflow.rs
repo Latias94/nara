@@ -990,7 +990,9 @@ impl ProjectCopy {
         for relative in [
             "nara.toml",
             "scenes/meadow.scene.json",
+            "scenes/meadow.scene.json.meta",
             "scenes/cavern.scene.json",
+            "scenes/cavern.scene.json.meta",
             "scenes/marker.scene.json",
             "scenes/marker.scene.json.meta",
             "scenes/side-room.scene.json",

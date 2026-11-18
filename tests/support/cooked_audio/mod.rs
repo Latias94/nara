@@ -273,6 +273,7 @@ pub fn accept(cooker: &Path) {
         "Cargo.toml",
         "Cargo.lock",
         "build.rs",
+        "assets/materials/region.wgsl",
         "src/lib.rs",
         "src/animation.rs",
         "src/sound_bank.rs",

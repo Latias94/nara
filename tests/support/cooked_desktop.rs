@@ -265,6 +265,7 @@ pub fn accept(cooker: &Path) {
         "Cargo.toml",
         "Cargo.lock",
         "build.rs",
+        "assets/materials/region.wgsl",
         "src/gameplay/mod.rs",
         "src/gameplay/input.rs",
         "src/animation.rs",

@@ -298,6 +298,19 @@ reject before bootstrap changes. The completed processed Schema must match the a
 Schema. Deep content validation also requires each Material texture to target an Image member
 with a selected Image codec.
 
+The game and the generated starter consume `project_tooling::project_cook`. The original source
+delivery traversal supplies compiled Scenes, expanded Prefab provenance, Input definitions and
+Image/Material/TileSet content directly to the existing processed builder. Meadow and Cavern
+now declare their existing Scene Product IDs in `.scene.json.meta` sidecars; their containing
+source keys keep the project's `project_location` policy. The cooker no longer reconstructs a
+separate identity database, rereads Prefabs or lists every Scene/Image Product itself.
+
+SoundBank and Sprite animation remain explicit typed build contributions. Their original build
+groups and optional/auxiliary input observations stay retained through Player compilation and
+publication. The shared source/code selection rejects changed or newly present captured inputs;
+it does not turn per-file revalidation into a hermetic or atomic workspace snapshot. Sample
+catalog counts are qualification facts rather than limits imposed by the common entry.
+
 The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
 has the `desktop` feature enabled. The cooker owns `player-bootstrap.rs` as an immutable logical
 input to the original Cargo request, then builds `player` with only `cooked-player`. Its trusted

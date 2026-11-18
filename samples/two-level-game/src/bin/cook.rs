@@ -4,8 +4,6 @@
 mod content;
 #[path = "cook/input.rs"]
 mod input;
-#[path = "cook/source.rs"]
-mod source;
 
 use std::{
     io::Write,
@@ -18,15 +16,11 @@ use nara::{
     project_tooling::{
         cargo_build::{CargoBuildFailure, CargoBuildLimits, CargoBuildRequest, CargoBuildTools},
         host_fs,
-        player_package::{
-            GeneratedPlayerBootstrap, PlayerPackageControlFailure, PlayerPackageError,
-            PlayerPackageLimits, PlayerPackageOutcome, build_player_package,
-        },
+        player_package::{PlayerPackageError, PlayerPackageLimits, PlayerPackageOutcome},
+        project_cook::{ProjectCookError, project_rust_input_inventory},
     },
     project_workflow::cargo::CargoBuildSelection,
 };
-
-const GENERATED: &str = "player-bootstrap.rs";
 
 fn main() -> ExitCode {
     match input::Options::read().and_then(run) {
@@ -58,7 +52,7 @@ fn run(options: input::Options) -> Result<(), String> {
     }
     let destination = RelativeComponent::new(&options.name).map_err(|error| error.to_string())?;
     let parent = host_fs::writable_directory(&output).map_err(|error| error.to_string())?;
-    let mut fence = source::ContentFence::capture(&project)?;
+    let root = host_fs::readable_directory(&project).map_err(|error| error.to_string())?;
     let cache_name =
         RelativeComponent::new("two-level-cook-cache").map_err(|error| error.to_string())?;
     let cache = match parent.open_child_directory(&cache_name) {
@@ -67,14 +61,13 @@ fn run(options: input::Options) -> Result<(), String> {
             .create_child_directory(&cache_name)
             .map_err(|error| error.to_string())?,
     };
-    let (content, observations) =
-        content::prepare(fence.root(), &cache, &options.target, options.runtime)?;
-    fence.bind_raw_inputs(&observations)?;
+    let prepared = content::prepare_for_player(&root, &cache, &options.target, options.runtime)
+        .map_err(build_failure)?;
     let limits = PlayerPackageLimits::default();
-    let bootstrap = GeneratedPlayerBootstrap::new(&content, GENERATED, limits)
-        .map_err(|error| error.to_string())?;
-    let inputs = source::code_inventory(&project)?;
-    fence.bind_code(&inputs)?;
+    let mut inputs = project_rust_input_inventory(&project).map_err(build_failure)?;
+    inputs.push(
+        RelativePath::new("assets/materials/region.wgsl").map_err(|error| error.to_string())?,
+    );
     let selection = CargoBuildSelection::new(
         "two-level-game",
         options.runtime.binary(),
@@ -84,8 +77,8 @@ fn run(options: input::Options) -> Result<(), String> {
         false,
     )
     .map_err(|error| error.to_string())?;
-    let tools =
-        CargoBuildTools::new(options.cargo, options.rustc).map_err(|error| error.to_string())?;
+    let tools = CargoBuildTools::new(options.cargo, options.rustc)
+        .map_err(|error| build_failure(ProjectCookError::Cargo(error)))?;
     let request = CargoBuildRequest::new(
         &project,
         RelativePath::new("Cargo.toml").map_err(|error| error.to_string())?,
@@ -95,18 +88,11 @@ fn run(options: input::Options) -> Result<(), String> {
         CargoBuildLimits::default(),
     )
     .and_then(|request| request.with_target_directory(&target))
-    .and_then(|request| request.with_generated_rust_input(bootstrap.name(), bootstrap.bytes()))
-    .map_err(|error| error.to_string())?;
-    let check = || {
-        fence
-            .verify()
-            .map_err(|_| PlayerPackageControlFailure::SelectionChanged)
-    };
-    let prepared = match build_player_package(content, bootstrap, &request, limits, |_| check()) {
-        Ok(prepared) => prepared,
-        Err(error) => return Err(build_failure(error)),
-    };
-    match prepared.publish(&parent, &destination, |_| check()) {
+    .map_err(|error| build_failure(ProjectCookError::Cargo(error)))?;
+    let prepared = prepared
+        .build_player(request, limits)
+        .map_err(build_failure)?;
+    match prepared.publish(&parent, &destination) {
         PlayerPackageOutcome::Published { receipt, error } => {
             println!(
                 "TWO_LEVEL_PACKAGE_PUBLISHED {}",
@@ -142,26 +128,34 @@ fn run(options: input::Options) -> Result<(), String> {
     }
 }
 
-fn build_failure(mut error: PlayerPackageError) -> String {
-    let message = format!("{error:?}");
-    if let PlayerPackageError::Build { source, .. } = &mut error {
-        if let CargoBuildFailure::CleanupIncomplete(custody) = source.as_mut() {
-            let notice = Instant::now() + Duration::from_secs(10);
-            let mut reported = false;
-            loop {
-                if custody.retry_cleanup().is_ok() {
-                    break;
-                }
-                if !reported && Instant::now() >= notice {
-                    let _ = writeln!(
-                        std::io::stderr().lock(),
-                        "two-level cook: original build cleanup remains pending; retaining child and target lease while retrying: pid={:?}",
-                        custody.process_id()
-                    );
-                    reported = true;
-                }
-                std::thread::sleep(Duration::from_millis(10));
+fn build_failure(mut error: ProjectCookError) -> String {
+    let message = match &error {
+        ProjectCookError::Source(source) => format!("source delivery agreement: {source:?}"),
+        _ => format!("{error:?}"),
+    };
+    let build = match &mut error {
+        ProjectCookError::Package(PlayerPackageError::Build { source, .. }) => {
+            Some(source.as_mut())
+        }
+        ProjectCookError::Cargo(source) => Some(source),
+        _ => None,
+    };
+    if let Some(CargoBuildFailure::CleanupIncomplete(custody)) = build {
+        let notice = Instant::now() + Duration::from_secs(10);
+        let mut reported = false;
+        loop {
+            if custody.retry_cleanup().is_ok() {
+                break;
             }
+            if !reported && Instant::now() >= notice {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "two-level cook: original build cleanup remains pending; retaining child and target lease while retrying: pid={:?}",
+                    custody.process_id()
+                );
+                reported = true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
     message

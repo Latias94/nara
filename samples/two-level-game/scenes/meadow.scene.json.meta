@@ -1,0 +1,14 @@
+{
+  "kind": "asset_meta",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": { "name": "nara", "version": "0.1.0" },
+  "payload": {
+    "asset": {
+      "stable_id": "624ebd5d-b7b1-4da9-94f8-86d689caeac1",
+      "path": "meadow.scene.json",
+      "source_kind": "scene"
+    },
+    "settings": {}
+  }
+}

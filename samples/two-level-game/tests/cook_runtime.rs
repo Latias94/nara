@@ -1,5 +1,5 @@
 //! The source oracle uses public manifest ingestion, the selected recipe and strict delivery.
-//! Preparation returns the existing prepared-content/observations pair. Raw paths are relative to
+//! Preparation retains the shared production source selection. Raw paths are relative to
 //! the project root; importer and delivery observations may repeat a path with the same digest.
 //! Preparation precedes logical Player bootstrap generation. Source-free Session acceptance
 //! consumes the prepared base after the copied project and import cache have been removed.
@@ -21,11 +21,6 @@ mod evidence;
 #[allow(dead_code)]
 #[path = "../src/bin/player/output.rs"]
 mod output;
-#[cfg(any(feature = "development", feature = "cook"))]
-#[allow(dead_code)]
-#[path = "../src/bin/cook/source.rs"]
-mod source;
-
 use input::RuntimeKind;
 use nara::{
     app::PluginId, input::ActionMapFileCandidate, project::ProjectManifest,
@@ -175,7 +170,7 @@ mod atlas_content {
         },
         asset_build::ArtifactBuildObservation,
         ecs::World,
-        fs::{ContentDigest, DirectoryCapability, RelativePath},
+        fs::{ContentDigest, DirectoryCapability, FsError, RelativePath},
         gameplay::{
             GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
             GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
@@ -196,6 +191,7 @@ mod atlas_content {
         project_tooling::{
             host_fs,
             player_package::{GeneratedPlayerBootstrap, PlayerPackageLimits},
+            project_cook::ProjectCookError,
         },
         project_workflow::cooked_content::PreparedRuntimeContent,
         reflect::{
@@ -223,7 +219,7 @@ mod atlas_content {
         sound_bank::bank_product,
     };
 
-    use super::{RuntimeKind, content, evidence::Evidence, source::ContentFence, two_level_pack};
+    use super::{RuntimeKind, content, evidence::Evidence, two_level_pack};
 
     const DEFAULT_SCHEMA: &str = "schema/authoring.bundle.json";
     const SELECTED_SCHEMA: &str = "authoring/selected.bundle.json";
@@ -255,7 +251,9 @@ mod atlas_content {
                 super::INPUT_PATH,
                 "schema/authoring.bundle.json",
                 "scenes/meadow.scene.json",
+                "scenes/meadow.scene.json.meta",
                 "scenes/cavern.scene.json",
+                "scenes/cavern.scene.json.meta",
                 "scenes/marker.scene.json",
                 "scenes/marker.scene.json.meta",
                 "scenes/side-room.scene.json",
@@ -400,8 +398,48 @@ mod atlas_content {
         }
         let store = cache.path.join("store");
         fs::create_dir(&store).unwrap();
-        let mut fence = ContentFence::capture(&project).unwrap();
-        let delivery = source_delivery(fence.root()).unwrap();
+        let root = host_fs::readable_directory(&project).unwrap();
+        let (prepared, selection) = content::prepare(
+            &root,
+            &host_fs::writable_directory(&store).unwrap(),
+            "x86_64-pc-windows-msvc",
+            RuntimeKind::Headless,
+        )
+        .unwrap()
+        .into_parts();
+        let delivery = selection.delivery_receipt();
+        let observations = selection.observations();
+        assert_eq!(delivery.members().len(), 35);
+        for (kind, count) in [
+            (ProjectContentMemberKind::ProjectManifest, 1),
+            (ProjectContentMemberKind::AuthoringSchemaBundle, 1),
+            (ProjectContentMemberKind::Scene, 5),
+            (ProjectContentMemberKind::Prefab, 1),
+            (ProjectContentMemberKind::InputActionMap, 1),
+            (ProjectContentMemberKind::AssetMetadata, 14),
+            (ProjectContentMemberKind::AssetSource, 12),
+        ] {
+            assert_eq!(
+                delivery
+                    .members()
+                    .iter()
+                    .filter(|member| member.kind() == kind)
+                    .count(),
+                count,
+                "{kind:?}"
+            );
+        }
+        assert_eq!(
+            observations
+                .iter()
+                .filter(|observation| matches!(
+                    observation,
+                    ArtifactBuildObservation::Raw { path, digest: None }
+                        if path.as_str() == format!("{}.meta", super::INPUT_PATH)
+                ))
+                .count(),
+            1
+        );
         assert_eq!(
             delivery
                 .scene_roots()
@@ -419,13 +457,6 @@ mod atlas_content {
                 .collect::<Vec<_>>(),
             [schema]
         );
-        let (prepared, observations) = content::prepare(
-            fence.root(),
-            &host_fs::writable_directory(&store).unwrap(),
-            "x86_64-pc-windows-msvc",
-            RuntimeKind::Headless,
-        )
-        .unwrap();
         let catalog = prepared.base().catalog();
         assert_eq!(catalog.members().len(), 15);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
@@ -594,12 +625,18 @@ mod atlas_content {
             Some(super::input_product())
         );
         let mut raw = BTreeMap::new();
-        for observation in &observations {
+        for observation in observations {
             let (path, digest) = match observation {
                 ArtifactBuildObservation::Raw {
                     path,
                     digest: Some(digest),
                 } => (path.as_str(), digest.content()),
+                ArtifactBuildObservation::Raw { path, digest: None }
+                    if path.as_str() == format!("{}.meta", super::INPUT_PATH) =>
+                {
+                    assert!(!project.join(path.as_str()).exists());
+                    continue;
+                }
                 other => panic!("unexpected source import observation: {other:?}"),
             };
             if let Some(previous) = raw.insert(path, digest) {
@@ -639,7 +676,9 @@ mod atlas_content {
             "nara.toml",
             schema,
             "scenes/meadow.scene.json",
+            "scenes/meadow.scene.json.meta",
             "scenes/cavern.scene.json",
+            "scenes/cavern.scene.json.meta",
             "scenes/marker.scene.json",
             "scenes/side-room.scene.json",
             "scenes/lookout.scene.json",
@@ -653,11 +692,10 @@ mod atlas_content {
                 "missing admitted source member {path}"
             );
         }
-        fence.bind_raw_inputs(&observations).unwrap();
         let bootstrap = generate_bootstrap(&project, &prepared);
-        fence.verify().unwrap();
-        drop(delivery);
-        drop(fence);
+        selection.verify(&project).unwrap();
+        drop(selection);
+        drop(root);
         drop(cache);
         assert!(!project.exists() && !store.exists());
         assert_eq!(bootstrap.name(), GENERATED);
@@ -753,18 +791,18 @@ mod atlas_content {
             let project = cache.project();
             let store = cache.path.join("store");
             fs::create_dir(&store).unwrap();
-            let mut fence = ContentFence::capture(&project).unwrap();
-            let (prepared, observations) = content::prepare(
-                fence.root(),
+            let root = host_fs::readable_directory(&project).unwrap();
+            let (prepared, selection) = content::prepare(
+                &root,
                 &host_fs::writable_directory(&store).unwrap(),
                 "x86_64-pc-windows-msvc",
                 runtime,
             )
-            .unwrap_or_else(|error| panic!("{runtime:?}: {error}"));
+            .unwrap_or_else(|error| panic!("{runtime:?}: {error}"))
+            .into_parts();
             assert!(prepared.base().plan().settings().window().enabled);
             assert_eq!(prepared.base().catalog().members().len(), 15);
-            let manifest = fence
-                .root()
+            let manifest = root
                 .open_file(&RelativePath::new("nara.toml").unwrap())
                 .unwrap();
             let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
@@ -777,9 +815,8 @@ mod atlas_content {
                     .composition_fingerprint(),
                 plan.schema_validation().composition_fingerprint(),
             );
-            fence.bind_raw_inputs(&observations).unwrap();
             let _bootstrap = generate_bootstrap(&project, &prepared);
-            fence.verify().unwrap();
+            selection.verify(&project).unwrap();
         }
     }
 
@@ -814,8 +851,8 @@ mod atlas_content {
                 }
                 _ => unreachable!(),
             }
-            let fence = ContentFence::capture(&project).unwrap();
-            let error = source_delivery(fence.root()).unwrap_err();
+            let root = host_fs::readable_directory(&project).unwrap();
+            let error = source_delivery(&root).unwrap_err();
             assert_eq!(error.kind(), kind, "{failure}: {error:?}");
             assert!(
                 error
@@ -829,13 +866,13 @@ mod atlas_content {
             let store = host_fs::writable_directory(&store).unwrap();
             let mut generated = None;
             let error = content::prepare(
-                fence.root(),
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .map(|(prepared, _)| {
-                let bootstrap = generate_bootstrap(&project, &prepared);
+            .map(|prepared| {
+                let bootstrap = generate_bootstrap(&project, prepared.content());
                 generated = Some((bootstrap.name().to_owned(), bootstrap.digest()));
             })
             .expect_err("invalid selected schema must reject before bootstrap generation");
@@ -847,53 +884,53 @@ mod atlas_content {
             assert!(generated.is_none(), "{failure}: {generated:?}");
             assert!(!project.join(GENERATED).exists());
             assert!(!project.join("src/bin/player/generated.rs").exists());
-            assert!(
+            assert_eq!(
                 fs::read_dir(cache.path.join("store"))
                     .unwrap()
-                    .next()
-                    .is_none()
+                    .map(|entry| entry.unwrap().file_name())
+                    .collect::<Vec<_>>(),
+                [std::ffi::OsString::from("artifact-store.lock")]
             );
             assert!(!project.join(DEFAULT_SCHEMA).exists());
-            fence.verify().unwrap();
         }
     }
 
     #[test]
-    fn selected_schema_changes_after_prepare_and_binding_cannot_rebaseline_the_original_fence() {
+    fn selected_schema_changes_cannot_rebaseline_the_original_shared_selection() {
         for replace_identity in [false, true] {
             let cache = Cache::new();
             let project = cache.project();
             select_alternate_schema(&project);
             let store = cache.path.join("store");
             fs::create_dir(&store).unwrap();
-            let mut fence = ContentFence::capture(&project).unwrap();
-            let (prepared, observations) = content::prepare(
-                fence.root(),
+            let root = host_fs::readable_directory(&project).unwrap();
+            let (prepared, selection) = content::prepare(
+                &root,
                 &host_fs::writable_directory(&store).unwrap(),
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .unwrap();
-            fence.bind_raw_inputs(&observations).unwrap();
+            .unwrap()
+            .into_parts();
             let bootstrap = generate_bootstrap(&project, &prepared);
-            fence.verify().unwrap();
+            selection.verify(&project).unwrap();
             let selected = project.join(SELECTED_SCHEMA);
             let relative = RelativePath::new(SELECTED_SCHEMA).unwrap();
-            let original = fence.root().open_file(&relative).unwrap();
+            let original = root.open_file(&relative).unwrap();
             let bytes = fs::read(&selected).unwrap();
             if replace_identity {
                 fs::rename(&selected, selected.with_extension("original")).unwrap();
                 fs::write(&selected, &bytes).unwrap();
-                let replacement = fence.root().open_file(&relative).unwrap();
+                let replacement = root.open_file(&relative).unwrap();
                 assert_ne!(original.identity(), replacement.identity());
                 assert_eq!(fs::read(&selected).unwrap(), bytes);
-                source_delivery(fence.root()).unwrap();
+                source_delivery(&root).unwrap();
             } else {
                 fs::write(&selected, divergent_bundle(&bytes)).unwrap();
-                let changed = fence.root().open_file(&relative).unwrap();
+                let changed = root.open_file(&relative).unwrap();
                 assert_eq!(original.identity(), changed.identity());
                 assert_ne!(fs::read(&selected).unwrap(), bytes);
-                let error = source_delivery(fence.root()).unwrap_err();
+                let error = source_delivery(&root).unwrap_err();
                 assert!(
                     error.diagnostics().iter().any(|diagnostic| {
                         diagnostic.code().as_str()
@@ -902,13 +939,24 @@ mod atlas_content {
                     "{error:?}"
                 );
             }
-            assert!(fence.verify().unwrap_err().contains(SELECTED_SCHEMA));
-            assert!(
-                fence
-                    .bind_raw_inputs(&observations)
-                    .unwrap_err()
-                    .contains(SELECTED_SCHEMA)
-            );
+            let error = selection.verify(&project).unwrap_err();
+            if replace_identity {
+                assert!(matches!(
+                    error,
+                    ProjectCookError::Filesystem(FsError::IdentityMismatch { .. })
+                ));
+                fs::remove_file(&selected).unwrap();
+                fs::rename(selected.with_extension("original"), &selected).unwrap();
+            } else {
+                assert!(matches!(
+                    error,
+                    ProjectCookError::Filesystem(
+                        FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. }
+                    )
+                ));
+                fs::write(&selected, &bytes).unwrap();
+            }
+            selection.verify(&project).unwrap();
             assert_eq!(bootstrap.name(), GENERATED);
             assert_eq!(
                 bootstrap.digest(),
@@ -933,21 +981,29 @@ mod atlas_content {
             let store = cache.path.join("store");
             fs::create_dir(&store).unwrap();
             let store = host_fs::writable_directory(&store).unwrap();
-            let mut fence = ContentFence::capture(&project).unwrap();
-            let (original, observations) = content::prepare(
-                fence.root(),
+            let root = host_fs::readable_directory(&project).unwrap();
+            let (original, selection) = content::prepare(
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .unwrap();
-            fence.bind_raw_inputs(&observations).unwrap();
+            .unwrap()
+            .into_parts();
             let bootstrap = generate_bootstrap(&project, &original);
             let path = project.join(name);
             let bytes = fs::read(&path).unwrap();
             fs::write(&path, "invalid region Material input").unwrap();
-            assert!(fence.verify().unwrap_err().contains(name));
-            let source_error = source_delivery(fence.root()).unwrap_err();
+            assert!(
+                matches!(
+                    selection.verify(&project),
+                    Err(ProjectCookError::Filesystem(
+                        FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. }
+                    ))
+                ),
+                "{name}"
+            );
+            let source_error = source_delivery(&root).unwrap_err();
             assert!(
                 source_error
                     .diagnostics()
@@ -956,7 +1012,7 @@ mod atlas_content {
                 "{name}: {source_error:?}"
             );
             let error = content::prepare(
-                fence.root(),
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
@@ -976,22 +1032,26 @@ mod atlas_content {
                 .unwrap();
             two_level_pack::assert_room_material(retained.product());
             fs::write(&path, bytes).unwrap();
-            fence.verify().unwrap();
-            let (repaired, repaired_observations) = content::prepare(
-                fence.root(),
+            selection.verify(&project).unwrap();
+            let (repaired, repaired_selection) = content::prepare(
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .unwrap();
-            fence.bind_raw_inputs(&repaired_observations).unwrap();
+            .unwrap()
+            .into_parts();
+            repaired_selection.verify(&project).unwrap();
+            assert_eq!(selection.observations(), repaired_selection.observations());
             assert_eq!(
                 original.base().catalog().to_json_bytes().unwrap(),
                 repaired.base().catalog().to_json_bytes().unwrap()
             );
             let repaired_bootstrap = generate_bootstrap(&project, &repaired);
             assert_eq!(bootstrap.bytes(), repaired_bootstrap.bytes());
-            drop(fence);
+            drop(selection);
+            drop(repaired_selection);
+            drop(root);
             drop(store);
             drop(cache);
             assert!(!project.exists());
@@ -1021,15 +1081,15 @@ mod atlas_content {
             let store = cache.path.join("store");
             fs::create_dir(&store).unwrap();
             let store = host_fs::writable_directory(&store).unwrap();
-            let mut fence = ContentFence::capture(&project).unwrap();
-            let (original, observations) = content::prepare(
-                fence.root(),
+            let root = host_fs::readable_directory(&project).unwrap();
+            let (original, selection) = content::prepare(
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .unwrap();
-            fence.bind_raw_inputs(&observations).unwrap();
+            .unwrap()
+            .into_parts();
             let bootstrap = generate_bootstrap(&project, &original);
             let retained = original
                 .base()
@@ -1069,8 +1129,16 @@ mod atlas_content {
                 }
                 _ => unreachable!(),
             }
-            assert!(fence.verify().unwrap_err().contains(name));
-            let source_error = source_delivery(fence.root()).unwrap_err();
+            assert!(
+                matches!(
+                    selection.verify(&project),
+                    Err(ProjectCookError::Filesystem(
+                        FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. }
+                    ))
+                ),
+                "{name}, {failure}"
+            );
+            let source_error = source_delivery(&root).unwrap_err();
             let code = match failure {
                 "source" => "project.content.tileset-source-invalid",
                 "metadata" => "project.content.asset-meta-invalid",
@@ -1087,7 +1155,7 @@ mod atlas_content {
                 "{name}, {failure}: {source_error:?}"
             );
             let error = content::prepare(
-                fence.root(),
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
@@ -1115,22 +1183,26 @@ mod atlas_content {
                 original_tileset.product(),
             );
             fs::write(&path, bytes).unwrap();
-            fence.verify().unwrap();
-            let (repaired, observations) = content::prepare(
-                fence.root(),
+            selection.verify(&project).unwrap();
+            let (repaired, repaired_selection) = content::prepare(
+                &root,
                 &store,
                 "x86_64-pc-windows-msvc",
                 RuntimeKind::Headless,
             )
-            .unwrap();
-            fence.bind_raw_inputs(&observations).unwrap();
+            .unwrap()
+            .into_parts();
+            repaired_selection.verify(&project).unwrap();
+            assert_eq!(selection.observations(), repaired_selection.observations());
             assert_eq!(
                 original.base().catalog().to_json_bytes().unwrap(),
                 repaired.base().catalog().to_json_bytes().unwrap()
             );
             let repaired_bootstrap = generate_bootstrap(&project, &repaired);
             assert_eq!(bootstrap.bytes(), repaired_bootstrap.bytes());
-            drop(fence);
+            drop(selection);
+            drop(repaired_selection);
+            drop(root);
             drop(store);
             drop(cache);
             assert!(!project.exists());
@@ -1172,17 +1244,18 @@ mod atlas_content {
         let bytes = authored.to_json_string().unwrap().into_bytes();
         fs::write(&input_path, &bytes).unwrap();
         assert!(!project.join(format!("{}.meta", super::INPUT_PATH)).exists());
-        let mut fence = ContentFence::capture(&project).unwrap();
+        let root = host_fs::readable_directory(&project).unwrap();
         let store = cache.path.join("store");
         fs::create_dir(&store).unwrap();
-        let (prepared, observations) = content::prepare(
-            fence.root(),
+        let (prepared, selection) = content::prepare(
+            &root,
             &host_fs::writable_directory(&store).unwrap(),
             "x86_64-pc-windows-msvc",
             RuntimeKind::Headless,
         )
-        .unwrap();
-        fence.bind_raw_inputs(&observations).unwrap();
+        .unwrap()
+        .into_parts();
+        selection.verify(&project).unwrap();
         let input = prepared.base().acquire_startup_input().unwrap().unwrap();
         assert_eq!(
             prepared.base().plan().settings().input().action_map,
@@ -1219,7 +1292,12 @@ mod atlas_content {
             );
         }
         fs::write(&input_path, original.to_json_string().unwrap()).unwrap();
-        assert!(fence.verify().unwrap_err().contains(super::INPUT_PATH));
+        assert!(matches!(
+            selection.verify(&project),
+            Err(ProjectCookError::Filesystem(
+                FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. }
+            ))
+        ));
         fs::remove_file(&input_path).unwrap();
         assert!(!input_path.exists());
         let result = observe_startup(prepared, |_| Ok(()));
@@ -1256,13 +1334,15 @@ mod atlas_content {
         fs::create_dir(&store).unwrap();
         let root = host_fs::readable_directory(&project).unwrap();
         let store = host_fs::writable_directory(&store).unwrap();
-        let (prepared, _) = content::prepare(
+        let (prepared, selection) = content::prepare(
             &root,
             &store,
             "x86_64-pc-windows-msvc",
             RuntimeKind::Headless,
         )
-        .unwrap();
+        .unwrap()
+        .into_parts();
+        selection.verify(&project).unwrap();
         assert_eq!(
             prepared
                 .base()
