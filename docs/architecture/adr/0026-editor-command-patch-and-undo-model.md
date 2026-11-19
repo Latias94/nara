@@ -77,6 +77,9 @@ Rules:
 - Patch paths are schema-aware: `SceneEntityId + ComponentTypeId + field path`. Root field
   identity follows the declared Schema contract; nested member names and unkeyed indices are
   revision-local locators, not promises of rename/reorder-stable persistent identity.
+- `RemoveField` resets a named field, including a named field within a list element. A path
+  ending in a list index is refused before document publication. Collection edits can replace
+  the complete typed list so the existing inverse retains and restores the previous value.
 - Ordered stable-property replacements resolve through the admitted Schema against one evolving
   private candidate, then coalesce into the existing root-field patch and owner-created inverse.
   Original property operation count, selector/key bytes and replacement payload are bounded before

@@ -6,9 +6,9 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
     ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentProjectionError, ComponentRegistrySnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueKind, ComponentValueMaterializationLimits,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentProjectionError,
+    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueCost, ComponentValueKind, ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -2876,6 +2876,22 @@ fn remove_field_value<D: EntityDocument>(
                 operation_index,
                 "scene.patch-required-field-removal",
                 "patch removes a required component field without a registered default",
+                Some(entity),
+                Some(component),
+                Some(path),
+            ),
+            field,
+        ));
+    }
+    if matches!(
+        path.segments().last(),
+        Some(ComponentFieldPathSegment::Index(_))
+    ) {
+        return Err(with_component_field_id(
+            patch_diagnostic(
+                operation_index,
+                "scene.patch-invalid-field-path",
+                "Patch field removal requires a named field",
                 Some(entity),
                 Some(component),
                 Some(path),
