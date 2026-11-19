@@ -191,6 +191,7 @@ pub struct CookedContentBuilder {
     retained_bytes: usize,
     encoded_bytes: usize,
     consumer_bytes: usize,
+    consumer_work_bytes: usize,
 }
 
 impl CookedContentBuilder {
@@ -261,6 +262,7 @@ impl CookedContentBuilder {
             retained_bytes,
             encoded_bytes: 0,
             consumer_bytes: 0,
+            consumer_work_bytes: 0,
         })
     }
 
@@ -293,6 +295,13 @@ impl CookedContentBuilder {
         self.request.scenes = scenes;
         self.retained_bytes = retained_bytes;
         Ok(())
+    }
+
+    /// Borrows the actual dependencies in assembly order, which is stable until `finish`.
+    pub(crate) fn pending_dependencies(&self, index: usize) -> Option<&[RuntimeContentDependency]> {
+        self.members
+            .get(index)
+            .map(|pending| pending.member.dependencies())
     }
 
     pub fn add_scene(
@@ -825,7 +834,10 @@ impl CookedContentBuilder {
     fn admit_work(&self, additional: usize) -> Result<(), CookedContentError> {
         check(
             "work-bytes",
-            add(self.retained_bytes, additional)?,
+            add(
+                add(self.retained_bytes, self.consumer_work_bytes)?,
+                additional,
+            )?,
             self.limits.work_bytes.get(),
         )
     }
@@ -844,6 +856,23 @@ impl CookedContentBuilder {
 
     pub(crate) fn admit_consumer_work(&self, bytes: usize) -> Result<(), CookedContentError> {
         self.admit_work(bytes)
+    }
+
+    /// Releases the charge for caller-owned metadata that has already been dropped.
+    pub(crate) fn release_consumer_metadata(&mut self, bytes: usize) {
+        self.consumer_bytes -= bytes;
+        self.retained_bytes -= bytes;
+    }
+
+    /// Charges visitor scratch that stays live during subsequent assembly operations.
+    pub(crate) fn reserve_consumer_work(&mut self, bytes: usize) -> Result<(), CookedContentError> {
+        self.admit_work(bytes)?;
+        self.consumer_work_bytes = add(self.consumer_work_bytes, bytes)?;
+        Ok(())
+    }
+
+    pub(crate) fn release_consumer_work(&mut self, bytes: usize) {
+        self.consumer_work_bytes -= bytes;
     }
 
     fn commit(
@@ -910,7 +939,7 @@ impl CookedContentBuilder {
         )?;
         check(
             "work-bytes",
-            add(retained, old_tables)?,
+            add(add(retained, self.consumer_work_bytes)?, old_tables)?,
             self.limits.work_bytes.get(),
         )?;
         let mut members = Vec::with_capacity(count);

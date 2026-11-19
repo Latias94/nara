@@ -59,9 +59,12 @@ Scenes do not become public travel roots. Every selected Scene needs an adjacent
 stable identity, including dependency-free roots in `project_location` projects. That identity
 names the cooked Product. The source document keeps its configured identity policy. Stock Images
 retain their admitted extent and color space. A device-specific transform remains an explicit
-separate artifact policy. Each additional
-domain uses its selected `SourceAssetBuild` and complete verified group. A source-only importer
-does not automatically opt into that build contract.
+separate artifact policy. Each additional domain uses its selected `SourceAssetBuild` and complete
+verified group. A source-only importer does not automatically opt into that build contract.
+Stock payloads enter the pack through a delivery root or a Required or Reference edge declared by
+the cooked content. An importer can embed PNG data in a custom Product and keep the PNG as a
+tracked build input. If the codec declares a link to the Image Product, the pack also contains
+the Image payload.
 
 Decoded roots retire sequentially; the unpublished builder accumulates their processed members
 and performs the existing final complete validation. `PreparedProjectCook` retains source and

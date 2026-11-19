@@ -155,6 +155,13 @@ remaining an explicit caller inventory. It does not infer Rust modules or Cargo 
 register another importer, or retain every decoded source generation. Starter and game adapters
 select their own recipe, content profile and Player Cargo target through the same entry.
 
+The compiled project entry selects stock payloads from the delivery roots and the Required and
+Reference edges declared by the encoded Scenes and verified groups. A source asset consumed
+during construction, such as a PNG embedded into a typed Product, still contributes its source
+and build observations. The PNG becomes a separate Runtime member when an encoded Product or
+delivery root requires it. Explicit groups retain their complete mappings, subject to the original
+builder's final reachability and deep validation.
+
 Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
 an independently expected catalog digest/length, content target/profile and relative pack location.
 The trusted Player explicitly compiles and uses that input with its own selected recipe. The

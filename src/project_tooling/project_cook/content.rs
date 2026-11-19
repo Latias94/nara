@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    collections::BTreeMap,
+    collections::{BTreeMap, btree_map::Entry},
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
@@ -15,13 +15,17 @@ use crate::{
     },
     core::FormatVersion,
     fs::{DirectoryCapability, RelativePath},
-    material::Material2dDomain,
+    image::ImageAsset,
+    input::ActionMapAsset,
+    material::{Material2dAsset, Material2dDomain},
     project_content::{DeliverySnapshotPhase, DeliveryVisitError, SelectedSceneProduct},
     project_host::{
         ProjectContentLoader, ProjectContentMemberKind, ProjectContentSnapshot,
-        resolve_product_recipe,
+        ProjectTileSetContent, resolve_product_recipe,
     },
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
+    runtime_content::RuntimeContentDependencyRole,
+    scene::CompiledSceneCandidate,
     tilemap::TileSetDescriptor,
 };
 
@@ -33,13 +37,48 @@ use super::{
 mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Output {
+enum StockKind {
     Scene,
     Image,
     Input,
     Material,
     TileSet,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StockState {
+    Available,
+    Demanded,
+    Cooked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Output {
+    /// A mandatory target whose provider has yet to be seen.
+    Demanded,
+    Stock(StockKind, StockState),
     Group(ArtifactContentDigest),
+}
+
+#[derive(Clone, Copy)]
+enum StockAsset<'a> {
+    Scene(&'a CompiledSceneCandidate),
+    Image(&'a ImageAsset),
+    Input(&'a ActionMapAsset),
+    Material(&'a Material2dAsset),
+    TileSet(&'a ProjectTileSetContent),
+}
+
+impl StockAsset<'_> {
+    fn kind(self) -> StockKind {
+        match self {
+            Self::Scene(_) => StockKind::Scene,
+            Self::Image(_) => StockKind::Image,
+            Self::Input(_) => StockKind::Input,
+            Self::Material(_) => StockKind::Material,
+            Self::TileSet(_) => StockKind::TileSet,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -149,7 +188,7 @@ pub struct ProjectCookContext<'a> {
     observations: &'a mut Observations,
 }
 
-impl ProjectCookContext<'_> {
+impl<'a> ProjectCookContext<'a> {
     #[must_use]
     pub fn snapshot(&self) -> &ProjectContentSnapshot {
         self.snapshot
@@ -311,13 +350,14 @@ impl ProjectCookContext<'_> {
         let mut total = 0;
         for product in products {
             total += 1;
-            if let Some(previous) = self.outputs.get(product) {
-                if *previous != output {
+            match self.outputs.get(product) {
+                None | Some(Output::Demanded) => {}
+                Some(previous) if *previous == output => present += 1,
+                Some(_) => {
                     return Err(ProjectCookError::Invalid(format!(
                         "cooked Product {product} has conflicting output"
                     )));
                 }
-                present += 1;
             }
         }
         if total != 0 && total == present {
@@ -329,7 +369,9 @@ impl ProjectCookContext<'_> {
             ));
         }
         for product in group.members().iter().flat_map(|member| &member.products) {
-            reserve_output(self.builder)?;
+            if !self.outputs.contains_key(product) {
+                reserve_output(self.builder)?;
+            }
         }
         self.builder.add_group(group)?;
         for product in group.members().iter().flat_map(|member| &member.products) {
@@ -341,19 +383,122 @@ impl ProjectCookContext<'_> {
         Ok(())
     }
 
-    fn stock_assets(&mut self) -> Result<(), ProjectCookError> {
-        for image in self.snapshot.images() {
+    fn select_stock(
+        &mut self,
+        inspected_members: &mut usize,
+        prepare: impl FnOnce(&mut Self) -> Result<(), ProjectCookError>,
+    ) -> Result<(), ProjectCookError> {
+        let snapshot = self.snapshot;
+        let materials = snapshot.domain_assets().collection::<Material2dDomain>();
+        let count = snapshot
+            .images()
+            .len()
+            .checked_add(snapshot.tilesets().len())
+            .and_then(|count| count.checked_add(snapshot.scene_dependencies().len()))
+            .and_then(|count| count.checked_add(materials.map_or(0, |values| values.iter().len())))
+            .ok_or_else(overflow)?;
+        let bytes = count
+            .checked_mul(size_of::<(AssetProductRef, StockAsset<'_>)>())
+            .ok_or_else(overflow)?;
+        self.builder.reserve_consumer_work(bytes)?;
+        let mut available = Vec::with_capacity(count);
+        for image in snapshot.images() {
             let product = image.image().product().ok_or_else(|| {
                 ProjectCookError::Invalid(
                     "a cooked Image requires persistent Product identity".into(),
                 )
             })?;
-            if self.needs(product, Output::Image)? {
-                reserve_output(self.builder)?;
-                self.builder.add_image(image.image())?;
-                self.outputs.insert(product, Output::Image);
+            available.push((product, StockAsset::Image(image.image())));
+        }
+        for tileset in snapshot.tilesets() {
+            let product = AssetProductRef::new(tileset.stable_id(), ImportedProductId::PRIMARY)
+                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
+            available.push((product, StockAsset::TileSet(tileset)));
+        }
+        if let Some(materials) = materials {
+            for material in materials.iter() {
+                available.push((material.product(), StockAsset::Material(material)));
             }
         }
+        let database = snapshot.asset_database();
+        for scene in snapshot.scene_dependencies() {
+            let record = database.record_for_path(scene.path()).ok_or_else(|| {
+                ProjectCookError::Invalid(format!(
+                    "Scene {} lost its admitted identity",
+                    scene.path()
+                ))
+            })?;
+            let product = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
+            available.push((product, StockAsset::Scene(scene.compiled_candidate())));
+        }
+        for &(product, asset) in &available {
+            self.register_stock(product, asset.kind())?;
+        }
+        available.sort_unstable_by_key(|(product, _)| *product);
+        let result =
+            prepare(self).and_then(|()| self.cook_demanded_stock(inspected_members, &available));
+        drop(available);
+        self.builder.release_consumer_work(bytes);
+        result
+    }
+
+    fn cook_demanded_stock(
+        &mut self,
+        inspected_members: &mut usize,
+        available: &[(AssetProductRef, StockAsset<'_>)],
+    ) -> Result<(), ProjectCookError> {
+        for &(product, asset) in available {
+            if matches!(
+                self.outputs.get(&product),
+                Some(Output::Stock(_, StockState::Demanded))
+            ) {
+                self.cook_stock(product, asset)?;
+            }
+        }
+
+        while let Some(count) = self
+            .builder
+            .pending_dependencies(*inspected_members)
+            .map(|dependencies| dependencies.len())
+        {
+            for index in 0..count {
+                let dependency = self
+                    .builder
+                    .pending_dependencies(*inspected_members)
+                    .expect("pending members retain their assembly index")[index];
+                let product = dependency.product();
+                if dependency.role() == RuntimeContentDependencyRole::Soft
+                    || matches!(
+                        self.outputs.get(&product),
+                        Some(Output::Stock(_, StockState::Cooked) | Output::Group(_))
+                    )
+                {
+                    continue;
+                }
+                if let Ok(slot) = available.binary_search_by_key(&product, |(product, _)| *product)
+                {
+                    self.cook_stock(product, available[slot].1)?;
+                } else {
+                    match self.outputs.entry(product) {
+                        Entry::Vacant(entry) => {
+                            reserve_output(self.builder)?;
+                            entry.insert(Output::Demanded);
+                        }
+                        Entry::Occupied(mut entry) => {
+                            if let Output::Stock(_, state) = entry.get_mut() {
+                                *state = StockState::Demanded;
+                            }
+                        }
+                    }
+                }
+            }
+            *inspected_members += 1;
+        }
+        Ok(())
+    }
+
+    fn input(&mut self) -> Result<(), ProjectCookError> {
         if let Some(input) = self.snapshot.input_action_map() {
             let path_bytes = input
                 .path()
@@ -376,94 +521,80 @@ impl ProjectCookContext<'_> {
                     .metadata_digest()
                     .map(ArtifactContentDigest::from_content),
             )?;
-            if self.needs(input.product(), Output::Input)? {
-                reserve_output(self.builder)?;
-                self.builder.add_input(input.asset())?;
-                self.outputs.insert(input.product(), Output::Input);
-            }
-        }
-        let resolver = self.snapshot.asset_resolution();
-        for tileset in self.snapshot.tilesets() {
-            let product = AssetProductRef::new(tileset.stable_id(), ImportedProductId::PRIMARY)
-                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
-            if !self.needs(product, Output::TileSet)? {
-                continue;
-            }
-            reserve_output(self.builder)?;
-            let source = tileset.source();
-            let image = resolve_image(resolver, &source.image)?;
-            let descriptor = TileSetDescriptor::new(product, image, source.atlas)
-                .map(|value| value.with_sampler(source.sampler))
-                .map(|value| value.with_alpha_mode(source.alpha_mode))
-                .and_then(|value| value.with_tint(source.tint))
-                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
-            self.builder.add_tileset(&descriptor)?;
-            self.outputs.insert(product, Output::TileSet);
-        }
-        if let Some(materials) = self
-            .snapshot
-            .domain_assets()
-            .collection::<Material2dDomain>()
-        {
-            for material in materials.iter() {
-                let product = material.product();
-                if !self.needs(product, Output::Material)? {
-                    continue;
-                }
-                reserve_output(self.builder)?;
-                let material = material
-                    .resolve_texture_references(|reference| resolve_image(resolver, reference))?;
-                self.builder.add_material(&material)?;
-                self.outputs.insert(product, Output::Material);
-            }
+            self.cook_stock(input.product(), StockAsset::Input(input.asset()))?;
         }
         Ok(())
     }
 
-    fn scenes(&mut self) -> Result<(), ProjectCookError> {
+    fn scene_root(&mut self) -> Result<(), ProjectCookError> {
         let selected = self.snapshot.selected_scene_product().ok_or_else(|| {
             ProjectCookError::Invalid("cooked Scenes require authored stable metadata".into())
         })?;
         self.builder.declare_scene_root(selected)?;
-        if self.needs(selected, Output::Scene)? {
-            reserve_output(self.builder)?;
-            self.builder.add_scene(
-                selected,
-                self.snapshot.compiled_candidate(),
-                self.snapshot.asset_resolution(),
-            )?;
-            self.outputs.insert(selected, Output::Scene);
+        self.cook_stock(
+            selected,
+            StockAsset::Scene(self.snapshot.compiled_candidate()),
+        )
+    }
+
+    fn cook_stock(
+        &mut self,
+        product: AssetProductRef,
+        asset: StockAsset<'_>,
+    ) -> Result<(), ProjectCookError> {
+        let kind = asset.kind();
+        if !self.register_stock(product, kind)? {
+            return Ok(());
         }
         let resolver = self.snapshot.asset_resolution();
-        for scene in self.snapshot.scene_dependencies() {
-            let record = resolver
-                .database()
-                .record_for_path(scene.path())
-                .ok_or_else(|| {
-                    ProjectCookError::Invalid(format!(
-                        "Scene {} lost its admitted identity",
-                        scene.path()
-                    ))
-                })?;
-            let product = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
-                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
-            if self.needs(product, Output::Scene)? {
-                reserve_output(self.builder)?;
-                self.builder
-                    .add_scene(product, scene.compiled_candidate(), resolver)?;
-                self.outputs.insert(product, Output::Scene);
+        match asset {
+            StockAsset::Scene(scene) => self.builder.add_scene(product, scene, resolver)?,
+            StockAsset::Image(image) => self.builder.add_image(image)?,
+            StockAsset::Input(input) => self.builder.add_input(input)?,
+            StockAsset::Material(material) => {
+                let material = material
+                    .resolve_texture_references(|reference| resolve_image(resolver, reference))?;
+                self.builder.add_material(&material)?;
+            }
+            StockAsset::TileSet(tileset) => {
+                let source = tileset.source();
+                let image = resolve_image(resolver, &source.image)?;
+                let descriptor = TileSetDescriptor::new(product, image, source.atlas)
+                    .map(|value| value.with_sampler(source.sampler))
+                    .map(|value| value.with_alpha_mode(source.alpha_mode))
+                    .and_then(|value| value.with_tint(source.tint))
+                    .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
+                self.builder.add_tileset(&descriptor)?;
             }
         }
+        self.outputs
+            .insert(product, Output::Stock(kind, StockState::Cooked));
         Ok(())
     }
 
-    fn needs(&self, product: AssetProductRef, output: Output) -> Result<bool, ProjectCookError> {
-        match self.outputs.get(&product) {
-            None => Ok(true),
-            Some(previous) if *previous == output => Ok(false),
-            Some(_) => Err(ProjectCookError::Invalid(format!(
-                "cooked Product {product} changed its selected resource kind"
-            ))),
+    fn register_stock(
+        &mut self,
+        product: AssetProductRef,
+        kind: StockKind,
+    ) -> Result<bool, ProjectCookError> {
+        match self.outputs.entry(product) {
+            Entry::Vacant(entry) => {
+                reserve_output(self.builder)?;
+                entry.insert(Output::Stock(kind, StockState::Available));
+                Ok(true)
+            }
+            Entry::Occupied(mut entry) => match *entry.get() {
+                Output::Demanded => {
+                    entry.insert(Output::Stock(kind, StockState::Demanded));
+                    Ok(true)
+                }
+                Output::Stock(previous, state) if previous == kind => {
+                    Ok(state != StockState::Cooked)
+                }
+                _ => Err(ProjectCookError::Invalid(format!(
+                    "cooked Product {product} changed its selected resource kind"
+                ))),
+            },
         }
     }
 }
@@ -475,6 +606,7 @@ fn reserve_output(builder: &mut CookedContentBuilder) -> Result<(), ProjectCookE
 
 /// Cooks the selected source project without reconstructing its identities or recompiling Scenes.
 ///
+/// Stock payloads are selected through delivery roots and the assembled Runtime dependencies.
 /// Stock Images preserve their admitted pixels, color space and extent through the stock Runtime
 /// codec. Device-specific image transforms remain explicit separate artifact contributions.
 /// Complete source snapshots are borrowed sequentially and released by the original loader.
@@ -503,7 +635,12 @@ fn prepare(
     let mut outputs = BTreeMap::new();
     let mut built_sources = BTreeMap::new();
     let mut observations = Observations::default();
+    let mut inspected_members = 0;
     let scene_product = SelectedSceneProduct::Required;
+    let delivery_error = |error| match error {
+        DeliveryVisitError::Content(error) => ProjectCookError::Source(error),
+        DeliveryVisitError::Visit(error) => error,
+    };
     let receipt = loader
         .load_delivery_with_snapshots(
             request.candidate,
@@ -545,18 +682,72 @@ fn prepare(
                     built_sources: &mut built_sources,
                     observations: &mut observations,
                 };
-                context.stock_assets()?;
-                contribute(&mut context)?;
-                context.scenes()
+                context.input()?;
+                context.select_stock(&mut inspected_members, |context| {
+                    contribute(context)?;
+                    context.scene_root()
+                })
             },
         )
-        .map_err(|error| match error {
-            DeliveryVisitError::Content(error) => ProjectCookError::Source(error),
-            DeliveryVisitError::Visit(error) => error,
-        })?;
+        .map_err(delivery_error)?;
     let mut builder = builder.ok_or_else(|| {
         ProjectCookError::Invalid("source delivery produced no startup Scene".into())
     })?;
+    let needs_replay = |outputs: &BTreeMap<AssetProductRef, Output>| {
+        outputs
+            .values()
+            .any(|output| matches!(output, Output::Stock(_, StockState::Demanded)))
+    };
+    let receipt = if needs_replay(&outputs) {
+        let expected_delivery = receipt.delivery_digest();
+        let expected_startup = receipt.startup_content().content_closure().stamp();
+        drop(receipt);
+        let replay = loader
+            .load_delivery_with_snapshots(
+                request.candidate,
+                &plan,
+                scene_product,
+                |snapshot, phase| {
+                    if phase != DeliverySnapshotPhase::Complete || !needs_replay(&outputs) {
+                        return Ok(());
+                    }
+                    ProjectCookContext {
+                        snapshot,
+                        root: request.root,
+                        store: request.store,
+                        implementation: request.implementation,
+                        builder: &mut builder,
+                        outputs: &mut outputs,
+                        built_sources: &mut built_sources,
+                        observations: &mut observations,
+                    }
+                    .select_stock(&mut inspected_members, |_| Ok(()))
+                },
+            )
+            .map_err(delivery_error)?;
+        if replay.delivery_digest() != expected_delivery
+            || replay.startup_content().content_closure().stamp() != expected_startup
+        {
+            return Err(ProjectCookError::Invalid(
+                "source delivery changed while selecting cooked dependencies".into(),
+            ));
+        }
+        replay
+    } else {
+        receipt
+    };
+    let output_bytes = metadata_bytes::<(AssetProductRef, Output)>(0)?
+        .checked_mul(outputs.len())
+        .ok_or_else(overflow)?;
+    let source_index_bytes = metadata_bytes::<(StableAssetId, TypeId)>(0)?
+        .checked_mul(built_sources.len())
+        .ok_or_else(overflow)?;
+    drop((outputs, built_sources));
+    builder.release_consumer_metadata(
+        output_bytes
+            .checked_add(source_index_bytes)
+            .ok_or_else(overflow)?,
+    );
     for member in receipt.members() {
         observations.raw(
             &mut builder,
@@ -565,7 +756,6 @@ fn prepare(
         )?;
     }
     let observations = observations.finish(&mut builder)?;
-    drop((outputs, built_sources));
     let content = builder.finish()?;
     if content
         .base()

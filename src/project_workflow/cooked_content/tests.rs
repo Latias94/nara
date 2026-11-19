@@ -838,6 +838,11 @@ fn finish_admits_original_group_base_and_decoder_promises_at_exact_work_limit() 
         .unwrap();
         add_scene(&mut builder, 1, None);
         builder.add_group(&group).unwrap();
+        let retained_before_index = builder.retained_bytes;
+        builder.reserve_consumer_metadata(4096).unwrap();
+        assert_eq!(builder.retained_bytes, retained_before_index + 4096);
+        builder.release_consumer_metadata(4096);
+        assert_eq!(builder.retained_bytes, retained_before_index);
         match builder.finish() {
             Err(CookedContentError::Budget {
                 kind: "work-bytes",

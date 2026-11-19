@@ -1,0 +1,217 @@
+//! A source badge with an authored Image dependency and two concrete delivery forms.
+
+use std::cell::Cell;
+
+use nara_asset::{
+    AssetBuildSource, AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource,
+    AssetPath, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
+    AssetRuntimeLimits, AssetSourceKind, ImportedProductId, RuntimeAssetCodec, SourceAssetBuild,
+    SourceAssetImporter,
+};
+use nara_core::ByteLimit;
+use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use serde::{Deserialize, Serialize};
+
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const PNG_BYTES: usize = 256;
+const RUNTIME_BYTES: usize = 2048;
+
+thread_local! {
+    static EMBEDDED_IMPORTS: Cell<usize> = const { Cell::new(0) };
+}
+
+pub(super) fn embedded_imports() -> usize {
+    EMBEDDED_IMPORTS.get()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ImageDelivery {
+    Embedded,
+    Linked,
+    LinkedAtBuild,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BadgeSettings {
+    pub(super) image_delivery: ImageDelivery,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BadgeSource {
+    pub(super) png: AssetPath,
+    pub(super) image: AssetProductRef,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Badge {
+    pub(super) product: AssetProductRef,
+    pub(super) art: BadgeArt,
+    #[serde(skip)]
+    source_image: Option<AssetRef>,
+    #[serde(skip)]
+    build_image: Option<AssetProductRef>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BadgeArt {
+    Embedded(Box<[u8]>),
+    Linked(AssetProductRef),
+}
+
+pub(super) struct BadgeDomain;
+
+impl AssetDomain for BadgeDomain {
+    type Product = Badge;
+}
+
+impl SourceAssetImporter for BadgeDomain {
+    const SOURCE_KIND: &'static str = "consumer.cook-badge";
+    type Settings = BadgeSettings;
+
+    fn limits() -> AssetImportLimits {
+        AssetImportLimits::new(bytes(1024), bytes(16 * 1024), bytes(2048))
+    }
+
+    fn prepare<E>(source: &mut AssetImportSource<'_, E>) -> Result<Badge, AssetImportError<E>> {
+        let candidate = source
+            .metadata()
+            .admit::<BadgeSettings>()
+            .map_err(|_| AssetImportError::domain(invalid_badge()))?;
+        let (identity, settings) = candidate.into_meta().into_parts();
+        let product = AssetProductRef::new(identity.stable_id(), ImportedProductId::PRIMARY)
+            .map_err(|_| AssetImportError::domain(invalid_badge()))?;
+        let body: BadgeSource = serde_json::from_slice(source.bytes())
+            .map_err(|_| AssetImportError::domain(invalid_badge()))?;
+        let png = source.read_dependency(&body.png, bytes(PNG_BYTES))?;
+        if !png.starts_with(PNG_SIGNATURE) || body.image.product() != ImportedProductId::PRIMARY {
+            return Err(AssetImportError::domain(invalid_badge()));
+        }
+        let source_image = (settings.image_delivery != ImageDelivery::LinkedAtBuild)
+            .then_some(AssetRef::Product(body.image));
+        let build_image =
+            (settings.image_delivery == ImageDelivery::LinkedAtBuild).then_some(body.image);
+        if settings.image_delivery == ImageDelivery::Embedded {
+            EMBEDDED_IMPORTS.set(EMBEDDED_IMPORTS.get() + 1);
+        }
+        let art = match settings.image_delivery {
+            ImageDelivery::Embedded | ImageDelivery::LinkedAtBuild => {
+                BadgeArt::Embedded(Box::from(png.as_ref()))
+            }
+            ImageDelivery::Linked => BadgeArt::Linked(body.image),
+        };
+        Ok(Badge {
+            product,
+            art,
+            source_image,
+            build_image,
+        })
+    }
+
+    fn visit_source_dependencies<E>(
+        badge: &Badge,
+        mut visit: impl FnMut(&AssetRef, &AssetSourceKind, AssetReferenceDemand) -> Result<(), E>,
+    ) -> Result<(), E> {
+        if let Some(image) = &badge.source_image {
+            visit(
+                image,
+                &AssetSourceKind::Image,
+                AssetReferenceDemand::Immediate,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl SourceAssetBuild for BadgeDomain {
+    type Codec = Self;
+    const BUILD_ID: &'static str = "consumer.cook-badge.build";
+    const BUILD_REVISION: u32 = 1;
+
+    fn normalize_settings(settings: BadgeSettings) -> Result<BadgeSettings, Diagnostic> {
+        Ok(settings)
+    }
+
+    fn build<E>(source: &mut AssetBuildSource<'_, E>) -> Result<Badge, AssetImportError<E>> {
+        let mut badge = source.prepare_import::<Self>()?;
+        if let Some(image) = badge.build_image.take() {
+            badge.art = BadgeArt::Linked(image);
+        }
+        Ok(badge)
+    }
+
+    fn visit_products<E>(
+        badge: &Badge,
+        mut visit: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        visit(badge.product)
+    }
+}
+
+impl RuntimeAssetCodec<Badge> for BadgeDomain {
+    const RUNTIME_KIND: &'static str = "consumer_cook_badge";
+    const RUNTIME_VERSION: u32 = 1;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        AssetRuntimeLimits::new(bytes(RUNTIME_BYTES), bytes(16 * 1024), bytes(2048))
+    }
+
+    fn encode_runtime(badge: &Badge) -> Result<Box<[u8]>, AssetRuntimeError> {
+        serde_json::to_vec(badge)
+            .map(Vec::into_boxed_slice)
+            .map_err(|_| AssetRuntimeError::new(invalid_badge()))
+    }
+
+    fn decode_runtime(encoded: &[u8]) -> Result<Badge, AssetRuntimeError> {
+        if encoded.len() > RUNTIME_BYTES {
+            return Err(AssetRuntimeError::new(invalid_badge()));
+        }
+        let badge: Badge =
+            serde_json::from_slice(encoded).map_err(|_| AssetRuntimeError::new(invalid_badge()))?;
+        let valid_art = match &badge.art {
+            BadgeArt::Embedded(png) => png.len() <= PNG_BYTES && png.starts_with(PNG_SIGNATURE),
+            BadgeArt::Linked(image) => image.product() == ImportedProductId::PRIMARY,
+        };
+        if badge.product.product() != ImportedProductId::PRIMARY || !valid_art {
+            return Err(AssetRuntimeError::new(invalid_badge()));
+        }
+        Ok(badge)
+    }
+
+    fn runtime_retained_bytes(badge: &Badge) -> Result<usize, AssetRuntimeError> {
+        let payload = match &badge.art {
+            BadgeArt::Embedded(png) => png.len(),
+            BadgeArt::Linked(_) => 0,
+        };
+        Ok(size_of::<Badge>() + payload)
+    }
+
+    fn visit_runtime_dependencies<E>(
+        badge: &Badge,
+        mut visit: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
+    ) -> Result<(), E> {
+        if let BadgeArt::Linked(image) = &badge.art {
+            visit(*image, AssetReferenceDemand::Immediate)?;
+        }
+        Ok(())
+    }
+
+    fn contains_runtime_product(badge: &Badge, product: AssetProductRef) -> bool {
+        badge.product == product
+    }
+}
+
+fn bytes(limit: usize) -> ByteLimit {
+    ByteLimit::new(limit).unwrap()
+}
+
+fn invalid_badge() -> Diagnostic {
+    Diagnostic::error(
+        DiagnosticCode::new("consumer.cook-badge.invalid").unwrap(),
+        SafeSummary::new("The badge or its PNG input is invalid").unwrap(),
+    )
+}
