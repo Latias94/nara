@@ -4556,6 +4556,18 @@ Surface visibility across focus, activation and semantic exposure. The TileSet o
 previous retention refusals when the desired Image fits. The audit retains the separate P2 and
 backend-specific findings.
 
+The next [workflow repair record](../../audits/2026-11-19-engine-workflow-review-follow-up.md#repair-status)
+tracks qualification for anchored Prefab identity, structural Undo, Cook source group admission,
+per-executable Export, headless faults, task results and presented UI. The
+[original audit's runtime P2 record](../../audits/2026-11-19-engine-workflow-review.md#runtime-p2-repair-record)
+tracks hierarchy, reload, pointer projection, additive retirement and cooked Material admission.
+
+The [consumer contract repair record](../../audits/2026-11-19-engine-consumer-contract-review.md#repair-status)
+tracks complete document Undo, exact Schema numbers, disabled hierarchy topology, scoped asset
+relocation, Game View Step, presented UI and picking. The recorded regressions cover public
+Workspace commands, real source and processed files, and exact Runtime control and presentation
+receipts on Windows.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

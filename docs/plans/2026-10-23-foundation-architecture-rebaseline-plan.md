@@ -1002,6 +1002,36 @@ covers the public/owner CPU and real filesystem paths on Windows. The
 [audit repair status](../audits/2026-11-19-engine-workflow-review.md#repair-status) tracks later
 runtime and shared interaction repairs.
 
+### November 19 Workflow Review Follow-up
+
+The [follow-up review](../audits/2026-11-19-engine-workflow-review-follow-up.md) exposes failures
+across three boundaries: Scene anchors losing resolved Prefab identity before tab activation,
+delivery selecting content independently of its producing inputs, and execution outcomes losing
+their original authority. Fix the affected owners and exercise the same public operations. A
+Prefab resolution must name the expected document through Open and reuse. Cook must bind supplied
+groups to current typed settings while preserving ordinary startup attestation. Source-carrying
+Export must include each executable's complete profile delivery and retain each startup agreement.
+The existing Runtime close, ordered task handoff and UI presentation journal own their respective
+result and activation fixes. The review records the separate UI-only window rendering policy.
+
+### November 19 Consumer Contract Review
+
+The [third review](../audits/2026-11-19-engine-consumer-contract-review.md) prioritizes exact
+Scene/Prefab Undo, generated Schema Bundle admission, and complete hierarchy validation. The
+Scene owner refuses indexed `RemoveField` while typed list replacement retains the original list
+for Undo. Engine JSON readers preserve emitted finite binary64 values and keep exact schema
+comparison. Structural validation reads stored edges regardless of ECS gameplay filters. The
+same review tracks a separate wide-integer Cook control, Game View Step retirement, and stable
+Product relocation in an already running World.
+
+For stable Image and Material renames, use the complete reference catalogue captured by the
+existing source preparation. Move a weak primary path only for a typed publication admitted by
+the replacement. A Deferred reference can update the catalogue while the old value retires through
+its original path. During re-entry the actual publication can move the retained handle. Godot
+also checks for a still-existing prior location before moving its UID mapping. Bevy queues reloads
+at its path-based source event boundary. [Godot scan](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/file_system/editor_file_system.cpp#L919-L938)
+· [Bevy source event handling](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/server/mod.rs#L1991-L2021)
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
