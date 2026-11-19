@@ -562,10 +562,7 @@ fn validate_structure_operation(
                 ));
             }
         }
-        ScenePatchOperation::RestoreEntity { entity }
-            if history
-                && (authoring_deletion_closure_is_complete(document, state)
-                    || (entity.components.is_empty() && entity.prefab.is_none())) => {}
+        ScenePatchOperation::RestoreEntity { .. } if history => {}
         ScenePatchOperation::AddComponent {
             component, value, ..
         } => {

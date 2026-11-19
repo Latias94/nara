@@ -299,6 +299,127 @@ fn deleting_a_complete_subtree_restores_exact_records_without_component_edit_per
     assert_eq!(session.document(), &prefab);
 }
 
+#[test]
+fn deletion_and_prefab_attachment_replay_exact_history_in_both_document_kinds() {
+    use nara_scene::AuthoringDocumentReadiness::{Complete, Degraded};
+
+    let name = ComponentTypeId::new("game.Name");
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("game.names").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![
+                ComponentSchema::new(name.clone(), "Name", ComponentSchemaVersion::ONE)
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("value"),
+                        "Name",
+                        ComponentFieldPath::empty(),
+                        ComponentValueKind::String,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+            ],
+            ..Default::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let name_record = |value: &str| {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String(value.into()),
+        )
+    };
+    let original = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("old")).with_component(name.clone(), name_record("Old")),
+        SceneEntityRecord::new(id("anchor")),
+    ]);
+
+    for (override_component, applied_readiness) in [
+        (None, Complete),
+        (Some(name), Complete),
+        (Some(ComponentTypeId::new("game.Missing")), Degraded),
+    ] {
+        let overrides = override_component.map(|component| {
+            let mut overlay = PrefabOverlay::new(prefab_source::key("structural.base"));
+            overlay.components.push(PrefabComponentIntent::Set {
+                mode: PrefabComponentSetMode::Add,
+                target: PrefabEntityTarget::source(id("base-root")),
+                component,
+                record: name_record("Override"),
+            });
+            overlay
+        });
+        let instance = PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
+            source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+            arguments: None,
+            overrides,
+        };
+        let mut patch = removal(&original, "old");
+        patch
+            .operations
+            .push(ScenePatchOperation::SetPrefabInstance {
+                entity: id("anchor"),
+                expected: None,
+                value: Some(instance.clone()),
+            });
+        let mut anchor = SceneEntityRecord::new(id("anchor"));
+        anchor.prefab = Some(instance);
+        let edited = SceneDocument::from_ordered_roots([anchor]);
+        let mut scene = scene(&original, &bundle);
+        let mut prefab = prefab(&original, &bundle);
+
+        for (generation, document, readiness, depths) in [
+            (1, &edited, applied_readiness, (1, 0)),
+            (2, &original, Complete, (0, 1)),
+            (3, &edited, applied_readiness, (1, 0)),
+        ] {
+            let (scene_report, prefab_report) = match generation {
+                1 => (
+                    scene.apply_authoring_patch(&patch),
+                    prefab.apply_authoring_patch(&patch),
+                ),
+                2 => (scene.undo_authoring(), prefab.undo_authoring()),
+                _ => (scene.redo_authoring(), prefab.redo_authoring()),
+            };
+            for (kind, report) in [("Scene", &scene_report), ("Prefab", &prefab_report)] {
+                assert!(
+                    report.applied,
+                    "{kind} revision {generation} with {applied_readiness:?} attachment failed: {:?}",
+                    report.diagnostics
+                );
+            }
+            if generation == 1 {
+                for report in [
+                    scene.apply_authoring_patch(scene_report.inverse.as_ref().unwrap()),
+                    prefab.apply_authoring_patch(prefab_report.inverse.as_ref().unwrap()),
+                ] {
+                    assert!(!report.applied, "Public Apply accepted a history inverse");
+                    assert!(report.inverse.is_none());
+                }
+            }
+            assert_eq!(scene.document(), document);
+            assert_eq!(&prefab.document().instantiate(), document);
+            for (revision, actual_readiness, history) in [
+                (
+                    scene.revision(),
+                    scene.authoring_readiness(),
+                    scene.history_status(),
+                ),
+                (
+                    prefab.revision(),
+                    prefab.authoring_readiness(),
+                    prefab.history_status(),
+                ),
+            ] {
+                assert_eq!(revision.generation(), generation);
+                assert_eq!(actual_readiness, Some(readiness));
+                assert_eq!((history.undo_depth, history.redo_depth), depths);
+            }
+        }
+    }
+}
+
 fn direct_target_references() -> [EntityReference; 2] {
     [
         EntityReference::SceneLocal {
