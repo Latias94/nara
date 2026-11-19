@@ -97,6 +97,10 @@ fn project_cook_retains_linked_image_and_rebuilds_after_source_drift() {
 }
 
 #[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook contribution callback returns ProjectCookError."
+)]
 fn project_cook_revisits_earlier_image_once_for_later_scene() {
     let scratch = Scratch::new();
     let project = scratch.0.join("project");
@@ -181,6 +185,10 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
     assert_eq!(complete.products(), 5);
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook error is preserved for typed assertions."
+)]
 fn exercise_project_cook(image_delivery: ImageDelivery) {
     let scratch = Scratch::new();
     let project = scratch.0.join("project");
