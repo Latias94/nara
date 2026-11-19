@@ -13,7 +13,7 @@ use nara_image::{ImageAsset, ImageContentSnapshot};
 
 use super::{
     DependencyObservation, RetainedImage, TileSetAssetError, TileSetAssets, TileSetDeclaration,
-    TileSetEntry,
+    TileSetEntry, same_pixels,
 };
 use crate::{TileSet, TileSetDescriptor, TileSetSource};
 
@@ -614,12 +614,6 @@ fn entry_is_current(
     entry.error != Some(TileSetAssetError::Superseded)
         && entry.slot == tilesets.slot_revision(entry.handle)
         && entry.state == states.state_revision(entry.handle.id())
-}
-
-fn same_pixels(left: &[u8], right: &[u8]) -> bool {
-    // ImageAsset admits nonempty, immutable, fixed-length RGBA allocations; a live slice identity
-    // therefore proves the same pixel allocation, rather than equal content in another allocation.
-    std::ptr::eq(left, right)
 }
 
 fn image_matches_input(image: &ImageContentSnapshot, input: &TileSetPublicationInput) -> bool {

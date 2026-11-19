@@ -103,6 +103,11 @@ struct RetainedImage {
     image: ImageContentSnapshot,
 }
 
+/// Compares live slice identity for nonempty, immutable Image pixel allocations.
+fn same_pixels(left: &[u8], right: &[u8]) -> bool {
+    std::ptr::eq(left, right)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DependencyObservation {
     record: Option<AssetRecord>,
@@ -699,6 +704,7 @@ impl TileSetAssets {
     }
 
     /// Observes dependency identity and exact slot changes without repeating source I/O or decoding.
+    /// Retries a retention refusal when the desired Image allocation can be admitted.
     pub fn reconcile(
         &mut self,
         server: &mut AssetServer,
@@ -726,30 +732,36 @@ impl TileSetAssets {
     ) -> Result<ImageContentSnapshot, TileSetAssetError> {
         self.retained
             .retain(|retained| retained.strong_count() != 0);
-        if let Some(retained) = self
-            .retained
-            .iter()
-            .filter_map(Weak::upgrade)
-            .find(|retained| retained.image.same_allocation(&image))
-        {
+        if let Some(retained) = self.admit_image_retention(image.pixels())? {
             return Ok(image.with_retention_owner(retained));
-        }
-        let retained = self.retention();
-        if retained.images >= self.limits.retained_images.get()
-            || image.pixels().len()
-                > self
-                    .limits
-                    .retained_bytes
-                    .get()
-                    .saturating_sub(retained.bytes)
-        {
-            return Err(TileSetAssetError::RetentionCapacity);
         }
         let owner = Arc::new(RetainedImage {
             image: image.clone(),
         });
         self.retained.push(Arc::downgrade(&owner));
         Ok(image.with_retention_owner(owner))
+    }
+
+    fn admit_image_retention(
+        &self,
+        pixels: &[u8],
+    ) -> Result<Option<Arc<RetainedImage>>, TileSetAssetError> {
+        let mut images = 0;
+        let mut bytes = 0;
+        for retained in self.retained.iter().filter_map(Weak::upgrade) {
+            let retained_pixels = retained.image.pixels();
+            if same_pixels(retained_pixels, pixels) {
+                return Ok(Some(retained));
+            }
+            images += 1;
+            bytes += retained_pixels.len();
+        }
+        if images >= self.limits.retained_images.get()
+            || pixels.len() > self.limits.retained_bytes.get().saturating_sub(bytes)
+        {
+            return Err(TileSetAssetError::RetentionCapacity);
+        }
+        Ok(None)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -815,7 +827,13 @@ impl TileSetAssets {
         let observation =
             DependencyObservation::capture(record.cloned(), image_handle, images, states);
         if entry.observation.as_ref() == Some(&observation) && !publication_revoked {
-            return;
+            let retryable = entry.error == Some(TileSetAssetError::RetentionCapacity)
+                && image_handle
+                    .and_then(|handle| images.get(handle))
+                    .is_some_and(|image| self.admit_image_retention(image.pixels()).is_ok());
+            if !retryable {
+                return;
+            }
         }
         entry.observation = Some(observation);
         let result = (|| {
@@ -1949,6 +1967,43 @@ mod tests {
         assert_eq!(fixture.owner.error(tileset), None);
         assert_eq!(restored.atlas().unwrap().columns, 2);
         assert_eq!(restored.image_content().unwrap().pixels(), &[10; 8]);
+    }
+
+    #[test]
+    fn releasing_retention_does_not_retry_an_unchanged_extent_mismatch() {
+        let limits = TileSetAssetLimits::new(
+            ItemLimit::ONE,
+            ItemLimit::new(4).unwrap(),
+            ByteLimit::new(16).unwrap(),
+        );
+        let mut fixture = Fixture::new(limits);
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let held_first = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 20);
+        fixture.reconcile();
+        assert_eq!(fixture.owner.retention().bytes, 16);
+
+        fixture.publish_image(fixture.image_a.clone(), 1, 1, 25);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::ImageExtentMismatch)
+        );
+        let state = fixture.states.state_revision(tileset.id());
+        let events = fixture.events.len();
+
+        drop(held_first);
+        assert_eq!(fixture.owner.retention().bytes, 8);
+        fixture.reconcile();
+        assert_eq!(fixture.states.state_revision(tileset.id()), state);
+        assert_eq!(fixture.events.len(), events);
     }
 
     #[test]

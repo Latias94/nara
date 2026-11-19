@@ -85,10 +85,11 @@ content suspends pending desired publication until corrected, while eligible las
 Refresh does not create Image metadata automatically.
 
 Entry count, distinct retained Image allocations and retained pixel bytes have explicit limits.
-A rejected successor preserves eligible last-good. After capacity is released, an explicit same
-source request/refresh or TileSetAssets::retry permits another attempt. Unchanged frame observations
-do not continually retry failed decoding or re-emit failures. Prepared packets retain the matching
-pixel charge until their final holder retires; WGPU applies its separate exact-version budget.
+A rejected successor preserves eligible last-good. A candidate refused by the retained Image
+budget is retried when its allocation fits again. An explicit same-source request, refresh or
+`TileSetAssets::retry` can also request another attempt. Unchanged content errors stay settled.
+Prepared packets retain their exact pixels and charge until the final holder retires. WGPU applies
+its own exact-version budget.
 
 ## Layout And Code-First Content
 

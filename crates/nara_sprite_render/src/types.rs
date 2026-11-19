@@ -129,6 +129,7 @@ impl ExtractedSprites {
 
     pub(crate) fn replace(&mut self, candidate: &mut Vec<ExtractedSprite>) {
         std::mem::swap(&mut self.sprites, candidate);
+        candidate.clear();
     }
 
     #[must_use]

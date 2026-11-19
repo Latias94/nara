@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use nara_app::{App, CoreStage};
+use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
     AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath,
     AssetStates, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
@@ -21,13 +21,13 @@ use nara_render::{
 };
 use nara_sprite::Sprite;
 use nara_sprite_render::{
-    __private::{QueuedSpriteItems, SpriteBatches, TextureUvRect},
+    __private::{QueuedSpriteItems, SpriteBatchKind, SpriteBatches, TextureUvRect},
     SpriteRenderPlugin,
 };
 use nara_tasks::{TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskShutdownPolicy};
 use nara_tilemap::{
-    TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, TileSetAssetLimits,
-    TileSetAssetPlugin, TileSetAssets, TileSetSource,
+    TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, TileSetAssetError,
+    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetSource, Tilemap,
 };
 use nara_transform::{Transform2d, TransformPlugin};
 
@@ -172,8 +172,7 @@ fn observations(world: &World) -> Vec<(Entity, u32, u8, TextureUvRect)> {
         .collect()
 }
 
-#[test]
-fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_held_packets() {
+fn content_app(limits: TileSetAssetLimits) -> App {
     let one = TaskKindConfig::new(ItemLimit::ONE, ItemLimit::ONE);
     let mut app = App::new();
     app.add_plugins((
@@ -190,12 +189,39 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
     app.init_resource::<ProjectAssetDatabase>().unwrap();
     app.add_plugins((TileSetAssetPlugin, SpriteRenderPlugin))
         .unwrap();
-    app.insert_resource(TileSetAssets::with_limits(TileSetAssetLimits::new(
+    app.insert_resource(TileSetAssets::with_limits(limits))
+        .unwrap();
+    app.add_systems(CoreStage::First, apply_edit).unwrap();
+    app
+}
+
+fn spawn_camera(world: &mut World) -> Entity {
+    world
+        .spawn((
+            Camera2d {
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+                viewport_height: 100.0,
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ))
+        .id()
+}
+
+fn spawn_tilemap(world: &mut World, tileset: Handle<TileSet>) -> Entity {
+    let mut map = Tilemap::new(Vec2::ONE).with_tileset(tileset);
+    map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
+    world.spawn((map, Transform2d::default())).id()
+}
+
+#[test]
+fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_held_packets() {
+    let mut app = content_app(TileSetAssetLimits::new(
         ItemLimit::new(2).unwrap(),
         ItemLimit::new(4).unwrap(),
         ByteLimit::new(128).unwrap(),
-    )))
-    .unwrap();
+    ));
     let image_record = record(
         "30000000-0000-4000-8000-000000000001",
         "atlas.png",
@@ -238,29 +264,15 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
     });
     let fixed = request(world, fixed_record, 2);
     let adaptive = request(world, adaptable.clone(), 4);
-    let camera = world
-        .spawn((
-            Camera2d {
-                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
-                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-                viewport_height: 100.0,
-                ..Camera2d::default()
-            },
-            Transform2d::default(),
-        ))
-        .id();
+    let camera = spawn_camera(world);
     let sprite = world
         .spawn((
             Sprite::from_texture(image_handle, Vec2::ONE),
             Transform2d::default(),
         ))
         .id();
-    let mut fixed_map = nara_tilemap::Tilemap::new(Vec2::ONE).with_tileset(fixed);
-    fixed_map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
-    let fixed_entity = world.spawn((fixed_map, Transform2d::default())).id();
-    let mut adaptive_map = nara_tilemap::Tilemap::new(Vec2::ONE).with_tileset(adaptive);
-    adaptive_map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
-    let adaptive_entity = world.spawn((adaptive_map, Transform2d::default())).id();
+    let fixed_entity = spawn_tilemap(world, fixed);
+    let adaptive_entity = spawn_tilemap(world, adaptive);
     HierarchyWriter::new(world)
         .apply_batch(
             &[camera, sprite, fixed_entity, adaptive_entity].map(|entity| {
@@ -295,8 +307,7 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
             Action::Remove,
         ]),
     });
-    app.add_systems(CoreStage::First, apply_edit).unwrap();
-    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     let first = observations(runtime.world());
     runtime.drive(Duration::ZERO).unwrap();
@@ -375,4 +386,142 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
         (released_retention.images, released_retention.bytes),
         (0, 0)
     );
+}
+
+fn atlas_reload_runtime() -> (RuntimeInstance, Handle<TileSet>) {
+    let mut app = content_app(TileSetAssetLimits::new(
+        ItemLimit::ONE,
+        ItemLimit::new(4).unwrap(),
+        ByteLimit::new(16).unwrap(),
+    ));
+    let image_record = record(
+        "30000000-0000-4000-8000-000000000001",
+        "atlas.png",
+        AssetSourceKind::Image,
+    );
+    let tileset_record = record(
+        "30000000-0000-4000-8000-000000000002",
+        "fixed.tileset.ron",
+        AssetSourceKind::Other(String::from("tileset")),
+    );
+    let world = app.world_mut().unwrap();
+    for record in [&image_record, &tileset_record] {
+        world
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(record.clone())
+            .unwrap();
+    }
+    let image_handle = world
+        .resource_mut::<AssetServer>()
+        .reserve_record::<ImageAsset>(&image_record)
+        .unwrap();
+    let tileset = request(world, tileset_record.clone(), 2);
+    let camera = spawn_camera(world);
+    let sprite = world
+        .spawn((
+            Sprite::from_texture(image_handle, Vec2::ONE),
+            Transform2d::default(),
+        ))
+        .id();
+    let tilemap = spawn_tilemap(world, tileset);
+    HierarchyWriter::new(world)
+        .apply_batch(
+            &[camera, sprite, tilemap].map(|entity| HierarchyOperation::Place {
+                entity,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            }),
+        )
+        .unwrap();
+    world.insert_resource(Edits {
+        image: image_record,
+        image_handle,
+        adaptable: tileset_record,
+        actions: VecDeque::from([10, 20, 25].map(|byte| Action::Resize {
+            width: 2,
+            byte,
+            update_atlas: false,
+        })),
+    });
+    (RuntimeInstance::start(app).unwrap(), tileset)
+}
+
+fn assert_atlas_packet(batches: &SpriteBatches, sprite: u8, tilemap: u8) {
+    assert_eq!(batches.len(), 2);
+    for (kind, byte) in [
+        (SpriteBatchKind::Sprite, sprite),
+        (SpriteBatchKind::Tilemap, tilemap),
+    ] {
+        let batch = batches
+            .as_slice()
+            .iter()
+            .find(|batch| batch.kind == kind)
+            .unwrap();
+        let image = batch.image.as_ref().unwrap();
+        assert_eq!(image.resource().pixels(), &[byte; 8], "{kind:?}");
+    }
+}
+
+#[test]
+fn successive_atlas_generations_publish_in_their_first_frame_with_a_two_generation_budget() {
+    let (mut runtime, tileset) = atlas_reload_runtime();
+    for byte in [10, 20, 25] {
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        assert_atlas_packet(world.resource::<SpriteBatches>(), byte, byte);
+        let owner = world.resource::<TileSetAssets>();
+        assert_eq!(owner.error(tileset), None);
+        assert_eq!(owner.retention().bytes, 8);
+    }
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn dropping_a_retained_packet_retries_the_pending_atlas_when_capacity_is_available() {
+    let (mut runtime, tileset) = atlas_reload_runtime();
+    runtime.drive(Duration::ZERO).unwrap();
+    let retained_packet = runtime.world().resource::<SpriteBatches>().clone();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_atlas_packet(runtime.world().resource::<SpriteBatches>(), 20, 20);
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert_atlas_packet(world.resource::<SpriteBatches>(), 25, 20);
+    let owner = world.resource::<TileSetAssets>();
+    assert_eq!(
+        owner.error(tileset),
+        Some(&TileSetAssetError::RetentionCapacity)
+    );
+    assert_eq!(owner.retention().bytes, 16);
+    let failed_state = world.resource::<AssetStates>().state_revision(tileset.id());
+    let failed_events = world.resource::<AssetEvents>().len();
+    for _ in 0..3 {
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        assert_atlas_packet(world.resource::<SpriteBatches>(), 25, 20);
+        assert_eq!(
+            world.resource::<AssetStates>().state_revision(tileset.id()),
+            failed_state
+        );
+        assert_eq!(world.resource::<AssetEvents>().len(), failed_events);
+        assert_eq!(world.resource::<TileSetAssets>().retention().bytes, 16);
+    }
+
+    assert_atlas_packet(&retained_packet, 10, 10);
+    drop(retained_packet);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<TileSetAssets>()
+            .retention()
+            .bytes,
+        8
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    let world = runtime.world();
+    assert_atlas_packet(world.resource::<SpriteBatches>(), 25, 25);
+    let owner = world.resource::<TileSetAssets>();
+    assert_eq!(owner.error(tileset), None);
+    assert_eq!(owner.retention().bytes, 8);
+    assert_eq!(world.resource::<AssetEvents>().len(), failed_events + 1);
+    runtime.finish().unwrap();
 }
