@@ -576,6 +576,71 @@ fn target_geometry_renews_capture_through_two_pans_and_default_geometry_cancels(
 }
 
 #[test]
+fn focus_visibility_preserves_capture_through_an_unclipped_offscreen_ancestor() {
+    let authored = |revision, sibling_x| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                    UiNode::new(UiStyle::absolute(360.0, 20.0, 80.0, 80.0))
+                        .with_key(node_key("ancestor"))
+                        .with_child(
+                            button("owner", "Owner", "owner", -110.0, 0.0, true).with_interaction(
+                                viewport_input(UiCaptureContinuity::TargetGeometry),
+                            ),
+                        ),
+                    button("sibling", "Sibling", "sibling", sibling_x, 10.0, true),
+                ]),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let initial = submit(
+        &mut journal,
+        compile(&mut compiler, &authored(1, 10.0), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let position = UiPoint::new(260.0, 25.0);
+    let owner = exact_key("base", "owner");
+    let press = session
+        .dispatch(
+            &journal,
+            initial,
+            pointer_button(UiButtonPhase::Pressed, position),
+        )
+        .unwrap();
+    let pressed = target_events(press.consumed().unwrap(), &UiRoutedEventKind::Pressed);
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].target(), &owner);
+
+    let successor = submit(
+        &mut journal,
+        compile(&mut compiler, &authored(2, 110.0), 1),
+        11,
+    );
+    let reconciliation = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(target_events(&reconciliation, &UiRoutedEventKind::Cancelled).is_empty());
+    let release = session
+        .dispatch(
+            &journal,
+            successor,
+            pointer_button(UiButtonPhase::Released, position),
+        )
+        .unwrap();
+    let released = target_events(
+        release.consumed().unwrap(),
+        &UiRoutedEventKind::Released { inside: true },
+    );
+    assert_eq!(released.len(), 1);
+    assert_eq!(released[0].target(), &owner);
+}
+
+#[test]
 fn staged_pan_cannot_renew_epoch_or_mutate_the_live_presented_capture() {
     let declaration = viewport_input(UiCaptureContinuity::TargetGeometry);
     let mut compiler = compiler();

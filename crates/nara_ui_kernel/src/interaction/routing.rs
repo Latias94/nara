@@ -1,6 +1,7 @@
 use super::{UiNonActivation, UiPointerInput, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind};
 use crate::{
-    UiDispatchBatch, UiFrame, UiHitRegion, UiInteraction, UiKey, UiPoint, UiRootKey, UiRootStatus,
+    UiDispatchBatch, UiFrame, UiHitRegion, UiInteraction, UiKey, UiLayoutFact, UiPoint, UiRootKey,
+    UiRootStatus,
 };
 
 pub(super) fn hit_target(
@@ -37,31 +38,45 @@ pub(super) fn target_rejection(
     modal_root: Option<&UiRootKey>,
     target: &UiKey,
 ) -> Option<UiNonActivation> {
-    match key_availability(frame, target) {
-        KeyAvailability::Retired => {
-            return Some(UiNonActivation::TargetRetired {
-                target: target.clone(),
-            });
+    target_rejection_with_visibility(frame, latest, modal_root, target, UiLayoutFact::visible)
+}
+
+pub(super) fn surface_target_rejection(
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    target: &UiKey,
+) -> Option<UiNonActivation> {
+    target_rejection_with_visibility(
+        frame,
+        latest,
+        modal_root,
+        target,
+        UiLayoutFact::visible_on_surface,
+    )
+}
+
+fn target_rejection_with_visibility(
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    target: &UiKey,
+    visible: impl Fn(&UiLayoutFact) -> bool,
+) -> Option<UiNonActivation> {
+    for frame in [frame, latest] {
+        match published_layout(frame, target) {
+            Some(layout) if visible(layout) => {}
+            Some(_) => {
+                return Some(UiNonActivation::TargetHidden {
+                    target: target.clone(),
+                });
+            }
+            None => {
+                return Some(UiNonActivation::TargetRetired {
+                    target: target.clone(),
+                });
+            }
         }
-        KeyAvailability::Hidden => {
-            return Some(UiNonActivation::TargetHidden {
-                target: target.clone(),
-            });
-        }
-        KeyAvailability::Active => {}
-    }
-    match key_availability(latest, target) {
-        KeyAvailability::Retired => {
-            return Some(UiNonActivation::TargetRetired {
-                target: target.clone(),
-            });
-        }
-        KeyAvailability::Hidden => {
-            return Some(UiNonActivation::TargetHidden {
-                target: target.clone(),
-            });
-        }
-        KeyAvailability::Active => {}
     }
     modal_root
         .is_some_and(|root| target.root_key() != root)
@@ -130,26 +145,14 @@ pub(super) fn active_modal_root(frame: &UiFrame) -> Option<UiRootKey> {
     frame.active_modal_root().cloned()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum KeyAvailability {
-    Active,
-    Hidden,
-    Retired,
-}
-
-pub(super) fn key_availability(frame: &UiFrame, key: &UiKey) -> KeyAvailability {
+pub(super) fn published_layout<'a>(frame: &'a UiFrame, key: &UiKey) -> Option<&'a UiLayoutFact> {
     if !root_is_published(frame, key.root_key()) {
-        return KeyAvailability::Retired;
+        return None;
     }
-    match frame
+    frame
         .layouts()
         .iter()
         .find(|layout| layout.key() == Some(key))
-    {
-        Some(layout) if layout.visible() => KeyAvailability::Active,
-        Some(_) => KeyAvailability::Hidden,
-        None => KeyAvailability::Retired,
-    }
 }
 
 fn root_is_published(frame: &UiFrame, root: &UiRootKey) -> bool {

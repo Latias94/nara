@@ -19,6 +19,7 @@ pub(super) struct RootLayoutFact {
     pub(super) physical_rect: UiPhysicalRect,
     pub(super) clip_rect: Option<UiRect>,
     pub(super) visible: bool,
+    pub(super) visible_on_surface: bool,
     pub(super) interaction: UiInteraction,
 }
 
@@ -35,6 +36,7 @@ impl RootLayoutFact {
             physical_rect: self.physical_rect,
             clip_rect: self.clip_rect,
             visible: self.visible,
+            visible_on_surface: self.visible_on_surface,
             interaction: self.interaction,
         }
     }

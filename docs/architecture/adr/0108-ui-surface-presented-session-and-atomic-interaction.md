@@ -281,8 +281,12 @@ receipt. Retirement is permanent and cannot be restored.
 
 Authored semantics are descriptive, not an independent behavior authority. An actionable semantic
 fact is published only when the exact presented behavior snapshot owns and can resolve that action.
-Platform bounds use the visible intersection of node geometry, ancestor clips and the Surface Slot
-content rect; an empty intersection is hidden and cannot advertise an action in this baseline.
+Compilation intersects node geometry with ancestor clips and the Surface Slot content rect.
+Keyboard focus, navigation, activation and platform semantics use that same visible region after
+snapping to physical pixels. A control with no covered pixels has no focus destination or
+semantic action. Directional navigation uses the centers of the visible logical regions. A
+visible disabled control may retain focus but cannot activate. Pointer capture keeps its
+existing continuity and cancellation rules.
 
 ## Alternatives Considered
 

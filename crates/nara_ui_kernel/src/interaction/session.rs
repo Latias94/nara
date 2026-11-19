@@ -6,11 +6,13 @@ use super::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome,
     UiInputEvent, UiNonActivation, UiPointerInputKind, UiSeatId, UiSemanticFact,
     UiSemanticSnapshot, UiSemanticState,
-    focus::{activate_target, committed_focus, is_focusable_key, navigate_focus, set_focus},
+    focus::{
+        activate_target, committed_focus, focus_fact, is_focusable_key, navigate_focus, set_focus,
+    },
     pointer::{
         pointer_button_is_unsupported, pointer_move, pointer_press, pointer_release, pointer_scroll,
     },
-    routing::{KeyAvailability, active_modal_root, key_availability, target_rejection},
+    routing::{active_modal_root, surface_target_rejection},
     state::{
         PointerPosition, SurfaceState, cancel_all_pointers, cancel_pointer, cancel_seat,
         cancel_surface, pointer_input_is_older, preflight_input_identity, preflight_seat,
@@ -368,22 +370,13 @@ impl UiInteractionSession {
         let nodes = frame
             .semantics()
             .iter()
-            .filter_map(|node| {
-                let rect = node.visible_rect()?;
-                let physical_rect = frame.environment().physical_rect(rect)?;
-                let availability = key_availability(latest_frame, node.key());
+            .map(|node| {
                 let inert = modal_root
                     .as_ref()
                     .is_some_and(|root| node.key().root_key() != root);
-                let active = availability == KeyAvailability::Active;
-                let focusable = active
-                    && !inert
-                    && frame
-                        .focus_order()
-                        .iter()
-                        .any(|fact| fact.key() == node.key() && fact.enabled());
+                let focusable =
+                    is_focusable_key(frame, latest_frame, modal_root.as_ref(), node.key());
                 let pressed = node.enabled()
-                    && active
                     && !inert
                     && state.is_some_and(|state| {
                         state.pointers.iter().any(|((pointer_seat, _), pointer)| {
@@ -397,26 +390,22 @@ impl UiInteractionSession {
                 let actions = node
                     .actions()
                     .iter()
-                    .filter(|action| {
-                        node.enabled() && active && !inert && owns_action(node.key(), action)
-                    })
+                    .filter(|action| node.enabled() && !inert && owns_action(node.key(), action))
                     .cloned()
                     .collect();
-                Some(UiSemanticFact::from_frame_node(
+                UiSemanticFact::from_frame_node(
                     node,
-                    rect,
-                    physical_rect,
                     actions,
                     UiSemanticState::new(
-                        node.enabled() && active,
-                        inert || !active,
+                        node.enabled(),
+                        inert,
                         node.selected(),
                         node.expanded(),
                         focusable,
                         focused.as_ref() == Some(node.key()),
                         pressed,
                     ),
-                ))
+                )
             })
             .collect();
         Ok(UiSemanticSnapshot::new(
@@ -592,13 +581,12 @@ fn apply_input(
             if is_focusable_key(frame, latest, state.modal_root.as_ref(), &target) {
                 set_focus(state, seat, Some(target), frame, batch);
             } else if let Some(reason) =
-                target_rejection(frame, latest, state.modal_root.as_ref(), &target)
+                surface_target_rejection(frame, latest, state.modal_root.as_ref(), &target)
             {
                 return Ok(UiInputApplication::Rejected(reason));
-            } else if frame
-                .focus_order()
-                .iter()
-                .any(|fact| fact.key() == &target && !fact.enabled())
+            } else if [frame, latest]
+                .into_iter()
+                .any(|frame| focus_fact(frame, &target).is_some_and(|fact| !fact.enabled()))
             {
                 return Ok(UiInputApplication::Rejected(
                     UiNonActivation::TargetDisabled { target },

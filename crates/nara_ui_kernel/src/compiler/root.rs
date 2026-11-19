@@ -96,6 +96,10 @@ pub(super) fn compile_root(
         layout_work,
     )?;
     let scale_factor = environment.scale_factor();
+    let content_transform = environment.content_transform();
+    let surface_bounds = content_transform.authored_bounds();
+    let snap_clipped =
+        |rect| content_transform.clipped_authored_rect_to_physical(rect, environment.snap_policy());
 
     let mut layout_entries = Vec::with_capacity(flat.len());
     let mut paint_entries = Vec::new();
@@ -133,16 +137,29 @@ pub(super) fn compile_root(
             .parent
             .map_or(ClipState::Unclipped, |parent| clips[parent]);
         let parent_visible = node.parent.is_none_or(|parent| visible[parent]);
-        let intersects_clip = match inherited_clip {
-            ClipState::Unclipped => true,
-            ClipState::Rect(clip) => rect.intersect(clip).is_some(),
-            ClipState::Empty => false,
+        let clipped = inherited_clip.intersect(rect);
+        let node_visible = parent_visible
+            && node.node.style.visible
+            && !rect.size().is_empty()
+            && !matches!(clipped, ClipState::Empty);
+        let surface_rect = rect.intersect(surface_bounds);
+        let physical_rect = surface_rect.and_then(snap_clipped);
+        let visible_bounds = if node_visible {
+            clipped.rect().and_then(|clipped_rect| {
+                if clipped_rect == rect {
+                    return surface_rect.zip(physical_rect);
+                }
+                let visible_rect = clipped_rect.intersect(surface_bounds)?;
+                let visible_physical_rect = snap_clipped(visible_rect)?;
+                Some((visible_rect, visible_physical_rect))
+            })
+        } else {
+            None
         };
-        let node_visible =
-            parent_visible && node.node.style.visible && !rect.size().is_empty() && intersects_clip;
+        let physical_rect = physical_rect.unwrap_or_default();
         visible[index] = node_visible;
         clips[index] = if node.node.style.overflow == UiOverflow::Clip {
-            inherited_clip.intersect(rect)
+            clipped
         } else {
             inherited_clip
         };
@@ -157,9 +174,10 @@ pub(super) fn compile_root(
                 structural_index: node.structural_index,
                 local_z: node.node.style.z_index,
                 rect,
-                physical_rect: environment.snap(rect),
+                physical_rect,
                 clip_rect: inherited_clip.rect(),
                 visible: node_visible,
+                visible_on_surface: visible_bounds.is_some(),
                 interaction: node.node.interaction,
             },
         ));
@@ -197,15 +215,13 @@ pub(super) fn compile_root(
             if let (Some(UiNodeText::Prepared(text)), Some((content_rect, text_clip))) =
                 (&node.node.text, text_geometry)
             {
-                let surface = UiRect::from_origin_size(
-                    0.0,
-                    0.0,
-                    environment.logical_size().width(),
-                    environment.logical_size().height(),
-                )
-                .expect("an environment has validated logical bounds");
                 let clip = (node_visible && !matches!(text_clip, ClipState::Empty))
-                    .then(|| text_clip.rect().unwrap_or(content_rect).intersect(surface))
+                    .then(|| {
+                        text_clip
+                            .rect()
+                            .unwrap_or(content_rect)
+                            .intersect(surface_bounds)
+                    })
                     .flatten();
                 let clip = clip.map_or(TextRect::default(), |clip| TextRect {
                     x0: clip.origin().x(),
@@ -213,7 +229,7 @@ pub(super) fn compile_root(
                     x1: clip.max().x(),
                     y1: clip.max().y(),
                 });
-                let physical_origin = environment.content_transform().physical_content_origin();
+                let physical_origin = content_transform.physical_content_origin();
                 Some(
                     text_engine
                         .prepare_window_at(
@@ -251,7 +267,7 @@ pub(super) fn compile_root(
                     UiPaintPrimitive::Rect {
                         key: node.key.clone(),
                         rect,
-                        physical_rect: environment.snap(rect),
+                        physical_rect,
                         clip_rect: inherited_clip.rect(),
                         brush,
                         border,
@@ -361,12 +377,16 @@ pub(super) fn compile_root(
                 },
             ));
         }
+        let Some((visible_rect, visible_physical_rect)) = visible_bounds else {
+            continue;
+        };
         if node.node.interaction.focusable {
             focus_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),
                 UiFocusFact {
                     key: node.key.clone().expect("required focus key is validated"),
                     rect,
+                    visible_rect,
                     enabled: node.node.interaction.enabled,
                 },
             ));
@@ -389,6 +409,8 @@ pub(super) fn compile_root(
                     actions: semantics.actions.clone(),
                     rect,
                     clip_rect: inherited_clip.rect(),
+                    visible_rect,
+                    visible_physical_rect,
                 },
             ));
         } else if let (Some(text), Some(key)) = (&node.node.text, &node.key) {
@@ -406,6 +428,8 @@ pub(super) fn compile_root(
                     actions: Vec::new(),
                     rect,
                     clip_rect: inherited_clip.rect(),
+                    visible_rect,
+                    visible_physical_rect,
                 },
             ));
         }

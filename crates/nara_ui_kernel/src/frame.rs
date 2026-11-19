@@ -285,6 +285,7 @@ pub struct UiLayoutFact {
     pub(crate) physical_rect: UiPhysicalRect,
     pub(crate) clip_rect: Option<UiRect>,
     pub(crate) visible: bool,
+    pub(crate) visible_on_surface: bool,
     pub(crate) interaction: UiInteraction,
 }
 
@@ -335,9 +336,14 @@ impl UiLayoutFact {
         self.clip_rect
     }
 
+    /// Returns layout visibility under the authored style and ancestor clips.
     #[must_use]
     pub const fn visible(&self) -> bool {
         self.visible
+    }
+
+    pub(crate) const fn visible_on_surface(&self) -> bool {
+        self.visible_on_surface
     }
 
     /// Returns the exact immutable input declaration that produced this layout fact.
@@ -447,6 +453,7 @@ impl UiHitRegion {
 pub struct UiFocusFact {
     pub(crate) key: UiKey,
     pub(crate) rect: UiRect,
+    pub(crate) visible_rect: UiRect,
     pub(crate) enabled: bool,
 }
 
@@ -456,9 +463,14 @@ impl UiFocusFact {
         &self.key
     }
 
+    /// Returns the full logical allocation rectangle.
     #[must_use]
     pub const fn rect(&self) -> UiRect {
         self.rect
+    }
+
+    pub(crate) const fn visible_rect(&self) -> UiRect {
+        self.visible_rect
     }
 
     #[must_use]
@@ -480,6 +492,8 @@ pub struct UiSemanticNode {
     pub(crate) actions: Vec<UiActionId>,
     pub(crate) rect: UiRect,
     pub(crate) clip_rect: Option<UiRect>,
+    pub(crate) visible_rect: UiRect,
+    pub(crate) visible_physical_rect: UiPhysicalRect,
 }
 
 impl UiSemanticNode {
@@ -536,11 +550,6 @@ impl UiSemanticNode {
     #[must_use]
     pub const fn clip_rect(&self) -> Option<UiRect> {
         self.clip_rect
-    }
-
-    pub(crate) fn visible_rect(&self) -> Option<UiRect> {
-        self.clip_rect
-            .map_or(Some(self.rect), |clip| self.rect.intersect(clip))
     }
 }
 
@@ -655,6 +664,8 @@ impl UiFrame {
         &self.hits
     }
 
+    /// Returns focus entries with visible physical bounds, including disabled controls that can
+    /// retain focus identity.
     #[must_use]
     pub fn focus_order(&self) -> &[UiFocusFact] {
         &self.focus

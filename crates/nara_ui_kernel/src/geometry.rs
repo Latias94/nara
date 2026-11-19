@@ -361,18 +361,27 @@ impl UiSurfaceContentTransform {
         policy: UiSnapPolicy,
     ) -> Option<UiPhysicalRect> {
         let visible = rect.intersect(self.authored_bounds())?;
-        let max = visible.max();
+        self.clipped_authored_rect_to_physical(visible, policy)
+    }
+
+    /// Maps a rectangle already intersected with the authored content bounds.
+    pub(crate) fn clipped_authored_rect_to_physical(
+        self,
+        rect: UiRect,
+        policy: UiSnapPolicy,
+    ) -> Option<UiPhysicalRect> {
+        let max = rect.max();
         let min_x =
-            self.physical_content_origin.x() + visible.origin().x() * self.content_scale_factor;
+            self.physical_content_origin.x() + rect.origin().x() * self.content_scale_factor;
         let min_y =
-            self.physical_content_origin.y() + visible.origin().y() * self.content_scale_factor;
+            self.physical_content_origin.y() + rect.origin().y() * self.content_scale_factor;
         let max_x = self.physical_content_origin.x() + max.x() * self.content_scale_factor;
         let max_y = self.physical_content_origin.y() + max.y() * self.content_scale_factor;
         UiPhysicalRect::snap_physical_edges(min_x, min_y, max_x, max_y, policy)
             .filter(|rect| !rect.is_empty())
     }
 
-    fn authored_bounds(self) -> UiRect {
+    pub(crate) fn authored_bounds(self) -> UiRect {
         UiRect::new(UiPoint::default(), self.authored_logical_size)
             .expect("validated authored size produces finite bounds")
     }

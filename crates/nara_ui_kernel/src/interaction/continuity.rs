@@ -1,4 +1,4 @@
-use super::routing::{KeyAvailability, active_modal_root, key_availability, route_path};
+use super::routing::{active_modal_root, published_layout, route_path};
 use crate::{UiFrame, UiKey};
 
 fn environment_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
@@ -108,28 +108,17 @@ pub(super) fn target_geometry_is_equivalent(
         return false;
     }
     route_path(previous, target).iter().all(|key| {
-        if key_availability(previous, key) != KeyAvailability::Active
-            || key_availability(latest, key) != KeyAvailability::Active
-        {
-            return false;
-        }
-        let previous = previous
-            .layouts()
-            .iter()
-            .find(|layout| layout.key() == Some(key));
-        let latest = latest
-            .layouts()
-            .iter()
-            .find(|layout| layout.key() == Some(key));
+        let previous = published_layout(previous, key);
+        let latest = published_layout(latest, key);
         previous.zip(latest).is_some_and(|(previous, latest)| {
-            previous.route_parent() == latest.route_parent()
+            previous.visible()
+                && latest.visible()
+                && previous.route_parent() == latest.route_parent()
                 && previous.layer() == latest.layer()
                 && previous.local_z() == latest.local_z()
                 && previous.rect() == latest.rect()
                 && previous.physical_rect() == latest.physical_rect()
                 && previous.clip_rect() == latest.clip_rect()
-                && previous.visible() == latest.visible()
-                && previous.visible()
         })
     })
 }

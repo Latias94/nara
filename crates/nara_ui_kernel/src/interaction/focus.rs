@@ -1,6 +1,6 @@
 use super::{
     UiActivationSource, UiNavigation, UiNonActivation, UiRoutedEventKind, UiSeatId,
-    routing::{route_event, target_rejection},
+    routing::{published_layout, route_event, surface_target_rejection},
     state::SurfaceState,
 };
 use crate::{UiDispatchBatch, UiFocusFact, UiFrame, UiKey, UiRect, UiRootKey};
@@ -109,17 +109,13 @@ fn directional_focus(
     frame: &UiFrame,
     candidates: &[&UiFocusFact],
 ) -> Option<UiKey> {
-    let current_rect = frame
-        .focus_order()
-        .iter()
-        .find(|candidate| candidate.key() == current)?
-        .rect();
+    let current_rect = focus_fact(frame, current)?.visible_rect();
     let (current_x, current_y) = rect_center(current_rect);
     candidates
         .iter()
         .filter(|candidate| candidate.key() != current)
         .filter_map(|candidate| {
-            let (x, y) = rect_center(candidate.rect());
+            let (x, y) = rect_center(candidate.visible_rect());
             let (primary, secondary) = match direction {
                 UiNavigation::Up => (current_y - y, (current_x - x).abs()),
                 UiNavigation::Down => (y - current_y, (current_x - x).abs()),
@@ -154,7 +150,7 @@ pub(super) fn activate_target(
     modal_root: Option<&UiRootKey>,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
-    if let Some(reason) = target_rejection(frame, latest, modal_root, target) {
+    if let Some(reason) = surface_target_rejection(frame, latest, modal_root, target) {
         return Err(reason);
     }
     let Some(semantic) = frame
@@ -166,7 +162,12 @@ pub(super) fn activate_target(
             target: target.clone(),
         });
     };
-    if !semantic.enabled() {
+    let latest_disabled = !std::ptr::eq(frame, latest)
+        && published_layout(latest, target).is_some_and(|layout| {
+            let interaction = layout.interaction();
+            interaction.requires_key() && !interaction.enabled()
+        });
+    if !semantic.enabled() || latest_disabled {
         return Err(UiNonActivation::TargetDisabled {
             target: target.clone(),
         });
@@ -202,10 +203,8 @@ pub(super) fn is_focusable_key(
     modal_root: Option<&UiRootKey>,
     target: &UiKey,
 ) -> bool {
-    target_rejection(frame, latest, modal_root, target).is_none()
-        && frame.focus_order().iter().any(|fact| {
-            fact.key() == target && is_focus_destination(frame, latest, modal_root, fact)
-        })
+    focus_fact(frame, target)
+        .is_some_and(|fact| is_focus_destination(frame, latest, modal_root, fact))
 }
 
 pub(super) fn can_retain_focus(
@@ -214,8 +213,13 @@ pub(super) fn can_retain_focus(
     modal_root: Option<&UiRootKey>,
     target: &UiKey,
 ) -> bool {
-    target_rejection(frame, latest, modal_root, target).is_none()
-        && frame.focus_order().iter().any(|fact| fact.key() == target)
+    modal_root.is_none_or(|root| target.root_key() == root)
+        && focus_fact(frame, target).is_some()
+        && (std::ptr::eq(frame, latest) || focus_fact(latest, target).is_some())
+}
+
+pub(super) fn focus_fact<'a>(frame: &'a UiFrame, target: &UiKey) -> Option<&'a UiFocusFact> {
+    frame.focus_order().iter().find(|fact| fact.key() == target)
 }
 
 fn focus_candidates<'a>(
@@ -236,7 +240,10 @@ fn is_focus_destination(
     modal_root: Option<&UiRootKey>,
     fact: &UiFocusFact,
 ) -> bool {
-    fact.enabled() && target_rejection(frame, latest, modal_root, fact.key()).is_none()
+    fact.enabled()
+        && modal_root.is_none_or(|root| fact.key().root_key() == root)
+        && (std::ptr::eq(frame, latest)
+            || focus_fact(latest, fact.key()).is_some_and(UiFocusFact::enabled))
 }
 
 pub(super) fn first_focus(
@@ -244,8 +251,10 @@ pub(super) fn first_focus(
     latest: &UiFrame,
     modal_root: Option<&UiRootKey>,
 ) -> Option<UiKey> {
-    focus_candidates(frame, latest, modal_root)
-        .first()
+    frame
+        .focus_order()
+        .iter()
+        .find(|fact| is_focus_destination(frame, latest, modal_root, fact))
         .map(|fact| fact.key().clone())
 }
 

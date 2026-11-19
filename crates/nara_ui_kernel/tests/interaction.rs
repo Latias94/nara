@@ -8,10 +8,10 @@ use nara_ui_kernel::{
     UiAccessibilityInput, UiActionId, UiActivationSource, UiAuthoringSnapshot,
     UiAuthoringSnapshotBuilder, UiButtonPhase, UiCompiler, UiDispatchError, UiEnvironment, UiFrame,
     UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiJournalError, UiLayer,
-    UiLimits, UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiPoint, UiPointerButton,
-    UiPointerId, UiPointerInput, UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind,
-    UiSeatId, UiSemanticRole, UiSemantics, UiSize, UiStyle, UiSurfaceContentTransform,
-    UiSurfaceGenerations, UiSurfaceId, UiTheme,
+    UiLimits, UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiOverflow, UiPoint,
+    UiPointerButton, UiPointerId, UiPointerInput, UiRect, UiRoot, UiRootKey, UiRoutePhase,
+    UiRouteStamp, UiRoutedEventKind, UiSeatId, UiSemanticRole, UiSemantics, UiSize, UiStyle,
+    UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
 
 #[path = "interaction/pointer_input.rs"]
@@ -73,6 +73,44 @@ fn button(name: &str, label: &str, action: &str, x: f32, y: f32, enabled: bool) 
         )
 }
 
+fn clipping_parent(x: f32, y: f32, width: f32, height: f32, child: UiNode) -> UiNode {
+    UiNode::new(UiStyle::absolute(x, y, width, height).with_overflow(UiOverflow::Clip))
+        .with_child(child)
+}
+
+fn keyboard_activation() -> UiInputEvent {
+    UiInputEvent::ActivateFocused {
+        seat: SEAT,
+        source: UiActivationSource::Keyboard,
+    }
+}
+
+fn assert_keyboard_activation(
+    session: &mut UiInteractionSession,
+    journal: &UiFrameJournal,
+    route: UiRouteStamp,
+    root: &str,
+    action_name: &str,
+) {
+    let outcome = session
+        .dispatch(journal, route, keyboard_activation())
+        .unwrap();
+    let batch = outcome.consumed().unwrap();
+    assert!(!batch.is_reconciliation());
+    let target = exact_key(root, action_name);
+    let activation = UiRoutedEventKind::ActivateRequested {
+        action: UiActionId::new(action_name).unwrap(),
+        source: UiActivationSource::Keyboard,
+    };
+    let targets = batch
+        .events()
+        .iter()
+        .filter(|event| event.phase() == UiRoutePhase::Target)
+        .map(|event| (event.target(), event.kind()))
+        .collect::<Vec<_>>();
+    assert_eq!(targets, vec![(&target, &activation)]);
+}
+
 fn base_root() -> UiRoot {
     base_root_with_first_enabled(true)
 }
@@ -116,17 +154,35 @@ fn disabled_focus_identity_survives_reconciliation_and_reenable() {
         compile(&mut compiler, &disabled_snapshot, 2),
         11,
     );
-    let retained = session
-        .semantic_snapshot(&journal, disabled_route, SEAT)
+    let reconciled = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
         .unwrap();
+    assert!(reconciled.events().is_empty());
+    let retained = session
+        .semantic_snapshot_with_action_authority(&journal, disabled_route, SEAT, |_, _| true)
+        .unwrap();
+    let target = exact_key("base", "first");
     let first = retained
         .nodes()
         .iter()
-        .find(|node| node.key() == &exact_key("base", "first"))
+        .find(|node| node.key() == &target)
         .unwrap();
     assert!(!first.state().enabled());
     assert!(!first.state().focusable());
     assert!(first.state().focused());
+    assert!(first.actions().is_empty());
+    for route in [disabled_route, initial_route] {
+        let outcome = session
+            .dispatch(&journal, route, keyboard_activation())
+            .unwrap();
+        assert_eq!(
+            outcome.rejection(),
+            Some(&UiNonActivation::TargetDisabled {
+                target: target.clone(),
+            })
+        );
+    }
 
     let reenabled_snapshot = UiAuthoringSnapshotBuilder::new(5)
         .with_root(base_root_with_first_enabled(true))
@@ -143,11 +199,12 @@ fn disabled_focus_identity_survives_reconciliation_and_reenable() {
     let first = reenabled
         .nodes()
         .iter()
-        .find(|node| node.key() == &exact_key("base", "first"))
+        .find(|node| node.key() == &target)
         .unwrap();
     assert!(first.state().enabled());
     assert!(first.state().focusable());
     assert!(first.state().focused());
+    assert_keyboard_activation(&mut session, &journal, reenabled_route, "base", "first");
 }
 
 #[test]
@@ -236,20 +293,6 @@ fn hidden_button() -> UiNode {
 fn modal_root() -> UiRoot {
     UiRoot::new(root_key("modal"), UiLayer::Modal, UiStyle::fill())
         .with_child(button("retry", "Retry", "retry", 210.0, 120.0, true))
-}
-
-fn modal_root_with_disabled_first_target() -> UiRoot {
-    UiRoot::new(root_key("modal"), UiLayer::Modal, UiStyle::fill()).with_children([
-        button(
-            "disabled-retry",
-            "Disabled Retry",
-            "disabled-retry",
-            110.0,
-            120.0,
-            false,
-        ),
-        button("retry", "Retry", "retry", 210.0, 120.0, true),
-    ])
 }
 
 fn snapshot(include_modal: bool) -> UiAuthoringSnapshot {
@@ -454,9 +497,22 @@ fn initial_non_modal_candidate_does_not_invent_focus() {
 }
 
 #[test]
-fn initial_modal_focus_skips_disabled_targets_in_structural_order() {
+fn focus_visibility_modal_entry_and_navigation_can_activate_a_partly_visible_button() {
     let snapshot = UiAuthoringSnapshotBuilder::new(11)
-        .with_root(modal_root_with_disabled_first_target())
+        .with_root(
+            UiRoot::new(root_key("modal"), UiLayer::Modal, UiStyle::fill()).with_children([
+                button("outside", "Outside", "outside", 190.0, 200.0, true),
+                button("disabled", "Disabled", "disabled", 110.0, 70.0, false),
+                clipping_parent(
+                    300.0,
+                    120.0,
+                    60.0,
+                    30.0,
+                    button("retry", "Retry", "retry", -10.0, -10.0, true),
+                ),
+                button("back", "Back", "back", 130.0, 120.0, true),
+            ]),
+        )
         .build()
         .unwrap();
     let mut compiler = compiler();
@@ -465,42 +521,71 @@ fn initial_modal_focus_skips_disabled_targets_in_structural_order() {
         .stage_candidate_presentation(SURFACE, SEAT, None, &frame, &[])
         .unwrap()
         .expect("modal entry should select the first eligible focus target");
-    let disabled = exact_key("modal", "disabled-retry");
     let retry = exact_key("modal", "retry");
-    assert!(staged.dispatch().events().iter().all(|event| {
-        event.target() != &disabled
-            || event.kind() != &UiRoutedEventKind::FocusChanged { focused: true }
-    }));
-    assert!(staged.dispatch().events().iter().any(|event| {
-        event.target() == &retry
-            && event.phase() == UiRoutePhase::Target
-            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
-    }));
+    let focused = staged
+        .dispatch()
+        .events()
+        .iter()
+        .filter(|event| {
+            event.phase() == UiRoutePhase::Target
+                && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+        })
+        .map(|event| event.target())
+        .collect::<Vec<_>>();
+    assert_eq!(focused, vec![&retry]);
 
-    let (staged_session, _) = staged.into_parts();
+    let (mut session, _) = staged.into_parts();
     let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
-    let semantics = staged_session
-        .semantic_snapshot(&journal, route, SEAT)
+    let semantics = session
+        .semantic_snapshot_with_action_authority(&journal, route, SEAT, |_, _| true)
         .unwrap();
-    assert!(
-        !semantics
-            .nodes()
-            .iter()
-            .find(|node| node.key() == &disabled)
-            .unwrap()
-            .state()
-            .focused()
+    let retry = semantics
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &retry)
+        .unwrap();
+    assert!(retry.state().focused());
+    assert!(retry.state().focusable());
+    assert_eq!(retry.actions(), &[UiActionId::new("retry").unwrap()]);
+    assert_eq!(
+        retry.rect(),
+        UiRect::from_origin_size(300.0, 120.0, 20.0, 30.0).unwrap()
+    );
+    let physical = retry.physical_rect();
+    assert_eq!(
+        (
+            physical.min_x(),
+            physical.min_y(),
+            physical.max_x(),
+            physical.max_y()
+        ),
+        (300, 120, 320, 150)
     );
     assert!(
         semantics
             .nodes()
             .iter()
-            .find(|node| node.key() == &retry)
-            .unwrap()
-            .state()
-            .focused()
+            .all(|node| node.key() != &exact_key("modal", "outside"))
     );
+    assert_keyboard_activation(&mut session, &journal, route, "modal", "retry");
+    for (direction, expected) in [
+        (UiNavigation::Previous, "back"),
+        (UiNavigation::Right, "retry"),
+    ] {
+        let navigation = session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction,
+                },
+            )
+            .unwrap();
+        assert!(navigation.consumed().is_some());
+        assert_keyboard_activation(&mut session, &journal, route, "modal", expected);
+    }
 }
 
 #[test]
@@ -898,6 +983,64 @@ fn removed_modal_restore_target_cannot_revive_after_same_key_reinsertion() {
             .state()
             .focused()
     );
+}
+
+#[test]
+fn focus_visibility_drops_a_modal_restore_target_while_it_is_offscreen() {
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let initial = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let focused = session
+        .dispatch(
+            &journal,
+            initial,
+            UiInputEvent::FocusTarget {
+                seat: SEAT,
+                target: exact_key("base", "second"),
+            },
+        )
+        .unwrap();
+    assert!(focused.consumed().is_some());
+
+    let modal = UiAuthoringSnapshotBuilder::new(2)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                button("first", "First", "first", 10.0, 10.0, true),
+                button("second", "Second", "second", 400.0, 10.0, true),
+            ]),
+        )
+        .with_root(modal_root())
+        .build()
+        .unwrap();
+    let modal_route = submit(&mut journal, compile(&mut compiler, &modal, 2), 11);
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert_keyboard_activation(&mut session, &journal, modal_route, "modal", "retry");
+
+    let restored = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 3),
+        12,
+    );
+    let reconciliation = session
+        .dispatch(&journal, restored, keyboard_activation())
+        .unwrap();
+    let batch = reconciliation.consumed().unwrap();
+    assert!(batch.is_reconciliation());
+    assert!(
+        batch
+            .events()
+            .iter()
+            .all(|event| !matches!(event.kind(), UiRoutedEventKind::ActivateRequested { .. }))
+    );
+    assert_keyboard_activation(&mut session, &journal, restored, "base", "first");
 }
 
 #[test]
@@ -1790,22 +1933,325 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
 }
 
 #[test]
-fn semantic_snapshot_omits_nodes_outside_the_surface_content_rect() {
+fn focus_visibility_rejects_buttons_with_empty_surface_or_ancestor_intersection() {
+    for layer in [UiLayer::Base, UiLayer::Modal] {
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(root_key("visibility"), layer, UiStyle::fill()).with_children([
+                    button("outside", "Outside", "outside", 400.0, 20.0, true),
+                    clipping_parent(
+                        10.0,
+                        70.0,
+                        40.0,
+                        60.0,
+                        button("clipped", "Clipped", "clipped", 50.0, 0.0, true),
+                    ),
+                    clipping_parent(
+                        330.0,
+                        100.0,
+                        40.0,
+                        60.0,
+                        button("disjoint", "Disjoint", "disjoint", -20.0, 0.0, true),
+                    ),
+                ]),
+            )
+            .build()
+            .unwrap();
+        let frame = compile(&mut compiler(), &snapshot, 1);
+        assert_eq!(frame.blocks_unhandled_input(), layer == UiLayer::Modal);
+        assert!(frame.focus_order().is_empty());
+        assert!(frame.semantics().is_empty());
+        let staged = UiInteractionSession::default()
+            .stage_candidate_presentation(SURFACE, SEAT, None, &frame, &[])
+            .unwrap()
+            .unwrap();
+        assert!(staged.dispatch().events().is_empty());
+        let (mut session, _) = staged.into_parts();
+        let mut journal = hosted_journal();
+        let route = submit(&mut journal, frame, 10);
+
+        let semantics = session
+            .semantic_snapshot_with_action_authority(&journal, route, SEAT, |_, _| true)
+            .unwrap();
+        assert!(semantics.nodes().is_empty());
+        let navigation = session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction: UiNavigation::Next,
+                },
+            )
+            .unwrap();
+        let activation = session
+            .dispatch(&journal, route, keyboard_activation())
+            .unwrap();
+        assert_eq!(
+            navigation.rejection(),
+            Some(&UiNonActivation::NoFocusTarget)
+        );
+        assert_eq!(
+            activation.rejection(),
+            Some(&UiNonActivation::NoFocusTarget)
+        );
+
+        for name in ["outside", "clipped", "disjoint"] {
+            let target = exact_key("visibility", name);
+            for request in [
+                UiAccessibilityInput::focus_target_from_route(route, SEAT, target.clone()),
+                UiAccessibilityInput::semantic_action_from_route(
+                    route,
+                    SEAT,
+                    target.clone(),
+                    UiActionId::new(name).unwrap(),
+                ),
+            ] {
+                let outcome = session.dispatch_accessibility(&journal, request).unwrap();
+                assert_eq!(
+                    outcome.rejection(),
+                    Some(&UiNonActivation::TargetHidden {
+                        target: target.clone(),
+                    })
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn focus_visibility_directional_navigation_uses_clipped_origin_and_destination_centers() {
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(
-            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
-                .with_child(button("outside", "Outside", "outside", 400.0, 20.0, true)),
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                button("reference", "Reference", "reference", 95.0, 10.0, true),
+                clipping_parent(
+                    140.0,
+                    70.0,
+                    20.0,
+                    40.0,
+                    button("cropped", "Cropped", "cropped", -60.0, 0.0, true),
+                ),
+                button("left", "Left", "left", 65.0, 120.0, true),
+            ]),
         )
         .build()
         .unwrap();
-    let mut compiler = compiler();
     let mut journal = hosted_journal();
-    let route = submit(&mut journal, compile(&mut compiler, &snapshot, 1), 10);
+    let route = submit(&mut journal, compile(&mut compiler(), &snapshot, 1), 10);
+    let mut session = UiInteractionSession::default();
+    for (direction, expected) in [
+        (UiNavigation::Next, "reference"),
+        (UiNavigation::Right, "cropped"),
+        (UiNavigation::Left, "reference"),
+    ] {
+        let focused = session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction,
+                },
+            )
+            .unwrap();
+        assert!(focused.consumed().is_some());
+        assert_keyboard_activation(&mut session, &journal, route, "base", expected);
+    }
+}
 
-    let semantics = UiInteractionSession::default()
+#[test]
+fn focus_visibility_requires_a_nonempty_snapped_physical_intersection() {
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                button("edge", "Edge", "edge", 319.75, 20.0, true),
+                clipping_parent(
+                    80.0,
+                    20.0,
+                    0.25,
+                    40.0,
+                    button("sliver", "Sliver", "sliver", 0.0, 0.0, true),
+                ),
+                clipping_parent(
+                    180.0,
+                    20.0,
+                    1.0,
+                    40.0,
+                    button("pixel", "Pixel", "pixel", 0.0, 0.0, true),
+                ),
+            ]),
+        )
+        .build()
+        .unwrap();
+    let frame = compile(&mut compiler(), &snapshot, 1);
+    let sliver_key = exact_key("base", "sliver");
+    let sliver = frame
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(&sliver_key))
+        .unwrap();
+    let clipped = sliver
+        .rect()
+        .intersect(sliver.clip_rect().unwrap())
+        .unwrap();
+    assert_eq!(clipped.size().width(), 0.25);
+    assert!(!sliver.physical_rect().is_empty());
+
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, frame, 10);
+    let mut session = UiInteractionSession::default();
+    let navigated = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Next,
+            },
+        )
+        .unwrap();
+    assert!(navigated.consumed().is_some());
+    assert_keyboard_activation(&mut session, &journal, route, "base", "pixel");
+
+    let semantics = session
         .semantic_snapshot_with_action_authority(&journal, route, SEAT, |_, _| true)
         .unwrap();
-    assert!(semantics.nodes().is_empty());
+    assert_eq!(semantics.nodes().len(), 1);
+    let pixel = &semantics.nodes()[0];
+    assert_eq!(pixel.key(), &exact_key("base", "pixel"));
+    assert!(pixel.state().focused());
+    assert_eq!(pixel.physical_rect().width(), 1);
+    let action = UiAccessibilityInput::semantic_action_from_route(
+        route,
+        SEAT,
+        sliver_key.clone(),
+        UiActionId::new("sliver").unwrap(),
+    );
+    let rejected = session.dispatch_accessibility(&journal, action).unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::TargetHidden { target: sliver_key })
+    );
+}
+
+#[test]
+fn focus_visibility_reconciles_focus_and_capture_when_a_control_leaves_view() {
+    let authored = |revision, offset, clip_width| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                    clipping_parent(
+                        250.0,
+                        20.0,
+                        clip_width,
+                        80.0,
+                        button("moving", "Moving", "moving", offset, 0.0, true),
+                    ),
+                    button("backup", "Backup", "backup", 10.0, 20.0, true),
+                ]),
+            )
+            .build()
+            .unwrap()
+    };
+    for (offset, clip_width) in [(90.0, 120.0), (20.0, 16.0)] {
+        let mut compiler = compiler();
+        let mut journal = hosted_journal();
+        let initial = compile(&mut compiler, &authored(1, 20.0, 120.0), 1);
+        let initial_route = submit(&mut journal, Arc::clone(&initial), 10);
+        let mut session = UiInteractionSession::default();
+        let position = UiPoint::new(275.0, 25.0);
+        let pressed = session
+            .dispatch(
+                &journal,
+                initial_route,
+                pointer_button(UiButtonPhase::Pressed, position),
+            )
+            .unwrap();
+        assert!(pressed.consumed().is_some());
+
+        let successor = compile(&mut compiler, &authored(2, offset, clip_width), 1);
+        let staged = session
+            .stage_candidate_presentation(SURFACE, SEAT, Some(&initial), &successor, &[])
+            .unwrap()
+            .unwrap();
+        let moving = exact_key("base", "moving");
+        let backup = exact_key("base", "backup");
+        let targets = staged
+            .dispatch()
+            .events()
+            .iter()
+            .filter(|event| event.phase() == UiRoutePhase::Target)
+            .map(|event| (event.target(), event.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            targets,
+            vec![
+                (&moving, &UiRoutedEventKind::Cancelled),
+                (&moving, &UiRoutedEventKind::HoverChanged { hovered: false }),
+                (&moving, &UiRoutedEventKind::FocusChanged { focused: false }),
+                (&backup, &UiRoutedEventKind::FocusChanged { focused: true }),
+            ]
+        );
+        let before = session
+            .semantic_snapshot(&journal, initial_route, SEAT)
+            .unwrap();
+        let control = before
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &moving)
+            .unwrap();
+        assert!(control.state().focused());
+        assert!(control.state().pressed());
+
+        let route = submit(&mut journal, successor, 11);
+        let cleanup = session
+            .reconcile_latest_presentation(&journal, SURFACE, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(cleanup.events(), staged.dispatch().events());
+        let after = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+        assert_eq!(after.nodes().len(), 1);
+        assert_eq!(after.nodes()[0].key(), &backup);
+        assert!(after.nodes()[0].state().focused());
+
+        let released = session
+            .dispatch(
+                &journal,
+                route,
+                pointer_button(UiButtonPhase::Released, position),
+            )
+            .unwrap();
+        assert_eq!(
+            released.rejection(),
+            Some(&UiNonActivation::NoPointerCapture)
+        );
+        let hidden_action = UiAccessibilityInput::semantic_action_from_route(
+            initial_route,
+            SEAT,
+            moving.clone(),
+            UiActionId::new("moving").unwrap(),
+        );
+        let hidden = session
+            .dispatch_accessibility(&journal, hidden_action)
+            .unwrap();
+        assert_eq!(
+            hidden.rejection(),
+            Some(&UiNonActivation::TargetHidden { target: moving })
+        );
+        let navigated = session
+            .dispatch(
+                &journal,
+                initial_route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction: UiNavigation::Previous,
+                },
+            )
+            .unwrap();
+        assert!(navigated.consumed().unwrap().events().is_empty());
+        assert_keyboard_activation(&mut session, &journal, route, "base", "backup");
+    }
 }
 
 #[test]

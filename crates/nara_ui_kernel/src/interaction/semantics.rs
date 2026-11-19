@@ -87,8 +87,6 @@ pub struct UiSemanticFact {
 impl UiSemanticFact {
     pub(crate) fn from_frame_node(
         node: &UiSemanticNode,
-        rect: UiRect,
-        physical_rect: UiPhysicalRect,
         actions: Vec<UiActionId>,
         state: UiSemanticState,
     ) -> Self {
@@ -99,8 +97,8 @@ impl UiSemanticFact {
             name: node.name().to_owned(),
             value: node.value().map(str::to_owned),
             actions,
-            rect,
-            physical_rect,
+            rect: node.visible_rect,
+            physical_rect: node.visible_physical_rect,
             state,
         }
     }
