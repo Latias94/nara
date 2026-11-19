@@ -61,7 +61,7 @@ fn run(options: input::Options) -> Result<(), String> {
             .create_child_directory(&cache_name)
             .map_err(|error| error.to_string())?,
     };
-    let prepared = content::prepare_for_player(&root, &cache, &options.target, options.runtime)
+    let prepared = content::prepare_for_player(&root, &cache, &options.target, options.selection)
         .map_err(build_failure)?;
     let limits = PlayerPackageLimits::default();
     let mut inputs = project_rust_input_inventory(&project).map_err(build_failure)?;
@@ -70,10 +70,10 @@ fn run(options: input::Options) -> Result<(), String> {
     );
     let selection = CargoBuildSelection::new(
         "two-level-game",
-        options.runtime.binary(),
+        options.selection.binary(),
         &options.profile,
         &options.target,
-        options.runtime.features(),
+        options.selection.features(),
         false,
     )
     .map_err(|error| error.to_string())?;
@@ -100,7 +100,8 @@ fn run(options: input::Options) -> Result<(), String> {
                     "directory": output.join(&options.name),
                     "executable": receipt.files.executable_name,
                     "postpublication_error": error.as_ref().map(ToString::to_string),
-                    "runtime": options.runtime.name(),
+                    "runtime": options.selection.runtime().name(),
+                    "controllers": options.selection.controllers().name(),
                 })
             );
             error.map_or(Ok(()), |error| {

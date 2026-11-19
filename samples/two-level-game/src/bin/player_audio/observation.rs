@@ -104,12 +104,8 @@ impl AudioObservation {
 }
 
 impl PlayerExtension for AudioObservation {
-    fn recipe(&self) -> nara::ProductRecipe {
-        audio::cooked_recipe()
-    }
-
-    fn content_profile(&self) -> &'static str {
-        "two-level-audio-desktop-shipping"
+    fn runtime_kind(&self) -> two_level_game::delivery::RuntimeKind {
+        two_level_game::delivery::RuntimeKind::AudioDesktop
     }
 
     fn isolate_input(&self) -> bool {

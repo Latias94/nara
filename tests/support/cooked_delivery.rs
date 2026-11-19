@@ -184,6 +184,7 @@ pub mod native {
     use serde_json::{Value, json};
     use two_level_game::{
         animation::{atlas_product, clips_product},
+        delivery::{ControllerBackend, PlayerSelection, RuntimeKind},
         input::{INPUT_PATH, input_product},
         levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
         markers::{SCENE_PATH, marker_image_product, marker_product},
@@ -197,7 +198,7 @@ pub mod native {
 
     use super::{
         HEADER_BYTES, KnownPack, MAX_PACK_BYTES, corrupt_catalog, corrupt_later_scene,
-        game_content, images, input::RuntimeKind, inspect_pack, record, walls,
+        game_content, images, inspect_pack, record, walls,
     };
 
     const OUTPUT_BYTES: usize = 2 * 1024 * 1024;
@@ -1151,7 +1152,7 @@ pub mod native {
             &root,
             &host_fs::writable_directory(cache).unwrap(),
             triple,
-            RuntimeKind::Headless,
+            PlayerSelection::new(RuntimeKind::Headless, ControllerBackend::Disabled).unwrap(),
         )
         .unwrap();
         let bootstrap = nara::project_tooling::player_package::GeneratedPlayerBootstrap::new(

@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, RunOptions, Scenario,
     animation::{atlas_product, clips_product},
+    delivery::{PlayerSelection, RuntimeKind},
     input::input_product,
     levels::{LevelId, LevelKey},
     markers::marker_product,
@@ -35,6 +36,11 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
     let mut save = None;
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(60);
+        let selection = PlayerSelection::from_content_profile(generated::CONTENT_PROFILE)?;
+        if selection.runtime() != RuntimeKind::Headless {
+            return Err("compiled content profile does not belong to the headless Player".into());
+        }
+        selection.validate_target(generated::CONTENT_TARGET)?;
         let expected = RuntimeContentExpectation::new(
             ContentDigest::from_parts(generated::CATALOG_LENGTH, generated::CATALOG_HASH),
             RuntimeContentTarget::new(generated::CONTENT_TARGET, generated::CONTENT_PROFILE)
@@ -43,7 +49,7 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         let base = open_executable_relative_runtime_pack(
             &RelativePath::new(generated::PACK_FILE).map_err(|error| error.to_string())?,
             &expected,
-            two_level_game::cooked_recipe(),
+            selection.recipe()?,
             RuntimeContentLimits::default(),
         )
         .map_err(|error| error.to_string())?;

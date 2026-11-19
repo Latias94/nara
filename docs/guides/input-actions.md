@@ -178,7 +178,10 @@ identified from a missing cache entry. Fresh observations after the queue barrie
 The Two-Level Game's source desktop entry selects the backend with both the `gamepad` build
 feature and `--gamepad`. Its authored D-pad and game buttons use the existing actions and
 command queue alongside keyboard input. This selection does not serialize device connections
-for exact continuation or automatically enable a cooked Player backend. Managed acquisition
+for exact continuation or automatically enable a cooked Player backend. The game cooker separately
+selects `--controllers gilrs` for silent or audible desktop delivery; the compiled content profile
+and actual recipe retain that choice independently of Cargo feature availability. See
+[Player delivery](cooked-player-delivery.md). Managed acquisition
 currently requires Windows WGI. Linux builds need libudev development files, but its selected
 Gilrs backend and macOS do not expose synchronous native retirement; the plugin refuses there
 before creating the native context. Native execution and drop guarantees retain the

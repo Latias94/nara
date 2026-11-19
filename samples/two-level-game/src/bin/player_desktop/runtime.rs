@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     Scenario,
     animation::{atlas_product, clips_product},
+    delivery::{PlayerSelection, RuntimeKind},
     input::input_product,
     levels::LevelId,
     markers::{marker_image_product, marker_product},
@@ -48,9 +49,7 @@ const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(60);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) trait PlayerExtension {
-    fn recipe(&self) -> nara::ProductRecipe;
-
-    fn content_profile(&self) -> &'static str;
+    fn runtime_kind(&self) -> RuntimeKind;
 
     fn isolate_input(&self) -> bool {
         false
@@ -80,12 +79,8 @@ pub(super) trait PlayerExtension {
 struct SilentDesktop;
 
 impl PlayerExtension for SilentDesktop {
-    fn recipe(&self) -> nara::ProductRecipe {
-        two_level_game::cooked_desktop_recipe()
-    }
-
-    fn content_profile(&self) -> &'static str {
-        "two-level-desktop-shipping"
+    fn runtime_kind(&self) -> RuntimeKind {
+        RuntimeKind::Desktop
     }
 }
 
@@ -101,9 +96,11 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
     let mut original = None;
     let mut save = None;
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
-        if generated::CONTENT_PROFILE != extension.borrow().content_profile() {
+        let selection = PlayerSelection::from_content_profile(generated::CONTENT_PROFILE)?;
+        if selection.runtime() != extension.borrow().runtime_kind() {
             return Err("compiled content profile does not belong to this Player".into());
         }
+        selection.validate_target(generated::CONTENT_TARGET)?;
         let expected = RuntimeContentExpectation::new(
             ContentDigest::from_parts(generated::CATALOG_LENGTH, generated::CATALOG_HASH),
             RuntimeContentTarget::new(generated::CONTENT_TARGET, generated::CONTENT_PROFILE)
@@ -112,7 +109,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         let base = open_executable_relative_runtime_pack(
             &RelativePath::new(generated::PACK_FILE).map_err(|error| error.to_string())?,
             &expected,
-            extension.borrow().recipe(),
+            selection.recipe()?,
             RuntimeContentLimits::default(),
         )
         .map_err(|error| error.to_string())?;

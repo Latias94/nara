@@ -1,4 +1,4 @@
-use super::input::RuntimeKind;
+use super::input::{PlayerSelection, RuntimeKind};
 use nara::{
     asset_build::{ArtifactBuildLimits, ArtifactBuildStore, ArtifactContentDigest},
     fs::{DirectoryCapability, RelativePath},
@@ -23,9 +23,9 @@ pub(super) fn prepare(
     root: &DirectoryCapability,
     cache: &DirectoryCapability,
     triple: &str,
-    runtime: RuntimeKind,
+    selection: PlayerSelection,
 ) -> Result<PreparedProjectCook, String> {
-    prepare_for_player(root, cache, triple, runtime).map_err(|error| match error {
+    prepare_for_player(root, cache, triple, selection).map_err(|error| match error {
         ProjectCookError::Source(source) => format!("source delivery agreement: {source:?}"),
         error => error.to_string(),
     })
@@ -35,16 +35,15 @@ pub(super) fn prepare_for_player(
     root: &DirectoryCapability,
     cache: &DirectoryCapability,
     triple: &str,
-    runtime: RuntimeKind,
+    selection: PlayerSelection,
 ) -> Result<PreparedProjectCook, ProjectCookError> {
-    if runtime == RuntimeKind::AudioDesktop && !triple.contains("-windows-") {
-        return Err(ProjectCookError::Invalid(
-            "audio-desktop Player requires an explicit Windows target".into(),
-        ));
-    }
-    let candidate = project_settings(root, runtime).map_err(ProjectCookError::Invalid)?;
-    let recipe = runtime.recipe().map_err(ProjectCookError::Invalid)?;
-    let target = RuntimeContentTarget::new(triple, runtime.content_profile())
+    selection
+        .validate_target(triple)
+        .map_err(ProjectCookError::Invalid)?;
+    let candidate =
+        project_settings(root, selection.runtime()).map_err(ProjectCookError::Invalid)?;
+    let recipe = selection.recipe().map_err(ProjectCookError::Invalid)?;
+    let target = RuntimeContentTarget::new(triple, selection.content_profile())
         .map_err(|error| ProjectCookError::Invalid(format!("cooked content target: {error}")))?;
     let implementation = implementation_digest().map_err(ProjectCookError::Invalid)?;
     let store = ArtifactBuildStore::open(cache.share(), ArtifactBuildLimits::default())?;
@@ -73,14 +72,8 @@ fn project_settings(
     let manifest = root
         .open_file(&RelativePath::new("nara.toml").map_err(|error| error.to_string())?)
         .map_err(|error| format!("nara.toml: {error}"))?;
-    let candidate = ingest_project_manifest(
-        &manifest,
-        match runtime {
-            RuntimeKind::Headless => None,
-            RuntimeKind::Desktop | RuntimeKind::AudioDesktop => Some("desktop"),
-        },
-    )
-    .map_err(|error| format!("nara.toml: {error:?}"))?;
+    let candidate = ingest_project_manifest(&manifest, runtime.manifest_profile())
+        .map_err(|error| format!("nara.toml: {error:?}"))?;
     if candidate.settings().window.enabled != (runtime != RuntimeKind::Headless) {
         return Err(format!(
             "nara.toml: the {} Player requires window.enabled={}",

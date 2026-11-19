@@ -217,6 +217,17 @@ explicit Windows `audio-desktop` recipe opens the original WASAPI device at Runt
 Its complete native delivery acceptance, observation costs and platform limits belong to the
 [game's current unit](../plans/2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player).
 
+The same game selects native controllers separately with `--controllers none|gilrs`. The default
+is `none`; Gilrs requires the cooker's optional gamepad feature, a Windows target and a desktop
+placement. Silent and audible desktop recipes compose the same fixed native Input configuration.
+The finite game-owned `PlayerSelection` supplies the selected Cargo features, binary, content
+profile and recipe to the existing build/catalog owners. Those owners retain actual compiler
+features and fingerprints; they do not infer backend policy. A Player uses its bound selection,
+so enabling all Cargo features does not itself acquire a controller context. The original three
+profile names remain unchanged, and controller profiles carry distinct names. No native device
+state enters the content pack or save format. See [game usage](../../samples/two-level-game/README.md#optional-native-controller)
+and the [delivery qualification](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#explicit-controllers-through-cooked-player-delivery).
+
 The same game's [explorer animation](../../samples/two-level-game/src/animation.rs) uses one
 shared four-frame Image Product in both travel Scenes. Atlas regions are evaluated Sprite state
 derived from the existing logical clock and held intent. The

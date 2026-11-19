@@ -4,6 +4,9 @@ pub mod animation;
 #[cfg(all(windows, feature = "audio-cpal"))]
 pub mod audio;
 pub mod command;
+#[cfg(feature = "gamepad")]
+pub mod controller;
+pub mod delivery;
 #[cfg(feature = "development")]
 pub mod development;
 mod gameplay;

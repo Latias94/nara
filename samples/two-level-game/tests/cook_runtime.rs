@@ -21,23 +21,24 @@ mod evidence;
 #[allow(dead_code)]
 #[path = "../src/bin/player/output.rs"]
 mod output;
-use input::RuntimeKind;
+use input::{ControllerBackend, PlayerSelection, RuntimeKind};
 use nara::{
     app::PluginId, input::ActionMapFileCandidate, project::ProjectManifest,
     project_host::resolve_runtime_configuration,
 };
 use two_level_game::input::{INPUT_PATH, input_product};
 
-fn plan(runtime: RuntimeKind) -> nara::project_host::RuntimeConfigurationPlan {
+fn keyboard(runtime: RuntimeKind) -> PlayerSelection {
+    PlayerSelection::new(runtime, ControllerBackend::Disabled).unwrap()
+}
+
+fn plan(selection: PlayerSelection) -> nara::project_host::RuntimeConfigurationPlan {
     let manifest = ProjectManifest::parse_toml_bytes(include_bytes!("../nara.toml"));
     assert!(!manifest.has_errors(), "{:?}", manifest.diagnostics);
     let settings = manifest
         .manifest
         .unwrap()
-        .resolve_profile(match runtime {
-            RuntimeKind::Headless => None,
-            RuntimeKind::Desktop | RuntimeKind::AudioDesktop => Some("desktop"),
-        })
+        .resolve_profile(selection.runtime().manifest_profile())
         .unwrap();
     let projection = settings.source_runtime_projection().unwrap();
     assert_eq!(projection.input_requirement().unwrap().as_str(), INPUT_PATH);
@@ -50,12 +51,12 @@ fn plan(runtime: RuntimeKind) -> nara::project_host::RuntimeConfigurationPlan {
     configuration.input.action_map = Some(input.product());
     let configuration = configuration.resolve().unwrap();
     assert_eq!(configuration.input().action_map, Some(input_product()));
-    resolve_runtime_configuration(&configuration, runtime.recipe().unwrap()).unwrap()
+    resolve_runtime_configuration(&configuration, selection.recipe().unwrap()).unwrap()
 }
 
 #[test]
 fn headless_cooking_selects_authored_semantics_without_a_native_window() {
-    let selected = RuntimeKind::parse("headless").unwrap();
+    let selected = keyboard(RuntimeKind::parse("headless").unwrap());
     let plan = plan(selected);
     assert!(!plan.settings().window().enabled);
     assert_eq!(
@@ -74,7 +75,7 @@ fn headless_cooking_selects_authored_semantics_without_a_native_window() {
 #[cfg(feature = "desktop")]
 #[test]
 fn desktop_selection_binds_its_profile_and_authored_game_input() {
-    let selected = RuntimeKind::parse("desktop").unwrap();
+    let selected = keyboard(RuntimeKind::parse("desktop").unwrap());
     let plan = plan(selected);
     assert!(plan.settings().window().enabled);
     assert_eq!(
@@ -87,7 +88,7 @@ fn desktop_selection_binds_its_profile_and_authored_game_input() {
     );
     assert_ne!(
         plan.plugin_plan().fingerprint(),
-        self::plan(RuntimeKind::Headless)
+        self::plan(keyboard(RuntimeKind::Headless))
             .plugin_plan()
             .fingerprint()
     );
@@ -99,7 +100,7 @@ fn desktop_selection_binds_its_profile_and_authored_game_input() {
 #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
 #[test]
 fn audible_selection_is_explicit_and_never_opens_a_device_during_composition() {
-    let selected = RuntimeKind::parse("audio-desktop").unwrap();
+    let selected = keyboard(RuntimeKind::parse("audio-desktop").unwrap());
     let plan = plan(selected);
     assert!(plan.settings().window().enabled);
     assert_eq!(selected.binary(), "player_audio");
@@ -120,7 +121,7 @@ fn audible_selection_is_explicit_and_never_opens_a_device_during_composition() {
         1
     );
     assert!(
-        self::plan(RuntimeKind::Desktop)
+        self::plan(keyboard(RuntimeKind::Desktop))
             .plugin_plan()
             .entries()
             .iter()
@@ -128,7 +129,9 @@ fn audible_selection_is_explicit_and_never_opens_a_device_during_composition() {
     );
     assert_ne!(
         plan.plugin_plan().fingerprint(),
-        self::plan(RuntimeKind::Desktop).plugin_plan().fingerprint()
+        self::plan(keyboard(RuntimeKind::Desktop))
+            .plugin_plan()
+            .fingerprint()
     );
 }
 
@@ -139,12 +142,281 @@ fn an_unknown_runtime_cannot_select_a_player() {
     #[cfg(not(all(windows, feature = "desktop", feature = "audio-cpal")))]
     {
         assert!(RuntimeKind::parse("audio-desktop").is_err());
-        assert!(RuntimeKind::AudioDesktop.recipe().is_err());
+        assert!(
+            PlayerSelection::new(RuntimeKind::AudioDesktop, ControllerBackend::Disabled).is_err()
+        );
+        assert!(PlayerSelection::new(RuntimeKind::AudioDesktop, ControllerBackend::Gilrs).is_err());
+        for profile in [
+            "two-level-audio-desktop-shipping",
+            "two-level-audio-desktop-gamepad-shipping",
+        ] {
+            assert!(PlayerSelection::from_content_profile(profile).is_err());
+        }
     }
     #[cfg(not(feature = "desktop"))]
     {
         assert!(RuntimeKind::parse("desktop").is_err());
-        assert!(RuntimeKind::Desktop.recipe().is_err());
+        assert!(PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Disabled).is_err());
+        assert!(PlayerSelection::from_content_profile("two-level-desktop-shipping").is_err());
+    }
+}
+
+#[test]
+fn keyboard_selections_never_add_native_controller_ingress() {
+    for runtime in [
+        RuntimeKind::Headless,
+        #[cfg(feature = "desktop")]
+        RuntimeKind::Desktop,
+        #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
+        RuntimeKind::AudioDesktop,
+    ] {
+        let selected = keyboard(runtime);
+        let plan = plan(selected);
+        assert_eq!(selected.controllers(), ControllerBackend::Disabled);
+        assert!(
+            !selected
+                .features()
+                .iter()
+                .any(|feature| feature == "gamepad")
+        );
+        assert!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .all(|entry| entry.plugin_id() != PluginId::new("nara.gilrs"))
+        );
+        assert_eq!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == PluginId::new("two-level-game.input"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(all(windows, feature = "gamepad"))]
+#[test]
+fn explicit_controllers_select_one_native_ingress_without_changing_authored_input() {
+    let selected = PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Gilrs).unwrap();
+    let plan = plan(selected);
+    let keyboard = self::plan(keyboard(RuntimeKind::Desktop));
+    assert_eq!(selected.runtime(), RuntimeKind::Desktop);
+    assert_eq!(selected.controllers(), ControllerBackend::Gilrs);
+    assert_eq!(selected.binary(), "player_desktop");
+    assert_eq!(selected.features(), ["cooked-player", "desktop", "gamepad"]);
+    assert_eq!(
+        selected.content_profile(),
+        "two-level-desktop-gamepad-shipping"
+    );
+    assert!(plan.settings().window().enabled);
+    assert_eq!(plan.settings(), keyboard.settings());
+    for plugin in ["two-level-game.input", "nara.gilrs"] {
+        assert_eq!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == PluginId::new(plugin))
+                .count(),
+            1
+        );
+    }
+    assert_ne!(
+        plan.plugin_plan().fingerprint(),
+        keyboard.plugin_plan().fingerprint()
+    );
+    assert_eq!(
+        plan.schema_validation().composition_fingerprint(),
+        keyboard.schema_validation().composition_fingerprint()
+    );
+    assert_eq!(
+        plan.runtime_codecs_fingerprint(),
+        keyboard.runtime_codecs_fingerprint()
+    );
+}
+
+#[cfg(all(windows, feature = "gamepad", feature = "audio-cpal"))]
+#[test]
+fn audio_and_controllers_compose_without_acquiring_either_native_device() {
+    let selected =
+        PlayerSelection::new(RuntimeKind::AudioDesktop, ControllerBackend::Gilrs).unwrap();
+    let plan = plan(selected);
+    let keyboard = self::plan(keyboard(RuntimeKind::AudioDesktop));
+    let silent =
+        self::plan(PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Gilrs).unwrap());
+    assert_eq!(selected.binary(), "player_audio");
+    assert_eq!(
+        selected.features(),
+        ["cooked-player", "desktop", "audio-cpal", "gamepad"]
+    );
+    assert_eq!(
+        selected.content_profile(),
+        "two-level-audio-desktop-gamepad-shipping"
+    );
+    assert!(plan.settings().window().enabled);
+    assert_eq!(plan.settings(), keyboard.settings());
+    for plugin in [
+        PluginId::new("two-level-game.input"),
+        PluginId::new("nara.gilrs"),
+        two_level_game::audio::AUDIO_PLUGIN_ID,
+    ] {
+        assert_eq!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == plugin)
+                .count(),
+            1
+        );
+    }
+    assert_ne!(
+        plan.plugin_plan().fingerprint(),
+        keyboard.plugin_plan().fingerprint()
+    );
+    assert_ne!(
+        plan.plugin_plan().fingerprint(),
+        silent.plugin_plan().fingerprint()
+    );
+    assert_eq!(
+        plan.schema_validation().composition_fingerprint(),
+        keyboard.schema_validation().composition_fingerprint()
+    );
+    assert_eq!(
+        plan.runtime_codecs_fingerprint(),
+        keyboard.runtime_codecs_fingerprint()
+    );
+}
+
+#[test]
+fn invalid_or_unavailable_controllers_cannot_select_a_player() {
+    assert_eq!(
+        ControllerBackend::parse("none").unwrap(),
+        ControllerBackend::Disabled
+    );
+    assert_eq!(
+        ControllerBackend::parse("gilrs").unwrap(),
+        ControllerBackend::Gilrs
+    );
+    assert_eq!(ControllerBackend::Disabled.name(), "none");
+    assert_eq!(ControllerBackend::Gilrs.name(), "gilrs");
+    for value in ["", "Gilrs", "keyboard", "anything"] {
+        assert!(ControllerBackend::parse(value).is_err(), "{value}");
+    }
+    assert!(PlayerSelection::new(RuntimeKind::Headless, ControllerBackend::Gilrs).is_err());
+    #[cfg(not(all(windows, feature = "gamepad")))]
+    {
+        for runtime in [
+            RuntimeKind::Headless,
+            RuntimeKind::Desktop,
+            RuntimeKind::AudioDesktop,
+        ] {
+            assert!(PlayerSelection::new(runtime, ControllerBackend::Gilrs).is_err());
+        }
+        for profile in [
+            "two-level-desktop-gamepad-shipping",
+            "two-level-audio-desktop-gamepad-shipping",
+        ] {
+            assert!(PlayerSelection::from_content_profile(profile).is_err());
+        }
+    }
+}
+
+#[test]
+fn content_profiles_roundtrip_the_complete_player_selection() {
+    for (runtime, controllers, profile) in [
+        (
+            RuntimeKind::Headless,
+            ControllerBackend::Disabled,
+            "two-level-shipping",
+        ),
+        #[cfg(feature = "desktop")]
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Disabled,
+            "two-level-desktop-shipping",
+        ),
+        #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Disabled,
+            "two-level-audio-desktop-shipping",
+        ),
+        #[cfg(all(windows, feature = "gamepad"))]
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Gilrs,
+            "two-level-desktop-gamepad-shipping",
+        ),
+        #[cfg(all(windows, feature = "gamepad", feature = "audio-cpal"))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Gilrs,
+            "two-level-audio-desktop-gamepad-shipping",
+        ),
+    ] {
+        let selected = PlayerSelection::new(runtime, controllers).unwrap();
+        assert_eq!(selected.content_profile(), profile);
+        let restored = PlayerSelection::from_content_profile(profile).unwrap();
+        assert_eq!(restored.runtime(), runtime);
+        assert_eq!(restored.controllers(), controllers);
+        assert_eq!(restored.binary(), selected.binary());
+        assert_eq!(restored.features(), selected.features());
+        assert_eq!(
+            plan(restored).plugin_plan().fingerprint(),
+            plan(selected).plugin_plan().fingerprint()
+        );
+    }
+    for profile in [
+        "",
+        "desktop",
+        "two-level-headless-gamepad-shipping",
+        "two-level-desktop-shipping-gamepad",
+    ] {
+        assert!(
+            PlayerSelection::from_content_profile(profile).is_err(),
+            "{profile}"
+        );
+    }
+}
+
+#[test]
+fn player_targets_preserve_portable_keyboard_and_restrict_native_backends() {
+    for runtime in [
+        RuntimeKind::Headless,
+        #[cfg(feature = "desktop")]
+        RuntimeKind::Desktop,
+    ] {
+        let selected = keyboard(runtime);
+        for triple in [
+            "x86_64-pc-windows-msvc",
+            "x86_64-unknown-linux-gnu",
+            "aarch64-apple-darwin",
+        ] {
+            selected.validate_target(triple).unwrap();
+        }
+    }
+    #[cfg(all(
+        windows,
+        feature = "desktop",
+        any(feature = "gamepad", feature = "audio-cpal")
+    ))]
+    for (runtime, controllers) in [
+        #[cfg(feature = "gamepad")]
+        (RuntimeKind::Desktop, ControllerBackend::Gilrs),
+        #[cfg(feature = "audio-cpal")]
+        (RuntimeKind::AudioDesktop, ControllerBackend::Disabled),
+        #[cfg(all(feature = "gamepad", feature = "audio-cpal"))]
+        (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs),
+    ] {
+        let selected = PlayerSelection::new(runtime, controllers).unwrap();
+        selected.validate_target("x86_64-pc-windows-msvc").unwrap();
+        for triple in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"] {
+            assert!(
+                selected.validate_target(triple).is_err(),
+                "{selected:?}: {triple}"
+            );
+        }
     }
 }
 
@@ -219,7 +491,13 @@ mod atlas_content {
         sound_bank::bank_product,
     };
 
-    use super::{RuntimeKind, content, evidence::Evidence, two_level_pack};
+    #[cfg(all(
+        windows,
+        feature = "desktop",
+        any(feature = "gamepad", feature = "audio-cpal")
+    ))]
+    use super::{ControllerBackend, PlayerSelection};
+    use super::{RuntimeKind, content, evidence::Evidence, keyboard, two_level_pack};
 
     const DEFAULT_SCHEMA: &str = "schema/authoring.bundle.json";
     const SELECTED_SCHEMA: &str = "authoring/selected.bundle.json";
@@ -326,7 +604,7 @@ mod atlas_content {
             .open_file(&RelativePath::new("nara.toml").unwrap())
             .unwrap();
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
-        let recipe = RuntimeKind::Headless.recipe().unwrap();
+        let recipe = keyboard(RuntimeKind::Headless).recipe().unwrap();
         let plan = resolve_product_recipe(&candidate, recipe.clone()).unwrap();
         ProjectContentLoader::with_limits(root.share(), recipe.source_content_limits())
             .unwrap()
@@ -403,7 +681,7 @@ mod atlas_content {
             &root,
             &host_fs::writable_directory(&store).unwrap(),
             "x86_64-pc-windows-msvc",
-            RuntimeKind::Headless,
+            keyboard(RuntimeKind::Headless),
         )
         .unwrap()
         .into_parts();
@@ -787,6 +1065,7 @@ mod atlas_content {
             RuntimeKind::AudioDesktop,
         ];
         for &runtime in runtimes {
+            let player = keyboard(runtime);
             let cache = Cache::new();
             let project = cache.project();
             let store = cache.path.join("store");
@@ -796,7 +1075,7 @@ mod atlas_content {
                 &root,
                 &host_fs::writable_directory(&store).unwrap(),
                 "x86_64-pc-windows-msvc",
-                runtime,
+                player,
             )
             .unwrap_or_else(|error| panic!("{runtime:?}: {error}"))
             .into_parts();
@@ -806,7 +1085,7 @@ mod atlas_content {
                 .open_file(&RelativePath::new("nara.toml").unwrap())
                 .unwrap();
             let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
-            let plan = resolve_product_recipe(&candidate, runtime.recipe().unwrap()).unwrap();
+            let plan = resolve_product_recipe(&candidate, player.recipe().unwrap()).unwrap();
             assert_eq!(
                 prepared
                     .base()
@@ -817,6 +1096,156 @@ mod atlas_content {
             );
             let _bootstrap = generate_bootstrap(&project, &prepared);
             selection.verify(&project).unwrap();
+            #[cfg(all(windows, feature = "gamepad"))]
+            {
+                use nara::runtime_content::{
+                    RuntimeContentBase, RuntimeContentExpectation, RuntimeContentLimits,
+                    RuntimeContentTarget,
+                };
+
+                let controllers = PlayerSelection::new(runtime, ControllerBackend::Gilrs).unwrap();
+                let (gamepad, gamepad_selection) = content::prepare(
+                    &root,
+                    &host_fs::writable_directory(&store).unwrap(),
+                    "x86_64-pc-windows-msvc",
+                    controllers,
+                )
+                .unwrap()
+                .into_parts();
+                gamepad_selection.verify(&project).unwrap();
+                let baseline = prepared.base().catalog();
+                let catalog = gamepad.base().catalog();
+                assert_eq!(catalog.target().triple(), baseline.target().triple());
+                assert_eq!(catalog.target().profile(), controllers.content_profile());
+                assert_ne!(catalog.target().profile(), baseline.target().profile());
+                assert_eq!(catalog.configuration(), baseline.configuration());
+                assert_eq!(catalog.members().len(), baseline.members().len());
+                for (member, original) in catalog.members().iter().zip(baseline.members()) {
+                    assert_eq!(member.path(), original.path());
+                    assert_eq!(member.digest(), original.digest());
+                    assert_eq!(member.kind(), original.kind());
+                    assert_eq!(member.products(), original.products());
+                    assert_eq!(member.dependencies(), original.dependencies());
+                }
+                assert_eq!(catalog.startup_scene(), baseline.startup_scene());
+                assert_eq!(catalog.scenes(), baseline.scenes());
+                assert_eq!(catalog.addressable_roots(), baseline.addressable_roots());
+                assert_eq!(catalog.schema_fingerprint(), baseline.schema_fingerprint());
+                assert_eq!(
+                    catalog.runtime_codecs_fingerprint(),
+                    baseline.runtime_codecs_fingerprint()
+                );
+                assert_ne!(
+                    catalog.plugin_plan_fingerprint(),
+                    baseline.plugin_plan_fingerprint()
+                );
+                assert_eq!(
+                    gamepad.base().plan().plugin_plan().fingerprint(),
+                    super::plan(controllers).plugin_plan().fingerprint()
+                );
+                let authored = ActionMapFileCandidate::decode_json_bytes(
+                    &fs::read(project.join(super::INPUT_PATH)).unwrap(),
+                )
+                .unwrap();
+                let input = gamepad.base().acquire_startup_input().unwrap().unwrap();
+                assert_eq!(input.product(), authored.product());
+                assert_eq!(
+                    input.definition().contexts(),
+                    authored.definition().contexts()
+                );
+                assert_eq!(
+                    input.definition().bindings(),
+                    authored.definition().bindings()
+                );
+                let gamepad_bootstrap = generate_bootstrap(&project, &gamepad);
+                assert_ne!(gamepad_bootstrap.digest(), _bootstrap.digest());
+
+                for (cooked, expected, incompatible, name) in [
+                    (&prepared, player, controllers, "keyboard.pack"),
+                    (&gamepad, controllers, player, "gamepad.pack"),
+                ] {
+                    let path = cache.path.join(name);
+                    cooked
+                        .base()
+                        .write_pack(&mut fs::File::create_new(&path).unwrap())
+                        .unwrap();
+                    let reopened = RuntimeContentBase::open_pack(
+                        host_fs::readable_file(&path).unwrap(),
+                        cooked.expectation(),
+                        expected.recipe().unwrap(),
+                        RuntimeContentLimits::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        reopened.acquire_startup_input().unwrap().unwrap().product(),
+                        authored.product()
+                    );
+                    assert!(matches!(
+                        RuntimeContentBase::open_pack(
+                            host_fs::readable_file(&path).unwrap(),
+                            cooked.expectation(),
+                            incompatible.recipe().unwrap(),
+                            RuntimeContentLimits::default(),
+                        ),
+                        Err(RuntimeContentError::RecipeMismatch)
+                    ));
+                    let wrong_profile = RuntimeContentExpectation::new(
+                        cooked.expectation().catalog_digest(),
+                        RuntimeContentTarget::new(
+                            "x86_64-pc-windows-msvc",
+                            incompatible.content_profile(),
+                        )
+                        .unwrap(),
+                    );
+                    assert!(matches!(
+                        RuntimeContentBase::open_pack(
+                            host_fs::readable_file(&path).unwrap(),
+                            &wrong_profile,
+                            expected.recipe().unwrap(),
+                            RuntimeContentLimits::default(),
+                        ),
+                        Err(RuntimeContentError::TargetMismatch)
+                    ));
+                }
+            }
+        }
+    }
+
+    #[cfg(all(
+        windows,
+        feature = "desktop",
+        any(feature = "gamepad", feature = "audio-cpal")
+    ))]
+    #[test]
+    fn unsupported_native_targets_refuse_before_reading_content_or_opening_the_store() {
+        let cache = Cache::new();
+        let project = cache.path.join("project");
+        let store = cache.path.join("store");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&store).unwrap();
+        let root = host_fs::readable_directory(&project).unwrap();
+        let directory = host_fs::writable_directory(&store).unwrap();
+        for (runtime, controllers) in [
+            #[cfg(feature = "gamepad")]
+            (RuntimeKind::Desktop, ControllerBackend::Gilrs),
+            #[cfg(feature = "audio-cpal")]
+            (RuntimeKind::AudioDesktop, ControllerBackend::Disabled),
+            #[cfg(all(feature = "gamepad", feature = "audio-cpal"))]
+            (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs),
+        ] {
+            let selection = PlayerSelection::new(runtime, controllers).unwrap();
+            for triple in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"] {
+                let Err(error) = content::prepare_for_player(&root, &directory, triple, selection)
+                else {
+                    panic!("{selection:?} for {triple} unexpectedly prepared native content");
+                };
+                let ProjectCookError::Invalid(message) = error else {
+                    panic!("{selection:?} for {triple} did not reject its target: {error}");
+                };
+                assert!(message.contains("Windows"), "{message}");
+                assert!(!project.join("nara.toml").exists());
+                assert_eq!(fs::read_dir(&store).unwrap().count(), 0);
+            }
         }
     }
 
@@ -869,7 +1298,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .map(|prepared| {
                 let bootstrap = generate_bootstrap(&project, prepared.content());
@@ -908,7 +1337,7 @@ mod atlas_content {
                 &root,
                 &host_fs::writable_directory(&store).unwrap(),
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .unwrap()
             .into_parts();
@@ -986,7 +1415,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .unwrap()
             .into_parts();
@@ -1015,7 +1444,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .err()
             .expect("invalid source must not reuse the previous cooked Material");
@@ -1037,7 +1466,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .unwrap()
             .into_parts();
@@ -1086,7 +1515,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .unwrap()
             .into_parts();
@@ -1158,7 +1587,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .err()
             .expect("invalid TileSet content must refuse the unpublished candidate");
@@ -1188,7 +1617,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .unwrap()
             .into_parts();
@@ -1253,7 +1682,7 @@ mod atlas_content {
             &root,
             &host_fs::writable_directory(&store).unwrap(),
             "x86_64-pc-windows-msvc",
-            RuntimeKind::Headless,
+            keyboard(RuntimeKind::Headless),
         )
         .unwrap()
         .into_parts();
@@ -1340,7 +1769,7 @@ mod atlas_content {
             &root,
             &store,
             "x86_64-pc-windows-msvc",
-            RuntimeKind::Headless,
+            keyboard(RuntimeKind::Headless),
         )
         .unwrap()
         .into_parts();
@@ -1379,7 +1808,7 @@ mod atlas_content {
                 &root,
                 &store,
                 "x86_64-pc-windows-msvc",
-                RuntimeKind::Headless,
+                keyboard(RuntimeKind::Headless),
             )
             .err()
             .unwrap();

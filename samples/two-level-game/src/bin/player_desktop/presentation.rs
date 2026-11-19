@@ -52,7 +52,14 @@ pub(super) struct Frame {
     queue_submissions: u64,
     presents: u64,
     adapter: Value,
+    controllers: ControllerObservation,
     side_rooms: Option<RoomFrame>,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+struct ControllerObservation {
+    backend: &'static str,
+    connected: usize,
 }
 
 #[derive(Default)]
@@ -173,6 +180,11 @@ impl Presentation {
             .frame
             .as_ref()
             .map(|frame| frame.adapter.clone())
+            .into();
+        record["controllers"] = self
+            .frame
+            .as_ref()
+            .map(|frame| json!(frame.controllers))
             .into();
         record["first_present_verified"] = json!(self.frames > 0);
         record["presented_frames"] = json!(self.frames);
@@ -429,12 +441,29 @@ fn join_presented(
         queue_submissions: transaction.queue_submissions(),
         presents: transaction.presents(),
         side_rooms,
+        controllers: observe_controllers(world),
         adapter: json!({
             "backend": adapter.backend(),
             "name": adapter.name(),
             "device_type": adapter.device_type(),
         }),
     }))
+}
+
+fn observe_controllers(world: &World) -> ControllerObservation {
+    #[cfg(feature = "gamepad")]
+    if let Some(devices) = world.get_resource::<nara_gilrs::GilrsDevices>() {
+        return ControllerObservation {
+            backend: "gilrs-wgi",
+            connected: devices.connected().len(),
+        };
+    }
+    #[cfg(not(feature = "gamepad"))]
+    let _ = world;
+    ControllerObservation {
+        backend: "none",
+        connected: 0,
+    }
 }
 
 fn observe_side_rooms(world: &World, frame: u64) -> Result<RoomFrame, String> {

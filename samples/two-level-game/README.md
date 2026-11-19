@@ -138,13 +138,29 @@ held source. Focus loss and physical disconnection terminate accepted controls t
 original lifetime. Known controls held across reassignment/refocus wait for release or neutral;
 cached holds are not replayed. Gilrs's event cache is not an instantaneous hardware snapshot.
 
-Compiling `gamepad` without passing `--gamepad` does not initialize the backend. The optional
-source selection does not enable a cooked Player backend or add native controller state to the
+Compiling `gamepad` without passing `--gamepad` does not initialize the source backend. The optional
+source selection does not automatically enable a cooked Player backend or add native controller state to the
 resume format. Exact development reconstruction can refuse the unrepresented native service.
 The existing keyboard-only continuation path remains independently supported. Managed native
 controller acquisition currently requires Windows WGI. Other platforms refuse before native
 acquisition until their backend's physical retirement contract is implemented. Native hardware
 and platform execution scope is recorded in the [owning unit](../../docs/plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#native-gilrs-input-and-playable-controller-successor).
+
+For a source-free Player, build the cooker with `cook,gamepad` and add `--controllers gilrs`
+to the [desktop cooking command](#source-free-desktop-player). The choice is independent of
+`--runtime`: both `desktop` and `audio-desktop` support it; the latter also needs the cooker's
+`audio-cpal` feature. Omit the option or use `--controllers none` for the original keyboard-only
+native placement. Headless native-controller selection refuses before content preparation.
+
+The published Player activates its compiled selection without a `--gamepad` runtime argument.
+`two_level_game::delivery::PlayerSelection` shares the selected recipe, binary/features and
+content profile between cooker and Player. The controller profiles are
+`two-level-desktop-gamepad-shipping` and `two-level-audio-desktop-gamepad-shipping`; the three
+original profiles are unchanged. An all-features build alone does not activate native input.
+Both choices keep the same fifteen content members and authored bindings. Successful observation
+records report the actual presented Runtime's controller backend and inventory count. Zero devices
+does not qualify physical button/stick/hotplug interaction. The [delivery unit](../../docs/plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#explicit-controllers-through-cooked-player-delivery)
+owns execution evidence and remaining hardware/platform limits.
 
 ### Ordinary Source Commands
 
@@ -178,6 +194,7 @@ schema command. It is not a hand-maintained second definition of component layou
 | `--no-default-features --features cooked-player` | Headless shipping Player and shared gameplay, without Cargo tools, watcher, UI or GPU/window backends |
 | `--no-default-features --features cooked-player,desktop` | Shipping Player with the explicit native window/GPU placement, without development tools, watcher or UI |
 | `--no-default-features --features cooked-player,desktop,audio-cpal` | Explicit Windows audible Player, without development tools, watcher or UI |
+| `--no-default-features --features cooked-player,desktop,gamepad` (plus `audio-cpal` for audible placement) | Native controller implementation available to an explicitly controller-selected cooked profile; availability alone does not activate it |
 | `desktop,cost-measurement,scene-work-observation` | Development-only native workload with existing Scene owner span attribution; disabled by default |
 
 Cargo features are additive. Enabling `cooked-player` with defaults still enables development;

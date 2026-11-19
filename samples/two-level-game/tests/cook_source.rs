@@ -2,10 +2,6 @@
 
 #![cfg(any(feature = "development", feature = "cook"))]
 
-#[allow(dead_code)]
-#[path = "../src/bin/cook/input.rs"]
-mod input;
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -44,6 +40,7 @@ use nara::{
 };
 use nara_sprite_animation::SpriteAnimationDomain;
 use two_level_game::{
+    delivery::{ControllerBackend, PlayerSelection, RuntimeKind},
     input::INPUT_PATH,
     levels::LevelId,
     region_material, region_tileset, side_room,
@@ -192,7 +189,10 @@ impl Directory {
             ProjectCookRequest {
                 root: &root,
                 candidate: &candidate,
-                recipe: input::RuntimeKind::Headless.recipe().unwrap(),
+                recipe: PlayerSelection::new(RuntimeKind::Headless, ControllerBackend::Disabled)
+                    .unwrap()
+                    .recipe()
+                    .unwrap(),
                 target: RuntimeContentTarget::new(TRIPLE, "two-level-shipping").unwrap(),
                 store: &self.store(),
                 implementation: ArtifactContentDigest::of_bytes(b"cook-source-selection-test/v1"),

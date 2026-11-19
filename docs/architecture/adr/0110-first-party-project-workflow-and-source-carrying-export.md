@@ -14,6 +14,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-11-01 by explicit physical event-loop custody across sequential desktop actions
 **Amended**: 2026-11-01 by project-wide source readiness and bounded authored-upgrade recovery
 **Amended**: 2026-11-14 by declaration-only finite build preparation and explicit metadata-feature absence
+**Amended**: 2026-11-19 by application-owned native-service selection across cooker and Player recipes
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -164,6 +165,12 @@ this content preparation. It compares the complete expected Cargo package,
 binary, profile, target, default-feature policy and requested features; actual compiled features
 and tool observations remain separate recorded facts. Cargo and content profiles stay independent.
 The Player does not accept a manifest or argument that overrides its compiled expectation.
+An application may share an explicit finite selection among its cooker and Player recipes,
+including optional native input alongside its chosen desktop/audio placement. Compiled feature
+availability alone does not activate such a service. The game's bound selection determines
+its actual recipe and distinct content profile; the existing catalog and build owners still
+verify their original fingerprints and actual compiler facts. This is application policy,
+not an engine-wide interpretation of profile names or a second feature resolver.
 This is a trusted implementation contract, not proof that arbitrary code consumed the input,
 hermetic compilation, global freshness or remote authenticity. The catalog never includes the final
 executable digest; the delivery manifest records both afterward, without a digest cycle.
