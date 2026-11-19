@@ -708,9 +708,14 @@ impl DomainSourceReader<'_, '_> {
             .work_bytes
             .checked_add(overhead)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        let (bytes, digest) = self
-            .context
-            .read_file(self.assets, path.as_str(), limit.get())?;
+        let (bytes, digest) = self.context.read_file_inner(
+            self.assets,
+            path.as_str(),
+            limit.get(),
+            ContentReadContext::ExactProjectMember {
+                source_root: self.root,
+            },
+        )?;
         self.context.record_member(
             ProjectContentMemberKind::AssetSource,
             self.root,

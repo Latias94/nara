@@ -118,8 +118,11 @@ semantic validation and conservative parser/product memory bounds remain domain-
   Its associated `Settings` type states the one settings contract shared with optional Editor
   adapters. Admission and semantic diagnostics remain domain-owned; source-only settings do not
   acquire Editor serialization or default-value requirements.
-  Every auxiliary read contributes an exact source member; repeated paths share one observation
-  within the source-domain load. Edges and global file/byte/work/retention limits remain Host-owned.
+  The source-domain loader proves stored spelling on the first read of each primary or auxiliary
+  path before caching its bytes. A spelling mismatch retains the requested project-relative
+  path in its diagnostic. Every auxiliary read contributes an exact source member. Repeated
+  paths share one observation within the source-domain load. Edges and global
+  file/byte/work/retention limits remain Host-owned.
 - The Host reserves declared work and product storage before preparation. Trusted domain code must
   honor those bounds, read every required source through the scoped context, and avoid external
   effects. CPU products and their destructors must be effect-free and must not panic. This is a

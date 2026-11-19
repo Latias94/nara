@@ -54,9 +54,10 @@ with `admit::<Self::Settings>()` and validate only domain invariants. Source-onl
 deserialization; serialization and editable defaults belong to the optional Editor facet.
 `bytes()` provides the bounded
 primary source. `read_dependency(path, limit)` reads a raw auxiliary source under the same Assets
-capability and records its exact digest. Paths are Assets-relative; no ambient filesystem or
-project-root handle is exposed. Auxiliary files have no implied metadata or decoder. This is not
-yet a cross-domain prepared-product dependency API.
+capability and records its exact digest. Paths are Assets-relative and must match the stored
+spelling. Check reports the requested project-relative path on a spelling mismatch. Auxiliary
+files are read as bytes and carry no implied metadata or decoder. The importer receives only the
+scoped reader and bounded bytes.
 
 All required source reads must use this context. Repeated auxiliary reads share one immutable
 observation per source-domain load while each declared edge counts against the global limit.

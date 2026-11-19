@@ -694,6 +694,120 @@ fn renamed_sound_bank_dependency_cooks_without_its_old_path_and_decodes_source_f
     );
 }
 
+#[cfg(windows)]
+mod sound_bank_spelling {
+    use std::{fs, path::Path};
+
+    use nara::{
+        diagnostic::DiagnosticValueRef,
+        project_host::{ProjectContentDeliveryReceipt, ProjectContentErrorKind},
+        project_tooling::host_fs,
+        project_workflow::{ProjectCheckError, ProjectCheckRequest, check_project},
+    };
+    use two_level_game::{
+        cooked_recipe,
+        sound_bank::{BANK_PATH, SoundBankCodec, SoundBankDomain, SoundCue, bank_product},
+    };
+
+    use super::{Directory, RENAMED_PICKUP};
+
+    fn project_with_case_renamed_pickup() -> Directory {
+        let directory = Directory::new();
+        let pickup = directory.project.join("assets/audio/pickup.wav");
+        let intermediate = directory.project.join(RENAMED_PICKUP);
+        fs::rename(&pickup, &intermediate).unwrap();
+        fs::rename(intermediate, pickup.with_file_name("Pickup.wav")).unwrap();
+        directory
+    }
+
+    fn check(directory: &Directory) -> Result<ProjectContentDeliveryReceipt, ProjectCheckError> {
+        check_project(ProjectCheckRequest::new(
+            host_fs::readable_directory(&directory.project).unwrap(),
+            cooked_recipe(),
+        ))
+    }
+
+    fn assert_pickup_spelling_rejected(directory: &Directory) {
+        let error = check(directory).expect_err("Check must reject the wrong pickup spelling");
+        let content = error
+            .content_error()
+            .unwrap_or_else(|| panic!("expected a project content error: {error:?}"));
+        assert_eq!(
+            content.kind(),
+            ProjectContentErrorKind::HostAuthorityRejected,
+            "{error:?}"
+        );
+        let diagnostic = content
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code().as_str() == "project.content.exact-spelling-mismatch"
+            })
+            .unwrap_or_else(|| panic!("expected an exact-spelling diagnostic: {error:?}"));
+        for (key, value) in [
+            (
+                "project-path",
+                DiagnosticValueRef::ProjectRelative("assets/audio/pickup.wav"),
+            ),
+            ("operation", DiagnosticValueRef::Identifier("open-file")),
+        ] {
+            assert!(
+                diagnostic
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == key && field.value() == value),
+                "missing {key}={value:?}: {diagnostic:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_rejects_wrong_pickup_spelling_and_cooks_correction() {
+        let directory = project_with_case_renamed_pickup();
+        assert_pickup_spelling_rejected(&directory);
+        fs::write(
+            directory.project.join("assets").join(BANK_PATH),
+            br#"{"pickup":"audio/Pickup.wav","travel":"audio/travel.wav"}"#,
+        )
+        .unwrap();
+        check(&directory).unwrap();
+
+        let prepared = directory.prepare().unwrap();
+        let bank = prepared
+            .content()
+            .base()
+            .acquire_asset::<SoundBankDomain, SoundBankCodec>(bank_product())
+            .unwrap();
+        for (cue, path) in [
+            (SoundCue::Pickup, "assets/audio/pickup.wav"),
+            (SoundCue::Travel, "assets/audio/travel.wav"),
+        ] {
+            let original = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+            let mut wav = hound::WavReader::open(original).unwrap();
+            let expected = wav
+                .samples::<i16>()
+                .map(|sample| (f32::from(sample.unwrap()) / 32_768.0).to_bits());
+            let actual = bank
+                .product()
+                .samples(cue)
+                .iter()
+                .map(|sample| sample.to_bits());
+            assert!(actual.eq(expected), "cooked samples differ for {path}");
+        }
+    }
+
+    #[test]
+    fn check_rejects_wrong_alias_after_exact_pickup() {
+        let directory = project_with_case_renamed_pickup();
+        fs::write(
+            directory.project.join("assets").join(BANK_PATH),
+            br#"{"pickup":"audio/Pickup.wav","travel":"audio/pickup.wav"}"#,
+        )
+        .unwrap();
+        assert_pickup_spelling_rejected(&directory);
+    }
+}
+
 #[test]
 fn edited_raw_dependency_is_rejected_after_the_public_selection_is_returned() {
     let directory = Directory::renamed_sound_bank();

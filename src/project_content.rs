@@ -1556,7 +1556,7 @@ enum ContentReadContext<'a> {
     SelectedScene {
         is_startup: bool,
     },
-    NativeMetadata {
+    ExactProjectMember {
         source_root: &'a nara_project::ProjectPath,
     },
 }
@@ -2406,28 +2406,47 @@ impl<'a> LoadContext<'a> {
             tracing::info_span!(target: "nara::scene::work", "project_content_read").entered();
         let exact_spelling = !matches!(context, ContentReadContext::Asset);
         let project_path = match context {
-            ContentReadContext::NativeMetadata { source_root } => Some((source_root, logical_path)),
+            ContentReadContext::ExactProjectMember { source_root } => {
+                Some((source_root, logical_path))
+            }
             _ => None,
         };
-        let open_handle_peak = if exact_spelling {
-            EXACT_RELATIVE_OPEN_HANDLE_PEAK
+        let (open_handle_peak, name_work) = if exact_spelling {
+            (
+                EXACT_RELATIVE_OPEN_HANDLE_PEAK,
+                EXACT_RELATIVE_OPEN_WORK_BYTES,
+            )
         } else {
-            RELATIVE_OPEN_HANDLE_PEAK
+            (RELATIVE_OPEN_HANDLE_PEAK, 0)
         };
         let relative = self.observe_path(logical_path)?;
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
-        self.add_budget(ProjectContentBudgetKind::OpenHandles, open_handle_peak)?;
-        let name_work = self.reserve_work(if exact_spelling {
-            EXACT_RELATIVE_OPEN_WORK_BYTES
-        } else {
-            0
-        })?;
+        let open_handles = checked_plan_sum(
+            ProjectContentBudgetKind::OpenHandles,
+            [
+                self.budget_value(ProjectContentBudgetKind::OpenHandles),
+                open_handle_peak,
+            ],
+        )?;
+        let work_bytes = checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                self.budget_value(ProjectContentBudgetKind::WorkBytes),
+                name_work,
+            ],
+        )?;
+        self.budget_mut()
+            .set_many(&[
+                (ProjectContentBudgetKind::OpenHandles, open_handles),
+                (ProjectContentBudgetKind::WorkBytes, work_bytes),
+            ])
+            .map_err(ProjectContentError::budget)?;
         let opened = if exact_spelling {
             directory.open_file_exact(&relative)
         } else {
             directory.open_file(&relative)
         };
-        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, name_work.reserved);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, name_work);
         let file = match opened {
             Ok(file) => file,
             Err(error) => {
@@ -2459,12 +2478,12 @@ impl<'a> LoadContext<'a> {
             }
         };
         let encoded_before = self.budget_value(ProjectContentBudgetKind::EncodedBytes);
-        self.set_budget(
-            ProjectContentBudgetKind::EncodedBytes,
-            encoded_before
-                .checked_add(encoded_ceiling)
-                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::EncodedBytes))?,
-        )?;
+        if let Err(error) = self.add_budget(ProjectContentBudgetKind::EncodedBytes, encoded_ceiling)
+        {
+            drop(file);
+            self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handle_peak);
+            return Err(error);
+        }
         let result = file.read_to_end_bounded(u64::try_from(encoded_ceiling).unwrap_or(u64::MAX));
         drop(file);
         self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handle_peak);
@@ -2634,7 +2653,7 @@ impl<'a> LoadContext<'a> {
             directory,
             &metadata_path,
             ceiling,
-            ContentReadContext::NativeMetadata { source_root },
+            ContentReadContext::ExactProjectMember { source_root },
         )?;
         self.verify_catalogued_metadata(project_path, source_root, metadata_digest)?;
         if matches!(usage, NativeMetadataUse::SourceClosure) {
@@ -4177,6 +4196,19 @@ fn map_fs_error_at(
     error: FsError,
     project_path: Option<(&nara_project::ProjectPath, &str)>,
 ) -> ProjectContentError {
+    let at_project_path = |diagnostic| {
+        let Some((root, path)) = project_path else {
+            return diagnostic;
+        };
+        attach_field(
+            diagnostic,
+            DiagnosticField::project_relative(
+                field_key("project-path"),
+                &format!("{}/{}", root.as_str(), path),
+            )
+            .unwrap_or_else(|_| DiagnosticField::sensitive(field_key("project-path"))),
+        )
+    };
     match error {
         FsError::Unsupported { operation, .. } => fs_authority_error(
             ProjectContentErrorKind::HostAuthorityUnsupported,
@@ -4192,13 +4224,10 @@ fn map_fs_error_at(
         ),
         FsError::Io { operation, source } => {
             let diagnostic = attach_field(
-                attach_field(
-                    diagnostic("project.content.host-io", "Project content host I/O failed"),
-                    DiagnosticField::public_identifier(
-                        field_key("operation"),
-                        PublicDiagnosticIdentifier::new(fs_operation_id(operation))
-                            .expect("filesystem operation IDs are engine-owned"),
-                    ),
+                fs_operation_diagnostic(
+                    "project.content.host-io",
+                    "Project content host I/O failed",
+                    operation,
                 ),
                 DiagnosticField::public_identifier(
                     field_key("io_kind"),
@@ -4206,22 +4235,19 @@ fn map_fs_error_at(
                         .expect("I/O kind IDs are engine-owned"),
                 ),
             );
-            let mut diagnostic = with_sensitive(diagnostic, "source");
-            if let Some((root, path)) = project_path {
-                diagnostic = attach_field(
-                    diagnostic,
-                    DiagnosticField::project_relative(
-                        field_key("project-path"),
-                        &format!("{}/{}", root.as_str(), path),
-                    )
-                    .unwrap_or_else(|_| DiagnosticField::sensitive(field_key("project-path"))),
-                );
-            }
             ProjectContentError::with_report(
                 ProjectContentErrorKind::HostIo,
-                single_report(diagnostic),
+                single_report(at_project_path(with_sensitive(diagnostic, "source"))),
             )
         }
+        FsError::ExactSpellingMismatch { operation } => ProjectContentError::with_report(
+            ProjectContentErrorKind::HostAuthorityRejected,
+            single_report(at_project_path(fs_operation_diagnostic(
+                "project.content.exact-spelling-mismatch",
+                "Project content path differs from the stored spelling",
+                operation,
+            ))),
+        ),
         FsError::ByteLimitExceeded { limit } => {
             let error = ProjectContentBudgetError::synthetic(
                 ProjectContentBudgetKind::EncodedBytes,
@@ -4294,15 +4320,23 @@ fn fs_authority_error(
     summary: &'static str,
     operation: FsOperation,
 ) -> ProjectContentError {
-    let diagnostic = attach_field(
+    let diagnostic = fs_operation_diagnostic(code, summary, operation);
+    ProjectContentError::with_report(kind, single_report(with_sensitive(diagnostic, "source")))
+}
+
+fn fs_operation_diagnostic(
+    code: &'static str,
+    summary: &'static str,
+    operation: FsOperation,
+) -> Diagnostic {
+    attach_field(
         diagnostic(code, summary),
         DiagnosticField::public_identifier(
             field_key("operation"),
             PublicDiagnosticIdentifier::new(fs_operation_id(operation))
                 .expect("filesystem operation IDs are engine-owned"),
         ),
-    );
-    ProjectContentError::with_report(kind, single_report(with_sensitive(diagnostic, "source")))
+    )
 }
 
 fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {
@@ -5394,6 +5428,67 @@ mod tests {
             drop(context);
             assert_eq!(loader.budget_snapshot().active_reservations(), 0);
         }
+    }
+
+    #[test]
+    fn exact_file_read_refunds_transient_charges_on_budget_refusal() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, loader) = project.inputs();
+        let directory = loader.project_root();
+        let source_root = nara_project::ProjectPath::new("scenes").unwrap();
+        let scenes = directory
+            .open_directory_exact(&RelativePath::new(source_root.as_str()).unwrap())
+            .unwrap();
+        let mut context = LoadContext::new(
+            &loader,
+            plan.schema_validation(),
+            &plan.asset_domains,
+            None,
+            BTreeMap::new(),
+            candidate.manifest_digest(),
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        let work = ProjectContentBudgetKind::WorkBytes;
+        let encoded = ProjectContentBudgetKind::EncodedBytes;
+        let handles = ProjectContentBudgetKind::OpenHandles;
+        context.add_budget(handles, 1).unwrap();
+        let base_work = context.budget_value(work);
+        let read = |context: &mut LoadContext<'_>| {
+            context.read_file_inner(
+                &scenes,
+                "startup.scene.json",
+                64 * 1024,
+                super::ContentReadContext::ExactProjectMember {
+                    source_root: &source_root,
+                },
+            )
+        };
+
+        for (kind, pressure, baseline) in [
+            (
+                work,
+                loader.limits.limit(work) - super::EXACT_RELATIVE_OPEN_WORK_BYTES + 1,
+                base_work,
+            ),
+            (encoded, loader.limits.limit(encoded), 0),
+        ] {
+            context.set_budget(kind, pressure).unwrap();
+            let error = read(&mut context).unwrap_err();
+            assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
+            assert_eq!(context.budget_value(handles), 1);
+            assert_eq!(context.budget_value(kind), pressure);
+            context.set_budget(kind, baseline).unwrap();
+        }
+        let (_, digest) = read(&mut context).unwrap();
+        assert_eq!(digest, project.digest("scenes/startup.scene.json"));
+        assert_eq!(context.budget_value(handles), 1);
+        assert_eq!(context.budget_value(work), base_work);
+        drop(context);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     }
 
     #[test]
