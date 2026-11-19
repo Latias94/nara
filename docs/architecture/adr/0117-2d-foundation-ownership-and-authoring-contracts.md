@@ -290,8 +290,10 @@ Runtime snapshot publication, managed Editor refresh and TaskUpdate use the same
 the independently testable `TileSetAssets` state machine retains publication and retention ownership.
 Host code supplies admitted decoded sources, rejection or revocation observations and dependency demand,
 without transferring filesystem authority to the domain or introducing an erased importer executor.
-Unchanged observations do not repeat failures. Entry and retained-pixel limits reject a successor
-before publication, and retained charges follow actual immutable holders through prepared packets.
+Unchanged dependency observations do not repeat content failures. An unchanged candidate previously
+refused by the retention limit becomes eligible when its exact Image allocation fits the current
+allowance. Entry and retained-pixel limits reject a successor before publication, and retained
+charges follow actual immutable holders through prepared packets.
 After the first successful publication, an entry retains its admitted atlas layout even if its
 Image or source is later automatically revoked. A live successor with a different layout is rejected with an explicit
 rebuild-required diagnostic; the latest desired source remains available for correction. This
@@ -339,6 +341,14 @@ ordered view list executes serially, including shared targets and explicit offsc
 This supersedes the single-view cardinality clauses in 0018/0094/0111/0112, retaining exclusive target
 ownership. Optional pixel-canvas policies do not quantize simulation. ADR0094 separately owns the
 finite typed resource program; no backend-neutral RHI is added here.
+
+Window camera extraction intersects each authored physical viewport with the current target raster.
+With a fixed WorldCanvas, that raster is the Canvas extent while the native window is renderable.
+Extraction omits the View for a zero-sized window or an empty intersection. It keeps the original
+camera configuration and derives projection, clear order and presented picking from the surviving
+rectangles. Without Window geometry, an explicit rectangle allows extraction and the actual target
+descriptor checks it at packet admission. Caller-built packets must supply valid in-bounds
+rectangles.
 
 Each captured View carries a non-reused process-local lifetime identity, separate from its camera
 Entity, target, raster extent and ordering. Camera removal/readdition starts a new lifetime even

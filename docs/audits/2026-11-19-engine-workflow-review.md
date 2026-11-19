@@ -93,3 +93,31 @@ The migration with the widest reach is input storage. A compact event record mus
 Rust 1.95.0 on Windows x64. Three temporary probes were compiled with the current `nara_input` source and existing matching dependency artifacts. They exercised paused motion, resized pointer state, and the outcome layouts. All **103 existing Input unit tests** also passed in that build. The other public-interface probes linked repository-built libraries from the shared `target` and used fresh temporary clients or adapted integration fixtures. Source paths and the relevant admission, extraction, or publication branches were cross-checked against the working tree.
 
 The Editor Save probe used a real temporary project, changed its sidecar, dispatched Save, checked the receipt and dirty state, and reread the file. The Cook probe used a real project directory and artifact store for each identity mode. Scene deletion went through authoring and readmission. The split-camera, integer-fit, TileSet, UI keyboard, hierarchy, fixed-time, and dirty-chunk probes ran on CPU. The watcher finding exercised the public coalescer. Desktop shutdown, backend input publication, the GPU sampling result, and the remaining source-traced branches were not exercised on a native window or GPU in this review. Full-workspace and platform qualification remain outside these results.
+
+## Repair status
+
+These entries record follow-up changes against the original findings above.
+
+| Finding | Repair and qualification |
+| --- | --- |
+| 1. Save identity | `5c61f8f` binds Scene and Prefab Save to the admitted sidecar identity. Early refusal keeps the draft and history. A sidecar change observed after the body switch produces the existing uncertain result. Windows persistence 101/101. [Evidence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#november-19-save-identity-and-direct-reference-closure) |
+| 2. Direct local references | `3918930` checks both `SceneLocal` and zero-hop authored direct references against the final namespace. A retarget and removal can still commit together. Windows Identity/Scene 992/992, including 67 public workflow tests. [Evidence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#november-19-save-identity-and-direct-reference-closure) |
+| 3. Paused input retention | `3946e4d` reclaims completed records individually while preserving original command and release custody. Shared CPU 512/512, independent consumer 10/10, original Winit 4/4. [Evidence](../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md#november-19-paused-mixed-input-reclamation) |
+| 4. Split view resize | `8364fa1` intersects authored viewports with the current raster before choosing projection and clear order. Windows DX12 verifies actual resize, drawing, picking and recovery on one display, including forced fallback. [Evidence](../plans/2026-11-14-durable-material-and-shader-plan.md#november-19-split-view-resize) |
+| 5. Sidecar recreation | `9fc22ac` separates principal and sidecar observations. Real PNG and metadata fixtures exercise single and split drains, last-good pixels, the restored identity, and actual principal removal. [Consumer](../../crates/nara_image/src/tests.rs) |
+| 6. Dependency-free Cook | `f222889` reads the selected root's stable sidecar through the existing Scene capability when the catalogue has no entry. The source key stays location-based. The delivery receipt carries the sidecar path and byte digest for revalidation. The Windows Cook and catalogue selection passes 26/26 in `10bed436-3d73-41de-8bbc-54decf381ef3`, including empty roots, unrelated invalid metadata, same-length metadata drift, and missing, duplicate or nil identity refusal. [Consumer](../../src/project_tooling/project_cook/content/tests.rs) |
+| 7. Offscreen focus | `2bc19f1` uses one snapped visible intersection for focus and semantic exposure. The kernel, widgets, authored UI and render preparation cohort passes 443/443 in `b1c7fd3e-5fe3-4120-8765-5f0d32e96d78`. It covers empty, subpixel, partly visible and modal cases, including pointer-capture continuity. [Contract](../architecture/adr/0108-ui-surface-presented-session-and-atomic-interaction.md) |
+| 8. Atlas refresh | `e435fde` releases retired Sprite extraction elements immediately. A TileSet refused on retention retries when its exact desired allocation fits. Tests cover `10 → 20 → 25` without a held packet, a held packet's unchanged pixels and recovery after release, and an unchanged invalid atlas. [Consumer](../../crates/nara_sprite_render/tests/tileset_content.rs) |
+
+The twelve P2 findings and the narrower risks above remain open in this qualification. They
+include default Input outcome allocation, native pointer invalidation, fractional-DPI integer
+fitting, image UV/border clipping and Inspector drag selection.
+
+The combined Windows asset, watcher, Image, Sprite and TileSet release cohort passes 603/603
+in `c39f3264-bb5e-4382-be1d-a1981cbaa7a0`, with one ignored case outside the selection. It
+includes the sidecar and atlas regressions and the original CPU consumers with explicit
+viewports. The first run, `3c58429f-49e4-42f4-967b-fef3fab4a93e`, found three regressions in
+those consumers. They pass after restoring explicit extraction without Window geometry.
+Correctness Clippy passes for the affected libraries with the Cook feature closure. Rustfmt passes
+for the root and independent stock composition workspaces. The native resize evidence covers the
+actual single-display Windows DX12 paths. The mixed-DPI test was outside this selection.

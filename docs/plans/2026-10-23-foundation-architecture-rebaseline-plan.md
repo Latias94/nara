@@ -998,8 +998,9 @@ Release nextest passes 992/992 in `796055f2-d330-48df-b057-c92cd66e8dcf`, includ
 and Scene library tests and 67 tests across eight public Scene targets. It covers failure-atomic
 deletion, a retained Redo branch, both encodings in both native document kinds, and valid routed
 references. Scoped correctness Clippy and workspace formatting also pass. This qualification
-covers the public/owner CPU and real filesystem paths on Windows. The rest of the workflow audit,
-including paused input reclamation, remains open.
+covers the public/owner CPU and real filesystem paths on Windows. The
+[audit repair status](../audits/2026-11-19-engine-workflow-review.md#repair-status) tracks later
+runtime and shared interaction repairs.
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 

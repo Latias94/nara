@@ -4547,6 +4547,15 @@ press association, terminal credits and live admission order. Independent Gamepl
 Winit coverage observe Input and close through their original owners. The linked record owns the
 qualification scope. The default outcome allocation and other runtime workflow findings remain open.
 
+The [November 19 workflow audit follow-up](../../audits/2026-11-19-engine-workflow-review.md#repair-status)
+records current Render, Asset, Cook, shared UI and TileSet qualification. The surviving camera
+rectangles drive native split-window drawing and picking under ADR 0117. Independent sidecar
+observations preserve last-good Image content under ADR 0007. ADR 0110 now admits selected stable
+Scene Product identities independently of source catalogue discovery. ADR 0108 shares clipped
+Surface visibility across focus, activation and semantic exposure. The TileSet owner retries
+previous retention refusals when the desired Image fits. The audit retains the separate P2 and
+backend-specific findings.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

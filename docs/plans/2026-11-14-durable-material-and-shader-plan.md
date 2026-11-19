@@ -1622,6 +1622,37 @@ the independent consumer's README records prebuilding and the separate physical/
 selections. Implementation `cf22a5b` and consumer/CI `a7a5fc8` are precise local commits. This
 closes the named drawing/picking successor while the complete Foundation Goal stays active.
 
+### November 19 Split View Resize
+
+The [workflow review](../audits/2026-11-19-engine-workflow-review.md#4-resizing-a-valid-split-screen-window-can-fault-the-desktop-runtime)
+reproduced `ViewportOutsideTarget` for a legal resize from 1280 to 960 physical pixels.
+At `8364fa1`, extraction intersects the authored rectangle with the current Window or WorldCanvas
+raster, then builds the projection and clear order for the surviving Views. An empty intersection
+omits the View. Resizing back restores the authored viewport and its original View identity.
+Headless extraction can still use an explicit viewport before a target descriptor is supplied.
+Independent Image descriptors and caller-built frame packets retain strict bounds admission.
+Pinned [Bevy](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_render/src/camera.rs#L428)
+also handles the target extent before updating projection.
+
+The two new owner regressions fail against the original extraction in
+`a19a9b78-2334-4169-b353-28421e0d101c`. The final release Render run passes 72/72
+in `fb6772fc-1dc8-4a9f-9579-2cc0520bee93`. The first broader owner run found three Sprite/Tile
+regressions caused by omitting explicit views without a Window. The final extraction retains that
+entry before packet admission. The stock `DesktopRun` presents widths 640, 480, 320, 240 and 640
+while the same right View shrinks from 320 to 160, leaves the output, and returns. It checks actual
+draw counts, independent positive and negative world picks, and the same Runtime and backend
+identities. Close destroys the original HWND and World and returns the event pump. The first
+native trial failed during Sprite extraction before resize. The fixture now places its entities
+through the normal hierarchy writer, and the resize test preserves retirement diagnostics on
+failure.
+
+Windows/Rust 1.95.0 release nextest passes 5/5 in `792f7c8d-a59a-4cf9-b4b7-cf7e7f7654c8`
+with hardware DX12 and a single 150% display. That selection includes the existing pixel oracle,
+single-display drawing, and failure retirement. Forced-fallback DX12 split resize passes 1/1 in
+`55d04fd3-10c7-4f4d-b99b-ae7dbad19640`. The Windows CI selection includes this fallback control.
+The mixed-DPI case is outside this run. These receipts establish presentation calls and presented
+geometry. The earlier pixel replay and mixed-DPI qualifications retain their own scope.
+
 ## Measured Sprite And Tile Geometry Successor
 
 Status: active from `c4e0770`. Continue R9c through actual public module consumers before
