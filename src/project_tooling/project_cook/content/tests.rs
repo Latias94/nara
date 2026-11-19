@@ -2,14 +2,17 @@ use std::{cell::RefCell, fs};
 
 use crate::{
     asset::RuntimeAssetCodec,
-    asset_build::ArtifactBuildError,
+    asset_build::{ArtifactBuildError, ArtifactBuildReason, ArtifactBuildStatus},
     core::ByteLimit,
     fs::{ContentDigest, FsError},
     project_host::{
         ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentErrorKind,
         ProjectContentMemberKind,
     },
-    project_workflow::cooked_content::{CookedContentError, CookedContentLimits},
+    project_workflow::{
+        ProjectCheckRequest, check_project,
+        cooked_content::{CookedContentError, CookedContentLimits},
+    },
     scene::SourceDocumentOrigin,
 };
 
@@ -18,7 +21,9 @@ use super::*;
 mod fixture;
 mod metadata;
 
-use fixture::{Codec, Domain, Fixture, OPTIONAL, auxiliary, product, write_metadata};
+use fixture::{
+    Codec, Domain, Fixture, Mapping, OPTIONAL, WideIntegers, auxiliary, product, write_metadata,
+};
 
 const STARTUP_META: &str = "scenes/first.scene.json.meta";
 const DECLARED_META: &str = "scenes/second.scene.json.meta";
@@ -245,6 +250,53 @@ fn declared_scene_roots_share_one_actual_compound_build_and_finished_runtime_pay
     selection.verify(&fixture.path).unwrap();
     drop(selection);
     assert_eq!(budget.snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn supplied_current_group_cooks_exact_wide_integer_settings() {
+    let fixture = Fixture::<7>::new(None);
+    let above_u64_max = 1_u128 << 64;
+    let unsigned = [above_u64_max, above_u64_max + 1, u128::from(u64::MAX)];
+    let below_i64_min = i128::from(i64::MIN) - 1;
+    fixture.write_settings(Mapping {
+        assignments: [(ImportedProductId::PRIMARY, 0), (auxiliary().product(), 1)],
+        integers: Some(WideIntegers {
+            unsigned,
+            signed: below_i64_min,
+        }),
+    });
+    check_project(ProjectCheckRequest::new(
+        fixture.root.share(),
+        fixture.recipe.clone(),
+    ))
+    .unwrap();
+
+    let built = fixture.build();
+    assert_eq!(built.status(), ArtifactBuildStatus::Built);
+    assert!(built.publication_receipt().is_some());
+    let settings = str::from_utf8(&built.group().seed().settings).unwrap();
+    let unsigned_json = serde_json::to_string(&unsigned).unwrap();
+    let sorted_integers =
+        format!(r#""integers":{{"signed":{below_i64_min},"unsigned":{unsigned_json}}}"#);
+    assert!(settings.contains(&sorted_integers), "{settings}");
+
+    let reused = fixture.build();
+    assert_eq!(reused.reason(), &ArtifactBuildReason::Reused);
+    assert_eq!(reused.group().digest(), built.group().digest());
+    let cooked = prepare_project_cooked_content(fixture.request(), |context| {
+        context.add_group::<Domain<7>>(reused.group())
+    })
+    .unwrap();
+    let (content, selection) = cooked.into_parts();
+    selection.verify(&fixture.path).unwrap();
+    let asset = content
+        .base()
+        .acquire_asset::<Domain<7>, Codec>(product(3))
+        .unwrap();
+    let integers = asset.product().integers.as_ref().unwrap();
+    assert_eq!(integers.unsigned, unsigned);
+    assert_eq!(integers.signed, below_i64_min);
+    assert_eq!(fixture.builds(), 1);
 }
 
 #[test]

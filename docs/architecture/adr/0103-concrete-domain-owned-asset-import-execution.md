@@ -285,7 +285,9 @@ the shared layer neither discovers importers nor schedules a general dependency 
 Product identity, pre-discovery seed, closed recipe, output content digest and complete group
 manifest are distinct. The Host selects versioned definitions with explicit implementation
 content authority. Current admitted normalized metadata and consumed target facts enter the
-seed; actual scoped raw/presence and verified processed-member observations close the recipe.
+seed. Metadata canonicalization sorts object keys and preserves array order and original typed
+JSON number tokens, including integers beyond 64 bits. Actual scoped raw/presence and verified
+processed-member observations close the recipe.
 Build observations do not replace the codec's actual Immediate/Deferred Runtime references.
 A stored seed association is a verified historical hint. The execution owner must replay current
 inputs and revalidate its request before returning a current hit or publishing a successor.

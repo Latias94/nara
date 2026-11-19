@@ -14,7 +14,7 @@ use crate::{
         AssetMeta, AssetMetaIdentity, AssetPath, AssetPathScope, AssetReferenceDemand,
         AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec, SourceAssetImporter,
     },
-    asset_build::ArtifactBuildLimits,
+    asset_build::{ArtifactBuildLimits, ArtifactBuildResult},
     core::{ByteLimit, ItemLimit},
     diagnostic::{Diagnostic, DiagnosticCode, SafeSummary},
     identity::SceneEntityId,
@@ -38,7 +38,7 @@ pub(super) const OPTIONAL: &str = "assets/build-only.bin";
 const COMPONENT: &str = "test.cook.SharedCompound";
 const PREFIX: &str = "nara-shared-cook-content-";
 static NEXT: AtomicU64 = AtomicU64::new(0);
-static BUILDS: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
+static BUILDS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
 
 pub(super) fn product(tag: u8) -> AssetProductRef {
     AssetProductRef::new(
@@ -72,7 +72,16 @@ struct Source {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Mapping {
-    assignments: [(ImportedProductId, usize); 2],
+    pub assignments: [(ImportedProductId, usize); 2],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integers: Option<WideIntegers>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WideIntegers {
+    pub unsigned: [u128; 3],
+    pub signed: i128,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +92,8 @@ pub(super) struct Compound {
     pub source_value: u8,
     pub auxiliary_value: u8,
     pub build_value: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integers: Option<WideIntegers>,
 }
 
 pub(super) struct Domain<const CASE: usize>;
@@ -110,15 +121,16 @@ impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
     }
 
     fn prepare<E>(source: &mut AssetImportSource<'_, E>) -> Result<Compound, AssetImportError<E>> {
-        let metadata = source
+        let (_, settings) = source
             .metadata()
             .admit::<Mapping>()
-            .map_err(|_| AssetImportError::domain(diagnostic()))?;
+            .map_err(|_| AssetImportError::domain(diagnostic()))?
+            .into_meta()
+            .into_parts();
         let body: Source = serde_json::from_slice(source.bytes())
             .map_err(|_| AssetImportError::domain(diagnostic()))?;
         let row = |product| {
-            metadata
-                .settings()
+            settings
                 .assignments
                 .iter()
                 .find(|(id, _)| *id == product)
@@ -133,6 +145,7 @@ impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
             source_value: row(ImportedProductId::PRIMARY)?,
             auxiliary_value: row(auxiliary)?,
             build_value: None,
+            integers: settings.integers,
         })
     }
 }
@@ -404,6 +417,13 @@ requested = ["runtime-2d"]
     }
 
     pub fn write_mapping(&self, assignments: [(ImportedProductId, usize); 2]) {
+        self.write_settings(Mapping {
+            assignments,
+            integers: None,
+        });
+    }
+
+    pub fn write_settings(&self, settings: Mapping) {
         self.write(
             "assets/shared.compound.meta",
             AssetMeta::new(
@@ -412,7 +432,7 @@ requested = ["runtime-2d"]
                     AssetPath::new("shared.compound").unwrap(),
                     AssetSourceKind::Other(Domain::<CASE>::SOURCE_KIND.to_owned()),
                 ),
-                Mapping { assignments },
+                settings,
             )
             .to_json_string()
             .unwrap()
@@ -421,6 +441,10 @@ requested = ["runtime-2d"]
     }
 
     pub fn build_group(&self) -> VerifiedArtifactGroup {
+        self.build().into_group()
+    }
+
+    pub fn build(&self) -> ArtifactBuildResult {
         let request = ArtifactSourceRequest::new(
             self.root
                 .open_directory_exact(&RelativePath::new("assets").unwrap())
@@ -433,9 +457,7 @@ requested = ["runtime-2d"]
                 implementation: self.request().implementation,
             },
         );
-        build_source::<Domain<CASE>>(&self.store, &request, |_| Ok(()))
-            .unwrap()
-            .into_group()
+        build_source::<Domain<CASE>>(&self.store, &request, |_| Ok(())).unwrap()
     }
 
     pub fn builds(&self) -> usize {

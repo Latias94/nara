@@ -14,7 +14,10 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{
+    Serialize,
+    de::{DeserializeOwned, IgnoredAny},
+};
 
 use super::{
     ArtifactBuildDefinition, ArtifactBuildError, ArtifactBuildObservation, ArtifactBuildOutput,
@@ -823,32 +826,85 @@ pub(super) fn admit_metadata<T: DeserializeOwned + Serialize>(
     let (_, settings) = selected.into_meta().into_parts();
     let settings = normalize(settings)
         .map_err(|diagnostic| ArtifactBuildError::Domain(Box::new(diagnostic)))?;
-    let normalized = AssetMeta::new(metadata.identity().clone(), settings)
+    let encoded = AssetMeta::new(metadata.identity().clone(), settings)
         .to_json_string()
         .map_err(|_| ArtifactBuildError::InvalidCandidate("normalized settings were rejected"))?;
-    let mut normalized: serde_json::Value = serde_json::from_str(&normalized).map_err(|_| {
-        ArtifactBuildError::InvalidCandidate("normalized metadata could not be read")
-    })?;
-    sort_objects(&mut normalized);
-    let normalized = serde_json::to_vec(&normalized).map_err(|_| {
-        ArtifactBuildError::InvalidCandidate("normalized metadata could not be encoded")
-    })?;
+    let mut normalized = Vec::with_capacity(encoded.len());
+    write_sorted_json(&encoded, &mut normalized)?;
     let actual = AssetMetaIdentityCandidate::decode_json_bytes(&normalized).map_err(|_| {
         ArtifactBuildError::InvalidCandidate("normalized metadata failed admission")
     })?;
     Ok((actual, normalized))
 }
 
-fn sort_objects(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for value in map.values_mut() {
-                sort_objects(value);
-            }
-            let sorted: BTreeMap<_, _> = std::mem::take(map).into_iter().collect();
-            map.extend(sorted);
+const INVALID_NORMALIZED_JSON: ArtifactBuildError =
+    ArtifactBuildError::InvalidCandidate("normalized metadata could not be read");
+
+fn write_sorted_json(json: &str, output: &mut Vec<u8>) -> Result<(), ArtifactBuildError> {
+    if let Some(object) = json
+        .strip_prefix('{')
+        .and_then(|json| json.strip_suffix('}'))
+    {
+        let mut remaining = object.trim_ascii_start();
+        let mut entries = BTreeMap::new();
+        while !remaining.is_empty() {
+            let (key, _) = take_json_prefix::<String>(&mut remaining)?;
+            remaining = remaining.strip_prefix(':').ok_or(INVALID_NORMALIZED_JSON)?;
+            entries.insert(key, take_json_element(&mut remaining)?);
         }
-        serde_json::Value::Array(values) => values.iter_mut().for_each(sort_objects),
-        _ => {}
+        output.push(b'{');
+        for (index, (key, value)) in entries.into_iter().enumerate() {
+            if index != 0 {
+                output.push(b',');
+            }
+            serde_json::to_writer(&mut *output, &key).map_err(|_| {
+                ArtifactBuildError::InvalidCandidate("normalized metadata could not be encoded")
+            })?;
+            output.push(b':');
+            write_sorted_json(value, output)?;
+        }
+        output.push(b'}');
+    } else if let Some(array) = json
+        .strip_prefix('[')
+        .and_then(|json| json.strip_suffix(']'))
+    {
+        let mut remaining = array.trim_ascii_start();
+        output.push(b'[');
+        while !remaining.is_empty() {
+            let value = take_json_element(&mut remaining)?;
+            write_sorted_json(value, output)?;
+            if !remaining.is_empty() {
+                output.push(b',');
+            }
+        }
+        output.push(b']');
+    } else {
+        output.extend_from_slice(json.as_bytes());
     }
+    Ok(())
+}
+
+fn take_json_element<'a>(remaining: &mut &'a str) -> Result<&'a str, ArtifactBuildError> {
+    let (_, span) = take_json_prefix::<IgnoredAny>(remaining)?;
+    if !remaining.is_empty() {
+        *remaining = remaining
+            .strip_prefix(',')
+            .ok_or(INVALID_NORMALIZED_JSON)?
+            .trim_ascii_start();
+    }
+    Ok(span)
+}
+
+fn take_json_prefix<'a, T: DeserializeOwned>(
+    remaining: &mut &'a str,
+) -> Result<(T, &'a str), ArtifactBuildError> {
+    let input = remaining.trim_ascii_start();
+    let mut stream = serde_json::Deserializer::from_str(input).into_iter::<T>();
+    let value = stream
+        .next()
+        .and_then(Result::ok)
+        .ok_or(INVALID_NORMALIZED_JSON)?;
+    let (span, tail) = input.split_at(stream.byte_offset());
+    *remaining = tail.trim_ascii_start();
+    Ok((value, span))
 }
