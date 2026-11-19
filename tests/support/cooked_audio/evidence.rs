@@ -16,15 +16,24 @@ pub fn number(value: &Value, field: &str) -> u64 {
         .unwrap_or_else(|| panic!("missing unsigned {field}: {value}"))
 }
 
+pub fn selection(record: &Value, request: &Request) {
+    assert_eq!(record["content_profile"], request.content_profile);
+    let connected = usize::try_from(number(&record["controllers"], "connected")).unwrap();
+    assert_eq!(
+        record["controllers"],
+        json!({"backend": request.controller_backend, "connected": connected})
+    );
+    if request.controller_backend == "none" {
+        assert_eq!(connected, 0);
+    }
+}
+
 pub fn presented(record: &Value, request: &Request) {
     assert_eq!(record["success"], true, "{record}");
     assert_eq!(record["source_free"], true);
     assert_eq!(record["processed_runtime"], true);
     package::assert_input_proof(record);
-    assert_eq!(
-        record["content_profile"],
-        "two-level-audio-desktop-shipping"
-    );
+    selection(record, request);
     assert_eq!(record["content_target"], request.target);
     assert_eq!(record["catalog_hash"], request.catalog_digest["hash"]);
     assert_eq!(record["catalog_length"], request.catalog_digest["length"]);

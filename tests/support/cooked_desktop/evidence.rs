@@ -24,6 +24,7 @@ use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
     animation::{atlas_product, clips_product},
+    delivery::PlayerSelection,
     input::input_product,
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::{SCENE_PATH, marker_image_product, marker_product},
@@ -36,7 +37,7 @@ use two_level_game::{
 #[path = "../two_level_pack.rs"]
 mod two_level_pack;
 
-use super::{images, process::read_bounded, walls};
+use super::{Request, images, process::read_bounded, walls};
 
 pub fn digest(value: ContentDigest) -> Value {
     json!({"length": value.length(), "hash": value.as_bytes()})
@@ -63,6 +64,7 @@ pub fn inspect_package(
     payload: &Value,
     triple: &str,
     configuration: &RuntimeConfiguration,
+    player: PlayerSelection,
 ) -> BTreeMap<LevelId, Value> {
     let bytes = read_bounded(&directory.join("content.pack"), 32 * 1024 * 1024);
     assert!(bytes.len() >= 20 && &bytes[..8] == b"NARAPACK");
@@ -78,12 +80,11 @@ pub fn inspect_package(
     )
     .unwrap();
     assert_eq!(catalog.target().triple(), triple);
-    assert_eq!(catalog.target().profile(), "two-level-desktop-shipping");
+    assert_eq!(catalog.target().profile(), player.content_profile());
+    assert_eq!(payload["content_target"], json!(catalog.target()));
     let configuration = configuration.resolve().unwrap();
     assert_eq!(catalog.configuration().resolve().unwrap(), configuration);
-    let plan =
-        resolve_runtime_configuration(&configuration, two_level_game::cooked_desktop_recipe())
-            .unwrap();
+    let plan = resolve_runtime_configuration(&configuration, player.recipe().unwrap()).unwrap();
     assert_eq!(
         catalog.plugin_plan_fingerprint(),
         plan.plugin_plan().fingerprint().as_bytes()
@@ -366,6 +367,18 @@ pub fn number(value: &Value, field: &str) -> u64 {
         .unwrap_or_else(|| panic!("missing unsigned {field}: {value}"))
 }
 
+pub fn selection(record: &Value, request: &Request) {
+    assert_eq!(record["content_profile"], request.content_profile);
+    let connected = usize::try_from(number(&record["controllers"], "connected")).unwrap();
+    assert_eq!(
+        record["controllers"],
+        json!({"backend": request.controller_backend, "connected": connected})
+    );
+    if request.controller_backend == "none" {
+        assert_eq!(connected, 0);
+    }
+}
+
 pub fn tileset(value: &Value, image: &Value) {
     assert_eq!(
         value["product"],
@@ -479,7 +492,7 @@ pub fn progress(record: &Value, level: LevelKey, score: u32, markers: &[u64], vi
     assert!(record["state"]["error"].is_null(), "{record}");
 }
 
-pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
+pub fn runtime(record: &Value, request: &Request) {
     assert_eq!(record["success"], true, "{record}");
     assert_eq!(record["source_free"], true);
     assert_eq!(record["processed_runtime"], true);
@@ -491,7 +504,7 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
             "definition": rebound_input_definition(),
         })
     );
-    assert_eq!(record["content_profile"], "two-level-desktop-shipping");
+    selection(record, request);
     for field in ["level", "score", "collected", "markers"] {
         assert_eq!(record[field], record["state"][field]);
     }
@@ -549,7 +562,7 @@ pub fn runtime(record: &Value, images: &BTreeMap<LevelId, Value>) {
         assert_eq!(
             proofs
                 .iter()
-                .filter(|proof| **proof == images[&level])
+                .filter(|proof| **proof == request.images[&level])
                 .count(),
             1
         );

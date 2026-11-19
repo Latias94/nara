@@ -21,6 +21,7 @@ use nara::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use two_level_game::delivery::{ControllerBackend, PlayerSelection, RuntimeKind};
 
 use crate::continuity::Fixture;
 
@@ -62,6 +63,8 @@ struct Request {
     unresolved_cleanup: PathBuf,
     title: String,
     target: String,
+    content_profile: String,
+    controller_backend: String,
     catalog_digest: Value,
     images: BTreeMap<String, Value>,
     source_samples: [Vec<f32>; 2],
@@ -135,8 +138,9 @@ impl Drop for Custody {
     }
 }
 
-pub fn accept(cooker: &Path) {
+pub fn accept(cooker: &Path, controllers: ControllerBackend) {
     assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
+    let player = PlayerSelection::new(RuntimeKind::AudioDesktop, controllers).unwrap();
     let mut custody = Custody {
         fixture: Some(Fixture::new()),
         process: None,
@@ -149,6 +153,7 @@ pub fn accept(cooker: &Path) {
         triple.ends_with("-pc-windows-msvc"),
         "actual native host target: {triple}"
     );
+    player.validate_target(&triple).unwrap();
     let loaded = ProjectManifest::parse_toml_bytes(fixture.read("nara.toml").as_bytes());
     assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
     let settings = loaded
@@ -201,7 +206,9 @@ pub fn accept(cooker: &Path) {
             "--name".into(),
             "TwoLevelAudio".into(),
             "--runtime".into(),
-            "audio-desktop".into(),
+            player.runtime().name().into(),
+            "--controllers".into(),
+            player.controllers().name().into(),
             "--profile".into(),
             "release".into(),
             "--target-dir".into(),
@@ -233,7 +240,8 @@ pub fn accept(cooker: &Path) {
     );
     let publication = process::record(&cooked, "TWO_LEVEL_PACKAGE_PUBLISHED ");
     assert!(publication["postpublication_error"].is_null());
-    assert_eq!(publication["runtime"], "audio-desktop");
+    assert_eq!(publication["runtime"], player.runtime().name());
+    assert_eq!(publication["controllers"], player.controllers().name());
     assert_eq!(publication["executable"], "player_audio.exe");
     let published = output.join("TwoLevelAudio").canonicalize().unwrap();
     assert_eq!(
@@ -252,6 +260,7 @@ pub fn accept(cooker: &Path) {
         &triple,
         &configuration,
         &source_samples,
+        player,
     );
     let bootstrap = payload["generated_input_name"].as_str().unwrap();
     assert_eq!(bootstrap, "player-bootstrap.rs");
@@ -275,6 +284,8 @@ pub fn accept(cooker: &Path) {
         "build.rs",
         "assets/materials/region.wgsl",
         "src/lib.rs",
+        "src/delivery.rs",
+        "src/controller.rs",
         "src/animation.rs",
         "src/sound_bank.rs",
         "src/sound_bank/source.rs",
@@ -311,7 +322,7 @@ pub fn accept(cooker: &Path) {
     package::copy_package(&relocated, &corrupt);
     package::copy_package(&relocated, &mismatched);
     package::corrupt_bank(&corrupt.join("content.pack"));
-    package::mismatch_catalog(&mismatched.join("content.pack"));
+    package::mismatch_catalog(&mismatched.join("content.pack"), player);
     let source = fixture.project.canonicalize().unwrap();
     let cache = output.join("two-level-cook-cache").canonicalize().unwrap();
     for (original, name) in [
@@ -349,6 +360,12 @@ pub fn accept(cooker: &Path) {
         unresolved_cleanup: worker.join("unresolved-cleanup"),
         title,
         target: triple,
+        content_profile: player.content_profile().to_owned(),
+        controller_backend: match player.controllers() {
+            ControllerBackend::Disabled => "none",
+            ControllerBackend::Gilrs => "gilrs-wgi",
+        }
+        .to_owned(),
         catalog_digest: payload["catalog_digest"].clone(),
         images,
         source_samples,

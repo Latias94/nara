@@ -85,8 +85,9 @@ impl<'a> Session<'a> {
                 self.request.catalog_digest["length"]
             );
             assert_eq!(record["content_target"], self.request.target);
+            evidence::selection(&record, self.request);
             if running(&record) {
-                evidence::runtime(&record, &self.request.images);
+                evidence::runtime(&record, self.request);
                 let visible_rooms = ["side_room", "lookout"]
                     .into_iter()
                     .filter(|room| record["state"][*room] == "open")
@@ -579,7 +580,7 @@ impl<'a> Session<'a> {
             .take()
             .expect("one terminal result after normal native close");
         assert!(self.ready);
-        evidence::runtime(&result, &self.request.images);
+        evidence::runtime(&result, self.request);
         assert!(
             self.input.restore(),
             "restore the original foreground after normal native retirement"
@@ -809,6 +810,11 @@ fn scripted_controls(request: &Request) -> Vec<Value> {
             "{scenario}: {}",
             native.diagnostics()
         );
+        for (_, record) in native.records() {
+            if record["success"] == true {
+                evidence::selection(&record, request);
+            }
+        }
         let result = super::process::record(&native.stdout(), RESULT);
         assert_eq!(result["scenario"], scenario);
         assert_eq!(result["state"]["verified"], true);
@@ -823,7 +829,7 @@ fn scripted_controls(request: &Request) -> Vec<Value> {
         ] {
             assert_eq!(result[field], true, "{result}");
         }
-        evidence::runtime(&result, &request.images);
+        evidence::runtime(&result, request);
         let (level, marker) = if scenario == "save" {
             (LevelId::Cavern, 2)
         } else {

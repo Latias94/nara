@@ -24,6 +24,7 @@ use nara_sprite_animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
     animation::{atlas_product, clips_product},
+    delivery::PlayerSelection,
     input::input_product,
     levels::LevelId,
     markers::{SCENE_PATH, marker_image_product, marker_product},
@@ -115,20 +116,17 @@ pub fn inspect(
     triple: &str,
     configuration: &RuntimeConfiguration,
     expected: &[Vec<f32>; 2],
+    player: PlayerSelection,
 ) -> BTreeMap<String, Value> {
     let bytes = read_bounded(&directory.join("content.pack"), 32 * 1024 * 1024);
     let pack = inspect_pack(&bytes);
     let catalog = &pack.catalog;
     assert_eq!(catalog.target().triple(), triple);
-    assert_eq!(
-        catalog.target().profile(),
-        "two-level-audio-desktop-shipping"
-    );
+    assert_eq!(catalog.target().profile(), player.content_profile());
+    assert_eq!(payload["content_target"], json!(catalog.target()));
     let configuration = configuration.resolve().unwrap();
     assert_eq!(catalog.configuration().resolve().unwrap(), configuration);
-    let plan =
-        resolve_runtime_configuration(&configuration, two_level_game::audio::cooked_recipe())
-            .unwrap();
+    let plan = resolve_runtime_configuration(&configuration, player.recipe().unwrap()).unwrap();
     assert_eq!(
         catalog.plugin_plan_fingerprint(),
         plan.plugin_plan().fingerprint().as_bytes()
@@ -184,14 +182,10 @@ pub fn inspect(
     assert_eq!(selection["cargo_profile"], "release");
     assert_eq!(selection["target_triple"], triple);
     assert_eq!(selection["default_features"], false);
-    let mut features = selection["requested_features"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|feature| feature.as_str().unwrap())
-        .collect::<Vec<_>>();
+    let mut features = player.features();
     features.sort();
-    assert_eq!(features, ["audio-cpal", "cooked-player", "desktop"]);
+    assert_eq!(selection["requested_features"], json!(features));
+    assert_eq!(payload["build"]["resolved_features"], json!(features));
     let mut products = BTreeSet::new();
     let mut images = BTreeMap::new();
     for (member, range) in catalog.members().iter().zip(pack.members) {
@@ -425,11 +419,12 @@ pub fn corrupt_bank(path: &Path) {
     fs::write(path, bytes).unwrap();
 }
 
-pub fn mismatch_catalog(path: &Path) {
+pub fn mismatch_catalog(path: &Path, player: PlayerSelection) {
     let mut bytes = read_bounded(path, 32 * 1024 * 1024);
     let pack = inspect_pack(&bytes);
     let original = ContentDigest::of_bytes(&bytes[pack.catalog_bytes.clone()]);
-    let profile = b"two-level-audio-desktop-shipping";
+    assert_eq!(pack.catalog.target().profile(), player.content_profile());
+    let profile = player.content_profile().as_bytes();
     let matches = bytes[pack.catalog_bytes.clone()]
         .windows(profile.len())
         .enumerate()
@@ -437,6 +432,7 @@ pub fn mismatch_catalog(path: &Path) {
         .collect::<Vec<_>>();
     assert_eq!(matches.len(), 1);
     let offset = pack.catalog_bytes.start + matches[0] + profile.len() - 1;
+    assert_eq!(bytes[offset], b'g');
     bytes[offset] = b'h';
     assert_ne!(
         ContentDigest::of_bytes(&bytes[pack.catalog_bytes.clone()]),

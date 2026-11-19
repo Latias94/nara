@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use two_level_game::{
     animation::atlas_product,
+    delivery::{ControllerBackend, PlayerSelection, RuntimeKind},
     levels::{LevelId, LevelKey},
     markers::marker_image_product,
 };
@@ -60,6 +61,8 @@ struct Request {
     save: PathBuf,
     title: String,
     target: String,
+    content_profile: String,
+    controller_backend: String,
     catalog_digest: Value,
     images: BTreeMap<LevelId, Value>,
 }
@@ -117,8 +120,9 @@ impl Drop for Custody {
     }
 }
 
-pub fn accept(cooker: &Path) {
+pub fn accept(cooker: &Path, controllers: ControllerBackend) {
     assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
+    let player = PlayerSelection::new(RuntimeKind::Desktop, controllers).unwrap();
     let mut custody = Custody {
         fixture: Some(Fixture::new()),
         process: None,
@@ -132,6 +136,7 @@ pub fn accept(cooker: &Path) {
         triple.ends_with("-pc-windows-msvc"),
         "actual Windows host triple: {triple}"
     );
+    player.validate_target(&triple).unwrap();
     let loaded = ProjectManifest::parse_toml_bytes(fixture.read("nara.toml").as_bytes());
     assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
     let settings = loaded
@@ -183,7 +188,7 @@ pub fn accept(cooker: &Path) {
             "--name".into(),
             "TwoLevelDesktop".into(),
             "--runtime".into(),
-            "desktop".into(),
+            player.runtime().name().into(),
             "--profile".into(),
             "release".into(),
             "--target-dir".into(),
@@ -203,6 +208,11 @@ pub fn accept(cooker: &Path) {
         .environment("CARGO", tools.cargo_path())
         .environment("RUSTC", tools.rustc_path())
         .bounded_stdout(std::num::NonZeroUsize::new(OUTPUT_BYTES).unwrap());
+    let command = if controllers == ControllerBackend::Gilrs {
+        command.arguments(["--controllers", "gilrs"])
+    } else {
+        command
+    };
     let cooked = custody.run(
         NativeProcess::spawn(&command, None),
         Duration::from_secs(30 * 60),
@@ -215,7 +225,8 @@ pub fn accept(cooker: &Path) {
     );
     let publication = process::record(&cooked, "TWO_LEVEL_PACKAGE_PUBLISHED ");
     assert!(publication["postpublication_error"].is_null());
-    assert_eq!(publication["runtime"], "desktop");
+    assert_eq!(publication["runtime"], player.runtime().name());
+    assert_eq!(publication["controllers"], player.controllers().name());
     assert_eq!(publication["executable"], "player_desktop.exe");
     let published = output.join("TwoLevelDesktop").canonicalize().unwrap();
     assert_eq!(
@@ -240,11 +251,11 @@ pub fn accept(cooker: &Path) {
     assert_eq!(selection["cargo_profile"], "release");
     assert_eq!(selection["target_triple"], triple);
     assert_eq!(selection["default_features"], false);
-    assert_eq!(
-        selection["requested_features"],
-        json!(["cooked-player", "desktop"])
-    );
-    let images = evidence::inspect_package(&published, payload, &triple, &configuration);
+    let mut features = player.features();
+    features.sort();
+    assert_eq!(selection["requested_features"], json!(features));
+    assert_eq!(payload["build"]["resolved_features"], json!(features));
+    let images = evidence::inspect_package(&published, payload, &triple, &configuration, player);
     let bootstrap = payload["generated_input_name"].as_str().unwrap();
     assert!(RelativePath::new(bootstrap).is_ok());
     assert_eq!(bootstrap, "player-bootstrap.rs");
@@ -266,6 +277,8 @@ pub fn accept(cooker: &Path) {
         "Cargo.lock",
         "build.rs",
         "assets/materials/region.wgsl",
+        "src/delivery.rs",
+        "src/controller.rs",
         "src/gameplay/mod.rs",
         "src/gameplay/input.rs",
         "src/animation.rs",
@@ -313,6 +326,12 @@ pub fn accept(cooker: &Path) {
             .join("checkpoint.json"),
         title,
         target: triple,
+        content_profile: player.content_profile().to_owned(),
+        controller_backend: match player.controllers() {
+            ControllerBackend::Disabled => "none",
+            ControllerBackend::Gilrs => "gilrs-wgi",
+        }
+        .to_owned(),
         catalog_digest: payload["catalog_digest"].clone(),
         images,
     };

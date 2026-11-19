@@ -61,6 +61,9 @@ impl<'a> Player<'a> {
             assert_eq!(evidence::number(&record, "sequence"), self.sequence + 1);
             self.sequence += 1;
             assert!(self.sequence <= 1024);
+            if record["success"] == true {
+                evidence::selection(&record, self.request);
+            }
             match kind {
                 READY => {
                     assert!(self.ready.is_none());
