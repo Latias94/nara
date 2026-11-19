@@ -15,13 +15,17 @@ struct CallbackControl {
 
 impl CallbackControl {
     fn new(capture_capacity: Option<usize>) -> Self {
+        Self::with_capture(capture_capacity.map(|capacity| (CaptureMode::Strict, capacity)))
+    }
+
+    fn with_capture(capture: Option<(CaptureMode, usize)>) -> Self {
         let shared = Arc::new(Shared::new(7));
         let (commands, input) = RingBuffer::new(COMMAND_CAPACITY);
         let (output, records) = RingBuffer::new(CUE_RECORD_CAPACITY + SCOPE_RECORD_CAPACITY);
-        let (capture_output, capture) = match capture_capacity {
-            Some(capacity) => {
+        let (capture_output, capture) = match capture {
+            Some((mode, capacity)) => {
                 let (producer, consumer) = RingBuffer::new(capacity);
-                (Some(producer), Some(consumer))
+                (Some((mode, producer)), Some(consumer))
             }
             None => (None, None),
         };
@@ -613,7 +617,78 @@ fn captured_chunks_preserve_literal_samples_and_exact_stereo_positions() {
     assert_eq!(captured, output);
     assert_eq!(&captured[..6], [0.5, 0.5, 0.25, 0.25, -0.5, -0.5]);
     assert!(captured[6..].iter().all(|sample| *sample == 0.0));
+    assert_eq!(callback.witness.dropped_output_frames(), 0);
     assert_eq!(callback.witness.snapshot().faults, 0);
+}
+
+#[test]
+fn full_best_effort_capture_keeps_mixing_cues_and_retires_with_unread_pcm() {
+    let mut callback = CallbackControl::with_capture(Some((CaptureMode::BestEffort, 1)));
+    let first = cue(1, 1);
+    let second = cue(1, 2);
+    callback.control.set_scope(scope(1)).unwrap();
+    callback.control.submit(first).unwrap();
+    assert_eq!(callback.output(1), [0.5, 0.5]);
+
+    callback.control.submit(second).unwrap();
+    assert_eq!(callback.output(2), [0.75, 0.75, -0.25, -0.25]);
+    let stalled = callback.witness.snapshot();
+    assert!(stalled.admission_open);
+    assert_eq!(stalled.faults, 0);
+    assert_eq!(callback.witness.dropped_output_frames(), 2);
+
+    let prefix = callback.witness.drain_capture();
+    assert_eq!(prefix.len(), 1);
+    assert_eq!((prefix[0].first_frame, prefix[0].len), (0, 2));
+    assert_eq!(&prefix[0].samples[..2], [0.5, 0.5]);
+    let output = callback.output(300);
+    assert_eq!(&output[..2], [-0.5, -0.5]);
+    assert!(output[2..].iter().all(|sample| *sample == 0.0));
+
+    drop(callback.callback.take());
+    let closing = callback.witness.snapshot();
+    assert!(closing.data_callback_released);
+    assert!(!closing.physical_complete);
+    drop(callback.error_release.take());
+    let retired = callback.witness.snapshot();
+    assert!(retired.error_callback_released && retired.physical_complete);
+    assert!(!retired.admission_open);
+    assert!(!retired.stream_created && !retired.stream_drop_returned);
+    assert_eq!(retired.faults, 0);
+    assert_eq!((retired.callback_count, retired.output_frame), (3, 303));
+    assert_eq!(
+        retired.counters,
+        Counters {
+            accepted: 2,
+            started: 2,
+            completed: 2,
+            cancelled: 0,
+        }
+    );
+    assert_eq!(
+        cue_records(&callback.witness),
+        [
+            (first, 0, CueRecordKind::Accepted),
+            (first, 0, CueRecordKind::Started),
+            (second, 1, CueRecordKind::Accepted),
+            (second, 1, CueRecordKind::Started),
+            (first, 3, CueRecordKind::Completed),
+            (second, 4, CueRecordKind::Completed),
+        ]
+    );
+    let resumed = callback.witness.drain_capture();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        (resumed[0].first_frame, resumed[0].len),
+        (3, CAPTURE_SAMPLES)
+    );
+    assert_eq!(&resumed[0].samples[..], &output[..CAPTURE_SAMPLES]);
+    assert_eq!(callback.witness.dropped_output_frames(), 46);
+    assert_eq!(
+        ((prefix[0].len + resumed[0].len) / OUTPUT_CHANNELS) as u64
+            + callback.witness.dropped_output_frames(),
+        retired.output_frame
+    );
 }
 
 #[test]
@@ -634,6 +709,28 @@ fn capture_overflow_is_a_fault_and_closes_further_admission() {
         cue(1, 1),
         0,
         CueRecordKind::Refused(SubmissionRefusal::Faulted),
+    )));
+}
+
+#[test]
+fn full_strict_capture_still_cancels_a_started_voice() {
+    let mut callback = CallbackControl::new(Some(1));
+    let pickup = cue(1, 1);
+    callback.control.set_scope(scope(1)).unwrap();
+    callback.control.submit(pickup).unwrap();
+    assert_eq!(callback.output(1), [0.5, 0.5]);
+
+    assert_eq!(callback.output(2), [0.0; 4]);
+    let snapshot = callback.witness.snapshot();
+    assert_eq!(snapshot.faults, DeviceFault::CaptureOverflow.mask());
+    assert!(!snapshot.admission_open);
+    assert_eq!(snapshot.counters.cancelled, 1);
+    assert_eq!(snapshot.counters.completed, 0);
+    assert_eq!(callback.witness.dropped_output_frames(), 2);
+    assert!(cue_records(&callback.witness).contains(&(
+        pickup,
+        1,
+        CueRecordKind::Cancelled { started: true },
     )));
 }
 

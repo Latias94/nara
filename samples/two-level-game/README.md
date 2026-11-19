@@ -303,9 +303,9 @@ and independent cause/scope/mix arithmetic. The separate delivery test compares 
 whole output hash against independently decoded source WAVs after relocation and source/cache
 removal. Neither observation establishes human audibility, DAC timing or scanout.
 
-This explicit placement always captures/drains callback output; normal play discards PCM while
-`--verify` retains only its finite verification interval. That observation cost is part of this
-placement and is not a production performance claim.
+This placement drains bounded callback observations. If the observer falls behind, playback
+continues and reports the number of discarded observation frames. `--verify` requires a continuous
+capture with zero discarded frames across its finite verification interval.
 
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --all-features --test cooked_audio --run-ignored only -E 'test(production_cooked_audio_player)' --test-threads=1 --no-fail-fast --no-tests fail

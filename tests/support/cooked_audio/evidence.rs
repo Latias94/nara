@@ -178,6 +178,7 @@ pub fn retired(record: &Value, request: &Request) {
         number(snapshot, "accepted")
     );
     assert_eq!(audio["callback_frames_drained"], snapshot["output_frames"]);
+    assert_eq!(audio["callback_frames_dropped"], 0);
 }
 
 pub fn refused(record: &Value, reason: &str) {
@@ -227,6 +228,7 @@ pub fn refused(record: &Value, reason: &str) {
     assert!(record["audio"]["snapshot"].is_null());
     assert!(record["audio"]["pcm"].is_null());
     assert_eq!(record["audio"]["callback_frames_drained"], 0);
+    assert_eq!(record["audio"]["callback_frames_dropped"], 0);
     match reason {
         "compiled_catalog_expectation_mismatch" => {
             assert!(

@@ -19,7 +19,7 @@ use two_level_game::{
 };
 
 use super::{
-    oracle::{self, CHANNELS, MAX_OUTPUT_FRAMES},
+    oracle::{self, CHANNELS},
     runtime::PlayerExtension,
 };
 
@@ -32,6 +32,7 @@ pub(super) struct AudioObservation {
     instances: BTreeMap<u64, LevelKey>,
     output: Vec<f32>,
     captured_frames: u64,
+    dropped_frames: u64,
     game: Option<GameSnapshot>,
     snapshot: Option<AudioSnapshot>,
     pcm: Option<Value>,
@@ -51,6 +52,7 @@ impl AudioObservation {
             instances: BTreeMap::new(),
             output: Vec::new(),
             captured_frames: 0,
+            dropped_frames: 0,
             game: None,
             snapshot: None,
             pcm: None,
@@ -64,26 +66,15 @@ impl AudioObservation {
         let Some(witness) = &self.witness else {
             return Ok(());
         };
-        for chunk in witness.drain_output() {
-            if chunk.channels as usize != CHANNELS
-                || chunk.first_channel != 0
-                || chunk.samples.is_empty()
-                || !chunk.samples.len().is_multiple_of(CHANNELS)
-                || chunk.first_frame != self.captured_frames
-            {
-                return Err("cooked audio callback capture is unexpected or discontinuous".into());
-            }
-            self.captured_frames = self
-                .captured_frames
-                .checked_add((chunk.samples.len() / CHANNELS) as u64)
-                .ok_or("cooked audio callback frame count exhausted")?;
-            if !self.verify {
-                continue;
-            }
-            if self.output.len() + chunk.samples.len() > MAX_OUTPUT_FRAMES as usize * CHANNELS {
-                return Err("cooked audio callback capture exceeded its finite allowance".into());
-            }
-            self.output.extend(chunk.samples);
+        let chunks = witness.drain_output();
+        self.dropped_frames = witness.dropped_output_frames();
+        let frames = chunks
+            .iter()
+            .map(|chunk| (chunk.samples.len() / CHANNELS) as u64)
+            .sum::<u64>();
+        self.captured_frames = self.captured_frames.saturating_add(frames);
+        if self.verify {
+            oracle::append_output(&mut self.output, chunks, self.dropped_frames)?;
         }
         let snapshot = witness.snapshot();
         if snapshot.faults != 0 || snapshot.error.is_some() {
@@ -249,7 +240,6 @@ impl PlayerExtension for AudioObservation {
             || !snapshot.data_callback_released
             || !snapshot.error_callback_released
             || snapshot.admission_open
-            || snapshot.output_frames != self.captured_frames
         {
             return Err("original cooked audio stream/callback retirement is incomplete".into());
         }
@@ -289,10 +279,11 @@ impl PlayerExtension for AudioObservation {
             "input_proof": self.input,
             "snapshot": self.snapshot,
             "callback_frames_drained": self.captured_frames,
+            "callback_frames_dropped": self.dropped_frames,
             "pcm": self.pcm,
             "native": self.native,
             "deadline_scope": "cooperative original polls and native calls; callback samples do not establish human audibility",
-            "observation_scope": "fixed callback capture is drained during all playback; only --verify retains PCM; no production performance claim",
+            "observation_scope": "bounded callback capture drops and counts excess frames; --verify requires complete PCM",
             "verification_input": "initial isolation, then original focus and physical-key reconciliation before Resume",
         }))
     }

@@ -121,6 +121,37 @@ fn fixture() -> (AudioSnapshot, Vec<f32>, BTreeMap<u64, LevelKey>) {
 }
 
 #[test]
+fn verification_requires_exact_callback_ordinals_across_drains() {
+    let chunk = |first_frame| AudioOutput {
+        first_frame,
+        first_channel: 0,
+        channels: CHANNELS as u16,
+        samples: vec![0.25; CHANNELS],
+    };
+    let mut output = Vec::new();
+    append_output(&mut output, vec![chunk(0)], 0).unwrap();
+    for frame in [0, 2] {
+        assert_eq!(
+            append_output(&mut output, vec![chunk(frame)], 0).unwrap_err(),
+            "cooked audio callback capture is unexpected or discontinuous"
+        );
+    }
+    assert_eq!(output, [0.25; CHANNELS]);
+    append_output(&mut output, vec![chunk(1)], 0).unwrap();
+    assert_eq!(output, [0.25; CHANNELS * 2]);
+}
+
+#[test]
+fn verification_refuses_reported_loss_without_waiting_for_a_gap() {
+    let mut output = vec![0.25; CHANNELS];
+    assert_eq!(
+        append_output(&mut output, Vec::new(), 1).unwrap_err(),
+        "cooked audio callback capture is incomplete (dropped frames = 1)"
+    );
+    assert_eq!(output, [0.25; CHANNELS]);
+}
+
+#[test]
 fn compares_every_callback_sample_and_reports_exact_acquired_source_frames() {
     let (snapshot, actual, instances) = fixture();
     let proof = verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).unwrap();
@@ -140,6 +171,16 @@ fn rejects_a_corrupt_callback_sample_or_wrong_acquired_pcm() {
     assert!(verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).is_err());
     let (snapshot, actual, instances) = fixture();
     assert!(verify(&snapshot, &actual, &[0.5, -0.5], &TRAVEL, &instances).is_err());
+}
+
+#[test]
+fn refuses_pcm_acceptance_with_a_missing_final_frame() {
+    let (snapshot, mut actual, instances) = fixture();
+    actual.truncate(actual.len() - CHANNELS);
+    assert_eq!(
+        verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).unwrap_err(),
+        "callback PCM does not cover the complete bounded output interval"
+    );
 }
 
 #[test]

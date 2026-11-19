@@ -3,13 +3,40 @@ use std::collections::BTreeMap;
 use nara::fs::ContentDigest;
 use serde_json::{Value, json};
 use two_level_game::{
-    audio::{AudioCause, AudioClip, AudioPhase, AudioRecord, AudioSnapshot},
+    audio::{AudioCause, AudioClip, AudioOutput, AudioPhase, AudioRecord, AudioSnapshot},
     levels::{LevelId, LevelKey},
 };
 
 pub(super) const SAMPLE_RATE: u64 = 48_000;
 pub(super) const CHANNELS: usize = 2;
-pub(super) const MAX_OUTPUT_FRAMES: u64 = SAMPLE_RATE * 60;
+const MAX_OUTPUT_FRAMES: u64 = SAMPLE_RATE * 60;
+
+pub(super) fn append_output(
+    output: &mut Vec<f32>,
+    chunks: Vec<AudioOutput>,
+    dropped_frames: u64,
+) -> Result<(), String> {
+    if dropped_frames != 0 {
+        return Err(format!(
+            "cooked audio callback capture is incomplete (dropped frames = {dropped_frames})"
+        ));
+    }
+    for chunk in chunks {
+        if chunk.channels as usize != CHANNELS
+            || chunk.first_channel != 0
+            || chunk.samples.is_empty()
+            || !chunk.samples.len().is_multiple_of(CHANNELS)
+            || chunk.first_frame != (output.len() / CHANNELS) as u64
+        {
+            return Err("cooked audio callback capture is unexpected or discontinuous".into());
+        }
+        if output.len() + chunk.samples.len() > MAX_OUTPUT_FRAMES as usize * CHANNELS {
+            return Err("cooked audio callback capture exceeded its finite allowance".into());
+        }
+        output.extend(chunk.samples);
+    }
+    Ok(())
+}
 
 struct Cue {
     clip: AudioClip,

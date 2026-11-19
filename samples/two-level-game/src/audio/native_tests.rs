@@ -11,14 +11,18 @@ use nara::{
     prelude::App,
 };
 
-use super::{AudioOptions, AudioPlugin, AudioWitness, device::NativeGate, start_audio, witness};
+use super::{
+    AudioPlugin, AudioWitness,
+    device::{CaptureMode, NativeGate},
+    start_audio, witness,
+};
 
 #[path = "development_native_tests.rs"]
 mod development;
 
 fn isolated_audio(gate: Option<NativeGate>) -> AudioPlugin {
     AudioPlugin {
-        options: AudioOptions::default(),
+        capture: CaptureMode::Disabled,
         policy: super::AudioPolicy::Ordinary,
         native_gate: gate,
         test_clips: Some(super::PreparedClips::new(Arc::from([0.0]), Arc::from([0.0])).unwrap()),

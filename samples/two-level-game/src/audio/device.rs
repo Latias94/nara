@@ -25,9 +25,19 @@ const DRIVER_RECORD_CAPACITY: usize = 256;
 const CAPTURE_SAMPLES: usize = 512;
 const CAPTURE_CAPACITY: usize = 1024;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub(super) enum CaptureMode {
+    #[default]
+    Disabled = 0,
+    Strict = 1,
+    #[cfg(any(feature = "desktop", test))]
+    BestEffort = 2,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct DeviceSettings {
-    pub capture: bool,
+    pub capture: CaptureMode,
     pub native_gate: Option<NativeGate>,
 }
 
@@ -263,6 +273,7 @@ struct Shared {
     quiescing: AtomicBool,
     callback_count: AtomicU64,
     output_frame: AtomicU64,
+    dropped_output_frames: AtomicU64,
     accepted: AtomicU64,
     started: AtomicU64,
     completed: AtomicU64,
@@ -289,6 +300,7 @@ impl Shared {
             quiescing: AtomicBool::new(false),
             callback_count: AtomicU64::new(0),
             output_frame: AtomicU64::new(0),
+            dropped_output_frames: AtomicU64::new(0),
             accepted: AtomicU64::new(0),
             started: AtomicU64::new(0),
             completed: AtomicU64::new(0),
@@ -526,6 +538,10 @@ impl AudioWitness {
         }
         chunks
     }
+
+    pub(super) fn dropped_output_frames(&self) -> u64 {
+        self.shared.dropped_output_frames.load(Ordering::Acquire)
+    }
 }
 
 pub(super) struct AudioDevice {
@@ -664,9 +680,9 @@ impl AudioDevice {
             .config();
         let (commands, command_input) = RingBuffer::new(COMMAND_CAPACITY);
         let (record_output, records) = RingBuffer::new(CUE_RECORD_CAPACITY + SCOPE_RECORD_CAPACITY);
-        let (capture_output, capture) = if settings.capture {
+        let (capture_output, capture) = if settings.capture != CaptureMode::Disabled {
             let (producer, consumer) = RingBuffer::new(CAPTURE_CAPACITY);
-            (Some(producer), Some(consumer))
+            (Some((settings.capture, producer)), Some(consumer))
         } else {
             (None, None)
         };
@@ -813,7 +829,7 @@ struct CallbackState {
     admission: Arc<Mutex<Producer<Cue>>>,
     commands: Consumer<Cue>,
     records: Producer<DeviceRecord>,
-    capture: Option<Producer<CapturedOutput>>,
+    capture: Option<(CaptureMode, Producer<CapturedOutput>)>,
     gate: Option<NativeGate>,
     release: ReleaseToken,
 }
@@ -855,7 +871,7 @@ impl CallbackState {
             shared.fault(DeviceFault::FrameOverflow);
             return;
         };
-        if let Some(capture) = &self.capture
+        if let Some((CaptureMode::Strict, capture)) = &self.capture
             && capture.slots() < output.len().div_ceil(CAPTURE_SAMPLES)
         {
             shared.fault(DeviceFault::CaptureOverflow);
@@ -903,10 +919,11 @@ impl CallbackState {
         if self.mixer.output_frame() != end_frame {
             shared.fault(DeviceFault::FrameOverflow);
         }
-        if let Some(capture) = &mut self.capture {
+        if let Some((mode, capture)) = &mut self.capture {
             for (index, samples) in output.chunks(CAPTURE_SAMPLES).enumerate() {
+                let chunk_frame = first_frame + (index * CAPTURE_SAMPLES / OUTPUT_CHANNELS) as u64;
                 let mut chunk = CapturedOutput {
-                    first_frame: first_frame + (index * CAPTURE_SAMPLES / OUTPUT_CHANNELS) as u64,
+                    first_frame: chunk_frame,
                     first_channel: 0,
                     channels: OUTPUT_CHANNELS as u16,
                     len: samples.len(),
@@ -914,7 +931,12 @@ impl CallbackState {
                 };
                 chunk.samples[..samples.len()].copy_from_slice(samples);
                 if capture.push(chunk).is_err() {
-                    shared.fault(DeviceFault::CaptureOverflow);
+                    shared
+                        .dropped_output_frames
+                        .fetch_add(end_frame - chunk_frame, Ordering::Release);
+                    if *mode == CaptureMode::Strict {
+                        shared.fault(DeviceFault::CaptureOverflow);
+                    }
                     break;
                 }
             }

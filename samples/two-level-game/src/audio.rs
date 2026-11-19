@@ -34,8 +34,8 @@ use crate::{RunOptions, levels::LevelKey};
 use bank::RetainedSoundBank;
 use clips::{ClipKind, PreparedClips};
 use device::{
-    AudioController, AudioDevice, AudioWitness as DeviceWitness, CueRecordKind, DeviceRecord,
-    DeviceSettings, DeviceSnapshot,
+    AudioController, AudioDevice, AudioWitness as DeviceWitness, CaptureMode, CueRecordKind,
+    DeviceRecord, DeviceSettings, DeviceSnapshot,
 };
 use mixer::{Cue, EffectId, Scope};
 
@@ -54,16 +54,32 @@ pub struct AudioOptions {
     pub capture_output: bool,
 }
 
+impl AudioOptions {
+    fn capture_mode(self) -> CaptureMode {
+        if self.capture_output {
+            CaptureMode::Strict
+        } else {
+            CaptureMode::Disabled
+        }
+    }
+}
+
 impl ProductConfiguration for AudioOptions {
     fn write_canonical(&self, output: &mut Vec<u8>) {
+        self.capture_mode().write_canonical(output);
+    }
+}
+
+impl ProductConfiguration for CaptureMode {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
         output.extend_from_slice(b"two-level-cpal-f32-stereo-48000/v1");
-        output.push(u8::from(self.capture_output));
+        output.push(*self as u8);
     }
 }
 
 /// An explicit audible source-game composition; ordinary and cooked recipes stay independent.
 pub fn recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
-    with_audio(crate::configured_recipe(options), audio)
+    with_audio(crate::configured_recipe(options), audio.capture_mode())
 }
 
 /// Starts the original device with gameplay publication disabled and empty effect history.
@@ -74,7 +90,7 @@ pub fn recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
 pub fn development_recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
     crate::configured_recipe(options)
         .add_configured_plugin(DevelopmentAudioOptions(audio), |options| AudioPlugin {
-            options: options.0,
+            capture: options.0.capture_mode(),
             policy: AudioPolicy::ResetOnRebuild,
             native_gate: None,
             #[cfg(test)]
@@ -101,18 +117,13 @@ enum AudioPolicy {
 /// The explicitly observed audible Player placement selected by the cooker.
 #[cfg(feature = "desktop")]
 pub fn cooked_recipe() -> ProductRecipe {
-    with_audio(
-        crate::cooked_desktop_recipe(),
-        AudioOptions {
-            capture_output: true,
-        },
-    )
+    with_audio(crate::cooked_desktop_recipe(), CaptureMode::BestEffort)
 }
 
-fn with_audio(recipe: ProductRecipe, audio: AudioOptions) -> ProductRecipe {
+fn with_audio(recipe: ProductRecipe, capture: CaptureMode) -> ProductRecipe {
     recipe
-        .add_configured_plugin(audio, |options| AudioPlugin {
-            options: *options,
+        .add_configured_plugin(capture, |capture| AudioPlugin {
+            capture: *capture,
             policy: AudioPolicy::Ordinary,
             native_gate: None,
             #[cfg(test)]
@@ -313,6 +324,15 @@ impl AudioWitness {
             })
             .collect()
     }
+
+    /// Cumulative stereo frames dropped by the bounded callback capture.
+    pub fn dropped_output_frames(&self) -> u64 {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .device
+            .dropped_output_frames()
+    }
 }
 
 impl GameAudioState {
@@ -510,7 +530,7 @@ fn publish(world: &mut World, clip: ClipKind, cause: AudioCause) {
 }
 
 struct AudioPlugin {
-    options: AudioOptions,
+    capture: CaptureMode,
     policy: AudioPolicy,
     native_gate: Option<device::NativeGate>,
     #[cfg(test)]
@@ -554,7 +574,7 @@ impl Plugin for AudioPlugin {
         app.world_mut()?.insert_non_send(NativeOwner {
             slot,
             settings: DeviceSettings {
-                capture: self.options.capture_output,
+                capture: self.capture,
                 native_gate: self.native_gate.clone(),
             },
             #[cfg(test)]
