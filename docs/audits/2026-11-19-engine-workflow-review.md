@@ -109,9 +109,8 @@ These entries record follow-up changes against the original findings above.
 | 7. Offscreen focus | `2bc19f1` uses one snapped visible intersection for focus and semantic exposure. The kernel, widgets, authored UI and render preparation cohort passes 443/443 in `b1c7fd3e-5fe3-4120-8765-5f0d32e96d78`. It covers empty, subpixel, partly visible and modal cases, including pointer-capture continuity. [Contract](../architecture/adr/0108-ui-surface-presented-session-and-atomic-interaction.md) |
 | 8. Atlas refresh | `e435fde` releases retired Sprite extraction elements immediately. A TileSet refused on retention retries when its exact desired allocation fits. Tests cover `10 → 20 → 25` without a held packet, a held packet's unchanged pixels and recovery after release, and an unchanged invalid atlas. [Consumer](../../crates/nara_sprite_render/tests/tileset_content.rs) |
 
-The twelve P2 findings and the narrower risks above remain open in this qualification. They
-include default Input outcome allocation, native pointer invalidation, fractional-DPI integer
-fitting, image UV/border clipping and Inspector drag selection.
+The subsequent repair record below tracks the P2 findings. The narrower risks retain the original
+verification scope above.
 
 The combined Windows asset, watcher, Image, Sprite and TileSet release cohort passes 603/603
 in `c39f3264-bb5e-4382-be1d-a1981cbaa7a0`, with one ignored case outside the selection. It
@@ -121,3 +120,20 @@ those consumers. They pass after restoring explicit extraction without Window ge
 Correctness Clippy passes for the affected libraries with the Cook feature closure. Rustfmt passes
 for the root and independent stock composition workspaces. The native resize evidence covers the
 actual single-display Windows DX12 paths. The mixed-DPI test was outside this selection.
+
+### Runtime P2 repair record
+
+| Finding | Repair and qualification |
+| --- | --- |
+| Pointer projection after geometry loss | `cf4791e` clears the convenience position for the sampled pointer's leave or its endpoint's invalidation. A managed Runtime regression covers resize, DPI, another endpoint, another pointer and fresh movement. Windows nextest `f0f5cd8f-644e-42ca-9d9a-f35ec12e349d`. |
+| Image reload with missing PNG provenance | `3ace201` settles the current failed request, retains the last-good Image version and uses the original removal queue for an exact primary Product. The superseded control preserves the replacement request's authority. Windows nextest `c2135ffc-eb02-4a7c-87e1-875ec7acade7`. |
+| Missing roots in an empty managed hierarchy | `c8b89b4` reports the managed fault, revokes the old completed order and keeps Stop available. A deferred command cannot recreate the missing roots. Standalone empty graphs remain usable. Windows nextest `8ba8a6a0-a090-438f-921c-85878d908297`. |
+| Cooked Material admission | `9f5462d` shares Scene Material declaration and override validation between deep checking and Player preparation. The independent consumer rejects incompatible declarations, wrong texture kinds and missing override products at package admission. Its positive control still boots from the encoded pack. Windows nextest `19a4c51a-725e-48a1-babc-75411864fa05`. |
+| Additive unload with unavailable Asset events | `afcb683` requires the TileSet publication resources before retiring the occurrence. The sample holds `AssetEvents` outside the World during the original unload attempt, checks exact entities and publications, then retries successfully and retains the last good pixels. The same sample cohort checks parented relic collection against the completed world position. Windows nextest `0209359c-a330-4707-9977-6e4a4b99dea8` passes all 100 selected tests. |
+| Fixed clock change during presentation | `9f16750` settles fixed time and interpolation together. The original App frame, moving camera and retained Material captures agree through change and replay. Windows DX12 shader readback passes in nextest `c46484b9-485c-48fb-8889-914c563c5802`. |
+
+Open P2 findings from this review include default Input outcome storage, Tilemap dirty-chunk
+retention, fractional-DPI integer Canvas fit, clipped UI image and border geometry, and drag
+selection in the drawn Inspector. The
+[third review's repair record](2026-11-19-engine-consumer-contract-review.md#repair-status)
+covers its separate set of consumer failures.
