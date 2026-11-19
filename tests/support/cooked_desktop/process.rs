@@ -247,10 +247,22 @@ impl NativeProcess {
             owner.process_id(),
             owner.state(),
             owner.cleanup_receipt(),
-            String::from_utf8_lossy(&self.stdout[self.stdout.len().saturating_sub(8192)..]),
-            String::from_utf8_lossy(&self.stderr[self.stderr.len().saturating_sub(8192)..])
+            diagnostic_excerpt(&self.stdout),
+            diagnostic_excerpt(&self.stderr)
         )
     }
+}
+
+fn diagnostic_excerpt(bytes: &[u8]) -> String {
+    if bytes.len() <= 8192 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    format!(
+        "{}\n[{} diagnostic bytes omitted]\n{}",
+        String::from_utf8_lossy(&bytes[..4096]),
+        bytes.len() - 8192,
+        String::from_utf8_lossy(&bytes[bytes.len() - 4096..]),
+    )
 }
 
 impl Drop for NativeProcess {

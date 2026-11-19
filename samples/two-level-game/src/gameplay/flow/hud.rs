@@ -68,7 +68,7 @@ impl Plugin for HudPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(StartupStage::Runtime, initialize.after(super::initialize))?;
-        app.add_systems(CoreStage::Update, update)?;
+        app.add_systems(CoreStage::Update, update.after(super::advance))?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-#![cfg(all(windows, feature = "play-flow", feature = "development"))]
+#![cfg(all(windows, feature = "play-flow-check"))]
 #![forbid(unsafe_code)]
 
 use std::{

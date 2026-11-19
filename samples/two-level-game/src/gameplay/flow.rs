@@ -12,14 +12,15 @@ use nara::{
     ProductRecipe, ProductRecipeError,
     advanced_prelude::{CurrentScene, StartupSceneActivationSet},
     app::{
-        AppExitRequests, PluginCategory, PluginDeclaration, PluginId, RuntimeTimeSettings,
-        StartupStage,
+        AppExitRequests, PluginCategory, PluginDeclaration, PluginId, RuntimeFrameStatus,
+        RuntimeTimeSettings, StartupStage,
     },
     ecs::{World, schedule::IntoScheduleConfigs},
     identity::SceneInstanceId,
     input::{
-        ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, ActionMaps,
-        ActionPhase, InputBinding, InputSeatId, KeyCode, SemanticActions,
+        ActionBinding, ActionContext, ActionId, ActionMapBindings, ActionMapBuilder,
+        ActionMapLimits, ActionMaps, ActionPhase, InputBinding, InputSeatId, KeyCode,
+        SemanticActions,
     },
     prelude::{App, CoreStage, Plugin, PluginError, Resource},
 };
@@ -68,6 +69,28 @@ pub struct FlowSnapshot {
     pub meadow_collected: bool,
     pub cavern_collected: bool,
     pub error: Option<String>,
+}
+
+/// Retains the admitted gameplay definition and this flow's exact installed menu derivation.
+///
+/// The original source or processed owner stays alive. Context enablement remains mutable in
+/// the original PRIMARY action map; neither handle changes that state or grants input custody.
+#[derive(Debug, Resource)]
+pub struct FlowBindings {
+    admitted: ActionMapBindings,
+    installed: ActionMapBindings,
+}
+
+impl FlowBindings {
+    #[must_use]
+    pub fn admitted(&self) -> &ActionMapBindings {
+        &self.admitted
+    }
+
+    #[must_use]
+    pub fn installed(&self) -> &ActionMapBindings {
+        &self.installed
+    }
 }
 
 #[derive(Resource)]
@@ -129,7 +152,11 @@ impl Plugin for PlayFlowPlugin {
             StartupStage::Runtime,
             initialize.after(StartupSceneActivationSet),
         )?;
-        app.add_systems(CoreStage::Last, advance.before(super::capture))?;
+        app.add_systems(CoreStage::Update, advance)?;
+        app.add_systems(
+            CoreStage::Last,
+            publish_while_host_paused.before(super::capture),
+        )?;
         Ok(())
     }
 }
@@ -193,9 +220,15 @@ fn install_controls(world: &mut World) -> Result<(), String> {
         .compile()
         .map_err(|error| error.to_string())?
         .into_bindings();
+    let retained = FlowBindings {
+        admitted: map.bindings_handle(),
+        installed: bindings.clone(),
+    };
     map.replace_bindings(bindings);
     map.disable_context(&ActionContext::gameplay())
         .map_err(|error| error.to_string())?;
+    drop(maps);
+    world.insert_resource(retained);
     Ok(())
 }
 
@@ -216,9 +249,6 @@ pub(super) fn drain_or_block_gameplay(world: &mut World) -> bool {
 }
 
 fn enter(world: &mut World, phase: FlowPhase) {
-    if phase != FlowPhase::Playing {
-        world.resource_mut::<Session>().held = [false; 4];
-    }
     let enabled = phase == FlowPhase::Playing;
     let result = world
         .resource_mut::<ActionMaps>()
@@ -234,6 +264,10 @@ fn enter(world: &mut World, phase: FlowPhase) {
     } else {
         phase
     };
+    if phase != FlowPhase::Playing && world.resource::<Session>().held != [false; 4] {
+        world.resource_mut::<Session>().held = [false; 4];
+        super::project_animation(world);
+    }
     let scale = if matches!(phase, FlowPhase::Playing | FlowPhase::Resuming) {
         world.resource::<Flow>().resume_scale
     } else {
@@ -335,8 +369,7 @@ fn goals(world: &World) -> [bool; 2] {
 }
 
 fn advance(world: &mut World) {
-    if world.resource::<RuntimeTimeSettings>().paused() {
-        publish(world);
+    if world.resource::<RuntimeFrameStatus>().simulation_paused {
         return;
     }
     let flow = world.resource::<Flow>();
@@ -394,6 +427,12 @@ fn advance(world: &mut World) {
         new_round(world);
     }
     publish(world);
+}
+
+fn publish_while_host_paused(world: &mut World) {
+    if world.resource::<RuntimeFrameStatus>().simulation_paused {
+        publish(world);
+    }
 }
 
 fn publish(world: &mut World) {

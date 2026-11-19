@@ -11,6 +11,7 @@ use nara::{
     asset::{AssetServer, AssetStates, Assets},
     core::Vec2,
     ecs::World,
+    fs::ContentDigest,
     image::{ImageAsset, PreparedImages, image_resource_key},
     material::Material2dAsset,
     project_host::{DesktopPresentationControl, DesktopPresentationObservation},
@@ -30,16 +31,30 @@ use nara::{
     },
 };
 use serde_json::{Value, json};
-use two_level_game::{GamePhase, GameSnapshot, Scenario, region_material, region_tileset};
+use two_level_game::{
+    GamePhase, GameSnapshot, Scenario,
+    delivery::{GameFlow, PlayerSelection},
+    region_material, region_tileset,
+};
+
+#[cfg(feature = "play-flow")]
+#[path = "flow.rs"]
+mod flow;
 
 use super::{
     desktop_output::{Emitter, Record},
     evidence::Evidence,
-    generated, output,
+    output,
 };
 
 pub(super) type Panic = Box<dyn Any + Send + 'static>;
 pub(super) type SharedPresentation = Rc<RefCell<Presentation>>;
+
+pub(super) struct ContentIdentity {
+    pub catalog: ContentDigest,
+    pub target: String,
+    pub profile: String,
+}
 
 pub(super) struct Frame {
     pub runtime_generation: u64,
@@ -126,6 +141,8 @@ impl Frame {
 }
 
 pub(super) struct Presentation {
+    content: ContentIdentity,
+    pub selection: Option<PlayerSelection>,
     pub evidence: Evidence,
     pub frame: Option<Frame>,
     pub frames: u64,
@@ -141,11 +158,21 @@ pub(super) struct Presentation {
     scenario: Scenario,
     scene_receipts_sampled: bool,
     semantic: Option<Value>,
+    #[cfg(feature = "play-flow")]
+    flow: Option<flow::Observation>,
+    #[cfg(feature = "play-flow")]
+    initial_title: Option<Value>,
 }
 
 impl Presentation {
-    pub(super) fn new(observe: bool, scenario: Scenario) -> SharedPresentation {
+    pub(super) fn new(
+        observe: bool,
+        scenario: Scenario,
+        content: ContentIdentity,
+    ) -> SharedPresentation {
         Rc::new(RefCell::new(Self {
+            content,
+            selection: None,
             evidence: Evidence::default(),
             frame: None,
             frames: 0,
@@ -161,6 +188,10 @@ impl Presentation {
             scenario,
             scene_receipts_sampled: false,
             semantic: None,
+            #[cfg(feature = "play-flow")]
+            flow: None,
+            #[cfg(feature = "play-flow")]
+            initial_title: None,
         }))
     }
 
@@ -171,10 +202,14 @@ impl Presentation {
         save: Option<Value>,
     ) -> Value {
         let mut record = self.evidence.result(scenario, message, save);
-        record["catalog_hash"] = json!(generated::CATALOG_HASH);
-        record["catalog_length"] = json!(generated::CATALOG_LENGTH);
-        record["content_target"] = json!(generated::CONTENT_TARGET);
-        record["content_profile"] = json!(generated::CONTENT_PROFILE);
+        record["catalog_hash"] = json!(self.content.catalog.as_bytes());
+        #[cfg(feature = "play-flow")]
+        {
+            record["initial_title_presentation"] = self.initial_title.clone().into();
+        }
+        record["catalog_length"] = json!(self.content.catalog.length());
+        record["content_target"] = json!(self.content.target);
+        record["content_profile"] = json!(self.content.profile);
         record["presentation"] = self.frame.as_ref().map(Frame::facts).into();
         record["adapter"] = self
             .frame
@@ -196,6 +231,11 @@ impl Presentation {
         record["original_pump_returned"] = json!(false);
         record["cleanup_complete"] = json!(false);
         record["scene_receipts_sampled"] = json!(self.scene_receipts_sampled);
+        record["flow"] = Value::Null;
+        #[cfg(feature = "play-flow")]
+        {
+            record["flow"] = self.flow.as_ref().map(flow::Observation::facts).into();
+        }
         record["gameplay_error"] = self
             .evidence
             .snapshot
@@ -228,6 +268,22 @@ impl Presentation {
         let world = observation
             .world()
             .ok_or("the presented World is unavailable")?;
+        #[cfg(feature = "play-flow")]
+        {
+            self.flow = self
+                .selection
+                .filter(|selection| selection.flow() == GameFlow::Round)
+                .and_then(|selection| flow::observe(world, &frame, selection.flow()));
+            if self.initial_title.is_none()
+                && world
+                    .get_resource::<GameSnapshot>()
+                    .is_some_and(|game| game.tick == 0)
+                && let Some(flow) = &self.flow
+                && flow.initial_title_presented()
+            {
+                self.initial_title = Some(flow.facts());
+            }
+        }
         self.frames = self
             .frames
             .checked_add(1)
@@ -279,6 +335,11 @@ impl Presentation {
                 .as_ref()
                 .map(semantic_state)
                 .unwrap_or(Value::Null);
+            #[cfg(feature = "play-flow")]
+            let semantic = match &self.flow {
+                Some(flow) => json!({"game": semantic, "flow": flow.semantic()}),
+                None => semantic,
+            };
             if self.semantic.as_ref() != Some(&semantic) {
                 let record = self.record(self.scenario, None, None);
                 self.emitter.emit(Record::Observation, record)?;
@@ -293,22 +354,44 @@ impl Presentation {
                 output::bounded(&error)
             ));
         }
-        if !self.ready
-            && self.launch_accepted
-            && self.resume_applied
-            && self.evidence.snapshot.as_ref().is_some_and(|snapshot| {
-                snapshot.initialized
-                    && snapshot.tick > 0
-                    && snapshot.phase == GamePhase::Running
-                    && !snapshot.restoring
-            })
-        {
+        if !self.ready && self.ready_to_publish() {
             let mut record = self.record(self.scenario, None, None);
             record["ready"] = json!(true);
             self.emitter.emit(Record::Ready, record)?;
             self.ready = true;
         }
         Ok(())
+    }
+
+    fn ready_to_publish(&self) -> bool {
+        if !self.launch_admitted || !self.resume_applied {
+            return false;
+        }
+        let Some(snapshot) = &self.evidence.snapshot else {
+            return false;
+        };
+        if !snapshot.initialized || snapshot.phase != GamePhase::Running || snapshot.restoring {
+            return false;
+        }
+        match self.selection.map(PlayerSelection::flow) {
+            Some(GameFlow::Exploration) => self.launch_accepted && snapshot.tick > 0,
+            Some(GameFlow::Round) => {
+                #[cfg(feature = "play-flow")]
+                {
+                    self.initial_title.is_some()
+                        && snapshot.error.is_none()
+                        && self
+                            .flow
+                            .as_ref()
+                            .is_some_and(flow::Observation::current_presented)
+                }
+                #[cfg(not(feature = "play-flow"))]
+                {
+                    false
+                }
+            }
+            None => false,
+        }
     }
 
     fn observe_world(&mut self, world: &World) -> Result<(), String> {

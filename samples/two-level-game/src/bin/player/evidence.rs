@@ -451,7 +451,13 @@ pub(super) fn input_proof(world: &World) -> Result<Value, String> {
         .ok_or("cooked Player has no installed PRIMARY Input map")?;
     let original = nara::input::startup_action_map_bindings(world)
         .ok_or("cooked Player has no finalized original Input selection")?;
-    if !original.shares_owner_with(&map.bindings_handle()) {
+    let installed = map.bindings_handle();
+    let admitted = match world.get_resource::<two_level_game::flow::FlowBindings>() {
+        Some(flow) if flow.installed().shares_owner_with(&installed) => flow.admitted(),
+        Some(_) => return Err("cooked round Player replaced its admitted menu derivation".into()),
+        None => &installed,
+    };
+    if !original.shares_owner_with(admitted) {
         return Err("cooked Player changed its selected Input during Startup".into());
     }
     if let Some(collection) = world
@@ -464,7 +470,7 @@ pub(super) fn input_proof(world: &World) -> Result<Value, String> {
     {
         return Err("cooked Input retained source records or an authored path alias".into());
     }
-    Ok(definition_proof(input_product(), map.definition()))
+    Ok(definition_proof(input_product(), admitted.definition()))
 }
 
 fn definition_proof(product: AssetProductRef, definition: &ActionMapDefinition) -> Value {

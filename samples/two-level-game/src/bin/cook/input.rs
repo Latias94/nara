@@ -1,6 +1,8 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
-pub(super) use two_level_game::delivery::{ControllerBackend, PlayerSelection, RuntimeKind};
+pub(super) use two_level_game::delivery::{
+    ControllerBackend, GameFlow, PlayerSelection, RuntimeKind,
+};
 
 pub(super) struct Options {
     pub project: PathBuf,
@@ -16,7 +18,11 @@ pub(super) struct Options {
 
 impl Options {
     pub fn read() -> Result<Self, String> {
-        let mut arguments = std::env::args_os().skip(1);
+        Self::from_args(std::env::args_os().skip(1))
+    }
+
+    pub fn from_args(arguments: impl IntoIterator<Item = OsString>) -> Result<Self, String> {
+        let mut arguments = arguments.into_iter();
         let mut values = BTreeMap::new();
         while let Some(flag) = arguments.next() {
             let flag = flag.into_string().map_err(|_| "flags require UTF-8")?;
@@ -31,6 +37,7 @@ impl Options {
                 "--rustc",
                 "--runtime",
                 "--controllers",
+                "--flow",
             ]
             .contains(&flag.as_str())
             {
@@ -74,7 +81,13 @@ impl Options {
                         .map_err(|_| "controllers requires UTF-8")?;
                     ControllerBackend::parse(&value)
                 })?;
-        let selection = PlayerSelection::new(runtime, controllers)?;
+        let flow = values
+            .remove("--flow")
+            .map_or(Ok(GameFlow::Exploration), |value| {
+                let value = value.into_string().map_err(|_| "flow requires UTF-8")?;
+                GameFlow::parse(&value)
+            })?;
+        let selection = PlayerSelection::new(runtime, controllers)?.with_flow(flow)?;
         selection.validate_target(&target)?;
         for path in [&project, &output, &target_directory, &cargo, &rustc] {
             if !path.is_absolute() {

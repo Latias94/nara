@@ -43,7 +43,7 @@ use two_level_game::{
     GamePhase, GameResumeError, GameSnapshot, RunOptions,
     animation::ExplorerFrame,
     capture_resume, configured_recipe,
-    flow::{FlowPhase, FlowSnapshot, with_play_flow},
+    flow::{FlowBindings, FlowPhase, FlowSnapshot, with_play_flow},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     open_explicit_project_root, product_recipe,
 };
@@ -75,6 +75,9 @@ impl Driver {
 
 struct DriverPlugin(Driver);
 
+#[derive(Default, Resource)]
+struct ExplorerAtExtract(Option<(FlowPhase, TextureRegion)>);
+
 impl Plugin for DriverPlugin {
     fn declaration() -> &'static PluginDeclaration {
         const DECLARATION: PluginDeclaration = PluginDeclaration::new(
@@ -87,6 +90,7 @@ impl Plugin for DriverPlugin {
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
         app.insert_resource(self.0.clone())?;
+        app.init_resource::<ExplorerAtExtract>()?;
         app.add_systems(StartupStage::Core, |world: &mut World| {
             world
                 .resource_mut::<InputTimeline>()
@@ -94,8 +98,25 @@ impl Plugin for DriverPlugin {
                 .unwrap();
         })?;
         app.add_systems(CoreStage::First, inject.before(InputSet::ProjectTimeline))?;
+        app.add_systems(CoreStage::Extract, observe_explorer_at_extract)?;
         Ok(())
     }
+}
+
+fn observe_explorer_at_extract(world: &mut World) {
+    let explorer = world
+        .get_resource::<FlowSnapshot>()
+        .and_then(|flow| explorer_region(world).map(|region| (flow.phase, region)));
+    world.resource_mut::<ExplorerAtExtract>().0 = explorer;
+}
+
+fn explorer_region(world: &World) -> Option<TextureRegion> {
+    let current = CurrentScene::get(world)?;
+    let id = SceneEntityId::new("explorer").unwrap();
+    let EntityLookup::Resolved(entity) = current.receipt().resolve(world, &id) else {
+        return None;
+    };
+    world.get::<Sprite>(entity)?.texture_region
 }
 
 fn inject(world: &mut World) {
@@ -216,12 +237,18 @@ impl Game {
     fn explorer_frame(&self) -> TextureRegion {
         self.session
             .observe(|world| {
-                let current = CurrentScene::get(world).unwrap();
-                let id = SceneEntityId::new("explorer").unwrap();
-                let EntityLookup::Resolved(entity) = current.receipt().resolve(world, &id) else {
-                    panic!("the current Scene must resolve its animated explorer")
-                };
-                world.get::<Sprite>(entity).unwrap().texture_region.unwrap()
+                explorer_region(world).expect("the current Scene has an animated explorer")
+            })
+            .unwrap()
+    }
+
+    fn explorer_at_extract(&self) -> (FlowPhase, TextureRegion) {
+        self.session
+            .observe(|world| {
+                world
+                    .resource::<ExplorerAtExtract>()
+                    .0
+                    .expect("the frame extracted an explorer")
             })
             .unwrap()
     }
@@ -407,6 +434,13 @@ impl Game {
                         <= 16.0
                 );
                 assert_eq!(self.object("gem-near").1, 0.0);
+                if self.flow().phase == FlowPhase::Complete {
+                    assert_eq!(snapshot.held, [false; 4]);
+                    assert_eq!(
+                        self.explorer_at_extract(),
+                        (FlowPhase::Complete, ExplorerFrame::Idle.texture_region())
+                    );
+                }
                 self.driver.key(RIGHT, false);
                 self.frame(Duration::ZERO);
                 return;
@@ -591,6 +625,144 @@ fn title_freezes_before_the_first_frame_and_new_round_prepares_a_real_source_sce
 }
 
 #[test]
+fn a_pending_player_save_launch_survives_title_and_is_consumed_once_by_the_first_resume_batch() {
+    let project = ProjectCopy::new();
+    let save = project.save_path();
+    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    let (admitted, installed) = game
+        .session
+        .observe(|world| {
+            let flow = world.resource::<FlowBindings>();
+            let original = nara::input::startup_action_map_bindings(world).unwrap();
+            let map = world
+                .resource::<ActionMaps>()
+                .get(InputSeatId::PRIMARY)
+                .unwrap();
+            assert!(flow.admitted().shares_owner_with(original));
+            assert!(flow.installed().shares_owner_with(&map.bindings_handle()));
+            assert!(!flow.admitted().shares_owner_with(flow.installed()));
+            (flow.admitted().clone(), flow.installed().clone())
+        })
+        .unwrap();
+    let launch = two_level_game::player_launch(RunOptions {
+        save_path: Some(save.clone()),
+        ..RunOptions::default()
+    })
+    .unwrap()
+    .unwrap();
+    game.session.submit(launch).unwrap();
+    for _ in 0..3 {
+        game.frame(Duration::from_millis(100));
+        assert_eq!(game.flow().phase, FlowPhase::Title);
+        assert_eq!(game.snapshot().logical_tick, 0);
+        assert_eq!(game.queue().pending_commands, 1);
+        assert_eq!(
+            game.session
+                .observe(|world| two_level_game::player_launch_result(world)
+                    .map(|result| result.map_err(str::to_owned)))
+                .unwrap(),
+            None
+        );
+    }
+    game.start_round();
+    assert_eq!(
+        game.session
+            .observe(|world| two_level_game::player_launch_result(world)
+                .map(|result| result.map_err(str::to_owned)))
+            .unwrap(),
+        Some(Ok(()))
+    );
+    assert_eq!(game.queue().accepted, 1);
+    assert_eq!(game.queue().acknowledged, 1);
+    game.assert_idle();
+    game.session
+        .observe(|world| {
+            let flow = world.resource::<FlowBindings>();
+            assert!(admitted.shares_owner_with(flow.admitted()));
+            assert!(installed.shares_owner_with(flow.installed()));
+        })
+        .unwrap();
+    assert!(!save.exists());
+    game.command('k');
+    assert_eq!(game.snapshot().saves, 1);
+    let saved = two_level_game::save::decode_checkpoint(&fs::read(&save).unwrap()).unwrap();
+    assert_eq!(saved.checkpoint.score, 0);
+    assert_eq!(
+        game.session
+            .observe(|world| two_level_game::player_launch_result(world)
+                .map(|result| result.map_err(str::to_owned)))
+            .unwrap(),
+        Some(Ok(()))
+    );
+    game.tap(KeyCode::Escape);
+    game.tap(KeyCode::Character('t'));
+    game.start_round();
+    assert_eq!(game.flow().round, 2);
+    assert_eq!(game.snapshot().saves, 0);
+    game.command('k');
+    assert_eq!(game.snapshot().saves, 1);
+    let saved = two_level_game::save::decode_checkpoint(&fs::read(&save).unwrap()).unwrap();
+    assert_eq!(saved.checkpoint.score, 0);
+    assert_eq!(
+        game.session
+            .observe(|world| two_level_game::player_launch_result(world)
+                .map(|result| result.map_err(str::to_owned)))
+            .unwrap(),
+        Some(Ok(()))
+    );
+}
+
+#[test]
+fn a_refused_first_resume_save_launch_keeps_its_result_and_completes_the_original_batch() {
+    let project = ProjectCopy::new();
+    let missing_parent = project.save_path().join("missing");
+    let invalid = missing_parent.join("checkpoint.json");
+    assert!(!missing_parent.exists());
+    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    game.session
+        .submit(
+            two_level_game::player_launch(RunOptions {
+                save_path: Some(invalid.clone()),
+                ..RunOptions::default()
+            })
+            .unwrap()
+            .unwrap(),
+        )
+        .unwrap();
+    game.begin_round();
+    game.settle_start(FlowPhase::Resuming);
+    game.frame(STEP);
+    let result = game
+        .session
+        .observe(|world| {
+            two_level_game::player_launch_result(world).map(|result| result.map_err(str::to_owned))
+        })
+        .unwrap()
+        .unwrap();
+    assert!(result.is_err());
+    assert_eq!(game.snapshot().error.as_ref(), result.as_ref().err());
+    assert_eq!(game.flow().phase, FlowPhase::Playing);
+    assert_eq!(game.snapshot().logical_tick, 0);
+    assert_eq!(game.queue().accepted, 1);
+    assert_eq!(game.queue().acknowledged, 1);
+    game.assert_idle();
+    assert!(!missing_parent.exists() && !invalid.exists());
+    game.tap(KeyCode::Escape);
+    game.tap(KeyCode::Character('t'));
+    game.start_round();
+    assert_eq!(game.flow().round, 2);
+    assert_eq!(
+        game.session
+            .observe(|world| two_level_game::player_launch_result(world)
+                .map(|result| result.map_err(str::to_owned)))
+            .unwrap(),
+        Some(result)
+    );
+    assert_eq!(game.queue().accepted, 1);
+    assert_eq!(game.queue().acknowledged, 1);
+}
+
+#[test]
 fn game_pause_clears_held_movement_freezes_clocks_and_requires_a_release_and_fresh_press() {
     let mut game = Game::source();
     game.start_round();
@@ -599,12 +771,19 @@ fn game_pause_clears_held_movement_freezes_clocks_and_requires_a_release_and_fre
     game.frame(STEP);
     assert!((game.snapshot().player.x - spawn.x - 3.2).abs() < 0.0001);
     assert_eq!(game.snapshot().held, [false, true, false, false]);
+    let (phase, moving_region) = game.explorer_at_extract();
+    assert_eq!(phase, FlowPhase::Playing);
+    assert_ne!(moving_region, ExplorerFrame::Idle.texture_region());
 
     game.tap(KeyCode::Escape);
     assert_eq!(game.flow().phase, FlowPhase::Paused);
     assert_eq!(game.session.state(), Some(RuntimeState::Running));
     assert_eq!(game.time_policy(), (false, 0.0));
     assert_eq!(game.snapshot().held, [false; 4]);
+    assert_eq!(
+        game.explorer_at_extract(),
+        (FlowPhase::Paused, ExplorerFrame::Idle.texture_region())
+    );
     assert!(!game.gameplay_enabled());
     let frozen = game.clocks();
     let position = game.snapshot().player;
@@ -747,6 +926,37 @@ fn host_pause_is_independent_of_game_pause_and_opt_in_flow_refuses_exact_resume(
     assert_eq!(game.clocks(), frozen);
     game.tap(KeyCode::Enter);
     game.finish_resume();
+}
+
+#[test]
+fn host_step_projects_the_pickup_in_maintenance_without_advancing_the_menu() {
+    let mut game = Game::source();
+    game.start_round();
+    let pickup = game.object("gem-near").0;
+    game.driver.key(RIGHT, true);
+    for _ in 0..64 {
+        if game.snapshot().player.distance(pickup) <= 19.2 {
+            break;
+        }
+        game.frame(STEP);
+    }
+    let before = game.snapshot();
+    assert_eq!(before.collected, 0);
+    assert!(before.player.distance(pickup) > 16.0 && before.player.distance(pickup) <= 19.2);
+    assert!(!game.flow().meadow_collected);
+    assert_eq!(game.session.pause().unwrap(), None);
+    assert_eq!(game.session.step().unwrap(), None);
+    let after = game.snapshot();
+    assert_eq!(after.tick, before.tick + 1);
+    assert_eq!(after.logical_tick, before.logical_tick + 1);
+    assert_eq!(after.current_instance, before.current_instance);
+    assert_eq!(after.collected, 1);
+    assert_eq!(game.session.state(), Some(RuntimeState::Paused));
+    let flow = game.flow();
+    assert_eq!((flow.phase, flow.round), (FlowPhase::Playing, 1));
+    assert!(flow.meadow_collected && !flow.cavern_collected);
+    assert_eq!(game.object("gem-near").1, 0.0);
+    game.driver.key(RIGHT, false);
 }
 
 #[test]

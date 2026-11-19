@@ -38,13 +38,6 @@ impl RuntimeKind {
         }
     }
 
-    pub const fn manifest_profile(self) -> Option<&'static str> {
-        match self {
-            Self::Headless => None,
-            Self::Desktop | Self::AudioDesktop => Some("desktop"),
-        }
-    }
-
     fn require_features(self) -> Result<(), String> {
         match self {
             Self::Headless => Ok(()),
@@ -54,6 +47,30 @@ impl RuntimeKind {
             Self::AudioDesktop => Err(
                 "audio-desktop selection requires Windows and the desktop and audio-cpal Cargo features".into(),
             ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GameFlow {
+    #[default]
+    Exploration,
+    Round,
+}
+
+impl GameFlow {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "exploration" => Ok(Self::Exploration),
+            "round" => Ok(Self::Round),
+            _ => Err("--flow requires exploration or round".into()),
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Exploration => "exploration",
+            Self::Round => "round",
         }
     }
 }
@@ -87,6 +104,7 @@ impl ControllerBackend {
 pub struct PlayerSelection {
     runtime: RuntimeKind,
     controllers: ControllerBackend,
+    flow: GameFlow,
 }
 
 impl PlayerSelection {
@@ -105,29 +123,76 @@ impl PlayerSelection {
         Ok(Self {
             runtime,
             controllers,
+            flow: GameFlow::Exploration,
         })
     }
 
+    pub fn with_flow(self, flow: GameFlow) -> Result<Self, String> {
+        if flow == GameFlow::Round {
+            if self.runtime == RuntimeKind::Headless {
+                return Err("round flow requires a desktop Player with a frame-menu driver".into());
+            }
+            if !cfg!(feature = "play-flow") {
+                return Err("round flow requires the play-flow Cargo feature".into());
+            }
+        }
+        Ok(Self { flow, ..self })
+    }
+
     pub fn from_content_profile(profile: &str) -> Result<Self, String> {
-        let (runtime, controllers) = match profile {
-            "two-level-shipping" => (RuntimeKind::Headless, ControllerBackend::Disabled),
-            "two-level-desktop-shipping" => (RuntimeKind::Desktop, ControllerBackend::Disabled),
-            "two-level-audio-desktop-shipping" => {
-                (RuntimeKind::AudioDesktop, ControllerBackend::Disabled)
-            }
-            "two-level-desktop-gamepad-shipping" => {
-                (RuntimeKind::Desktop, ControllerBackend::Gilrs)
-            }
-            "two-level-audio-desktop-gamepad-shipping" => {
-                (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs)
-            }
+        let (runtime, controllers, flow) = match profile {
+            "two-level-shipping" => (
+                RuntimeKind::Headless,
+                ControllerBackend::Disabled,
+                GameFlow::Exploration,
+            ),
+            "two-level-desktop-shipping" => (
+                RuntimeKind::Desktop,
+                ControllerBackend::Disabled,
+                GameFlow::Exploration,
+            ),
+            "two-level-audio-desktop-shipping" => (
+                RuntimeKind::AudioDesktop,
+                ControllerBackend::Disabled,
+                GameFlow::Exploration,
+            ),
+            "two-level-desktop-gamepad-shipping" => (
+                RuntimeKind::Desktop,
+                ControllerBackend::Gilrs,
+                GameFlow::Exploration,
+            ),
+            "two-level-audio-desktop-gamepad-shipping" => (
+                RuntimeKind::AudioDesktop,
+                ControllerBackend::Gilrs,
+                GameFlow::Exploration,
+            ),
+            "two-level-round-desktop-shipping" => (
+                RuntimeKind::Desktop,
+                ControllerBackend::Disabled,
+                GameFlow::Round,
+            ),
+            "two-level-round-desktop-gamepad-shipping" => (
+                RuntimeKind::Desktop,
+                ControllerBackend::Gilrs,
+                GameFlow::Round,
+            ),
+            "two-level-round-audio-desktop-shipping" => (
+                RuntimeKind::AudioDesktop,
+                ControllerBackend::Disabled,
+                GameFlow::Round,
+            ),
+            "two-level-round-audio-desktop-gamepad-shipping" => (
+                RuntimeKind::AudioDesktop,
+                ControllerBackend::Gilrs,
+                GameFlow::Round,
+            ),
             _ => {
                 return Err(
                     "compiled content profile is not a Two-Level Game Player selection".into(),
                 );
             }
         };
-        Self::new(runtime, controllers)
+        Self::new(runtime, controllers)?.with_flow(flow)
     }
 
     pub const fn runtime(self) -> RuntimeKind {
@@ -138,22 +203,48 @@ impl PlayerSelection {
         self.controllers
     }
 
+    pub const fn flow(self) -> GameFlow {
+        self.flow
+    }
+
+    pub const fn manifest_profile(self) -> Option<&'static str> {
+        match (self.runtime, self.flow) {
+            (RuntimeKind::Headless, _) => None,
+            (_, GameFlow::Exploration) => Some("desktop"),
+            (_, GameFlow::Round) => Some("play-flow"),
+        }
+    }
+
     pub const fn binary(self) -> &'static str {
         self.runtime.binary()
     }
 
     pub const fn content_profile(self) -> &'static str {
-        match (self.runtime, self.controllers) {
-            (RuntimeKind::Headless, _) => "two-level-shipping",
-            (RuntimeKind::Desktop, ControllerBackend::Disabled) => "two-level-desktop-shipping",
-            (RuntimeKind::Desktop, ControllerBackend::Gilrs) => {
+        match (self.runtime, self.controllers, self.flow) {
+            (RuntimeKind::Headless, _, _) => "two-level-shipping",
+            (RuntimeKind::Desktop, ControllerBackend::Disabled, GameFlow::Exploration) => {
+                "two-level-desktop-shipping"
+            }
+            (RuntimeKind::Desktop, ControllerBackend::Gilrs, GameFlow::Exploration) => {
                 "two-level-desktop-gamepad-shipping"
             }
-            (RuntimeKind::AudioDesktop, ControllerBackend::Disabled) => {
+            (RuntimeKind::AudioDesktop, ControllerBackend::Disabled, GameFlow::Exploration) => {
                 "two-level-audio-desktop-shipping"
             }
-            (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs) => {
+            (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs, GameFlow::Exploration) => {
                 "two-level-audio-desktop-gamepad-shipping"
+            }
+            (RuntimeKind::Desktop, ControllerBackend::Disabled, GameFlow::Round) => {
+                "two-level-round-desktop-shipping"
+            }
+            (RuntimeKind::Desktop, ControllerBackend::Gilrs, GameFlow::Round) => {
+                "two-level-round-desktop-gamepad-shipping"
+            }
+            (RuntimeKind::AudioDesktop, ControllerBackend::Disabled, GameFlow::Round) => {
+                "two-level-round-audio-desktop-shipping"
+            }
+            (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs, GameFlow::Round) => {
+                "two-level-round-audio-desktop-gamepad-shipping"
             }
         }
     }
@@ -168,6 +259,9 @@ impl PlayerSelection {
         }
         if self.controllers == ControllerBackend::Gilrs {
             features.push("gamepad".into());
+        }
+        if self.flow == GameFlow::Round {
+            features.push("play-flow".into());
         }
         features
     }
@@ -203,16 +297,25 @@ impl PlayerSelection {
                 );
             }
         };
-        match self.controllers {
-            ControllerBackend::Disabled => Ok(recipe),
+        let recipe = match self.controllers {
+            ControllerBackend::Disabled => recipe,
             #[cfg(feature = "gamepad")]
             ControllerBackend::Gilrs => {
-                crate::controller::with_gilrs_input(recipe).map_err(|error| error.to_string())
+                crate::controller::with_gilrs_input(recipe).map_err(|error| error.to_string())?
             }
             #[cfg(not(feature = "gamepad"))]
             ControllerBackend::Gilrs => {
-                Err("Gilrs Player selection requires the gamepad Cargo feature".into())
+                return Err("Gilrs Player selection requires the gamepad Cargo feature".into());
             }
+        };
+        match self.flow {
+            GameFlow::Exploration => Ok(recipe),
+            #[cfg(feature = "play-flow")]
+            GameFlow::Round => crate::flow::with_play_flow(recipe)
+                .and_then(crate::flow::with_play_flow_hud)
+                .map_err(|error| error.to_string()),
+            #[cfg(not(feature = "play-flow"))]
+            GameFlow::Round => Err("round flow requires the play-flow Cargo feature".into()),
         }
     }
 }

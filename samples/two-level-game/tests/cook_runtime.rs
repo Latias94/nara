@@ -21,7 +21,7 @@ mod evidence;
 #[allow(dead_code)]
 #[path = "../src/bin/player/output.rs"]
 mod output;
-use input::{ControllerBackend, PlayerSelection, RuntimeKind};
+use input::{ControllerBackend, GameFlow, PlayerSelection, RuntimeKind};
 use nara::{
     app::PluginId, input::ActionMapFileCandidate, project::ProjectManifest,
     project_host::resolve_runtime_configuration,
@@ -38,7 +38,7 @@ fn plan(selection: PlayerSelection) -> nara::project_host::RuntimeConfigurationP
     let settings = manifest
         .manifest
         .unwrap()
-        .resolve_profile(selection.runtime().manifest_profile())
+        .resolve_profile(selection.manifest_profile())
         .unwrap();
     let projection = settings.source_runtime_projection().unwrap();
     assert_eq!(projection.input_requirement().unwrap().as_str(), INPUT_PATH);
@@ -70,6 +70,8 @@ fn headless_cooking_selects_authored_semantics_without_a_native_window() {
     assert_eq!(selected.binary(), "player");
     assert_eq!(selected.features(), ["cooked-player"]);
     assert_eq!(selected.content_profile(), "two-level-shipping");
+    assert_eq!(selected.flow(), GameFlow::Exploration);
+    assert_eq!(selected.manifest_profile(), None);
 }
 
 #[cfg(feature = "desktop")]
@@ -95,6 +97,8 @@ fn desktop_selection_binds_its_profile_and_authored_game_input() {
     assert_eq!(selected.binary(), "player_desktop");
     assert_eq!(selected.features(), ["cooked-player", "desktop"]);
     assert_eq!(selected.content_profile(), "two-level-desktop-shipping");
+    assert_eq!(selected.flow(), GameFlow::Exploration);
+    assert_eq!(selected.manifest_profile(), Some("desktop"));
 }
 
 #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
@@ -112,6 +116,8 @@ fn audible_selection_is_explicit_and_never_opens_a_device_during_composition() {
         selected.content_profile(),
         "two-level-audio-desktop-shipping"
     );
+    assert_eq!(selected.flow(), GameFlow::Exploration);
+    assert_eq!(selected.manifest_profile(), Some("desktop"));
     assert_eq!(
         plan.plugin_plan()
             .entries()
@@ -149,6 +155,8 @@ fn an_unknown_runtime_cannot_select_a_player() {
         for profile in [
             "two-level-audio-desktop-shipping",
             "two-level-audio-desktop-gamepad-shipping",
+            "two-level-round-audio-desktop-shipping",
+            "two-level-round-audio-desktop-gamepad-shipping",
         ] {
             assert!(PlayerSelection::from_content_profile(profile).is_err());
         }
@@ -158,6 +166,232 @@ fn an_unknown_runtime_cannot_select_a_player() {
         assert!(RuntimeKind::parse("desktop").is_err());
         assert!(PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Disabled).is_err());
         assert!(PlayerSelection::from_content_profile("two-level-desktop-shipping").is_err());
+        assert!(PlayerSelection::from_content_profile("two-level-round-desktop-shipping").is_err());
+    }
+}
+
+#[test]
+fn flow_names_are_explicit_and_headless_round_is_always_refused() {
+    assert_eq!(GameFlow::default(), GameFlow::Exploration);
+    for (name, flow) in [
+        ("exploration", GameFlow::Exploration),
+        ("round", GameFlow::Round),
+    ] {
+        assert_eq!(GameFlow::parse(name).unwrap(), flow);
+        assert_eq!(flow.name(), name);
+    }
+    for name in ["", "Round", "play-flow", "anything"] {
+        assert!(GameFlow::parse(name).is_err(), "{name}");
+    }
+    let headless = keyboard(RuntimeKind::Headless);
+    assert_eq!(headless.with_flow(GameFlow::Exploration).unwrap(), headless);
+    assert!(
+        headless
+            .with_flow(GameFlow::Round)
+            .unwrap_err()
+            .contains("desktop Player")
+    );
+    #[cfg(not(feature = "play-flow"))]
+    {
+        for profile in [
+            "two-level-round-desktop-shipping",
+            "two-level-round-desktop-gamepad-shipping",
+            "two-level-round-audio-desktop-shipping",
+            "two-level-round-audio-desktop-gamepad-shipping",
+        ] {
+            assert!(PlayerSelection::from_content_profile(profile).is_err());
+        }
+        #[cfg(feature = "desktop")]
+        assert!(
+            keyboard(RuntimeKind::Desktop)
+                .with_flow(GameFlow::Round)
+                .unwrap_err()
+                .contains("play-flow Cargo feature")
+        );
+    }
+}
+
+fn cook_options(extra: &[&str]) -> Result<input::Options, String> {
+    use std::{ffi::OsString, path::Path};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut arguments = Vec::new();
+    for flag in [
+        "--project-root",
+        "--output-parent",
+        "--target-dir",
+        "--cargo",
+        "--rustc",
+    ] {
+        arguments.push(OsString::from(flag));
+        arguments.push(root.as_os_str().to_owned());
+    }
+    arguments.extend(
+        [
+            "--name",
+            "flow-control",
+            "--target",
+            "x86_64-pc-windows-msvc",
+        ]
+        .into_iter()
+        .chain(extra.iter().copied())
+        .map(OsString::from),
+    );
+    input::Options::from_args(arguments)
+}
+
+#[test]
+fn cooker_defaults_to_exploration_and_refuses_invalid_flow_arguments() {
+    let default = cook_options(&[]).unwrap().selection;
+    assert_eq!(default, keyboard(RuntimeKind::Headless));
+    assert_eq!(
+        cook_options(&["--flow", "exploration"]).unwrap().selection,
+        default
+    );
+    for (arguments, message) in [
+        (vec!["--flow"], "missing value for --flow"),
+        (
+            vec!["--flow", "Round"],
+            "--flow requires exploration or round",
+        ),
+        (
+            vec!["--flow", "anything"],
+            "--flow requires exploration or round",
+        ),
+        (
+            vec!["--flow", "exploration", "--flow", "round"],
+            "duplicate argument",
+        ),
+        (
+            vec!["--game-flow", "round"],
+            "unknown argument: --game-flow",
+        ),
+        (vec!["--flow", "round"], "desktop Player"),
+    ] {
+        let error = cook_options(&arguments).err().unwrap();
+        assert!(error.contains(message), "{arguments:?}: {error}");
+    }
+    #[cfg(all(feature = "desktop", not(feature = "play-flow")))]
+    assert!(
+        cook_options(&["--runtime", "desktop", "--flow", "round"])
+            .err()
+            .unwrap()
+            .contains("play-flow Cargo feature")
+    );
+    #[cfg(feature = "play-flow")]
+    {
+        let selected = cook_options(&["--flow", "round", "--runtime", "desktop"])
+            .unwrap()
+            .selection;
+        assert_eq!(
+            selected,
+            keyboard(RuntimeKind::Desktop)
+                .with_flow(GameFlow::Round)
+                .unwrap()
+        );
+        assert_eq!(selected.manifest_profile(), Some("play-flow"));
+    }
+}
+
+#[cfg(feature = "play-flow")]
+#[test]
+fn round_recipes_select_ui_owners_without_acquiring_native_devices() {
+    for (runtime, controllers, expected_features) in [
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Disabled,
+            vec!["cooked-player", "desktop", "play-flow"],
+        ),
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Disabled,
+            vec!["cooked-player", "desktop", "audio-cpal", "play-flow"],
+        ),
+        #[cfg(all(windows, feature = "gamepad"))]
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Gilrs,
+            vec!["cooked-player", "desktop", "gamepad", "play-flow"],
+        ),
+        #[cfg(all(windows, feature = "audio-cpal", feature = "gamepad"))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Gilrs,
+            vec![
+                "cooked-player",
+                "desktop",
+                "audio-cpal",
+                "gamepad",
+                "play-flow",
+            ],
+        ),
+    ] {
+        let exploration = PlayerSelection::new(runtime, controllers).unwrap();
+        let selected = exploration.with_flow(GameFlow::Round).unwrap();
+        assert_eq!(selected.flow(), GameFlow::Round);
+        assert_eq!(selected.runtime(), runtime);
+        assert_eq!(selected.controllers(), controllers);
+        assert_eq!(selected.binary(), exploration.binary());
+        assert_eq!(selected.manifest_profile(), Some("play-flow"));
+        assert_eq!(selected.features(), expected_features);
+        let plan = plan(selected);
+        let original = self::plan(exploration);
+        assert!(plan.settings().window().enabled);
+        for plugin in [
+            "two-level-game.input",
+            "two-level-game.play-flow",
+            "two-level-game.play-flow.hud",
+            "nara.ui",
+            "nara.ui-render",
+        ] {
+            assert_eq!(
+                plan.plugin_plan()
+                    .entries()
+                    .iter()
+                    .filter(|entry| entry.plugin_id() == PluginId::new(plugin))
+                    .count(),
+                1,
+                "{selected:?}: {plugin}"
+            );
+        }
+        assert_eq!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == PluginId::new("nara.gilrs"))
+                .count(),
+            usize::from(controllers == ControllerBackend::Gilrs)
+        );
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        assert_eq!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == two_level_game::audio::AUDIO_PLUGIN_ID)
+                .count(),
+            usize::from(runtime == RuntimeKind::AudioDesktop)
+        );
+        assert!(original.plugin_plan().entries().iter().all(|entry| {
+            ![
+                PluginId::new("two-level-game.play-flow"),
+                PluginId::new("two-level-game.play-flow.hud"),
+                PluginId::new("nara.ui"),
+                PluginId::new("nara.ui-render"),
+            ]
+            .contains(&entry.plugin_id())
+        }));
+        assert_ne!(
+            plan.plugin_plan().fingerprint(),
+            original.plugin_plan().fingerprint()
+        );
+        let restored = selected.with_flow(GameFlow::Exploration).unwrap();
+        assert_eq!(restored, exploration);
+        assert_eq!(restored.features(), exploration.features());
+        assert_eq!(
+            self::plan(restored).plugin_plan().fingerprint(),
+            original.plugin_plan().fingerprint()
+        );
     }
 }
 
@@ -316,6 +550,8 @@ fn invalid_or_unavailable_controllers_cannot_select_a_player() {
         for profile in [
             "two-level-desktop-gamepad-shipping",
             "two-level-audio-desktop-gamepad-shipping",
+            "two-level-round-desktop-gamepad-shipping",
+            "two-level-round-audio-desktop-gamepad-shipping",
         ] {
             assert!(PlayerSelection::from_content_profile(profile).is_err());
         }
@@ -324,42 +560,88 @@ fn invalid_or_unavailable_controllers_cannot_select_a_player() {
 
 #[test]
 fn content_profiles_roundtrip_the_complete_player_selection() {
-    for (runtime, controllers, profile) in [
+    let mut profiles = std::collections::BTreeSet::new();
+    for (runtime, controllers, flow, profile) in [
         (
             RuntimeKind::Headless,
             ControllerBackend::Disabled,
+            GameFlow::Exploration,
             "two-level-shipping",
         ),
         #[cfg(feature = "desktop")]
         (
             RuntimeKind::Desktop,
             ControllerBackend::Disabled,
+            GameFlow::Exploration,
             "two-level-desktop-shipping",
         ),
         #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
         (
             RuntimeKind::AudioDesktop,
             ControllerBackend::Disabled,
+            GameFlow::Exploration,
             "two-level-audio-desktop-shipping",
         ),
         #[cfg(all(windows, feature = "gamepad"))]
         (
             RuntimeKind::Desktop,
             ControllerBackend::Gilrs,
+            GameFlow::Exploration,
             "two-level-desktop-gamepad-shipping",
         ),
         #[cfg(all(windows, feature = "gamepad", feature = "audio-cpal"))]
         (
             RuntimeKind::AudioDesktop,
             ControllerBackend::Gilrs,
+            GameFlow::Exploration,
             "two-level-audio-desktop-gamepad-shipping",
         ),
+        #[cfg(feature = "play-flow")]
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Disabled,
+            GameFlow::Round,
+            "two-level-round-desktop-shipping",
+        ),
+        #[cfg(all(windows, feature = "play-flow", feature = "audio-cpal"))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Disabled,
+            GameFlow::Round,
+            "two-level-round-audio-desktop-shipping",
+        ),
+        #[cfg(all(windows, feature = "play-flow", feature = "gamepad"))]
+        (
+            RuntimeKind::Desktop,
+            ControllerBackend::Gilrs,
+            GameFlow::Round,
+            "two-level-round-desktop-gamepad-shipping",
+        ),
+        #[cfg(all(
+            windows,
+            feature = "play-flow",
+            feature = "gamepad",
+            feature = "audio-cpal"
+        ))]
+        (
+            RuntimeKind::AudioDesktop,
+            ControllerBackend::Gilrs,
+            GameFlow::Round,
+            "two-level-round-audio-desktop-gamepad-shipping",
+        ),
     ] {
-        let selected = PlayerSelection::new(runtime, controllers).unwrap();
+        let selected = PlayerSelection::new(runtime, controllers)
+            .unwrap()
+            .with_flow(flow)
+            .unwrap();
+        assert!(profiles.insert(profile), "{profile}");
         assert_eq!(selected.content_profile(), profile);
         let restored = PlayerSelection::from_content_profile(profile).unwrap();
+        assert_eq!(restored, selected);
         assert_eq!(restored.runtime(), runtime);
         assert_eq!(restored.controllers(), controllers);
+        assert_eq!(restored.flow(), flow);
+        assert_eq!(restored.manifest_profile(), selected.manifest_profile());
         assert_eq!(restored.binary(), selected.binary());
         assert_eq!(restored.features(), selected.features());
         assert_eq!(
@@ -372,6 +654,11 @@ fn content_profiles_roundtrip_the_complete_player_selection() {
         "desktop",
         "two-level-headless-gamepad-shipping",
         "two-level-desktop-shipping-gamepad",
+        "two-level-round-shipping",
+        "two-level-round-headless-shipping",
+        "two-level-round-desktop-shipping-gamepad",
+        "two-level-desktop-round-shipping",
+        "two-level-round-desktop-shipping-extra",
     ] {
         assert!(
             PlayerSelection::from_content_profile(profile).is_err(),
@@ -387,13 +674,22 @@ fn player_targets_preserve_portable_keyboard_and_restrict_native_backends() {
         #[cfg(feature = "desktop")]
         RuntimeKind::Desktop,
     ] {
-        let selected = keyboard(runtime);
-        for triple in [
-            "x86_64-pc-windows-msvc",
-            "x86_64-unknown-linux-gnu",
-            "aarch64-apple-darwin",
+        for flow in [
+            GameFlow::Exploration,
+            #[cfg(feature = "play-flow")]
+            GameFlow::Round,
         ] {
-            selected.validate_target(triple).unwrap();
+            if runtime == RuntimeKind::Headless && flow == GameFlow::Round {
+                continue;
+            }
+            let selected = keyboard(runtime).with_flow(flow).unwrap();
+            for triple in [
+                "x86_64-pc-windows-msvc",
+                "x86_64-unknown-linux-gnu",
+                "aarch64-apple-darwin",
+            ] {
+                selected.validate_target(triple).unwrap();
+            }
         }
     }
     #[cfg(all(
@@ -409,13 +705,22 @@ fn player_targets_preserve_portable_keyboard_and_restrict_native_backends() {
         #[cfg(all(feature = "gamepad", feature = "audio-cpal"))]
         (RuntimeKind::AudioDesktop, ControllerBackend::Gilrs),
     ] {
-        let selected = PlayerSelection::new(runtime, controllers).unwrap();
-        selected.validate_target("x86_64-pc-windows-msvc").unwrap();
-        for triple in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"] {
-            assert!(
-                selected.validate_target(triple).is_err(),
-                "{selected:?}: {triple}"
-            );
+        for flow in [
+            GameFlow::Exploration,
+            #[cfg(feature = "play-flow")]
+            GameFlow::Round,
+        ] {
+            let selected = PlayerSelection::new(runtime, controllers)
+                .unwrap()
+                .with_flow(flow)
+                .unwrap();
+            selected.validate_target("x86_64-pc-windows-msvc").unwrap();
+            for triple in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"] {
+                assert!(
+                    selected.validate_target(triple).is_err(),
+                    "{selected:?}: {triple}"
+                );
+            }
         }
     }
 }
@@ -491,6 +796,8 @@ mod atlas_content {
         sound_bank::bank_product,
     };
 
+    #[cfg(feature = "play-flow")]
+    use super::GameFlow;
     #[cfg(all(
         windows,
         feature = "desktop",
@@ -1084,7 +1391,7 @@ mod atlas_content {
             let manifest = root
                 .open_file(&RelativePath::new("nara.toml").unwrap())
                 .unwrap();
-            let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
+            let candidate = ingest_project_manifest(&manifest, player.manifest_profile()).unwrap();
             let plan = resolve_product_recipe(&candidate, player.recipe().unwrap()).unwrap();
             assert_eq!(
                 prepared
@@ -1096,29 +1403,81 @@ mod atlas_content {
             );
             let _bootstrap = generate_bootstrap(&project, &prepared);
             selection.verify(&project).unwrap();
-            #[cfg(all(windows, feature = "gamepad"))]
+            #[cfg(any(feature = "play-flow", all(windows, feature = "gamepad")))]
+            for (index, variant) in [
+                #[cfg(all(windows, feature = "gamepad"))]
+                PlayerSelection::new(runtime, ControllerBackend::Gilrs).unwrap(),
+                #[cfg(feature = "play-flow")]
+                player.with_flow(GameFlow::Round).unwrap(),
+                #[cfg(all(windows, feature = "gamepad", feature = "play-flow"))]
+                PlayerSelection::new(runtime, ControllerBackend::Gilrs)
+                    .unwrap()
+                    .with_flow(GameFlow::Round)
+                    .unwrap(),
+            ]
+            .into_iter()
+            .enumerate()
             {
                 use nara::runtime_content::{
                     RuntimeContentBase, RuntimeContentExpectation, RuntimeContentLimits,
                     RuntimeContentTarget,
                 };
 
-                let controllers = PlayerSelection::new(runtime, ControllerBackend::Gilrs).unwrap();
-                let (gamepad, gamepad_selection) = content::prepare(
+                let (variant_content, variant_selection) = content::prepare(
                     &root,
                     &host_fs::writable_directory(&store).unwrap(),
                     "x86_64-pc-windows-msvc",
-                    controllers,
+                    variant,
                 )
-                .unwrap()
+                .unwrap_or_else(|error| panic!("{variant:?}: {error}"))
                 .into_parts();
-                gamepad_selection.verify(&project).unwrap();
+                variant_selection.verify(&project).unwrap();
+                let candidate =
+                    ingest_project_manifest(&manifest, variant.manifest_profile()).unwrap();
+                let source_plan =
+                    resolve_product_recipe(&candidate, variant.recipe().unwrap()).unwrap();
+                assert_eq!(
+                    variant_content.base().plan().settings().window(),
+                    source_plan.settings().window()
+                );
+                assert_eq!(
+                    variant_content.base().plan().settings().ui(),
+                    source_plan.settings().ui()
+                );
+                assert_eq!(
+                    variant_content
+                        .base()
+                        .plan()
+                        .schema_validation()
+                        .composition_fingerprint(),
+                    source_plan.schema_validation().composition_fingerprint()
+                );
+                let original_members = selection.delivery_receipt().members();
+                let variant_members = variant_selection.delivery_receipt().members();
+                assert_eq!(variant_members.len(), original_members.len());
+                for (member, original) in variant_members.iter().zip(original_members) {
+                    assert_eq!(member.path(), original.path());
+                    assert_eq!(member.digest(), original.digest());
+                    assert_eq!(member.kind(), original.kind());
+                    let expected = member.digest();
+                    assert!(variant_selection.observations().iter().any(|observation| {
+                        matches!(observation,
+                                ArtifactBuildObservation::Raw { path, digest: Some(digest) }
+                                    if path.as_str() == member.path().as_str()
+                                        && digest.content() == expected)
+                    }));
+                }
                 let baseline = prepared.base().catalog();
-                let catalog = gamepad.base().catalog();
+                let catalog = variant_content.base().catalog();
                 assert_eq!(catalog.target().triple(), baseline.target().triple());
-                assert_eq!(catalog.target().profile(), controllers.content_profile());
+                assert_eq!(catalog.target().profile(), variant.content_profile());
                 assert_ne!(catalog.target().profile(), baseline.target().profile());
-                assert_eq!(catalog.configuration(), baseline.configuration());
+                if variant.flow() == super::GameFlow::Exploration {
+                    assert_eq!(catalog.configuration(), baseline.configuration());
+                    assert_eq!(catalog.schema_fingerprint(), baseline.schema_fingerprint());
+                } else {
+                    assert_ne!(catalog.configuration(), baseline.configuration());
+                }
                 assert_eq!(catalog.members().len(), baseline.members().len());
                 for (member, original) in catalog.members().iter().zip(baseline.members()) {
                     assert_eq!(member.path(), original.path());
@@ -1130,7 +1489,6 @@ mod atlas_content {
                 assert_eq!(catalog.startup_scene(), baseline.startup_scene());
                 assert_eq!(catalog.scenes(), baseline.scenes());
                 assert_eq!(catalog.addressable_roots(), baseline.addressable_roots());
-                assert_eq!(catalog.schema_fingerprint(), baseline.schema_fingerprint());
                 assert_eq!(
                     catalog.runtime_codecs_fingerprint(),
                     baseline.runtime_codecs_fingerprint()
@@ -1139,15 +1497,24 @@ mod atlas_content {
                     catalog.plugin_plan_fingerprint(),
                     baseline.plugin_plan_fingerprint()
                 );
+                let expected_plan = super::plan(variant);
                 assert_eq!(
-                    gamepad.base().plan().plugin_plan().fingerprint(),
-                    super::plan(controllers).plugin_plan().fingerprint()
+                    variant_content.base().plan().settings(),
+                    expected_plan.settings()
+                );
+                assert_eq!(
+                    variant_content.base().plan().plugin_plan().fingerprint(),
+                    expected_plan.plugin_plan().fingerprint()
                 );
                 let authored = ActionMapFileCandidate::decode_json_bytes(
                     &fs::read(project.join(super::INPUT_PATH)).unwrap(),
                 )
                 .unwrap();
-                let input = gamepad.base().acquire_startup_input().unwrap().unwrap();
+                let input = variant_content
+                    .base()
+                    .acquire_startup_input()
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(input.product(), authored.product());
                 assert_eq!(
                     input.definition().contexts(),
@@ -1157,14 +1524,19 @@ mod atlas_content {
                     input.definition().bindings(),
                     authored.definition().bindings()
                 );
-                let gamepad_bootstrap = generate_bootstrap(&project, &gamepad);
-                assert_ne!(gamepad_bootstrap.digest(), _bootstrap.digest());
+                let variant_bootstrap = generate_bootstrap(&project, &variant_content);
+                assert_ne!(variant_bootstrap.digest(), _bootstrap.digest());
+                assert!(
+                    std::str::from_utf8(variant_bootstrap.bytes())
+                        .unwrap()
+                        .contains(variant.content_profile())
+                );
 
                 for (cooked, expected, incompatible, name) in [
-                    (&prepared, player, controllers, "keyboard.pack"),
-                    (&gamepad, controllers, player, "gamepad.pack"),
+                    (&prepared, player, variant, "original"),
+                    (&variant_content, variant, player, "selected"),
                 ] {
-                    let path = cache.path.join(name);
+                    let path = cache.path.join(format!("{index}-{name}.pack"));
                     cooked
                         .base()
                         .write_pack(&mut fs::File::create_new(&path).unwrap())
@@ -1177,18 +1549,26 @@ mod atlas_content {
                     )
                     .unwrap();
                     assert_eq!(
+                        reopened.catalog().target().profile(),
+                        expected.content_profile()
+                    );
+                    assert_eq!(
                         reopened.acquire_startup_input().unwrap().unwrap().product(),
                         authored.product()
                     );
-                    assert!(matches!(
-                        RuntimeContentBase::open_pack(
-                            host_fs::readable_file(&path).unwrap(),
-                            cooked.expectation(),
-                            incompatible.recipe().unwrap(),
-                            RuntimeContentLimits::default(),
-                        ),
-                        Err(RuntimeContentError::RecipeMismatch)
-                    ));
+                    let rejected = RuntimeContentBase::open_pack(
+                        host_fs::readable_file(&path).unwrap(),
+                        cooked.expectation(),
+                        incompatible.recipe().unwrap(),
+                        RuntimeContentLimits::default(),
+                    );
+                    if expected.flow() == super::GameFlow::Exploration
+                        && incompatible.flow() == super::GameFlow::Round
+                    {
+                        assert!(matches!(rejected, Err(RuntimeContentError::Composition(_))));
+                    } else {
+                        assert!(matches!(rejected, Err(RuntimeContentError::RecipeMismatch)));
+                    }
                     let wrong_profile = RuntimeContentExpectation::new(
                         cooked.expectation().catalog_digest(),
                         RuntimeContentTarget::new(
@@ -1207,6 +1587,16 @@ mod atlas_content {
                         Err(RuntimeContentError::TargetMismatch)
                     ));
                 }
+                let manifest_path = project.join("nara.toml");
+                let bytes = fs::read(&manifest_path).unwrap();
+                let mut changed = bytes.clone();
+                changed.push(b'\n');
+                fs::write(&manifest_path, changed).unwrap();
+                assert!(selection.verify(&project).is_err());
+                assert!(variant_selection.verify(&project).is_err());
+                fs::write(&manifest_path, bytes).unwrap();
+                selection.verify(&project).unwrap();
+                variant_selection.verify(&project).unwrap();
             }
         }
     }

@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     Scenario,
     animation::{atlas_product, clips_product},
-    delivery::{PlayerSelection, RuntimeKind},
+    delivery::{GameFlow, PlayerSelection, RuntimeKind},
     input::input_product,
     levels::LevelId,
     markers::{marker_image_product, marker_product},
@@ -91,7 +91,15 @@ pub(super) fn run(options: Options) -> ExitCode {
 
 pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'static) -> ExitCode {
     let started = Instant::now();
-    let shared = Presentation::new(options.observe, options.game.scenario);
+    let shared = Presentation::new(
+        options.observe,
+        options.game.scenario,
+        presentation::ContentIdentity {
+            catalog: ContentDigest::from_parts(generated::CATALOG_LENGTH, generated::CATALOG_HASH),
+            target: generated::CONTENT_TARGET.to_owned(),
+            profile: generated::CONTENT_PROFILE.to_owned(),
+        },
+    );
     let extension = Rc::new(RefCell::new(extension));
     let mut original = None;
     let mut save = None;
@@ -101,6 +109,11 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
             return Err("compiled content profile does not belong to this Player".into());
         }
         selection.validate_target(generated::CONTENT_TARGET)?;
+        validate_flow(
+            selection.flow(),
+            options.game.scenario,
+            extension.borrow().isolate_input(),
+        )?;
         let expected = RuntimeContentExpectation::new(
             ContentDigest::from_parts(generated::CATALOG_LENGTH, generated::CATALOG_HASH),
             RuntimeContentTarget::new(generated::CONTENT_TARGET, generated::CONTENT_PROFILE)
@@ -209,7 +222,7 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
                 presentation::observer(&observed, facts)
             });
         let run = original.insert(DesktopRun::from_runtime_content(base, execution));
-        drive(run, &shared, &options, started, &extension)?;
+        drive(run, &shared, &options, selection, started, &extension)?;
         save = verification::save(&options.game)?;
         Ok(())
     }));
@@ -315,14 +328,32 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
     }
 }
 
+fn validate_flow(flow: GameFlow, scenario: Scenario, isolate_input: bool) -> Result<(), String> {
+    if flow == GameFlow::Round {
+        if isolate_input {
+            return Err(
+                "round Player does not support isolated-input verification or the exploration audio oracle; use ordinary interactive playback".into(),
+            );
+        }
+        if scenario != Scenario::Interactive {
+            return Err(
+                "round Player requires the interactive scenario; scripted travel, save and restore verification require exploration flow".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn drive(
     original: &mut DesktopRun,
     shared: &SharedPresentation,
     options: &Options,
+    selection: PlayerSelection,
     started: Instant,
     extension: &Rc<RefCell<impl PlayerExtension>>,
 ) -> Result<(), String> {
     let first_deadline = started + FIRST_PRESENT_TIMEOUT;
+    shared.borrow_mut().selection = Some(selection);
     wait_initial_pause(original, shared, first_deadline, extension)?;
     let activate_input = extension.borrow().isolate_input();
     if activate_input {

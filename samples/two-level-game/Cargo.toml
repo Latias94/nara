@@ -48,7 +48,8 @@ default = ["development"]
 development = ["nara/project-tooling", "dep:notify"]
 audio-cpal = ["dep:cpal", "dep:rtrb"]
 desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]
-play-flow = ["desktop", "nara/presentation-ui", "dep:windows-sys"]
+play-flow = ["desktop", "nara/presentation-ui"]
+play-flow-check = ["development", "play-flow", "dep:windows-sys"]
 gamepad = ["desktop", "dep:nara_gilrs"]
 cost-measurement = ["dep:windows-sys"]
 scene-work-observation = ["nara/scene-work-observation", "dep:tracing", "dep:tracing-subscriber"]
@@ -79,7 +80,7 @@ required-features = ["development", "desktop"]
 [[bin]]
 name = "play_flow_check"
 path = "src/bin/play_flow_check.rs"
-required-features = ["development", "play-flow"]
+required-features = ["play-flow-check"]
 test = false
 bench = false
 

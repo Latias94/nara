@@ -371,8 +371,8 @@ jobs:
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cook --test cook_source --test cooked_delivery --test sound_bank_content --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test Two-Level Game sample headless
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features cook,cooked-player --test-threads=1 --no-fail-fast
-      - name: Test explicit Player controller selection without native acquisition
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features gamepad,cook,audio-cpal,cooked-player --lib --test cook_runtime -E 'test(controller::) | binary(cook_runtime)' --test-threads=1 --no-fail-fast --no-tests fail
+      - name: Test explicit Player selection and round flow without native acquisition
+        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features gamepad,cook,audio-cpal,cooked-player,play-flow --lib --test cook_runtime --test play_flow -E 'test(controller::) | binary(cook_runtime) | binary(play_flow)' --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test runtime CPU evidence and atlas pixel oracle
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features desktop,cost-measurement,scene-work-observation --test runtime_workload_metrics --test runtime_workload_spans --test tile_payload_trial --test desktop_pixel_oracle --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test concrete game audio CPU controls and independent callback oracle

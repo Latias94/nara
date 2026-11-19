@@ -40,8 +40,7 @@ pub(super) fn prepare_for_player(
     selection
         .validate_target(triple)
         .map_err(ProjectCookError::Invalid)?;
-    let candidate =
-        project_settings(root, selection.runtime()).map_err(ProjectCookError::Invalid)?;
+    let candidate = project_settings(root, selection).map_err(ProjectCookError::Invalid)?;
     let recipe = selection.recipe().map_err(ProjectCookError::Invalid)?;
     let target = RuntimeContentTarget::new(triple, selection.content_profile())
         .map_err(|error| ProjectCookError::Invalid(format!("cooked content target: {error}")))?;
@@ -67,13 +66,14 @@ pub(super) fn prepare_for_player(
 
 fn project_settings(
     root: &DirectoryCapability,
-    runtime: RuntimeKind,
+    selection: PlayerSelection,
 ) -> Result<ProjectSettingsCandidate, String> {
     let manifest = root
         .open_file(&RelativePath::new("nara.toml").map_err(|error| error.to_string())?)
         .map_err(|error| format!("nara.toml: {error}"))?;
-    let candidate = ingest_project_manifest(&manifest, runtime.manifest_profile())
+    let candidate = ingest_project_manifest(&manifest, selection.manifest_profile())
         .map_err(|error| format!("nara.toml: {error:?}"))?;
+    let runtime = selection.runtime();
     if candidate.settings().window.enabled != (runtime != RuntimeKind::Headless) {
         return Err(format!(
             "nara.toml: the {} Player requires window.enabled={}",

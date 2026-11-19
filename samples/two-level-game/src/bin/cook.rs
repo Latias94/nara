@@ -102,6 +102,7 @@ fn run(options: input::Options) -> Result<(), String> {
                     "postpublication_error": error.as_ref().map(ToString::to_string),
                     "runtime": options.selection.runtime().name(),
                     "controllers": options.selection.controllers().name(),
+                    "flow": options.selection.flow().name(),
                 })
             );
             error.map_or(Ok(()), |error| {
