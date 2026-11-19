@@ -1290,13 +1290,15 @@ impl<T> OrderedTaskResults<T> {
 
     /// Admits a unique key from the collection's current completion owner.
     ///
-    /// A duplicate key or different owner returns the original handle without cancellation or
-    /// terminal consumption. An empty collection accepts the first handle's owner.
+    /// A duplicate key, different owner, or previously consumed terminal returns the original
+    /// handle without cancellation or terminal consumption. An empty collection accepts the first
+    /// admitted handle's owner.
     pub fn push(&mut self, handle: TaskHandle<T>) -> Result<(), TaskHandle<T>> {
         let key = handle.order_key();
         if self.pending.first_key_value().is_some_and(|(_, first)| {
             !Arc::ptr_eq(&first.state.instance_token, &handle.state.instance_token)
         }) || self.pending.contains_key(&key)
+            || (handle.is_finished() && lock_unpoisoned(&handle.state.inner).terminal.is_none())
         {
             return Err(handle);
         }

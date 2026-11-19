@@ -25,6 +25,47 @@ fn spawn(pools: &TaskPools, tick: u64, kind: TaskPoolKind, value: u32) -> TaskHa
 }
 
 #[test]
+fn a_spent_handle_cannot_discard_a_previous_available_result() {
+    let pools = TaskPools::inline_for_tests(config()).unwrap();
+    let available = spawn(&pools, 10, TaskPoolKind::Io, 11);
+    let mut spent = spawn(&pools, 20, TaskPoolKind::Io, 22);
+    let spent_descriptor = spent.descriptor();
+    assert_eq!(pools.run_pending_for_tests().executed, 2);
+    assert!(matches!(
+        spent.try_take(),
+        Some(TaskTerminal::Completed(Value(22)))
+    ));
+    assert!(spent.is_finished());
+
+    let mut ordered = OrderedTaskResults::default();
+    ordered.push(available).unwrap();
+    let mut returned = ordered.push(spent).expect_err("consumed result");
+    assert_eq!(returned.descriptor(), spent_descriptor);
+    assert!(returned.try_take().is_none());
+    assert_eq!(ordered.len(), 1);
+    let cutoff = pools.capture_completion_cutoff();
+    let ready = ordered
+        .capture_ready_prefix(&cutoff)
+        .unwrap()
+        .into_terminals()
+        .unwrap();
+    assert_eq!(ready.len(), 1);
+    assert!(matches!(
+        ready[0].terminal,
+        TaskTerminal::Completed(Value(11))
+    ));
+    assert!(
+        ordered
+            .capture_ready_prefix(&cutoff)
+            .unwrap()
+            .into_terminals()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(pools.shutdown_blocking().unwrap().is_complete());
+}
+
+#[test]
 fn sibling_scopes_reject_mixed_results_and_return_the_original_pending_handle() {
     let facilities = TaskFacilities::inline_for_tests(config()).unwrap();
     let mut first = facilities.scope();
