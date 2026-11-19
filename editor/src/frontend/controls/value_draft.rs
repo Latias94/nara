@@ -368,12 +368,7 @@ fn scalar_item(shape: &ComponentValueShape) -> bool {
 
 fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
     if matches!(shape, ComponentValueShape::AssetRef { .. }) {
-        return match nara::reflect::decode_asset_reference_value(value) {
-            Ok(AssetRef::Path(path)) => path.to_string(),
-            Ok(AssetRef::StableId(id)) => format!("stable_id:{id}"),
-            Ok(reference @ AssetRef::Product(_)) => reference.to_string(),
-            Err(_) => String::new(),
-        };
+        return super::authoring::asset_reference_text(value);
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
         return match value.as_entity_reference() {
@@ -568,8 +563,25 @@ mod tests {
 
     #[test]
     fn asset_reference_drafts_preserve_complete_product_selection() {
+        use nara::{
+            reflect::{ComponentFieldPath, ComponentRegistryBuilder, ComponentTypeId},
+            scene::{
+                PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+                SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+                SceneEntityRecord,
+            },
+            tooling::{SceneInspectorFieldState, SceneInspectorState},
+        };
+
         let source = StableAssetId::parse_str("cc91a0c8-e2b4-42ae-9d78-3481b9f34d65").unwrap();
         let shape = ComponentValueShape::from(ComponentValueKind::AssetRef);
+        let mut registry = ComponentRegistryBuilder::new();
+        nara::sprite::register_sprite_components(&mut registry).unwrap();
+        let registry = registry.freeze().unwrap();
+        let sprite = ComponentTypeId::new("nara.sprite.Sprite");
+        let schema = registry.schema(&sprite).unwrap();
+        let entity_id = SceneEntityId::new("sprite").unwrap();
+        let inspector = SceneInspectorState::new();
         for reference in [
             AssetRef::path("bundle.json").unwrap(),
             AssetRef::StableId(source),
@@ -585,8 +597,61 @@ mod tests {
         ] {
             let value = nara::reflect::encode_asset_reference_value(&reference);
             let text = scalar_text(&shape, &value);
-            assert!(!text.is_empty());
+            assert_eq!(text, reference.to_string());
             assert_eq!(parse_scalar(&shape, &text).unwrap(), value);
+
+            let mut authored = schema.authoring_initial_value().unwrap().clone();
+            authored
+                .set_path(
+                    &ComponentFieldPath::from_fields(["material", "image"]),
+                    value.clone(),
+                )
+                .unwrap();
+            let entity = SceneEntityRecord::new(entity_id.clone()).with_component(
+                sprite.clone(),
+                SceneComponentRecord::new(schema.version(), authored),
+            );
+            let scene = SceneDocument::from_ordered_roots([entity.clone()])
+                .to_json_string()
+                .unwrap();
+            let scene = SceneDocumentCandidate::decode_json_str(&scene)
+                .unwrap()
+                .into_composition_source()
+                .unwrap();
+            let prefab = PrefabDocument::from_ordered_roots([entity])
+                .to_json_string()
+                .unwrap();
+            let prefab = PrefabDocumentCandidate::decode_json_str(&prefab)
+                .unwrap()
+                .into_composition_source()
+                .unwrap();
+            let models = [
+                inspector.model_with_selection(
+                    &SceneAuthoringSession::new(scene),
+                    &registry,
+                    Some(&entity_id),
+                    None,
+                ),
+                inspector.prefab_model_with_selection(
+                    &PrefabAuthoringSession::new(prefab),
+                    Some(&registry),
+                    Some(&entity_id),
+                ),
+            ];
+            for model in models {
+                let mut field = model.selected_entity_view.unwrap().components[0]
+                    .fields
+                    .iter()
+                    .find(|field| field.id == ComponentFieldId::new("material.image"))
+                    .unwrap()
+                    .clone();
+                assert_eq!(field.state, SceneInspectorFieldState::Present);
+                assert_eq!(field.value, Some(value.clone()));
+                assert_eq!(super::super::authoring::field_source_text(&field), text);
+                field.default_value = field.value.take();
+                field.state = SceneInspectorFieldState::Defaulted;
+                assert_eq!(super::super::authoring::field_source_text(&field), text);
+            }
         }
         for text in [
             "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65",

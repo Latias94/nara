@@ -18,19 +18,7 @@ use nara::{
 pub(in crate::frontend) fn field_source_text(field: &SceneInspectorFieldView) -> String {
     let value = field.value.as_ref().or(field.default_value.as_ref());
     if field.value_kind == ComponentValueKind::AssetRef {
-        if let Some(ComponentValue::Map(fields)) = value {
-            if let (Some(kind), Some(value)) = (
-                fields.get("kind").and_then(ComponentValue::as_str),
-                fields.get("value").and_then(ComponentValue::as_str),
-            ) {
-                return if kind == "stable_id" {
-                    format!("stable_id:{value}")
-                } else {
-                    value.to_owned()
-                };
-            }
-        }
-        return String::new();
+        return value.map(asset_reference_text).unwrap_or_default();
     }
     if let Some(value) = value {
         return value_label(Some(value));
@@ -41,6 +29,12 @@ pub(in crate::frontend) fn field_source_text(field: &SceneInspectorFieldView) ->
         ComponentValueKind::F64 => "0.0".to_owned(),
         _ => String::new(),
     }
+}
+
+pub(super) fn asset_reference_text(value: &ComponentValue) -> String {
+    nara::reflect::decode_asset_reference_value(value)
+        .map(|reference| reference.to_string())
+        .unwrap_or_default()
 }
 
 pub(in crate::frontend) fn value_label(value: Option<&ComponentValue>) -> String {
