@@ -183,6 +183,8 @@ where
                 }),
         )?;
         let mut source_defaults = Vec::new();
+        #[cfg(feature = "serde")]
+        let mut inspection_bytes = Some(0usize);
         for record in &mut document.entities {
             let node = self.locators[&record.id];
             let id = &identifiers[&record.id];
@@ -333,12 +335,12 @@ where
                     );
                     SceneCompilationFailureKind::Reference
                 })?;
-                let nodes = cost
+                let value_nodes = cost
                     .nodes()
                     .checked_sub(old_nodes)
                     .and_then(|nodes| nodes.checked_add(new_nodes))
                     .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-                let bytes = cost
+                let value_bytes = cost
                     .logical_bytes()
                     .checked_sub(old_bytes)
                     .and_then(|bytes| bytes.checked_add(new_bytes))
@@ -349,9 +351,9 @@ where
                     .context
                     .preflight_materialized_value_cost(
                         0,
-                        nodes,
+                        value_nodes,
                         0,
-                        bytes,
+                        value_bytes,
                         self.nodes[node].origin.entity(),
                     )
                     .ok_or(SceneCompilationFailureKind::WorkLimit)?;
@@ -419,6 +421,19 @@ where
                     // its separately admitted snapshots outside the effective-value validator.
                     payload.contextual_defaults.clear();
                 }
+                #[cfg(feature = "serde")]
+                if self.root.inspect {
+                    inspection_bytes =
+                        inspection_bytes.and_then(|bytes| {
+                            bytes
+                                .checked_add(value_nodes.checked_mul(96)?)?
+                                .checked_add(value_bytes)?
+                                .checked_add(payload.value_storage_retained_bytes())?
+                                .checked_add(payload.owner().map_or(Some(0), |owner| {
+                                    provenance_string_bytes(owner.as_str())
+                                })?)
+                        });
+                }
             }
             let mut usage = self.context.usage;
             usage.generated_identifier_bytes = usage
@@ -438,7 +453,7 @@ where
             *root = identifiers[root].clone();
         }
         #[cfg(feature = "serde")]
-        let targets = if self.selected_anchor.is_some() {
+        let targets = if self.root.preserve_source_defaults {
             let cost = self.scopes[0]
                 .output
                 .iter()
@@ -517,6 +532,16 @@ where
             )?;
             reference_targets.insert(query.clone(), reference);
         }
+        #[cfg(feature = "serde")]
+        let inspection = if self.root.inspect {
+            Some(self.capture_inspection(
+                &identifiers,
+                &references,
+                inspection_bytes.ok_or(SceneCompilationFailureKind::WorkLimit)?,
+            )?)
+        } else {
+            None
+        };
         Ok(StagedSceneOutput {
             document,
             source_defaults,
@@ -524,6 +549,8 @@ where
             targets,
             #[cfg(feature = "serde")]
             reference_targets,
+            #[cfg(feature = "serde")]
+            inspection,
         })
     }
 

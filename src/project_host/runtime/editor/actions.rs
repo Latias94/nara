@@ -109,6 +109,9 @@ impl EditorProjectSession {
             EditorAction::PrefabConversion(action) => {
                 EditorActionOutcome::PrefabConversion(self.request_prefab_conversion(action))
             }
+            EditorAction::PrefabInspection(action) => {
+                EditorActionOutcome::PrefabInspection(self.request_prefab_inspection(action))
+            }
             EditorAction::SourceTool(action) => self.dispatch_source_tool_action(action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
@@ -378,6 +381,7 @@ impl EditorProjectSession {
             | EditorActionOutcome::DocumentProperty(_)
             | EditorActionOutcome::AuthoringConstruction(_)
             | EditorActionOutcome::PrefabConversion(_)
+            | EditorActionOutcome::PrefabInspection(_)
             | EditorActionOutcome::SourceTool(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)

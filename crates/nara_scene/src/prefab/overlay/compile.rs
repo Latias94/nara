@@ -49,6 +49,8 @@ pub(crate) struct StagedSceneOutput {
         nara_identity::AuthoredEntityReference,
         nara_identity::EntityReference,
     >,
+    #[cfg(feature = "serde")]
+    pub(crate) inspection: Option<crate::prefab::inspection::CapturedPrefabInspection>,
 }
 
 pub(crate) struct MaterializedSourceDefaults {
@@ -81,6 +83,9 @@ where
             entities,
             inputs,
             reference_queries: &[],
+            preserve_source_defaults: false,
+            #[cfg(feature = "serde")]
+            inspect: false,
         },
     )
 }
@@ -90,7 +95,7 @@ pub(crate) fn expand_selected_instance<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
     source: crate::prefab::SourceDocumentInput<'_>,
     anchor: &SceneEntityId,
-    reference_queries: &[nara_identity::AuthoredEntityReference],
+    consumer: crate::prefab::SelectedInstanceConsumer<'_>,
 ) -> Result<StagedSceneOutput, SceneCompilationFailure>
 where
     F: FnMut(
@@ -98,7 +103,7 @@ where
         &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    staged::expand_selected(context, source_topology(source, reference_queries), anchor)
+    staged::expand_selected(context, source_topology(source, Some(consumer)), anchor)
 }
 
 #[cfg(feature = "serde")]
@@ -113,14 +118,23 @@ where
         &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    staged::capture_source_cut(context, source_topology(source, &[]), root)
+    staged::capture_source_cut(context, source_topology(source, None), root)
 }
 
 #[cfg(feature = "serde")]
 fn source_topology<'a>(
     source: crate::prefab::SourceDocumentInput<'a>,
-    reference_queries: &'a [nara_identity::AuthoredEntityReference],
+    consumer: Option<crate::prefab::SelectedInstanceConsumer<'a>>,
 ) -> staged::SourceTopology<'a> {
+    use crate::prefab::SelectedInstanceConsumer;
+
+    let (reference_queries, preserve_source_defaults, inspect) = match consumer {
+        Some(SelectedInstanceConsumer::Conversion {
+            reference_queries, ..
+        }) => (reference_queries, true, false),
+        Some(SelectedInstanceConsumer::Inspection) => (&[][..], false, true),
+        None => (&[][..], false, false),
+    };
     let (placements, entities, inputs) = match source {
         crate::prefab::SourceDocumentInput::Scene(document) => (
             document.placements.as_slice(),
@@ -138,6 +152,8 @@ fn source_topology<'a>(
         entities,
         inputs,
         reference_queries,
+        preserve_source_defaults,
+        inspect,
     }
 }
 

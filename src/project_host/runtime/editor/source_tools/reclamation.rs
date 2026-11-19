@@ -392,6 +392,7 @@ impl EditorProjectSession {
             || self.source_asset_import.schema_adoption_pending()
             || self.schema_owner_adoption.reclamation_blocked()
             || self.prefab_conversion.reclamation_blocked()
+            || self.prefab_inspection.reclamation_blocked()
             || self.authoring_retirements.is_pending()
         {
             return Err(Error::Busy);

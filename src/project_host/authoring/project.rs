@@ -79,9 +79,9 @@ mod source_upgrade_adoption;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 mod source_upgrade_resume;
 pub(crate) use capture::{
-    AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
-    AuthoringSceneSessionSnapshot, AuthoringSceneSource, AuthoringSourceCaptureInputs,
-    AuthoringSourceValidation, CapturedAuthoringPreview,
+    AuthoringDocumentCapture, AuthoringPrefabCaptureRequest, AuthoringPrefabSessionSnapshot,
+    AuthoringPrefabSourceCapture, AuthoringSceneSessionSnapshot, AuthoringSceneSource,
+    AuthoringSourceCaptureInputs, AuthoringSourceValidation, CapturedAuthoringPreview,
 };
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use schema_owner::{

@@ -26,7 +26,10 @@ use crate::project_host::authoring::{
     AuthoringPrefabSourceCapture, AuthoringProjectSourceAdmissionError, AuthoringSourceValidation,
 };
 
-use super::{EditorProjectSession, authoring_sources::AuthoringSourceSelection};
+use super::{
+    EditorProjectSession,
+    authoring_sources::{SelectedPrefabBasis, SelectedPrefabSources, prefab_participant_retention},
+};
 
 const CONVERSION_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7072_6662_636f_6e76);
 const REVIEW_ROWS: usize = 64;
@@ -35,22 +38,10 @@ const REVIEW_BYTES: usize = 128 * 1024;
 const REVIEW_RESERVATION: usize =
     4 * REVIEW_BYTES + 3 * REVIEW_ROWS * size_of::<EditorPrefabConversionMappingRow>();
 
-struct ConversionSelection {
-    root: AuthoringSourceSelection,
-    prefabs: Vec<AuthoringSourceSelection>,
-}
-
-struct Participant {
-    key: nara_scene::SourceDocumentKey,
-    project_path: Arc<str>,
-    selected: Option<AuthoringSourceSelection>,
-}
-
 struct PreparedOperation {
     source: PreparedEditorPrefabConversion,
     capture: AuthoringPrefabSourceCapture,
-    root: AuthoringSourceSelection,
-    participants: Vec<Participant>,
+    basis: SelectedPrefabBasis,
 }
 
 struct PreparedSource {
@@ -97,7 +88,7 @@ impl PendingWork {
 pub(super) struct EditorPrefabConversionHost {
     sequence: u64,
     view: EditorPrefabConversionView,
-    selection: Option<ConversionSelection>,
+    selection: Option<SelectedPrefabSources>,
     prepared: Option<PreparedOperation>,
     pending: Option<PendingWork>,
     cancel_requested: bool,
@@ -251,14 +242,7 @@ impl EditorProjectSession {
             return rejected(None, Rejection::BudgetExceeded);
         }
         let Some(selection_bytes) = self
-            .authoring_source_selection_retained_bytes(basis.document)
-            .and_then(|root| {
-                self.prefab_lanes.keys().try_fold(root, |bytes, &document| {
-                    bytes.checked_add(self.authoring_source_selection_retained_bytes(document)?)
-                })
-            })
-            .and_then(|bytes| bytes.checked_add(size_of::<ConversionSelection>()))
-            .and_then(|bytes| bytes.checked_mul(2))
+            .prefab_source_capture_selection_bytes(basis.document)
             .and_then(|bytes| bytes.checked_add(anchor.as_str().len()))
             .and_then(|bytes| bytes.checked_add(4 * size_of::<usize>()))
         else {
@@ -276,7 +260,7 @@ impl EditorProjectSession {
                     .expect("checked authoring mode")
                     .admit_source_capture_inputs(0, bytes)
             });
-        let mut inputs = match inputs {
+        let inputs = match inputs {
             Ok(inputs) => inputs,
             Err(error) => {
                 let failure = admission_failure(error, Rejection::PreparationFailed);
@@ -317,34 +301,15 @@ impl EditorProjectSession {
         if !locator_matches || root.revision != basis.revision || root.schema != basis.schema {
             return rejected(None, Rejection::StaleSource);
         }
-        let prefabs = self.authoring_prefab_selections();
-        let Some(schema) = basis.schema.as_ref() else {
-            return rejected(None, Rejection::SourceRejected);
-        };
-        let context = (|| {
-            let observation = self.capture_authoring_source_observation(&root, &mut inputs)?;
-            let snapshots =
-                self.capture_open_prefabs(&prefabs, &mut inputs, Some((&root, &observation)))?;
-            self.authoring_project()
-                .expect("checked authoring mode")
-                .capture_prefab_conversion_request(
-                    receipt,
-                    observation,
-                    schema,
-                    kind,
-                    inputs,
-                    snapshots,
-                )
-        })();
-        let mut context = match context {
-            Ok(context) => context,
-            Err(error) => {
-                let failure = admission_failure(error, Rejection::PreparationFailed);
-                let _ = self.diagnostics.extend(failure.diagnostics);
-                return rejected(None, failure.reason);
-            }
-        };
-        let selection = ConversionSelection { root, prefabs };
+        let (selection, mut context) =
+            match self.capture_selected_prefab_sources(root, kind, inputs) {
+                Ok(selected) => selected,
+                Err(error) => {
+                    let failure = admission_failure(error, Rejection::PreparationFailed);
+                    let _ = self.diagnostics.extend(failure.diagnostics);
+                    return rejected(None, failure.reason);
+                }
+            };
         let Some(sequence) = self.prefab_conversion.sequence.checked_add(1) else {
             return rejected(None, Rejection::IdExhausted);
         };
@@ -384,11 +349,10 @@ impl EditorProjectSession {
                         let participant_bytes = acquisition
                             .loaded_prefabs()
                             .try_fold(0usize, |bytes, prefab| {
-                                bytes
-                                    .checked_add(size_of::<Participant>())?
-                                    .checked_add(prefab.native_source().key().retained_bytes())?
-                                    .checked_add(prefab.source().project_path().as_str().len())?
-                                    .checked_add(4 * size_of::<usize>())
+                                bytes.checked_add(prefab_participant_retention(
+                                    prefab.native_source().key(),
+                                    prefab.source().project_path().as_str(),
+                                )?)
                             })
                             .ok_or_else(|| failure(Rejection::BudgetExceeded))?;
                         let retained = source
@@ -434,17 +398,6 @@ impl EditorProjectSession {
         accepted(operation, self.prefab_conversion.view.phase)
     }
 
-    fn conversion_matches(&self, prepared: &PreparedOperation) -> bool {
-        self.authoring_source_selection_is_current(&prepared.root)
-            && prepared.participants.iter().all(|participant| {
-                self.authoring_dependency_selection_is_current(
-                    &participant.key,
-                    &participant.project_path,
-                    participant.selected.as_ref(),
-                )
-            })
-    }
-
     fn validate_prefab_conversion(&mut self, operation: EditorPrefabConversionId) -> Outcome {
         if self.authoring_operation_fenced() {
             return rejected(Some(operation), Rejection::Busy);
@@ -458,7 +411,7 @@ impl EditorProjectSession {
         let Some(prepared) = self.prefab_conversion.prepared.take() else {
             return rejected(Some(operation), Rejection::WrongPhase);
         };
-        if !self.conversion_matches(&prepared) {
+        if !prepared.basis.matches(self) {
             self.prefab_conversion.fail(failure(Rejection::StaleSource));
             return accepted(operation, Phase::Terminal);
         }
@@ -515,38 +468,16 @@ impl EditorProjectSession {
             self.prefab_conversion.fail(failure(Rejection::StaleSource));
             return;
         };
-        let mut participants = Vec::new();
-        for prefab in prepared.capture.prefabs() {
-            let key = prefab.native_source().key();
-            let path = prefab.source().project_path().as_str();
-            let mut matches = selection
-                .prefabs
-                .iter()
-                .filter(|source| &source.source_key == key || source.project_path.as_ref() == path);
-            let selected = matches.next();
-            if matches.next().is_some()
-                || selected
-                    .and_then(|source| source.receipt.as_ref())
-                    .is_none()
-                    && prefab.session_revision().is_some()
-                || selected.map(|source| source.revision) != prefab.session_revision()
-            {
-                self.prefab_conversion.fail(failure(Rejection::StaleSource));
-                return;
-            }
-            participants.push(Participant {
-                key: key.clone(),
-                project_path: Arc::from(path),
-                selected: selected.cloned(),
-            });
-        }
+        let Some(basis) = selection.complete(&prepared.capture) else {
+            self.prefab_conversion.fail(failure(Rejection::StaleSource));
+            return;
+        };
         let prepared = PreparedOperation {
             source: prepared.source,
             capture: prepared.capture,
-            root: selection.root,
-            participants,
+            basis,
         };
-        if !self.conversion_matches(&prepared) {
+        if !prepared.basis.matches(self) {
             self.prefab_conversion.fail(failure(Rejection::StaleSource));
             return;
         }
@@ -565,7 +496,7 @@ impl EditorProjectSession {
             self.prefab_conversion.fail(failure(Rejection::Closing));
             return;
         }
-        if !self.conversion_matches(&prepared) {
+        if !prepared.basis.matches(self) {
             self.prefab_conversion.fail(failure(Rejection::StaleSource));
             return;
         }

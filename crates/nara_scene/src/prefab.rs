@@ -37,6 +37,8 @@ mod declaration;
 #[cfg(feature = "serde")]
 pub(crate) mod extraction;
 #[cfg(feature = "serde")]
+pub(crate) mod inspection;
+#[cfg(feature = "serde")]
 mod native_preview;
 mod overlay;
 #[cfg(feature = "serde")]
@@ -1118,9 +1120,20 @@ where
 /// An actual containing source, borrowed without a Scene-shaped surrogate.
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum SourceDocumentInput<'a> {
+#[doc(hidden)]
+pub enum SourceDocumentInput<'a> {
     Scene(&'a SceneDocument),
     Prefab(&'a PrefabDocument),
+}
+
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy)]
+pub(crate) enum SelectedInstanceConsumer<'a> {
+    Conversion {
+        reference_queries: &'a [nara_identity::AuthoredEntityReference],
+        initial_reference_work: (usize, usize),
+    },
+    Inspection,
 }
 
 /// A semantic fragment has no authority to stand in for a complete expanded document.
@@ -1140,6 +1153,7 @@ pub(crate) struct SelectedInstanceFragment {
 #[derive(Debug)]
 pub(crate) struct SelectedInstanceCompilation {
     pub(crate) fragment: Option<SelectedInstanceFragment>,
+    pub(crate) inspection: Option<inspection::CapturedPrefabInspection>,
     pub(crate) diagnostics: DiagnosticReport,
     pub(crate) failure: Option<SceneCompilationFailure>,
     pub(crate) omissions: Vec<AuthoringSceneCompilationOmission>,
@@ -1148,14 +1162,13 @@ pub(crate) struct SelectedInstanceCompilation {
     pub(crate) budget_failed: bool,
 }
 
-/// Private comparison entry: only a directly owned anchor's complete projection is interpreted.
+/// Only a directly owned anchor's complete projection is interpreted.
 /// All containing-source IDs and topology remain actual external reference context.
 #[cfg(feature = "serde")]
 pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
     source: SourceDocumentInput<'_>,
     anchor: &SceneEntityId,
-    reference_queries: &[nara_identity::AuthoredEntityReference],
-    initial_reference_work: (usize, usize),
+    consumer: SelectedInstanceConsumer<'_>,
     basis: &crate::AuthoringSchemaBasis,
     options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -1170,28 +1183,38 @@ where
         options,
         asset_resolution,
     );
-    let result: Result<SelectedInstanceFragment, SceneCompilationFailure> = (|| {
+    let result: Result<_, SceneCompilationFailure> = (|| {
+        let initial_reference_work = match consumer {
+            SelectedInstanceConsumer::Conversion {
+                initial_reference_work,
+                ..
+            } => initial_reference_work,
+            SelectedInstanceConsumer::Inspection => (0, 0),
+        };
         context
             .admit_terminal_work(initial_reference_work.0, initial_reference_work.1, Some(0))
             .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
+        let output_bytes = match consumer {
+            SelectedInstanceConsumer::Conversion { .. } => {
+                std::mem::size_of::<SelectedInstanceFragment>()
+            }
+            SelectedInstanceConsumer::Inspection => {
+                std::mem::size_of::<inspection::AuthoringPrefabInstanceSnapshot>()
+            }
+        };
         if !context.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
             None,
             None,
         ) || !context.reserve_scratch_bytes(
-            std::mem::size_of::<SelectedInstanceCompilation>()
-                .checked_add(std::mem::size_of::<SelectedInstanceFragment>()),
+            std::mem::size_of::<SelectedInstanceCompilation>().checked_add(output_bytes),
             None,
             None,
         ) {
             return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
-        let output = overlay::compile::expand_selected_instance(
-            &mut context,
-            source,
-            anchor,
-            reference_queries,
-        )?;
+        let output =
+            overlay::compile::expand_selected_instance(&mut context, source, anchor, consumer)?;
         let mut document = output.document;
         document.canonicalize();
         context.observe_authoring_omissions(&mut document);
@@ -1201,13 +1224,20 @@ where
             let validation = context.validate_authoring_document(&document);
             context.diagnostics.extend(validation);
         }
-        if context.diagnostics.has_errors() {
+        if context.budget_failed || context.diagnostics.has_errors() {
             return Err(if context.budget_failed {
                 SceneCompilationFailureKind::WorkLimit
             } else {
                 SceneCompilationFailureKind::OwnerAdmission
             }
             .into());
+        }
+        if matches!(consumer, SelectedInstanceConsumer::Inspection) {
+            let mut inspection = output
+                .inspection
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            inspection.retain_admitted_payloads(document)?;
+            return Ok((None, Some(inspection)));
         }
         // These source-only snapshots have their own lexical proof and allocation admission.
         // Restore them only after the flat effective values passed their ordinary validator.
@@ -1261,19 +1291,20 @@ where
         // This complete table belongs to the actual containing compilation, not to a
         // reconstruction from generated ID spelling or the selected fragment's provenance.
         let targets = output.targets;
-        Ok(SelectedInstanceFragment {
+        let fragment = SelectedInstanceFragment {
             roots,
             entities: document.entities,
             provenance: std::mem::take(&mut context.provenance),
             targets,
             reference_targets: output.reference_targets,
-        })
+        };
+        Ok((Some(fragment), None))
     })();
-    let (fragment, failure) = match result {
-        Ok(fragment) => (Some(fragment), None),
+    let (fragment, inspection, failure) = match result {
+        Ok((fragment, inspection)) => (fragment, inspection, None),
         Err(failure) => {
             context.push_expansion_failure(&failure);
-            (None, Some(failure))
+            (None, None, Some(failure))
         }
     };
     let work_bytes = context.usage.checked_work_bytes();
@@ -1282,6 +1313,7 @@ where
     }
     Ok(SelectedInstanceCompilation {
         fragment,
+        inspection,
         diagnostics: context.diagnostics,
         failure,
         omissions: context.omissions,

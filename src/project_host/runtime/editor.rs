@@ -23,6 +23,7 @@ mod persistence;
 mod play;
 mod prefab_conversion;
 mod prefab_extraction;
+mod prefab_inspection;
 mod prepared_edit;
 #[cfg(feature = "presentation-2d")]
 mod presentation;
@@ -911,6 +912,7 @@ pub struct EditorProjectSession {
     image_import: image_import::EditorImageImportHost,
     source_asset_import: source_asset_import::EditorSourceAssetImportHost,
     prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
+    prefab_inspection: prefab_inspection::EditorPrefabInspectionHost,
     source_tools: source_tools::EditorSourceTools,
     schema_owner_adoption: Box<schema_owner::EditorSchemaOwnerAdoptionHost>,
     authored_schema_upgrade: Box<authored_upgrade::EditorAuthoredSchemaUpgradeHost>,
@@ -1080,6 +1082,7 @@ impl Drop for EditorProjectSession {
         self.image_import.cancel_pending();
         self.source_asset_import.cancel();
         self.prefab_conversion.cancel();
+        self.prefab_inspection.cancel();
         self.source_tools.cancel();
         self.source_tools.cancel_template_import();
         self.source_tools.cancel_reclamation();
@@ -1129,6 +1132,8 @@ impl EditorProjectSession {
         self.advance_source_tools();
         self.prefab_conversion.cancel();
         self.advance_prefab_conversion();
+        self.prefab_inspection.cancel();
+        self.advance_prefab_inspection();
         #[cfg(test)]
         if let Some(gate) = self.next_close_poll_gate.take() {
             gate(self);
@@ -1169,6 +1174,7 @@ impl EditorProjectSession {
                 self.advance_prefab_extraction();
                 self.drain_schema_adoption_source_asset_import();
                 self.advance_prefab_conversion();
+                self.advance_prefab_inspection();
                 self.advance_source_tools();
                 files_closed &= !self.schema_owner_adoption.pending();
                 files_closed &= !self.authored_schema_upgrade.work_pending();
@@ -1176,6 +1182,7 @@ impl EditorProjectSession {
                 files_closed &= !self.prefab_extraction.work_pending();
                 files_closed &= !self.prefab_extraction.writes_fenced();
                 files_closed &= !self.source_asset_import.schema_adoption_pending();
+                files_closed &= !self.prefab_inspection.work_pending();
                 files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
                 if files_closed && !self.authoring_retirements.is_pending() && play_closed {
@@ -1767,6 +1774,7 @@ impl EditorProjectSession {
                 image_import,
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
+                prefab_inspection: Default::default(),
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
                 authored_schema_upgrade: Default::default(),
@@ -2073,6 +2081,7 @@ impl EditorProjectSession {
                 image_import: image_import::EditorImageImportHost::default(),
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
+                prefab_inspection: Default::default(),
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
                 authored_schema_upgrade: Default::default(),

@@ -22,7 +22,7 @@ pub(crate) struct AuthoringPrefabCaptureRequest {
 impl AuthoringProjectSessionSnapshot {
     /// Retain current open Prefabs, including a Prefab containing root. Only actual demand
     /// activates a snapshot; a finite demand of the containing source uses its working copy.
-    pub(crate) fn capture_prefab_conversion_request(
+    pub(crate) fn capture_selected_prefab_request(
         &self,
         source: &AuthoringDocumentSourceFact,
         observation: FileSourceObservation,
@@ -117,6 +117,37 @@ impl AuthoringPrefabSourceCapture {
         self.validation.clone()
     }
 
+    /// Admits the receipts and Host selection that survive a Prefab inspection.
+    pub(crate) fn inspection_source_validation(
+        &self,
+        retained_host_bytes: usize,
+    ) -> Result<AuthoringSourceValidation, AuthoringProjectSourceAdmissionError> {
+        let validation = &self.validation;
+        let mut budget = validation.schema.budget;
+        let retained_capture_bytes = checked_retained_replacement(
+            budget.retained_candidate_bytes,
+            0,
+            checked_sum([
+                size_of::<AuthoringSourceValidation>(),
+                2 * size_of::<usize>(),
+                validation.retained_fact_bytes()?,
+                validation
+                    .source_observations
+                    .retained_bytes(&validation.sources)?,
+                retained_host_bytes,
+            ])?,
+            budget.limits.retained_candidate_bytes().get(),
+        )?;
+        budget.retain_open_handles(checked_product(
+            validation.physical_count()?,
+            FileSourceObservation::retained_handle_capacity(),
+        )?)?;
+        Ok(AuthoringSourceValidation {
+            retained_capture_bytes,
+            ..validation.clone()
+        })
+    }
+
     pub(crate) const fn usage(&self) -> AuthoringProjectAdmissionUsage {
         self.usage
     }
@@ -126,7 +157,7 @@ impl AuthoringPrefabSourceCapture {
     }
 }
 
-/// One loader owner serves full preview and source-only selected conversion.
+/// One loader owner serves full preview and source-only selected instance work.
 ///
 /// The budget reserves the callback's complete suspended view, including any dependency
 /// snapshots retained by its source-owner wrapper. Host source caches and receipts retain
@@ -471,12 +502,16 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             if snapshot.basis.as_ref() != Some(basis) {
                 return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
             }
-            let observation = snapshot.observation.as_ref().ok_or_else(|| {
-                AuthoringProjectSourceAdmissionError::SourceChanged {
-                    kind: AuthoringSourceKind::Prefab,
-                    path: opened.project_path.clone(),
+            let observation = match snapshot.capture_observation(budget) {
+                Ok(Some(observation)) => observation,
+                Ok(None) | Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch) => {
+                    return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                        kind: AuthoringSourceKind::Prefab,
+                        path: opened.project_path,
+                    });
                 }
-            })?;
+                Err(error) => return Err(error),
+            };
             if !observation.matches(&opened.capability).map_err(|source| {
                 AuthoringProjectSourceAdmissionError::SourceHost {
                     kind: AuthoringSourceKind::Prefab,
@@ -511,7 +546,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             charge_composition_source(&source, 0, &snapshot.document, budget)?;
             budget.charge_source_bytes(source.encoded_bytes(), 0, 0, 0)?;
             let source = Arc::new(source);
-            source_observations.insert_original(&source, &native_source, observation, budget)?;
+            source_observations.insert_original(&source, &native_source, &observation, budget)?;
             let content = AuthoringPrefabContent::Session {
                 document: Arc::clone(&snapshot.document),
                 revision: snapshot.revision,
@@ -556,17 +591,17 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
 
     /// Finish without resource hydration or a Scene preview.
     ///
-    /// `retained_conversion_bytes` accounts for the complete prepared source token,
-    /// including its dependency snapshots; it replaces the compiler reservation. Input
+    /// `retained_result_bytes` accounts for the complete retained operation result.
+    /// It replaces the compiler reservation. Input
     /// documents remain conservatively charged until this finite request is dropped.
     pub(crate) fn finish_source_capture(
         mut self,
-        retained_conversion_bytes: usize,
+        retained_result_bytes: usize,
     ) -> Result<AuthoringPrefabSourceCapture, AuthoringProjectSourceAdmissionError> {
         resize_compiler_work(
             self.budget,
             &mut self.compiler_reservation,
-            retained_conversion_bytes,
+            retained_result_bytes,
         )?;
         drop(self.prefabs_directory.take());
         revalidate_sources(
@@ -690,6 +725,10 @@ pub(in crate::project_host::authoring::project) fn open_prefab_inputs_retained_b
                 &snapshot.project_path,
                 &snapshot.document,
             )?,
+            snapshot
+                .deferred_observation
+                .as_deref()
+                .map_or(Ok(0), prefab_observation_factory_bytes)?,
         ])?;
     }
     Ok(input_retained)

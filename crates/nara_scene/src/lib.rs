@@ -121,6 +121,13 @@ pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, 
 pub use placement::{
     SceneEntityPlacement, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };
+#[cfg(feature = "serde")]
+pub use prefab::inspection::{
+    AuthoringPrefabComponentFact, AuthoringPrefabComponentView, AuthoringPrefabInstanceSnapshot,
+    AuthoringPrefabProperty, AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind,
+    AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin, AuthoringPrefabTargetView,
+    AuthoringPrefabValue, AuthoringPrefabValueError,
+};
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget,
@@ -219,9 +226,13 @@ pub mod __private {
         CapturedExtractionSource, PrefabExtractionAssets, PrefabExtractionBinding,
         PrefabExtractionEnvironment,
     };
+    pub use crate::prefab::inspection::{
+        AuthoringPrefabInspectionError, try_inspect_authoring_prefab_instance_with_loader,
+    };
     pub use crate::prefab::{
         AuthoringNativePreview, AuthoringSceneCompilationOmission,
         AuthoringSceneCompilationOmissionReason, AuthoringSceneCompilationParts,
-        AuthoringSceneCompilationReport, try_compile_authoring_scene_with_loader,
+        AuthoringSceneCompilationReport, SourceDocumentInput,
+        try_compile_authoring_scene_with_loader,
     };
 }

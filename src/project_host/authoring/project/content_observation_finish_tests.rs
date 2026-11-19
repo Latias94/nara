@@ -130,7 +130,7 @@ fn finish_after_sidecar_replacement(replacement: MetadataReplacement) {
         })
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_selected_prefab_request(
             &source,
             observation,
             &basis,

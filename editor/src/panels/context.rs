@@ -1,17 +1,17 @@
 use nara::{
     project_host::EditorEditPreparationError,
     scene::{
-        AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-        PrefabInstanceObservation, PrefabInstancePath, PrefabPropertyIntent, PrefabRevert,
-        SceneCompilationFailure, ScenePatchDocument,
+        AuthoringConstructionDraft, AuthoringPrefabInstanceSnapshot, AuthoringPropertyEdit,
+        PrefabDeclarationLimits, PrefabInstanceObservation, PrefabInstancePath,
+        PrefabPropertyIntent, PrefabRevert, SceneCompilationFailure, ScenePatchDocument,
     },
     tooling::{
         EditorAction, EditorAuthoringPage, EditorAuthoringQuery, EditorDocumentId,
         EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityPage,
-        EditorEntityQuery, EditorPrefabPropertyClaimTarget, EditorPropertyObservation,
-        EditorPropertyRead, EditorPropertyReadLimits, EditorSourceToolAction,
-        EditorSourceToolError, EditorSourceToolReview, PreparedEditorDocumentConstruction,
-        PreparedEditorDocumentEdit,
+        EditorEntityQuery, EditorPrefabInspectionId, EditorPrefabInspectionRejection,
+        EditorPrefabPropertyClaimTarget, EditorPropertyObservation, EditorPropertyRead,
+        EditorPropertyReadLimits, EditorSourceToolAction, EditorSourceToolError,
+        EditorSourceToolReview, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
     },
 };
 
@@ -107,6 +107,22 @@ impl EditorPanelContext<'_, '_> {
         limits: EditorPropertyReadLimits,
     ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
         self.application.read_prefab_property_claim(claim, limits)
+    }
+
+    /// Borrows the completed observation of one selected Prefab occurrence.
+    pub fn prefab_effective_observation(
+        &self,
+        inspection: EditorPrefabInspectionId,
+    ) -> Result<&AuthoringPrefabInstanceSnapshot, EditorPrefabInspectionRejection> {
+        self.application.prefab_effective_observation(inspection)
+    }
+
+    /// Borrows the source-owned Revert before submitting Commit.
+    pub fn prefab_inspection_revert_patch(
+        &self,
+        inspection: EditorPrefabInspectionId,
+    ) -> Result<&ScenePatchDocument, EditorPrefabInspectionRejection> {
+        self.application.prefab_inspection_revert_patch(inspection)
     }
 
     /// Prepares Revert of a discovered claim without rebinding its source slot.

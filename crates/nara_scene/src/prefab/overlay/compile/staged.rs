@@ -15,6 +15,8 @@ use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 #[cfg(feature = "serde")]
 mod extraction;
 mod inputs;
+#[cfg(feature = "serde")]
+mod inspection;
 mod output;
 mod reference_program;
 mod values;
@@ -174,6 +176,9 @@ pub(super) struct SourceTopology<'a> {
     pub(super) entities: &'a [SceneEntityRecord],
     /// Witnessed containing-source references that must survive explicit source conversion.
     pub(super) reference_queries: &'a [nara_identity::AuthoredEntityReference],
+    pub(super) preserve_source_defaults: bool,
+    #[cfg(feature = "serde")]
+    pub(super) inspect: bool,
 }
 
 /// Preserves a standalone Prefab's declared input environment at the source boundary.
@@ -196,6 +201,20 @@ pub(super) fn expand_selected<F, E>(
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    if source.inspect {
+        // Even a missing selection must pay for the borrowed containing-record lookup.
+        context
+            .admit_terminal_work(source.entities.len(), 0, Some(0))
+            .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
+        let bytes = source.entities.iter().try_fold(0usize, |bytes, entity| {
+            bytes
+                .checked_add(entity.id.as_str().len())?
+                .checked_add(anchor.as_str().len())
+        });
+        context
+            .admit_terminal_work(0, bytes.unwrap_or(usize::MAX), Some(0))
+            .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
+    }
     // The containing scope registers direct shells first, in this source record order.
     let selected = source
         .entities

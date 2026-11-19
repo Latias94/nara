@@ -2,12 +2,15 @@
 
 use std::sync::Arc;
 
-use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision, SourceDocumentKey};
+use nara_scene::{
+    AuthoringSchemaBasis, SceneAuthoringRevision, SourceDocumentKey, SourceDocumentKind,
+};
 use nara_tooling::EditorDocumentId;
 
 use crate::project_host::authoring::{
-    AuthoringPrefabSessionSnapshot, AuthoringProjectSourceAdmissionError,
-    AuthoringSceneSessionSnapshot, AuthoringSourceCaptureInputs, PreparedAuthoringSchemaOwner,
+    AuthoringPrefabCaptureRequest, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
+    AuthoringProjectSourceAdmissionError, AuthoringSceneSessionSnapshot,
+    AuthoringSourceCaptureInputs, PreparedAuthoringSchemaOwner,
     document::AuthoringDocumentSourceFact,
 };
 use crate::project_host::persistence::FileSourceObservation;
@@ -40,7 +43,145 @@ impl AuthoringSourceSelection {
     }
 }
 
+pub(super) struct SelectedPrefabSources {
+    root: AuthoringSourceSelection,
+    prefabs: Vec<AuthoringSourceSelection>,
+}
+
+pub(super) struct SelectedPrefabBasis {
+    root: AuthoringSourceSelection,
+    participants: Vec<PrefabParticipant>,
+}
+
+struct PrefabParticipant {
+    key: SourceDocumentKey,
+    project_path: Arc<str>,
+    selected: Option<AuthoringSourceSelection>,
+}
+
+pub(super) fn prefab_participant_retention(key: &SourceDocumentKey, path: &str) -> Option<usize> {
+    size_of::<PrefabParticipant>()
+        .checked_add(key.retained_bytes())?
+        .checked_add(path.len())?
+        .checked_add(4 * size_of::<usize>())
+}
+
+impl SelectedPrefabSources {
+    /// Retains only demanded sources, joined to the original selection of file or working copy.
+    pub(super) fn complete(
+        self,
+        capture: &AuthoringPrefabSourceCapture,
+    ) -> Option<SelectedPrefabBasis> {
+        let mut participants = Vec::new();
+        for prefab in capture.prefabs() {
+            let key = prefab.native_source().key();
+            let path = prefab.source().project_path().as_str();
+            let mut matches = self
+                .prefabs
+                .iter()
+                .filter(|source| &source.source_key == key || source.project_path.as_ref() == path);
+            let selected = matches.next();
+            if matches.next().is_some()
+                || selected.map(|source| source.revision) != prefab.session_revision()
+                || selected.is_some_and(|source| source.receipt.is_none())
+            {
+                return None;
+            }
+            participants.push(PrefabParticipant {
+                key: key.clone(),
+                project_path: Arc::from(path),
+                selected: selected.cloned(),
+            });
+        }
+        Some(SelectedPrefabBasis {
+            root: self.root,
+            participants,
+        })
+    }
+}
+
+impl SelectedPrefabBasis {
+    pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
+        let root = size_of::<Self>().checked_add(self.root.checked_retained_bytes()?)?;
+        self.participants
+            .iter()
+            .try_fold(root, |bytes, participant| {
+                bytes
+                    .checked_add(prefab_participant_retention(
+                        &participant.key,
+                        &participant.project_path,
+                    )?)?
+                    .checked_add(
+                        participant
+                            .selected
+                            .as_ref()
+                            .map_or(Some(0), AuthoringSourceSelection::checked_retained_bytes)?,
+                    )
+            })
+    }
+
+    pub(super) fn matches(&self, editor: &EditorProjectSession) -> bool {
+        editor.authoring_source_selection_is_current(&self.root)
+            && self.participants.iter().all(|participant| {
+                editor.authoring_dependency_selection_is_current(
+                    &participant.key,
+                    &participant.project_path,
+                    participant.selected.as_ref(),
+                )
+            })
+    }
+}
+
 impl EditorProjectSession {
+    pub(super) fn prefab_source_capture_selection_bytes(
+        &self,
+        root: EditorDocumentId,
+    ) -> Option<usize> {
+        let root_bytes = self.authoring_source_selection_retained_bytes(root)?;
+        self.prefab_lanes
+            .keys()
+            .try_fold(root_bytes, |bytes, &document| {
+                bytes.checked_add(self.authoring_source_selection_retained_bytes(document)?)
+            })?
+            .checked_add(size_of::<SelectedPrefabSources>())?
+            .checked_mul(2)
+    }
+
+    pub(super) fn capture_selected_prefab_sources(
+        &self,
+        root: AuthoringSourceSelection,
+        kind: SourceDocumentKind,
+        mut inputs: AuthoringSourceCaptureInputs,
+    ) -> Result<
+        (SelectedPrefabSources, AuthoringPrefabCaptureRequest),
+        AuthoringProjectSourceAdmissionError,
+    > {
+        let receipt = root
+            .receipt
+            .as_ref()
+            .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?;
+        let schema = root
+            .schema
+            .as_ref()
+            .ok_or(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch)?;
+        let prefabs = self.authoring_prefab_selections();
+        let observation = self.capture_authoring_source_observation(&root, &mut inputs)?;
+        let snapshots =
+            self.capture_open_prefabs(&prefabs, &mut inputs, Some((&root, &observation)))?;
+        let request = self
+            .authoring_project()
+            .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?
+            .capture_selected_prefab_request(
+                receipt,
+                observation,
+                schema,
+                kind,
+                inputs,
+                snapshots,
+            )?;
+        Ok((SelectedPrefabSources { root, prefabs }, request))
+    }
+
     pub(super) fn authoring_source_selection_is_current(
         &self,
         expected: &AuthoringSourceSelection,
@@ -415,11 +556,13 @@ impl EditorProjectSession {
             .collect()
     }
 
+    /// Selected requests share the root observation and defer all other Prefab observations.
+    /// Full preview captures its observations here on the owner thread.
     pub(super) fn capture_open_prefabs(
         &self,
         selections: &[AuthoringSourceSelection],
         inputs: &mut AuthoringSourceCaptureInputs,
-        root: Option<(&AuthoringSourceSelection, &FileSourceObservation)>,
+        selected_root: Option<(&AuthoringSourceSelection, &FileSourceObservation)>,
     ) -> Result<Box<[AuthoringPrefabSessionSnapshot]>, AuthoringProjectSourceAdmissionError> {
         selections
             .iter()
@@ -439,19 +582,50 @@ impl EditorProjectSession {
                 let Some(source) = selected.receipt.as_ref() else {
                     return Ok(unavailable());
                 };
-                let observation =
-                    if let Some((_, observation)) = root.filter(|(root, _)| *root == selected) {
-                        // The root factory already admitted this custody; sharing opens no leaf.
-                        observation.clone()
-                    } else {
-                        match self.capture_authoring_source_observation(selected, inputs) {
-                            Ok(observation) => observation,
-                            Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch) => {
-                                return Ok(unavailable());
-                            }
-                            Err(error) => return Err(error),
+                let observation = match selected_root {
+                    Some((root, observation)) if root == selected => observation.clone(),
+                    Some(_) => {
+                        let Some(lane) = self.prefab_lanes.get(&selected.document) else {
+                            return Ok(unavailable());
+                        };
+                        if selected.source_key.kind() != SourceDocumentKind::Prefab
+                            || source.source_key() != &selected.source_key
+                            || source.relative_path() != selected.project_path.as_ref()
+                            || selected.source_key != lane.source_key
+                            || selected.project_path != lane.project_path
+                        {
+                            return Ok(unavailable());
                         }
-                    };
+                        let host = lane.host.clone();
+                        let expected =
+                            (source.identity(), source.parent_identity(), source.digest());
+                        return AuthoringPrefabSessionSnapshot::capture_deferred(
+                            source,
+                            session,
+                            inputs,
+                            move |admission| {
+                                let mismatch =
+                                    || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+                                host.with_worker(|host| {
+                                    let cost =
+                                        host.source_observation_cost().ok_or_else(mismatch)?;
+                                    admission.capture_source_observation(cost, || {
+                                        host.capture_source_observation(expected)
+                                            .map_err(|_| mismatch())
+                                    })
+                                })
+                                .ok_or_else(mismatch)?
+                            },
+                        );
+                    }
+                    None => match self.capture_authoring_source_observation(selected, inputs) {
+                        Ok(observation) => observation,
+                        Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch) => {
+                            return Ok(unavailable());
+                        }
+                        Err(error) => return Err(error),
+                    },
+                };
                 Ok(AuthoringPrefabSessionSnapshot::capture(
                     source,
                     observation,

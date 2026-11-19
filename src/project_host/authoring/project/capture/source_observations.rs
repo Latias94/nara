@@ -40,15 +40,12 @@ impl SourceObservation {
 }
 
 impl SourceObservations {
+    const STORAGE_BYTES: usize = size_of::<Self>() + 2 * size_of::<usize>();
+
     pub(super) fn new(
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Self, AuthoringProjectSourceAdmissionError> {
-        budget.charge_source_bytes(
-            0,
-            0,
-            0,
-            checked_sum([size_of::<Self>(), 2 * size_of::<usize>()])?,
-        )?;
+        budget.charge_source_bytes(0, 0, 0, Self::STORAGE_BYTES)?;
         Ok(Self {
             entries: BTreeMap::new(),
         })
@@ -102,7 +99,7 @@ impl SourceObservations {
             }
             return Ok(());
         }
-        self.charge_entry(source, Some(native), budget)?;
+        budget.charge_source_bytes(0, 0, 0, Self::entry_retained_bytes(path, Some(native))?)?;
         self.entries.insert(
             path.to_owned(),
             SourceObservation::Original {
@@ -135,7 +132,7 @@ impl SourceObservations {
             }
             return Ok(());
         }
-        self.charge_entry(source, native, budget)?;
+        budget.charge_source_bytes(0, 0, 0, Self::entry_retained_bytes(path, native)?)?;
         self.entries.insert(
             path.to_owned(),
             SourceObservation::ReadContent {
@@ -168,26 +165,49 @@ impl SourceObservations {
         Ok(())
     }
 
-    fn charge_entry(
-        &self,
-        source: &AuthoringSourceFact,
+    fn entry_retained_bytes(
+        path: &str,
         native: Option<&AdmittedNativeDocumentSource>,
-        budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        budget.charge_source_bytes(
-            0,
-            0,
-            0,
-            checked_sum([
-                size_of::<(String, SourceObservation)>(),
-                source.project_path().as_str().len(),
-                64,
-                native
-                    .map_or(Some(0), AdmittedNativeDocumentSource::retained_bytes)
-                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-            ])?,
-        )?;
-        Ok(())
+    ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        checked_sum([
+            size_of::<(String, SourceObservation)>(),
+            path.len(),
+            64,
+            native
+                .map_or(Some(0), AdmittedNativeDocumentSource::retained_bytes)
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        ])
+    }
+
+    /// Measures receipt storage alongside facts already charged in a path-sorted slice.
+    pub(super) fn retained_bytes(
+        &self,
+        sources: &[Arc<AuthoringSourceFact>],
+    ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        self.entries
+            .iter()
+            .try_fold(Self::STORAGE_BYTES, |bytes, (path, entry)| {
+                let source = entry.source();
+                // A containing Prefab can preserve a separate original fact in this map.
+                let shared_fact = sources
+                    .binary_search_by(|fact| fact.project_path().as_str().cmp(path.as_str()))
+                    .is_ok_and(|index| std::ptr::eq(source, sources[index].as_ref()));
+                let fact_bytes = if shared_fact {
+                    0
+                } else {
+                    source_fact_retained_bytes(source)?
+                };
+                let custody_bytes = match entry {
+                    SourceObservation::Original { .. } => FileSourceObservation::retained_bytes(),
+                    SourceObservation::ReadContent { .. } => 0,
+                };
+                checked_sum([
+                    bytes,
+                    Self::entry_retained_bytes(path, entry.native())?,
+                    fact_bytes,
+                    custody_bytes,
+                ])
+            })
     }
 
     pub(in crate::project_host::authoring::project) fn physical_count(&self) -> usize {

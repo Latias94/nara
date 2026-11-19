@@ -29,6 +29,7 @@ pub use read::{
     AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPage,
     AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringReadError,
 };
+pub(crate) use read::{property_children_in_schema, property_root};
 pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
 pub(crate) use retention::prefab_inputs_bytes as retained_prefab_inputs_bytes;
 use structure::authoring_structure_rejection;

@@ -109,7 +109,7 @@ where
         component: &ComponentTypeId,
     ) -> Result<BTreeMap<ComponentFieldId, ReferenceProgram>, SceneCompilationFailure> {
         let mut programs = BTreeMap::new();
-        if self.selected_anchor.is_none() {
+        if !self.root.preserve_source_defaults {
             return Ok(programs);
         }
         for (id, value) in &record.contextual_defaults {

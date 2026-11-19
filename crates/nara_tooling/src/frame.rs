@@ -120,6 +120,7 @@ impl EditorFrameClock {
             source_asset_import_work_pending: false,
             source_tool: Default::default(),
             prefab_conversion: Default::default(),
+            prefab_inspection: Default::default(),
             document_open: Default::default(),
             scene_preview_document: None,
             authoring_retirement_pending: false,
@@ -293,6 +294,7 @@ pub struct EditorFrameModel {
     source_asset_import_work_pending: bool,
     source_tool: crate::EditorSourceToolView,
     prefab_conversion: crate::EditorPrefabConversionView,
+    prefab_inspection: crate::EditorPrefabInspectionView,
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
@@ -325,6 +327,18 @@ impl EditorFrameModel {
     #[must_use]
     pub fn with_prefab_conversion(mut self, view: crate::EditorPrefabConversionView) -> Self {
         self.prefab_conversion = view;
+        self
+    }
+
+    #[must_use]
+    pub const fn prefab_inspection(&self) -> &crate::EditorPrefabInspectionView {
+        &self.prefab_inspection
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_prefab_inspection(mut self, view: crate::EditorPrefabInspectionView) -> Self {
+        self.prefab_inspection = view;
         self
     }
 
@@ -713,6 +727,7 @@ pub enum EditorAction {
     /// Consumes the source owner's construction and retains its exact successful mapping.
     CommitAuthoringConstruction(crate::PreparedEditorDocumentConstruction),
     PrefabConversion(crate::EditorPrefabConversionAction),
+    PrefabInspection(crate::EditorPrefabInspectionAction),
     SourceTool(crate::EditorSourceToolAction),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
@@ -762,6 +777,7 @@ impl EditorAction {
             | Self::CommitAuthoringEdit(_)
             | Self::CommitAuthoringConstruction(_)
             | Self::PrefabConversion(_)
+            | Self::PrefabInspection(_)
             | Self::SourceTool(_)
             | Self::Extension(_)
             | Self::Persistence(_)
@@ -929,6 +945,7 @@ pub enum EditorActionOutcome {
     /// Exact source-owner receipt after successful construction publication.
     AuthoringConstruction(crate::CommittedEditorDocumentConstruction),
     PrefabConversion(crate::EditorPrefabConversionActionOutcome),
+    PrefabInspection(crate::EditorPrefabInspectionOutcome),
     SourceTool(crate::EditorSourceToolActionOutcome),
     /// Owned read-only page or exact query rejection; not a document mutation result.
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),

@@ -597,6 +597,7 @@ impl EditorProjectSession {
             || self.image_import.schema_adoption_import_pending()
             || self.source_asset_import.schema_adoption_pending()
             || self.prefab_conversion.schema_adoption_pending()
+            || self.prefab_inspection.work_pending()
             || self.source_tools.schema_adoption_pending()
     }
 

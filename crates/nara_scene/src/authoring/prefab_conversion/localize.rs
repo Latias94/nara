@@ -25,8 +25,9 @@ use crate::{
     patch::{bounded_component_records_source_cost, bounded_expanded_component_records_cost},
     prefab::{
         AuthoringSceneCompilationOmissionReason, PrefabOverlayCostLimits,
-        SceneCompilationWorkingSet, SelectedInstanceCompilation, SourceDocumentInput,
-        prefab_instance_cost, try_compile_selected_authoring_instance_with_loader,
+        SceneCompilationWorkingSet, SelectedInstanceCompilation, SelectedInstanceConsumer,
+        SourceDocumentInput, prefab_instance_cost,
+        try_compile_selected_authoring_instance_with_loader,
     },
 };
 
@@ -121,8 +122,10 @@ where
     let mut compiled = try_compile_selected_authoring_instance_with_loader(
         source,
         anchor,
-        &reference_queries.values,
-        reference_queries.reference_work,
+        SelectedInstanceConsumer::Conversion {
+            reference_queries: &reference_queries.values,
+            initial_reference_work: reference_queries.reference_work,
+        },
         basis,
         options.with_limits(limits),
         asset_resolution,

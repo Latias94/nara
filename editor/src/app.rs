@@ -1055,6 +1055,31 @@ impl EditorApplication {
             .read_prefab_property_claim(claim, limits)
     }
 
+    /// Borrows the completed observation of one selected Prefab occurrence.
+    /// The file evidence is rechecked when preparing and committing a Revert.
+    pub fn prefab_effective_observation(
+        &self,
+        inspection: nara::tooling::EditorPrefabInspectionId,
+    ) -> Result<
+        &nara::scene::AuthoringPrefabInstanceSnapshot,
+        nara::tooling::EditorPrefabInspectionRejection,
+    > {
+        self.authoring_query_session()
+            .map_err(prefab_inspection_query_rejection)?
+            .prefab_effective_observation(inspection)
+    }
+
+    /// Borrows the existing source owner's unpublished Revert for review.
+    pub fn prefab_inspection_revert_patch(
+        &self,
+        inspection: nara::tooling::EditorPrefabInspectionId,
+    ) -> Result<&nara::scene::ScenePatchDocument, nara::tooling::EditorPrefabInspectionRejection>
+    {
+        self.authoring_query_session()
+            .map_err(prefab_inspection_query_rejection)?
+            .prefab_inspection_revert_patch(inspection)
+    }
+
     /// Prepares Revert of the selected claim at its original document basis and instance path.
     pub fn prepare_prefab_property_revert(
         &self,
@@ -2674,6 +2699,16 @@ fn cancel_pending_exit(project: &mut PublishedEditorProject) -> bool {
     )
 }
 
+fn prefab_inspection_query_rejection(
+    rejection: nara::tooling::EditorDocumentQueryRejection,
+) -> nara::tooling::EditorPrefabInspectionRejection {
+    use nara::tooling::{EditorDocumentQueryRejection, EditorPrefabInspectionRejection};
+    match rejection {
+        EditorDocumentQueryRejection::Closing => EditorPrefabInspectionRejection::Closing,
+        _ => EditorPrefabInspectionRejection::SourceUnavailable,
+    }
+}
+
 fn drive_project_frame(
     project: &mut PublishedEditorProject,
     real_delta: Duration,
@@ -2690,6 +2725,7 @@ fn drive_project_frame(
         || before.source_asset_import() != after.source_asset_import()
         || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
         || before.prefab_conversion() != after.prefab_conversion()
+        || before.prefab_inspection() != after.prefab_inspection()
         || before.source_tool() != after.source_tool()
         || before.image_import_work_pending() != after.image_import_work_pending()
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()

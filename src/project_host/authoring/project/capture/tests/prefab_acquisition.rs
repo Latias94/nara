@@ -371,7 +371,7 @@ fn finite_containing_prefab_demand_uses_the_actual_unsaved_root_working_copy() {
 }
 
 #[test]
-fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separately() {
+fn selected_conversion_captures_original_custody_only_for_demanded_working_copies() {
     let project = independent_project();
     let (snapshot, source, session) = open_second_scene(&project);
     let (prefab_source, mut prefab_session) = open_prefab(&snapshot, "prefabs/outer.prefab.json");
@@ -392,43 +392,52 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
             SceneCompilationOptions::default(),
         )
         .unwrap();
+    let mut inputs = snapshot
+        .admit_source_capture_inputs(
+            0,
+            checked_sum([
+                AuthoringPrefabSessionSnapshot::capture_retained_bytes(
+                    &prefab_source,
+                    &prefab_session,
+                )
+                .unwrap(),
+                AuthoringPrefabSessionSnapshot::capture_retained_bytes(
+                    &unused_source,
+                    &unused_session,
+                )
+                .unwrap(),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+    let host = bound_source_host(&snapshot, &prefab_source).unwrap();
+    let expected = host.accepted_source_observation().unwrap();
+    let selected = AuthoringPrefabSessionSnapshot::capture_deferred(
+        &prefab_source,
+        &prefab_session,
+        &mut inputs,
+        move |admission| {
+            admission.capture_source_observation(host.source_observation_cost().unwrap(), || {
+                host.capture_source_observation(expected)
+                    .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+            })
+        },
+    )
+    .unwrap();
+    let unused = AuthoringPrefabSessionSnapshot::capture_deferred(
+        &unused_source,
+        &unused_session,
+        &mut inputs,
+        |_| panic!("the selected working copy replaced demand for this Prefab"),
+    )
+    .unwrap();
     let mut context = snapshot
         .capture_bound_prefab_request(
             &source,
             &session.authoring_schema_basis().unwrap(),
             SourceDocumentKind::Scene,
-            snapshot
-                .admit_source_capture_inputs(
-                    0,
-                    checked_sum([
-                        AuthoringPrefabSessionSnapshot::capture_retained_bytes(
-                            &prefab_source,
-                            &prefab_session,
-                        )
-                        .unwrap(),
-                        AuthoringPrefabSessionSnapshot::capture_retained_bytes(
-                            &unused_source,
-                            &unused_session,
-                        )
-                        .unwrap(),
-                    ])
-                    .unwrap(),
-                )
-                .unwrap(),
-            vec![
-                AuthoringPrefabSessionSnapshot::capture(
-                    &prefab_source,
-                    bound_source_observation(&snapshot, &prefab_source),
-                    &prefab_session,
-                ),
-                AuthoringPrefabSessionSnapshot::capture(
-                    &unused_source,
-                    bound_source_observation(&snapshot, &unused_source),
-                    &unused_session,
-                )
-                .without_persistence(),
-            ]
-            .into_boxed_slice(),
+            inputs,
+            vec![selected, unused].into_boxed_slice(),
         )
         .unwrap();
     context.retain_root_input(session.document().retained_bytes().unwrap());
@@ -442,6 +451,7 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
     let captured = acquisition
         .finish_source_capture(PREPARED_FIXTURE_BYTES)
         .unwrap();
+    drop(context);
     assert_eq!(
         captured
             .prefabs()
@@ -467,7 +477,58 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
             .document(),
         held.as_ref(),
     );
-    captured.source_validation().validate().unwrap();
+    let validation = captured.source_validation();
+    assert_eq!(validation.physical_count().unwrap(), 2);
+    validation.validate().unwrap();
+}
+
+#[test]
+fn inspection_validation_has_room_to_read_after_dropping_worker_storage() {
+    let project = independent_project();
+    let (snapshot, source, session) = open_second_scene(&project);
+    let mut context = snapshot
+        .capture_bound_prefab_request(
+            &source,
+            &session.authoring_schema_basis().unwrap(),
+            SourceDocumentKind::Scene,
+            snapshot
+                .admit_source_capture_inputs(0, PREPARED_FIXTURE_BYTES)
+                .unwrap(),
+            Box::new([]),
+        )
+        .unwrap();
+    let capture = context.acquire().unwrap().finish_source_capture(0).unwrap();
+    let conversion = capture.source_validation();
+    let host_bytes = 137;
+    let inspection = capture.inspection_source_validation(host_bytes).unwrap();
+    let receipt_bytes = capture
+        .inspection_source_validation(0)
+        .unwrap()
+        .retained_capture_bytes;
+    assert_eq!(
+        inspection.retained_capture_bytes,
+        receipt_bytes + host_bytes
+    );
+    assert!(Arc::ptr_eq(
+        &inspection.source_observations,
+        &conversion.source_observations,
+    ));
+    drop((capture, context));
+
+    let maximum = conversion.retained_capture_bytes;
+    let mut budget = snapshot.schema.budget;
+    budget.limits.retained_candidate_bytes = ByteLimit::new(maximum).unwrap();
+    budget
+        .retain_open_handles(FileSourceObservation::retained_handle_capacity())
+        .unwrap();
+    let mut conversion_budget = budget;
+    assert!(matches!(
+        conversion.validate_with_budget(&mut conversion_budget),
+        Err(AuthoringProjectSourceAdmissionError::Budget(
+            AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded { maximum: observed }
+        )) if observed == maximum
+    ));
+    inspection.validate_with_budget(&mut budget).unwrap();
 }
 
 #[test]

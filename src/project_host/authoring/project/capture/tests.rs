@@ -89,7 +89,7 @@ impl BoundCaptureRequests for AuthoringProjectSessionSnapshot {
                 .filter_map(|snapshot| snapshot.observation.as_ref()),
         )?;
         let observation = observe_request_root(self, source, &mut inputs)?;
-        self.capture_prefab_conversion_request(source, observation, basis, kind, inputs, prefabs)
+        self.capture_selected_prefab_request(source, observation, basis, kind, inputs, prefabs)
     }
 }
 

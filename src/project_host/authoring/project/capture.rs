@@ -12,7 +12,7 @@ pub(super) mod scenes;
 #[cfg(any(feature = "tooling", test))]
 mod schema_owner;
 pub(super) mod source_observations;
-pub(crate) use prefabs::AuthoringPrefabSourceCapture;
+pub(crate) use prefabs::{AuthoringPrefabCaptureRequest, AuthoringPrefabSourceCapture};
 use source_observations::SourceCaptureMode;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -34,6 +34,7 @@ mod source_observation_custody_tests;
 pub(crate) struct AuthoringPrefabSessionSnapshot {
     source: Option<super::super::document::AuthoringDocumentSourceFact>,
     pub(super) observation: Option<FileSourceObservation>,
+    deferred_observation: Option<Arc<PrefabObservationFactory>>,
     source_key: nara_scene::SourceDocumentKey,
     project_path: Arc<str>,
     document: Arc<PrefabDocument>,
@@ -41,6 +42,38 @@ pub(crate) struct AuthoringPrefabSessionSnapshot {
     source_matches: bool,
     persistence_available: bool,
     revision: nara_scene::SceneAuthoringRevision,
+}
+
+type PrefabObservationFactory = dyn Fn(
+        PrefabObservationAdmission<'_>,
+    ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError>
+    + Send
+    + Sync;
+
+/// One demanded working copy can transfer original custody under the loader's current allowance.
+pub(crate) struct PrefabObservationAdmission<'a> {
+    budget: &'a mut AuthoringProjectAdmissionBudget,
+}
+
+impl PrefabObservationAdmission<'_> {
+    pub(crate) fn capture_source_observation(
+        self,
+        cost: FileSourceObservationCost,
+        factory: impl FnOnce() -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError>,
+    ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError> {
+        source_observations::capture_source_observation(self.budget, cost, factory)
+    }
+}
+
+fn prefab_observation_factory_bytes(
+    factory: &PrefabObservationFactory,
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    use std::alloc::Layout;
+
+    let (layout, _) = Layout::new::<[usize; 2]>()
+        .extend(Layout::for_value(factory))
+        .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+    Ok(layout.pad_to_align().size())
 }
 
 #[derive(Clone)]
@@ -505,6 +538,7 @@ impl AuthoringPrefabSessionSnapshot {
         Ok(Self {
             source: Some(source.clone()),
             observation: Some(observation),
+            deferred_observation: None,
             source_key: source.source_key().clone(),
             project_path: Arc::from(source.relative_path()),
             document: view.shared_document(),
@@ -521,8 +555,44 @@ impl AuthoringPrefabSessionSnapshot {
         session: &nara_scene::PrefabAuthoringSession,
     ) -> Self {
         Self {
-            source: Some(source.clone()),
             observation: Some(observation),
+            ..Self::capture_working_copy(source, session)
+        }
+    }
+
+    /// Selected requests offer a working copy without transferring original file custody yet.
+    /// The factory borrows an existing Host when invoked and keeps its captured inputs inline.
+    pub(crate) fn capture_deferred(
+        source: &super::super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::PrefabAuthoringSession,
+        inputs: &mut AuthoringSourceCaptureInputs,
+        factory: impl Fn(
+            PrefabObservationAdmission<'_>,
+        ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<Self, AuthoringProjectSourceAdmissionError> {
+        let factory_bytes = prefab_observation_factory_bytes(&factory)?;
+        let worker_retained_bytes = checked_sum([inputs.worker_retained_bytes, factory_bytes])?;
+        let mut budget = inputs.budget;
+        budget.charge_source_bytes(0, 0, 0, factory_bytes)?;
+        inputs.budget = budget;
+        inputs.worker_retained_bytes = worker_retained_bytes;
+        Ok(Self {
+            deferred_observation: Some(Arc::new(factory)),
+            ..Self::capture_working_copy(source, session)
+        })
+    }
+
+    fn capture_working_copy(
+        source: &super::super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::PrefabAuthoringSession,
+    ) -> Self {
+        Self {
+            source: Some(source.clone()),
+            observation: None,
+            deferred_observation: None,
             source_key: source.source_key().clone(),
             project_path: Arc::from(source.relative_path()),
             document: session.shared_document(),
@@ -533,6 +603,16 @@ impl AuthoringPrefabSessionSnapshot {
             ),
             persistence_available: true,
             revision: session.revision(),
+        }
+    }
+
+    fn capture_observation(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Option<FileSourceObservation>, AuthoringProjectSourceAdmissionError> {
+        match &self.deferred_observation {
+            Some(factory) => factory(PrefabObservationAdmission { budget }).map(Some),
+            None => Ok(self.observation.clone()),
         }
     }
 
@@ -557,6 +637,7 @@ impl AuthoringPrefabSessionSnapshot {
         Self {
             source: None,
             observation: None,
+            deferred_observation: None,
             source_key,
             project_path,
             document: session.shared_document(),
@@ -775,6 +856,17 @@ impl AuthoringSourceValidation {
         Ok(self)
     }
 
+    fn retained_fact_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        let sources = self.sources.iter().try_fold(
+            checked_product(self.sources.len(), size_of::<Arc<AuthoringSourceFact>>())?,
+            |bytes, source| checked_sum([bytes, source_fact_retained_bytes(source)?]),
+        )?;
+        self.stable_lookups.iter().try_fold(
+            checked_sum([sources, 2 * size_of::<usize>()])?,
+            |bytes, observation| checked_sum([bytes, observation.retained_bytes()?]),
+        )
+    }
+
     /// Reuses an operation's cumulative allowance, which already owns every Original proof
     /// in this validation. Standalone callers use `validate` to admit that separate scope.
     pub(super) fn validate_with_budget(
@@ -783,14 +875,7 @@ impl AuthoringSourceValidation {
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let retained_before = budget.retained_candidate_bytes;
         let result = (|| {
-            let retained = self.sources.iter().try_fold(
-                checked_product(self.sources.len(), size_of::<Arc<AuthoringSourceFact>>())?,
-                |bytes, source| checked_sum([bytes, source_fact_retained_bytes(source)?]),
-            )?;
-            let retained = self.stable_lookups.iter().try_fold(
-                checked_sum([retained, 2 * size_of::<usize>()])?,
-                |bytes, observation| checked_sum([bytes, observation.retained_bytes()?]),
-            )?;
+            let retained = self.retained_fact_bytes()?;
             budget.charge_source_bytes(
                 0,
                 0,

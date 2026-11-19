@@ -12,6 +12,7 @@ mod inspector;
 mod persistence;
 mod play;
 mod prefab_conversion;
+mod prefab_inspection;
 mod project_browser;
 mod snapshot;
 mod source_asset_import;
@@ -98,6 +99,11 @@ pub use prefab_conversion::{
     EditorPrefabConversionAction, EditorPrefabConversionActionOutcome, EditorPrefabConversionId,
     EditorPrefabConversionMappingRow, EditorPrefabConversionPhase, EditorPrefabConversionRejection,
     EditorPrefabConversionResult, EditorPrefabConversionReview, EditorPrefabConversionView,
+};
+pub use prefab_inspection::{
+    EditorPrefabInspectionAction, EditorPrefabInspectionId, EditorPrefabInspectionOutcome,
+    EditorPrefabInspectionPhase, EditorPrefabInspectionRejection, EditorPrefabInspectionResult,
+    EditorPrefabInspectionView, EditorPrefabPropertyAddress,
 };
 pub use project_browser::{
     EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult,

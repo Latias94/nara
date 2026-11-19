@@ -61,6 +61,8 @@ pub(crate) use document::{
     OwnedAuthoringDocumentRequest,
 };
 #[cfg(feature = "tooling")]
+pub(crate) use project::AuthoringPrefabCaptureRequest;
+#[cfg(feature = "tooling")]
 pub(crate) use project::SourceUpgradeProjectOutcome;
 #[cfg(feature = "tooling")]
 pub use project::{

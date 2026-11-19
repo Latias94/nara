@@ -31,6 +31,10 @@ use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentDigest, EditorDocumentId,
     EditorDocumentMutation, EditorDocumentOpenResult, EditorNavigationAction,
     EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
+    EditorPrefabInspectionAction as InspectAction, EditorPrefabInspectionOutcome as InspectOutcome,
+    EditorPrefabInspectionPhase as InspectPhase,
+    EditorPrefabInspectionRejection as InspectRejection,
+    EditorPrefabInspectionResult as InspectResult, EditorPrefabPropertyAddress,
     EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorSelectionSet,
     EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult,
@@ -294,6 +298,13 @@ fn conversion(editor: &mut EditorProjectSession, action: EditorPrefabConversionA
     match dispatch(editor, EditorAction::PrefabConversion(action)) {
         EditorActionOutcome::PrefabConversion(outcome) => outcome,
         other => panic!("conversion was not routed to its owner: {other:?}"),
+    }
+}
+
+fn inspection(editor: &mut EditorProjectSession, action: InspectAction) -> InspectOutcome {
+    match dispatch(editor, EditorAction::PrefabInspection(action)) {
+        EditorActionOutcome::PrefabInspection(outcome) => outcome,
+        other => panic!("inspection was not routed to its owner: {other:?}"),
     }
 }
 
@@ -673,7 +684,7 @@ struct Gate {
 }
 
 impl Gate {
-    fn install(editor: &mut EditorProjectSession, stage: Stage) -> Self {
+    fn worker_gate() -> (Self, Box<dyn FnOnce() + Send>) {
         let (entered_tx, entered) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let gate: Box<dyn FnOnce() + Send> = Box::new(move || {
@@ -681,14 +692,22 @@ impl Gate {
             // Dropping the control on assertion unwind also releases this physical worker.
             let _ = released.recv_timeout(Duration::from_secs(60));
         });
+        (
+            Self {
+                entered,
+                release: Some(release),
+            },
+            gate,
+        )
+    }
+
+    fn install(editor: &mut EditorProjectSession, stage: Stage) -> Self {
+        let (control, gate) = Self::worker_gate();
         match stage {
             Stage::Prepare => editor.prefab_conversion.next_prepare_gate = Some(gate),
             Stage::Validate => editor.prefab_conversion.next_validation_gate = Some(gate),
         }
-        Self {
-            entered,
-            release: Some(release),
-        }
+        control
     }
 
     fn wait_entered(&self) {
@@ -701,6 +720,172 @@ impl Gate {
         if let Some(release) = self.release.take() {
             let _ = release.send(());
         }
+    }
+}
+
+#[test]
+fn shared_selected_source_capture_keeps_inspection_worker_custody_during_close() {
+    let project = Project::new(2, false);
+    let mut editor = project.editor();
+    let document = open_source(&mut editor, CONTAINER);
+    let before = source_state(&editor, document);
+    let basis = editor.document_query_basis(document).unwrap();
+    let (mut gate, worker_gate) = Gate::worker_gate();
+    editor.prefab_inspection.next_inspect_gate = Some(worker_gate);
+    let admitted = inspection(
+        &mut editor,
+        InspectAction::Inspect {
+            basis,
+            anchor: id("anchor"),
+        },
+    );
+    let InspectOutcome::Accepted {
+        inspection: id,
+        phase: InspectPhase::Inspecting,
+    } = admitted
+    else {
+        panic!("effective inspection was not admitted: {admitted:?}");
+    };
+    gate.wait_entered();
+    assert!(
+        editor
+            .drive_editor_frame(Duration::ZERO)
+            .authoring_operation_work_pending()
+    );
+    assert!(matches!(
+        inspection(&mut editor, InspectAction::Cancel { inspection: id }),
+        InspectOutcome::Accepted { inspection: actual, phase: InspectPhase::Cancelling } if actual == id
+    ));
+    for _ in 0..3 {
+        assert!(matches!(
+            editor.advance_close(),
+            EditorProjectCloseProgress::Incomplete { .. }
+        ));
+        let view = editor.prefab_inspection.view();
+        assert_eq!((view.phase, view.result), (InspectPhase::Cancelling, None));
+        assert_eq!(source_state(&editor, document), before);
+    }
+    gate.release();
+    close(&mut editor);
+    assert_eq!(
+        editor.prefab_inspection.view().result,
+        Some(InspectResult::Cancelled { inspection: id })
+    );
+    assert!(!editor.prefab_inspection.work_pending());
+    assert_eq!(source_state(&editor, document), before);
+}
+
+#[test]
+fn effective_revert_revalidates_disk_after_dispatch_before_the_owner_consumes_it() {
+    use nara_asset::AssetSourcePath;
+    use nara_reflect::ComponentPropertyPath;
+    use nara_scene::{
+        PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
+        PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SourceDocumentKey,
+    };
+
+    let key = SourceDocumentKey::project_location(
+        UNIVERSE.parse().unwrap(),
+        AssetSourcePath::new(BASE).unwrap(),
+        SourceDocumentKind::Prefab,
+    );
+    let property = ComponentPropertyPath::new(ComponentFieldId::new("amount"));
+    for commit in [false, true] {
+        let project = Project::new(1, false);
+        let mut overlay = PrefabOverlay::new(key.clone());
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("leaf-0")),
+            component: payload_type(),
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: property.clone(),
+                intent: PrefabPropertyIntent::Set(ComponentValue::U64(0)),
+            }],
+        });
+        let mut anchor = SceneEntityRecord::new(id("anchor"));
+        let mut instance = PrefabInstance::forest(AssetRef::path("base.prefab.json").unwrap());
+        instance.overrides = Some(overlay);
+        anchor.prefab = Some(instance);
+        project.write_source(CONTAINER, &SceneDocument::from_ordered_roots([anchor]));
+        let mut editor = project.editor();
+        let document = open_source(&mut editor, CONTAINER);
+        let before = source_state(&editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
+        let InspectOutcome::Accepted {
+            inspection: operation,
+            ..
+        } = inspection(
+            &mut editor,
+            InspectAction::Inspect {
+                basis,
+                anchor: id("anchor"),
+            },
+        )
+        else {
+            panic!("inspection did not start");
+        };
+        wait(&mut editor, |editor| {
+            !editor.prefab_inspection.work_pending()
+        });
+        assert_eq!(editor.prefab_inspection.view().phase, InspectPhase::Ready);
+        let address = EditorPrefabPropertyAddress {
+            entity: PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                    expected_base: key.clone(),
+                }],
+                entity: PrefabEntityOrigin::SourceEntity(id("leaf-0")),
+            },
+            component: payload_type(),
+            property: property.clone(),
+        };
+        assert_eq!(
+            inspection(
+                &mut editor,
+                InspectAction::PrepareRevert {
+                    inspection: operation,
+                    address
+                }
+            ),
+            InspectOutcome::Accepted {
+                inspection: operation,
+                phase: InspectPhase::PreparingRevert
+            }
+        );
+        if commit {
+            editor.drive_editor_frame(Duration::ZERO);
+            assert!(editor.prefab_inspection_revert_patch(operation).is_ok());
+            assert_eq!(
+                inspection(
+                    &mut editor,
+                    InspectAction::Commit {
+                        inspection: operation
+                    }
+                ),
+                InspectOutcome::Accepted {
+                    inspection: operation,
+                    phase: InspectPhase::Validating
+                }
+            );
+        }
+
+        let file = project.root.join(BASE);
+        let before_bytes = fs::read(&file).unwrap();
+        let changed = PrefabDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("leaf-0")).with_component(payload_type(), payload(7))
+        ])
+        .to_json_string()
+        .unwrap();
+        assert_eq!(before_bytes.len(), changed.len());
+        assert_ne!(before_bytes, changed.as_bytes());
+        fs::write(file, changed).unwrap();
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        assert!(matches!(frame.prefab_inspection().result,
+            Some(InspectResult::Failed { inspection, reason: InspectRejection::StaleSource, .. })
+                if inspection == operation));
+        assert!(!frame.authoring_operation_work_pending());
+        assert_eq!(source_state(&editor, document), before);
+        close(&mut editor);
     }
 }
 

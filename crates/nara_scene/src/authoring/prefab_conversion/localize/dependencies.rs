@@ -239,7 +239,10 @@ mod tests {
         __private::AuthoringAdapterReceipt,
         PrefabInstance, SceneCompilationOptions, SceneComponentRecord, SceneDocument,
         SceneEntityId, SceneEntityRecord,
-        prefab::{SourceDocumentInput, try_compile_selected_authoring_instance_with_loader},
+        prefab::{
+            SelectedInstanceConsumer, SourceDocumentInput,
+            try_compile_selected_authoring_instance_with_loader,
+        },
     };
 
     const MAXIMUM: usize = 1024 * 1024;
@@ -320,8 +323,10 @@ mod tests {
         try_compile_selected_authoring_instance_with_loader(
             SourceDocumentInput::Scene(&scene),
             &anchor,
-            &[],
-            (0, 0),
+            SelectedInstanceConsumer::Conversion {
+                reference_queries: &[],
+                initial_reference_work: (0, 0),
+            },
             basis,
             SceneCompilationOptions::default(),
             None,

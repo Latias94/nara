@@ -71,6 +71,7 @@ impl EditorProjectSession {
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
         self.advance_prefab_conversion();
+        self.advance_prefab_inspection();
         self.advance_source_tools();
         self.advance_schema_owner_adoption();
         self.advance_authored_schema_upgrade();
@@ -187,11 +188,13 @@ impl EditorProjectSession {
                 .with_authoring_operation_work_pending(
                     self.schema_owner_adoption.work_pending()
                         || self.authored_schema_upgrade.work_pending()
-                        || self.prefab_extraction.work_pending(),
+                        || self.prefab_extraction.work_pending()
+                        || self.prefab_inspection.work_pending(),
                 )
                 .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
                 .with_scene_preview_document(self.scene_preview_document)
-                .with_prefab_conversion(self.prefab_conversion_view()),
+                .with_prefab_conversion(self.prefab_conversion_view())
+                .with_prefab_inspection(self.prefab_inspection.view()),
         );
         #[cfg(feature = "runtime-ui")]
         self.publish_ui_authoring_frame(frame.revision());

@@ -59,6 +59,9 @@ mod direct_member_authoring;
 #[path = "support/prefab_property_claims.rs"]
 mod prefab_property_claims;
 
+#[path = "support/prefab_effective_inspection.rs"]
+mod prefab_effective_inspection;
+
 const OWNER: &str = "consumer.prepared";
 
 fn id(value: &str) -> SceneEntityId {

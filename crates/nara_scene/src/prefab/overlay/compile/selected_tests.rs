@@ -31,10 +31,15 @@ use crate::{
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     SourceDocumentKey, SourceDocumentKind,
     prefab::{
-        AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation, SourceDocumentInput,
-        try_compile_authoring_scene_with_loader,
+        AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
+        SelectedInstanceConsumer, SourceDocumentInput, try_compile_authoring_scene_with_loader,
         try_compile_selected_authoring_instance_with_loader,
     },
+};
+
+const CONVERSION: SelectedInstanceConsumer<'static> = SelectedInstanceConsumer::Conversion {
+    reference_queries: &[],
+    initial_reference_work: (0, 0),
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -133,10 +138,14 @@ fn schema() -> ComponentSchema {
 }
 
 fn basis() -> AuthoringSchemaBasis {
+    basis_with_schema(schema())
+}
+
+fn basis_with_schema(schema: ComponentSchema) -> AuthoringSchemaBasis {
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         owner(),
         ComponentSchemaCatalog {
-            components: vec![schema()],
+            components: vec![schema],
             ..Default::default()
         },
         None,
@@ -370,8 +379,7 @@ impl Fixture {
         let report = try_compile_selected_authoring_instance_with_loader(
             SourceDocumentInput::Scene(&self.scene),
             &id("A"),
-            &[],
-            (0, 0),
+            CONVERSION,
             basis,
             SceneCompilationOptions::default().with_limits(limits),
             None,
@@ -670,8 +678,7 @@ fn nominal_prefab_input_uses_its_actual_topology_without_instantiating_a_scene()
     let from_prefab = try_compile_selected_authoring_instance_with_loader(
         SourceDocumentInput::Prefab(&prefab),
         &id("A"),
-        &[],
-        (0, 0),
+        CONVERSION,
         &basis,
         Default::default(),
         None,
@@ -772,8 +779,7 @@ fn every_opened_selected_scope_requires_the_exact_shared_basis() {
         let report = try_compile_selected_authoring_instance_with_loader(
             SourceDocumentInput::Scene(&fixture.scene),
             &id("A"),
-            &[],
-            (0, 0),
+            CONVERSION,
             &basis,
             Default::default(),
             None,
@@ -805,8 +811,7 @@ fn selection_rejects_non_instance_or_projected_locators_without_loading() {
         let report = try_compile_selected_authoring_instance_with_loader(
             SourceDocumentInput::Scene(&fixture.scene),
             &id(selected),
-            &[],
-            (0, 0),
+            CONVERSION,
             &basis,
             Default::default(),
             None,
@@ -854,8 +859,7 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     let report = try_compile_selected_authoring_instance_with_loader(
         SourceDocumentInput::Scene(&fixture.scene),
         &id("A"),
-        &[],
-        (0, 0),
+        CONVERSION,
         &basis,
         Default::default(),
         None,
@@ -872,8 +876,7 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     let error = try_compile_selected_authoring_instance_with_loader(
         SourceDocumentInput::Scene(&fixture.scene),
         &id("A"),
-        &[],
-        (0, 0),
+        CONVERSION,
         &basis,
         Default::default(),
         None,
@@ -1200,5 +1203,485 @@ fn final_surviving_shells_and_root_bindings_share_the_entity_cap_without_copying
             }
             assert_eq!(fixture.scene, before);
         }
+    }
+}
+
+#[test]
+fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() {
+    use crate::{
+        __private::try_inspect_authoring_prefab_instance_with_loader,
+        AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
+        AuthoringPrefabRecordOrigin, AuthoringPrefabValueError, AuthoringPropertyChildrenPosition,
+        AuthoringReadError, PrefabDeclarationSource, PrefabInstancePath, PrefabOverlaySlot,
+    };
+    use nara_reflect::{
+        ComponentPropertyReadBudget, ComponentPropertyStep, ComponentValueMaterializationLimits,
+    };
+
+    let property = |root| ComponentPropertyPath::new(ComponentFieldId::new(root));
+    let pin = |root, value| PrefabPropertyClaim {
+        path: property(root),
+        intent: PrefabPropertyIntent::Set(value),
+    };
+    let properties = |target, claims| PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(id(target)),
+        component: component(),
+        version: ComponentSchemaVersion::ONE,
+        claims,
+    };
+    let basis = basis_with_schema(
+        schema().with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("links"),
+                "Links",
+                ComponentFieldPath::from_fields(["links"]),
+                ComponentValueShape::map(ComponentValueShape::EntityRef),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::EntityRef),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("annotation"),
+                "Annotation",
+                ComponentFieldPath::from_fields(["annotation"]),
+                ComponentValueKind::String,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ]),
+    );
+    let inherited = SceneEntityRecord::new(id("host")).with_component(
+        component(),
+        record(ComponentValue::map([
+            ("score", ComponentValue::U64(7)),
+            ("links", ComponentValue::map([("main", local("socket"))])),
+        ])),
+    );
+    let branch = PrefabDocument::new(
+        [
+            SceneEntityPlacement::root(id("host")),
+            crate::tests::child_placement(id("socket"), id("host")),
+        ],
+        [inherited, SceneEntityRecord::new(id("socket"))],
+    );
+    let mut inner = PrefabOverlay::new(key("branch"));
+    inner.components.push(properties(
+        "host",
+        vec![
+            pin("score", ComponentValue::U64(7)),
+            pin("persistent", persistent()),
+        ],
+    ));
+    let mut bridge = SceneEntityRecord::new(id("bridge"));
+    bridge.prefab = Some(PrefabInstance {
+        overrides: Some(inner),
+        ..PrefabInstance::root(
+            request("branch"),
+            key("branch"),
+            PrefabEntityTarget::source(id("host")),
+        )
+    });
+    let base = PrefabDocument::from_ordered_roots([bridge]);
+    let root_hop = PrefabInstanceHop {
+        anchor: PrefabEntityOrigin::SourceEntity(id("A")),
+        expected_base: key("base"),
+    };
+    let inner_hop = PrefabInstanceHop {
+        anchor: PrefabEntityOrigin::SourceEntity(id("bridge")),
+        expected_base: key("branch"),
+    };
+    let root = PrefabEntityTarget {
+        through: vec![root_hop.clone()],
+        entity: PrefabEntityOrigin::SourceEntity(id("bridge")),
+    };
+    let nested = |name| PrefabEntityTarget {
+        through: vec![root_hop.clone(), inner_hop.clone()],
+        entity: PrefabEntityOrigin::SourceEntity(id(name)),
+    };
+    let host = nested("host");
+    let socket = nested("socket");
+    let typed_ref = authored(socket.clone().into());
+    let links = ComponentValue::map([("main", typed_ref.clone())]);
+    let mut outer = PrefabOverlay::new(key("base"));
+    outer.components.push(properties(
+        "bridge",
+        vec![
+            pin("score", ComponentValue::U64(7)),
+            PrefabPropertyClaim {
+                path: property("image"),
+                intent: PrefabPropertyIntent::Absent,
+            },
+            PrefabPropertyClaim {
+                path: property("annotation"),
+                intent: PrefabPropertyIntent::Absent,
+            },
+            pin("links", links.clone()),
+        ],
+    ));
+    let unknown = ComponentTypeId::new("game.InspectionOpaque");
+    let mut containing = SceneEntityRecord::new(id("A")).with_component(
+        unknown.clone(),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+    );
+    containing.prefab = Some(PrefabInstance {
+        overrides: Some(outer),
+        ..PrefabInstance::root(
+            request("alias"),
+            key("base"),
+            PrefabEntityTarget::source(id("bridge")),
+        )
+    });
+    let source =
+        PrefabDocument::from_ordered_roots([containing, anchor("sibling", "missing", None)]);
+    let sources = [
+        (request("alias"), (key("base"), Arc::new(base))),
+        (request("branch"), (key("branch"), Arc::new(branch))),
+    ];
+    let mut reads = Vec::new();
+    let snapshot = try_inspect_authoring_prefab_instance_with_loader(
+        SourceDocumentInput::Prefab(&source),
+        &id("A"),
+        &basis,
+        Default::default(),
+        |reference, _| {
+            reads.push(reference.clone());
+            Ok::<_, Infallible>(
+                sources
+                    .iter()
+                    .find(|(request, _)| request == reference)
+                    .map(|(_, (key, source))| {
+                        ResolvedPrefabSource::bound_authoring_source(
+                            Arc::clone(source),
+                            basis.clone(),
+                            key.clone(),
+                        )
+                    }),
+            )
+        },
+    )
+    .unwrap();
+    assert_eq!(reads, [request("alias"), request("branch")]);
+    assert_eq!(snapshot.schema_basis(), &basis);
+    assert!(
+        snapshot
+            .checked_retained_bytes()
+            .is_some_and(|bytes| bytes > 0)
+    );
+    assert_eq!(
+        snapshot.targets().collect::<Vec<_>>(),
+        [&root, &host, &socket]
+    );
+    let root = snapshot.target(&root).unwrap();
+    let alias = snapshot.target(&host).unwrap();
+    assert_eq!(root.component_count(), 2);
+    let opaque = alias.component(&unknown).unwrap();
+    assert_eq!(
+        opaque.fact().record(),
+        &AuthoringPrefabRecordOrigin::SourceEntity {
+            source: PrefabDeclarationSource::Containing,
+            entity: id("A"),
+        }
+    );
+    assert!(matches!(
+        opaque.root_fields(),
+        Err(AuthoringReadError::UnavailableComponent {
+            readiness: AuthoringRecordReadiness::UnknownSchema,
+        })
+    ));
+    let root = root.component(&component()).unwrap();
+    let alias = alias.component(&component()).unwrap();
+    assert!(std::ptr::eq(root.fact(), alias.fact()));
+    assert_eq!(
+        root.fact().record(),
+        &AuthoringPrefabRecordOrigin::SourceEntity {
+            source: PrefabDeclarationSource::Prefab(key("branch")),
+            entity: id("host"),
+        }
+    );
+    assert_eq!(root.property_claims().len(), 6);
+    assert_eq!(
+        root.property_claims()[0].location.source(),
+        &PrefabDeclarationSource::Prefab(key("base"))
+    );
+    let mut scan = ComponentPropertyReadBudget::new(
+        ItemLimit::new(100).unwrap(),
+        ByteLimit::new(4096).unwrap(),
+    );
+    let score = root.property_value(&property("score"), &mut scan).unwrap();
+    let AuthoringPrefabPropertyValue::Present(value) = score.value else {
+        panic!("equal pin must be explicit")
+    };
+    assert_eq!(
+        value.copy_value(Default::default()).unwrap(),
+        ComponentValue::U64(7)
+    );
+    let claim = score.revert_claim().unwrap();
+    assert_eq!(claim.location.path(), &PrefabInstancePath::new(id("A")));
+    assert_eq!(
+        claim.slot,
+        PrefabOverlaySlot::Property {
+            component_index: 0,
+            claim_index: 0
+        }
+    );
+    let inherited_claim = root
+        .property_value(&property("persistent"), &mut scan)
+        .unwrap();
+    assert!(inherited_claim.controlling_claim().is_some());
+    assert!(inherited_claim.revert_claim().is_none());
+    let absent = root.property_value(&property("image"), &mut scan).unwrap();
+    assert!(matches!(
+        absent.value,
+        AuthoringPrefabPropertyValue::Defaulted(_)
+    ));
+    assert_eq!(
+        absent.revert_claim().unwrap().kind,
+        AuthoringPrefabPropertyClaimKind::Absent
+    );
+    let absent = root
+        .property_value(&property("annotation"), &mut scan)
+        .unwrap();
+    assert!(matches!(
+        absent.value,
+        AuthoringPrefabPropertyValue::Missing
+    ));
+    assert_eq!(
+        absent.revert_claim().unwrap().kind,
+        AuthoringPrefabPropertyClaimKind::Absent
+    );
+    let target = root.property_value(&property("target"), &mut scan).unwrap();
+    let AuthoringPrefabPropertyValue::Defaulted(target) = target.value else {
+        panic!("default must retain its provenance")
+    };
+    assert_eq!(target.copy_value(Default::default()).unwrap(), typed_ref);
+    assert_eq!(
+        target
+            .copy_value(ComponentValueMaterializationLimits::default().with_nodes(ItemLimit::ONE)),
+        Err(AuthoringPrefabValueError::BudgetExceeded),
+    );
+    let page = root
+        .property_children(
+            &property("links"),
+            AuthoringPropertyChildrenPosition::Initial,
+            32,
+            8,
+            4096,
+        )
+        .unwrap();
+    let entry = ComponentPropertyStep::MapEntry("main".into());
+    assert_eq!(page.children[0].to_step(), entry);
+    let member = root
+        .property_value(&property("links").with_steps([entry]), &mut scan)
+        .unwrap();
+    assert_eq!(member.controlling_claim().unwrap().path, property("links"));
+    assert!(member.revert_claim().is_none());
+    let AuthoringPrefabPropertyValue::Present(value) = root
+        .property_value(&property("links"), &mut scan)
+        .unwrap()
+        .value
+    else {
+        panic!("map pin must be explicit")
+    };
+    assert_eq!(value.copy_value(Default::default()).unwrap(), links);
+}
+
+#[test]
+fn inspection_resolves_a_contextual_default_only_when_it_supplies_the_effective_value() {
+    use crate::{
+        __private::{
+            AuthoringPrefabInspectionError, try_inspect_authoring_prefab_instance_with_loader,
+        },
+        AuthoringPrefabPropertyValue,
+    };
+    use nara_reflect::ComponentPropertyReadBudget;
+
+    let basis = basis();
+    let mut fixture = Fixture::new();
+    let root = PrefabEntityTarget::source(id("host"));
+    fixture.sources.insert(
+        request("base"),
+        (
+            key("base"),
+            Arc::new(PrefabDocument::from_ordered_roots([
+                SceneEntityRecord::new(id("host")),
+            ])),
+        ),
+    );
+    fixture.sources.remove(&request("unrelated"));
+    let selected = fixture
+        .scene
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id == id("A"))
+        .unwrap();
+    selected.prefab = Some(PrefabInstance::root(request("base"), key("base"), root));
+    let contextual = authored(
+        PrefabEntityTarget {
+            through: vec![PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(id("0_B")),
+                expected_base: key("unrelated"),
+            }],
+            entity: PrefabEntityOrigin::SourceEntity(id("socket")),
+        }
+        .into(),
+    );
+    let with_target = |value| {
+        record(value).with_contextual_default(ComponentFieldId::new("target"), contextual.clone())
+    };
+    selected.components.insert(
+        component(),
+        with_target(ComponentValue::map([("target", persistent())])),
+    );
+    let inspect = |fixture: &Fixture, reads: &mut Vec<AssetRef>| {
+        try_inspect_authoring_prefab_instance_with_loader(
+            SourceDocumentInput::Scene(&fixture.scene),
+            &id("A"),
+            &basis,
+            Default::default(),
+            |request, _| {
+                reads.push(request.clone());
+                Ok::<_, Infallible>(fixture.load(request, &basis))
+            },
+        )
+    };
+    let mut reads = Vec::new();
+    let snapshot = inspect(&fixture, &mut reads).unwrap();
+    assert_eq!(reads, [request("base")]);
+    let view = snapshot.target(snapshot.targets().next().unwrap()).unwrap();
+    let component_view = view.component(&component()).unwrap();
+    let mut budget = ComponentPropertyReadBudget::new(ItemLimit::ONE, ByteLimit::new(128).unwrap());
+    let property = component_view
+        .property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("target")),
+            &mut budget,
+        )
+        .unwrap();
+    let AuthoringPrefabPropertyValue::Present(value) = property.value else {
+        panic!("an explicit value shadows its declared default")
+    };
+    assert_eq!(value.copy_value(Default::default()).unwrap(), persistent());
+
+    fixture
+        .scene
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id == id("A"))
+        .unwrap()
+        .components
+        .insert(component(), with_target(empty()));
+    reads.clear();
+    let failure = inspect(&fixture, &mut reads).unwrap_err();
+    let AuthoringPrefabInspectionError::Compilation { diagnostics, .. } = failure else {
+        panic!("expected compiler failure")
+    };
+    assert_eq!(reads, [request("base"), request("unrelated")]);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.prefab-source-missing")
+    );
+}
+
+#[test]
+fn inspection_copies_repeated_references_at_the_exact_projected_value_limit() {
+    use crate::{
+        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringPrefabPropertyValue,
+        AuthoringPrefabValueError,
+    };
+    use nara_core::DepthLimit;
+    use nara_reflect::{ComponentPropertyReadBudget, ComponentValueMaterializationLimits};
+
+    let field = ComponentFieldId::new("links");
+    let capabilities = ComponentCapability::SCENE_AUTHORING;
+    let basis = basis_with_schema(
+        ComponentSchema::new(component(), "Links", ComponentSchemaVersion::ONE)
+            .with_capabilities(capabilities)
+            .with_fields([ComponentFieldSchema::required(
+                field.clone(),
+                "Links",
+                ComponentFieldPath::from_fields(["links"]),
+                ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::EntityRef)),
+            )
+            .with_capabilities(capabilities)
+            .with_capability(ComponentCapability::EntityRef)]),
+    );
+    let map_key = "k".repeat(4096);
+    let authored_value = ComponentValue::map([(
+        "links",
+        ComponentValue::map([(
+            map_key.clone(),
+            ComponentValue::List(vec![local("root"); 3]),
+        )]),
+    )]);
+    let base = Arc::new(PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("root")).with_component(
+            component(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, authored_value)
+                .with_owner(owner()),
+        ),
+    ]));
+    let mut instance = SceneEntityRecord::new(id("p"));
+    instance.prefab = Some(PrefabInstance::root(
+        request("base"),
+        key("base"),
+        PrefabEntityTarget::source(id("root")),
+    ));
+    let scene = SceneDocument::from_ordered_roots([instance]);
+    let snapshot = try_inspect_authoring_prefab_instance_with_loader(
+        SourceDocumentInput::Scene(&scene),
+        &id("p"),
+        &basis,
+        Default::default(),
+        |reference, _| {
+            assert_eq!(reference, &request("base"));
+            Ok::<_, Infallible>(Some(ResolvedPrefabSource::bound_authoring_source(
+                Arc::clone(&base),
+                basis.clone(),
+                key("base"),
+            )))
+        },
+    )
+    .unwrap();
+    let target = PrefabEntityTarget {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(id("p")),
+            expected_base: key("base"),
+        }],
+        entity: PrefabEntityOrigin::SourceEntity(id("root")),
+    };
+    let view = snapshot
+        .target(&target)
+        .unwrap()
+        .component(&component())
+        .unwrap();
+    let mut budget = ComponentPropertyReadBudget::new(ItemLimit::ONE, ByteLimit::ONE);
+    let observation = view
+        .property_value(&ComponentPropertyPath::new(field), &mut budget)
+        .unwrap();
+    let AuthoringPrefabPropertyValue::Present(value) = observation.value else {
+        panic!("expected the authored Map")
+    };
+
+    let expected = ComponentValue::map([(
+        map_key,
+        ComponentValue::List(vec![authored(AuthoredEntityReference::source(id("p"))); 3]),
+    )]);
+    let exact = ComponentValueMaterializationLimits::new(
+        ItemLimit::new(8).unwrap(),
+        ByteLimit::new(4099).unwrap(),
+        DepthLimit::new(3).unwrap(),
+    );
+    assert_eq!(value.copy_value(exact).unwrap(), expected);
+    for limits in [
+        exact.with_nodes(ItemLimit::new(7).unwrap()),
+        exact.with_bytes(ByteLimit::new(4098).unwrap()),
+        ComponentValueMaterializationLimits::new(
+            ItemLimit::new(8).unwrap(),
+            ByteLimit::new(4099).unwrap(),
+            DepthLimit::new(2).unwrap(),
+        ),
+    ] {
+        assert_eq!(
+            value.copy_value(limits),
+            Err(AuthoringPrefabValueError::BudgetExceeded)
+        );
     }
 }
