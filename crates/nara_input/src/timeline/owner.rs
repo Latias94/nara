@@ -1022,9 +1022,13 @@ impl InputTimeline {
                 origin,
                 None,
             ),
-            ButtonDriverInput::Release(button) => {
-                self.release(endpoint, Some(pointer), None, InputBinding::Mouse(button))
-            }
+            ButtonDriverInput::Release(button) => self.release_trigger(
+                endpoint,
+                Some(pointer),
+                None,
+                InputBinding::Mouse(button),
+                Some(origin),
+            ),
             ButtonDriverInput::ReleaseAll => {
                 self.release_all(endpoint, Some(pointer), true, origin)
             }
@@ -1435,7 +1439,13 @@ impl InputTimeline {
                     .flatten()
                     .filter(|record| record.seat == seat)
                 {
-                    record.focused = record.id == endpoint.id;
+                    let focused = record.id == endpoint.id;
+                    if record.focused && !focused {
+                        record.invalidated_through = admission
+                            .last_sequence()
+                            .expect("an admitted focus gain has one sequence");
+                    }
+                    record.focused = focused;
                 }
                 Ok(__InputDriverOutput::new(admission))
             }

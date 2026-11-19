@@ -316,23 +316,51 @@ impl From<InputIngressError> for ButtonInputDriverError {
     }
 }
 
+/// Convenience projection of the last accepted pointer motion across all endpoints.
+///
+/// A leave for that pointer or geometry loss for its endpoint clears the position. Games
+/// tracking multiple independent pointers can read the corresponding timeline observations.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Resource)]
 pub struct PointerState {
-    position: Option<Vec2>,
+    sample: Option<PointerSample>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PointerSample {
+    endpoint: (InputWindowId, InputSeatId),
+    pointer: InputPointerId,
+    position: Vec2,
 }
 
 impl PointerState {
     #[must_use]
     pub const fn position(self) -> Option<Vec2> {
-        self.position
+        match self.sample {
+            Some(sample) => Some(sample.position),
+            None => None,
+        }
     }
 
-    fn set_position(&mut self, position: Vec2) {
-        self.position = Some(position);
+    fn set_position(&mut self, route: InputRouteStamp, position: Vec2) {
+        let Some(pointer) = route.pointer() else {
+            return;
+        };
+        self.sample = Some(PointerSample {
+            endpoint: (route.window(), route.seat()),
+            pointer,
+            position,
+        });
     }
 
-    fn clear_position(&mut self) {
-        self.position = None;
+    fn clear_position(&mut self, route: InputRouteStamp) {
+        if self.sample.is_some_and(|sample| {
+            sample.endpoint == (route.window(), route.seat())
+                && route
+                    .pointer()
+                    .is_none_or(|pointer| sample.pointer == pointer)
+        }) {
+            self.sample = None;
+        }
     }
 }
 
@@ -967,20 +995,21 @@ fn project_timeline_input(
             }
             InputEventKind::PointerMoved => {
                 if let Some(position) = entry.logical_position() {
-                    pointer.set_position(position);
+                    pointer.set_position(entry.route(), position);
                 }
             }
-            InputEventKind::PointerLeft => pointer.clear_position(),
+            InputEventKind::PointerLeft
+            | InputEventKind::FocusChanged { focused: false }
+            | InputEventKind::Resized { .. }
+            | InputEventKind::ScaleFactorChanged { .. }
+            | InputEventKind::CloseRequested
+            | InputEventKind::SurfaceRetired => pointer.clear_position(entry.route()),
             InputEventKind::Wheel { .. }
             | InputEventKind::GamepadConnected { .. }
             | InputEventKind::GamepadDisconnected { .. }
             | InputEventKind::GamepadButton { .. }
             | InputEventKind::GamepadAxis { .. }
-            | InputEventKind::FocusChanged { .. }
-            | InputEventKind::Resized { .. }
-            | InputEventKind::ScaleFactorChanged { .. }
-            | InputEventKind::CloseRequested
-            | InputEventKind::SurfaceRetired => {}
+            | InputEventKind::FocusChanged { focused: true } => {}
         }
     }
     timeline.finish_projection();
@@ -1499,6 +1528,77 @@ mod tests {
         assert_eq!(observed[0].phase, ActionPhase::Released);
         assert_eq!(observed[0].value, ActionValue::released());
         runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn individual_mouse_release_retains_its_trigger_and_the_original_press() {
+        for press_origin in [InputEventOrigin::Synthetic, InputEventOrigin::Platform] {
+            let mut app = App::new();
+            app.add_plugin(InputPlugin).unwrap();
+            let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+            let release_origin = match press_origin {
+                InputEventOrigin::Synthetic => InputEventOrigin::Platform,
+                _ => InputEventOrigin::Synthetic,
+            };
+            let apply = |runtime: &mut nara_app::RuntimeInstance, origin, input| {
+                let result = runtime
+                    .with_driver_scope(|scope| match origin {
+                        InputEventOrigin::Synthetic => apply_mouse_driver_input(scope, input),
+                        _ => apply_mouse_driver_input_at(
+                            scope,
+                            InputWindowId::UNSPECIFIED,
+                            InputSeatId::PRIMARY,
+                            InputPointerId::PRIMARY,
+                            input,
+                        ),
+                    })
+                    .unwrap();
+                assert!(result.post_operation_fault.is_none());
+                result.output.unwrap();
+            };
+            apply(
+                &mut runtime,
+                press_origin,
+                ButtonDriverInput::Press(MouseButton::Left),
+            );
+            let press = *runtime
+                .world()
+                .resource::<InputTimeline>()
+                .entries()
+                .last()
+                .unwrap();
+            assert_eq!(press.origin(), press_origin);
+            runtime.drive(Duration::ZERO).unwrap();
+            apply(
+                &mut runtime,
+                release_origin,
+                ButtonDriverInput::Release(MouseButton::Left),
+            );
+            let release = *runtime
+                .world()
+                .resource::<InputTimeline>()
+                .entries()
+                .last()
+                .unwrap();
+            assert_eq!(release.origin(), release_origin);
+            assert_eq!(release.member_origin(), Some(press_origin));
+            assert_eq!(release.press_sequence(), Some(press.sequence()));
+            assert!(matches!(
+                release.kind(),
+                InputEventKind::PointerButton {
+                    phase: ButtonTransitionPhase::Released,
+                    button: MouseButton::Left,
+                }
+            ));
+            runtime.drive(Duration::ZERO).unwrap();
+            assert!(
+                !runtime
+                    .world()
+                    .resource::<ButtonInput<MouseButton>>()
+                    .pressed(MouseButton::Left)
+            );
+            runtime.finish().unwrap();
+        }
     }
 
     #[test]

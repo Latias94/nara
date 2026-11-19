@@ -172,8 +172,9 @@ Runtime error/cleanup path; it is not an invisible keyboard-only fallback.
 
 `InputTimeline::endpoint_observation` provides a read-only incarnation/focus snapshot and
 `invalidated_through()` sequence. Backends can observe a focus loss followed by refocus between
-polls even after the original log entries are reclaimed. The snapshot is not a connection or
-an ingress capability. Known controls held across a route boundary need release/neutral before
+polls even after the original log entries are reclaimed. A focus gain on another endpoint for
+the same seat advances this sequence on the previously focused endpoint. The snapshot grants
+observation only. Known controls held across a route boundary need release/neutral before
 they can contribute again; cached values are not replayed as fresh intent. Gilrs does not expose
 a portable instantaneous hardware snapshot, so an unknown startup-held control cannot be
 identified from a missing cache entry. Fresh observations after the queue barrier remain usable.

@@ -96,6 +96,86 @@ fn activate_is_held(runtime: &RuntimeInstance) -> bool {
 }
 
 #[test]
+fn pointer_projection_clears_only_for_its_pointer_or_endpoint_geometry() {
+    let mut runtime = runtime(InputLimits::new(40, 3, 4, 4).unwrap());
+    let seat = InputSeatId::PRIMARY;
+    let first = InputWindowId::new(81);
+    let second = InputWindowId::new(82);
+    let primary = InputPointerId::PRIMARY;
+    let other = InputPointerId::new(2);
+    let position = Vec2::new(300.0, 50.0);
+    input(&mut runtime, |scope| {
+        connect_input_endpoint(scope, first, seat).unwrap();
+        connect_input_endpoint(scope, second, seat).unwrap();
+        connect_input_pointer(scope, first, seat, primary).unwrap();
+        connect_input_pointer(scope, second, seat, primary).unwrap();
+        connect_input_pointer(scope, second, seat, other).unwrap();
+        apply_pointer_driver_input_at(
+            scope,
+            first,
+            seat,
+            primary,
+            PointerDriverInput::Moved(Vec2::ONE),
+        )
+        .unwrap();
+        apply_pointer_driver_input_at(
+            scope,
+            second,
+            seat,
+            other,
+            PointerDriverInput::Moved(Vec2::ONE),
+        )
+        .unwrap();
+        apply_pointer_driver_input_at(
+            scope,
+            second,
+            seat,
+            primary,
+            PointerDriverInput::Moved(position),
+        )
+        .unwrap();
+    });
+    let sample = |runtime: &RuntimeInstance| runtime.world().resource::<FrameSnapshot>().position;
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(sample(&runtime), Some(position));
+    let resize = InputWindowEvent::Resized {
+        logical_size: Vec2::splat(100.0),
+    };
+    input(&mut runtime, |scope| {
+        apply_window_input_driver_event(scope, first, seat, resize.clone()).unwrap();
+        apply_pointer_driver_input_at(scope, second, seat, other, PointerDriverInput::Left)
+            .unwrap();
+    });
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(sample(&runtime), Some(position));
+
+    for event in [
+        resize,
+        InputWindowEvent::ScaleFactorChanged { scale_factor: 1.5 },
+    ] {
+        input(&mut runtime, |scope| {
+            apply_window_input_driver_event(scope, second, seat, event).unwrap();
+        });
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(sample(&runtime), None);
+        assert_eq!(runtime.world().resource::<PointerState>().position(), None);
+        input(&mut runtime, |scope| {
+            apply_pointer_driver_input_at(
+                scope,
+                second,
+                seat,
+                primary,
+                PointerDriverInput::Moved(Vec2::ONE),
+            )
+            .unwrap();
+        });
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(sample(&runtime), Some(Vec2::ONE));
+    }
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn synthetic_edges_share_admitted_members_and_clear_after_each_frame() {
     let limits = InputLimits::new(24, 1, 1, 4).unwrap();
     let mut runtime = runtime(limits);

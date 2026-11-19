@@ -206,6 +206,44 @@ fn rapid_focus_loss_and_regain_cannot_readopt_known_buttons_or_axes() {
 }
 
 #[test]
+fn same_seat_focus_round_trip_between_polls_interrupts_axis_continuity() {
+    for seat in [ROUTE.seat, InputSeatId::new(2)] {
+        let mut f = Fixture::new(1);
+        let other = InputWindowId::new(8);
+        f.timeline.connect_endpoint(other, seat).unwrap();
+        f.connect(0, PhysicalState::default());
+        f.poll_boundary(true);
+        f.event(0, axis(0.6));
+        let first = f.timeline.endpoint_observation(WINDOW, ROUTE.seat).unwrap();
+        f.timeline
+            .admit_window_event(other, seat, InputWindowEvent::Focused(true))
+            .unwrap();
+        f.timeline
+            .admit_window_event(WINDOW, ROUTE.seat, InputWindowEvent::Focused(true))
+            .unwrap();
+        let restored = f.timeline.endpoint_observation(WINDOW, ROUTE.seat).unwrap();
+        assert_eq!(restored.incarnation(), first.incarnation());
+        assert!(restored.focused());
+
+        f.poll_boundary(false);
+        f.event(0, axis(0.8));
+        if seat == ROUTE.seat {
+            assert!(restored.invalidated_through() > first.invalidated_through());
+            assert_eq!(f.samples(), [0.6, 0.0]);
+            f.poll_boundary(true);
+            f.event(0, axis(0.9));
+            assert_eq!(f.samples(), [0.6, 0.0]);
+            f.event(0, axis(0.0));
+            f.event(0, axis(0.7));
+            assert_eq!(f.samples(), [0.6, 0.0, 0.7]);
+        } else {
+            assert_eq!(restored.invalidated_through(), first.invalidated_through());
+            assert_eq!(f.samples(), [0.6, 0.8]);
+        }
+    }
+}
+
+#[test]
 fn no_endpoint_or_unfocused_endpoint_never_creates_an_implicit_route() {
     let (mut bridge, mut devices) = Bridge::new(1, Some(ROUTE));
     let mut timeline = InputTimeline::default();
