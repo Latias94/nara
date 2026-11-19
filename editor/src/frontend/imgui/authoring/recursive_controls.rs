@@ -65,12 +65,12 @@ fn show_node(
                 *value = Some(false);
             }
         }
-        (ValueDraft::Text { text, entered }, ComponentValueShape::EntityRef) => {
+        (ValueDraft::Text { text, entered, .. }, ComponentValueShape::EntityRef) => {
             if super::super::field_editor::entity_reference::show(ui, entities, text) {
                 *entered = true;
             }
         }
-        (ValueDraft::Text { text, entered }, _) => {
+        (ValueDraft::Text { text, entered, .. }, _) => {
             if ui.input_text("##value", text).build() {
                 *entered = true;
             }

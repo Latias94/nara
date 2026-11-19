@@ -1,7 +1,11 @@
+use super::owned::InspectorOperation;
 use super::*;
+
 use nara::{
-    identity::EntityReference,
+    asset::AssetSourcePath,
+    identity::{AuthoredEntityReference, EntityReference},
     reflect::{ComponentShapeMember, ComponentValueShape},
+    scene::{PrefabEntityOrigin, PrefabInstanceHop, SourceDocumentKey, SourceDocumentKind},
 };
 
 pub(super) fn configure(project: &InteractionProject) {
@@ -114,4 +118,100 @@ pub(super) fn configure(project: &InteractionProject) {
     prefab.placements.extend(additions.placements);
     prefab.entities.extend(additions.entities);
     fs::write(prefab_path, prefab.to_json_string().unwrap()).unwrap();
+}
+
+fn selected_references(interaction: &Interaction) -> ComponentValue {
+    interaction
+        .frame()
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap()
+        .components
+        .iter()
+        .find(|component| component.component.as_str() == CUSTOM_COMPONENT)
+        .unwrap()
+        .fields
+        .iter()
+        .find(|field| field.id.as_str() == "references")
+        .unwrap()
+        .value
+        .clone()
+        .unwrap()
+}
+
+#[test]
+fn inspector_sibling_apply_and_undo_preserve_authored_reference_scope() {
+    let project = InteractionProject::new_nested_entity_references();
+    let path = project.source(EditorDocumentKind::Scene);
+    let mut scene = SceneDocumentCandidate::decode_json_bytes(&fs::read(&path).unwrap())
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+    let references = scene
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id.as_str() == "source")
+        .unwrap()
+        .components
+        .get_mut(&ComponentTypeId::new(CUSTOM_COMPONENT))
+        .unwrap()
+        .value_mut()
+        .get_path_mut(&ComponentFieldPath::from_fields(["references"]))
+        .unwrap();
+    let direct = AuthoredEntityReference::source(SceneEntityId::new("target").unwrap());
+    let nested = AuthoredEntityReference {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("prefab-anchor").unwrap()),
+            expected_base: SourceDocumentKey::project_location(
+                "c3504a11-271b-59f3-b385-4810c9a5c5a2".parse().unwrap(),
+                AssetSourcePath::new("blueprints/ordinary.prefab.json").unwrap(),
+                SourceDocumentKind::Prefab,
+            ),
+        }],
+        ..direct.clone()
+    };
+    references
+        .set_path(
+            &ComponentFieldPath::from_fields(["direct"]),
+            ComponentValue::EntityReference(EntityReference::Authored { reference: direct }),
+        )
+        .unwrap();
+    references
+        .set_path(
+            &ComponentFieldPath::from_fields(["list"]),
+            ComponentValue::List(vec![ComponentValue::EntityReference(
+                EntityReference::Authored { reference: nested },
+            )]),
+        )
+        .unwrap();
+    let original = references.clone();
+    fs::write(path, scene.to_json_string().unwrap()).unwrap();
+
+    let mut interaction = Interaction::new(&project);
+    interaction.click_hierarchy("Select source");
+    interaction.click_owned(Some("references"), "root: Edit value");
+    interaction
+        .try_replace_owned_text("references", "root.other", "after")
+        .unwrap();
+    assert_eq!(selected_references(&interaction), original);
+    interaction
+        .field_operation("references", InspectorOperation::Apply)
+        .unwrap();
+
+    let mut expected = original.clone();
+    expected
+        .set_path(
+            &ComponentFieldPath::from_fields(["other"]),
+            ComponentValue::String("after".into()),
+        )
+        .unwrap();
+    assert_eq!(selected_references(&interaction), expected);
+    interaction.click("Undo");
+    assert_eq!(selected_references(&interaction), original);
 }

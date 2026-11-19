@@ -170,7 +170,7 @@ fn node_rows(
                 );
             }
         }
-        (ValueDraft::Text { text, entered }, _) if text_shape(shape) => {
+        (ValueDraft::Text { text, entered, .. }, _) if text_shape(shape) => {
             rows.push(StructuredRow::Text {
                 input: DraftInput::Value(path.clone()),
                 label: display_path.to_owned(),
@@ -923,7 +923,7 @@ pub(in crate::frontend) fn set_text(
 ) -> Result<(), String> {
     let (target, entered) = match input {
         DraftInput::Value(path) => match node_mut(root, &path.0) {
-            Some(ValueDraft::Text { text, entered }) => (text, entered),
+            Some(ValueDraft::Text { text, entered, .. }) => (text, entered),
             _ => return Err("This draft input is no longer available".to_owned()),
         },
         DraftInput::MapKey { parent, child } => match node_mut(root, &parent.0) {
