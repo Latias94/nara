@@ -91,7 +91,6 @@ struct RetainedInput {
     entry: InputTimelineEntry,
     projection_pending: bool,
     observation_pending: bool,
-    frame_pending: bool,
     ui_pending: bool,
     ui_consumed: bool,
     action: ActionRetention,
@@ -316,6 +315,8 @@ impl InputTimeline {
         self.retained.len()
     }
 
+    /// Visits the retained records in admission order.
+    /// Completed records can leave gaps in the sequence numbers.
     pub fn entries(&self) -> impl Iterator<Item = &InputTimelineEntry> {
         self.retained.iter().map(|record| &record.entry)
     }
@@ -569,7 +570,7 @@ impl InputTimeline {
         let route = reservation.declaration.route;
         if let Some(reason) = reservation.invalidation {
             self.refund_unused_geometry(route.window(), route.seat());
-            self.reclaim_completed();
+            self.reap_retired_topology();
             return InputRouteCommit::Invalidated { reason };
         }
         let endpoint = self
@@ -593,7 +594,7 @@ impl InputTimeline {
         let reservation = self.consume_route(token);
         let declaration = reservation.declaration;
         self.refund_unused_geometry(declaration.route.window(), declaration.route.seat());
-        self.reclaim_completed();
+        self.reap_retired_topology();
     }
 
     fn ensure_unreserved(
@@ -953,7 +954,6 @@ impl InputTimeline {
                 },
                 projection_pending: true,
                 observation_pending: true,
-                frame_pending: true,
                 ui_pending: draft.route.is_ui_routable(),
                 ui_consumed: false,
                 action: ActionRetention::Unscanned,
@@ -1359,7 +1359,7 @@ impl InputTimeline {
                         .geometry = false;
                 }
                 owner.assert_accounting();
-                owner.reclaim_completed();
+                owner.reap_retired_topology();
                 Ok(Self::release_output(admission, drafts))
             }),
         }
@@ -1690,7 +1690,7 @@ impl InputTimeline {
                 _ => unreachable!(),
             }
             owner.assert_accounting();
-            owner.reclaim_completed();
+            owner.reap_retired_topology();
             Ok(Self::release_output(admission, drafts))
         })
     }
@@ -1794,25 +1794,13 @@ impl InputTimeline {
     }
     pub(crate) fn finish_projection(&mut self) {
         for record in &mut self.retained {
-            if record.projection_pending {
-                record.frame_pending = true;
-            }
             record.projection_pending = false;
         }
     }
-
-    /// Frame copies pin their original records until every projection/observation buffer clears.
-    pub(crate) fn finish_frame_observations(&mut self) {
-        for record in &mut self.retained {
-            record.frame_pending = false;
-        }
-    }
-
     pub(crate) fn publish_observations(&mut self, observations: &mut InputFrameObservations) {
         observations.entries.clear();
         for record in &mut self.retained {
             if record.observation_pending {
-                record.frame_pending = true;
                 observations.entries.push(record.entry);
                 record.observation_pending = false;
                 self.observation_cursor = record.entry.sequence();
@@ -1886,28 +1874,28 @@ impl InputTimeline {
                 .take()
                 .expect("an admitted action edge retains its actual staging basis");
             if deliver {
-                record.frame_pending = true;
                 entries.push((record.entry, revision));
             }
         }
         entries
     }
 
-    pub(crate) fn reclaim_completed(&mut self) {
-        let mut removed = 0;
-        while self.retained.front().is_some_and(|record| {
-            !record.projection_pending
-                && !record.observation_pending
-                && !record.frame_pending
-                && !record.ui_pending
-                && record.action == ActionRetention::Done
-        }) {
-            self.retained.pop_front();
-            removed += 1;
-        }
+    /// Call after clearing this frame's projection and action copies.
+    pub(crate) fn finish_frame(&mut self) {
+        let before = self.retained.len();
+        self.retained.retain(|record| {
+            record.projection_pending
+                || record.observation_pending
+                || record.ui_pending
+                || record.action != ActionRetention::Done
+        });
         self.capacity
-            .reclaim(removed)
+            .reclaim(before - self.retained.len())
             .expect("only actually removed records release retained credits");
+        self.reap_retired_topology();
+    }
+
+    pub(super) fn reap_retired_topology(&mut self) {
         for slot in &mut self.topology.members {
             if slot.is_some_and(|member| {
                 !member.pressed

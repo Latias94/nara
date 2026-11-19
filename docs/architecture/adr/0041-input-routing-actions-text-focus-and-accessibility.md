@@ -184,11 +184,16 @@ observations and semantic contribution links derive from those members; they do 
 public mutation queues. Synthetic drivers use the same admission and termination path. The default
 synthetic endpoint is established once by its owner, not reconstructed on every mutation.
 
-Frame projections and action observations retain the original event while their internal copies
-are live. Admission-time pinning alone is insufficient: an event arriving after this frame's
-projection must reacquire the next frame's pin when it is actually copied. Only cleanup after
-those copies clear releases that pin; physical loss or another cursor cannot reclaim their space
-and admit another full frame of copies in the same frame.
+Frame projections and action observations keep their original events charged while their copies
+are live. An event arriving after projection retains its pending work into the next frame.
+`FrameCleanup` clears the copies and is the sole place that reclaims event slots, including for
+late events projected or resolved on an exact Step. Physical loss and cursor advancement can
+still settle topology and routing but cannot free those slots during the frame.
+
+Completion belongs to each record. The Input owner reclaims a finished record even when an
+earlier action is deferred. Live records retain admission order and their original sequence,
+which can have gaps. Pending actions keep their original staging basis. Held members reserve
+their remaining terminal obligations and retain their press provenance through retirement.
 
 Keyboard/mouse endpoint labels remain the public delivery identity for their bounded workflow. Explicit
 connection/retirement and private non-reused record/member identity protect internal lifetimes.

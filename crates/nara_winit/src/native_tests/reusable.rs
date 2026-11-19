@@ -794,14 +794,15 @@ fn native_posted_key_up_releases_a_physically_confirmed_restored_member_once() {
 #[ignore = "requires an interactive Windows desktop; run serially in its own nextest process"]
 fn unsupported_native_keyboard_query_keeps_the_original_candidate_paused() {
     let binding = nara_input::KeyboardActionBinding {
-        key: KeyCode::Enter,
+        key: KeyCode::Character('é'),
         ..native_keyboard_binding()
     };
+    assert!(crate::keyboard_continuation::physical_key(binding.key).is_none());
     let mut session = native_keyboard_session(binding.clone());
     poll_native_keyboard_until(&mut session, |session| {
         session
             .capture_keyboard_holds(std::slice::from_ref(&binding))
-            .is_ok()
+            .is_ok_and(|holds| !holds[0].held)
     });
     session
         .restore_keyboard_holds(vec![nara_input::KeyboardHold {
@@ -812,7 +813,7 @@ fn unsupported_native_keyboard_query_keeps_the_original_candidate_paused() {
     poll_native_keyboard_until(&mut session, |session| {
         session
             .capture_keyboard_holds(std::slice::from_ref(&binding))
-            .is_ok()
+            .is_ok_and(|holds| holds[0].held)
     });
     let window = session.app.as_ref().unwrap().platform_windows[&WindowId::PRIMARY].clone();
     session.reveal().unwrap();

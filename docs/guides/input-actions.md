@@ -127,8 +127,11 @@ preserves physical holds; `InputWindowEvent::SurfaceRetired` ends the endpoint, 
 Pending consumers or prepared presentation tokens keep retiring records charged and prevent label
 reuse. Drain or discard external queued
 operations before reusing raw labels; looking up a current generation cannot identify an old
-originless OS event. Frame cleanup releases observation copies, while paused action work retains
-its own original members until resolution or the owning Runtime ends.
+originless OS event. Frame cleanup returns event slots as each record's last consumer finishes.
+During a managed pause, pointer movement can finish while an earlier action waits for Resume or
+exact Step. `InputTimeline::entries()` visits live records in admission order and can show sequence
+gaps. Paused actions retain their original press association and staging basis. Accepted holds
+retain their remaining release obligations.
 
 A UI Host connects its logical endpoint before `install_ui_surface`, including when native window
 creation happens later. The Surface keeps that exact Input lifetime through suspension and geometry

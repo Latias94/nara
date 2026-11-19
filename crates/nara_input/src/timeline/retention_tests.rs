@@ -307,8 +307,7 @@ fn drain_unmapped_timeline(timeline: &mut InputTimeline) {
     timeline.finalize_ui_routing();
     timeline.stage_actions(&ActionStaging::default());
     timeline.take_deferred_action_inputs();
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
     assert_eq!(timeline.retained_len(), 0);
 }
 

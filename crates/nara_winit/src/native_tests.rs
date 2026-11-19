@@ -9,6 +9,7 @@ use winit::platform::windows::EventLoopBuilderExtWindows;
 mod cadence;
 mod geometry;
 mod maintenance;
+mod paused_input;
 mod reusable;
 mod titlebar;
 

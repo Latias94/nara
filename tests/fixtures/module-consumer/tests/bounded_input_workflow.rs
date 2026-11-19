@@ -17,14 +17,14 @@ use nara_engine::{
         GameplayCommandSet, GameplayCommandTypeId,
     },
     input::{
-        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
-        ActionMapLimits, ActionMaps, ActionPhase, ButtonDriverInput, ButtonInput,
-        ButtonInputDriverError, InputEventOrigin, InputIngressError, InputLimits, InputPlugin,
-        InputPointerId, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
-        MouseButton, PointerDriverInput, SemanticActionCause, SemanticActions,
-        apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_mouse_driver_input_at,
-        apply_pointer_driver_input_at, apply_window_input_driver_event, connect_input_endpoint,
-        connect_input_pointer,
+        ActionBinding, ActionContext, ActionId, ActionInputProvenance, ActionMap,
+        ActionMapBindings, ActionMapBuilder, ActionMapLimits, ActionMaps, ActionPhase,
+        ButtonDriverInput, ButtonInput, ButtonInputDriverError, InputEventOrigin,
+        InputIngressError, InputLimits, InputPlugin, InputPointerId, InputSeatId, InputTimeline,
+        InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput, PointerState,
+        SemanticActionCause, SemanticActions, apply_keyboard_driver_input,
+        apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+        apply_window_input_driver_event, connect_input_endpoint, connect_input_pointer,
     },
 };
 
@@ -143,6 +143,7 @@ fn simulate(batch: Res<GameplayCommandBatch>, mut effects: ResMut<Effects>) {
 #[derive(Debug, Default, Resource)]
 struct ActionEvidence {
     observed_frame: Option<u64>,
+    physical_edges_this_frame: Vec<(ActionPhase, ActionInputProvenance)>,
     platform_starts: u32,
     synthetic_starts: u32,
     platform_stops: u32,
@@ -160,6 +161,7 @@ fn observe_actions(
         return;
     }
     evidence.observed_frame = Some(time.frame);
+    evidence.physical_edges_this_frame.clear();
     for edge in actions
         .as_slice()
         .iter()
@@ -171,6 +173,9 @@ fn observe_actions(
                 let provenance = edge.provenance.expect("admitted input retains its origin");
                 assert!(provenance.sequence() > 0);
                 assert!(provenance.press_sequence().is_some());
+                evidence
+                    .physical_edges_this_frame
+                    .push((edge.phase, provenance));
                 match (edge.phase, provenance.origin()) {
                     (ActionPhase::Started, InputEventOrigin::Platform) => {
                         evidence.platform_starts += 1
@@ -851,6 +856,166 @@ fn bounded_input_configuration_lifetimes_and_exact_steps_apply_commands_once() {
             .bindings_handle()
             .shares_owner_with(&original)
     );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn bounded_input_reclaims_paused_motion_without_losing_gameplay_edges() {
+    const EVENT_CAPACITY: usize = 24;
+    const MOTION_SAMPLES: u16 = 64;
+    let (mut runtime, _, _) = start(InputLimits::new(EVENT_CAPACITY, 3, 2, 1).unwrap());
+    input(&mut runtime, |scope| {
+        connect_input_endpoint(scope, WINDOW, SEAT)?;
+        connect_input_endpoint(scope, OTHER_WINDOW, SEAT)?;
+        connect_input_pointer(scope, OTHER_WINDOW, SEAT, POINTER)
+    })
+    .unwrap();
+
+    control(&mut runtime, RuntimeControl::Pause);
+    input(&mut runtime, |scope| {
+        apply_keyboard_driver_input_at(scope, WINDOW, SEAT, ButtonDriverInput::Press(KEY))
+    })
+    .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let press_sequence = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .cursors()
+        .oldest_deferred_action()
+        .expect("the paused key press is waiting for gameplay");
+    assert!(!movement_is_held(&runtime));
+
+    for sample in 1..=MOTION_SAMPLES {
+        let position = Vec2::new(f32::from(sample), 3.0);
+        let (admission, _) = match input(&mut runtime, |scope| {
+            apply_pointer_driver_input_at(
+                scope,
+                OTHER_WINDOW,
+                SEAT,
+                POINTER,
+                PointerDriverInput::Moved(position),
+            )
+        }) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                runtime.finish().unwrap();
+                panic!("paused motion sample {sample} must be admitted: {error:?}");
+            }
+        };
+        let sequence = Some(press_sequence + u64::from(sample));
+        assert_eq!(
+            (admission.first_sequence(), admission.last_sequence()),
+            (sequence, sequence)
+        );
+        let frame = runtime.drive(Duration::ZERO).unwrap();
+        let status = &frame.frame().unwrap().status;
+        assert!(status.simulation_paused);
+        assert_eq!(status.fixed_steps, 0);
+        assert_eq!(
+            runtime.world().resource::<PointerState>().position(),
+            Some(position)
+        );
+    }
+    let timeline = runtime.world().resource::<InputTimeline>();
+    let cursors = timeline.cursors();
+    let last_motion = press_sequence + u64::from(MOTION_SAMPLES);
+    assert_eq!(cursors.observation(), last_motion);
+    assert_eq!(cursors.ui(), last_motion);
+    assert_eq!(cursors.action_scanned(), last_motion);
+    assert_eq!(cursors.oldest_deferred_action(), Some(press_sequence));
+    assert_eq!(timeline.retained_len(), 1);
+
+    let (retirement, _, _) = input(&mut runtime, |scope| {
+        apply_window_input_driver_event(scope, OTHER_WINDOW, SEAT, InputWindowEvent::SurfaceRetired)
+    })
+    .unwrap();
+    assert!(!retirement.is_ignored());
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.world().resource::<PointerState>().position(), None);
+    input(&mut runtime, |scope| {
+        connect_input_endpoint(scope, OTHER_WINDOW, SEAT)?;
+        connect_input_pointer(scope, OTHER_WINDOW, SEAT, POINTER)
+    })
+    .expect("the unrelated endpoint and pointer can be reused during pause");
+
+    let (retirement, released_keys, _) = input(&mut runtime, |scope| {
+        apply_window_input_driver_event(scope, WINDOW, SEAT, InputWindowEvent::SurfaceRetired)
+    })
+    .unwrap();
+    assert_eq!(released_keys, [KEY]);
+    let release_sequence = retirement.first_sequence().unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<InputTimeline>()
+            .entries()
+            .map(|entry| entry.sequence())
+            .collect::<Vec<_>>(),
+        [press_sequence, release_sequence]
+    );
+    assert_eq!(
+        input(&mut runtime, |scope| connect_input_endpoint(
+            scope, WINDOW, SEAT
+        )),
+        Err(ButtonInputDriverError::Timeline(
+            InputIngressError::EndpointRetiring {
+                window: WINDOW,
+                seat: SEAT,
+            }
+        ))
+    );
+    assert_eq!(effects(&runtime), Effects::default());
+
+    control(&mut runtime, RuntimeControl::Resume);
+    let evidence = runtime.world().resource::<ActionEvidence>();
+    let [
+        (ActionPhase::Started, press),
+        (ActionPhase::Released, release),
+    ] = evidence.physical_edges_this_frame.as_slice()
+    else {
+        panic!(
+            "expected ordered start and release, got {:?}",
+            evidence.physical_edges_this_frame
+        );
+    };
+    assert_eq!(
+        (press.sequence(), release.sequence()),
+        (press_sequence, release_sequence)
+    );
+    for provenance in [press, release] {
+        assert_eq!(provenance.origin(), InputEventOrigin::Platform);
+        assert_eq!(provenance.member_origin(), Some(InputEventOrigin::Platform));
+        assert_eq!(provenance.press_sequence(), Some(press_sequence));
+        assert_eq!(provenance.press_route(), Some(press.route()));
+        assert_eq!(provenance.route().window(), WINDOW);
+        assert_eq!(provenance.route().seat(), SEAT);
+        assert_eq!(provenance.route().pointer(), None);
+    }
+    assert!(!movement_is_held(&runtime));
+    assert_eq!(
+        runtime.world().resource::<InputTimeline>().retained_len(),
+        0
+    );
+    input(&mut runtime, |scope| {
+        connect_input_endpoint(scope, WINDOW, SEAT)
+    })
+    .unwrap();
+    assert_eq!(effects(&runtime), Effects::default());
+
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let once = Effects {
+        starts: 1,
+        stops: 1,
+        ticks: 1,
+        ..Effects::default()
+    };
+    assert_eq!(effects(&runtime), once);
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
+    assert_eq!(effects(&runtime), Effects { ticks: 3, ..once });
+    let evidence = runtime.world().resource::<ActionEvidence>();
+    assert!(evidence.physical_edges_this_frame.is_empty());
+    assert_eq!((evidence.platform_starts, evidence.platform_stops), (1, 1));
     runtime.finish().unwrap();
 }
 

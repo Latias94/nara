@@ -68,7 +68,7 @@ impl InputCapacity {
 
     /// Checks all new records and the complete obligations remaining after this operation.
     ///
-    /// No records are reclaimed here, including completed records behind a lagging prefix.
+    /// Record reclamation belongs to the owner after its actual consumers finish.
     /// Ordinary admission may acquire new obligations or revoke obligations that no longer apply.
     pub(super) fn plan(
         &self,

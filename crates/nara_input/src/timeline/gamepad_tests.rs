@@ -30,8 +30,7 @@ fn drain(timeline: &mut InputTimeline) {
     timeline.finalize_ui_routing();
     timeline.stage_actions(&ActionStaging::default());
     assert!(timeline.take_deferred_action_inputs().is_empty());
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
     assert_eq!(timeline.retained_len(), 0);
 }
 
@@ -577,8 +576,7 @@ fn retired_connection_slots_wait_for_actions_and_actual_frame_copy_retirement() 
     timeline.finalize_ui_routing();
     timeline.stage_actions(&staging);
     observations.clear();
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
     assert_eq!(
         timeline.cursors().oldest_deferred_action(),
         pressed.first_sequence()
@@ -594,12 +592,11 @@ fn retired_connection_slots_wait_for_actions_and_actual_frame_copy_retirement() 
         delivered[1].0.press_sequence()
     );
     assert_eq!(delivered[1].0.axis_value(), Some(AxisValue::ZERO));
-    timeline.reclaim_completed();
+    timeline.reap_retired_topology();
     assert_eq!(timeline.topology.gamepads.iter().flatten().count(), 1);
     assert_eq!(timeline.topology.members.iter().flatten().count(), 1);
     drop(delivered);
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
     assert_eq!(timeline.retained_len(), 0);
     assert_eq!(timeline.topology.gamepads.iter().flatten().count(), 0);
     assert_eq!(timeline.topology.members.iter().flatten().count(), 0);

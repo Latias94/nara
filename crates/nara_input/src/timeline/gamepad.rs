@@ -164,7 +164,7 @@ impl InputTimeline {
                 .unwrap()
                 .retiring = true;
             owner.assert_accounting();
-            owner.reclaim_completed();
+            owner.reap_retired_topology();
             Ok(admission)
         })
     }

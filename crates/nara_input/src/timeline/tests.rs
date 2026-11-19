@@ -44,8 +44,7 @@ fn drain_unmapped(timeline: &mut InputTimeline) {
     timeline.stage_actions(&ActionStaging::default());
     drop(timeline.take_deferred_action_inputs());
     observations.clear();
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
     assert_eq!(timeline.retained_len(), 0);
 }
 
@@ -53,6 +52,76 @@ fn primary_staging() -> ActionStaging {
     let mut staging = ActionStaging::default();
     staging.observe_maps(&ActionMaps::default());
     staging
+}
+
+#[test]
+fn completed_frame_records_release_capacity_between_deferred_edges() {
+    let limits = InputLimits::new(24, 1, 1, 2).unwrap();
+    let mut timeline = InputTimeline::with_limits(limits).unwrap();
+    let window = InputWindowId::UNSPECIFIED;
+    let seat = InputSeatId::PRIMARY;
+    let pointer = InputPointerId::PRIMARY;
+    let staging = primary_staging();
+    let mut observations = InputFrameObservations::default();
+    let press = timeline
+        .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Space))
+        .unwrap()
+        .first_sequence()
+        .unwrap();
+    let mut release = None;
+    for index in 0..64 {
+        let motion = timeline
+            .admit_pointer(
+                window,
+                seat,
+                pointer,
+                PointerDriverInput::Moved(Vec2::new(index as f32, 5.0)),
+            )
+            .unwrap_or_else(|err| panic!("motion {index} must still fit: {err:?}"))
+            .first_sequence()
+            .unwrap();
+        if index == 32 {
+            release = timeline
+                .admit_keyboard(window, seat, ButtonDriverInput::Release(KeyCode::Space))
+                .unwrap()
+                .first_sequence();
+            assert!(release.is_some_and(|sequence| sequence > motion));
+        }
+        timeline.finish_projection();
+        timeline.publish_observations(&mut observations);
+        timeline.finalize_ui_routing();
+        timeline.stage_actions(&staging);
+        timeline.reap_retired_topology();
+        assert!(timeline.entries().any(|entry| entry.sequence() == motion));
+        assert!(
+            observations
+                .as_slice()
+                .iter()
+                .any(|entry| entry.sequence() == motion)
+        );
+        observations.clear();
+        timeline.finish_frame();
+    }
+    let release = release.unwrap();
+    assert_eq!(
+        timeline
+            .entries()
+            .map(|entry| entry.sequence())
+            .collect::<Vec<_>>(),
+        [press, release]
+    );
+    assert_eq!(timeline.cursors().oldest_deferred_action(), Some(press));
+    let delivered = timeline.take_deferred_action_inputs();
+    assert_eq!(delivered.len(), 2);
+    assert_eq!(delivered[0].0.sequence(), press);
+    assert_eq!(delivered[1].0.sequence(), release);
+    assert_eq!(delivered[1].0.press_sequence(), Some(press));
+    assert!(timeline.take_deferred_action_inputs().is_empty());
+    timeline.reap_retired_topology();
+    assert_eq!(timeline.retained_len(), 2);
+    drop(delivered);
+    timeline.finish_frame();
+    assert_eq!(timeline.retained_len(), 0);
 }
 
 fn published_timeline() -> InputTimeline {

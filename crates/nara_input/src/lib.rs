@@ -1001,7 +1001,6 @@ fn finalize_timeline_routing(
     staging.observe_maps(&action_maps);
     timeline.finalize_ui_routing();
     timeline.stage_actions(&staging);
-    timeline.reclaim_completed();
 }
 
 fn resolve_action_outcomes(
@@ -1103,8 +1102,7 @@ fn clear_input_transitions(
         semantic.clear_outcomes();
     }
     observations.clear();
-    timeline.finish_frame_observations();
-    timeline.reclaim_completed();
+    timeline.finish_frame();
 }
 
 fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
