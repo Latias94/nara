@@ -64,13 +64,13 @@ pub(crate) enum SceneCompositionSelection {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PreparedSceneComposition {
-    patch: ScenePatchDocument,
+    patch: Option<ScenePatchDocument>,
     selection: SceneCompositionSelection,
 }
 
 impl PreparedSceneComposition {
-    pub(crate) fn patch(&self) -> &ScenePatchDocument {
-        &self.patch
+    pub(crate) fn patch(&self) -> Option<&ScenePatchDocument> {
+        self.patch.as_ref()
     }
 
     pub(crate) fn selection(&self) -> &SceneCompositionSelection {
@@ -146,13 +146,20 @@ pub(crate) fn prepare_generic_composition(
         ),
         SceneCompositionCommand::MoveEntity { target, to } => {
             return Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::set_placement(document.placements(), target, to),
+                patch: ScenePatchDocument::set_placement_if_changed(
+                    document.placements(),
+                    target,
+                    to,
+                ),
                 selection: SceneCompositionSelection::Preserve,
             });
         }
         SceneCompositionCommand::RevertPlacement { target } => {
             return Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::revert_placement(document.placements(), &target)?,
+                patch: Some(ScenePatchDocument::revert_placement(
+                    document.placements(),
+                    &target,
+                )?),
                 selection: SceneCompositionSelection::Preserve,
             });
         }
@@ -169,7 +176,7 @@ pub(crate) fn prepare_generic_composition(
                 selected,
             )?;
             return Ok(PreparedSceneComposition {
-                patch,
+                patch: Some(patch),
                 selection: replacement.map_or(
                     SceneCompositionSelection::Preserve,
                     SceneCompositionSelection::Select,
@@ -184,7 +191,7 @@ pub(crate) fn prepare_generic_composition(
         }
     };
     Ok(PreparedSceneComposition {
-        patch: ScenePatchDocument::new([operation]),
+        patch: Some(ScenePatchDocument::new([operation])),
         selection,
     })
 }
@@ -210,7 +217,7 @@ pub(crate) fn prepare_scene_composition(
                 selected,
             )?;
             Ok(PreparedSceneComposition {
-                patch,
+                patch: Some(patch),
                 selection: replacement.map_or(
                     SceneCompositionSelection::Preserve,
                     SceneCompositionSelection::Select,
@@ -221,11 +228,13 @@ pub(crate) fn prepare_scene_composition(
             require_entity(document, &entity)?;
             let (component_id, value) = component_draft(registry, component)?;
             Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-                    entity,
-                    component: component_id,
-                    value,
-                }]),
+                patch: Some(ScenePatchDocument::new([
+                    ScenePatchOperation::AddComponent {
+                        entity,
+                        component: component_id,
+                        value,
+                    },
+                ])),
                 selection: SceneCompositionSelection::Preserve,
             })
         }
@@ -233,19 +242,21 @@ pub(crate) fn prepare_scene_composition(
             require_entity(document, &entity)?;
             let (component, _) = admitted_component(registry, component)?;
             Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::new([ScenePatchOperation::RemoveComponent {
-                    entity,
-                    component,
-                }]),
+                patch: Some(ScenePatchDocument::new([
+                    ScenePatchOperation::RemoveComponent { entity, component },
+                ])),
                 selection: SceneCompositionSelection::Preserve,
             })
         }
         SceneCompositionCommand::MoveEntity { target, to } => Ok(PreparedSceneComposition {
-            patch: ScenePatchDocument::set_placement(&document.placements, target, to),
+            patch: ScenePatchDocument::set_placement_if_changed(&document.placements, target, to),
             selection: SceneCompositionSelection::Preserve,
         }),
         SceneCompositionCommand::RevertPlacement { target } => Ok(PreparedSceneComposition {
-            patch: ScenePatchDocument::revert_placement(&document.placements, &target)?,
+            patch: Some(ScenePatchDocument::revert_placement(
+                &document.placements,
+                &target,
+            )?),
             selection: SceneCompositionSelection::Preserve,
         }),
     }
@@ -457,25 +468,19 @@ pub(crate) fn prepare_prefab_composition(
         }
         PrefabCompositionCommand::CreateEntity { .. } => Err(creation_requires_source_owner()),
         PrefabCompositionCommand::MoveEntity { target, to } => {
-            if document
-                .placements
-                .iter()
-                .any(|entry| entry.target == target && entry.placement == to)
-            {
-                return Ok(PreparedPrefabComposition {
-                    patch: None,
-                    selection: PrefabCompositionSelection::Preserve,
-                    outcome: PrefabCompositionOutcome::NoOp { target },
-                });
-            }
+            let patch = ScenePatchDocument::set_placement_if_changed(
+                &document.placements,
+                target.clone(),
+                to,
+            );
             Ok(PreparedPrefabComposition {
-                patch: Some(ScenePatchDocument::set_placement(
-                    &document.placements,
-                    target.clone(),
-                    to,
-                )),
+                outcome: if patch.is_some() {
+                    PrefabCompositionOutcome::Moved { target }
+                } else {
+                    PrefabCompositionOutcome::NoOp { target }
+                },
+                patch,
                 selection: PrefabCompositionSelection::Preserve,
-                outcome: PrefabCompositionOutcome::Moved { target },
             })
         }
         PrefabCompositionCommand::RevertPlacement { target } => {

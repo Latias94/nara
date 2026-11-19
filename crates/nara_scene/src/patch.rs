@@ -576,22 +576,44 @@ pub enum ScenePatchOperation {
 impl ScenePatchDocument {
     /// Pins one desired location in its existing declaration slot, or appends a new inherited pin.
     /// This constructs source intent; the ordinary transaction admits the complete result.
+    /// The patch retains its exact placement precondition even for an identical location.
     #[must_use]
     pub fn set_placement(
         placements: &[SceneEntityPlacement],
         target: PrefabEntityTarget,
         placement: ScenePlacement,
     ) -> Self {
+        Self::set_placement_if_changed(placements, target, placement).unwrap_or_else(|| {
+            Self::new([ScenePatchOperation::SetPlacements {
+                expected: placements.to_vec(),
+                value: placements.to_vec(),
+            }])
+        })
+    }
+
+    /// Prepares a placement edit against the current declarations.
+    /// Returns `None` when the target already declares the same parent and slot.
+    #[must_use]
+    pub fn set_placement_if_changed(
+        placements: &[SceneEntityPlacement],
+        target: PrefabEntityTarget,
+        placement: ScenePlacement,
+    ) -> Option<Self> {
+        let index = placements.iter().position(|entry| entry.target == target);
+        if index.is_some_and(|index| placements[index].placement == placement) {
+            return None;
+        }
+
         let mut value = placements.to_vec();
-        if let Some(declaration) = value.iter_mut().find(|entry| entry.target == target) {
-            declaration.placement = placement;
+        if let Some(index) = index {
+            value[index].placement = placement;
         } else {
             value.push(SceneEntityPlacement::new(target, placement));
         }
-        Self::new([ScenePatchOperation::SetPlacements {
+        Some(Self::new([ScenePatchOperation::SetPlacements {
             expected: placements.to_vec(),
             value,
-        }])
+        }]))
     }
 
     /// Removes an optional inherited source placement without changing the remaining ordinals.

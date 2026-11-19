@@ -3,6 +3,156 @@ use super::*;
 mod deletion;
 
 #[test]
+fn repeated_placement_preserves_exact_source_and_redo() {
+    let parent = entity_id("parent");
+    let child = entity_id("child");
+    let original = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(parent.clone()),
+        SceneEntityRecord::new(child.clone()),
+    ]);
+    let target = PrefabEntityTarget::source(child);
+    let registry = frozen_empty_registry();
+    let bundle = authoring_basis_bundle("Unused schema");
+
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        for published in [false, true] {
+            let (mut workspace, mut persistence) = EditorWorkspace::new_hosted();
+            let document = if published {
+                open_published_structure(&mut workspace, kind, &original, &bundle)
+            } else {
+                match kind {
+                    EditorDocumentKind::Scene => {
+                        open_scene(&mut workspace, "structure", original.clone())
+                    }
+                    EditorDocumentKind::Prefab => open_prefab(
+                        &mut workspace,
+                        "structure",
+                        PrefabDocument::new(original.placements.clone(), original.entities.clone()),
+                    ),
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                }
+            };
+            let apply = |workspace: &mut EditorWorkspace, command| {
+                if published {
+                    workspace.apply_authoring_command(command)
+                } else {
+                    workspace.apply_command(&registry, command)
+                }
+            };
+            let current_tab = |workspace: &EditorWorkspace| {
+                let model = if published {
+                    workspace.authoring_model()
+                } else {
+                    workspace.model(&registry, None)
+                };
+                model.document(document).unwrap().clone()
+            };
+            let move_to = |base_revision, to| {
+                command(
+                    document,
+                    base_revision,
+                    kind,
+                    SceneCompositionCommand::MoveEntity {
+                        target: target.clone(),
+                        to,
+                    },
+                )
+            };
+
+            let initial = persistence.capture(&workspace, document).unwrap();
+            let moved = apply(
+                &mut workspace,
+                move_to(
+                    initial.revision(),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        parent.clone(),
+                    ))),
+                ),
+            );
+            assert!(
+                moved.applied,
+                "{kind:?} published={published}: {:?}",
+                moved.diagnostics
+            );
+            let moved_source = persistence.capture(&workspace, document).unwrap();
+            let undone = apply(
+                &mut workspace,
+                EditorWorkspaceCommand::Undo {
+                    document,
+                    base_revision: moved_source.revision(),
+                },
+            );
+            assert!(
+                undone.applied,
+                "{kind:?} published={published}: {:?}",
+                undone.diagnostics
+            );
+            let before = persistence.capture(&workspace, document).unwrap();
+            assert_eq!(before.scene(), initial.scene());
+            assert_eq!(before.prefab(), initial.prefab());
+            let before_tab = current_tab(&workspace);
+            assert!(!before_tab.dirty);
+            assert_eq!(
+                before_tab.history,
+                DocumentHistoryStatus {
+                    undo_depth: 0,
+                    redo_depth: 1,
+                }
+            );
+
+            let no_op = apply(
+                &mut workspace,
+                move_to(
+                    before.revision(),
+                    ScenePlacement::last(ScenePlacementParent::Root),
+                ),
+            );
+            assert!(
+                !no_op.applied && no_op.diagnostics.is_empty(),
+                "{kind:?} published={published}: {no_op:?}"
+            );
+            assert_eq!(no_op.revision, Some(before.revision()));
+            assert_eq!(no_op.dirty, Some(false));
+            assert!(no_op.patch_report.is_none());
+            assert_eq!(
+                no_op.prefab_composition_outcome,
+                (kind == EditorDocumentKind::Prefab).then_some(PrefabCompositionOutcome::NoOp {
+                    target: target.clone(),
+                })
+            );
+            assert_eq!(current_tab(&workspace), before_tab);
+            let unchanged = persistence.capture(&workspace, document).unwrap();
+            assert_eq!(unchanged.content_state(), before.content_state());
+            if let Some(scene) = before.scene() {
+                assert!(std::ptr::eq(unchanged.scene().unwrap(), scene));
+            } else {
+                assert!(std::ptr::eq(
+                    unchanged.prefab().unwrap(),
+                    before.prefab().unwrap()
+                ));
+            }
+
+            let redone = apply(
+                &mut workspace,
+                EditorWorkspaceCommand::Redo {
+                    document,
+                    base_revision: before.revision(),
+                },
+            );
+            assert!(
+                redone.applied,
+                "{kind:?} published={published}: {:?}",
+                redone.diagnostics
+            );
+            let after = persistence.capture(&workspace, document).unwrap();
+            assert_eq!(after.content_state(), moved_source.content_state());
+            assert_eq!(after.scene(), moved_source.scene());
+            assert_eq!(after.prefab(), moved_source.prefab());
+        }
+    }
+}
+
+#[test]
 fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_action_basis() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         let root = entity_id("root");
@@ -43,54 +193,7 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
         );
         let bundle = authoring_basis_bundle("Unused schema");
         let mut workspace = EditorWorkspace::new();
-        let document = match kind {
-            EditorDocumentKind::Scene => workspace
-                .open_authoring_scene_document(
-                    "structure",
-                    EditorDocumentSourceBinding::new("scenes/structure.scene.json"),
-                    SceneDocumentCandidate::decode_json_bytes(
-                        original.to_json_string().unwrap().as_bytes(),
-                    )
-                    .unwrap()
-                    .admit_authoring(
-                        AuthoringDocumentSource::new(
-                            AssetRef::path("scenes/structure.scene.json").unwrap(),
-                        ),
-                        &bundle,
-                        &[],
-                    )
-                    .unwrap()
-                    .publish(),
-                )
-                .unwrap(),
-            EditorDocumentKind::Prefab => workspace
-                .open_authoring_prefab_document(
-                    "structure",
-                    EditorDocumentSourceBinding::new("prefabs/structure.prefab.json"),
-                    PrefabDocumentCandidate::decode_json_bytes(
-                        PrefabDocument::new(original.placements.clone(), original.entities.clone())
-                            .to_json_string()
-                            .unwrap()
-                            .as_bytes(),
-                    )
-                    .unwrap()
-                    .admit_authoring(
-                        AuthoringDocumentSource::new(
-                            AssetRef::path("prefabs/structure.prefab.json").unwrap(),
-                        ),
-                        &bundle,
-                        &[],
-                    )
-                    .unwrap()
-                    .publish(),
-                )
-                .unwrap(),
-            EditorDocumentKind::Extension(_) => {
-                unreachable!("this fixture exercises Scene and Prefab structure")
-            }
-        }
-        .opened_document
-        .unwrap();
+        let document = open_published_structure(&mut workspace, kind, &original, &bundle);
         assert!(
             workspace
                 .apply_authoring_command(EditorWorkspaceCommand::SelectEntity {
@@ -137,6 +240,9 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
             move_command.clone(),
         ));
         assert!(!stale.applied);
+        assert!(stale.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
+        }));
         assert_eq!(document_value(&workspace, document), after_move);
         assert_eq!(
             workspace.documents[&document].history_status().undo_depth,
@@ -209,6 +315,62 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
         assert!(redo.applied);
         assert_eq!(document_value(&workspace, document), after_move);
     }
+}
+
+fn open_published_structure(
+    workspace: &mut EditorWorkspace,
+    kind: EditorDocumentKind,
+    original: &SceneDocument,
+    bundle: &AuthoringSchemaBundle,
+) -> EditorDocumentId {
+    match kind {
+        EditorDocumentKind::Scene => workspace
+            .open_authoring_scene_document(
+                "structure",
+                EditorDocumentSourceBinding::new("scenes/structure.scene.json"),
+                SceneDocumentCandidate::decode_json_bytes(
+                    original.to_json_string().unwrap().as_bytes(),
+                )
+                .unwrap()
+                .admit_authoring(
+                    AuthoringDocumentSource::new(
+                        AssetRef::path("scenes/structure.scene.json").unwrap(),
+                    ),
+                    bundle,
+                    &[],
+                )
+                .unwrap()
+                .publish(),
+            )
+            .unwrap(),
+        EditorDocumentKind::Prefab => workspace
+            .open_authoring_prefab_document(
+                "structure",
+                EditorDocumentSourceBinding::new("prefabs/structure.prefab.json"),
+                PrefabDocumentCandidate::decode_json_bytes(
+                    PrefabDocument::new(original.placements.clone(), original.entities.clone())
+                        .to_json_string()
+                        .unwrap()
+                        .as_bytes(),
+                )
+                .unwrap()
+                .admit_authoring(
+                    AuthoringDocumentSource::new(
+                        AssetRef::path("prefabs/structure.prefab.json").unwrap(),
+                    ),
+                    bundle,
+                    &[],
+                )
+                .unwrap()
+                .publish(),
+            )
+            .unwrap(),
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("this fixture exercises Scene and Prefab structure")
+        }
+    }
+    .opened_document
+    .unwrap()
 }
 
 fn command(

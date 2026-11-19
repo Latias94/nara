@@ -80,6 +80,9 @@ Rules:
 - `RemoveField` resets a named field, including a named field within a list element. A path
   ending in a list index is refused before document publication. Collection edits can replace
   the complete typed list so the existing inverse retains and restores the previous value.
+- Repeating an existing authored placement through Scene or Prefab composition preserves the
+  current revision, content state and Redo branch. A new explicit placement can still pin an
+  inherited target that has no matching declaration of its own.
 - Ordered stable-property replacements resolve through the admitted Schema against one evolving
   private candidate, then coalesce into the existing root-field patch and owner-created inverse.
   Original property operation count, selector/key bytes and replacement payload are bounded before

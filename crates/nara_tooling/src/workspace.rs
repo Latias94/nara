@@ -1680,32 +1680,22 @@ impl EditorWorkspace {
                 .apply_authoring_entity_creation(document, base_revision, entity_kind, placement)
                 .unwrap_or_else(|report| report);
         }
-        if let EditorDocumentSlot::Prefab(prefab) = &*slot {
-            let placements = &prefab.session.document().placements;
-            let unchanged = match &command {
-                SceneCompositionCommand::MoveEntity { target, to }
-                    if placements
-                        .iter()
-                        .any(|entry| &entry.target == target && &entry.placement == to) =>
-                {
-                    Some(target)
-                }
-                SceneCompositionCommand::RevertPlacement { target }
-                    if !target.through.is_empty()
-                        && !placements.iter().any(|entry| &entry.target == target) =>
-                {
-                    Some(target)
-                }
-                _ => None,
-            };
-            if let Some(target) = unchanged {
-                let mut report = report_for_document(document, active_document, slot);
-                report.applied = false;
-                report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp {
-                    target: target.clone(),
-                });
-                return report;
-            }
+        if let SceneCompositionCommand::RevertPlacement { target } = &command
+            && let EditorDocumentSlot::Prefab(prefab) = &*slot
+            && !target.through.is_empty()
+            && !prefab
+                .session
+                .document()
+                .placements
+                .iter()
+                .any(|entry| &entry.target == target)
+        {
+            let mut report = report_for_document(document, active_document, slot);
+            report.applied = false;
+            report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp {
+                target: target.clone(),
+            });
+            return report;
         }
         let mut prefab_outcome = if kind == EditorDocumentKind::Prefab {
             match &command {
@@ -1776,11 +1766,17 @@ impl EditorWorkspace {
                 return report;
             }
         };
-        let patch_report = match slot {
-            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_patch(prepared.patch()),
-            EditorDocumentSlot::Prefab(slot) => {
-                slot.session.apply_authoring_patch(prepared.patch())
+        let Some(patch) = prepared.patch() else {
+            let mut report = report_for_document(document, active_document, slot);
+            report.applied = false;
+            if let Some(PrefabCompositionOutcome::Moved { target }) = prefab_outcome {
+                report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp { target });
             }
+            return report;
+        };
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_patch(patch),
+            EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_patch(patch),
             EditorDocumentSlot::Extension(_) => {
                 return authoring_command_error_report(active_document, document);
             }
@@ -1857,7 +1853,12 @@ impl EditorWorkspace {
                 return report;
             }
         };
-        let patch_report = slot.session.apply_patch(prepared.patch(), registry);
+        let Some(patch) = prepared.patch() else {
+            let mut report = report_for_slot(document, active_document, slot);
+            report.applied = false;
+            return report;
+        };
+        let patch_report = slot.session.apply_patch(patch, registry);
         let report = report_for_patch_slot(document, active_document, slot, patch_report);
         if report.applied {
             match prepared.selection() {
