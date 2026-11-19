@@ -123,6 +123,43 @@ fn authored_constructors_keep_entity_origins_and_inputs_distinct() {
 }
 
 #[test]
+fn direct_source_entity_recognizes_only_the_two_local_encodings() {
+    let target = id("actor");
+    let mut routed = AuthoredEntityReference::source(target.clone());
+    routed.through.push(PrefabInstanceHop {
+        anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+        expected_base: named_key("nested"),
+    });
+    for reference in [
+        EntityReference::SceneLocal {
+            entity: target.clone(),
+        },
+        EntityReference::Authored {
+            reference: AuthoredEntityReference::source(target.clone()),
+        },
+    ] {
+        assert_eq!(reference.direct_source_entity(), Some(&target));
+    }
+    for reference in [
+        EntityReference::Authored { reference: routed },
+        EntityReference::Authored {
+            reference: AuthoredEntityReference::addition(target),
+        },
+        EntityReference::Authored {
+            reference: AuthoredEntityReference::input(ReferenceInputId::new("actor").unwrap()),
+        },
+        EntityReference::Persistent {
+            entity: PersistentRuntimeReference::new(
+                PersistentRuntimeNamespaceId::new("actor").unwrap(),
+                PersistentRuntimeId::parse_str(STABLE_ID).unwrap(),
+            ),
+        },
+    ] {
+        assert_eq!(reference.direct_source_entity(), None, "{reference:?}");
+    }
+}
+
+#[test]
 fn structural_target_conversion_consumes_the_route_and_origin_without_cloning() {
     for mut target in [
         PrefabEntityTarget::source(id("endpoint")),

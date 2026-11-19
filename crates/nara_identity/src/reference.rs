@@ -257,6 +257,25 @@ impl EntityReferenceCost {
 }
 
 impl EntityReference {
+    /// Returns the ID addressed by a `SceneLocal` or zero-hop authored `SourceEntity` reference.
+    ///
+    /// The ID is relative to the reference's lexical declaration namespace.
+    #[must_use]
+    pub fn direct_source_entity(&self) -> Option<&SceneEntityId> {
+        match self {
+            Self::SceneLocal { entity } => Some(entity),
+            Self::Authored { reference } if reference.through.is_empty() => {
+                match &reference.target {
+                    AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(entity)) => {
+                        Some(entity)
+                    }
+                    _ => None,
+                }
+            }
+            Self::Authored { .. } | Self::Persistent { .. } => None,
+        }
+    }
+
     /// Returns the logical node count without visiting an authored reference's hops.
     /// Byte accounting remains in [`Self::cost`]; callers can admit this count first.
     #[must_use]

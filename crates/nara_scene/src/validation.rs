@@ -1026,13 +1026,12 @@ pub(crate) fn validate_effective_local_references<'value>(
 ) -> Result<(), ComponentEntityReferenceRewriteError<SceneLocalTargetMissing>> {
     let effective = effective.into();
     let plan = plan_declared_entity_references(schema, effective, limits)?;
-    plan.visit(effective, |_, reference| match reference {
-        EntityReference::SceneLocal { entity } => contains_entity(entity)
+    plan.visit(effective, |_, reference| {
+        reference
+            .direct_source_entity()
+            .is_none_or(&contains_entity)
             .then_some(())
-            .ok_or(SceneLocalTargetMissing),
-        // Authored targets have lexical Scene meaning; Native callers establish flatness
-        // separately before using this shared Source declaration/closure check.
-        EntityReference::Persistent { .. } | EntityReference::Authored { .. } => Ok(()),
+            .ok_or(SceneLocalTargetMissing)
     })
 }
 

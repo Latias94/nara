@@ -381,9 +381,24 @@ fn data_setter_rejects_authored_values_and_defaults_without_replacing_prior_memb
 #[cfg(feature = "serde")]
 #[test]
 fn source_json_and_ron_preserve_authored_intent_without_codec_but_native_refuses() {
+    use nara_identity::{PrefabEntityOrigin, PrefabInstanceHop};
     use nara_scene::SceneDocumentCandidate;
 
-    for value in [authored(), input()] {
+    let unresolved_route = ComponentValue::EntityReference(EntityReference::Authored {
+        reference: AuthoredEntityReference {
+            through: vec![PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(id("a")),
+                expected_base: SourceDocumentKey::named(
+                    "1ba29bee-0d20-4dc4-924a-b0d233cd0824".parse().unwrap(),
+                    "missing.prefab",
+                    SourceDocumentKind::Prefab,
+                )
+                .unwrap(),
+            }],
+            ..AuthoredEntityReference::source(id("outside"))
+        },
+    });
+    for value in [unresolved_route, input()] {
         let (registry, calls) = registry(link_schema(ComponentValue::Null));
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("a"))
             .with_component(last_id(), record(ComponentValue::map([("target", value)])))]);
@@ -704,10 +719,13 @@ fn source_patch_accepts_authored_intent_and_flat_payloads_keep_business_checks()
     use nara_scene::{ScenePatchDocument, ScenePatchOperation};
 
     let (registry, calls) = registry(link_schema(ComponentValue::Null));
+    let existing = ComponentValue::EntityReference(EntityReference::Authored {
+        reference: AuthoredEntityReference::source(id("a")),
+    });
     let mut document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("a"))
         .with_component(
             last_id(),
-            record(ComponentValue::map([("target", authored())])),
+            record(ComponentValue::map([("target", existing)])),
         )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::ReplaceComponent {
         entity: id("a"),

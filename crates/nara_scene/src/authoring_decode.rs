@@ -61,7 +61,6 @@ use crate::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
     },
-    validation::validate_effective_local_references,
 };
 
 /// Stable project-relative or stable-asset identity of one persistent authoring document.
@@ -2373,35 +2372,16 @@ fn classify_complete_record(
             validate_complete_value(schema, owner, component, record, context.limits)?
         };
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
-            if bounded {
-                reclassification::validate_local_references(
-                    schema,
-                    &effective,
-                    &context.namespace,
-                    context
-                        .limits
-                        .component_materialization_limits()
-                        .reference_traversal_limits(),
-                    &mut context.admission,
-                )?;
-            } else {
-                validate_effective_local_references(
+            reclassification::validate_source_local_references(
                 schema,
                 effective.as_ref(),
-                |entity| context.namespace.contains(entity),
-                context.limits.component_materialization_limits().reference_traversal_limits(),
-            )
-            .map_err(|_| {
-                rejection(with_public_locator(
-                    diagnostic_error(
-                        "scene.authoring-local-reference-invalid",
-                        "Persistent authoring references do not close over their source namespace",
-                    ),
-                    "component-id",
-                    component.as_str(),
-                ))
-                })?;
-            }
+                &context.namespace,
+                context
+                    .limits
+                    .component_materialization_limits()
+                    .reference_traversal_limits(),
+                &mut context.admission,
+            )?;
         }
         admitted_effective = Some(effective);
     }

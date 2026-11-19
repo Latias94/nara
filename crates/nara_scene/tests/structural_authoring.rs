@@ -4,6 +4,7 @@
 mod prefab_source;
 
 use nara_asset::AssetRef;
+use nara_identity::AuthoredEntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -11,25 +12,30 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAuthoringSession,
-    PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate,
-    PrefabEntityTarget, PrefabInstance, PrefabOverlay, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
+    PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
+    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementParent,
+    SchemaReclassificationKind, SchemaReclassificationWork,
 };
 
 fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
 
-fn scene(document: &SceneDocument, bundle: &AuthoringSchemaBundle) -> SceneAuthoringSession {
-    let adapters = bundle
+fn adapters(bundle: &AuthoringSchemaBundle) -> Vec<AuthoringAdapterReceipt> {
+    bundle
         .owners()
         .iter()
         .map(|owner| {
             AuthoringAdapterReceipt::from_schema_owner(owner, &Default::default()).unwrap()
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+fn scene(document: &SceneDocument, bundle: &AuthoringSchemaBundle) -> SceneAuthoringSession {
     SceneAuthoringSession::from_published_authoring_document(
         SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -38,7 +44,24 @@ fn scene(document: &SceneDocument, bundle: &AuthoringSchemaBundle) -> SceneAutho
                     AssetRef::path("scenes/structure.scene.json").unwrap(),
                 ),
                 bundle,
-                &adapters,
+                &adapters(bundle),
+            )
+            .unwrap()
+            .publish(),
+    )
+}
+
+fn prefab(document: &SceneDocument, bundle: &AuthoringSchemaBundle) -> PrefabAuthoringSession {
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
+    PrefabAuthoringSession::from_published_authoring_document(
+        PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
+            .unwrap()
+            .admit_authoring(
+                AuthoringDocumentSource::new(
+                    AssetRef::path("prefabs/structure.prefab.json").unwrap(),
+                ),
+                bundle,
+                &adapters(bundle),
             )
             .unwrap()
             .publish(),
@@ -276,29 +299,48 @@ fn deleting_a_complete_subtree_restores_exact_records_without_component_edit_per
     assert_eq!(session.document(), &prefab);
 }
 
-#[test]
-fn deletion_rejects_effective_default_inbound_references_without_mutation() {
-    let component = ComponentTypeId::new("game.Link");
-    let field = ComponentFieldSchema::optional_with_default(
-        ComponentFieldId::new("target"),
-        "Target",
-        ComponentFieldPath::from_fields(["target"]),
-        ComponentValueKind::EntityRef,
-        ComponentValue::EntityReference(EntityReference::SceneLocal {
+fn direct_target_references() -> [EntityReference; 2] {
+    [
+        EntityReference::SceneLocal {
             entity: id("target"),
-        }),
-    )
-    .with_capabilities([
-        ComponentCapability::Scene,
-        ComponentCapability::Inspect,
-        ComponentCapability::EntityRef,
-    ]);
+        },
+        EntityReference::Authored {
+            reference: AuthoredEntityReference::source(id("target")),
+        },
+    ]
+}
+
+fn link_fixture(
+    reference: &EntityReference,
+    contextual: bool,
+) -> (AuthoringSchemaBundle, SceneDocument, ComponentTypeId) {
+    let component = ComponentTypeId::new("game.Link");
+    let field_id = ComponentFieldId::new("target");
+    let path = ComponentFieldPath::from_fields(["target"]);
+    let field = if contextual {
+        ComponentFieldSchema::optional_with_default(
+            field_id.clone(),
+            "Target",
+            path,
+            ComponentValueKind::EntityRef,
+            ComponentValue::Null,
+        )
+    } else {
+        ComponentFieldSchema::required(
+            field_id.clone(),
+            "Target",
+            path,
+            ComponentValueKind::EntityRef,
+        )
+    }
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_capability(ComponentCapability::EntityRef);
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("game.link").unwrap(),
         ComponentSchemaCatalog {
             components: vec![
                 ComponentSchema::new(component.clone(), "Link", ComponentSchemaVersion::ONE)
-                    .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
                     .with_fields([field]),
             ],
             ..Default::default()
@@ -306,40 +348,153 @@ fn deletion_rejects_effective_default_inbound_references_without_mutation() {
         None,
     )])
     .unwrap();
+    let value = ComponentValue::EntityReference(reference.clone());
+    let record = if contextual {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::Map(Default::default()),
+        )
+        .with_contextual_default(field_id, value)
+    } else {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("target", value)]),
+        )
+    };
     let document = SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(id("source")).with_component(
-            component,
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::map([] as [(&str, ComponentValue); 0]),
-            )
-            .with_contextual_default(
-                ComponentFieldId::new("target"),
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: id("target"),
-                }),
-            ),
-        ),
+        SceneEntityRecord::new(id("source")).with_component(component.clone(), record),
         SceneEntityRecord::new(id("target")),
     ]);
-    let mut session = scene(&document, &bundle);
-    let revision = session.revision();
-    let history = session.history_status();
-    assert!(
-        !session
-            .apply_authoring_patch(&removal(&document, "target"))
-            .applied
-    );
-    assert_eq!(session.document(), &document);
-    assert_eq!(session.revision(), revision);
-    assert_eq!(session.history_status(), history);
-    assert!(
-        session
-            .apply_authoring_patch(&removal(&document, "source"))
-            .applied
-    );
+    (bundle, document, component)
+}
 
-    let mut subtree = document.clone();
+fn assert_local_reference_refusal(report: ScenePatchReport) {
+    assert!(!report.applied, "{report:?}");
+    assert!(report.inverse.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.authoring-local-reference-invalid"
+        }),
+        "{:?}",
+        report.diagnostics
+    );
+}
+
+#[test]
+fn deletion_rejects_both_direct_reference_encodings_without_changing_either_draft() {
+    for reference in direct_target_references() {
+        for contextual in [false, true] {
+            let (bundle, document, component) = link_fixture(&reference, contextual);
+            let mut scene = scene(&document, &bundle);
+            let mut prefab = prefab(&document, &bundle);
+            let original_prefab = prefab.document().clone();
+            let remove_target = removal(&document, "target");
+            let mut coordinated = remove_target.clone();
+            let replacement = ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: id("source"),
+            });
+            coordinated.operations.insert(
+                0,
+                ScenePatchOperation::SetField {
+                    entity: id("source"),
+                    component: component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("target"),
+                    value: replacement.clone(),
+                },
+            );
+            for report in [
+                scene.apply_authoring_patch(&coordinated),
+                prefab.apply_authoring_patch(&coordinated),
+            ] {
+                assert!(report.applied, "{:?}", report.diagnostics);
+            }
+            let coordinated_scene = scene.document().clone();
+            let coordinated_prefab = prefab.document().clone();
+            assert_eq!(coordinated_prefab.instantiate(), coordinated_scene);
+            let [survivor] = coordinated_scene.entities.as_slice() else {
+                panic!("only the retargeted source should survive");
+            };
+            assert_eq!(survivor.id, id("source"));
+            assert_eq!(
+                survivor.components[&component].value().get("target"),
+                Some(&replacement)
+            );
+            assert!(scene.undo_authoring().applied);
+            assert!(prefab.undo_authoring().applied);
+            let scene_revision = scene.revision();
+            let prefab_revision = prefab.revision();
+            let scene_content = scene.content_state();
+            let prefab_content = prefab.content_state();
+            let scene_history = (scene.history_status(), scene.history_usage());
+            let prefab_history = (prefab.history_status(), prefab.history_usage());
+            assert_eq!(scene_history.0.redo_depth, 1);
+            assert_eq!(prefab_history.0.redo_depth, 1);
+
+            assert_local_reference_refusal(scene.apply_authoring_patch(&remove_target));
+            assert_local_reference_refusal(prefab.apply_authoring_patch(&remove_target));
+            assert_eq!(scene.document(), &document);
+            assert_eq!(prefab.document(), &original_prefab);
+            assert_eq!(scene.revision(), scene_revision);
+            assert_eq!(prefab.revision(), prefab_revision);
+            assert_eq!(scene.content_state(), scene_content);
+            assert_eq!(prefab.content_state(), prefab_content);
+            assert_eq!(
+                (scene.history_status(), scene.history_usage()),
+                scene_history
+            );
+            assert_eq!(
+                (prefab.history_status(), prefab.history_usage()),
+                prefab_history
+            );
+
+            assert!(scene.redo_authoring().applied);
+            assert!(prefab.redo_authoring().applied);
+            assert_eq!(scene.document(), &coordinated_scene);
+            assert_eq!(prefab.document(), &coordinated_prefab);
+        }
+    }
+}
+
+#[test]
+fn reclassification_rejects_both_dangling_direct_reference_encodings() {
+    let empty = AuthoringSchemaBundle::new([]).unwrap();
+    for reference in direct_target_references() {
+        for contextual in [false, true] {
+            let (bundle, mut document, _) = link_fixture(&reference, contextual);
+            document.entities.retain(|entity| entity.id != id("target"));
+            document
+                .placements
+                .retain(|placement| placement.target != PrefabEntityTarget::source(id("target")));
+            let successor = AuthoringSchemaBasis::admit(&bundle, &adapters(&bundle)).unwrap();
+            let scene = scene(&document, &empty);
+            let prefab = prefab(&document, &empty);
+            let kind = SchemaReclassificationKind::DeclarationExtension;
+            assert_local_reference_refusal(
+                scene
+                    .prepare_schema_reclassification(
+                        &successor,
+                        &kind,
+                        &mut SchemaReclassificationWork::default(),
+                    )
+                    .unwrap_err(),
+            );
+            assert_local_reference_refusal(
+                prefab
+                    .prepare_schema_reclassification(
+                        &successor,
+                        &kind,
+                        &mut SchemaReclassificationWork::default(),
+                    )
+                    .unwrap_err(),
+            );
+        }
+    }
+}
+
+#[test]
+fn deletion_accepts_a_subtree_containing_both_ends_of_a_default_reference() {
+    let (bundle, mut subtree, _) = link_fixture(&direct_target_references()[0], true);
     subtree.placements = vec![
         SceneEntityPlacement::root(id("root")),
         SceneEntityPlacement::new(

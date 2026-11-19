@@ -162,6 +162,9 @@ Stable-ID reparent/reorder proves an operation-relative placement change while p
 complete record semantics. Explicit subtree deletion requires a Complete, source-local document
 without Prefab instance anchors and validates surviving effective references. Unavailable records
 remain a deletion barrier; broad reference remapping and unresolved Prefab closure are not admitted.
+Within a complete source namespace, `SceneLocal` and zero-hop authored `SourceEntity` references
+must both resolve to a source declaration. Explicit fields and their effective contextual defaults
+follow the same rule. Authored routes, inputs and instance additions use their lexical compilers.
 
 Nara authoring preserves a complete bounded semantic component record when the
 file envelope, document shape, and generic `ComponentValue` grammar are understood but its schema,

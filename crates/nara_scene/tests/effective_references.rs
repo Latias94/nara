@@ -20,7 +20,10 @@ use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityRecord, export_live_scene,
 };
 #[cfg(feature = "serde")]
-use nara_scene::{SceneDocumentCandidate, SceneFileLimits};
+use nara_scene::{
+    PrefabAuthoringSession, PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileLimits,
+    ScenePatchDocument, ScenePatchOperation,
+};
 
 #[derive(Debug, PartialEq, Component)]
 struct DefaultLink {
@@ -87,16 +90,20 @@ fn registry_with_extra_fields(
 }
 
 fn linked_source(omit_target: bool) -> SceneEntityRecord {
+    linked_source_with_target(omit_target, local_target())
+}
+
+fn linked_source_with_target(omit_target: bool, target: EntityReference) -> SceneEntityRecord {
     let value = if omit_target {
         ComponentValue::Map(Default::default())
     } else {
-        ComponentValue::map([("target", ComponentValue::EntityReference(local_target()))])
+        ComponentValue::map([("target", ComponentValue::EntityReference(target.clone()))])
     };
     SceneEntityRecord::new(scene_id("source")).with_component(
         component_id(),
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_contextual_default(
             ComponentFieldId::new("target"),
-            ComponentValue::EntityReference(local_target()),
+            ComponentValue::EntityReference(target),
         ),
     )
 }
@@ -106,6 +113,90 @@ fn linked_scene(omit_target: bool) -> SceneDocument {
         linked_source(omit_target),
         SceneEntityRecord::new(scene_id("target")),
     ])
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn registry_patch_and_publication_reject_either_dangling_direct_reference() {
+    let registry = registry(false);
+    let targets = [
+        local_target(),
+        EntityReference::Authored {
+            reference: nara_identity::AuthoredEntityReference::source(scene_id("target")),
+        },
+    ];
+    for target in targets {
+        for omit_target in [false, true] {
+            let source = linked_source_with_target(omit_target, target.clone());
+            let scene = SceneDocument::from_ordered_roots([
+                source.clone(),
+                SceneEntityRecord::new(scene_id("target")),
+            ]);
+            let original_prefab =
+                PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
+            let dangling = SceneDocument::from_ordered_roots([source]);
+            let patch = ScenePatchDocument::new([
+                ScenePatchOperation::RemoveEntity {
+                    entity: scene_id("target"),
+                },
+                ScenePatchOperation::SetPlacements {
+                    expected: scene.placements.clone(),
+                    value: dangling.placements.clone(),
+                },
+            ]);
+            let mut edited_scene = scene.clone();
+            let mut prefab = PrefabAuthoringSession::new(original_prefab.clone());
+            let prefab_revision = prefab.revision();
+            let prefab_history = prefab.history_status();
+            let is_local_reference_error = |report: &nara_diagnostic::DiagnosticReport| {
+                report
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == "scene.local-reference-invalid")
+            };
+            for report in [
+                patch.apply_to_scene(&mut edited_scene, &registry),
+                prefab.apply_patch(&patch, &registry),
+            ] {
+                assert!(!report.applied && report.inverse.is_none());
+                assert!(
+                    report.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code().as_str() == "scene.local-reference-invalid"
+                            && diagnostic.fields().iter().any(|field| {
+                                field.key().as_str() == "operation-index"
+                                    && field.value()
+                                        == nara_diagnostic::DiagnosticValueRef::Unsigned(1)
+                            })
+                    }),
+                    "{report:?}"
+                );
+            }
+            assert_eq!(edited_scene, scene);
+            assert_eq!(prefab.document(), &original_prefab);
+            assert_eq!(prefab.revision(), prefab_revision);
+            assert_eq!(prefab.history_status(), prefab_history);
+
+            let scene_error =
+                SceneDocumentCandidate::decode_json_str(&dangling.to_json_string().unwrap())
+                    .unwrap()
+                    .publish(&registry)
+                    .unwrap_err();
+            let dangling_prefab = PrefabDocument::new(dangling.placements, dangling.entities);
+            let prefab_error = PrefabDocumentCandidate::decode_json_str(
+                &dangling_prefab.to_json_string().unwrap(),
+            )
+            .unwrap()
+            .publish(&registry)
+            .unwrap_err();
+            assert!(
+                is_local_reference_error(scene_error.diagnostics()),
+                "{scene_error:?}"
+            );
+            assert!(
+                is_local_reference_error(prefab_error.diagnostics()),
+                "{prefab_error:?}"
+            );
+        }
+    }
 }
 
 #[test]

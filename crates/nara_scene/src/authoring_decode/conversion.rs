@@ -335,11 +335,16 @@ fn classify_materialized_record(
     })?;
     let mut missing = false;
     plan.visit(effective.as_ref(), |_, reference| {
-        missing |= matches!(reference, EntityReference::SceneLocal { entity } if !context.namespace.contains(entity));
+        missing |= reference
+            .direct_source_entity()
+            .is_some_and(|entity| !context.namespace.contains(entity));
         Ok::<_, ()>(())
-    }).map_err(|_| structure::authoring_structure_rejection(
-        "Converted records require valid declared entity references",
-    ))?;
+    })
+    .map_err(|_| {
+        structure::authoring_structure_rejection(
+            "Converted records require valid declared entity references",
+        )
+    })?;
     if missing {
         return Err(structure::authoring_structure_rejection(
             "Converted references must close over the complete source namespace",

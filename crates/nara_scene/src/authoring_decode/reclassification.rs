@@ -542,7 +542,7 @@ pub(super) fn reference_charge(
     })
 }
 
-pub(super) fn validate_local_references(
+pub(super) fn validate_source_local_references(
     schema: &ComponentSchema,
     effective: &ComponentValue,
     namespace: &BTreeSet<&SceneEntityId>,
@@ -559,29 +559,37 @@ pub(super) fn validate_local_references(
             schema.id().as_str(),
         ))
     };
-    let plan = nara_reflect::__private::plan_declared_entity_references_with_admission::<(), _>(
-        schema,
-        effective,
-        limits,
-        |nodes, bytes, allocated| {
-            reference_charge(
-                admission,
-                "classification-local-references",
-                nodes,
-                bytes,
-                allocated,
-            )
-        },
-    )
-    .map_err(|error| match error {
-        nara_reflect::__private::EntityReferencePlanError::Admission(report) => report,
-        nara_reflect::__private::EntityReferencePlanError::Reference(_) => invalid(),
-    })?;
+    let plan = if admission.is_some() {
+        nara_reflect::__private::plan_declared_entity_references_with_admission::<(), _>(
+            schema,
+            effective,
+            limits,
+            |nodes, bytes, allocated| {
+                reference_charge(
+                    admission,
+                    "classification-local-references",
+                    nodes,
+                    bytes,
+                    allocated,
+                )
+            },
+        )
+        .map_err(|error| match error {
+            nara_reflect::__private::EntityReferencePlanError::Admission(report) => report,
+            nara_reflect::__private::EntityReferencePlanError::Reference(_) => invalid(),
+        })?
+    } else {
+        nara_reflect::__private::plan_declared_entity_references::<()>(schema, effective, limits)
+            .map_err(|_| invalid())?
+    };
     plan.visit(effective, |_, reference| {
-        if matches!(reference, EntityReference::SceneLocal { entity } if !namespace.contains(entity)) {
-            Err(())
-        } else { Ok(()) }
-    }).map_err(|_| invalid())
+        reference
+            .direct_source_entity()
+            .is_none_or(|entity| namespace.contains(entity))
+            .then_some(())
+            .ok_or(())
+    })
+    .map_err(|_| invalid())
 }
 
 pub(super) fn validate_reference_grammar(
