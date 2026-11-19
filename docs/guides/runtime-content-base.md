@@ -73,7 +73,9 @@ candidate through `ProjectScenes::scope`, then call `activate_prepared_project_s
 explicit `SceneOccurrenceKey`. Retain the resulting `SpawnedSceneInstance` for unload and
 acknowledge the original terminal request. To cancel, wait for physical return before releasing
 the slot. `unload_project_scene_addition` takes the exact receipt. It removes the companion's
-entities and releases its resource use. Other active Scenes keep shared Image publications until
+entities and releases its resource use. If a required publication resource is temporarily
+unavailable, unload refuses before retiring the occurrence and the same receipt can be retried.
+Other active Scenes keep shared Image publications until
 their last user leaves. Material-backed additions use the same rule for a complete Material
 definition, its Shader and resolved Image references. An identical live Material reuses the
 original handle and version. Changed defaults, Shader inputs or texture selections refuse the

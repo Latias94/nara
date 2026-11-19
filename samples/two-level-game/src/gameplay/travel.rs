@@ -3,7 +3,7 @@ mod reconstruction;
 
 use markers::add_marker;
 pub(super) use markers::{DynamicMarker, MarkerInstance, observe_markers};
-pub(super) use reconstruction::{hide_collected, reconstruct};
+pub(super) use reconstruction::reconstruct;
 
 use std::collections::BTreeSet;
 

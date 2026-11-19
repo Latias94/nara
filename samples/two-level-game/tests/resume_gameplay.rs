@@ -13,6 +13,7 @@ use std::{
 };
 
 use nara::{
+    advanced_prelude::CurrentScene,
     app::{
         FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeState,
         RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
@@ -23,6 +24,7 @@ use nara::{
     },
     core::ByteLimit,
     gameplay::GameplayCommandDraft,
+    identity::{EntityLookup, SceneEntityId},
     material::{
         AlphaMode2d, Material2d, Material2dAsset, Material2dDeclaration, Material2dDomain,
         Material2dSource, MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
@@ -30,6 +32,7 @@ use nara::{
     },
     prelude::{App, Plugin, PluginError},
     project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError},
+    sprite::Sprite,
 };
 use support::{
     DEADLINE, Game, INSTANCE, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, action, movement,
@@ -62,6 +65,75 @@ fn collect_near_pickup(game: &mut Game, score: u32) {
     assert_eq!(snapshot.score, score, "{snapshot:?}");
     assert_eq!(snapshot.visible_pickups, 1);
     assert_eq!(snapshot.held, [false, true, false, false]);
+}
+
+#[test]
+fn pickup_alpha_tracks_authored_and_collected_state() {
+    let project = ProjectCopy::new();
+    let path = project.root().join("scenes/meadow.scene.json");
+    let mut scene: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let ids = ["gem-near", "gem-far"];
+    let authored_alpha = [0.5_f32, 0.25];
+    for (id, alpha) in ids.into_iter().zip(authored_alpha) {
+        let pickup = scene["payload"]["entities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entity| entity["id"] == id)
+            .unwrap();
+        let sprite = &mut pickup["components"]["nara.sprite.Sprite"]["value"]["value"];
+        sprite["material"]["value"]["tint"]["value"]["a"]["value"] = serde_json::json!(alpha);
+    }
+    fs::write(path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+
+    let mut game = Game::from_project_with_recipe(
+        project.root(),
+        configured_recipe(RunOptions {
+            save_path: Some(project.save_path()),
+            ..RunOptions::default()
+        }),
+    );
+    let pickup_alphas = |game: &Game| {
+        game.session
+            .observe(|world| {
+                let current = CurrentScene::get(world).unwrap();
+                let receipt = current.receipt();
+                let alpha = ids.map(|id| {
+                    let id = SceneEntityId::new(id).unwrap();
+                    let EntityLookup::Resolved(entity) = receipt.resolve(world, &id) else {
+                        panic!("pickup {id} must remain a Scene member");
+                    };
+                    world.get::<Sprite>(entity).unwrap().material.tint.a
+                });
+                (receipt.instance_id(), alpha)
+            })
+            .unwrap()
+    };
+
+    let (original, startup_alpha) = pickup_alphas(&game);
+    assert_eq!(startup_alpha, authored_alpha);
+    assert_eq!(game.step().collected, 0);
+    assert_eq!(pickup_alphas(&game), (original, authored_alpha));
+    assert_eq!(game.command(action("two-level-game.save")).saves, 1);
+
+    collect_near_pickup(&mut game, 10);
+    let collected_alpha = [0.0, authored_alpha[1]];
+    assert_eq!(pickup_alphas(&game), (original, collected_alpha));
+
+    let retried = game.command(action("two-level-game.retry"));
+    let (restarted, restarted_alpha) = pickup_alphas(&game);
+    assert_eq!(retried.restarts, 1);
+    assert_eq!(retried.collected, 1);
+    assert_ne!(restarted, original);
+    assert_eq!(restarted_alpha, collected_alpha);
+
+    let restored = game.command(action("two-level-game.restore"));
+    let (replacement, restored_alpha) = pickup_alphas(&game);
+    assert_eq!(restored.restores, 1);
+    assert_eq!(restored.collected, 0);
+    assert_ne!(replacement, restarted);
+    assert_eq!(restored_alpha, authored_alpha);
+    game.close();
 }
 
 fn meaningful_game(game: &mut Game) -> ResumeState {

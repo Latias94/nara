@@ -3,13 +3,14 @@ use nara::{
     asset::{AssetProductRef, AssetRef, ImportedProductId},
     ecs::World,
     identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance},
-    prelude::{Resource, Transform2d, Vec2},
+    prelude::Resource,
     project_host::{
         ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
         activate_prepared_project_scene, unload_project_scene_addition,
     },
     scene::SceneOccurrenceKey,
     sprite::Sprite,
+    transform::fixed_spatial_snapshot,
 };
 
 use crate::side_room::{
@@ -17,8 +18,9 @@ use crate::side_room::{
 };
 
 use super::{
-    Session,
+    GamePhase, Session,
     commands::{LOOKOUT, SIDE_ROOM},
+    flow, player,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -229,7 +231,10 @@ pub(super) fn advance(world: &mut World) {
     world.resource_mut::<Rooms>().0[room as usize] = state;
 }
 
-pub(super) fn find_relics(world: &mut World, position: Vec2) {
+pub(super) fn find_relics(world: &mut World) {
+    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
+        return;
+    }
     for room in Room::ALL {
         let index = room as usize;
         let RoomState::Open {
@@ -243,10 +248,14 @@ pub(super) fn find_relics(world: &mut World, position: Vec2) {
         let EntityLookup::Resolved(entity) = receipt.resolve(world, relic) else {
             continue;
         };
-        if world.get::<Transform2d>(entity).is_some_and(|transform| {
-            transform.translation.distance_squared(position) <= 10.0 * 10.0
-        }) && let Some(mut sprite) = world.get_mut::<Sprite>(entity)
-        {
+        let Some(player) = player(world) else { return };
+        let nearby = fixed_spatial_snapshot(world).is_ok_and(|spatial| {
+            let (Ok(player), Ok(relic)) = (spatial.global(player), spatial.global(entity)) else {
+                return false;
+            };
+            relic.translation().distance_squared(player.translation()) <= 10.0 * 10.0
+        });
+        if nearby && let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
             sprite.material.tint.a = 0.0;
             if let RoomState::Open { found, .. } = &mut world.resource_mut::<Rooms>().0[index] {
                 *found = true;

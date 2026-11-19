@@ -439,32 +439,40 @@ pub(super) fn validate_native_resources(
 ) -> Result<(), HostFault> {
     let uses_tilesets =
         content.tileset_count() != 0 || current.is_some_and(|current| current.tileset_count() != 0);
-    let uses_images = uses_tilesets
-        || content.image_count() != 0
-        || current.is_some_and(|current| current.image_count() != 0);
+    let uses_images =
+        content.image_count() != 0 || current.is_some_and(|current| current.image_count() != 0);
     let uses_materials = content.material_count() != 0
         || current.is_some_and(|current| current.material_count() != 0);
-    if uses_images
-        && (!world.contains_resource::<AssetServer>()
-            || !world.contains_resource::<Assets<ImageAsset>>()
-            || !world.contains_resource::<AssetStates>()
-            || !world.contains_resource::<AssetEvents>())
-    {
-        return Err(resources_missing());
-    }
-    if uses_tilesets
-        && (!world.contains_resource::<TileSetAssets>()
-            || !world.contains_resource::<Assets<TileSet>>()
-            || !world.contains_resource::<AssetStates>()
-            || !world.contains_resource::<AssetEvents>())
-    {
-        return Err(resources_missing());
+    if uses_tilesets {
+        validate_tileset_resources(world)?;
+    } else if uses_images {
+        validate_image_resources(world)?;
     }
     if uses_materials
         && (!world.contains_resource::<AssetServer>()
             || !world.contains_resource::<Assets<Material2dAsset>>()
             || !world.contains_resource::<AssetStates>()
             || !world.contains_resource::<AssetEvents>())
+    {
+        return Err(resources_missing());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_tileset_resources(world: &World) -> Result<(), HostFault> {
+    validate_image_resources(world)?;
+    if !world.contains_resource::<TileSetAssets>() || !world.contains_resource::<Assets<TileSet>>()
+    {
+        return Err(resources_missing());
+    }
+    Ok(())
+}
+
+fn validate_image_resources(world: &World) -> Result<(), HostFault> {
+    if !world.contains_resource::<AssetServer>()
+        || !world.contains_resource::<Assets<ImageAsset>>()
+        || !world.contains_resource::<AssetStates>()
+        || !world.contains_resource::<AssetEvents>()
     {
         return Err(resources_missing());
     }

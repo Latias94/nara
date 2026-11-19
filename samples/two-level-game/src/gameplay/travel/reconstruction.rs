@@ -1,15 +1,14 @@
-use std::collections::BTreeSet;
-
 use nara::{
     advanced_prelude::CurrentScene, ecs::World, identity::EntityLookup, prelude::Transform2d,
     sprite::Sprite,
 };
 
-use crate::gameplay::{ActiveLevel, Progress};
+use crate::gameplay::{ActiveLevel, Progress, hide_pickup};
 
 pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> {
-    let content = world
-        .resource::<ActiveLevel>()
+    let level = world.resource::<ActiveLevel>();
+    let key = level.key();
+    let content = level
         .content()
         .cloned()
         .ok_or("active level content is unavailable")?;
@@ -37,38 +36,18 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
     let mut pose = *world.get::<Transform2d>(player).unwrap();
     pose.translation = content.checkpoint_position;
     crate::gameplay::collision::place(world, player, pose)?;
-    hide_collected(world);
-    super::markers::rebuild(world)
-}
 
-pub(in crate::gameplay) fn hide_collected(world: &mut World) {
-    let level = world.resource::<ActiveLevel>();
-    let Some(content) = level.content() else {
-        return;
-    };
-    let collected = world
-        .resource::<Progress>()
-        .checkpoint()
-        .collected
-        .iter()
-        .filter(|pickup| pickup.level == level.key())
-        .map(|pickup| pickup.entity.clone())
-        .collect::<BTreeSet<_>>();
-    let ids = content.pickups.keys().cloned().collect::<Vec<_>>();
-    let entities = {
-        let Some(current) = CurrentScene::get(world) else {
-            return;
-        };
-        ids.into_iter()
-            .filter_map(|id| match current.receipt().resolve(world, &id) {
-                EntityLookup::Resolved(entity) => Some((id, entity)),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
     for (id, entity) in entities {
-        if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
-            sprite.material.tint.a = if collected.contains(&id) { 0.0 } else { 1.0 };
+        if content.pickups.contains_key(&id)
+            && world
+                .resource::<Progress>()
+                .checkpoint()
+                .collected
+                .iter()
+                .any(|pickup| pickup.level == key && pickup.entity == id)
+        {
+            hide_pickup(world, entity);
         }
     }
+    super::markers::rebuild(world)
 }

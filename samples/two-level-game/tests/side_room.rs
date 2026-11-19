@@ -17,8 +17,8 @@ use nara::{
     advanced_prelude::CurrentScene,
     app::{CoreStage, PluginCategory, PluginDeclaration, PluginId},
     asset::{
-        AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSlotRevision, AssetSourceKind,
-        AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase,
+        AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSlotRevision,
+        AssetSourceKind, AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase,
     },
     ecs::{
         World,
@@ -32,6 +32,7 @@ use nara::{
         Material2d, Material2dAsset, Material2dBinding, Material2dSource, SamplerDescriptor,
     },
     prelude::{App, Component, Plugin, PluginError, Resource, Transform2d, Vec2},
+    project_host::unload_project_scene_addition,
     scene::{SceneEntitySource, retire_and_despawn_scene_instance},
     sprite::Sprite,
     tilemap::{
@@ -416,6 +417,153 @@ fn both_rooms_share_one_authored_tileset_until_either_last_user_closes() {
         assert!(resident_tileset(&game).is_none());
         game.close();
     }
+}
+
+#[test]
+fn parented_relic_uses_its_completed_world_position_for_pickup() {
+    let source = ProjectCopy::new();
+    let path = source.root().join("scenes/side-room.scene.json");
+    let mut scene: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let entities = scene["payload"]["entities"].as_array_mut().unwrap();
+    for (id, x, y) in [
+        (region_tileset::SIDE_ROOM_FLOOR, 0.0, 28.0),
+        (RELIC, -120.0, 24.0),
+    ] {
+        let entity = entities
+            .iter_mut()
+            .find(|entity| entity["id"] == id)
+            .unwrap();
+        let position = &mut entity["components"]["nara.transform.Transform2d"]["value"]["value"]["translation"]
+            ["value"];
+        position["x"]["value"] = serde_json::json!(x);
+        position["y"]["value"] = serde_json::json!(y);
+    }
+    let placement = scene["payload"]["placements"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|placement| placement["target"]["entity"]["entity"] == RELIC)
+        .unwrap();
+    placement["placement"]["parent"] = serde_json::json!({
+        "kind": "entity",
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": region_tileset::SIDE_ROOM_FLOOR } },
+    });
+    fs::write(path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+
+    let mut game = Game::from_project(source.root());
+    let (room, relic) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let local = Vec2::new(-120.0, 24.0);
+    let target = Vec2::new(-120.0, 52.0);
+    assert_eq!(sprite_facts(&game, &room, &relic).0, local);
+    assert_eq!(
+        game.session
+            .observe(|world| {
+                let EntityLookup::Resolved(entity) = room.resolve(world, &relic) else {
+                    panic!("the relic must resolve in the added room");
+                };
+                nara::transform::historical_spatial_snapshot(world)
+                    .unwrap()
+                    .global(entity)
+                    .unwrap()
+                    .translation()
+            })
+            .unwrap(),
+        target
+    );
+
+    let mut player = game.command(movement(2, true));
+    for _ in 0..MAX_WALK_STEPS {
+        if player.player.y >= local.y {
+            break;
+        }
+        player = game.step();
+    }
+    assert!(player.player.distance(local) < 5.0, "{player:?}");
+    assert_eq!(player.side_room, SideRoomPhase::Open);
+    assert_eq!(sprite_facts(&game, &room, &relic).2, 1.0);
+    for _ in 0..MAX_WALK_STEPS {
+        if player.side_room == SideRoomPhase::RelicFound {
+            break;
+        }
+        player = game.step();
+    }
+    assert_eq!(player.side_room, SideRoomPhase::RelicFound);
+    assert!(player.player.distance(target) <= 10.0, "{player:?}");
+    assert_eq!(sprite_facts(&game, &room, &relic).2, 0.0);
+    game.close();
+}
+
+#[test]
+fn last_tileset_user_unload_refuses_before_retirement_when_asset_events_are_scoped_out() {
+    let project = ProjectCopy::new();
+    for (file, entity, component) in [
+        ("side-room.scene.json", RELIC, "nara.material2d"),
+        (
+            "lookout.scene.json",
+            region_tileset::LOOKOUT_FLOOR,
+            "nara.tilemap.Tilemap",
+        ),
+    ] {
+        let path = project.root().join("scenes").join(file);
+        let mut scene: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let entity = scene["payload"]["entities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|record| record["id"] == entity)
+            .unwrap();
+        assert!(
+            entity["components"]
+                .as_object_mut()
+                .unwrap()
+                .remove(component)
+                .is_some()
+        );
+        fs::write(path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+    }
+
+    let recipe = configured_recipe(RunOptions::default())
+        .add_plugin::<RetirementProbe>()
+        .unwrap();
+    let mut game = Game::from_project_with_recipe(project.root(), recipe);
+    let (lookout, _) = open_room(&mut game, LOOKOUT, LOOKOUT_RELIC, |state| state.lookout);
+    assert!(resident_tileset(&game).is_none());
+    let (side, _) = open_room(&mut game, SIDE_ROOM, RELIC, |state| state.side_room);
+    let before = game.snapshot();
+    let atlas = resident_tileset(&game).unwrap();
+    let image = resident(&game, image_product()).unwrap();
+    let material = resident_material(&game).unwrap();
+    let retained = room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR);
+
+    let refused = game.command(action(UNLOAD_WITHOUT_ASSET_EVENTS));
+    assert_eq!(room_phases(&refused), room_phases(&before));
+    assert_eq!(refused.current_instance, before.current_instance);
+    assert_eq!(room_receipt(&game, RELIC).0, side);
+    assert_eq!(room_receipt(&game, LOOKOUT_RELIC).0, lookout);
+    assert_eq!(resident_tileset(&game), Some(atlas));
+    assert_eq!(resident(&game, image_product()), Some(image));
+    assert_eq!(resident_material(&game), Some(material));
+
+    assert_eq!(
+        game.command(action(SIDE_ROOM)).side_room,
+        SideRoomPhase::Closed
+    );
+    assert_retired(&game, &side);
+    assert!(resident_tileset(&game).is_none());
+    assert_eq!(resident(&game, image_product()), Some(image));
+    assert_eq!(resident_material(&game), Some(material));
+    assert_eq!(room_receipt(&game, LOOKOUT_RELIC).0, lookout);
+    assert_eq!(
+        retained.image_content().unwrap().pixels(),
+        RELIC_PIXEL.repeat(4)
+    );
+
+    assert_eq!(game.command(action(LOOKOUT)).lookout, SideRoomPhase::Closed);
+    assert_retired(&game, &lookout);
+    assert!(resident(&game, image_product()).is_none());
+    assert!(resident_material(&game).is_none());
+    game.close();
 }
 
 #[test]
@@ -1266,6 +1414,7 @@ const TOGGLE_RETIREMENT_BLOCK: &str = "two-level-game.test-toggle-retirement-blo
 const REMOVE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-remove-room-image-record";
 const RESTORE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-restore-room-image-record";
 const RETIRE_SIDE_ROOM: &str = "two-level-game.test-retire-side-room";
+const UNLOAD_WITHOUT_ASSET_EVENTS: &str = "two-level-game.test-unload-without-asset-events";
 
 #[derive(Default, Resource)]
 struct RetirementProbe {
@@ -1331,25 +1480,51 @@ fn edit_room_residency(world: &mut World) {
                     .unwrap();
             }
             RETIRE_SIDE_ROOM => {
-                let instance = world
-                    .iter_entities()
-                    .filter_map(|entity| entity.get::<SceneEntitySource>())
-                    .find(|source| source.entity_id.as_str() == RELIC)
-                    .unwrap()
-                    .instance_id;
-                let receipt = world
-                    .resource::<WorldIdentityDomain>()
-                    .active_scene_instance(world, instance)
-                    .unwrap();
+                let receipt = original_side_room(world);
                 assert_eq!(
                     retire_and_despawn_scene_instance(world, &receipt).unwrap(),
                     receipt.len()
                 );
                 world.resource_mut::<RetirementProbe>().retired = Some(receipt);
             }
+            UNLOAD_WITHOUT_ASSET_EVENTS => {
+                let receipt = original_side_room(world);
+                let identities = world.resource::<WorldIdentityDomain>().stats();
+                let catalog = world.resource::<ProjectAssetDatabase>().clone();
+                world.resource_scope(|world, events: nara::ecs::Mut<AssetEvents>| {
+                    assert!(!world.contains_resource::<AssetEvents>());
+                    let before = events.len();
+                    let report = unload_project_scene_addition(world, &receipt).unwrap_err();
+                    assert!(report.iter().any(|entry| {
+                        entry.code().as_str() == "project.scene.residency-unavailable"
+                    }));
+                    assert_eq!(events.len(), before);
+                    for id in receipt.entity_ids() {
+                        assert!(matches!(
+                            receipt.resolve(world, id),
+                            EntityLookup::Resolved(_)
+                        ));
+                    }
+                    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+                    assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+                });
+            }
             _ => {}
         }
     }
+}
+
+fn original_side_room(world: &World) -> SpawnedSceneInstance {
+    let instance = world
+        .iter_entities()
+        .filter_map(|entity| entity.get::<SceneEntitySource>())
+        .find(|source| source.entity_id.as_str() == RELIC)
+        .unwrap()
+        .instance_id;
+    world
+        .resource::<WorldIdentityDomain>()
+        .active_scene_instance(world, instance)
+        .unwrap()
 }
 
 #[derive(Component)]

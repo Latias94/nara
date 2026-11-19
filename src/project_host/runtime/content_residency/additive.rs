@@ -256,7 +256,8 @@ impl PreparedAddition {
 ///
 /// Call at an exclusive simulation boundary. Other Scenes and their shared Images stay live.
 /// Previously retained render inputs keep their original pixels. A stale or foreign
-/// receipt, unsafe hierarchy teardown or overwritten publication refuses before mutation.
+/// receipt, unavailable publication resources, unsafe hierarchy teardown or overwritten
+/// publication refuses before retirement.
 pub fn unload_project_scene_addition(
     world: &mut World,
     expected: &SpawnedSceneInstance,
@@ -276,15 +277,6 @@ pub fn unload_project_scene_addition(
         .map_err(|fault| fault.diagnostics)?;
     let (retirement, materials, tilesets, catalog) =
         prepare_retirement(world, additions, index).map_err(|fault| fault.diagnostics)?;
-    if !tilesets.is_empty()
-        && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
-    {
-        return Err(failure(
-            "project.scene.residency-lifecycle-unsupported",
-            "Scene residency owners cannot run lifecycle effects during commit",
-        )
-        .diagnostics);
-    }
     let prepared = PreparedUnload {
         images: retirement,
         materials,
@@ -294,6 +286,14 @@ pub fn unload_project_scene_addition(
     };
     if tilesets.is_empty() {
         return prepared.commit(world, expected, None, &[]);
+    }
+    replacement::validate_tileset_resources(world).map_err(|fault| fault.diagnostics)?;
+    if nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err() {
+        return Err(failure(
+            "project.scene.residency-lifecycle-unsupported",
+            "Scene residency owners cannot run lifecycle effects during commit",
+        )
+        .diagnostics);
     }
     world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
         let publications = owner

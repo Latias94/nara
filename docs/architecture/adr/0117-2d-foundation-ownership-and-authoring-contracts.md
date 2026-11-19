@@ -150,6 +150,9 @@ same World. Additions coexist within the Host's original content and Scene limit
 
 The Host publishes one identical Image, Material, TileSet or source catalog record for all live Scenes that use it.
 Unload retires the exact occurrence and releases publications whose last live Scene leaves.
+Before retiring any entity, the Host admits the resources required by each nonempty publication
+batch. A TileSet retirement needs its Image and Asset event stores even when every Image is shared
+and no Material retires. A refused unload leaves the original occurrence available for retry.
 A failed reload of the same last-good Image or Material still permits retirement. After lower-level occurrence
 retirement, the Host can finish only the outstanding resource release. Prepared primary travel
 includes all live Host additions in its existing retirement and resource publication transaction.

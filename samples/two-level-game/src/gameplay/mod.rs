@@ -19,7 +19,7 @@ use nara::{
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
     core::ItemLimit,
-    ecs::{World, schedule::IntoScheduleConfigs},
+    ecs::{Entity, World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
@@ -31,6 +31,7 @@ use nara::{
         PersistentComponentProvider,
     },
     scene::advanced::SceneProductResource,
+    sprite::Sprite,
 };
 
 use crate::{
@@ -298,11 +299,15 @@ impl Plugin for ExplorationPlugin {
         add_local_gameplay_command_systems(app, verification::drive)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (travel::consume, simulate, project_animation, capture)
+            (travel::consume, simulate, project_animation)
                 .chain()
                 .in_set(GameplayCommandSet::Consume)
                 .before(GameplayCommandSet::Capture)
                 .in_set(FixedUpdateSet::Simulate),
+        )?;
+        nara::transform::add_fixed_transform_projection_systems(
+            app,
+            (side_room::find_relics, capture).chain(),
         )?;
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -499,12 +504,22 @@ pub(crate) fn sound_bank_reference(world: &World) -> Result<nara::asset::AssetRe
         .ok_or_else(|| "initial game content lacks its Sound Bank".into())
 }
 
-fn player(world: &World) -> Option<nara::ecs::Entity> {
+fn player(world: &World) -> Option<Entity> {
     let id = &world.resource::<ActiveLevel>().content()?.player;
+    current_level_entity(world, id)
+}
+
+fn current_level_entity(world: &World, id: &SceneEntityId) -> Option<Entity> {
     let current = CurrentScene::get(world)?;
     match current.receipt().resolve(world, id) {
         EntityLookup::Resolved(entity) => Some(entity),
         _ => None,
+    }
+}
+
+fn hide_pickup(world: &mut World, entity: Entity) {
+    if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
+        sprite.material.tint.a = 0.0;
     }
 }
 
@@ -545,24 +560,21 @@ fn simulate(world: &mut World) {
         .filter(|(_, point)| point.distance(position) <= 16.0)
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    for entity in nearby {
-        let id = entity.clone();
-        let pickup = CollectedPickup { level: key, entity };
-        let mut progress = world.resource_mut::<Progress>();
-        if progress.collect(pickup) {
-            println!(
-                "two_level_game: collected={id} level={key:?} score={}",
-                progress.checkpoint().score
-            );
-            #[cfg(all(windows, feature = "audio-cpal"))]
-            {
-                drop(progress);
-                crate::audio::pickup_collected(world, key, id);
+    for id in nearby {
+        let pickup = CollectedPickup {
+            level: key,
+            entity: id.clone(),
+        };
+        if world.resource_mut::<Progress>().collect(pickup) {
+            if let Some(entity) = current_level_entity(world, &id) {
+                hide_pickup(world, entity);
             }
+            let score = world.resource::<Progress>().checkpoint().score;
+            println!("two_level_game: collected={id} level={key:?} score={score}");
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            crate::audio::pickup_collected(world, key, id);
         }
     }
-    travel::hide_collected(world);
-    side_room::find_relics(world, position);
 }
 
 fn project_animation(world: &mut World) {

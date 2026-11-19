@@ -41,7 +41,7 @@ impl Plugin for PreparationInputProbe {
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
-                observe.after(GameplayCommandSet::Consume),
+                observe.after(GameplayCommandSet::Capture),
             )?;
         Ok(())
     }
