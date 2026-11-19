@@ -56,6 +56,9 @@ Rules:
 - Scene, prefab, scene patch, component schema catalog, and asset metadata currently have distinct
   canonical kinds. Import artifact records and a future file-backed project-manifest envelope
   remain long-term participants.
+- JSON readers preserve the exact value of finite binary64 numbers emitted by Nara's writers.
+  Schema fingerprints continue to compare exact values, including authored defaults. The engine
+  dependencies select the JSON parser behavior for independent consumers.
 - Unknown future versions fail with structured diagnostics.
 - Prototype versions/shapes fail with structured diagnostics rather than using a hidden fallback.
 - A version other than the selected canonical version is readable only when its owning ADR names
