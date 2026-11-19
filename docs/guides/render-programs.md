@@ -73,6 +73,9 @@ It is not recomputed from a current policy, camera or Shader text during present
 The original Runtime presentation guard admits this frozen inverse only after genuine present.
 It converts logical input to final physical pixels once, applies the inverse and then uses
 the captured WorldCanvas and View mapping. Half-open target/View bounds and bars still reject.
+When several subviews share a camera, `WorldPointer::window_to_world` uses the first presented
+subview containing the point. Use `window_to_world_in_view` with its `RenderViewId` when the
+interaction targets a particular subview, including where viewports overlap.
 An unpresented candidate grants no picking, and a successfully displayed unmapped successor
 revokes the previous mapping. This contract covers World picking; it does not retarget UI
 hit testing or provide an inverse for arbitrary nonlinear/channel-dependent effects. See the

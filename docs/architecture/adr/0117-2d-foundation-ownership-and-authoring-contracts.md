@@ -362,7 +362,9 @@ when the Entity survives. A temporarily unavailable target, zero extent or filte
 does not retire the camera's View lifetime. Automatic extraction and manually supplied Views use
 the same identity type; manual producers retain their identity with their actual View owner rather
 than minting one per frame. Distinct code-owned subviews may share a source camera without sharing
-identity. Frame source plus View identity binds historical render state. Duplicate identities in
+identity. Camera picking uses the first presented subview of that camera containing the point.
+Picking by `RenderViewId` selects an exact subview and checks the same presented bounds.
+Frame source plus View identity binds historical render state. Duplicate identities in
 one captured packet reject rather than aliasing two Views. These are runtime facts and are not
 serialized into camera authoring data. Persistent camera edits keep their normal codec/lifecycle
 contracts; this refinement does not introduce RequiredComponents or native effects into document

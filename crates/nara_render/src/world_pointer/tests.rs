@@ -81,6 +81,91 @@ impl PointerFixture {
     }
 }
 
+#[test]
+fn presented_camera_picking_uses_the_containing_subview_in_either_order() {
+    let left_viewport = ViewportRect::new(0, 0, 100, 100).unwrap();
+    let resolution = WindowResolution::new(200, 100);
+    for right_x in [100, 50] {
+        for reverse in [false, true] {
+            let mut fixture = PointerFixture::new(resolution, left_viewport, Mat3::IDENTITY, None);
+            let window = fixture.world.get::<Window>(fixture.window_entity).unwrap();
+            let left = fixture.packet.views()[0];
+            let right_viewport = ViewportRect::new(right_x, 0, 100, 100).unwrap();
+            let right = ExtractedView {
+                id: RenderViewId::try_acquire().unwrap(),
+                viewport: right_viewport,
+                mapping: ViewMapping2d::orthographic(
+                    Mat3::from_translation(Vec2::new(1000.0, 0.0)),
+                    VIEWPORT_HEIGHT,
+                    right_viewport,
+                )
+                .unwrap(),
+                ..left
+            };
+            let mut views = ExtractedViews::default();
+            let (first, second) = if reverse {
+                (right, left)
+            } else {
+                (left, right)
+            };
+            views.push(first);
+            views.push(ExtractedView {
+                order: 1,
+                load: ViewLoadOp::Load,
+                ..second
+            });
+            fixture.packet = build_render_frame_packet_for_source(
+                fixture.packet.source_generation(),
+                2,
+                Some(window.id),
+                [window],
+                &views,
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let guard = fixture.prepare(WorldInputMapping2d::identity());
+            let left_only = Vec2::new(25.0, 50.0);
+            let right_only = Vec2::new(right_x as f32 + 75.0, 50.0);
+            let pick_exact = |fixture: &mut PointerFixture, view, point| {
+                fixture
+                    .pointer
+                    .get(&fixture.world)
+                    .unwrap()
+                    .window_to_world_in_view(view, point)
+            };
+
+            assert_eq!(pick_exact(&mut fixture, left.id, left_only), None);
+            guard.mark_presented();
+            assert_eq!(fixture.pick(left_only), Some(Vec2::new(-2.0, 0.0)));
+            assert_eq!(fixture.pick(right_only), Some(Vec2::new(1002.0, 0.0)));
+            assert_eq!(pick_exact(&mut fixture, left.id, right_only), None);
+            assert_eq!(pick_exact(&mut fixture, right.id, left_only), None);
+
+            let boundary = Vec2::new(100.0, 50.0);
+            assert_eq!(pick_exact(&mut fixture, left.id, boundary), None);
+            let right_at_boundary = Vec2::new(if right_x == 100 { 996.0 } else { 1000.0 }, 0.0);
+            assert_eq!(fixture.pick(boundary), Some(right_at_boundary));
+            if right_x == 50 {
+                let overlap = Vec2::new(75.0, 50.0);
+                assert_eq!(
+                    pick_exact(&mut fixture, left.id, overlap),
+                    Some(Vec2::new(2.0, 0.0))
+                );
+                assert_eq!(
+                    pick_exact(&mut fixture, right.id, overlap),
+                    Some(Vec2::new(998.0, 0.0))
+                );
+                let first_x = if reverse { 998.0 } else { 2.0 };
+                assert_eq!(fixture.pick(overlap), Some(Vec2::new(first_x, 0.0)));
+            }
+            guard.invalidate();
+            assert_eq!(pick_exact(&mut fixture, left.id, left_only), None);
+        }
+    }
+}
+
 fn affine_matrix(rows: [[f64; 3]; 2]) -> Mat3 {
     Mat3::from_cols_array(&[
         rows[0][0] as f32,

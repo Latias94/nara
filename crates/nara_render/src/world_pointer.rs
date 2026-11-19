@@ -10,7 +10,7 @@ use nara_window::{Window, WindowEvent, WindowEvents};
 
 use crate::{
     DisplayMapping2d, DisplayRect, DisplayScale, ExtractedView, RenderFramePacket,
-    RenderFrameSourceGeneration, RenderFrameTarget, RenderWindowPacket, WorldCanvas,
+    RenderFrameSourceGeneration, RenderFrameTarget, RenderViewId, RenderWindowPacket, WorldCanvas,
 };
 
 const PREPARED: u8 = 0;
@@ -75,8 +75,27 @@ pub struct WorldPointer<'w, 's> {
 }
 
 impl WorldPointer<'_, '_> {
+    /// Picks the first presented subview of `camera` that contains the point.
+    ///
+    /// Use [`Self::window_to_world_in_view`] to select a particular subview when they overlap.
     #[must_use]
     pub fn window_to_world(&self, camera: Entity, logical_position: Vec2) -> Option<Vec2> {
+        self.presented()?
+            .window_to_world(logical_position, |view| view.camera_entity == camera)
+    }
+
+    /// Picks through one exact view of the last presented frame if it contains the point.
+    #[must_use]
+    pub fn window_to_world_in_view(
+        &self,
+        view_id: RenderViewId,
+        logical_position: Vec2,
+    ) -> Option<Vec2> {
+        self.presented()?
+            .window_to_world(logical_position, |view| view.id == view_id)
+    }
+
+    fn presented(&self) -> Option<&PresentedWorldFrame> {
         let presented = self.presented.as_deref()?;
         if presented.live.load(Ordering::Acquire) != PRESENTED {
             return None;
@@ -92,7 +111,7 @@ impl WorldPointer<'_, '_> {
             presented.live.store(REVOKED, Ordering::Release);
             return None;
         }
-        presented.window_to_world(camera, logical_position)
+        Some(presented)
     }
 }
 
@@ -147,7 +166,11 @@ impl PresentedWorldFrame {
         self.frame_index
     }
 
-    fn window_to_world(&self, camera: Entity, position: Vec2) -> Option<Vec2> {
+    fn window_to_world(
+        &self,
+        position: Vec2,
+        matches_view: impl Fn(&ExtractedView) -> bool,
+    ) -> Option<Vec2> {
         let resolution = self.window.resolution;
         let contains_target = |point: Vec2| {
             point.is_finite()
@@ -184,20 +207,16 @@ impl PresentedWorldFrame {
         } else {
             source_physical
         };
-        let view = self
-            .views
-            .iter()
-            .find(|view| view.camera_entity == camera)?;
-        let viewport = view.viewport;
-        if point.x < viewport.physical_x as f32
-            || point.y < viewport.physical_y as f32
-            || point.x
-                >= (u64::from(viewport.physical_x) + u64::from(viewport.physical_width)) as f32
-            || point.y
-                >= (u64::from(viewport.physical_y) + u64::from(viewport.physical_height)) as f32
-        {
-            return None;
-        }
+        let view = self.views.iter().find(|view| {
+            let viewport = view.viewport;
+            matches_view(view)
+                && point.x >= viewport.physical_x as f32
+                && point.y >= viewport.physical_y as f32
+                && point.x
+                    < (u64::from(viewport.physical_x) + u64::from(viewport.physical_width)) as f32
+                && point.y
+                    < (u64::from(viewport.physical_y) + u64::from(viewport.physical_height)) as f32
+        })?;
         view.viewport_to_world(point)
             .filter(|world| world.is_finite())
     }
