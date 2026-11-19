@@ -50,8 +50,8 @@ use nara_reference_game::{
     PlayerRole, ProjectileDamage, ProjectileId, ProjectileLifetime, ProjectileRole,
     REFERENCE_WAVE_PLUGIN_ID, Velocity2d, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
     WaveRetryStatus, WaveRunGeneration, WaveSnapshot, WaveSpawn, Weapon, WeaponCooldown,
-    bundled_wave_commands, bundled_wave_run, movement_command, retry_command, wave_headless_run,
-    wave_recipe,
+    bundled_wave_commands, bundled_wave_run, movement_command, retry_command, wave_headless_intent,
+    wave_headless_run, wave_recipe,
 };
 use project_content_fixture::{
     headless_wave_candidate_plan_and_root, headless_wave_candidate_plan_and_root_with,
@@ -1037,6 +1037,56 @@ fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
         snapshot.projectiles.is_empty(),
         "the projectile born after propagation must hit and retire before same-tick Capture"
     );
+}
+
+#[test]
+fn second_projectile_hits_next_live_enemy_in_the_same_tick() {
+    let project = ReferenceProjectCopy::new("same-tick-projectile-hits");
+    let prefab_path = project.file("prefabs/enemy.prefab.json");
+    let mut prefab: serde_json::Value =
+        serde_json::from_slice(&fs::read(&prefab_path).unwrap()).unwrap();
+    let enemy = &mut prefab["payload"]["entities"][0];
+    let transform = &mut enemy["components"]["nara.transform.Transform2d"]["value"]["value"];
+    let translation = &mut transform["translation"]["value"];
+    translation["x"]["value"] = 2.0.into();
+    fs::write(&prefab_path, serde_json::to_vec_pretty(&prefab).unwrap()).unwrap();
+
+    let scene_path = project.file("scenes/startup.scene.json");
+    let mut scene: serde_json::Value =
+        serde_json::from_slice(&fs::read(&scene_path).unwrap()).unwrap();
+    let entities = scene["payload"]["entities"].as_array_mut().unwrap();
+    let second_enemy = entities
+        .iter_mut()
+        .find(|entity| entity["id"] == "enemy-anchor-2")
+        .unwrap();
+    second_enemy["prefab"]["overrides"] = serde_json::Value::Null;
+    let weapon_entity = entities
+        .iter_mut()
+        .find(|entity| entity["id"] == "player-weapon")
+        .unwrap();
+    let weapon = &mut weapon_entity["components"]["reference_game.Weapon"]["value"]["value"];
+    weapon["damage"]["value"] = 10.into();
+    weapon["cooldown-ticks"]["value"] = 1.into();
+    fs::write(&scene_path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+
+    let maximum = NonZeroU32::new(2).unwrap();
+    let intent = wave_headless_intent(maximum).stop_when(|snapshot| snapshot.tick == 2);
+    let snapshot = complete(HeadlessRun::new(project.capability(), intent, Vec::new()));
+
+    assert_eq!(snapshot.tick, 2);
+    assert_eq!(snapshot.score, 200);
+    assert_eq!(snapshot.defeated_enemies, 2);
+    assert!(snapshot.projectiles.is_empty());
+    let [survivor] = snapshot.enemies.as_slice() else {
+        panic!(
+            "expected only the later spawn to survive: {:?}",
+            snapshot.enemies
+        );
+    };
+    assert_eq!(survivor.spawn_tick, 9);
+    assert_eq!(survivor.position, Vec2::new(13.0, 0.0));
+    assert_eq!(survivor.hit_points, 10);
+    assert!(!survivor.active);
 }
 
 #[test]

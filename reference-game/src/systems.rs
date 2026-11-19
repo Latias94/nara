@@ -1178,25 +1178,24 @@ fn resolve_wave_projectile_hits_inner(world: &mut World) -> Result<(), BevyError
             if damage.amount <= 0 || lifetime.remaining_ticks == 0 {
                 continue;
             }
-            let target = target_order
-                .iter()
-                .find_map(|(_, entity, target_position)| {
-                    (distance_squared(position, *target_position) <= 1.0).then_some(*entity)
-                });
-            let Some(target) = target else {
-                continue;
-            };
-            let Some(mut health) = world.get_mut::<Health>(target) else {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::InvalidAuthoredConfiguration,
-                ));
-            };
-            if health.current > 0 {
+            let in_range = target_order.iter().filter(|(_, _, target_position)| {
+                distance_squared(position, *target_position) <= 1.0
+            });
+            for (_, target, _) in in_range {
+                let Some(mut health) = world.get_mut::<Health>(*target) else {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::InvalidAuthoredConfiguration,
+                    ));
+                };
+                if health.current <= 0 {
+                    continue;
+                }
                 health.current = health.current.saturating_sub(damage.amount);
                 world
                     .get_mut::<ProjectileLifetime>(token.entity())
                     .expect("validated projectile lifetime remains present")
                     .remaining_ticks = 0;
+                break;
             }
         }
         Ok(())
