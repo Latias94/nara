@@ -757,10 +757,11 @@ impl EditorProjectSession {
                     EditorExecutionLane::TrustedCompiled(lane) => lane.snapshot.prefab_resolution(),
                 };
                 let unresolved = "project.editor.prefab-source-stable-id-unresolved";
-                let record = resolver
-                    .resolve_ref(reference)
-                    .map_err(|_| unresolved)?;
-                let path = resolver.scope().relativize(record.path()).ok_or(unresolved)?;
+                let record = resolver.resolve_ref(reference).map_err(|_| unresolved)?;
+                let path = resolver
+                    .scope()
+                    .relativize(record.path())
+                    .ok_or(unresolved)?;
                 (path, Some(record.stable_id()))
             }
         };
