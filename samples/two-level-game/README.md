@@ -11,6 +11,29 @@ the current logical level at its checkpoint, or retries a failed reconstruction.
 uses normal Runtime shutdown, including pending Scene preparation and temporary-file cleanup.
 The green square marks the checkpoint; the purple square marks the destination portal.
 
+An opt-in source desktop flow adds a title, new round, pause, completion and return to title:
+
+```text
+cargo run --manifest-path samples/two-level-game/Cargo.toml --release --features play-flow --bin desktop -- --play-flow
+```
+
+Enter starts a round or continues a paused round. Escape pauses/continues. T returns to the title
+from pause or completion, and X exits through ordinary Runtime shutdown. Collect one gold gem
+in each main Meadow and Cavern occurrence to complete the round; E travels between them.
+The window shows the current phase, goals and available controls. A new round replaces the Scene
+through the original preparation/commit path, then resets game progress and round counters.
+The opt-in contribution retains the authored gameplay bindings and adds its own menu context;
+Enter, Escape, T and X must be unbound in the source map or Startup reports the conflict.
+Preparation failure retains the old game; a failure after Scene commit is explicitly degraded.
+Enter from that error screen attempts a new round.
+
+Menus stop game time while Input, tasks, rendering and native cleanup remain active. Continuing
+drains old ordinary gameplay intent through the original fixed transaction before reopening the
+gameplay context. Held keys require release and a fresh press. The additional flow and mapping
+lifetime are not part of exact Resume capture. Default exploration, existing cooked Players,
+checkpoint saves and Resume wire formats are unchanged. The `play-flow` manifest profile owns
+the UI composition; compiling that feature alone does not enable the flow on the normal desktop.
+
 These are the default physical keys in [the authored action map](input/explorer.actions.json),
 selected by `[input] action_map` in `nara.toml`. Edit its key bindings without changing gameplay
 Rust. Stable action names identify movement directions and commands independently of their

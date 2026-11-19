@@ -52,3 +52,22 @@ resizable = true
 [profiles.desktop.render.world_canvas]
 width = 320
 height = 180
+
+[profiles.play-flow.capabilities]
+requested = ["runtime-2d", "runtime-ui", "presentation-2d", "presentation-ui", "desktop-winit", "render-wgpu"]
+
+[profiles.play-flow.window]
+enabled = true
+title = "Meadow / Cavern | Play Flow"
+width = 960
+height = 540
+present_mode = "fifo"
+resizable = true
+
+[profiles.play-flow.render.world_canvas]
+width = 320
+height = 180
+
+[profiles.play-flow.ui.primary_surface]
+logical_width = 960
+logical_height = 540

@@ -211,7 +211,9 @@ pub mod advanced {
         suspend_ui_surface, ui_candidate_frame, ui_candidate_frames, ui_semantic_snapshot,
         ui_surface_slot_snapshots, update_ui_surface_slot,
     };
-    pub use nara_ui_kernel::{UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot};
+    pub use nara_ui_kernel::{
+        UiFrame, UiKey, UiNonActivation, UiPaintPrimitive, UiSemanticSnapshot,
+    };
 }
 
 #[cfg(test)]

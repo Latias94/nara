@@ -1,6 +1,7 @@
 mod collision;
 pub(crate) mod commands;
 pub(crate) mod content;
+pub mod flow;
 pub mod input;
 #[cfg(feature = "desktop")]
 pub use input::movement_keyboard_bindings;
@@ -508,7 +509,7 @@ fn player(world: &World) -> Option<nara::ecs::Entity> {
 }
 
 fn simulate(world: &mut World) {
-    if world.resource::<Session>().phase != GamePhase::Running {
+    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
         return;
     }
     if let Err(error) = resume::advance_clock(world) {

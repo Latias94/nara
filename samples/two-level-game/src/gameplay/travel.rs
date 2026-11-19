@@ -59,6 +59,21 @@ enum ConsumedInput {
 }
 
 pub(super) fn consume(world: &mut World) {
+    if super::flow::drain_or_block_gameplay(world) {
+        let released = world
+            .resource::<GameplayCommandBatch>()
+            .commands()
+            .iter()
+            .filter(|command| command.command_type().as_str() == MOVE)
+            .filter_map(|command| decode_movement(command).ok())
+            .filter(|(_, pressed)| !pressed)
+            .map(|(direction, _)| direction)
+            .collect::<Vec<_>>();
+        for direction in released {
+            world.resource_mut::<Session>().held[direction] = false;
+        }
+        return;
+    }
     let launch_error = super::player_launch::consume(world).err();
     if let Some(error) = &launch_error {
         eprintln!("two_level_game: Player launch rejected: {error}");

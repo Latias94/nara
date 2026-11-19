@@ -39,6 +39,8 @@ windows-sys = { version = "0.61.2", optional = true, features = [
     "Win32_Foundation",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [features]
@@ -46,6 +48,7 @@ default = ["development"]
 development = ["nara/project-tooling", "dep:notify"]
 audio-cpal = ["dep:cpal", "dep:rtrb"]
 desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]
+play-flow = ["desktop", "nara/presentation-ui", "dep:windows-sys"]
 gamepad = ["desktop", "dep:nara_gilrs"]
 cost-measurement = ["dep:windows-sys"]
 scene-work-observation = ["nara/scene-work-observation", "dep:tracing", "dep:tracing-subscriber"]
@@ -72,6 +75,13 @@ bench = false
 name = "desktop"
 path = "src/bin/desktop.rs"
 required-features = ["development", "desktop"]
+
+[[bin]]
+name = "play_flow_check"
+path = "src/bin/play_flow_check.rs"
+required-features = ["development", "play-flow"]
+test = false
+bench = false
 
 [[bin]]
 name = "audio_desktop"

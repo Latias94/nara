@@ -7,12 +7,15 @@ fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
     let mut verify = false;
     let mut gamepad = false;
+    let mut play_flow = false;
     let mut save_path = None;
     while let Some(argument) = args.next() {
         if argument == "--verify-first-present" && !verify {
             verify = true;
         } else if argument == "--gamepad" && !gamepad && cfg!(feature = "gamepad") {
             gamepad = true;
+        } else if argument == "--play-flow" && !play_flow && cfg!(feature = "play-flow") {
+            play_flow = true;
         } else if argument == "--save" && save_path.is_none() {
             save_path = args.next().map(PathBuf::from);
             if save_path.is_none() {
@@ -29,6 +32,20 @@ fn main() -> ExitCode {
         save_path,
         ..Default::default()
     });
+    #[cfg(feature = "play-flow")]
+    let recipe = if play_flow {
+        match two_level_game::flow::with_play_flow(recipe)
+            .and_then(two_level_game::flow::with_play_flow_hud)
+        {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                eprintln!("play flow configuration: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        recipe
+    };
     #[cfg(feature = "gamepad")]
     let recipe = if gamepad {
         match two_level_game::controller::with_gilrs_input(recipe) {
@@ -55,6 +72,11 @@ fn main() -> ExitCode {
             eprintln!("{error}");
             return ExitCode::FAILURE;
         }
+    };
+    let launch = if play_flow {
+        launch.with_standalone_profile("play-flow")
+    } else {
+        launch
     };
     let report = launch.run();
     let report = match report {
@@ -86,10 +108,13 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> ExitCode {
+    eprint!("usage: desktop [--save ABSOLUTE_PATH] [--verify-first-present]");
     if cfg!(feature = "gamepad") {
-        eprintln!("usage: desktop [--save ABSOLUTE_PATH] [--verify-first-present] [--gamepad]");
-    } else {
-        eprintln!("usage: desktop [--save ABSOLUTE_PATH] [--verify-first-present]");
+        eprint!(" [--gamepad]");
     }
+    if cfg!(feature = "play-flow") {
+        eprint!(" [--play-flow]");
+    }
+    eprintln!();
     ExitCode::FAILURE
 }
