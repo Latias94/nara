@@ -373,12 +373,20 @@ pub trait HierarchyCommandsExt {
 
 impl HierarchyCommandsExt for Commands<'_, '_> {
     fn apply_hierarchy_operation(&mut self, operation: HierarchyOperation) -> &mut Self {
-        self.queue(move |world: &mut World| HierarchyWriter::new(world).apply(operation));
+        self.queue(move |world: &mut World| {
+            HierarchyWriter::new(world)
+                .apply(operation)
+                .map_err(HierarchyError::into_execution_error)
+        });
         self
     }
 
     fn apply_hierarchy_batch(&mut self, operations: Vec<HierarchyOperation>) -> &mut Self {
-        self.queue(move |world: &mut World| HierarchyWriter::new(world).apply_batch(&operations));
+        self.queue(move |world: &mut World| {
+            HierarchyWriter::new(world)
+                .apply_batch(&operations)
+                .map_err(HierarchyError::into_execution_error)
+        });
         self
     }
 }
@@ -810,6 +818,7 @@ pub(crate) fn validate_fresh_construction_topology(
     world: &World,
     has_parent_edges: bool,
 ) -> Result<(), HierarchyError> {
+    require_managed_roots(world)?;
     validate_hierarchy_mutation_support(world)?;
     validate_registered_component_observers::<HierarchyMember>(world, None)
         .map_err(|_| HierarchyError::LifecycleWork)?;
@@ -855,6 +864,17 @@ fn validate_hierarchy_mutation_support(world: &World) -> Result<(), HierarchyErr
     Ok(())
 }
 
+fn require_managed_roots(world: &World) -> Result<(), HierarchyError> {
+    if !world.contains_resource::<HierarchyRoots>()
+        && world
+            .get_resource::<HierarchyGenerationState>()
+            .is_some_and(|state| state.roots_required)
+    {
+        return Err(HierarchyError::MissingRoots);
+    }
+    Ok(())
+}
+
 fn record_component_targets(
     entity: Entity,
     owner: HierarchyPlacementOwner,
@@ -872,6 +892,9 @@ fn prepare_batch(
     operations: &[HierarchyOperation],
     validate: bool,
 ) -> Result<PreparedHierarchyBatch, HierarchyError> {
+    if !operations.is_empty() {
+        require_managed_roots(world)?;
+    }
     if validate {
         validate_hierarchy(world)?;
     }

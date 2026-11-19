@@ -185,6 +185,7 @@ use __private::HierarchySet;
 
 #[derive(Debug, Resource)]
 struct HierarchyGenerationState {
+    roots_required: bool,
     topology_generation: u64,
     completed_generation: Option<u64>,
     baseline_valid: bool,
@@ -198,6 +199,7 @@ struct HierarchyGenerationState {
 impl Default for HierarchyGenerationState {
     fn default() -> Self {
         Self {
+            roots_required: false,
             topology_generation: 0,
             completed_generation: None,
             baseline_valid: false,
@@ -266,7 +268,9 @@ impl Plugin for HierarchyPlugin {
             app.insert_resource(HierarchyRoots::new())?;
         }
         app.init_resource::<HierarchyOrder>()?;
-        app.init_resource::<HierarchyGenerationState>()?;
+        app.world_mut()?
+            .get_resource_or_init::<HierarchyGenerationState>()
+            .roots_required = true;
         app.init_resource::<__private::CompletedHierarchyProjection>()?;
         app.init_resource::<RetainedHierarchyValidationScratch>()?;
         app.add_systems(
@@ -309,11 +313,15 @@ fn hierarchy_component_changed(mut world: DeferredWorld<'_>, _context: HookConte
 }
 
 fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
-    world.get_resource_or_init::<HierarchyGenerationState>();
-
-    let root_epoch = world
+    let Some(root_epoch) = world
         .get_resource::<HierarchyRoots>()
-        .map(HierarchyRoots::epoch);
+        .map(HierarchyRoots::epoch)
+    else {
+        mark_topology_dirty(world);
+        return Err(HierarchyError::MissingRoots.into_execution_error());
+    };
+
+    world.get_resource_or_init::<HierarchyGenerationState>();
     let order_epoch = world
         .get_resource::<HierarchyOrder>()
         .and_then(HierarchyOrder::root_epoch);
@@ -322,11 +330,12 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     {
         let mut state = world.resource_mut::<HierarchyGenerationState>();
         if state.baseline_valid
-            && (state.baseline_root_epoch != root_epoch || state.baseline_world != Some(world_id))
+            && (state.baseline_root_epoch != Some(root_epoch)
+                || state.baseline_world != Some(world_id))
         {
             state.mark_dirty();
         } else if state.completed_generation == Some(state.topology_generation)
-            && (order_epoch != root_epoch || !publication_valid)
+            && (order_epoch != Some(root_epoch) || !publication_valid)
         {
             state.mark_dirty();
         }
@@ -357,8 +366,11 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     );
     validation.map_err(BevyError::error)?;
     world.init_resource::<HierarchyOrder>();
-    let root_epoch = world.resource::<HierarchyRoots>().epoch();
-    let roots = world.resource::<HierarchyRoots>().as_slice().to_vec();
+    let roots = world
+        .get_resource::<HierarchyRoots>()
+        .ok_or_else(|| HierarchyError::MissingRoots.into_execution_error())?;
+    let root_epoch = roots.epoch();
+    let roots = roots.as_slice().to_vec();
     static NEXT_PUBLICATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let publication = __private::HierarchyPublication {
         world: world_id,

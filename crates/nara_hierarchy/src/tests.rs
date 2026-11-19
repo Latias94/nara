@@ -167,6 +167,28 @@ fn deferred_batch_uses_the_same_ordered_transaction() {
 }
 
 #[test]
+fn unrelated_invalid_deferred_write_retains_the_bare_world_error_behavior() {
+    #[derive(Resource)]
+    struct LaterCommandRan;
+
+    let mut world = World::new();
+    let missing = world.spawn_empty().id();
+    assert!(world.despawn(missing));
+    let mut queue = CommandQueue::default();
+    Commands::new(&mut queue, &world)
+        .apply_hierarchy_operation(HierarchyOperation::Place {
+            entity: missing,
+            placement: root_last(),
+        })
+        .insert_resource(LaterCommandRan);
+
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| queue.apply(&mut world)));
+    assert!(outcome.is_err());
+    assert!(!world.contains_resource::<LaterCommandRan>());
+}
+
+#[test]
 fn invalid_batch_rejects_before_any_topology_mutation() {
     let mut world = World::new();
     let root = world.spawn_empty().id();
@@ -889,6 +911,42 @@ fn complete_validation_does_not_register_missing_hierarchy_state() {
 }
 
 #[test]
+fn managed_mutation_preparation_rejects_missing_roots_without_blocking_empty_retirement() {
+    let mut app = App::new();
+    app.add_plugin(HierarchyPlugin).unwrap();
+    let world = app.world_mut().unwrap();
+    let entity = world.spawn_empty().id();
+    let operation = HierarchyOperation::Place {
+        entity,
+        placement: root_last(),
+    };
+    __private::prepare_mutation_baseline(world);
+    __private::validate_fresh_construction_topology(world, false).unwrap();
+    world.remove_resource::<HierarchyRoots>().unwrap();
+
+    assert_eq!(
+        __private::validate_fresh_construction_topology(world, false),
+        Err(HierarchyError::MissingRoots)
+    );
+    assert_eq!(
+        __private::prepare_construction_batch(world, &[operation]).err(),
+        Some(HierarchyError::MissingRoots)
+    );
+    assert_eq!(
+        HierarchyWriter::new(world).apply(operation),
+        Err(HierarchyError::MissingRoots)
+    );
+
+    let retirement = __private::retirement_operations(world, &[]).unwrap();
+    assert!(retirement.is_empty());
+    __private::prepare_construction_batch(world, &retirement)
+        .unwrap()
+        .commit(world);
+    assert!(!world.contains_resource::<HierarchyRoots>());
+    assert!(world.get::<relation::HierarchyMember>(entity).is_none());
+}
+
+#[test]
 fn missing_registered_root_is_reported_exactly() {
     let mut world = World::new();
     let root = world.spawn_empty().id();
@@ -964,6 +1022,111 @@ fn plugin_completes_the_latest_ordered_generation() {
                 .topology_generation
         )
     );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn removing_empty_hierarchy_roots_faults_runtime_drive_and_allows_stop() {
+    use std::time::Duration;
+
+    use nara_app::{
+        RealTime, RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus,
+        RuntimeFaultKind, RuntimeInstance, RuntimeState,
+    };
+
+    let mut app = App::new();
+    app.add_plugin(HierarchyPlugin).unwrap();
+    app.add_systems(
+        CoreStage::PostUpdate,
+        (|world: &mut World| {
+            if world.resource::<RealTime>().frame == 2 {
+                world.remove_resource::<HierarchyRoots>().unwrap();
+            }
+        })
+        .before(HierarchySet::ValidateAndComplete),
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(runtime.world().resource::<HierarchyRoots>().is_empty());
+    assert!(__private::completed_topology_publication(runtime.world()).is_some());
+
+    let error = runtime.drive(Duration::ZERO).unwrap_err();
+    let fault = error.fault();
+    assert_eq!(fault.kind(), RuntimeFaultKind::System);
+    assert_eq!(fault.source(), "nara.ecs.fallible-execution");
+    let detail = fault.detail().unwrap();
+    assert_eq!(detail.code(), "nara.hierarchy.missing-roots");
+    assert_eq!(detail.origin(), "nara.hierarchy");
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    assert_eq!(runtime.fault(), Some(fault));
+    assert!(!runtime.world().contains_resource::<HierarchyRoots>());
+    assert!(
+        !runtime
+            .world()
+            .contains_resource::<__private::CompletedHierarchyProjection>()
+    );
+    assert_eq!(
+        __private::completed_topology_publication(runtime.world()),
+        None
+    );
+    assert_eq!(runtime.drive(Duration::ZERO).unwrap_err().fault(), fault);
+
+    let RuntimeControlRequestResult::Accepted(stop) = runtime.request_control(RuntimeControl::Stop)
+    else {
+        panic!("faulted runtime should accept Stop");
+    };
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Stopping);
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Stopped);
+    assert_eq!(
+        runtime.control_status(stop),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert_eq!(runtime.fault(), Some(fault));
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn deferred_placement_cannot_recreate_managed_roots_before_completion() {
+    use std::time::Duration;
+
+    use nara_app::{RealTime, RuntimeFaultKind, RuntimeInstance};
+
+    let mut app = App::new();
+    app.add_plugin(HierarchyPlugin).unwrap();
+    let entity = app.world_mut().unwrap().spawn_empty().id();
+    app.add_systems(
+        CoreStage::PostUpdate,
+        (move |world: &mut World| {
+            if world.resource::<RealTime>().frame == 2 {
+                world.remove_resource::<HierarchyRoots>().unwrap();
+                world
+                    .commands()
+                    .apply_hierarchy_operation(HierarchyOperation::Place {
+                        entity,
+                        placement: root_last(),
+                    });
+                world.flush();
+            }
+        })
+        .before(HierarchySet::ValidateAndComplete),
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let error = runtime.drive(Duration::ZERO).unwrap_err();
+    assert_eq!(error.fault().kind(), RuntimeFaultKind::Command);
+    assert_eq!(
+        error.fault().detail().unwrap().code(),
+        "nara.hierarchy.missing-roots"
+    );
+    assert!(!runtime.world().contains_resource::<HierarchyRoots>());
+    assert!(HierarchyPlacement::current(runtime.world(), entity).is_none());
+    assert!(__private::completed_topology_publication(runtime.world()).is_none());
     runtime.finish().unwrap();
 }
 

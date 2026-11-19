@@ -122,7 +122,10 @@ flowchart LR
 - Nara-owned placement and replacement paths validate the supported topology generation before
   derived publication. Immutable component insert/discard hooks invalidate completion immediately,
   including advanced raw component replacement or removal. A missing or divergent root resource
-  also withholds completion. Direct reverse-collection mutation is unavailable; raw despawn never
+  also withholds completion. An installed Hierarchy plugin requires its roots resource at managed
+  completion and reports its absence through the Runtime's first-fault route. Standalone empty
+  graphs can be validated without a roots resource. Direct reverse-collection mutation is
+  unavailable; raw despawn never
   cascades and leaves the hierarchy fail-closed until its owning placement transaction runs.
 - Ordinary owner-controlled writer batches may reuse a private validated baseline and resolve through
   a sparse touched-owner candidate. Sequential anchor and placement validation retains the complete

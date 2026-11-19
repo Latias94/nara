@@ -1,4 +1,5 @@
-use nara_ecs::Entity;
+use nara_app::RuntimeFaultDetail;
+use nara_ecs::{Entity, bevy_ecs::error::BevyError};
 use thiserror::Error;
 
 /// A rejected hierarchy construction or validation operation.
@@ -6,6 +7,8 @@ use thiserror::Error;
 pub enum HierarchyError {
     #[error("hierarchy mutation would run unsupported lifecycle work")]
     LifecycleWork,
+    #[error("the hierarchy roots resource is missing")]
+    MissingRoots,
     #[error("hierarchy entity {entity:?} does not exist")]
     MissingEntity { entity: Entity },
     #[error("hierarchy child entity {child:?} does not exist")]
@@ -58,4 +61,19 @@ pub enum HierarchyError {
         child: Entity,
         actual_parent: Option<Entity>,
     },
+}
+
+impl HierarchyError {
+    pub(crate) fn into_execution_error(self) -> BevyError {
+        match self {
+            Self::MissingRoots => RuntimeFaultDetail::new(
+                "nara.hierarchy.missing-roots",
+                "The hierarchy roots resource is missing",
+                "nara.hierarchy",
+            )
+            .expect("static hierarchy fault metadata is valid")
+            .into_bevy_error(),
+            error => error.into(),
+        }
+    }
 }
