@@ -1755,6 +1755,14 @@ existing game controls. It preserves original runtime/command/input owners and r
 per-tick and continued-state evidence in that plan. Physical controller backends, universal
 recording/rollback and broader repeatability requirements remain open.
 
+The November 19 [paused mixed Input correction](2026-10-30-input-endpoint-admission-and-retirement-plan.md#november-19-paused-mixed-input-reclamation)
+reclaims finished records at the original frame cleanup even if an earlier gameplay action is
+waiting for Resume or exact Step. Live records preserve their sequence, captured mapping and
+terminal obligations. The independent gameplay consumer runs 64 paused moves at a limit of 24,
+reuses an unrelated endpoint and receives the original press/release effects once. The Windows
+case exercises actual Winit motion messages and original close. Frame outcome memory and the
+remaining runtime audit items retain their own scope.
+
 The [authored game Input successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#authored-game-input-through-source-and-player-delivery)
 removes the actual Two-Level Game's hardcoded physical mapping and cooker restriction. One
 native action file supplies source and processed PRIMARY definitions; game-owned semantic

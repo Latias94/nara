@@ -223,3 +223,65 @@ UI/Winit/root consumers, plus the independent public workflow and relevant featu
 root `target`, use `CARGO_BUILD_JOBS=1` for substantial builds and never run Cargo concurrently in
 this checkout. Any native/platform statement requires its own actual evidence under the existing
 qualification procedure. Document checks alone establish neither implementation nor acceptance.
+
+## November 19 Paused Mixed Input Reclamation
+
+Implementation and regression coverage are in `3946e4d`.
+
+The [engine workflow audit](../audits/2026-11-19-engine-workflow-review.md#3-one-deferred-key-can-exhaust-input-during-an-otherwise-idle-managed-pause)
+found that one action waiting for Resume left every later completed pointer record behind it in
+the log. With an event limit of 24, the eighteenth move refused admission even after a completed
+maintenance frame for each previous move. The focused red test reproduces `retained: 18` and
+`requested: 7` in `ff02f65a-1d78-450f-b205-7cb50dff4d0e`.
+An independent consumer linked against the prior release artifacts refuses its twelfth move.
+It has more connected endpoints and retains 12 records with 13 slots requested under the same
+limit of 24. Its other three tests pass in that red control.
+
+Godot's pinned input path (`b070e63b161aa816afac71dcfc9d60859d38f220`,
+`core/input/input.cpp:1654` and `core/input/input_event.cpp:1036`) accumulates compatible adjacent
+motion and drains its event list while delivering input. Bevy's pinned path
+(`779770720e6ad916c1de38cf66a67d0e079ed1e3`, `crates/bevy_ecs/src/message/messages.rs:71` and
+`crates/bevy_input/src/mouse.rs:330`) ages message buffers and refreshes its accumulated mouse delta
+each frame. Both give motion an explicit short lifetime. Nara's public input observations and
+deferred actions also retain exact per-event provenance.
+
+Frame cleanup visits the live deque once after the actual copies clear. It compacts completed
+records in place and preserves the admission order of survivors. This single removal boundary
+replaces per-record frame pins and the intermediate sweep in action staging. Lifecycle callbacks
+can still reap topology against the live records and prepared route or held-member obligations.
+The original ledger recovers only removed records. Cleanup leaves the consumer cursors in place.
+The owner's `entries()` is an ordered view of retained records and can have sequence gaps. Its
+public frame observations still report the original events. Pending actions keep their exact
+sequence, press association and mapping revision through Resume or exact Step.
+
+The complete regression exercises the Input owner, a publicly composed gameplay consumer,
+and the Winit pause path with motion arriving through its original window event callback. The
+first sparse-reclamation candidate passes the Input package 220/220 with serde enabled in
+`91212d95-4833-4a27-8159-fb197bf515cc`. Independent review finds a redundant full sweep in
+StageActions. The implementation then moves all event-slot reclamation into FrameCleanup and
+keeps lifecycle reaping separate. Event slots become reusable at the cleanup boundary. During
+the frame, ordinary ingress can still reach its cap and accepted lifetimes retain their reserved
+terminal admission. Frame outcome allocation and measured frame costs remain separate work.
+
+The independently locked [gameplay consumer](../../tests/fixtures/module-consumer/tests/bounded_input_workflow.rs)
+and seat replay targets pass 10/10 in `c999e9f7-f587-497c-ac44-99a9a474ec11`. The new case drives
+64 paused moves through the public Runtime and Input driver. It observes original sequences and
+positions, retires and reopens the unrelated pointer endpoint, and keeps the key endpoint owned
+until its original press and reserved release are both consumed. Resume delivers both edges in
+order and each command executes once through the original fixed simulation.
+
+On Windows the new Winit case first passes in `c9e1ff57-eb67-416c-ab05-3b6c7695c6e7`. It posts
+32 `WM_MOUSEMOVE` messages to the original hidden HWND and observes 32 separate paused frame
+settlements. The claimed driver supplies the staged key. Resume publishes its original binding
+outcome once, and close retires the original HWND, pump session and Runtime. This exercises the
+actual window message path without moving the desktop cursor or taking keyboard focus.
+
+The final Input, Gameplay, UI and Winit all-feature cohort passes 512/512, with 24 tests skipped,
+in `08b621a2-b144-4165-b4da-471f1dc57f32`. The first grouped native run passes three of four.
+The isolated failed control again receives `AwaitingFocus` because its input was Enter, now mapped
+as of `7cbdd9f`. The regression now uses a character with no physical mapping and confirms the
+restored hold before expecting immediate refusal. The full selected Windows native cohort then
+passes 4/4 in `182f7505-0c3b-4972-b46e-28c50c1a7378`, including the hidden paused window,
+original release-gap exact Step and unsupported-activation controls. Correctness Clippy, root and
+independent formatting, document links and whitespace checks pass. These results cover the
+selected Windows Runtime boundaries and leave foreign native execution and numeric costs open.

@@ -4541,6 +4541,12 @@ source candidate before committing a deletion. The linked record owns the actual
 and remaining audit items. ADRs [0038](0038-scene-prefab-authoring-identity-and-provenance.md) and
 [0090](0090-unavailable-schema-and-lossless-authoring.md) own the respective contracts.
 
+The November 19 [paused Input successor](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md#november-19-paused-mixed-input-reclamation)
+reclaims completed event records at frame cleanup while retaining the original deferred actions,
+press association, terminal credits and live admission order. Independent Gameplay and Windows
+Winit coverage observe Input and close through their original owners. The linked record owns the
+qualification scope. The default outcome allocation and other runtime workflow findings remain open.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected
