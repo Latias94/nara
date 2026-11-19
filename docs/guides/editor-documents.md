@@ -154,9 +154,9 @@ forge a saved checkpoint. The platform/capability guarantees remain those of ADR
 
 In a `stable_metadata` project, a Scene or Prefab Save also checks that the adjacent `.meta`
 still names the open document. A mismatch reported before replacement leaves the file and draft
-available. Restore the original identity to retry. If the sidecar changes during a completed
-replacement, the result is uncertain. Restore the binding and use explicit Reopen to reconcile
-the body before another Save.
+available. Restore the original identity to retry. If the worker observes a sidecar change after
+replacing the body, the result is uncertain. Restore the binding and use explicit Reopen to
+reconcile the body before another Save.
 
 Reopen reads with a read-only capability, decodes off-thread and publishes only if the original
 document/source/revision still matches. A subsequent edit rejects that completion. A successful

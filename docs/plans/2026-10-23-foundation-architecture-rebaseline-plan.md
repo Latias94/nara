@@ -968,6 +968,39 @@ selected compiler demand, semantic data retention, fixed local-ID/reference rema
 history, current Host dependency fences and selected native interaction. This closes direct
 selected-instance complete conversion, not outer-only unpack, cross-source Apply or full R5.
 
+### November 19 Save Identity And Direct Reference Closure
+
+The first two findings of the [engine workflow audit](../audits/2026-11-19-engine-workflow-review.md)
+affect ordinary authoring. A stable Scene could report Saved after its sidecar acquired a different
+UUID. The public trusted-compiled reproduction returned `Saved` in run
+`d5f5bd28-0dd1-43bb-971b-eb89d4c1e1fe` before the fix. At `5c61f8f`, the Save worker carries the
+open document key to the original publisher. It admits the adjacent sidecar under the retained
+parent before replacing the body and compares that live object and its bytes again before
+acknowledging the receipt. Early identity drift refuses publication.
+Observed drift after a completed switch retains the existing uncertain result and Reopen path.
+Same-key metadata edits completed before the worker's observation are valid. The body and sidecar
+remain separate files. An external writer can still change and restore the sidecar between observations.
+
+The Windows/Rust 1.95.0 release persistence cohort passes 101/101 in
+`65ca44ae-ac5e-4321-b224-fd3cc1e5a190`. It includes the public trusted-compiled Save refusal and
+retry, both Authoring lanes while a worker is held, and actual file switches followed by sidecar
+byte or object changes. Those cases retain the dirty draft and history on early refusal and the
+original uncertainty receipt after a completed switch.
+
+At `3918930`, direct source reference validation asks Identity for the local target of `SceneLocal`
+and zero-hop authored `SourceEntity` references. Scene and Prefab check the same complete
+declaration namespace for both encodings, including effective contextual defaults, registry-backed
+patch and publication, and bounded Schema reclassification. The final candidate determines closure,
+so retargeting and deletion can still commit and Undo together. The compiler continues to interpret
+routes, input bindings, instance additions and inherited declarations in their lexical scopes.
+
+Release nextest passes 992/992 in `796055f2-d330-48df-b057-c92cd66e8dcf`, including the Identity
+and Scene library tests and 67 tests across eight public Scene targets. It covers failure-atomic
+deletion, a retained Redo branch, both encodings in both native document kinds, and valid routed
+references. Scoped correctness Clippy and workspace formatting also pass. This qualification
+covers the public/owner CPU and real filesystem paths on Windows. The rest of the workflow audit,
+including paused input reclamation, remains open.
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime

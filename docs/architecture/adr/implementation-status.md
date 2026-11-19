@@ -4534,6 +4534,13 @@ record distinguishes later corrections from older executed cohorts. Its
 [bounded architecture review](../../audits/2026-10-22-post-refactor-ownership-and-ergonomics-review.md)
 separates remaining measurements and concrete-consumer triggers from correctness repairs.
 
+The November 19 [authoring correctness repairs](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#november-19-save-identity-and-direct-reference-closure)
+bind stable Scene and Prefab Save to the open document's sidecar identity at the original file
+switch. They also validate both representations of direct local references against the final
+source candidate before committing a deletion. The linked record owns the actual verification
+and remaining audit items. ADRs [0038](0038-scene-prefab-authoring-identity-and-provenance.md) and
+[0090](0090-unavailable-schema-and-lossless-authoring.md) own the respective contracts.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected
