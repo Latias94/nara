@@ -2,6 +2,7 @@ use std::{cell::RefCell, fs};
 
 use crate::{
     asset::RuntimeAssetCodec,
+    asset_build::ArtifactBuildError,
     core::ByteLimit,
     fs::{ContentDigest, FsError},
     project_host::{
@@ -55,6 +56,7 @@ fn dependency_free_scene_roots_cook_from_adjacent_metadata() {
     let ordinary = loader.load(&fixture.candidate, &plan).unwrap();
     assert_eq!(ordinary.selected_scene_product(), None);
     drop(ordinary);
+    let checked = loader.load_delivery(&fixture.candidate, &plan).unwrap();
 
     let cooked = prepare_project_cooked_content(fixture.request(), |context| {
         let snapshot = context.snapshot();
@@ -66,6 +68,16 @@ fn dependency_free_scene_roots_cook_from_adjacent_metadata() {
         Ok(())
     })
     .unwrap();
+    let startup = cooked.source().startup_content();
+    assert_eq!(startup.members(), checked.startup_content().members());
+    assert_eq!(
+        startup.content_digest(),
+        checked.startup_content().content_digest(),
+    );
+    assert_eq!(
+        startup.closure_plan_digest(),
+        checked.startup_content().closure_plan_digest(),
+    );
     let catalog = cooked.content().base().catalog();
     assert_eq!(catalog.startup_scene(), product(1));
     assert_eq!(catalog.scenes(), [product(1), product(2)]);
@@ -84,14 +96,18 @@ fn dependency_free_scene_roots_cook_from_adjacent_metadata() {
 
     let (_, selection) = cooked.into_parts();
     selection.verify(&fixture.path).unwrap();
-    let original = fs::read_to_string(fixture.path.join(STARTUP_META)).unwrap();
-    let changed = original.replacen('\n', " ", 1);
-    assert_ne!(changed, original);
-    fixture.write(STARTUP_META, changed.as_bytes());
-    assert!(matches!(
-        selection.verify(&fixture.path),
-        Err(ProjectCookError::Filesystem(FsError::DigestMismatch { .. }))
-    ));
+    for path in [STARTUP_META, DECLARED_META] {
+        let original = fs::read_to_string(fixture.path.join(path)).unwrap();
+        let changed = original.replacen('\n', " ", 1);
+        assert_ne!(changed, original);
+        fixture.write(path, changed.as_bytes());
+        assert!(matches!(
+            selection.verify(&fixture.path),
+            Err(ProjectCookError::Filesystem(FsError::DigestMismatch { .. }))
+        ));
+        fixture.write(path, original.as_bytes());
+        selection.verify(&fixture.path).unwrap();
+    }
 }
 
 #[test]
@@ -167,6 +183,9 @@ fn selected_scene_metadata_rejects_nil_identity_before_contribution() {
 #[test]
 fn declared_scene_roots_share_one_actual_compound_build_and_finished_runtime_payload() {
     let fixture = Fixture::<0>::new(Some(b'A'));
+    let plan = resolve_product_recipe(&fixture.candidate, fixture.recipe.clone()).unwrap();
+    let loader = ProjectContentLoader::new(fixture.root.share()).unwrap();
+    let checked = loader.load_delivery(&fixture.candidate, &plan).unwrap();
     let before = fixture.builds();
     let mut visited = Vec::new();
     let cooked = prepare_project_cooked_content(fixture.request(), |context| {
@@ -191,6 +210,14 @@ fn declared_scene_roots_share_one_actual_compound_build_and_finished_runtime_pay
 
     let budget = take_loader_budget();
     assert_source_work_released(&budget);
+    let startup = cooked.source().startup_content();
+    assert_eq!(startup.members(), checked.startup_content().members());
+    assert!(
+        startup
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == STARTUP_META)
+    );
     assert_eq!(budget.snapshot().generation_high_water(), 1);
     assert_eq!(visited, [product(1), product(2)]);
     assert_eq!(fixture.builds() - before, 1);
@@ -218,6 +245,128 @@ fn declared_scene_roots_share_one_actual_compound_build_and_finished_runtime_pay
     selection.verify(&fixture.path).unwrap();
     drop(selection);
     assert_eq!(budget.snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn retained_group_must_match_the_current_typed_sidecar_mapping() {
+    let fixture = Fixture::<5>::new(None);
+    let original = fixture.build_group();
+    let before = fixture.builds();
+    let primary_id = ImportedProductId::PRIMARY;
+    let auxiliary_id = auxiliary().product();
+
+    fixture.write_mapping([(primary_id, 1), (auxiliary_id, 0)]);
+    let result = prepare_project_cooked_content(fixture.request(), |context| {
+        let current = context
+            .snapshot()
+            .domain_assets()
+            .collection::<Domain<5>>()
+            .unwrap();
+        let imported = current.iter().next().unwrap();
+        assert_eq!(
+            (imported.source_value, imported.auxiliary_value),
+            (b'Q', b'S')
+        );
+        context.add_group::<Domain<5>>(&original)
+    });
+    let error = result
+        .err()
+        .expect("the original group has the wrong mapping");
+    assert!(
+        matches!(&error, ProjectCookError::Invalid(message) if message.contains("does not match the selected source build: assets/shared.compound")),
+        "{error:?}",
+    );
+    assert_eq!(fixture.builds(), before);
+
+    let current = fixture.build_group();
+    assert_eq!(current.observations(), original.observations());
+    assert_eq!(
+        current.members()[0].products,
+        original.members()[0].products
+    );
+    assert_ne!(current.recipe_digest(), original.recipe_digest());
+    let cooked = prepare_project_cooked_content(fixture.request(), |context| {
+        context.add_group::<Domain<5>>(&current)?;
+        let wrong_domain = context.add_group::<Domain<6>>(&current).unwrap_err();
+        assert!(matches!(wrong_domain, ProjectCookError::Invalid(message)
+            if message.contains("already belongs to a different source build domain")));
+        context.add_group::<Domain<5>>(&current)
+    })
+    .unwrap();
+    let (content, selection) = cooked.into_parts();
+    selection.verify(&fixture.path).unwrap();
+    let asset = content
+        .base()
+        .acquire_asset::<Domain<5>, Codec>(auxiliary())
+        .unwrap();
+    assert_eq!(
+        (
+            asset.product().source_value,
+            asset.product().auxiliary_value
+        ),
+        (b'Q', b'S'),
+    );
+    assert_eq!(fixture.builds(), before + 1);
+
+    let plan = resolve_product_recipe(&fixture.candidate, fixture.recipe.clone()).unwrap();
+    let loader = ProjectContentLoader::new(fixture.root.share()).unwrap();
+    let snapshot = loader.load(&fixture.candidate, &plan).unwrap();
+    let mut historical = fixture.builder(CookedContentLimits::default()).unwrap();
+    historical
+        .add_scene(
+            product(1),
+            snapshot.compiled_candidate(),
+            snapshot.asset_resolution(),
+        )
+        .unwrap();
+    historical.add_group(&original).unwrap();
+    let historical = historical.finish().unwrap();
+    let asset = historical
+        .base()
+        .acquire_asset::<Domain<5>, Codec>(auxiliary())
+        .unwrap();
+    assert_eq!(
+        (
+            asset.product().source_value,
+            asset.product().auxiliary_value
+        ),
+        (b'S', b'Q'),
+    );
+
+    fixture.write_mapping([(auxiliary_id, 1), (primary_id, 0)]);
+    let same = prepare_project_cooked_content(fixture.request(), |context| {
+        context.add_group::<Domain<5>>(&original)
+    })
+    .unwrap();
+    let (same, selection) = same.into_parts();
+    selection.verify(&fixture.path).unwrap();
+    let asset = same
+        .base()
+        .acquire_asset::<Domain<5>, Codec>(product(3))
+        .unwrap();
+    assert_eq!(
+        (
+            asset.product().source_value,
+            asset.product().auxiliary_value
+        ),
+        (b'S', b'Q'),
+    );
+    assert_eq!(fixture.builds(), before + 1);
+}
+
+#[test]
+fn source_build_refuses_sidecar_changed_after_snapshot_admission() {
+    let fixture = Fixture::<6>::new(None);
+    let before = fixture.builds();
+    let result = prepare_project_cooked_content(fixture.request(), |context| {
+        fixture.write_mapping([(ImportedProductId::PRIMARY, 1), (auxiliary().product(), 0)]);
+        context.add_source_assets::<Domain<6>>()
+    });
+    assert!(matches!(
+        result,
+        Err(ProjectCookError::Artifact(ArtifactBuildError::Stale))
+    ));
+    assert_eq!(fixture.builds(), before);
 }
 
 #[test]

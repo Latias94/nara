@@ -321,6 +321,11 @@ recorded raw-read observation. Scene, Input and TileSet source observations belo
 Host request. Code declared inputs and content observations remain separate inventories; their
 path sets need not match. Checks establish their stated per-file/fence envelope, not a simultaneous
 cross-file snapshot, ABA detection, hermetic compilation or global latest-state authority.
+Project Cook admits a contributed source group through its `SourceAssetBuild` domain and compares
+its seed with the current selection before using its bytes. The comparison uses the selected
+source identity, primary digest, normalized sidecar settings, format and build definition. Cook
+keeps additional Scene metadata used for Product selection in the delivery receipt. The startup
+receipt continues to describe the inputs read by ordinary startup.
 The assembler may prepare exact captured historical content without claiming freshness. Current
 selection and its original observation custody remain with the compiled Host, as specified by
 [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery).

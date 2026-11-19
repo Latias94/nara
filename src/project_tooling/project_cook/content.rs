@@ -1,11 +1,12 @@
 use std::{
+    any::TypeId,
     collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
 use crate::{
     asset::{
-        AssetPath, AssetProductRef, AssetRef, AssetReferenceResolver, AssetSourceKind,
+        AssetPathScope, AssetProductRef, AssetRef, AssetReferenceResolver, AssetSourceKind,
         AssetSourcePath, ImportedProductId, SourceAssetBuild, StableAssetId,
     },
     asset_build::{
@@ -16,7 +17,10 @@ use crate::{
     fs::{DirectoryCapability, RelativePath},
     material::Material2dDomain,
     project_content::{DeliverySnapshotPhase, DeliveryVisitError, SelectedSceneProduct},
-    project_host::{ProjectContentLoader, ProjectContentSnapshot, resolve_product_recipe},
+    project_host::{
+        ProjectContentLoader, ProjectContentMemberKind, ProjectContentSnapshot,
+        resolve_product_recipe,
+    },
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
     tilemap::TileSetDescriptor,
 };
@@ -141,7 +145,7 @@ pub struct ProjectCookContext<'a> {
     implementation: ArtifactContentDigest,
     builder: &'a mut CookedContentBuilder,
     outputs: &'a mut BTreeMap<AssetProductRef, Output>,
-    built_sources: &'a mut BTreeMap<StableAssetId, &'static str>,
+    built_sources: &'a mut BTreeMap<StableAssetId, TypeId>,
     observations: &'a mut Observations,
 }
 
@@ -164,19 +168,12 @@ impl ProjectCookContext<'_> {
         let Some(collection) = self.snapshot.domain_assets().collection::<D>() else {
             return Ok(());
         };
-        let scope = self.snapshot.asset_resolution().scope().clone();
-        let assets = match scope.prefix() {
-            Some(prefix) => self
-                .root
-                .open_directory(&RelativePath::new(prefix.as_str())?)?,
-            None => self.root.share(),
-        };
-        let revision = FormatVersion::new(D::BUILD_REVISION).ok_or_else(|| {
-            ProjectCookError::Invalid("source-build revision must be nonzero".into())
-        })?;
+        let scope = self.snapshot.asset_resolution().scope();
+        let assets = self.open_source_directory(scope)?;
+        let domain = TypeId::of::<D>();
         for record in collection.source_records() {
-            if let Some(kind) = self.built_sources.get(&record.stable_id()) {
-                if *kind != D::SOURCE_KIND {
+            if let Some(built) = self.built_sources.get(&record.stable_id()) {
+                if *built != domain {
                     return Err(ProjectCookError::Invalid(format!(
                         "source {} changed its selected build domain",
                         record.path()
@@ -184,33 +181,127 @@ impl ProjectCookContext<'_> {
                 }
                 continue;
             }
-            let path = scope.relative_path(record.path()).ok_or_else(|| {
-                ProjectCookError::Invalid("source build escaped its admitted asset scope".into())
-            })?;
-            let path = AssetPath::new(path)
-                .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
-            let request = ArtifactSourceRequest::new(
-                assets.share(),
-                scope.clone(),
-                path,
-                ArtifactBuildDefinition {
-                    id: D::BUILD_ID.to_owned(),
-                    revision,
-                    implementation: self.implementation,
-                },
-            );
             self.builder
-                .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, &'static str)>(0)?)?;
+                .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
+            let request = self.source_request::<D>(scope, assets.share(), record.path())?;
             let group = build_source::<D>(self.store, &request, |_| Ok(()))?.into_group();
-            self.add_group(&group)?;
-            self.built_sources
-                .insert(record.stable_id(), D::SOURCE_KIND);
+            self.add_verified_group(&group)?;
+            self.built_sources.insert(record.stable_id(), domain);
         }
         Ok(())
     }
 
-    /// Adds an original immutable group and retains all its source/build observations.
-    pub fn add_group(&mut self, group: &VerifiedArtifactGroup) -> Result<(), ProjectCookError> {
+    /// Adds a verified group for the current typed source selection.
+    ///
+    /// First admission requires the selected snapshot to contain the source. The build owner
+    /// compares its normalized settings, source identity, primary bytes and compiled definition
+    /// with the retained seed. The existing group supplies the build observations for publication.
+    pub fn add_group<D>(&mut self, group: &VerifiedArtifactGroup) -> Result<(), ProjectCookError>
+    where
+        D: SourceAssetBuild,
+        D::Settings: serde::Serialize,
+    {
+        let source = group.seed().source;
+        let domain = TypeId::of::<D>();
+        if self.outputs.get(&source) == Some(&Output::Group(group.digest())) {
+            return if self.built_sources.get(&source.source()) == Some(&domain) {
+                Ok(())
+            } else {
+                Err(ProjectCookError::Invalid(format!(
+                    "artifact group already belongs to a different source build domain: {source}"
+                )))
+            };
+        }
+        let record = self
+            .snapshot
+            .asset_database()
+            .record_for_stable_id(source.source())
+            .filter(|record| {
+                matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == D::SOURCE_KIND)
+            })
+            .filter(|_| self.snapshot.domain_assets().collection::<D>().is_some())
+            .ok_or_else(|| {
+                ProjectCookError::Invalid(format!(
+                    "artifact group has no selected source for {}: {source}",
+                    D::SOURCE_KIND,
+                ))
+            })?;
+        let scope = self.snapshot.asset_resolution().scope();
+        self.builder
+            .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
+        let directory = self.open_source_directory(scope)?;
+        let request = self.source_request::<D>(scope, directory, record.path())?;
+        if !request.matches_source_group::<D>(self.store, group)? {
+            return Err(ProjectCookError::Invalid(format!(
+                "artifact group does not match the selected source build: {}",
+                record.path(),
+            )));
+        }
+        self.add_verified_group(group)?;
+        self.built_sources.insert(source.source(), domain);
+        Ok(())
+    }
+
+    fn open_source_directory(
+        &self,
+        scope: &AssetPathScope,
+    ) -> Result<DirectoryCapability, ProjectCookError> {
+        match scope.prefix() {
+            Some(prefix) => Ok(self
+                .root
+                .open_directory_exact(&RelativePath::new(prefix.as_str())?)?),
+            None => Ok(self.root.share()),
+        }
+    }
+
+    fn source_request<D>(
+        &self,
+        scope: &AssetPathScope,
+        directory: DirectoryCapability,
+        path: &AssetSourcePath,
+    ) -> Result<ArtifactSourceRequest, ProjectCookError>
+    where
+        D: SourceAssetBuild,
+        D::Settings: serde::Serialize,
+    {
+        let local = scope.relativize(path).ok_or_else(|| {
+            ProjectCookError::Invalid("source build escaped its admitted asset scope".into())
+        })?;
+        let revision = FormatVersion::new(D::BUILD_REVISION).ok_or_else(|| {
+            ProjectCookError::Invalid("source-build revision must be nonzero".into())
+        })?;
+        let closure = self.snapshot.content_closure();
+        let members = closure.members();
+        let digest = |path: &str, kind| {
+            members
+                .binary_search_by(|member| member.path().as_str().cmp(path))
+                .ok()
+                .map(|index| &members[index])
+                .filter(|member| member.kind() == kind)
+                .map(|member| ArtifactContentDigest::from_content(member.digest()))
+                .ok_or_else(|| {
+                    ProjectCookError::Invalid(format!("source build input is not selected: {path}"))
+                })
+        };
+        let primary = digest(path.as_str(), ProjectContentMemberKind::AssetSource)?;
+        let metadata = digest(&path.meta_path(), ProjectContentMemberKind::AssetMetadata)?;
+        Ok(ArtifactSourceRequest::new(
+            directory,
+            scope.clone(),
+            local,
+            ArtifactBuildDefinition {
+                id: D::BUILD_ID.to_owned(),
+                revision,
+                implementation: self.implementation,
+            },
+        )
+        .with_source_digests(primary, metadata))
+    }
+
+    fn add_verified_group(
+        &mut self,
+        group: &VerifiedArtifactGroup,
+    ) -> Result<(), ProjectCookError> {
         let output = Output::Group(group.digest());
         let products = group
             .members()

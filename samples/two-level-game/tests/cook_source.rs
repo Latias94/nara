@@ -659,7 +659,7 @@ fn renamed_sound_bank_dependency_cooks_without_its_old_path_and_decodes_source_f
     let group = directory.build_sound_bank();
     let prepared = directory
         .prepare_with(|cx| {
-            cx.add_group(&group)?;
+            cx.add_group::<SoundBankDomain>(&group)?;
             cx.add_source_assets::<SpriteAnimationDomain>()?;
             Ok(())
         })
@@ -722,7 +722,7 @@ fn stale_build_group_cannot_rebaseline_new_source_delivery() {
     fs::write(path, bytes).unwrap();
     let error = directory
         .prepare_with(|cx| {
-            cx.add_group(&group)?;
+            cx.add_group::<SoundBankDomain>(&group)?;
             cx.add_source_assets::<SpriteAnimationDomain>()?;
             Ok(())
         })

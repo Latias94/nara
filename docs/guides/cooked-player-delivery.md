@@ -212,7 +212,9 @@ Its actual qualification remains in the owning plan/evidence; foreign builds, na
 server stripping and additional platforms require their separate consumers.
 
 The [Two-Level Game's audible placement](../../samples/two-level-game/README.md#source-free-audible-player)
-adds a concrete game-owned Sound Bank through ordinary `SourceAssetBuild` and `add_group`.
+adds a concrete game-owned Sound Bank through ordinary `SourceAssetBuild`. A project Cook caller
+can build the selected sources with `add_source_assets::<D>()` or reuse verified bytes through
+`add_group::<D>()`, which checks the current typed build seed before admission.
 Both Scenes declare the same primary Product; the catalog includes its source-free PCM member.
 The cooker binds the actual import groups' raw observations through publication, including a
 renamed WAV selected by the descriptor. CPU preparation requires no audio device. Only the

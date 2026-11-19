@@ -48,6 +48,14 @@ pub struct ProjectContentMemberReceipt {
 }
 
 impl ProjectContentMemberReceipt {
+    pub(super) const fn new(
+        kind: ProjectContentMemberKind,
+        path: ProjectPath,
+        digest: ContentDigest,
+    ) -> Self {
+        Self { kind, path, digest }
+    }
+
     #[must_use]
     pub const fn kind(&self) -> ProjectContentMemberKind {
         self.kind
@@ -539,11 +547,13 @@ impl ProjectContentClosureBuilder {
         let members = self
             .members
             .into_iter()
-            .map(|(path, facts)| ProjectContentMemberReceipt {
-                kind: facts.kind,
-                path: ProjectPath::new(path)
-                    .expect("Scene closure paths were validated before admission"),
-                digest: facts.digest,
+            .map(|(path, facts)| {
+                ProjectContentMemberReceipt::new(
+                    facts.kind,
+                    ProjectPath::new(path)
+                        .expect("Scene closure paths were validated before admission"),
+                    facts.digest,
+                )
             })
             .collect::<Box<[_]>>();
         let closure_plan_digest = closure_plan_digest(&runtime_directories, &members);

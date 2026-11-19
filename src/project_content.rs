@@ -296,6 +296,7 @@ struct ProjectContentSnapshotInner {
     schema_authority: Arc<SceneComponentBindingsWitness>,
     domain_authority: ProjectAssetDomains,
     content_closure: ProjectContentClosureReceipt,
+    delivery_scene_metadata: Option<ProjectContentMemberReceipt>,
     source_upgrade_required: bool,
     deferred_source_targets: bool,
     input: Option<ProjectInputContent>,
@@ -1508,6 +1509,11 @@ enum SourceLoadMode {
     DeliveryScene(SelectedSceneProduct),
 }
 
+enum NativeMetadataUse {
+    SourceClosure,
+    DeliveryOnly,
+}
+
 impl SourceLoadMode {
     fn requires_selected_scene_product(self) -> bool {
         matches!(
@@ -2008,7 +2014,7 @@ impl<'a> LoadContext<'a> {
                 self.reconcile_native_metadata(&loaded.path, &loaded.source)?;
             }
         }
-        if self.source_mode.requires_selected_scene_product()
+        let delivery_scene_metadata = if self.source_mode.requires_selected_scene_product()
             && settings.project.native_document_identity
                 == nara_project::NativeDocumentIdentity::ProjectLocation
             && !self
@@ -2016,13 +2022,30 @@ impl<'a> LoadContext<'a> {
                 .as_ref()
                 .is_some_and(|catalogue| catalogue.metadata.contains_key(&selected_source_path))
         {
-            self.admit_native_metadata(
+            let (_, digest) = self.admit_native_metadata(
                 scene_directory,
                 scene_root,
                 scene_path.as_str(),
                 &selected_source_path,
                 SourceDocumentKind::Scene,
+                NativeMetadataUse::DeliveryOnly,
             )?;
+            let path_work = self.reserve_work(checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [
+                    selected_source_path.as_str().len(),
+                    ".meta".len(),
+                    STRING_ALLOCATION_OVERHEAD,
+                ],
+            )?)?;
+            let path = nara_project::ProjectPath::new(selected_source_path.meta_path())
+                .map_err(|_| catalogue::identity_conflict(&selected_source_path))?;
+            self.commit_work_as_retained(path_work, path_work.reserved)?;
+            Some(ProjectContentMemberReceipt::new(
+                ProjectContentMemberKind::AssetMetadata,
+                path,
+                digest,
+            ))
         } else {
             self.admit_catalogued_native_metadata(
                 scene_directory,
@@ -2031,7 +2054,8 @@ impl<'a> LoadContext<'a> {
                 &selected_source_path,
                 &selected_scene_source,
             )?;
-        }
+            None
+        };
         for dependency in &dependent_scenes {
             self.reconcile_native_metadata(&dependency.path, &dependency.source)?;
         }
@@ -2264,6 +2288,7 @@ impl<'a> LoadContext<'a> {
                 schema_authority: Arc::new(bindings.witness()),
                 domain_authority: self.domains.clone(),
                 content_closure,
+                delivery_scene_metadata,
                 source_upgrade_required: self.source_upgrade_required,
                 deferred_source_targets,
                 input,
@@ -2549,12 +2574,13 @@ impl<'a> LoadContext<'a> {
                 SourceDocumentKey::project_location(source_universe, project_path, kind)
             }
             nara_project::NativeDocumentIdentity::StableMetadata => {
-                let stable_id = self.admit_native_metadata(
+                let (stable_id, _) = self.admit_native_metadata(
                     directory,
                     source_root,
                     logical_path,
                     &project_path,
                     kind,
+                    NativeMetadataUse::SourceClosure,
                 )?;
                 drop(project_path);
                 self.subtract_budget(
@@ -2580,7 +2606,8 @@ impl<'a> LoadContext<'a> {
         logical_path: &str,
         project_path: &AssetSourcePath,
         kind: SourceDocumentKind,
-    ) -> Result<StableAssetId, ProjectContentError> {
+        usage: NativeMetadataUse,
+    ) -> Result<(StableAssetId, ContentDigest), ProjectContentError> {
         let path_bytes = string_retained_bytes(logical_path)?;
         let path_work = self.reserve_work(checked_plan_sum(
             ProjectContentBudgetKind::WorkBytes,
@@ -2603,12 +2630,14 @@ impl<'a> LoadContext<'a> {
             ContentReadContext::NativeMetadata { source_root },
         )?;
         self.verify_catalogued_metadata(project_path, source_root, metadata_digest)?;
-        self.record_member(
-            ProjectContentMemberKind::AssetMetadata,
-            source_root,
-            &metadata_path,
-            metadata_digest,
-        )?;
+        if matches!(usage, NativeMetadataUse::SourceClosure) {
+            self.record_member(
+                ProjectContentMemberKind::AssetMetadata,
+                source_root,
+                &metadata_path,
+                metadata_digest,
+            )?;
+        }
         let reservation = self.reserve_work(ceiling)?;
         let identity =
             AssetMetaIdentityCandidate::decode_json_bytes_owned(metadata_bytes.into_boxed_slice())
@@ -2647,7 +2676,7 @@ impl<'a> LoadContext<'a> {
         self.index_metadata_identity(relative_path, root_index, metadata_digest, identity)?;
         drop(metadata_path);
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
-        Ok(stable_id)
+        Ok((stable_id, metadata_digest))
     }
 
     fn decode_scene(

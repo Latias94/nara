@@ -292,7 +292,7 @@ impl ProjectContentLoader {
         let mut members = BTreeMap::<String, ProjectContentMemberReceipt>::new();
         self.merge_delivery_members(
             &mut members,
-            &content,
+            &snapshot,
             startup.content_closure(),
             &mut budget,
         )?;
@@ -327,7 +327,7 @@ impl ProjectContentLoader {
             merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
             self.merge_delivery_members(
                 &mut members,
-                &snapshot.content_closure(),
+                &snapshot,
                 startup.content_closure(),
                 &mut budget,
             )?;
@@ -410,10 +410,11 @@ impl ProjectContentLoader {
     fn merge_delivery_members(
         &self,
         members: &mut BTreeMap<String, ProjectContentMemberReceipt>,
-        content: &ProjectContentClosureReceipt,
+        snapshot: &ProjectContentSnapshot,
         startup: &ProjectContentClosureReceipt,
         budget: &mut super::BudgetTicket,
     ) -> Result<(), ProjectContentError> {
+        let content = &snapshot.inner.content_closure;
         if content.project_root_identity() != startup.project_root_identity()
             || content.settings_lineage() != startup.settings_lineage()
             || content.manifest_digest() != startup.manifest_digest()
@@ -425,7 +426,11 @@ impl ProjectContentLoader {
                 "Delivery roots do not share the same source authority",
             ));
         }
-        for member in content.members() {
+        for member in content
+            .members()
+            .iter()
+            .chain(&snapshot.inner.delivery_scene_metadata)
+        {
             if let Some(previous) = members.get(member.path().as_str()) {
                 if previous != member {
                     return Err(delivery_error(

@@ -8,9 +8,9 @@ use std::{
 };
 
 use nara_asset::{
-    AssetBuildSource, AssetImportError, AssetMeta, AssetMetaFileLimits, AssetMetaIdentityCandidate,
-    AssetPath, AssetPathScope, AssetProductRef, AssetReferenceDemand, AssetSourceKind,
-    AssetSourcePath, ImportedProductId, RuntimeAssetCodec, SourceAssetBuild,
+    AssetBuildSource, AssetImportError, AssetImportLimits, AssetMeta, AssetMetaFileLimits,
+    AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef, AssetReferenceDemand,
+    AssetSourceKind, AssetSourcePath, ImportedProductId, RuntimeAssetCodec, SourceAssetBuild,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
@@ -32,6 +32,13 @@ pub struct ArtifactSourceRequest {
     pub(super) scope: AssetPathScope,
     pub(super) path: AssetPath,
     pub(super) definition: ArtifactBuildDefinition,
+    source_digests: Option<SourceDigests>,
+}
+
+#[derive(Clone, Copy)]
+struct SourceDigests {
+    primary: ArtifactContentDigest,
+    metadata: ArtifactContentDigest,
 }
 
 impl ArtifactSourceRequest {
@@ -47,6 +54,95 @@ impl ArtifactSourceRequest {
             scope,
             path,
             definition,
+            source_digests: None,
+        }
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(crate) fn with_source_digests(
+        mut self,
+        primary: ArtifactContentDigest,
+        metadata: ArtifactContentDigest,
+    ) -> Self {
+        self.source_digests = Some(SourceDigests { primary, metadata });
+        self
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(crate) fn matches_source_group<D: SourceAssetBuild>(
+        &self,
+        store: &ArtifactBuildStore,
+        group: &VerifiedArtifactGroup,
+    ) -> Result<bool, ArtifactBuildError>
+    where
+        D::Settings: Serialize,
+    {
+        self.validate_definition::<D>()?;
+        let digests = self
+            .source_digests
+            .ok_or(ArtifactBuildError::InvalidCandidate(
+                "group comparison requires an observed source selection",
+            ))?;
+        let _operation = store.reserve_work(metadata_work_bytes()?)?;
+        let mut inputs = SourceInputs::new(store, self);
+        let (metadata, normalized) = admit_source_metadata::<D>(&mut inputs)?;
+        let seed = self.build_seed::<D>(&metadata, normalized, digests.primary)?;
+        Ok(group.seed() == &seed)
+    }
+
+    fn validate_definition<D: SourceAssetBuild>(&self) -> Result<(), ArtifactBuildError>
+    where
+        D::Settings: Serialize,
+    {
+        if self.definition.id != D::BUILD_ID || self.definition.revision.get() != D::BUILD_REVISION
+        {
+            return Err(ArtifactBuildError::InvalidCandidate(
+                "compiled source build definition mismatch",
+            ));
+        }
+        Ok(())
+    }
+
+    fn build_seed<D: SourceAssetBuild>(
+        &self,
+        metadata: &AssetMetaIdentityCandidate,
+        normalized: Vec<u8>,
+        primary: ArtifactContentDigest,
+    ) -> Result<ArtifactBuildSeed, ArtifactBuildError>
+    where
+        D::Settings: Serialize,
+    {
+        let source =
+            AssetProductRef::new(metadata.identity().stable_id(), ImportedProductId::PRIMARY)
+                .map_err(|_| {
+                    ArtifactBuildError::InvalidCandidate(
+                        "source has no persistent Product identity",
+                    )
+                })?;
+        Ok(ArtifactBuildSeed {
+            source,
+            location: Some(self.scope.resolve(&self.path)),
+            primary: Some(primary),
+            definitions: vec![self.definition.clone()],
+            settings: normalized,
+            target: Vec::new(),
+            format: FormatKind::new(D::Codec::RUNTIME_KIND).map_err(|_| {
+                ArtifactBuildError::InvalidCandidate("invalid compiled Runtime format")
+            })?,
+            format_version: FormatVersion::new(D::Codec::RUNTIME_VERSION).ok_or(
+                ArtifactBuildError::InvalidCandidate("invalid compiled Runtime version"),
+            )?,
+        })
+    }
+
+    fn expected_digest(&self, path: &AssetPath) -> Option<ArtifactContentDigest> {
+        let digests = self.source_digests?;
+        if path == &self.path {
+            Some(digests.primary)
+        } else if path.as_str().strip_suffix(".meta") == Some(self.path.as_str()) {
+            Some(digests.metadata)
+        } else {
+            None
         }
     }
 }
@@ -307,6 +403,11 @@ impl SourceInputs<'_> {
             }
             None => InputSnapshot::Missing,
         };
+        if let Some(expected) = self.request.expected_digest(path)
+            && snapshot.digest() != Some(expected)
+        {
+            return Err(ArtifactBuildError::Stale);
+        }
         let bytes = snapshot.bytes().cloned();
         self.inputs.insert(
             canonical,
@@ -488,56 +589,23 @@ where
     D: SourceAssetBuild,
     D::Settings: Serialize,
 {
-    if request.definition.id != D::BUILD_ID
-        || request.definition.revision.get() != D::BUILD_REVISION
-    {
-        return Err(ArtifactBuildError::InvalidCandidate(
-            "compiled source build definition mismatch",
-        ));
-    }
+    request.validate_definition::<D>()?;
     let import_limits = D::limits();
-    let metadata_limit = AssetMetaFileLimits::default().encoded_bytes();
-    let fixed_work = import_limits
-        .work_bytes()
-        .get()
-        .checked_add(import_limits.retained_bytes().get())
-        .and_then(|bytes| {
-            metadata_limit
-                .get()
-                .checked_mul(8)
-                .and_then(|metadata| bytes.checked_add(metadata))
-        })
-        .ok_or(ArtifactBuildError::Overflow)?;
-    let _operation = store.reserve_work(fixed_work)?;
+    let _operation = reserve_source_work(store, import_limits)?;
     let mut inputs = SourceInputs::new(store, request);
     inputs.trace = observations;
-    let (actual, normalized) = admit_metadata::<D::Settings>(
-        &mut inputs,
-        &AssetSourceKind::Other(D::SOURCE_KIND.to_owned()),
-        D::normalize_settings,
-    )?;
+    let (actual, normalized) = admit_source_metadata::<D>(&mut inputs)?;
     let primary = inputs
         .read(&request.path, import_limits.source_bytes(), true)?
         .ok_or(ArtifactBuildError::InvalidCandidate(
             "primary source is absent",
         ))?;
-    let product = AssetProductRef::new(actual.identity().stable_id(), ImportedProductId::PRIMARY)
-        .map_err(|_| {
-        ArtifactBuildError::InvalidCandidate("source has no persistent Product identity")
-    })?;
-    let seed = ArtifactBuildSeed {
-        source: product,
-        location: Some(request.scope.resolve(&request.path)),
-        primary: Some(ArtifactContentDigest::of_bytes(&primary)),
-        definitions: vec![request.definition.clone()],
-        settings: normalized,
-        target: Vec::new(),
-        format: FormatKind::new(D::Codec::RUNTIME_KIND)
-            .map_err(|_| ArtifactBuildError::InvalidCandidate("invalid compiled Runtime format"))?,
-        format_version: FormatVersion::new(D::Codec::RUNTIME_VERSION).ok_or(
-            ArtifactBuildError::InvalidCandidate("invalid compiled Runtime version"),
-        )?,
-    };
+    let primary_digest = request.source_digests.map_or_else(
+        || ArtifactContentDigest::of_bytes(&primary),
+        |digests| digests.primary,
+    );
+    let seed = request.build_seed::<D>(&actual, normalized, primary_digest)?;
+    let product = seed.source;
     let reason = if let Some(group) = store.lookup_seed(&seed)? {
         if let Some(trace) = &mut inputs.trace {
             trace.begin_input_execution();
@@ -678,6 +746,41 @@ where
 
 fn is_missing(error: &FsError) -> bool {
     matches!(error, FsError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn reserve_source_work(
+    store: &ArtifactBuildStore,
+    import_limits: AssetImportLimits,
+) -> Result<ArtifactBuildLease, ArtifactBuildError> {
+    let metadata = metadata_work_bytes()?;
+    let fixed_work = import_limits
+        .work_bytes()
+        .get()
+        .checked_add(import_limits.retained_bytes().get())
+        .and_then(|bytes| bytes.checked_add(metadata))
+        .ok_or(ArtifactBuildError::Overflow)?;
+    store.reserve_work(fixed_work)
+}
+
+fn metadata_work_bytes() -> Result<usize, ArtifactBuildError> {
+    AssetMetaFileLimits::default()
+        .encoded_bytes()
+        .get()
+        .checked_mul(8)
+        .ok_or(ArtifactBuildError::Overflow)
+}
+
+fn admit_source_metadata<D: SourceAssetBuild>(
+    inputs: &mut SourceInputs<'_>,
+) -> Result<(AssetMetaIdentityCandidate, Vec<u8>), ArtifactBuildError>
+where
+    D::Settings: Serialize,
+{
+    admit_metadata::<D::Settings>(
+        inputs,
+        &AssetSourceKind::Other(D::SOURCE_KIND.to_owned()),
+        D::normalize_settings,
+    )
 }
 
 pub(super) fn admit_metadata<T: DeserializeOwned + Serialize>(

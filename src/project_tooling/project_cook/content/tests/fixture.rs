@@ -11,8 +11,8 @@ use crate::{
     app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
     asset::{
         AssetBuildSource, AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource,
-        AssetMeta, AssetMetaIdentity, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
-        RuntimeAssetCodec, SourceAssetImporter,
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetPathScope, AssetReferenceDemand,
+        AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec, SourceAssetImporter,
     },
     asset_build::ArtifactBuildLimits,
     core::{ByteLimit, ItemLimit},
@@ -38,7 +38,7 @@ pub(super) const OPTIONAL: &str = "assets/build-only.bin";
 const COMPONENT: &str = "test.cook.SharedCompound";
 const PREFIX: &str = "nara-shared-cook-content-";
 static NEXT: AtomicU64 = AtomicU64::new(0);
-static BUILDS: [AtomicUsize; 5] = [const { AtomicUsize::new(0) }; 5];
+static BUILDS: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
 
 pub(super) fn product(tag: u8) -> AssetProductRef {
     AssetProductRef::new(
@@ -66,8 +66,13 @@ fn diagnostic() -> Diagnostic {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Source {
-    value: u8,
-    auxiliary: ImportedProductId,
+    rows: [u8; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Mapping {
+    assignments: [(ImportedProductId, usize); 2],
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +81,7 @@ pub(super) struct Compound {
     pub source: StableAssetId,
     pub auxiliary: ImportedProductId,
     pub source_value: u8,
+    pub auxiliary_value: u8,
     pub build_value: Option<u8>,
 }
 
@@ -91,7 +97,7 @@ impl<const CASE: usize> AssetDomain for Domain<CASE> {
 }
 
 impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
-    type Settings = ();
+    type Settings = Mapping;
 
     const SOURCE_KIND: &'static str = "test.cook.shared-compound";
 
@@ -104,16 +110,28 @@ impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
     }
 
     fn prepare<E>(source: &mut AssetImportSource<'_, E>) -> Result<Compound, AssetImportError<E>> {
-        source
+        let metadata = source
             .metadata()
-            .admit::<()>()
+            .admit::<Mapping>()
             .map_err(|_| AssetImportError::domain(diagnostic()))?;
         let body: Source = serde_json::from_slice(source.bytes())
             .map_err(|_| AssetImportError::domain(diagnostic()))?;
+        let row = |product| {
+            metadata
+                .settings()
+                .assignments
+                .iter()
+                .find(|(id, _)| *id == product)
+                .and_then(|(_, index)| body.rows.get(*index))
+                .copied()
+                .ok_or_else(|| AssetImportError::domain(diagnostic()))
+        };
+        let auxiliary = auxiliary().product();
         Ok(Compound {
             source: source.metadata().identity().stable_id(),
-            auxiliary: body.auxiliary,
-            source_value: body.value,
+            auxiliary,
+            source_value: row(ImportedProductId::PRIMARY)?,
+            auxiliary_value: row(auxiliary)?,
             build_value: None,
         })
     }
@@ -125,7 +143,8 @@ impl<const CASE: usize> SourceAssetBuild for Domain<CASE> {
     const BUILD_ID: &'static str = "test.cook.shared-compound-build";
     const BUILD_REVISION: u32 = 1;
 
-    fn normalize_settings(settings: ()) -> Result<(), Diagnostic> {
+    fn normalize_settings(mut settings: Mapping) -> Result<Mapping, Diagnostic> {
+        settings.assignments.sort_unstable_by_key(|(_, row)| *row);
         Ok(settings)
     }
 
@@ -333,13 +352,6 @@ requested = ["runtime-2d"]
                 AssetSourceKind::Scene,
             );
         }
-        write_metadata(
-            &path,
-            SOURCE,
-            "shared.compound",
-            product(3).source(),
-            AssetSourceKind::Other(Domain::<CASE>::SOURCE_KIND.to_owned()),
-        );
         let root = host_fs::readable_directory(&path).unwrap();
         let manifest = root
             .open_file_exact(&RelativePath::new("nara.toml").unwrap())
@@ -370,6 +382,7 @@ requested = ["runtime-2d"]
             store,
         };
         fixture.write_source(b'S');
+        fixture.write_mapping([(ImportedProductId::PRIMARY, 0), (auxiliary().product(), 1)]);
         if let Some(value) = optional {
             fixture.write(OPTIONAL, &[value]);
         }
@@ -384,11 +397,45 @@ requested = ["runtime-2d"]
         self.write(
             SOURCE,
             &serde_json::to_vec(&Source {
-                value,
-                auxiliary: auxiliary().product(),
+                rows: [value, b'Q'],
             })
             .unwrap(),
         );
+    }
+
+    pub fn write_mapping(&self, assignments: [(ImportedProductId, usize); 2]) {
+        self.write(
+            "assets/shared.compound.meta",
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    product(3).source(),
+                    AssetPath::new("shared.compound").unwrap(),
+                    AssetSourceKind::Other(Domain::<CASE>::SOURCE_KIND.to_owned()),
+                ),
+                Mapping { assignments },
+            )
+            .to_json_string()
+            .unwrap()
+            .as_bytes(),
+        );
+    }
+
+    pub fn build_group(&self) -> VerifiedArtifactGroup {
+        let request = ArtifactSourceRequest::new(
+            self.root
+                .open_directory_exact(&RelativePath::new("assets").unwrap())
+                .unwrap(),
+            AssetPathScope::under(AssetSourcePath::new("assets").unwrap()),
+            AssetPath::new("shared.compound").unwrap(),
+            ArtifactBuildDefinition {
+                id: Domain::<CASE>::BUILD_ID.to_owned(),
+                revision: FormatVersion::new(Domain::<CASE>::BUILD_REVISION).unwrap(),
+                implementation: self.request().implementation,
+            },
+        );
+        build_source::<Domain<CASE>>(&self.store, &request, |_| Ok(()))
+            .unwrap()
+            .into_group()
     }
 
     pub fn builds(&self) -> usize {
