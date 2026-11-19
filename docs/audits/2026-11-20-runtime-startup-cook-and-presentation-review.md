@@ -142,3 +142,39 @@ Scoped engine correctness Clippy, strict Clippy for the independent Cook test, a
 consumer format checks pass. The three independent Cook cases pass again in
 `3123949d-7b9b-41b9-bde7-d94053385fdf` after the fixture's scoped large-error lint allowance for
 the original public error type.
+
+### Two-Level Game rotated wall contact
+
+The public Headless reproduction failed at the reported ninth step in
+`a913648d-2c13-400e-8a52-b888a2d7cd21`. In `6d48055`, the game checks the exact candidate pose
+with the same native shape intersection used for resume placement. On overlap it retries one
+sweep with the inward component removed using the wall's native contact normal. If the retry
+cannot be admitted, the last accepted pose is retained.
+
+The repaired public sequence stays capturable for all 36 ticks, continues sliding and rounds
+the south end of the wall. A second Runtime restored at step nine produces the same canonical
+state on each later tick. The source gameplay, collision and recovery cohort passes 29/29 in
+`f5ab2166-be91-4a87-87c8-559870848054`. The existing native DX12 reconstruction and the two
+source-free Cook and Player controls pass in separate runs.
+[Reproduction and repair evidence](../plans/2026-11-04-authored-collision-derivation-plan.md#rotated-character-pose-admission)
+
+### Typed source file spelling
+
+Windows run `ff7d4772-882c-4c69-bd5c-31f5ce5d6648` reproduced both incorrect Check receipts.
+In `ddabcab`, the first read of a typed source path verifies its stored spelling through the
+existing Assets capability. The typed source cache only holds verified paths. The public
+diagnostic preserves the requested `assets/audio/pickup.wav` and the file operation on mismatch.
+
+Check rejects the wrong pickup spelling and rejects a second alias after reading the correct
+name. Correcting the input passes Check and Cook, and the cooked Sound Bank decoder produces
+bit-identical PCM for both cues. The Two-Level cohort also covers source gameplay, collision and
+resume, plus source-free Cook and Player controls.
+[Sound Bank regression](../../samples/two-level-game/tests/cook_source.rs)
+
+The original source reader now reserves handle and name-query work together and refunds the
+handle charge when a subsequent encoded-read reservation is refused. The budget regression
+exercises both refusal points and then reads the original file in the same context. The final
+engine cohort passes 143/143 in `fd3e0484-a354-46e4-bf42-e5992bda6f88`. Two-Level passes 68/68 in
+`e2f42a30-4d88-4f25-be8b-b2fdec88fb57`, and the independently locked asset-domain cohort passes
+15/15 in `e8e11514-238a-45a3-9ccf-80f1a926df0a`. Scoped correctness Clippy passes for the
+engine and sample targets. Root and sample formatting and changed document links pass.

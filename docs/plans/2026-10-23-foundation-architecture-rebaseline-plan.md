@@ -1056,6 +1056,11 @@ pass 25 Windows public boot and owner cleanup tests. The [Cook consumer regressi
 pass 11 tests, including linked and embedded payloads, cache invalidation and a later Scene's
 dependency on an Image from an earlier source snapshot.
 
+Check and Cook now agree on stored names for typed source reads. The first typed source read
+proves exact spelling before caching bytes. Check rejects an incorrect case alias and reports
+the requested path. The Two-Level Sound Bank verifies the corrected spelling through decoded PCM.
+[Auxiliary spelling repair](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#typed-source-file-spelling)
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
@@ -2082,6 +2087,12 @@ assertions remain. Real headless body/private-structure rebuild adoption also pa
 original development Host. Owning correctness Clippy, formatting and document checks pass. Geometry
 preparation belongs at Scene/shape change; full-scene validation does not repeat on the movement
 path. This selects no general dynamics or physical-history restore. Full R10/R12/Foundation remains active.
+
+Commit `6d48055` checks the exact player endpoint before writing the game Transform. When the
+native sweep misses and the endpoint overlaps, the same controller can retry tangent to the
+native contact before admission. The public Headless regression keeps a rotated explorer
+capturable through contact, rounds the wall and reconstructs the same continued state in a
+fresh Runtime. [Rotated character repair](2026-11-04-authored-collision-derivation-plan.md#rotated-character-pose-admission)
 
 The [authored Sprite clip successor](2026-11-03-joint-motion-execution-plan.md#authored-sprite-clips-through-runtime-and-delivery)
 replaces the game's hardcoded frame selector with directly consumed immutable named resources.

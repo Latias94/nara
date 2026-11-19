@@ -1790,6 +1790,11 @@ the original Host; owning correctness Clippy, format and document checks also pa
 No dynamic native-history serialization, default Physics backend, numerical speed claim or full
 R10/R12/Foundation completion follows; Editor/UI/Dialogue product work stays paused.
 
+Two-Level Game checks the endpoint before writing the character Transform. On overlap, one
+native tangential retry starts from the previous accepted pose. The Headless regression covers
+36 rotated steps and canonical continuation after restoration at the original failing tick.
+[Rotated character repair](../../plans/2026-11-04-authored-collision-derivation-plan.md#rotated-character-pose-admission)
+
 The joint discontinuity unit adds semantic discontinuation to the existing CPU history lineage.
 Original clones cannot be refreshed through late admission, first preparation, target adaptation
 or retained candidate submission. Ordinary per-slot reset stays distinct. The independent two-View consumer
@@ -2331,6 +2336,13 @@ using the encoded Scenes, global Input and verified group dependencies. The inde
 Windows consumer run passes 11 tests, including actual pack decode, PNG drift and a later
 Scene's demand for stock data from an earlier snapshot. Engine 64/64 and Two-Level Cook 37/37
 pass. Complete explicit groups still undergo final reachability validation.
+
+Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
+source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
+Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and
+independent asset-domain 15/15 pass. The engine cohort also verifies release of transient handle
+reservations after both name-query and encoded-read budget refusal.
+[Typed source spelling repair](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#typed-source-file-spelling)
 
 The [task-result/replay publication correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
 at `e67bdca` / `0f979aa` closes review F9/F11 within their original owners. `OrderedTaskResults`

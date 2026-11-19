@@ -712,3 +712,39 @@ paused UI/Dialogue files remain byte-identical to their original receipt and are
 Verification uses Windows11/Rust1.95, serial jobs1, the original target and locked offline release builds.
 The meaningful runtime feature is delivered before further micro-optimization; no new benchmark,
 compact encoding, universal backend, worker or lifecycle authority is added. Commits remain local.
+
+## Rotated Character Pose Admission
+
+The November 20 review found that a valid Meadow pose at `(-30,-12)` with `0.01` radians of
+rotation became uncapturable on the ninth diagonal fixed step. Public Headless run
+`a913648d-2c13-400e-8a52-b888a2d7cd21`
+reproduces the failure at `(-12.836445,-32.380024)`. The direct Rapier probe from the eighth
+step's position returns zero callbacks with margin `0.01`. Native `contact` at the resulting
+pose reports `-2.2531033` signed distance, with the wall's outward normal `(-1,0)`. Changing
+either box from the baked convex hull to a native cuboid leaves the positive-margin miss in
+place, while zero-distance casts hit in all four combinations. These are installed Rapier 0.33.0
+and Parry 0.28.0 observations for the reproduced inputs.
+[November 20 review](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#game-and-integration-findings)
+
+In `6d48055`, the game admits the actual recomposed endpoint before writing its Transform.
+The existing actor shape, native sensor filter and immutable room index also define checkpoint and
+reconstruction placement. An overlapping endpoint provides the contacted wall. Its native
+contact normal removes the inward component of the requested displacement, then the same
+controller sweeps once from the last accepted pose. The game checks the resulting endpoint and
+retains the last accepted pose when it cannot admit a retry. A stationary tick reuses that pose.
+An in-range proposal that changes position adds one endpoint query against the existing BVH.
+Swept path coverage remains the native controller's responsibility. If the endpoint's contact
+normal cannot guide a safe retry, the character can stop at the corner. Godot likewise applies
+the motion accepted by its physics query before updating the body transform.
+[Pinned Godot move and writeback](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/2d/physics/physics_body_2d.cpp#L74-L123)
+
+The first repaired Headless run `f5ab2166-be91-4a87-87c8-559870848054` passes 29/29, covering
+the original fixed-step failure, continued tangential movement, capture on all 36 ticks, and
+canonical continuation in the original and a fresh Runtime restored at step nine. The original
+wall stops and slides, mirrored nonuniform actors, invalid placement, travel, Retry, save and
+fresh-process Restore all retain their controls.
+
+The Windows hardware DX12 reconstruction run `cdd8b57e-9928-4866-b3e3-26163dd9c283` passes its
+original keyboard, wall stop and slide, restored presentation, retained image replays and native
+cleanup trajectory. The rotated trajectory is qualified through the public Headless controller.
+Two source-free Cook and Player controls also pass in `12b6f820-2898-4ea3-94c8-eaf6438f6d12`.
