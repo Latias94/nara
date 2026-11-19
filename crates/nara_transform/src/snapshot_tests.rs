@@ -780,7 +780,7 @@ fn historical_mutation_fixed_resolve_finalize_capture_and_multistep_presentation
         runtime
             .world()
             .resource::<nara_app::RenderTime>()
-            .interpolation_alpha
+            .interpolation_alpha()
             > 0.0
     );
     assert!(matches!(
@@ -928,7 +928,9 @@ fn elapsed_resume_after_exact_step_presents_current_pose_without_paused_maintena
             status.fixed_steps,
             status.virtual_delta,
             status.fixed_remainder,
-            world.resource::<nara_app::RenderTime>().interpolation_alpha,
+            world
+                .resource::<nara_app::RenderTime>()
+                .interpolation_alpha(),
         )
     });
     assert_eq!(resumed[0], resumed[1]);
@@ -1218,7 +1220,10 @@ fn foreign_simulation_or_history_cannot_be_laundered_into_a_local_presentation()
         .spawn(Transform2d::from_translation(Vec2::new(100.0, 0.0)))
         .id();
     app.insert_resource(FixedTransformInterpolation).unwrap();
+    app.insert_resource(FixedTime::new(Duration::from_millis(20)).unwrap())
+        .unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::from_millis(10)).unwrap();
     check_world(&mut runtime, move |world| {
         use crate::presentation::{
             TransformHistory, capture_current, capture_previous, derive_render_projection,
@@ -1242,9 +1247,12 @@ fn foreign_simulation_or_history_cannot_be_laundered_into_a_local_presentation()
         capture_previous(world);
         complete_at(world, SpatialSnapshotPhase::Fixed).unwrap();
         capture_current(world);
-        world
-            .resource_mut::<nara_app::RenderTime>()
-            .interpolation_alpha = 0.5;
+        assert_eq!(
+            world
+                .resource::<nara_app::RenderTime>()
+                .interpolation_alpha(),
+            0.5
+        );
         derive_render_projection(world).unwrap();
         assert_eq!(
             presented_spatial_snapshot(world)
@@ -1287,7 +1295,10 @@ fn runtime_generation_change_discards_uncommitted_history_samples() {
     let mut app = spatial_app().unwrap();
     let entity = app.world_mut().unwrap().spawn(Transform2d::default()).id();
     app.insert_resource(FixedTransformInterpolation).unwrap();
+    app.insert_resource(FixedTime::new(Duration::from_millis(20)).unwrap())
+        .unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::from_millis(10)).unwrap();
     check_world(&mut runtime, move |world| {
         use crate::presentation::{capture_current, capture_previous, derive_render_projection};
         capture_previous(world);
@@ -1295,9 +1306,12 @@ fn runtime_generation_change_discards_uncommitted_history_samples() {
         world.get_mut::<Transform2d>(entity).unwrap().translation.x = 100.0;
         complete_at(world, SpatialSnapshotPhase::Fixed).unwrap();
         capture_current(world);
-        world
-            .resource_mut::<nara_app::RenderTime>()
-            .interpolation_alpha = 0.5;
+        assert_eq!(
+            world
+                .resource::<nara_app::RenderTime>()
+                .interpolation_alpha(),
+            0.5
+        );
         derive_render_projection(world).unwrap();
         assert_eq!(
             presented_spatial_snapshot(world)

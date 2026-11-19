@@ -99,8 +99,9 @@ fn nonzero_phase_preserves_local_history_and_matches_subsequent_tick_timing() {
         )
     );
     let render = candidate.world().resource::<RenderTime>();
-    assert_eq!(render.remainder, captured.remainder());
-    assert!((render.interpolation_alpha - 0.65).abs() < f32::EPSILON);
+    assert_eq!(render.fixed(), *candidate.world().resource::<FixedTime>());
+    assert_eq!(render.remainder(), captured.remainder());
+    assert!((render.interpolation_alpha() - 0.65).abs() < f32::EPSILON);
     assert!(matches!(
         candidate.capture_time_continuation(),
         Err(RuntimeTimeContinuationError::Rejected(

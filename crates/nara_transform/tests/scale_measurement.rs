@@ -436,7 +436,12 @@ fn run_timed_row(
             .status;
         assert_eq!(status.fixed_steps, 0);
         assert!(
-            (runtime.world().resource::<RenderTime>().interpolation_alpha - 0.5).abs()
+            (runtime
+                .world()
+                .resource::<RenderTime>()
+                .interpolation_alpha()
+                - 0.5)
+                .abs()
                 <= f32::EPSILON
         );
     }
@@ -518,7 +523,10 @@ fn run_timed_row(
             assert_eq!(status.fixed_steps, 0);
         }
         if interpolation {
-            let alpha = runtime.world().resource::<RenderTime>().interpolation_alpha;
+            let alpha = runtime
+                .world()
+                .resource::<RenderTime>()
+                .interpolation_alpha();
             assert!((alpha - 0.5).abs() <= f32::EPSILON);
             let expected = previous_actor + delta * alpha;
             let projected = presented_spatial_snapshot(runtime.world())
@@ -535,7 +543,10 @@ fn run_timed_row(
                 status.fixed_steps,
                 status.fixed_steps_capped,
                 usize::from(scenario != "static"),
-                runtime.world().resource::<RenderTime>().interpolation_alpha,
+                runtime
+                    .world()
+                    .resource::<RenderTime>()
+                    .interpolation_alpha(),
             ),
         );
         samples += 1;

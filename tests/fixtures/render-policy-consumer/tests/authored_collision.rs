@@ -229,7 +229,7 @@ impl Harness {
         );
         assert!(moving.tick > unprepared.tick);
         assert!(moving.body.translation.y < original.body.translation.y);
-        assert_eq!(moving.render_time.interpolation_alpha, 0.5);
+        assert_eq!(moving.render_time.interpolation_alpha(), 0.5);
         assert_ne!(moving.fixed.as_ref().unwrap().body_before, moving.body);
         assert!((moving.body_presented.z_axis.y - moving.body.translation.y).abs() > 0.000_1);
         let moving_output = self.publish(&moving);

@@ -1,4 +1,5 @@
 use super::*;
+use nara_app::{App, FixedTime, RuntimeInstance};
 use nara_core::{Color, Mat3, Vec2};
 use nara_render::{RenderTarget, RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect};
 use std::mem::{align_of, offset_of, size_of};
@@ -161,6 +162,13 @@ fn elapsed_wraps_with_integer_periods_and_never_rounds_to_the_next_period() {
 
 #[test]
 fn clocks_preserve_maximum_deltas_scale_pause_and_original_render_alpha() {
+    let mut app = App::new();
+    app.insert_resource(FixedTime::new(Duration::from_millis(16)).unwrap())
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::from_millis(10)).unwrap();
+    let render = *runtime.world().resource::<RenderTime>();
+    runtime.finish().unwrap();
     let uniform = WgpuViewUniform::capture(&view(), None).with_clocks(
         RealTime {
             elapsed: Duration::MAX,
@@ -172,11 +180,7 @@ fn clocks_preserve_maximum_deltas_scale_pause_and_original_render_alpha() {
             delta: Duration::MAX,
             frame: 0x1234_5678_9abc_def0,
         },
-        FixedTime::default(),
-        RenderTime {
-            interpolation_alpha: 0.625,
-            remainder: Duration::from_millis(4),
-        },
+        render,
         RuntimeTimeSettings::default()
             .with_time_scale(0.25)
             .unwrap()
@@ -195,6 +199,7 @@ fn clocks_preserve_maximum_deltas_scale_pause_and_original_render_alpha() {
     assert_eq!(uniform.virtual_frame, [0x9abc_def0, 0x1234_5678]);
     assert_eq!(uniform.time_scale, 0.25);
     assert_eq!(uniform.paused, 1);
+    assert_eq!(uniform.fixed_timestep, 0.016);
     assert_eq!(uniform.interpolation_alpha, 0.625);
     assert_eq!(uniform.spatial_interpolated, 0);
     assert_eq!(uniform.fixed_delta, 0.0);
@@ -205,10 +210,10 @@ fn clocks_preserve_maximum_deltas_scale_pause_and_original_render_alpha() {
 
 #[test]
 fn fixed_delta_is_the_latest_tick_and_steps_remain_a_separate_count() {
-    let mut app = nara_app::App::new();
+    let mut app = App::new();
     app.insert_resource(FixedTime::new(Duration::from_millis(10)).unwrap())
         .unwrap();
-    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     for (delta, steps, tick) in [
         (Duration::from_millis(35), 3, 3),
         (Duration::from_millis(2), 0, 3),
@@ -219,7 +224,6 @@ fn fixed_delta_is_the_latest_tick_and_steps_remain_a_separate_count() {
         let uniform = WgpuViewUniform::capture(&view(), None).with_clocks(
             *world.resource::<RealTime>(),
             *world.resource::<VirtualTime>(),
-            *world.resource::<FixedTime>(),
             *world.resource::<RenderTime>(),
             *world.resource::<RuntimeTimeSettings>(),
             true,

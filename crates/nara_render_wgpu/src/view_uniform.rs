@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use bytemuck::{Pod, Zeroable};
-use nara_app::{FixedTime, RealTime, RenderTime, RuntimeTimeSettings, VirtualTime};
+use nara_app::{RealTime, RenderTime, RuntimeTimeSettings, VirtualTime};
 use nara_render::{CapturedRenderTime, ExtractedView};
 
 pub(crate) const VIEW_UNIFORM_BYTES: u64 = nara_material::__STOCK_VIEW_UNIFORM_BYTES as u64;
@@ -62,7 +62,6 @@ impl WgpuViewUniform {
             Some(time) => uniform.with_clocks(
                 time.real(),
                 time.virtual_time(),
-                time.fixed(),
                 time.render(),
                 time.settings(),
                 time.spatial_interpolated(),
@@ -75,11 +74,11 @@ impl WgpuViewUniform {
         mut self,
         real: RealTime,
         virtual_time: VirtualTime,
-        fixed: FixedTime,
         render: RenderTime,
         settings: RuntimeTimeSettings,
         spatial_interpolated: bool,
     ) -> Self {
+        let fixed = render.fixed();
         (self.real_elapsed, self.real_period) = period_time(real.elapsed);
         (self.virtual_elapsed, self.virtual_period) = period_time(virtual_time.elapsed);
         (self.fixed_elapsed, self.fixed_period) = period_time(fixed.elapsed());
@@ -87,7 +86,7 @@ impl WgpuViewUniform {
         self.virtual_delta = virtual_time.delta.as_secs_f32();
         self.fixed_delta = fixed.delta().as_secs_f32();
         self.fixed_timestep = fixed.timestep().as_secs_f32();
-        self.interpolation_alpha = render.interpolation_alpha;
+        self.interpolation_alpha = render.interpolation_alpha();
         self.time_scale = settings.time_scale();
         self.clock_available = 1;
         self.paused = u32::from(settings.paused());

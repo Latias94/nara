@@ -113,7 +113,7 @@ pub fn expected_image(sample: &Sample) -> ExpectedImage {
         &sample.authored,
         previous,
         sample.body,
-        f64::from(sample.render_time.interpolation_alpha),
+        f64::from(sample.render_time.interpolation_alpha()),
         sample.paused,
     )
 }
@@ -221,7 +221,7 @@ pub fn assert_spatial(sample: &Sample) {
     let translation = presented_translation(
         previous,
         sample.body,
-        f64::from(sample.render_time.interpolation_alpha),
+        f64::from(sample.render_time.interpolation_alpha()),
         sample.paused,
     );
     assert_frame(

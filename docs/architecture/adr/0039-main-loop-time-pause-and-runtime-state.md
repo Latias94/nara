@@ -61,13 +61,14 @@ The product contract is:
 - **Fixed time** is the authoritative simulation tick domain. `FixedTime` exposes the current
   monotonic tick, per-tick delta, elapsed duration, whole-tick debt, and sub-tick remainder. It
   advances immediately before each fixed schedule run.
-- **Render interpolation** uses fixed overstep/interpolation data and must not mutate simulation
-  state.
-- Render extraction copies the existing clocks and time settings together with the validated
-  presented-spatial sample and actual interpolation decision. That immutable observation belongs
-  to its original capture; later preparation, target adaptation and replay cannot replace it
-  with Host time or a newer World sample. The clock remainder alone does not prove that spatial
-  interpolation was applied. Exact Step does not run Extract, so the preceding captured sample
+- **Render interpolation** reads the settled `RenderTime` sample. App publishes the completed
+  fixed clock, its timestep, and its remainder and interpolation fraction together. A timestep
+  change after the fixed schedule configures the next transaction and preserves this sample.
+- Render extraction copies the settled fixed sample, real and virtual clocks, and time settings
+  together with the validated presented-spatial sample and actual interpolation decision. Later
+  preparation, target adaptation and replay keep the original clock observation. The clock
+  remainder alone does not prove that spatial interpolation was applied. Exact Step does not
+  run Extract, so the preceding captured sample
   remains intact until the next ordinary presentation extraction. App frame, fixed tick and
   render transaction counters remain distinct. The render owner defines the bounded GPU
   projection of these facts without becoming another time owner.

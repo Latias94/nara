@@ -13,12 +13,12 @@ impl Default for ClearColor {
     }
 }
 
-#[cfg(test)]
-use nara_app::RuntimeGeneration;
 use nara_app::{
-    App, CoreStage, FixedTime, Plugin, PluginError, PluginPreflightContext, RealTime, RenderTime,
+    App, CoreStage, Plugin, PluginError, PluginPreflightContext, RealTime, RenderTime,
     RuntimeTimeSettings, VirtualTime,
 };
+#[cfg(test)]
+use nara_app::{FixedTime, RuntimeGeneration};
 #[cfg(test)]
 use nara_core::Vec2;
 use nara_ecs::{
@@ -741,7 +741,6 @@ struct ViewExtraction<'w, 's> {
     spatial: PresentedSpatialSnapshot2d<'w>,
     real_time: Res<'w, RealTime>,
     virtual_time: Res<'w, VirtualTime>,
-    fixed_time: Res<'w, FixedTime>,
     render_time: Res<'w, RenderTime>,
     time_settings: Res<'w, RuntimeTimeSettings>,
     primary_window_id: Option<Res<'w, PrimaryWindowId>>,
@@ -768,7 +767,6 @@ fn extract_views(
         spatial,
         real_time,
         virtual_time,
-        fixed_time,
         render_time,
         time_settings,
         primary_window_id,
@@ -781,7 +779,6 @@ fn extract_views(
     let captured_time = CapturedRenderTime::new(
         *real_time,
         *virtual_time,
-        *fixed_time,
         *render_time,
         *time_settings,
         spatial_stamp,

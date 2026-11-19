@@ -90,8 +90,8 @@ fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks
     assert_eq!(first.virtual_time().frame, 1);
     assert_eq!(first.fixed().tick(), 0);
     assert_eq!(first.fixed().steps_this_frame(), 0);
-    assert_eq!(first.render().remainder, TIMESTEP / 2);
-    assert_eq!(first.render().interpolation_alpha, 0.5);
+    assert_eq!(first.render().remainder(), TIMESTEP / 2);
+    assert_eq!(first.render().interpolation_alpha(), 0.5);
     assert!(!first.spatial_interpolated());
     let old_packet = capture_packet(&runtime);
     let old_views = old_packet.views().to_vec();
@@ -106,7 +106,7 @@ fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks
     assert_eq!(second.fixed().tick(), 2);
     assert_eq!(second.fixed().steps_this_frame(), 2);
     assert_eq!(second.fixed().elapsed(), TIMESTEP * 2);
-    assert_eq!(second.render().remainder, TIMESTEP / 2);
+    assert_eq!(second.render().remainder(), TIMESTEP / 2);
     assert_eq!(second.settings().time_scale(), 0.5);
     assert!(second.spatial_interpolated());
     let next_packet = capture_packet(&runtime);
@@ -128,6 +128,63 @@ fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks
 }
 
 #[test]
+fn changing_timestep_in_update_preserves_the_completed_view_clock_and_pose() {
+    let mut app = moving_camera_app();
+    app.add_systems(
+        CoreStage::Update,
+        |mut fixed: nara_ecs::ResMut<FixedTime>| {
+            if fixed.timestep() == TIMESTEP {
+                fixed.set_timestep(TIMESTEP / 2).unwrap();
+            }
+        },
+    )
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+
+    let before = runtime.drive(Duration::from_millis(55)).unwrap();
+    let before = before.frame().unwrap().status;
+    assert_eq!(before.fixed_tick, 2);
+    assert_eq!(before.fixed_remainder, Duration::from_millis(15));
+    let scheduled = runtime.world().resource::<FixedTime>();
+    assert_eq!(scheduled.timestep(), TIMESTEP / 2);
+    assert_eq!(scheduled.remainder(), Duration::from_millis(5));
+    assert_eq!(scheduled.debt(), TIMESTEP / 2);
+
+    let old = capture_packet(&runtime);
+    let clock = old.captured_time().unwrap();
+    assert_eq!(clock.fixed().timestep(), TIMESTEP);
+    assert_eq!(clock.fixed().delta(), TIMESTEP);
+    assert_eq!(clock.fixed().remainder(), before.fixed_remainder);
+    assert_eq!(clock.fixed().debt(), Duration::ZERO);
+    assert_eq!(clock.render().interpolation_alpha(), 0.75);
+    assert!(clock.spatial_interpolated());
+    let center = old.views()[0].mapping.clip_to_world(Vec2::ZERO);
+    assert!(center.abs_diff_eq(Vec2::new(1.75, 0.0), 1.0e-5));
+
+    let after = runtime.drive(Duration::ZERO).unwrap();
+    let after = after.frame().unwrap().status;
+    assert_eq!(after.fixed_tick, 3);
+    assert_eq!(after.fixed_steps, 1);
+    assert_eq!(after.fixed_elapsed, Duration::from_millis(50));
+    let clock_after = assert_current_sample(&runtime);
+    assert_eq!(clock_after.fixed().timestep(), TIMESTEP / 2);
+    assert_eq!(clock_after.fixed().delta(), TIMESTEP / 2);
+    assert_eq!(clock_after.fixed().remainder(), Duration::from_millis(5));
+    assert_eq!(clock_after.render().interpolation_alpha(), 0.5);
+    assert!(clock_after.spatial_interpolated());
+    let new = capture_packet(&runtime);
+    assert!(
+        new.views()[0]
+            .mapping
+            .clip_to_world(Vec2::ZERO)
+            .abs_diff_eq(Vec2::new(2.5, 0.0), 1.0e-5)
+    );
+    runtime.finish().unwrap();
+    assert_eq!(old.captured_time(), Some(clock));
+    assert_eq!(old.views()[0].mapping.clip_to_world(Vec2::ZERO), center);
+}
+
+#[test]
 fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
     let mut runtime = RuntimeInstance::start(moving_camera_app()).unwrap();
     runtime.drive(TIMESTEP * 2 + TIMESTEP / 2).unwrap();
@@ -144,7 +201,7 @@ fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
     assert_eq!(paused.virtual_time().delta, Duration::ZERO);
     assert_eq!(paused.fixed().tick(), 2);
     assert_eq!(paused.fixed().steps_this_frame(), 0);
-    assert_eq!(paused.render().interpolation_alpha, 0.5);
+    assert_eq!(paused.render().interpolation_alpha(), 0.5);
     assert!(!paused.spatial_interpolated());
     let paused_views = runtime.world().resource::<ExtractedViews>().clone();
     let paused_packet = capture_packet(&runtime);
@@ -180,7 +237,11 @@ fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
         paused.virtual_time().elapsed + TIMESTEP
     );
     assert_eq!(after_step.fixed().tick(), 3);
-    assert_eq!(after_step.render(), paused.render());
+    assert_eq!(after_step.render().remainder(), paused.render().remainder());
+    assert_eq!(
+        after_step.render().interpolation_alpha(),
+        paused.render().interpolation_alpha()
+    );
     assert!(!after_step.spatial_interpolated());
     assert_eq!(after_step_packet.frame_index(), 3);
     assert_ne!(after_step_packet.frame_index(), after_step.real().frame);
@@ -222,7 +283,7 @@ fn elapsed_resume_after_exact_step_captures_the_settled_pose_and_retains_it() {
     assert_eq!(sample.virtual_time().delta, Duration::ZERO);
     assert_eq!(sample.fixed().tick(), 3);
     assert_eq!(sample.fixed().remainder(), TIMESTEP / 2);
-    assert_eq!(sample.render().interpolation_alpha, 0.5);
+    assert_eq!(sample.render().interpolation_alpha(), 0.5);
     assert!(!sample.spatial_interpolated());
     let packet = capture_packet(&runtime);
     assert_eq!(packet.captured_time(), Some(sample));

@@ -201,7 +201,7 @@ pub(super) fn derive_render_projection(world: &mut World) -> Result<(), BevyErro
     let alpha = if paused {
         1.0
     } else {
-        world.resource::<RenderTime>().interpolation_alpha
+        world.resource::<RenderTime>().interpolation_alpha()
     };
     world.resource_scope(|world, mut history: Mut<TransformHistory>| {
         history.bind(world);

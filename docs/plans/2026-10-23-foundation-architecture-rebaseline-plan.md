@@ -2132,6 +2132,23 @@ repairs, explicit candidate API, real Reference observation and selected Windows
 Its bounded keyboard/mouse scope does not qualify the broader Input/motion work above. Neither
 preceding definition qualification nor the private count model substitutes for that evidence.
 
+### Settled Fixed Time During Presentation
+
+The [November 19 audit](../audits/2026-11-19-engine-workflow-review.md#other-defects-and-measurable-refactor-costs)
+observes a single frame with an old interpolation fraction and a new fixed timestep in the
+material View uniform. Keep the App's settled fixed state and its render fraction in one
+`RenderTime` sample. After the fixed schedule, a gameplay write to `FixedTime` selects the policy
+for the next transaction. Extract and material shaders consume the time sample paired with the
+actual presented pose. Exercise a changing timestep through an ordinary Runtime, a moving
+camera, and the existing independent Material shader pixel oracle. Keep exact Step, continuation,
+and old-packet replay in the affected verification.
+
+Windows release qualification covers 70 App and continuation tests, 107 hierarchy, Transform,
+Render and Winit tests, and five WGPU uniform tests. The independent DX12 shader readback
+records `16 ms / 12 ms / 0.75` on the change frame and `32 ms / 8 ms / 0.25` on its successor.
+It replays retained captures after camera and clock changes. Nextest
+`c46484b9-485c-48fb-8889-914c563c5802`.
+
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
 **Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md)

@@ -495,7 +495,7 @@ impl Sample {
             assert_eq!(time.real().elapsed, motion.real_elapsed);
             assert_eq!(time.virtual_time().elapsed, motion.virtual_elapsed);
             assert_eq!(
-                time.render().interpolation_alpha,
+                time.render().interpolation_alpha(),
                 motion.interpolation_alpha
             );
             assert_eq!(time.settings().paused(), motion.paused);

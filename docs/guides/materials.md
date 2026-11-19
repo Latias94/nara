@@ -462,7 +462,7 @@ Choose the clock domain explicitly:
 | --- | --- |
 | `real_elapsed`, `real_delta` | Original unscaled App time, including paused maintenance |
 | `virtual_elapsed`, `virtual_delta` | Original scaled, pausable App time |
-| `fixed_elapsed`, `fixed_delta`, `fixed_timestep`, `fixed_steps` | Original fixed clock; delta is the latest tick's delta, while steps can be zero in this App frame |
+| `fixed_elapsed`, `fixed_delta`, `fixed_timestep`, `fixed_steps` | Fixed clock settled for this frame. A timestep change during `Update` applies to the next fixed transaction. A frame without fixed steps has zero `fixed_delta`. |
 | `interpolation_alpha`, `spatial_interpolated` | Original render fraction and whether spatial interpolation actually ran; alpha alone cannot establish it |
 | `time_scale`, `paused`, `clock_available` | Original settings and explicit `0u`/`1u` flags |
 | `world_to_clip`, `clip_to_world`, `viewport` | Original homogeneous 2D mapping and physical `[x, y, width, height]` |

@@ -398,7 +398,8 @@ Shader Graph/frontends nor qualifies the still-active persistent, native and int
 
 The original Extract owner publishes an immutable observation of existing App clocks, time
 settings and validated presented-spatial identity atomically with its extracted views. The
-actual spatial interpolation decision accompanies the original RenderTime remainder/alpha.
+actual spatial interpolation decision accompanies the settled fixed clock and its remainder and
+alpha from `RenderTime`. Later gameplay writes to `FixedTime` configure the following transaction.
 Frame packets and target adaptation retain that exact observation. It is data, not authority
 to advance a World or accept history. A manually supplied view without this observation
 advertises unavailable clock data rather than borrowing the Host's current time.

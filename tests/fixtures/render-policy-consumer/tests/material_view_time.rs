@@ -55,6 +55,7 @@ const WIDTH: u32 = 64;
 const HEIGHT: u32 = 24;
 const VIEW_WIDTH: u32 = WIDTH / 2;
 const TIMESTEP: Duration = Duration::from_millis(16);
+const CHANGED_TIMESTEP: Duration = Duration::from_millis(32);
 const MATERIAL_ID: &str = "consumer.captured-view-time";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,7 +145,6 @@ impl Drop for WorldDropped {
 struct Clocks {
     real: RealTime,
     virtual_time: VirtualTime,
-    fixed: FixedTime,
     render: RenderTime,
     settings: RuntimeTimeSettings,
     interpolated: bool,
@@ -157,6 +157,8 @@ struct Sample {
     clocks: Clocks,
     cameras: [CameraConfiguration; 2],
     capture_count: usize,
+    expected_timestep: Duration,
+    expected_remainder: Duration,
 }
 
 fn material() -> Material2dBinding {
@@ -212,7 +214,8 @@ fn configure(
         .unwrap();
     app.insert_resource(WorldDropped(dropped)).unwrap();
     app.init_resource::<Captures>().unwrap();
-    app.add_systems(CoreStage::Update, update_cameras).unwrap();
+    app.add_systems(CoreStage::Update, update_cameras_and_timestep)
+        .unwrap();
     app.add_systems(
         CoreStage::Render,
         capture.in_set(WgpuPolicyCaptureSet::Publish),
@@ -259,7 +262,7 @@ fn configure(
     });
 }
 
-fn update_cameras(world: &mut World) {
+fn update_cameras_and_timestep(world: &mut World) {
     let requested = world
         .resource::<CameraState>()
         .pending
@@ -277,6 +280,11 @@ fn update_cameras(world: &mut World) {
             configuration.viewport_height as f32;
     }
     world.resource_mut::<CameraState>().current = configurations;
+    // This changes App cadence. The borrowed Rapier solver owns its integration timestep.
+    world
+        .resource_mut::<FixedTime>()
+        .set_timestep(CHANGED_TIMESTEP)
+        .unwrap();
 }
 
 fn capture(world: &mut World) {
@@ -295,7 +303,12 @@ fn capture(world: &mut World) {
 }
 
 impl Sample {
-    fn observe(runtime: &MotionRuntime, motion: MotionFrame) -> Self {
+    fn observe(
+        runtime: &MotionRuntime,
+        motion: MotionFrame,
+        expected_timestep: Duration,
+        expected_remainder: Duration,
+    ) -> Self {
         let sample = runtime.observe(|world| {
             let captures = world.resource::<Captures>();
             let input = captures
@@ -323,13 +336,14 @@ impl Sample {
                 clocks: Clocks {
                     real: *world.resource::<RealTime>(),
                     virtual_time: *world.resource::<VirtualTime>(),
-                    fixed: *world.resource::<FixedTime>(),
                     render: *world.resource::<RenderTime>(),
                     settings: *world.resource::<RuntimeTimeSettings>(),
                     interpolated: motion.spatial_interpolated,
                 },
                 cameras: cameras.current,
                 capture_count: captures.count,
+                expected_timestep,
+                expected_remainder,
             }
         });
         sample.assert_original();
@@ -346,17 +360,22 @@ impl Sample {
         let time = packet
             .captured_time()
             .expect("the original Extract time sample");
+        let fixed = time.fixed();
+        let render = time.render();
         assert_eq!(time.real(), self.clocks.real);
         assert_eq!(time.virtual_time(), self.clocks.virtual_time);
-        assert_eq!(time.fixed(), self.clocks.fixed);
-        assert_eq!(time.render(), self.clocks.render);
+        assert_eq!(fixed, self.clocks.render.fixed());
+        assert_eq!(render, self.clocks.render);
+        assert_eq!(fixed.timestep(), self.expected_timestep);
+        assert_eq!(render.remainder(), self.expected_remainder);
+        assert_eq!(render.interpolation_alpha(), self.expected_alpha());
         assert_eq!(time.settings(), self.clocks.settings);
         assert_eq!(time.spatial_stamp(), self.motion.stamp);
         assert_eq!(time.spatial_interpolated(), self.clocks.interpolated);
         assert_eq!(time.real().elapsed, self.motion.real_elapsed);
         assert_eq!(time.virtual_time().elapsed, self.motion.virtual_elapsed);
         assert_eq!(
-            time.render().interpolation_alpha,
+            render.interpolation_alpha(),
             self.motion.interpolation_alpha
         );
         assert_eq!(time.settings().paused(), self.motion.paused);
@@ -416,8 +435,17 @@ impl Sample {
         }
     }
 
+    fn expected_alpha(&self) -> f32 {
+        let remainder = self.expected_remainder.as_nanos() as f64;
+        let timestep = self.expected_timestep.as_nanos() as f64;
+        (remainder / timestep) as f32
+    }
+
     fn expected(&self) -> Vec<[u8; 4]> {
         let mut pixels = vec![[0; 4]; (WIDTH * HEIGHT) as usize];
+        let clock = self.clocks;
+        let fixed = clock.render.fixed();
+        let alpha = self.expected_alpha();
         for (index, configuration) in self.cameras.into_iter().enumerate() {
             let camera_x = configuration.x;
             let camera_y = configuration.y;
@@ -442,7 +470,6 @@ impl Sample {
             assert!(top + height <= HEIGHT);
             let probes = configuration.probe_bytes();
             let viewport_byte = ((VIEW_WIDTH + HEIGHT) / 2 + index as u32 * VIEW_WIDTH / 2) as u8;
-            let clock = self.clocks;
             let rows = [
                 [
                     time_byte(clock.real.elapsed),
@@ -453,13 +480,13 @@ impl Sample {
                 [
                     time_byte(clock.real.delta),
                     time_byte(clock.virtual_time.delta),
-                    (16 + 7 * (clock.fixed.tick() % 32)) as u8 + viewport_byte,
+                    (16 + 7 * (fixed.tick() % 32)) as u8 + viewport_byte,
                     255,
                 ],
                 [
-                    time_byte(clock.fixed.elapsed()),
-                    time_byte(clock.fixed.delta()),
-                    time_byte(clock.fixed.timestep()),
+                    time_byte(fixed.elapsed()),
+                    time_byte(fixed.delta()),
+                    time_byte(self.expected_timestep),
                     255,
                 ],
                 [
@@ -468,8 +495,8 @@ impl Sample {
                     16 + 64 * u8::from(clock.interpolated)
                         + 32 * u8::from(clock.settings.paused())
                         + (clock.settings.time_scale() * 16.0).round() as u8
-                        + (clock.render.interpolation_alpha * 8.0).round() as u8
-                        + 4 * clock.fixed.steps_this_frame() as u8,
+                        + (alpha * 8.0).round() as u8
+                        + 4 * fixed.steps_this_frame() as u8,
                     255,
                 ],
             ];
@@ -516,10 +543,15 @@ struct Harness {
 }
 
 impl Harness {
-    fn sample(&mut self, delta: Duration) -> Sample {
+    fn sample(
+        &mut self,
+        delta: Duration,
+        expected_timestep: Duration,
+        expected_remainder: Duration,
+    ) -> Sample {
         let runtime = self.motion.as_mut().unwrap();
         let motion = runtime.drive(delta);
-        Sample::observe(runtime, motion)
+        Sample::observe(runtime, motion, expected_timestep, expected_remainder)
     }
 
     fn publish(&mut self, producer_index: usize, sample: &Sample) -> usize {
@@ -748,17 +780,17 @@ impl Harness {
         for _ in 0..3 {
             self.producers.push(self.host.create_producer().unwrap());
         }
-        let zero = self.sample(Duration::ZERO);
+        let zero = self.sample(Duration::ZERO, TIMESTEP, Duration::ZERO);
         assert_eq!(zero.capture_count, 1);
-        assert_eq!(zero.clocks.fixed.tick(), 0);
-        assert_eq!(zero.clocks.fixed.steps_this_frame(), 0);
+        assert_eq!(zero.clocks.render.fixed().tick(), 0);
+        assert_eq!(zero.clocks.render.fixed().steps_this_frame(), 0);
         assert!(!zero.clocks.interpolated);
         self.publish(0, &zero);
 
-        let a = self.sample(TIMESTEP * 2 + TIMESTEP / 2);
+        let a = self.sample(TIMESTEP * 2 + TIMESTEP / 2, TIMESTEP, TIMESTEP / 2);
         assert_eq!(a.capture_count, 2);
-        assert_eq!(a.clocks.fixed.tick(), 2);
-        assert_eq!(a.clocks.fixed.steps_this_frame(), 2);
+        assert_eq!(a.clocks.render.fixed().tick(), 2);
+        assert_eq!(a.clocks.render.fixed().steps_this_frame(), 2);
         assert!((a.motion.interpolation_alpha - 0.5).abs() < 1e-5);
         assert!((a.motion.kinematic.x - 0.375).abs() < 1e-5);
         assert!((a.motion.fixed_positions[0].x - 0.5).abs() < 1e-5);
@@ -775,7 +807,8 @@ impl Harness {
             assert_eq!(world.resource::<CameraState>().current, INITIAL_CAMERAS);
             assert_eq!(world.resource::<Captures>().count, a.capture_count);
         });
-        let b = self.sample(TIMESTEP / 4);
+        // This frame settles 8 ms + 4 ms at the original 16 ms cadence before Update.
+        let b = self.sample(TIMESTEP / 4, TIMESTEP, Duration::from_millis(12));
         assert_eq!(a.cameras, INITIAL_CAMERAS);
         assert_eq!(b.cameras, CHANGED_CAMERAS);
         assert!(self.camera_pending.lock().unwrap().is_none());
@@ -797,8 +830,11 @@ impl Harness {
             }
         }
         assert_eq!(b.capture_count, 3);
-        assert_eq!(b.clocks.fixed.tick(), 2);
-        assert_eq!(b.clocks.fixed.steps_this_frame(), 0);
+        let b_fixed = b.clocks.render.fixed();
+        assert_eq!(b_fixed.tick(), 2);
+        assert_eq!(b_fixed.steps_this_frame(), 0);
+        assert_eq!(b_fixed.elapsed(), Duration::from_millis(32));
+        assert_eq!(b_fixed.delta(), Duration::ZERO);
         assert_eq!(
             b.clocks.virtual_time.elapsed - a.clocks.virtual_time.elapsed,
             TIMESTEP / 4
@@ -813,6 +849,7 @@ impl Harness {
 
         self.motion.as_mut().unwrap().set_time_scale(0.5);
         self.motion.as_ref().unwrap().observe(|world| {
+            assert_eq!(world.resource::<FixedTime>().timestep(), CHANGED_TIMESTEP);
             assert_eq!(world.resource::<Captures>().count, b.capture_count);
             assert_eq!(
                 world
@@ -825,13 +862,21 @@ impl Harness {
                 b.input.packet().captured_time()
             );
         });
-        let scaled = self.sample(TIMESTEP);
+        // 56 ms at half speed adds 28 ms. The 40 ms pending time runs one 32 ms tick.
+        let scaled = self.sample(
+            Duration::from_millis(56),
+            CHANGED_TIMESTEP,
+            Duration::from_millis(8),
+        );
         assert_eq!(scaled.capture_count, 4);
         assert_eq!(scaled.clocks.settings.time_scale(), 0.5);
-        assert_eq!(scaled.clocks.real.delta, TIMESTEP);
-        assert_eq!(scaled.clocks.virtual_time.delta, TIMESTEP / 2);
-        assert_eq!(scaled.clocks.fixed.tick(), 3);
-        assert_eq!(scaled.clocks.fixed.steps_this_frame(), 1);
+        assert_eq!(scaled.clocks.real.delta, Duration::from_millis(56));
+        assert_eq!(scaled.clocks.virtual_time.delta, Duration::from_millis(28));
+        let scaled_fixed = scaled.clocks.render.fixed();
+        assert_eq!(scaled_fixed.tick(), 3);
+        assert_eq!(scaled_fixed.steps_this_frame(), 1);
+        assert_eq!(scaled_fixed.elapsed(), Duration::from_millis(64));
+        assert_eq!(scaled_fixed.delta(), CHANGED_TIMESTEP);
         assert!((scaled.motion.kinematic.x - 0.5625).abs() < 1e-5);
         assert!(scaled.clocks.interpolated);
         assert_ne!(
@@ -841,10 +886,14 @@ impl Harness {
         self.publish(0, &scaled);
 
         self.motion.as_mut().unwrap().pause();
-        let paused = self.sample(Duration::from_millis(125));
+        let paused = self.sample(
+            Duration::from_millis(125),
+            CHANGED_TIMESTEP,
+            Duration::from_millis(8),
+        );
         assert_eq!(paused.capture_count, 6);
         assert!(paused.motion.paused);
-        assert_eq!(paused.clocks.fixed.tick(), scaled.clocks.fixed.tick());
+        assert_eq!(paused.clocks.render.fixed().tick(), scaled_fixed.tick());
         assert_eq!(
             paused.clocks.virtual_time.elapsed,
             scaled.clocks.virtual_time.elapsed
@@ -885,17 +934,17 @@ impl Harness {
             ));
             assert_eq!(
                 world.resource::<VirtualTime>().elapsed,
-                paused.clocks.virtual_time.elapsed + TIMESTEP
+                paused.clocks.virtual_time.elapsed + CHANGED_TIMESTEP
             );
             assert_eq!(
                 world.resource::<RealTime>().elapsed,
                 paused.clocks.real.elapsed
             );
         });
-        let stepped = self.sample(Duration::ZERO);
+        let stepped = self.sample(Duration::ZERO, CHANGED_TIMESTEP, Duration::from_millis(8));
         assert_eq!(stepped.capture_count, paused.capture_count + 1);
         assert_eq!(stepped.motion.stamp.frame, stamp.frame + 1);
-        assert_eq!(stepped.clocks.fixed.tick(), 4);
+        assert_eq!(stepped.clocks.render.fixed().tick(), 4);
         assert_eq!(stepped.motion.kinematic, poses[0]);
         assert!(!stepped.clocks.interpolated);
         assert!(stepped.clocks.real.frame > stepped.input.packet().frame_index());

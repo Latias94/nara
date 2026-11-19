@@ -367,7 +367,7 @@ fn observe_presented(
         stamp: spatial.stamp().unwrap(),
         virtual_elapsed: virtual_time.elapsed,
         real_elapsed: real_time.elapsed,
-        interpolation_alpha: render_time.interpolation_alpha,
+        interpolation_alpha: render_time.interpolation_alpha(),
         spatial_interpolated: spatial.spatial_interpolated().unwrap(),
         paused: settings.paused(),
         kinematic: spatial.global(actors.kinematic).unwrap().translation(),

@@ -294,7 +294,7 @@ fn resume_settles_a_long_paused_wait_and_preserves_the_next_tick_phase() {
     let paused = counts(&session);
     assert_eq!(before.0.elapsed, Duration::from_millis(13));
     assert_eq!(before.1.elapsed, Duration::from_millis(13));
-    assert_eq!(before.3.interpolation_alpha, 0.65);
+    assert_eq!(before.3.interpolation_alpha(), 0.65);
     assert!(matches!(
         session.request_control(RuntimeControl::Pause),
         RuntimeControlRequestResult::Rejected(RuntimeControlRejection::InvalidState { .. })
@@ -434,8 +434,8 @@ fn hidden_paused_restore_preserves_refusal_eligibility_and_requires_original_mai
     assert_eq!(restored.2.tick(), before.2.tick());
     assert_eq!(restored.2.elapsed(), before.2.elapsed());
     assert_eq!(restored.2.remainder(), phase.pending());
-    assert_eq!(restored.3.remainder, phase.pending());
-    assert_eq!(restored.3.interpolation_alpha, 0.65);
+    assert_eq!(restored.3.remainder(), phase.pending());
+    assert_eq!(restored.3.interpolation_alpha(), 0.65);
     assert_eq!(counts(&session), paused);
     assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
     assert!(session.paused_frame_complete());
@@ -596,7 +596,7 @@ fn restore_applied_before_fault_invalidates_the_original_paused_frame() {
     assert_eq!(restored.1, before.1);
     assert_eq!(restored.2.tick(), before.2.tick());
     assert_eq!(restored.2.remainder(), phase.pending());
-    assert_eq!(restored.3.interpolation_alpha, 0.65);
+    assert_eq!(restored.3.interpolation_alpha(), 0.65);
     assert_eq!(counts(&session), paused);
     session.request_close();
     assert_eq!(session.execute(), WinitRunProgress::Retired);

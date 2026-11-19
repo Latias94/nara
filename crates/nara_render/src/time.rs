@@ -10,7 +10,6 @@ use nara_transform::SpatialSnapshotStamp;
 pub struct CapturedRenderTime {
     real: RealTime,
     virtual_time: VirtualTime,
-    fixed: FixedTime,
     render: RenderTime,
     settings: RuntimeTimeSettings,
     spatial_stamp: SpatialSnapshotStamp,
@@ -21,7 +20,6 @@ impl CapturedRenderTime {
     pub(crate) const fn new(
         real: RealTime,
         virtual_time: VirtualTime,
-        fixed: FixedTime,
         render: RenderTime,
         settings: RuntimeTimeSettings,
         spatial_stamp: SpatialSnapshotStamp,
@@ -30,7 +28,6 @@ impl CapturedRenderTime {
         Self {
             real,
             virtual_time,
-            fixed,
             render,
             settings,
             spatial_stamp,
@@ -50,7 +47,7 @@ impl CapturedRenderTime {
 
     #[must_use]
     pub const fn fixed(&self) -> FixedTime {
-        self.fixed
+        self.render.fixed()
     }
 
     #[must_use]

@@ -660,26 +660,37 @@ impl RuntimeTimeSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Resource)]
+/// Fixed clock and interpolation fraction settled together for presentation.
+///
+/// An exact step preserves this sample until the next elapsed frame. A subsequent change to
+/// the live [`FixedTime`] policy does not change the sample already settled for this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Resource)]
 pub struct RenderTime {
-    /// Fraction of the current fixed timestep represented by [`Self::remainder`].
-    pub interpolation_alpha: f32,
-    /// Sub-tick virtual time left after fixed work and catch-up policy complete.
-    pub remainder: Duration,
-}
-
-impl Default for RenderTime {
-    fn default() -> Self {
-        Self {
-            interpolation_alpha: 0.0,
-            remainder: Duration::ZERO,
-        }
-    }
+    fixed: FixedTime,
+    interpolation_alpha: f32,
 }
 
 impl RenderTime {
+    /// Fixed time used by the settled presentation sample.
+    #[must_use]
+    pub const fn fixed(&self) -> FixedTime {
+        self.fixed
+    }
+
+    /// Sub-tick virtual time left after fixed work and catch-up policy complete.
+    #[must_use]
+    pub const fn remainder(&self) -> Duration {
+        self.fixed.remainder
+    }
+
+    /// Fraction of the sample's fixed timestep represented by [`Self::remainder`].
+    #[must_use]
+    pub const fn interpolation_alpha(&self) -> f32 {
+        self.interpolation_alpha
+    }
+
     fn update_from_fixed(&mut self, fixed: &FixedTime) {
-        self.remainder = fixed.remainder;
+        self.fixed = *fixed;
         let alpha = fixed.remainder.as_secs_f64() / fixed.timestep.as_secs_f64();
         self.interpolation_alpha = (alpha as f32).min(f32::from_bits(1.0f32.to_bits() - 1));
     }
@@ -2633,7 +2644,7 @@ mod tests {
             status.fixed_steps,
             status.fixed_tick,
             status.fixed_remainder,
-            render_time.interpolation_alpha,
+            render_time.interpolation_alpha(),
         ));
     }
 
@@ -3217,9 +3228,9 @@ mod tests {
         assert_eq!(fixed.discarded_this_frame(), step * 3);
         assert!(fixed.capped_this_frame());
         let render = app.world().resource::<RenderTime>();
-        assert_eq!(render.remainder, step / 2);
-        assert!(render.interpolation_alpha < 1.0);
-        assert!((render.interpolation_alpha - 0.5).abs() < f32::EPSILON);
+        assert_eq!(render.remainder(), step / 2);
+        assert!(render.interpolation_alpha() < 1.0);
+        assert!((render.interpolation_alpha() - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -3244,7 +3255,7 @@ mod tests {
         assert_eq!(fixed.debt(), step * 3);
         assert_eq!(fixed.remainder(), step / 2);
         assert_eq!(fixed.discarded_this_frame(), Duration::ZERO);
-        let alpha = app.world().resource::<RenderTime>().interpolation_alpha;
+        let alpha = app.world().resource::<RenderTime>().interpolation_alpha();
         assert!((alpha - 0.5).abs() < f32::EPSILON);
 
         run_frame(&mut app, Duration::ZERO).unwrap();
