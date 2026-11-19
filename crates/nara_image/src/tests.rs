@@ -3333,6 +3333,109 @@ fn image_admission_rejects_a_mismatched_pair_at_capture() {
 
 #[cfg(feature = "serde")]
 #[test]
+fn image_plugin_sidecar_recreation_preserves_last_good_across_drains() {
+    use nara_asset::AssetSourceChange;
+
+    for split_drains in [false, true] {
+        let root = unique_temp_root();
+        let record = image_record("textures/player.png");
+        let texture_path = root.join(record.path().as_str());
+        let metadata_path = texture_path.with_extension("png.meta");
+        let pixels = [255, 0, 0, 255];
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                record.stable_id(),
+                root_alias(&record),
+                record.source_kind().clone(),
+            ),
+            ImageImportSettings::default(),
+        )
+        .to_json_string()
+        .unwrap();
+        fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+        fs::write(&texture_path, rgba_png(1, 1, &pixels)).unwrap();
+        fs::write(&metadata_path, &metadata).unwrap();
+
+        let mut app = app_with_image_plugin(&root, record.clone());
+        let world = app.world_mut().unwrap();
+        let handle = world
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(&record)
+            .unwrap();
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .meta_modified(record.path().clone())
+            .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        drive_image_jobs(&mut runtime);
+        let id = handle.id();
+        let initial_version = runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(id)
+            .unwrap()
+            .usable_version()
+            .unwrap();
+
+        fs::remove_file(&metadata_path).unwrap();
+        let mut changes = vec![AssetSourceChange::metadata_removed(record.path().clone())];
+        if split_drains {
+            edit_image_pipeline(
+                &mut runtime,
+                ImagePipelineEdit::SourceChangeBatch(std::mem::take(&mut changes)),
+            );
+            runtime.drive(Duration::ZERO).unwrap();
+            let world = runtime.world();
+            let states = world.resource::<AssetStates>();
+            let state = states.state(id).unwrap();
+            assert!(matches!(state.load_state(), LoadState::Failed { message }
+                if message == "image.import-source-failed"));
+            assert_eq!(state.usable_version(), Some(initial_version));
+            assert!(states.metadata_change_pending(id));
+            assert!(!states.source_removal_pending(id));
+            assert_eq!(
+                world
+                    .resource::<Assets<ImageAsset>>()
+                    .get(handle)
+                    .unwrap()
+                    .pixels(),
+                &pixels
+            );
+        }
+        fs::write(&metadata_path, &metadata).unwrap();
+        changes.push(AssetSourceChange::new(
+            record.path().clone(),
+            AssetSourceChangeKind::MetaModified,
+        ));
+        edit_image_pipeline(&mut runtime, ImagePipelineEdit::SourceChangeBatch(changes));
+        drive_image_jobs(&mut runtime);
+
+        let world = runtime.world();
+        let states = world.resource::<AssetStates>();
+        let state = states.state(id).unwrap();
+        assert_eq!(state.load_state(), &LoadState::Loaded);
+        assert_eq!(
+            state.usable_version(),
+            Some(AssetVersion::from_raw(initial_version.raw() + 1))
+        );
+        assert!(!states.metadata_change_pending(id));
+        assert_eq!(
+            world
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .pixels(),
+            &pixels
+        );
+        assert_eq!(world.resource::<ImageReloadStats>().removed, 0);
+        assert_eq!(world.resource::<ImageReloadStats>().pending, 0);
+        runtime.finish().unwrap();
+        remove_temp_root(&root);
+    }
+}
+
+#[cfg(feature = "serde")]
+#[test]
 fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");
@@ -3390,6 +3493,7 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
         .version(handle.id());
 
     fs::remove_file(&texture_path).unwrap();
+    fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
     for kind in [
         AssetSourceChangeKind::Removed,
         AssetSourceChangeKind::MetaModified,
@@ -4268,13 +4372,17 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         ),
         linear,
     );
+    fs::remove_file(&metadata_path).unwrap();
     fs::write(&metadata_path, changed_identity.to_json_string().unwrap()).unwrap();
     edit_image_pipeline(
         &mut runtime,
-        ImagePipelineEdit::SourceChange {
-            path: record.path().clone(),
-            kind: AssetSourceChangeKind::MetaModified,
-        },
+        ImagePipelineEdit::SourceChangeBatch(vec![
+            nara_asset::AssetSourceChange::metadata_removed(record.path().clone()),
+            nara_asset::AssetSourceChange::new(
+                record.path().clone(),
+                AssetSourceChangeKind::MetaModified,
+            ),
+        ]),
     );
     drive_image_jobs(&mut runtime);
 

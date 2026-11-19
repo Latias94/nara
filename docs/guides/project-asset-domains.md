@@ -454,12 +454,12 @@ records bounded retry inputs. Warm reuse replays current inputs and restores sub
 executing the domain. Superseded, cancelled or stale completions cannot adopt a value or edges.
 Currentness includes the original issuing generation resource, not only its numeric counter.
 
-Metadata notifications retain their actual raw origin while keeping the existing principal
-invalidation semantics. Explicit producers use `MetaModified` for sidecar changes and
-`AssetSourceChange::metadata_removed` for a sidecar deletion; ordinary `Removed` denotes a source
-file deletion. Coalescing preserves both actual input flags, so a sidecar-only change does not
-refresh a consumer that reads only the source bytes. The native watch translator supplies those
-facts automatically.
+Metadata notifications request principal metadata revalidation. Explicit producers use
+`MetaModified` for sidecar changes and `AssetSourceChange::metadata_removed` for sidecar deletion.
+Only deletion of the source file generates `Removed`. Coalescing preserves both raw input flags,
+so a sidecar-only change does not refresh a consumer that reads only the source bytes. An Image
+can retain its last-good publication while its sidecar is missing, then reload when the original
+identity is restored. The native watch translator supplies those facts automatically.
 
 Configure the adapter's `with_pending_limit`, original Task/store limits and dependency graph's
 `SourceSubscriptionLimits` for the workload. Admission refusal is diagnosed and retains existing

@@ -543,7 +543,7 @@ fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
 }
 
 #[test]
-fn meta_remove_maps_to_source_remove_change() {
+fn meta_remove_maps_to_metadata_revalidation() {
     let root = temp_root();
     fs::create_dir_all(root.join("textures")).unwrap();
     let meta = root.join("textures").join("player.png.meta");
@@ -562,6 +562,7 @@ fn meta_remove_maps_to_source_remove_change() {
             AssetSourcePath::new("textures/player.png").unwrap()
         )]
     );
+    assert_eq!(changes[0].kind(), AssetSourceChangeKind::MetaModified);
     remove_temp_root(&root);
 }
 

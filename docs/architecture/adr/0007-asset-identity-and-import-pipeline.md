@@ -112,6 +112,11 @@ canonical scope, including both rename endpoints and metadata changes. Do not wi
 authority or prepend a guessed Assets directory to a canonical location. Export uses exact
 project-relative source receipts and retains its existing revalidation owner.
 
+Source change coalescing tracks observations of the principal and its metadata sidecar
+independently. A sidecar deletion requests metadata revalidation. Principal removal still
+revokes the source even when a sidecar is edited or recreated in the same batch. Raw path
+subscriptions retain their original source/sidecar distinction.
+
 This adopts source addressing and resolution only. The
 [source-location design](../source-location-and-reference-resolution-design.md) records the complete
 consumer and alternatives; Source Scene dependency loading, package providers and mount execution

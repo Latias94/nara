@@ -224,11 +224,13 @@ fn check_exact_raw_sidecar_routing(
                     assert_eq!(image_requests.0.len(), image_observations);
                     let image_request = image_requests.0.last().unwrap();
                     assert_eq!(image_request.path(), &raw_source);
+                    let is_metadata = file == &metadata;
+                    let principal_removed = removed && !is_metadata;
                     assert_eq!(
                         image_request.source_change_kind(),
-                        if removed {
+                        if principal_removed {
                             AssetSourceChangeKind::Removed
-                        } else if file == &metadata {
+                        } else if is_metadata {
                             AssetSourceChangeKind::MetaModified
                         } else {
                             AssetSourceChangeKind::Modified
@@ -236,23 +238,20 @@ fn check_exact_raw_sidecar_routing(
                     );
                     assert_eq!(
                         image_request.request_kind(),
-                        if removed {
+                        if principal_removed {
                             AssetReloadRequestKind::Remove
                         } else {
                             AssetReloadRequestKind::LoadOrReload
                         }
                     );
-                    if removed {
+                    if principal_removed {
                         assert!(states.source_removal_pending(image_request.asset_id()));
                         assert!(
                             !states.metadata_change_after_source_removal(image_request.asset_id())
                         );
-                    } else if file == &metadata {
+                    } else if is_metadata {
                         assert!(states.metadata_change_pending(image_request.asset_id()));
-                        assert_eq!(
-                            states.metadata_change_after_source_removal(image_request.asset_id()),
-                            image_observations == 3
-                        );
+                        assert!(!states.source_removal_pending(image_request.asset_id()));
                     }
                 }
                 assert!(

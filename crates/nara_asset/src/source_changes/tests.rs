@@ -124,8 +124,8 @@ fn source_change_constructors_preserve_semantics_and_distinguish_raw_origins() {
         ),
         (
             AssetSourceChange::metadata_removed(path.clone()),
-            AssetSourceChangeKind::Removed,
-            false,
+            AssetSourceChangeKind::MetaModified,
+            true,
             false,
             true,
         ),
@@ -154,16 +154,19 @@ fn source_changes_preserve_raw_origins_and_removal_order_associatively_across_ba
                 let sequence = [first.clone(), second.clone(), third.clone()];
                 let last_source = sequence
                     .iter()
-                    .map(AssetSourceChange::kind)
-                    .rfind(|kind| *kind != AssetSourceChangeKind::MetaModified);
-                let metadata = sequence.iter().any(AssetSourceChange::metadata_dirty);
+                    .rfind(|change| change.raw_source_changed())
+                    .map(AssetSourceChange::kind);
+                let last_metadata = sequence
+                    .iter()
+                    .rev()
+                    .find_map(|change| change.observation.metadata);
                 let last_invalidation = sequence
                     .iter()
                     .map(AssetSourceChange::kind)
                     .rfind(|kind| *kind != AssetSourceChangeKind::Modified);
                 let expected_kind = match last_source {
                     Some(AssetSourceChangeKind::Removed) => AssetSourceChangeKind::Removed,
-                    _ if metadata => AssetSourceChangeKind::MetaModified,
+                    _ if last_metadata.is_some() => AssetSourceChangeKind::MetaModified,
                     _ => AssetSourceChangeKind::Modified,
                 };
                 let mut direct = AssetSourceChanges::new();
@@ -172,7 +175,15 @@ fn source_changes_preserve_raw_origins_and_removal_order_associatively_across_ba
                 }
                 let expected = direct.drain_coalesced();
                 assert_eq!(expected[0].kind(), expected_kind, "{sequence:?}");
-                assert_eq!(expected[0].metadata_dirty(), metadata, "{sequence:?}");
+                assert_eq!(
+                    expected[0].observation.metadata, last_metadata,
+                    "{sequence:?}"
+                );
+                assert_eq!(
+                    expected[0].metadata_dirty(),
+                    last_metadata.is_some(),
+                    "{sequence:?}"
+                );
                 assert_eq!(
                     expected[0].raw_source_changed(),
                     sequence.iter().any(AssetSourceChange::raw_source_changed),

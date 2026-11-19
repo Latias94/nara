@@ -118,7 +118,7 @@ fn real_file_and_sidecar_renames_map_both_ends_without_losing_atomic_save_order(
             .collect::<Vec<_>>(),
         [
             (&new_path, AssetSourceChangeKind::Removed, true),
-            (&old_path, AssetSourceChangeKind::Removed, false),
+            (&old_path, AssetSourceChangeKind::Removed, true),
         ]
     );
     // Metadata edits do not resurrect a removed file; source recreation retains that dirtiness.
@@ -136,7 +136,7 @@ fn real_file_and_sidecar_renames_map_both_ends_without_losing_atomic_save_order(
             .collect::<Vec<_>>(),
         [
             (&new_path, AssetSourceChangeKind::MetaModified, true),
-            (&old_path, AssetSourceChangeKind::Removed, false),
+            (&old_path, AssetSourceChangeKind::Removed, true),
         ]
     );
     remove_temp_root(&root);

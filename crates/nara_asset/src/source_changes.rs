@@ -33,16 +33,12 @@ impl AssetSourceChange {
         }
     }
 
-    /// Records a metadata sidecar removal with the principal's semantic removal behavior.
+    /// Records a sidecar removal that requires revalidating the principal's metadata.
     #[must_use]
     pub const fn metadata_removed(path: AssetSourcePath) -> Self {
         Self {
             path,
-            observation: PendingSourceChange {
-                raw_source_changed: false,
-                raw_metadata_changed: true,
-                ..PendingSourceChange::new(AssetSourceChangeKind::Removed)
-            },
+            observation: PendingSourceChange::metadata(SourceFileObservation::Removed),
         }
     }
 
@@ -51,27 +47,28 @@ impl AssetSourceChange {
         &self.path
     }
 
+    /// Returns the principal's reload intent. `Removed` requires a principal removal observation.
     #[must_use]
     pub const fn kind(&self) -> AssetSourceChangeKind {
         self.observation.kind()
     }
 
-    /// Metadata dirtiness survives a coalesced removal without implying source existence.
+    /// Whether a sidecar was changed, including across a coalesced principal removal.
     #[must_use]
     pub const fn metadata_dirty(&self) -> bool {
-        self.observation.metadata_dirty
+        self.raw_metadata_changed()
     }
 
     /// Whether any coalesced observation changed the raw principal input.
     #[must_use]
     pub const fn raw_source_changed(&self) -> bool {
-        self.observation.raw_source_changed
+        self.observation.source.is_some()
     }
 
     /// Whether any coalesced observation changed the raw metadata sidecar input.
     #[must_use]
     pub const fn raw_metadata_changed(&self) -> bool {
-        self.observation.raw_metadata_changed
+        self.observation.metadata.is_some()
     }
 
     #[cfg(any(feature = "runtime", test))]
@@ -194,10 +191,9 @@ fn checked_source_change_limit(
 ///
 /// Watch adapters and explicit authoring tools are producers. Every staged input batch and the
 /// retained set share the item and owned-path byte ceilings. Duplicate paths coalesce at admission
-/// with the latest source existence, metadata dirtiness, and relative metadata/removal order
-/// preserved; distinct paths retain
-/// their owned logical-path capacity
-/// until the next resolve stage drains the complete map. This authoring request intent is not
+/// with the latest observation for each input and the relative order of metadata changes and
+/// principal removals preserved. Distinct paths retain their owned logical-path capacity until
+/// the next resolve stage drains the complete map. This authoring request intent is not
 /// replay-recordable gameplay state.
 #[derive(Debug)]
 #[cfg_attr(feature = "runtime", derive(nara_ecs::Resource))]
@@ -208,56 +204,63 @@ pub struct AssetSourceChanges {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceFileObservation {
+    Present,
+    Removed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceInvalidation {
     Metadata,
-    Removal,
+    SourceRemoval,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingSourceChange {
-    removed: Option<bool>,
-    metadata_dirty: bool,
-    raw_source_changed: bool,
-    raw_metadata_changed: bool,
+    source: Option<SourceFileObservation>,
+    metadata: Option<SourceFileObservation>,
     // The rightmost relevant observation survives source-only edits and regrouped batches.
     last_invalidation: Option<SourceInvalidation>,
 }
 
 impl PendingSourceChange {
     const fn new(kind: AssetSourceChangeKind) -> Self {
+        match kind {
+            AssetSourceChangeKind::MetaModified => Self::metadata(SourceFileObservation::Present),
+            AssetSourceChangeKind::Modified => Self::source(SourceFileObservation::Present),
+            AssetSourceChangeKind::Removed => Self::source(SourceFileObservation::Removed),
+        }
+    }
+
+    const fn source(observation: SourceFileObservation) -> Self {
         Self {
-            removed: match kind {
-                AssetSourceChangeKind::Modified => Some(false),
-                AssetSourceChangeKind::Removed => Some(true),
-                AssetSourceChangeKind::MetaModified => None,
+            source: Some(observation),
+            metadata: None,
+            last_invalidation: match observation {
+                SourceFileObservation::Present => None,
+                SourceFileObservation::Removed => Some(SourceInvalidation::SourceRemoval),
             },
-            metadata_dirty: matches!(kind, AssetSourceChangeKind::MetaModified),
-            raw_source_changed: !matches!(kind, AssetSourceChangeKind::MetaModified),
-            raw_metadata_changed: matches!(kind, AssetSourceChangeKind::MetaModified),
-            last_invalidation: match kind {
-                AssetSourceChangeKind::MetaModified => Some(SourceInvalidation::Metadata),
-                AssetSourceChangeKind::Removed => Some(SourceInvalidation::Removal),
-                AssetSourceChangeKind::Modified => None,
-            },
+        }
+    }
+
+    const fn metadata(observation: SourceFileObservation) -> Self {
+        Self {
+            source: None,
+            metadata: Some(observation),
+            last_invalidation: Some(SourceInvalidation::Metadata),
         }
     }
 
     fn merge(&mut self, incoming: Self) {
-        if incoming.removed.is_some() {
-            self.removed = incoming.removed;
-        }
-        self.metadata_dirty |= incoming.metadata_dirty;
-        self.raw_source_changed |= incoming.raw_source_changed;
-        self.raw_metadata_changed |= incoming.raw_metadata_changed;
-        if incoming.last_invalidation.is_some() {
-            self.last_invalidation = incoming.last_invalidation;
-        }
+        self.source = incoming.source.or(self.source);
+        self.metadata = incoming.metadata.or(self.metadata);
+        self.last_invalidation = incoming.last_invalidation.or(self.last_invalidation);
     }
 
     const fn kind(self) -> AssetSourceChangeKind {
-        if matches!(self.removed, Some(true)) {
+        if matches!(self.source, Some(SourceFileObservation::Removed)) {
             AssetSourceChangeKind::Removed
-        } else if self.metadata_dirty {
+        } else if self.metadata.is_some() {
             AssetSourceChangeKind::MetaModified
         } else {
             AssetSourceChangeKind::Modified
