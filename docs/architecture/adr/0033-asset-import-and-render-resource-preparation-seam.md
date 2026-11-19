@@ -218,6 +218,20 @@ that other residency holders retired. Reconciliation preserves last-good and doe
 unchanged publication. Actual Image captures keep their original Runtime acquisition and
 decoded-output reservation through the last escaped TileSet or prepared-render owner.
 
+When the source resolver rejects a notification before routing, it can advance state without
+superseding the TileSet declaration. The resolver retains the exact preceding state revision
+across successive unrouted rejections. A state write outside that path ends the proof. TileSet
+also requires the original value slot before honoring the declaration claim. A new source
+request carries forward an authorized last-good Image. A revoked publication releases the
+owner's stored TileSet and Image reference. A newly decoded request or a Scene replacement can
+publish under the original claim when the declaration is unchanged. Each prepared mutation still
+requires its exact state revision at commit.
+
+During Scene replacement, an already-absent owned catalog record can be restored from the newly
+admitted snapshot or left absent. Both its old path and stable identity must be free. A conflicting
+registration rejects before mutation, and the Scene transaction rechecks the captured catalog
+before publishing.
+
 Content acquisition proves the actual Image dependency is present and Required in the captured
 base. The concrete publication owner additionally proves typed binding, actual Image identity and
 extent. The Scene/content adapter checks cell indices against that admitted atlas before live

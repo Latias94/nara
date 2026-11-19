@@ -29,11 +29,14 @@ impl CatalogChange {
         let mut prior_owned = BTreeSet::new();
         for record in owned {
             prior_owned.insert(record.path());
-            if current.record_for_path(record.path()) != Some(record) {
-                return Err(conflict());
-            }
-            if !target_by_path.contains_key(record.path()) {
-                assert!(database.remove_exact(record));
+            match current.record_for_path(record.path()) {
+                Some(existing) if existing == record => {
+                    if !target_by_path.contains_key(record.path()) {
+                        assert!(database.remove_exact(record));
+                    }
+                }
+                None if current.record_for_stable_id(record.stable_id()).is_none() => {}
+                _ => return Err(conflict()),
             }
         }
         let mut next_owned = Vec::new();

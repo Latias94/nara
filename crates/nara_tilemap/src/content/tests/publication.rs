@@ -535,6 +535,50 @@ fn source_claim_survives_reconciliation_but_rejects_foreign_desired_or_raw_stora
 }
 
 #[test]
+fn unrelated_state_writes_do_not_authorize_retirement_under_a_source_claim() {
+    let mut fixture = Fixture::new(TileSetAssetLimits::default());
+    let handle = fixture.request("a.png");
+    fixture.reconcile();
+    let claim = receipt(&fixture, handle);
+    let initial_slot = fixture.tilesets.slot_revision(handle);
+    let initial_version = fixture.states.version(handle.id());
+    fixture.states.set_loading(handle.id());
+    assert!(matches!(
+        fixture.owner.prepare_publications(
+            Vec::new(),
+            std::slice::from_ref(&claim),
+            &fixture.server,
+            Some(&fixture.database),
+            &fixture.tilesets,
+            &fixture.states,
+        ),
+        Err(TileSetAssetError::Superseded)
+    ));
+    fixture
+        .tilesets
+        .record_reload_failure(handle, &mut fixture.states, &mut fixture.events, "failed")
+        .unwrap();
+    assert_eq!(
+        fixture.states.state(handle.id()).unwrap().usable_version(),
+        initial_version
+    );
+    assert_eq!(fixture.tilesets.slot_revision(handle), initial_slot);
+    assert!(matches!(
+        fixture.owner.prepare_publications(
+            Vec::new(),
+            std::slice::from_ref(&claim),
+            &fixture.server,
+            Some(&fixture.database),
+            &fixture.tilesets,
+            &fixture.states,
+        ),
+        Err(TileSetAssetError::Superseded)
+    ));
+
+    assert!(fixture.tilesets.get(handle).is_some());
+}
+
+#[test]
 fn identical_source_rebound_to_another_scope_rotates_claim_and_refuses_stale_publication() {
     let mut fixture = Fixture::new(TileSetAssetLimits::default());
     let first_scope = AssetPathScope::under(AssetSourcePath::new("first/art").unwrap());

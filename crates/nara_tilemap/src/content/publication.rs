@@ -211,10 +211,12 @@ impl TileSetAssets {
         states: &AssetStates,
     ) -> Option<TileSetContentReceipt> {
         let entry = self.entries.get(&handle.id())?;
-        entry_is_current(entry, tilesets, states).then(|| TileSetContentReceipt {
-            handle,
-            claim: Arc::downgrade(&entry.claim),
-        })
+        entry
+            .owned_state_revision(tilesets, states)
+            .map(|_| TileSetContentReceipt {
+                handle,
+                claim: Arc::downgrade(&entry.claim),
+            })
     }
 
     /// Preflights a finite residency transition without publishing any TileSet or Image.
@@ -599,21 +601,11 @@ fn validate_claim(
 ) -> Result<(), TileSetAssetError> {
     if receipt.handle != entry.handle
         || !Weak::ptr_eq(&receipt.claim, &Arc::downgrade(&entry.claim))
-        || !entry_is_current(entry, tilesets, states)
+        || entry.owned_state_revision(tilesets, states).is_none()
     {
         return Err(TileSetAssetError::Superseded);
     }
     Ok(())
-}
-
-fn entry_is_current(
-    entry: &TileSetEntry,
-    tilesets: &Assets<TileSet>,
-    states: &AssetStates,
-) -> bool {
-    entry.error != Some(TileSetAssetError::Superseded)
-        && entry.slot == tilesets.slot_revision(entry.handle)
-        && entry.state == states.state_revision(entry.handle.id())
 }
 
 fn image_matches_input(image: &ImageContentSnapshot, input: &TileSetPublicationInput) -> bool {

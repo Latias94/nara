@@ -421,6 +421,27 @@ struct TileSetEntry {
     error: Option<TileSetAssetError>,
 }
 
+impl TileSetEntry {
+    /// Keeps the original declaration through a rejected notification in the same value slot.
+    fn owned_state_revision(
+        &self,
+        tilesets: &Assets<TileSet>,
+        states: &AssetStates,
+    ) -> Option<AssetStateRevision> {
+        if self.error == Some(TileSetAssetError::Superseded)
+            || self.slot != tilesets.slot_revision(self.handle)
+        {
+            return None;
+        }
+        let id = self.handle.id();
+        let revision = states.state_revision(id);
+        (self.state == revision
+            || (self.declaration.source().is_some()
+                && states.source_rejection_follows(id, &self.state)))
+        .then_some(revision)
+    }
+}
+
 /// Concrete reconciliation owner for TileSet declarations and exact Image dependencies.
 #[derive(Debug, Resource)]
 pub struct TileSetAssets {
@@ -555,24 +576,15 @@ impl TileSetAssets {
         let handle = server
             .reserve_record::<TileSet>(record)
             .map_err(TileSetAssetError::Asset)?;
-        let published = self
-            .entries
-            .get(&handle.id())
-            .filter(|entry| {
-                entry.slot == tilesets.slot_revision(handle)
-                    && entry.state == states.state_revision(handle.id())
-            })
-            .and_then(|entry| entry.published.clone());
-        let accepted_atlas = self
-            .entries
-            .get(&handle.id())
-            .and_then(|entry| entry.accepted_atlas);
-        if self.entries.get(&handle.id()).is_some_and(|entry| {
-            entry.declaration.same_declaration(&declaration)
+        let previous = self.entries.get(&handle.id());
+        let accepted_atlas = previous.and_then(|entry| entry.accepted_atlas);
+        let owned_state = previous.and_then(|entry| entry.owned_state_revision(tilesets, states));
+        let same_declaration =
+            previous.is_some_and(|entry| entry.declaration.same_declaration(&declaration));
+        if previous.is_some_and(|entry| {
+            same_declaration
                 && entry.active
-                && entry.slot == tilesets.slot_revision(handle)
-                && entry.state == states.state_revision(handle.id())
-                && entry.error != Some(TileSetAssetError::Superseded)
+                && owned_state.as_ref() == Some(&entry.state)
                 && entry.error != Some(TileSetAssetError::RetentionCapacity)
         }) {
             if let Some(entry) = self.entries.get_mut(&handle.id()) {
@@ -589,15 +601,10 @@ impl TileSetAssets {
             }
             return Ok(handle);
         }
-        let claim = self
-            .entries
-            .get(&handle.id())
-            .filter(|entry| {
-                entry.declaration.same_declaration(&declaration)
-                    && entry.slot == tilesets.slot_revision(handle)
-                    && entry.state == states.state_revision(handle.id())
-                    && entry.error != Some(TileSetAssetError::Superseded)
-            })
+        let previous = previous.filter(|_| owned_state.is_some());
+        let published = previous.and_then(|entry| entry.published.clone());
+        let claim = previous
+            .filter(|_| same_declaration)
             .map_or_else(|| Arc::new(()), |entry| Arc::clone(&entry.claim));
         states.set_loading(handle.id());
         self.entries.insert(
@@ -642,22 +649,28 @@ impl TileSetAssets {
         else {
             return Ok(false);
         };
-        if entry.error == Some(TileSetAssetError::Superseded)
-            || entry.slot != tilesets.slot_revision(handle)
-            || entry.state != states.state_revision(handle.id())
-        {
+        let Some(state) = entry.owned_state_revision(tilesets, states) else {
             return Err(TileSetAssetError::Superseded);
-        }
-        if !entry.active {
+        };
+        if !entry.active
+            && entry.error == Some(TileSetAssetError::InvalidSource)
+            && state == entry.state
+        {
             return Ok(true);
         }
         entry.active = false;
         states.set_loading(handle.id());
         let message = TileSetAssetError::InvalidSource.to_string();
-        if entry.published.is_some() {
+        if entry.published.is_some()
+            && states.published_slot_revision(handle.id()) == Some(&entry.slot)
+        {
             tilesets.record_reload_failure(handle, states, events, message)
         } else {
-            tilesets.record_load_failure(handle, states, events, message)
+            let result = tilesets.record_load_failure(handle, states, events, message);
+            if result.is_ok() {
+                entry.published = None;
+            }
+            result
         }
         .map_err(TileSetAssetError::State)?;
         entry.error = Some(TileSetAssetError::InvalidSource);
@@ -675,10 +688,7 @@ impl TileSetAssets {
         let Some(entry) = self.entries.get(&handle.id()) else {
             return Ok(false);
         };
-        if entry.error == Some(TileSetAssetError::Superseded)
-            || entry.slot != tilesets.slot_revision(handle)
-            || entry.state != states.state_revision(handle.id())
-        {
+        if entry.owned_state_revision(tilesets, states).is_none() {
             return Err(TileSetAssetError::Superseded);
         }
         let result = revoke(handle, tilesets, states, events);
@@ -706,10 +716,7 @@ impl TileSetAssets {
         else {
             return Ok(false);
         };
-        if entry.error == Some(TileSetAssetError::Superseded)
-            || entry.slot != tilesets.slot_revision(handle)
-            || entry.state != states.state_revision(handle.id())
-        {
+        if entry.owned_state_revision(tilesets, states).is_none() {
             return Err(TileSetAssetError::Superseded);
         }
         if !entry.active && entry.published.is_none() {
@@ -803,24 +810,34 @@ impl TileSetAssets {
         if entry.error == Some(TileSetAssetError::Superseded) {
             return;
         }
-        if entry.slot != tilesets.slot_revision(entry.handle)
-            || entry.state != states.state_revision(entry.handle.id())
-        {
+        let Some(state) = entry.owned_state_revision(tilesets, states) else {
             entry.published = None;
             entry.error = Some(TileSetAssetError::Superseded);
             refresh_entry(entry, tilesets, states);
             return;
+        };
+        if state != entry.state {
+            entry.active = false;
+            entry.observation = None;
         }
         let catalog_valid = entry
             .declaration
             .is_admitted(entry.handle, server, database);
-        let publication_revoked = entry.published.as_ref().is_some_and(|image| {
-            !image.is_authorized(server, states, images)
-                || !entry
-                    .declaration
-                    .published_image_is_admitted(image, database)
-        });
+        let tileset_revoked = entry.published.is_some()
+            && states.published_slot_revision(entry.handle.id()) != Some(&entry.slot);
+        let publication_revoked = tileset_revoked
+            || entry.published.as_ref().is_some_and(|image| {
+                !image.is_authorized(server, states, images)
+                    || !entry
+                        .declaration
+                        .published_image_is_admitted(image, database)
+            });
         if (!catalog_valid && entry.published.is_some()) || publication_revoked {
+            let keep_loading = entry.active
+                && catalog_valid
+                && states
+                    .state(entry.handle.id())
+                    .is_some_and(|state| state.load_state() == &LoadState::Loading);
             if let Err(error) = revoke(entry.handle, tilesets, states, events) {
                 states.invalidate_publication(entry.handle.id());
                 tilesets.remove(entry.handle);
@@ -830,6 +847,11 @@ impl TileSetAssets {
                 return;
             }
             entry.published = None;
+            if keep_loading {
+                states.set_loading(entry.handle.id());
+            } else if tileset_revoked {
+                entry.error = Some(TileSetAssetError::IdentityMismatch);
+            }
             refresh_entry(entry, tilesets, states);
         }
         if !catalog_valid {

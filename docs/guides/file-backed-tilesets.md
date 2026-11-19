@@ -63,6 +63,14 @@ First requests and dependency changes may use an authorized published Image even
 reload is pending or has failed. Only a cold Loading dependency without published content waits.
 Identity, publication and exact storage-slot checks still reject revoked or directly replaced data.
 
+When the source resolver rejects a notification before routing, the declaration keeps its claim
+while the original value slot and the resolver's state history match. A subsequent request retains
+eligible last-good while its new Image dependency is unavailable. A revoked publication releases
+its stored TileSet at reconciliation. Once the source is restored, the normal Scene replacement
+can restore the absent catalog record and publish the TileSet again. A replacement that does not
+use the TileSet can retire its declaration while the source is still absent. Both operations refuse
+a conflicting catalog entry at the original path or stable identity.
+
 Both Image and TileSet managed publication use `Assets<T>::mutation_baseline(handle, &states)`.
 It admits the actual typed store/state association, including a fresh empty initial slot, before
 capturing an owned `AssetMutationBaseline<T>`. A delayed owner consumes that same baseline through `commit_loaded`,

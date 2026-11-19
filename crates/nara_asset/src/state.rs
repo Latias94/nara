@@ -229,13 +229,20 @@ pub struct AssetStates {
     store_revision: Arc<()>,
     image_reload_authority: Option<Arc<()>>,
     states: BTreeMap<AssetId, AssetState>,
-    state_revisions: BTreeMap<AssetId, RevisionCounter>,
+    state_revisions: BTreeMap<AssetId, StateRevisionCounter>,
     publication_revisions: BTreeMap<AssetId, RevisionCounter>,
     image_recovery_revisions: BTreeMap<AssetId, RevisionCounter>,
     published_slots: BTreeMap<AssetId, AssetSlotRevision>,
     managed_slots: Mutex<BTreeMap<AssetId, AssetSlotRevision>>,
     metadata_dirty: BTreeMap<AssetId, AssetStateRevision>,
     removed_sources: BTreeMap<AssetId, Option<AssetStateRevision>>,
+}
+
+#[derive(Debug, Default)]
+struct StateRevisionCounter {
+    counter: RevisionCounter,
+    #[cfg(feature = "runtime")]
+    source_rejection_origin: Option<Box<AssetStateRevision>>,
 }
 
 impl Default for AssetStates {
@@ -358,7 +365,52 @@ impl AssetStates {
     /// Returns this store's identity plus the latest runtime-state write identity for this asset.
     #[must_use]
     pub fn state_revision(&self, id: AssetId) -> AssetStateRevision {
-        AssetStateRevision::new(&self.store_revision, self.state_revisions.get(&id))
+        AssetStateRevision::new(
+            &self.store_revision,
+            self.state_revisions.get(&id).map(|state| &state.counter),
+        )
+    }
+
+    /// Whether only source notifications rejected before routing changed this asset since `prior`.
+    ///
+    /// A subsequent state write outside that resolution path ends continuity. Callers still check
+    /// their own typed value and prepare against the current exact state revision before mutation.
+    #[cfg(feature = "runtime")]
+    #[must_use]
+    pub fn source_rejection_follows(&self, id: AssetId, prior: &AssetStateRevision) -> bool {
+        self.state_revisions
+            .get(&id)
+            .and_then(|state| state.source_rejection_origin.as_deref())
+            == Some(prior)
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn source_rejection_origin(&self, id: AssetId) -> Option<AssetStateRevision> {
+        let state = self.state_revisions.get(&id)?;
+        Some(
+            state
+                .source_rejection_origin
+                .as_deref()
+                .cloned()
+                .unwrap_or_else(|| {
+                    AssetStateRevision::new(&self.store_revision, Some(&state.counter))
+                }),
+        )
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn reject_source_observation(
+        &mut self,
+        id: AssetId,
+        origin: Option<AssetStateRevision>,
+        message: &'static str,
+    ) -> AssetVersion {
+        let version = self.reject_reload_request(id, message);
+        self.state_revisions
+            .get_mut(&id)
+            .expect("rejection advances the state revision")
+            .source_rejection_origin = origin.map(Box::new);
+        version
     }
 
     #[cfg(feature = "runtime")]
@@ -603,7 +655,13 @@ impl AssetStates {
     fn advance_state_revision(&mut self, id: AssetId) {
         self.state_revisions
             .entry(id)
-            .and_modify(RevisionCounter::advance)
+            .and_modify(|state| {
+                state.counter.advance();
+                #[cfg(feature = "runtime")]
+                {
+                    state.source_rejection_origin = None;
+                }
+            })
             .or_default();
         self.advance_image_recovery_revision(id);
     }

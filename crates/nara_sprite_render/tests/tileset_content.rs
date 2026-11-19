@@ -2,13 +2,15 @@ use std::{collections::VecDeque, time::Duration};
 
 use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
-    AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetServer, AssetSourceChanges,
-    AssetSourceKind, AssetSourcePath, AssetSourcePlugin, AssetStates, Assets, Handle,
-    ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion, LoadState,
-    ProjectAssetDatabase, SourceHash, StableAssetId,
+    AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetReloadDiagnostics, AssetServer,
+    AssetSourceChanges, AssetSourceKind, AssetSourcePath, AssetSourcePlugin, AssetStates,
+    AssetTaskUpdateSet, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId,
+    ImporterVersion, LoadState, ProjectAssetDatabase, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
-use nara_ecs::{Entity, Resource, World};
+use nara_ecs::{
+    Entity, Resource, World, bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
+};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
     HierarchyWriter,
@@ -28,7 +30,8 @@ use nara_sprite_render::{
 use nara_tasks::{TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskShutdownPolicy};
 use nara_tilemap::{
     TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, TileSetAssetError,
-    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetSource, Tilemap,
+    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetContent, TileSetContentReceipt,
+    TileSetSource, Tilemap,
 };
 use nara_transform::{Transform2d, TransformPlugin};
 
@@ -49,6 +52,11 @@ enum Action {
     },
     Remove,
     RemoveTileSetSource,
+    RestoreTileSetCatalog,
+    ModifyTileSetSource,
+    RejectTileSetSource,
+    RequestPendingTileSetDependency,
+    PublishPendingTileSetDependency,
 }
 
 fn apply_edit(world: &mut World) {
@@ -71,38 +79,12 @@ fn apply_edit(world: &mut World) {
             byte,
             update_atlas,
         } => {
-            let image = image(&image_record, width, byte);
-            world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
-                world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
-                    images
-                        .commit_loaded(
-                            image_handle,
-                            image,
-                            &mut states,
-                            &mut world.resource_mut::<AssetEvents>(),
-                            None,
-                            None,
-                        )
-                        .unwrap();
-                });
-            });
+            publish_image(world, image_handle, image(&image_record, width, byte));
             if update_atlas {
                 request(world, adaptable, width);
             }
         }
-        Action::Remove => {
-            world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
-                world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
-                    images
-                        .remove_with_state(
-                            image_handle,
-                            &mut states,
-                            &mut world.resource_mut::<AssetEvents>(),
-                        )
-                        .unwrap();
-                });
-            });
-        }
+        Action::Remove => remove_image(world, image_handle),
         Action::RemoveTileSetSource => {
             assert!(
                 world
@@ -114,7 +96,78 @@ fn apply_edit(world: &mut World) {
                 .removed(adaptable.path().clone())
                 .unwrap();
         }
+        Action::RestoreTileSetCatalog => world
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(adaptable)
+            .unwrap(),
+        Action::ModifyTileSetSource => world
+            .resource_mut::<AssetSourceChanges>()
+            .modified(adaptable.path().clone())
+            .unwrap(),
+        Action::RejectTileSetSource => SystemState::<TileSetContent>::new(world)
+            .get_mut(world)
+            .unwrap()
+            .reject_source(&adaptable)
+            .unwrap(),
+        Action::RequestPendingTileSetDependency => {
+            request_source(world, adaptable, "pending.png", 2);
+        }
+        Action::PublishPendingTileSetDependency => {
+            let pending = pending_image_record();
+            let handle = admit_image(world, &pending);
+            publish_image(world, handle, image(&pending, 2, 70));
+        }
     }
+}
+
+fn pending_image_record() -> AssetRecord {
+    record(
+        "30000000-0000-4000-8000-000000000004",
+        "pending.png",
+        AssetSourceKind::Image,
+    )
+}
+
+fn admit_image(world: &mut World, record: &AssetRecord) -> Handle<ImageAsset> {
+    let mut database = world.resource_mut::<ProjectAssetDatabase>();
+    if database.record_for_path(record.path()).is_none() {
+        database.insert(record.clone()).unwrap();
+    }
+    world
+        .resource_mut::<AssetServer>()
+        .reserve_record(record)
+        .unwrap()
+}
+
+fn publish_image(world: &mut World, handle: Handle<ImageAsset>, image: ImageAsset) {
+    world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+        world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
+            images
+                .commit_loaded(
+                    handle,
+                    image,
+                    &mut states,
+                    &mut world.resource_mut::<AssetEvents>(),
+                    None,
+                    None,
+                )
+                .unwrap();
+        });
+    });
+}
+
+fn remove_image(world: &mut World, handle: Handle<ImageAsset>) {
+    world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+        world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
+            images
+                .remove_with_state(
+                    handle,
+                    &mut states,
+                    &mut world.resource_mut::<AssetEvents>(),
+                )
+                .unwrap();
+        });
+    });
 }
 
 fn record(id: &str, path: &str, kind: AssetSourceKind) -> AssetRecord {
@@ -146,26 +199,25 @@ fn image(record: &AssetRecord, width: u32, byte: u8) -> ImageAsset {
 }
 
 fn request(world: &mut World, record: AssetRecord, width: u32) -> Handle<TileSet> {
-    world.resource_scope(|world, mut owner: nara_ecs::Mut<TileSetAssets>| {
-        world.resource_scope(|world, mut server: nara_ecs::Mut<AssetServer>| {
-            world.resource_scope(|world, tilesets: nara_ecs::Mut<Assets<TileSet>>| {
-                owner
-                    .request(
-                        record,
-                        TileSetSource::new(
-                            AssetRef::path("atlas.png").unwrap(),
-                            TileAtlasLayout::grid(Vec2::ONE, width, 1),
-                        ),
-                        SourceHash::from_bytes(width.to_le_bytes()),
-                        &nara_asset::AssetPathScope::ROOT,
-                        &mut server,
-                        &tilesets,
-                        &mut world.resource_mut::<AssetStates>(),
-                    )
-                    .unwrap()
-            })
-        })
-    })
+    request_source(world, record, "atlas.png", width)
+}
+
+fn request_source(
+    world: &mut World,
+    record: AssetRecord,
+    path: &str,
+    width: u32,
+) -> Handle<TileSet> {
+    let source = TileSetSource::new(
+        AssetRef::path(path).unwrap(),
+        TileAtlasLayout::grid(Vec2::ONE, width, 1),
+    );
+    let hash = SourceHash::from_bytes(source.encode_ron_bytes().unwrap());
+    SystemState::<TileSetContent>::new(world)
+        .get_mut(world)
+        .unwrap()
+        .request(record, source, hash, &nara_asset::AssetPathScope::ROOT)
+        .unwrap()
 }
 
 fn observations(world: &World) -> Vec<(Entity, u32, u8, TextureUvRect)> {
@@ -551,11 +603,14 @@ fn source_removal_revokes_new_tilemap_batches_while_a_shared_sprite_keeps_drawin
     let world = app.world_mut().unwrap();
     let mut edits = world.resource_mut::<Edits>();
     edits.actions.truncate(1);
-    edits.actions.push_back(Action::RemoveTileSetSource);
+    edits
+        .actions
+        .extend([Action::RemoveTileSetSource, Action::RestoreTileSetCatalog]);
 
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     let retained_packet = runtime.world().resource::<SpriteBatches>().clone();
+    let mut saw_missing_record = false;
     let observations: Vec<_> = (0..4)
         .map(|_| {
             runtime.drive(Duration::ZERO).unwrap();
@@ -563,35 +618,233 @@ fn source_removal_revokes_new_tilemap_batches_while_a_shared_sprite_keeps_drawin
             let states = world.resource::<AssetStates>();
             let state = states.state(tileset.id()).cloned();
             let has_slot = states.published_slot_revision(tileset.id()).is_some();
-            let retains_value = world
-                .resource::<Assets<TileSet>>()
-                .get(tileset)
-                .and_then(TileSet::image_content)
-                .is_some();
+            let retains_value = world.resource::<Assets<TileSet>>().get(tileset).is_some();
             let batches = world.resource::<SpriteBatches>().clone();
+            saw_missing_record |= world
+                .resource::<AssetReloadDiagnostics>()
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == "asset.reload-record-missing");
             (state, has_slot, retains_value, batches)
         })
         .collect();
-    runtime.finish().unwrap();
+    let world = runtime.world();
+    let held = world.resource::<TileSetAssets>().retention();
 
     assert_atlas_packet(&retained_packet, 10, 10);
     let retained_sprite = retained_packet
         .as_slice()
         .iter()
         .find(|batch| batch.kind == SpriteBatchKind::Sprite)
-        .unwrap();
+        .unwrap()
+        .clone();
+    drop(retained_packet);
+    let released = world.resource::<TileSetAssets>().retention();
+    runtime.finish().unwrap();
+
     for (state, has_slot, retains_value, batches) in observations {
         let state = state.unwrap();
-        assert_eq!(
-            state.load_state(),
-            &LoadState::Failed {
-                message: "asset.reload-record-missing".to_owned(),
-            }
-        );
+        assert_eq!(state.load_state(), &LoadState::Removed);
         assert!(state.usable_version().is_none());
         assert!(!has_slot);
-        assert!(retains_value);
+        assert!(!retains_value);
         assert_eq!(batches.len(), 1, "revoked TileSet emitted a new batch");
-        assert_eq!(batches.as_slice(), std::slice::from_ref(retained_sprite));
+        assert_eq!(batches.as_slice(), std::slice::from_ref(&retained_sprite));
+    }
+    assert!(saw_missing_record);
+    assert_eq!((held.images, held.bytes), (1, 8));
+    assert_eq!((released.images, released.bytes), (0, 0));
+}
+
+#[test]
+fn failed_source_notification_and_dependency_retry_keep_the_last_good_tilemap() {
+    let (mut app, tileset) = atlas_reload_app();
+    app.add_plugins(AssetSourcePlugin).unwrap();
+    let mut edits = app.world_mut().unwrap().resource_mut::<Edits>();
+    edits.actions.truncate(1);
+    edits.actions.extend([
+        Action::ModifyTileSetSource,
+        Action::RequestPendingTileSetDependency,
+        Action::Initial,
+        Action::PublishPendingTileSetDependency,
+        Action::ModifyTileSetSource,
+        Action::RejectTileSetSource,
+        Action::RejectTileSetSource,
+    ]);
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let frames: Vec<_> = (0..8)
+        .map(|_| {
+            runtime.drive(Duration::ZERO).unwrap();
+            let world = runtime.world();
+            let states = world.resource::<AssetStates>();
+            (
+                states.state(tileset.id()).cloned().unwrap(),
+                states.published_slot_revision(tileset.id()).cloned(),
+                world.resource::<SpriteBatches>().clone(),
+                states.state_revision(tileset.id()),
+            )
+        })
+        .collect();
+    runtime.finish().unwrap();
+
+    let (initial, initial_slot, initial_batches, _) = &frames[0];
+    assert_eq!(initial.load_state(), &LoadState::Loaded);
+    assert!(initial_slot.is_some());
+    assert_atlas_packet(initial_batches, 10, 10);
+    assert!(
+        matches!(frames[1].0.load_state(), LoadState::Failed { message }
+        if message == "asset.reload-source-consumer-missing")
+    );
+    for (state, slot, batches, _) in &frames[1..4] {
+        assert!(matches!(state.load_state(), LoadState::Failed { .. }));
+        assert_eq!(state.usable_version(), initial.usable_version());
+        assert_eq!(slot, initial_slot);
+        assert_atlas_packet(batches, 10, 10);
+    }
+    let (recovered, recovered_slot, recovered_batches, _) = &frames[4];
+    assert_eq!(recovered.load_state(), &LoadState::Loaded);
+    assert!(recovered.usable_version().unwrap() > initial.usable_version().unwrap());
+    assert!(recovered_slot.is_some());
+    assert_ne!(recovered_slot, initial_slot);
+    assert_atlas_packet(recovered_batches, 10, 70);
+    assert_atlas_packet(initial_batches, 10, 10);
+    for (state, slot, batches, _) in &frames[6..] {
+        assert!(matches!(state.load_state(), LoadState::Failed { message }
+            if message == &TileSetAssetError::InvalidSource.to_string()));
+        assert_eq!(state.usable_version(), recovered.usable_version());
+        assert_eq!(slot, recovered_slot);
+        assert_atlas_packet(batches, 10, 70);
+    }
+    assert_ne!(frames[5].3, frames[6].3);
+    assert_eq!(frames[6].3, frames[7].3);
+}
+
+#[test]
+fn fresh_source_request_before_revocation_cleanup_keeps_waiting_for_its_image() {
+    for revoke_tileset in [true, false] {
+        assert_pending_request_survives_retirement(revoke_tileset);
+    }
+}
+
+fn assert_pending_request_survives_retirement(revoke_tileset: bool) {
+    let (mut app, tileset) = atlas_reload_app();
+    app.add_plugins(AssetSourcePlugin).unwrap();
+    let world = app.world_mut().unwrap();
+    let pending = admit_image(world, &pending_image_record());
+    world
+        .resource_mut::<AssetStates>()
+        .set_loading(pending.id());
+    let mut edits = world.resource_mut::<Edits>();
+    edits.actions.truncate(1);
+    edits.actions.extend([
+        if revoke_tileset {
+            Action::RemoveTileSetSource
+        } else {
+            Action::ModifyTileSetSource
+        },
+        Action::Initial,
+        Action::PublishPendingTileSetDependency,
+    ]);
+    let mut original: Option<TileSetContentReceipt> = None;
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |world: &mut World| match world.resource::<nara_app::RealTime>().frame {
+            1 => {
+                original = world.resource::<TileSetAssets>().content_receipt(
+                    tileset,
+                    world.resource::<Assets<TileSet>>(),
+                    world.resource::<AssetStates>(),
+                );
+            }
+            2 => {
+                let claim = original.take().unwrap();
+                world.resource_scope(|world, mut owner: nara_ecs::Mut<TileSetAssets>| {
+                    let states = world.resource::<AssetStates>();
+                    let slot = world.resource::<Assets<TileSet>>();
+                    assert_eq!(
+                        states
+                            .state(tileset.id())
+                            .unwrap()
+                            .usable_version()
+                            .is_none(),
+                        revoke_tileset
+                    );
+                    assert!(slot.get(tileset).is_some());
+                    drop(
+                        owner
+                            .prepare_publications(
+                                Vec::new(),
+                                &[claim],
+                                world.resource::<AssetServer>(),
+                                Some(world.resource::<ProjectAssetDatabase>()),
+                                slot,
+                                states,
+                            )
+                            .unwrap(),
+                    );
+                });
+                let edits = world.resource::<Edits>();
+                let source = edits.adaptable.clone();
+                let original_image = edits.image_handle;
+                if revoke_tileset {
+                    world
+                        .resource_mut::<ProjectAssetDatabase>()
+                        .insert(source.clone())
+                        .unwrap();
+                }
+                assert_eq!(request_source(world, source, "pending.png", 2), tileset);
+                if !revoke_tileset {
+                    remove_image(world, original_image);
+                }
+            }
+            _ => {}
+        })
+        .after(AssetTaskUpdateSet::ResolveSourceChanges)
+        .before(AssetTaskUpdateSet::ApplyResults),
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let observations: Vec<_> = (0..4)
+        .map(|_| {
+            runtime.drive(Duration::ZERO).unwrap();
+            let world = runtime.world();
+            let state = world
+                .resource::<AssetStates>()
+                .state(tileset.id())
+                .unwrap()
+                .clone();
+            let owner_error = world.resource::<TileSetAssets>().error(tileset).cloned();
+            (
+                state,
+                owner_error,
+                world.resource::<SpriteBatches>().clone(),
+            )
+        })
+        .collect();
+    runtime.finish().unwrap();
+
+    assert_atlas_packet(&observations[0].2, 10, 10);
+    for (state, owner_error, batches) in &observations[1..3] {
+        assert_eq!(state.load_state(), &LoadState::Loading);
+        assert!(state.usable_version().is_none());
+        assert!(owner_error.is_none());
+        assert_eq!(batches.len(), usize::from(revoke_tileset));
+        assert!(
+            batches
+                .as_slice()
+                .iter()
+                .all(|batch| batch.kind == SpriteBatchKind::Sprite)
+        );
+    }
+    assert_eq!(observations[3].0.load_state(), &LoadState::Loaded);
+    let recovered = &observations[3].2;
+    if revoke_tileset {
+        assert_atlas_packet(recovered, 10, 70);
+    } else {
+        assert_eq!(recovered.len(), 1);
+        let batch = &recovered.as_slice()[0];
+        assert_eq!(batch.kind, SpriteBatchKind::Tilemap);
+        assert_eq!(batch.image.as_ref().unwrap().resource().pixels(), &[70; 8]);
     }
 }

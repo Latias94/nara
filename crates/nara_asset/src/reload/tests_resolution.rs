@@ -176,6 +176,72 @@ fn resolver_terminates_unknown_source_changes_instead_of_retaining_them() {
 }
 
 #[test]
+fn unrouted_source_rejections_keep_the_original_revision_until_an_independent_write() {
+    let mut app = App::new();
+    install_asset_plugin(&mut app);
+    let record = image_record("textures/player.png", stable_id());
+    let world = app.world_mut().unwrap();
+    world
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    let handle = world
+        .resource_mut::<AssetServer>()
+        .reserve_record::<String>(&record)
+        .unwrap();
+    let id = handle.id();
+    let version = AssetVersion::from_raw(1);
+    let mut states = world.resource_mut::<AssetStates>();
+    states.set_loaded_at(id, version, None, None);
+    let original = states.state_revision(id);
+
+    app.add_systems(
+        CoreStage::First,
+        move |world: &mut nara_ecs::World| match world.resource::<nara_app::RealTime>().frame {
+            1 | 4 => world
+                .resource_mut::<AssetSourceChanges>()
+                .modified(record.path().clone())
+                .unwrap(),
+            2 => {
+                assert!(
+                    world
+                        .resource_mut::<ProjectAssetDatabase>()
+                        .remove_exact(&record)
+                );
+                world
+                    .resource_mut::<AssetSourceChanges>()
+                    .removed(record.path().clone())
+                    .unwrap();
+            }
+            3 => world
+                .resource_mut::<AssetStates>()
+                .observe_metadata_change(id),
+            _ => {}
+        },
+    )
+    .unwrap();
+
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    let mut after_independent_write = None;
+    for (index, expected_usable) in [Some(version), None, None, None].into_iter().enumerate() {
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        let states = runtime.world().resource::<AssetStates>();
+        let state = states.state(id).unwrap();
+        assert!(matches!(state.load_state(), LoadState::Failed { .. }));
+        assert_eq!(state.usable_version(), expected_usable);
+        assert_eq!(state.version(), version);
+        assert_eq!(states.source_rejection_follows(id, &original), index < 2);
+        if index == 2 {
+            after_independent_write = Some(states.state_revision(id));
+        }
+        if index == 3 {
+            assert!(states.source_rejection_follows(id, after_independent_write.as_ref().unwrap()));
+        }
+    }
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn missing_record_invalidates_an_existing_runtime_identity() {
     let mut app = App::new();
     install_asset_plugin(&mut app);

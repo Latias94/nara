@@ -330,20 +330,35 @@ impl AssetReloadResolutionContext<'_> {
                 return Err(error);
             }
         };
-        if let Some(registration) = registration {
-            (registration.claim_asset_type)(self.asset_server, asset_id).map_err(|source| {
-                AssetReloadResolutionError::Asset {
-                    path: record.path().clone(),
-                    change_kind,
-                    source,
-                }
-            })?;
-            if image_recovery {
-                self.states
-                    .bind_image_reload_authority(&registration.authority);
+        let Some(registration) = registration else {
+            let origin = self.states.source_rejection_origin(asset_id);
+            self.observe_request(
+                asset_id,
+                change_kind,
+                metadata_dirty,
+                metadata_after_removal,
+                false,
+            );
+            let error = AssetReloadResolutionError::SourceConsumerMissing {
+                path: record.path().clone(),
+                source_kind: record.source_kind().clone(),
+                change_kind,
+            };
+            self.reject_source_observation(asset_id, origin, error.diagnostic_code());
+            return Err(error);
+        };
+        (registration.claim_asset_type)(self.asset_server, asset_id).map_err(|source| {
+            AssetReloadResolutionError::Asset {
+                path: record.path().clone(),
+                change_kind,
+                source,
             }
+        })?;
+        if image_recovery {
+            self.states
+                .bind_image_reload_authority(&registration.authority);
         }
-        let source_authority = registration.map(|registration| Arc::clone(&registration.authority));
+        let source_authority = Arc::clone(&registration.authority);
         let previous_state = (
             self.states.state_revision(asset_id),
             self.states
@@ -357,18 +372,6 @@ impl AssetReloadResolutionContext<'_> {
             metadata_after_removal,
             image_recovery,
         );
-        let source_authority = match source_authority {
-            Some(authority) => authority,
-            None => {
-                let error = AssetReloadResolutionError::SourceConsumerMissing {
-                    path: record.path().clone(),
-                    source_kind: record.source_kind().clone(),
-                    change_kind,
-                };
-                return Err(self.reject_request(asset_id, error, image_recovery));
-            }
-        };
-
         let request_kind = if change_kind == AssetSourceChangeKind::Removed {
             AssetReloadRequestKind::Remove
         } else {
@@ -466,9 +469,24 @@ impl AssetReloadResolutionContext<'_> {
     }
 
     fn invalidate_and_reject(&mut self, asset_id: AssetId, diagnostic_code: &'static str) {
+        let origin = self.states.source_rejection_origin(asset_id);
         self.generations.begin_request(asset_id);
         self.states.invalidate_publication(asset_id);
-        self.reject_asset(asset_id, diagnostic_code);
+        self.reject_source_observation(asset_id, origin, diagnostic_code);
+    }
+
+    fn reject_source_observation(
+        &mut self,
+        id: AssetId,
+        origin: Option<crate::AssetStateRevision>,
+        diagnostic_code: &'static str,
+    ) {
+        let version = self
+            .states
+            .reject_source_observation(id, origin, diagnostic_code);
+        let _ = self
+            .events
+            .push(id, version, AssetEventKind::ReloadRejected);
     }
 
     fn reject_request(

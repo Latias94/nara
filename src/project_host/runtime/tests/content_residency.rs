@@ -2,8 +2,9 @@ use super::*;
 
 use nara_app::CoreStage;
 use nara_asset::{
-    AssetEvent, AssetPathScope, AssetRecord, AssetSlotRevision, AssetSourcePath, AssetState,
-    AssetStateRevision, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
+    AssetEvent, AssetPathScope, AssetRecord, AssetSlotRevision, AssetSourceChanges,
+    AssetSourcePath, AssetSourcePlugin, AssetState, AssetStateRevision, Handle,
+    ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion, LoadState,
     ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
@@ -19,7 +20,10 @@ use nara_tilemap::{
     TileSetRetentionSnapshot, TileSetSource,
 };
 
-use super::super::{content::PreparedSceneContent, content_residency::replace_scene};
+use super::super::{
+    ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes, commit_prepared_project_scene,
+    content::PreparedSceneContent, content_residency::replace_scene,
+};
 
 const SHARED_ID: &str = "53000000-0000-4000-8000-000000000001";
 const UNIQUE_ID: &str = "53000000-0000-4000-8000-000000000002";
@@ -72,13 +76,23 @@ struct ResidencyFixture {
     project: TestProject,
     candidate: ProjectSettingsCandidate,
     plan: RuntimePlan,
-    loader: ProjectContentLoader,
+    loader: Arc<ProjectContentLoader>,
     probe: Arc<ResidencyProbe>,
     host: ProjectHost,
 }
 
 impl ResidencyFixture {
     fn new(foreign: bool, limits: Option<TileSetAssetLimits>) -> Self {
+        Self::start(foreign, limits, false)
+    }
+
+    fn with_scene_requests() -> Self {
+        let limits =
+            TileSetAssetLimits::new(ItemLimit::ONE, ItemLimit::ONE, ByteLimit::new(4).unwrap());
+        Self::start(false, Some(limits), true)
+    }
+
+    fn start(foreign: bool, limits: Option<TileSetAssetLimits>, with_scene_requests: bool) -> Self {
         let project = TestProject::new("project-scene-residency");
         write_image(&project, "shared.png", SHARED_ID, [255, 0, 0, 255]);
         write_image(&project, "unique.png", UNIQUE_ID, [0, 255, 0, 255]);
@@ -86,6 +100,14 @@ impl ResidencyFixture {
         write_scene(&project, "startup.scene.json", "level-a", true, true);
         write_scene(&project, "b.scene.json", "level-b", true, false);
         write_scene(&project, "empty.scene.json", "empty", false, false);
+        if with_scene_requests {
+            write_scene(&project, "restored.scene.json", "restored", true, true);
+            let manifest_path = project.root.join(PROJECT_MANIFEST);
+            let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+            manifest
+                .push_str("\n[content]\nscenes = [\"b.scene.json\", \"restored.scene.json\"]\n");
+            fs::write(manifest_path, manifest).unwrap();
+        }
         let root = project.capability();
         let manifest = root
             .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
@@ -105,13 +127,32 @@ impl ResidencyFixture {
         );
         let request = project_runtime_plugins(&candidate)
             .insert_after::<nara_tilemap::TileSetAssetPlugin>(definition);
+        let request = if with_scene_requests {
+            request.with_recipe(
+                crate::ProductRecipe::new()
+                    .add_plugin::<AssetSourcePlugin>()
+                    .unwrap(),
+            )
+        } else {
+            request
+        };
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
-        let loader = ProjectContentLoader::new(root).unwrap();
+        let loader = Arc::new(ProjectContentLoader::new(root).unwrap());
         let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-        let mut attempt = host
-            .begin_start(snapshot, plan.clone(), Vec::new())
-            .unwrap();
+        let mut attempt = if with_scene_requests {
+            host.begin_project_start(
+                snapshot,
+                plan.clone(),
+                candidate.clone(),
+                Arc::clone(&loader),
+                Vec::new(),
+            )
+            .unwrap()
+        } else {
+            host.begin_start(snapshot, plan.clone(), Vec::new())
+                .unwrap()
+        };
         host.complete_start(&mut attempt).unwrap();
         drop(attempt);
         Self {
@@ -134,17 +175,55 @@ impl ResidencyFixture {
             .unwrap()
     }
 
-    fn step(&mut self, action: impl FnOnce(&mut World) + Send + Sync + 'static) {
+    fn step<R: Send + 'static>(
+        &mut self,
+        action: impl FnOnce(&mut World) -> R + Send + Sync + 'static,
+    ) -> R {
+        let output = Arc::new(Mutex::new(None));
+        let capture = Arc::clone(&output);
         assert!(
             self.probe
                 .next
                 .lock()
                 .unwrap()
-                .replace(Box::new(action))
+                .replace(Box::new(move |world| {
+                    let value = action(world);
+                    *capture.lock().unwrap() = Some(value);
+                }))
                 .is_none()
         );
         self.host.drive_running_runtime(Duration::ZERO).unwrap();
         assert!(self.probe.next.lock().unwrap().is_none());
+        let value = output.lock().unwrap().take().unwrap();
+        value
+    }
+
+    fn prepare_scene(&mut self, path: &str) -> ProjectSceneRequestId {
+        let selection = ProjectPath::new(path).unwrap();
+        let request = self.step(move |world| {
+            ProjectScenes::scope(world, |scenes| scenes.request(selection)).unwrap()
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let (state, diagnostics) = self.step(move |world| {
+                ProjectScenes::scope(world, |scenes| {
+                    (scenes.state(request), scenes.diagnostics(request).cloned())
+                })
+            });
+            if state == Some(ProjectSceneRequestState::Ready) {
+                return request;
+            }
+            assert_eq!(
+                state,
+                Some(ProjectSceneRequestState::Preparing),
+                "Scene request for {path} ended early: {diagnostics:?}"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "Scene request for {path} did not reach Ready"
+            );
+            std::thread::yield_now();
+        }
     }
 
     fn close(&mut self) {
@@ -286,6 +365,24 @@ fn replace(world: &mut World, snapshot: &ProjectContentSnapshot) -> SpawnedScene
         snapshot.compiled_scene()
     );
     receipt
+}
+
+fn commit_scene(world: &mut World, request: ProjectSceneRequestId) {
+    let before = world.resource::<CurrentSceneOwner>().receipt().clone();
+    let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let receipt = report.instance.unwrap();
+    assert_ne!(receipt.instance_id(), before.instance_id());
+    assert_eq!(receipt.domain_id(), before.domain_id());
+    assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
+    ProjectScenes::scope(world, |scenes| {
+        assert_eq!(
+            scenes.state(request),
+            Some(ProjectSceneRequestState::Committed)
+        );
+        assert!(scenes.acknowledge(request));
+        assert_eq!(scenes.state(request), None);
+    });
 }
 
 fn image_handle(world: &World, id: &str) -> Handle<ImageAsset> {
@@ -563,6 +660,218 @@ fn hosted_residency_hands_off_shared_pixels_retires_old_only_and_preserves_forei
         assert_eq!(world.resource::<ProjectAssetDatabase>().len(), 2);
         assert_foreign_unchanged(world);
     });
+    fixture.close();
+}
+
+#[test]
+fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
+    let mut fixture = ResidencyFixture::with_scene_requests();
+    let tileset_id = StableAssetId::parse_str(TILESET_ID).unwrap();
+    let terrain = nara_identity::SceneEntityId::new("terrain").unwrap();
+    let image_revisions = |world: &World, handle: Handle<ImageAsset>| {
+        (
+            world.resource::<Assets<ImageAsset>>().slot_revision(handle),
+            world.resource::<AssetStates>().state_revision(handle.id()),
+        )
+    };
+    let (original, record, tile, original_version, image_bindings) = fixture
+        .host
+        .with_running_world(|world| {
+            let original = world.resource::<CurrentSceneOwner>().receipt().clone();
+            let (tile, record, _) = world
+                .resource::<TileSetAssets>()
+                .sources()
+                .find(|(_, record, _)| record.stable_id() == tileset_id)
+                .unwrap();
+            let version = world
+                .resource::<AssetStates>()
+                .state(tile.id())
+                .unwrap()
+                .usable_version()
+                .unwrap();
+            assert_eq!(world.resource::<TileSetAssets>().retention().bytes, 4);
+            let image_bindings = [SHARED_ID, UNIQUE_ID].map(|id| {
+                let handle = image_handle(world, id);
+                (handle, image_revisions(world, handle))
+            });
+            (original, record.clone(), tile, version, image_bindings)
+        })
+        .unwrap();
+    let domain = original.domain_id();
+    let removed = record.clone();
+    fs::remove_file(fixture.project.root.join(removed.path().as_str())).unwrap();
+    fixture.step(move |world| {
+        assert!(
+            world
+                .resource_mut::<ProjectAssetDatabase>()
+                .remove_exact(&removed)
+        );
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .removed(removed.path().clone())
+            .unwrap();
+    });
+    fixture.host.drive_running_runtime(Duration::ZERO).unwrap();
+    let (revoked_slot_empty, revoked_retention) = fixture
+        .host
+        .with_running_world(|world| {
+            let states = world.resource::<AssetStates>();
+            assert!(states.state(tile.id()).unwrap().usable_version().is_none());
+            assert!(states.published_slot_revision(tile.id()).is_none());
+            assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &original);
+            assert!(matches!(
+                original.resolve(world, &terrain),
+                EntityLookup::Resolved(_)
+            ));
+            for (handle, revisions) in &image_bindings {
+                assert_eq!(&image_revisions(world, *handle), revisions);
+            }
+            (
+                world.resource::<Assets<TileSet>>().get(tile).is_none(),
+                world.resource::<TileSetAssets>().retention(),
+            )
+        })
+        .unwrap();
+
+    let [(shared, _), (atlas, _)] = image_bindings;
+    let atlas_pixels = [0, 0, 255, 255];
+    write_tileset(&fixture.project, TileAtlasLayout::grid(Vec2::ONE, 1, 1));
+    write_image(&fixture.project, "unique.png", UNIQUE_ID, atlas_pixels);
+    let recovery = fixture.prepare_scene("restored.scene.json");
+    let original_for_conflict = original.clone();
+    let foreign = AssetRecord::new(
+        tileset_id,
+        AssetSourcePath::new("foreign/terrain.tileset.ron").unwrap(),
+        record.source_kind().clone(),
+    );
+    fixture.step(move |world| {
+        world
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(foreign.clone())
+            .unwrap();
+        let report = commit_prepared_project_scene(world, recovery, limits(), &[], |_| {});
+        assert!(report.instance.is_none());
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code().as_str() == "project.scene.asset-catalog-conflict")
+        );
+        assert_eq!(
+            world.resource::<CurrentSceneOwner>().receipt(),
+            &original_for_conflict
+        );
+        assert_eq!(
+            world
+                .resource::<ProjectAssetDatabase>()
+                .record_for_stable_id(tileset_id),
+            Some(&foreign)
+        );
+        assert!(
+            world
+                .resource_mut::<ProjectAssetDatabase>()
+                .remove_exact(&foreign)
+        );
+        ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(recovery)));
+    });
+    let recovery = fixture.prepare_scene("restored.scene.json");
+    let expected_record = record.clone();
+    fixture.step(move |world| {
+        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &original);
+        ProjectScenes::scope(world, |scenes| {
+            let prepared = scenes.prepared(recovery).unwrap();
+            assert_eq!(prepared.expected_instance(), &original);
+            assert_eq!(
+                prepared.selected_scene_path().unwrap().as_str(),
+                "restored.scene.json"
+            );
+            let restored = nara_identity::SceneEntityId::new("restored").unwrap();
+            assert!(prepared.scene().roots().contains(&restored));
+        });
+        assert!(
+            world
+                .resource::<ProjectAssetDatabase>()
+                .record_for_stable_id(tileset_id)
+                .is_none()
+        );
+        commit_scene(world, recovery);
+        assert_eq!(
+            world
+                .resource::<ProjectAssetDatabase>()
+                .record_for_stable_id(tileset_id),
+            Some(&expected_record)
+        );
+    });
+    let no_tile_pixels = TileSetRetentionSnapshot {
+        images: 0,
+        bytes: 0,
+    };
+    assert!(revoked_slot_empty);
+    assert_eq!(revoked_retention, no_tile_pixels);
+
+    let published_version = |world: &World| {
+        let receipt = world.resource::<CurrentSceneOwner>().receipt();
+        assert_eq!(receipt.domain_id(), domain);
+        let EntityLookup::Resolved(entity) = receipt.resolve(world, &terrain) else {
+            panic!("the replacement Scene must contain its Tilemap");
+        };
+        assert_eq!(
+            world.get::<nara_tilemap::Tilemap>(entity).unwrap().tileset,
+            Some(tile)
+        );
+        let tilesets = world.resource::<Assets<TileSet>>();
+        let states = world.resource::<AssetStates>();
+        assert_eq!(
+            states.published_slot_revision(tile.id()),
+            Some(&tilesets.slot_revision(tile))
+        );
+        let image = tilesets.get(tile).unwrap().image_content().unwrap();
+        let images = world.resource::<Assets<ImageAsset>>();
+        assert_eq!(image.handle(), atlas);
+        assert_eq!(image.pixels(), &atlas_pixels);
+        assert!(image.is_current(world.resource::<AssetServer>(), states, images));
+        assert_eq!(image_handle(world, SHARED_ID), shared);
+        assert_eq!(images.get(shared).unwrap().pixels(), &[255, 0, 0, 255]);
+        states.state(tile.id()).unwrap().usable_version().unwrap()
+    };
+    let recovered_version = fixture.host.with_running_world(&published_version).unwrap();
+    assert!(recovered_version > original_version);
+
+    fs::remove_file(fixture.project.root.join(record.path().as_str())).unwrap();
+    fixture.step(move |world| {
+        assert!(
+            world
+                .resource_mut::<ProjectAssetDatabase>()
+                .remove_exact(&record)
+        );
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .removed(record.path().clone())
+            .unwrap();
+    });
+    let without_tiles = fixture.prepare_scene("b.scene.json");
+    fixture.step(move |world| commit_scene(world, without_tiles));
+    write_tileset(&fixture.project, TileAtlasLayout::grid(Vec2::ONE, 1, 1));
+    let reentry = fixture.prepare_scene("restored.scene.json");
+    fixture.step(move |world| {
+        let receipt = world.resource::<CurrentSceneOwner>().receipt();
+        assert_eq!(receipt.domain_id(), domain);
+        let states = world.resource::<AssetStates>();
+        assert_eq!(
+            states.state(tile.id()).unwrap().load_state(),
+            &LoadState::Removed
+        );
+        assert!(world.resource::<Assets<TileSet>>().get(tile).is_none());
+        assert!(world.resource::<Assets<ImageAsset>>().get(atlas).is_none());
+        assert_eq!(
+            world.resource::<TileSetAssets>().retention(),
+            no_tile_pixels
+        );
+        assert_eq!(image_handle(world, SHARED_ID), shared);
+        commit_scene(world, reentry);
+    });
+    let reentered_version = fixture.host.with_running_world(published_version).unwrap();
+    assert!(reentered_version > recovered_version);
     fixture.close();
 }
 
