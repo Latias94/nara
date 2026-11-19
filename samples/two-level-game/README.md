@@ -1278,9 +1278,9 @@ actual first presentation through the ordinary shutdown path. Both declared leve
 Images/metadata are delivered in the sibling `project/` tree. This is a source-carrying development
 candidate, with checkpoint location still chosen by the application, rather than a full project backup.
 
-Export uses the existing protocol-2 headless/desktop targets. `[content]` declares Cavern in addition
-to implicit startup Meadow, so Check and export cover both Images and metadata through the delivery
-union. Packaged executables load the sibling `project/` tree; they do not fall back to the source
-checkout when that packaged tree is present but invalid. The five-file build-input observation is
-not a complete hash of Rust `mod` dependencies; ordinary Cargo remains responsible for compiling
-changes to these gameplay modules.
+Export uses the existing protocol-2 headless/desktop targets. It checks every declared Scene for
+the base Headless settings and again for the `desktop` profile. The sibling `project/` tree carries
+the union of both complete deliveries, including profile-specific files for Cavern. Each executable
+still has its own startup agreement. If the packaged tree exists, it is the executable's source
+authority. The five-file build-input observation covers the selected entry sources and manifests.
+Cargo compiles gameplay modules through its ordinary dependency graph.
