@@ -216,7 +216,54 @@ Independent source review identified two existing recovery gaps. A source notifi
 supersede the owner's state revision and leave a retired atlas held in the typed slot. The
 original claim can then block Scene replacement after the catalog record returns. A terminal
 load attempt that preserves the old usable version can also make a later plain source request
-lose last-good on dependency failure. Both cases still need verification through the source
-owner's recovery workflow.
+lose last-good on dependency failure. The [recovery repair](#file-backed-tileset-recovery) below
+exercises both paths through the original owners.
 [Reconciliation](../../crates/nara_tilemap/src/content.rs) ·
 [Scene replacement](../../src/project_host/runtime/content_residency/tilesets.rs)
+
+### File-backed TileSet recovery
+
+Commit `454d7c3` retains the preceding state revision when the resolver rejects a notification
+before routing. Consecutive rejections preserve that origin. An independent state write ends
+continuity. The TileSet owner can still honor its exact declaration claim when the resolver
+changed the state and the original value slot still matches. A prepared mutation captures the
+current exact revisions and checks them at commit.
+[Resolver](../../crates/nara_asset/src/reload/resolution.rs) ·
+[TileSet owner](../../crates/nara_tilemap/src/content.rs)
+
+Windows run `018bcdf0-73a8-45b8-94e3-35bf52249856` reproduced the lost usable version after a
+failed source notification and a subsequent request with an unavailable Image. The first combined
+run, `90aa7e05-da3b-423f-a637-7a0532135cce`, reached 364/365. Its removal regression read the
+frame-scoped diagnostic after a later frame cleared it. The corrected fixture observes each
+frame. The final resource, TileSet and Sprite renderer cohort passes 368/368 in
+`ab28cc38-86ac-4aa9-86dd-ba3305c8a40b`.
+The regressions carry forward the authorized last-good atlas until its successor publishes. A
+revoked value is retired at reconciliation. A freshly admitted request stays Loading while its
+Image is pending, whether the old TileSet or its old Image was revoked. An explicit decode
+rejection publishes its diagnostic after the resolver has suspended the earlier declaration.
+[Public rendering regressions](../../crates/nara_sprite_render/tests/tileset_content.rs)
+
+The Project Host and startup cohort passes 100/100 in
+`14778edc-af32-4223-9345-46c10cfec356`. The recovery test removes the actual TileSet file and
+catalog record, delivers the published source notification, and verifies release under a one-atlas
+budget. The public Scene request rejects an occupied stable identity, then restores the catalog
+and publishes changed pixels under the original handle. A second removal permits travel to a
+Scene that has no dependency on the TileSet. Restoring the file permits re-entry in the same World.
+[Project Scene recovery test](../../src/project_host/runtime/tests/content_residency.rs)
+
+The independently locked source-free consumer passes 14/14 in
+`c2747b75-7158-4dc5-be21-629c1116aca3`. It covers primary and auxiliary TileSet products,
+original retirement, and scene travel using a cooked pack. WGPU offscreen readback passes 1/1 in
+`786efb36-5608-4f0e-9b8b-dd8fb22b7dcf`, preserving exact retained pixels for both selections.
+Correctness Clippy and workspace formatting checks pass. The qualification uses Rust 1.95.0 on
+Windows. The source removal is injected at the public notification queue. Native filesystem
+watcher delivery and window presentation have separate qualification paths.
+[Independent TileSet consumer](../../tests/fixtures/module-consumer/tests/runtime_tileset_delivery.rs) ·
+[WGPU readback](../../crates/nara_render_wgpu/src/readback_tests.rs)
+
+Bevy records a failed load on the asset and its dependents without replacing the stored value in
+that handler. Godot can fall back to the resource already in its cache after a failed load. Nara
+retains the failure result alongside any still-authorized publication, and requires a fresh source
+admission after revocation.
+[Bevy failed load](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/server/info.rs#L685) ·
+[Godot cache fallback](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/io/resource_loader.cpp#L620)

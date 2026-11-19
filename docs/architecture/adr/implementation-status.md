@@ -2348,8 +2348,17 @@ The November 20 [TileSet draw publication repair](../../audits/2026-11-20-runtim
 at `34a5070` requires the usable managed TileSet version and its exact storage slot for new
 Tilemap extraction. A shared Sprite continues to draw after TileSet revocation, and earlier
 captures keep their original pixels. On Windows, Sprite rendering passes 61/61, the independently
-locked TileSet consumer 14/14, and offscreen WGPU readback 1/1. The linked source review records
-the remaining TileSet owner recovery cases.
+locked TileSet consumer 14/14, and offscreen WGPU readback 1/1. The linked source review identified
+the recovery cases exercised below.
+
+The [file-backed TileSet recovery](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#file-backed-tileset-recovery)
+at `454d7c3` uses the resolver's exact rejection history and the owner's original value slot. It
+preserves an eligible last-good atlas during dependency failure and releases owner-held pixels
+after revocation.
+The existing Scene transaction can restore a missing catalog record or travel without it. The
+Windows Host and startup cohort passes 100/100, including conflict refusal and re-entry in the
+same World under a one-atlas budget. The resource and rendering cohort passes 368/368, the
+independent consumer 14/14, and WGPU offscreen readback 1/1.
 
 The [task-result/replay publication correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
 at `e67bdca` / `0f979aa` closes review F9/F11 within their original owners. `OrderedTaskResults`

@@ -5594,6 +5594,12 @@ allowance and incorrect identity-versus-residency fixture assertion from final q
 No per-frame definition audit, new resource owner or performance claim is added. General additive
 native services, destination sets and full R9/R10/R12 remain open.
 
+The [file-backed TileSet recovery](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#file-backed-tileset-recovery)
+at `454d7c3` uses the original declaration and typed slot after an unrouted source rejection. The
+owner retains an authorized atlas across dependency failure and releases the retired value after
+revocation. Recovery proceeds through a newly decoded request or the original Scene replacement
+transaction.
+
 R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
 UI, semantic-command and future agent use through the same domain owners and exact outcomes.
 Keep capability coverage explicit per frontend: a semantic snapshot does not prove pointer hit
