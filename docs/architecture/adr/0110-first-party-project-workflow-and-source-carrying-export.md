@@ -141,7 +141,11 @@ pixels, typed source assets and resolver before each decoded snapshot retires. O
 attestation remains distinct from complete Deferred validation. Only the manifest-selected roots
 receive travel authority; dependency Scenes stay data dependencies. Preserve admitted persistent
 Product identities instead of inventing path-derived identities or requiring game-specific
-metadata databases. The original builder owns encoding and final processed deep validation.
+metadata databases. Cook directly admits a selected Scene's adjacent stable metadata even when
+`project_location` source loading has no catalogue references. The document keeps its source
+location identity. The metadata supplies the processed Product identity, and its observed bytes
+are carried through package revalidation. The original builder owns encoding and final processed
+deep validation.
 
 Game-owned typed build facets remain explicit contributions. Source import is not proof of a
 separate `SourceAssetBuild` result: the existing artifact owner supplies the selected build,

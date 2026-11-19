@@ -15,7 +15,7 @@ use crate::{
     core::FormatVersion,
     fs::{DirectoryCapability, RelativePath},
     material::Material2dDomain,
-    project_content::{DeliverySnapshotPhase, DeliveryVisitError},
+    project_content::{DeliverySnapshotPhase, DeliveryVisitError, SelectedSceneProduct},
     project_host::{ProjectContentLoader, ProjectContentSnapshot, resolve_product_recipe},
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
     tilemap::TileSetDescriptor,
@@ -412,47 +412,53 @@ fn prepare(
     let mut outputs = BTreeMap::new();
     let mut built_sources = BTreeMap::new();
     let mut observations = Observations::default();
+    let scene_product = SelectedSceneProduct::Required;
     let receipt = loader
-        .load_delivery_with_snapshots(request.candidate, &plan, |snapshot, phase| {
-            if builder.is_none() {
-                let startup = snapshot.selected_scene_product().ok_or_else(|| {
-                    ProjectCookError::Invalid(
-                        "cooked startup requires authored stable metadata".into(),
-                    )
-                })?;
-                let mut configuration =
-                    request.candidate.runtime_configuration().to_configuration();
-                configuration.input.action_map =
-                    snapshot.input_action_map().map(|input| input.product());
-                builder = Some(CookedContentBuilder::new(
-                    CookedContentRequest {
-                        target: request.target.clone(),
-                        configuration,
-                        startup_scene: startup,
-                        scenes: vec![startup],
-                        addressable_roots: Vec::new(),
-                    },
-                    request.recipe.clone(),
-                    request.limits,
-                )?);
-            }
-            if phase == DeliverySnapshotPhase::Startup {
-                return Ok(());
-            }
-            let mut context = ProjectCookContext {
-                snapshot,
-                root: request.root,
-                store: request.store,
-                implementation: request.implementation,
-                builder: builder.as_mut().expect("startup initialized the assembly"),
-                outputs: &mut outputs,
-                built_sources: &mut built_sources,
-                observations: &mut observations,
-            };
-            context.stock_assets()?;
-            contribute(&mut context)?;
-            context.scenes()
-        })
+        .load_delivery_with_snapshots(
+            request.candidate,
+            &plan,
+            scene_product,
+            |snapshot, phase| {
+                if builder.is_none() {
+                    let startup = snapshot.selected_scene_product().ok_or_else(|| {
+                        ProjectCookError::Invalid(
+                            "cooked startup requires authored stable metadata".into(),
+                        )
+                    })?;
+                    let mut configuration =
+                        request.candidate.runtime_configuration().to_configuration();
+                    configuration.input.action_map =
+                        snapshot.input_action_map().map(|input| input.product());
+                    builder = Some(CookedContentBuilder::new(
+                        CookedContentRequest {
+                            target: request.target.clone(),
+                            configuration,
+                            startup_scene: startup,
+                            scenes: vec![startup],
+                            addressable_roots: Vec::new(),
+                        },
+                        request.recipe.clone(),
+                        request.limits,
+                    )?);
+                }
+                if phase == DeliverySnapshotPhase::Startup {
+                    return Ok(());
+                }
+                let mut context = ProjectCookContext {
+                    snapshot,
+                    root: request.root,
+                    store: request.store,
+                    implementation: request.implementation,
+                    builder: builder.as_mut().expect("startup initialized the assembly"),
+                    outputs: &mut outputs,
+                    built_sources: &mut built_sources,
+                    observations: &mut observations,
+                };
+                context.stock_assets()?;
+                contribute(&mut context)?;
+                context.scenes()
+            },
+        )
         .map_err(|error| match error {
             DeliveryVisitError::Content(error) => ProjectCookError::Source(error),
             DeliveryVisitError::Visit(error) => error,

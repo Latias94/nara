@@ -1261,6 +1261,7 @@ impl ProjectContentLoader {
             expected_startup_scene_digest,
             agreement,
             &readiness,
+            SelectedSceneProduct::WhenKnown,
         )
     }
 
@@ -1271,6 +1272,7 @@ impl ProjectContentLoader {
         expected_startup_scene_digest: Option<ContentDigest>,
         agreement: PreparedRuntimeSchemaAgreement,
         readiness: &SourceReadiness,
+        selected_scene_product: SelectedSceneProduct,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.load_inner_with_source_mode(
             candidate,
@@ -1282,7 +1284,7 @@ impl ProjectContentLoader {
             None,
             true,
             None,
-            SourceLoadMode::Current,
+            SourceLoadMode::DeliveryStartup(selected_scene_product),
             Some(readiness),
             None,
         )
@@ -1296,6 +1298,7 @@ impl ProjectContentLoader {
         catalogue: Option<&DeliveryCatalogue>,
         capture_catalogue: bool,
         readiness: &SourceReadiness,
+        selected_scene_product: SelectedSceneProduct,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.load_inner_with_source_mode(
             candidate,
@@ -1307,7 +1310,7 @@ impl ProjectContentLoader {
             catalogue,
             capture_catalogue,
             None,
-            SourceLoadMode::Strict,
+            SourceLoadMode::DeliveryScene(selected_scene_product),
             Some(readiness),
             None,
         )
@@ -1491,11 +1494,28 @@ struct SourceCandidates {
     resolved_source_work_bytes: usize,
 }
 
-/// Strict delivery shares the production loader, but never publishes its decoded snapshots.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
+pub(crate) enum SelectedSceneProduct {
+    WhenKnown,
+    #[cfg_attr(not(feature = "project-tooling"), allow(dead_code))]
+    Required,
+}
+
+#[derive(Clone, Copy)]
 enum SourceLoadMode {
     Current,
-    Strict,
+    DeliveryStartup(SelectedSceneProduct),
+    DeliveryScene(SelectedSceneProduct),
+}
+
+impl SourceLoadMode {
+    fn requires_selected_scene_product(self) -> bool {
+        matches!(
+            self,
+            Self::DeliveryStartup(SelectedSceneProduct::Required)
+                | Self::DeliveryScene(SelectedSceneProduct::Required)
+        )
+    }
 }
 
 type RequiredAssetProducts = BTreeMap<StableAssetId, BTreeSet<AssetProductRef>>;
@@ -1988,13 +2008,30 @@ impl<'a> LoadContext<'a> {
                 self.reconcile_native_metadata(&loaded.path, &loaded.source)?;
             }
         }
-        self.admit_catalogued_native_metadata(
-            scene_directory,
-            scene_root,
-            scene_path.as_str(),
-            &selected_source_path,
-            &selected_scene_source,
-        )?;
+        if self.source_mode.requires_selected_scene_product()
+            && settings.project.native_document_identity
+                == nara_project::NativeDocumentIdentity::ProjectLocation
+            && !self
+                .catalogue
+                .as_ref()
+                .is_some_and(|catalogue| catalogue.metadata.contains_key(&selected_source_path))
+        {
+            self.admit_native_metadata(
+                scene_directory,
+                scene_root,
+                scene_path.as_str(),
+                &selected_source_path,
+                SourceDocumentKind::Scene,
+            )?;
+        } else {
+            self.admit_catalogued_native_metadata(
+                scene_directory,
+                scene_root,
+                scene_path.as_str(),
+                &selected_source_path,
+                &selected_scene_source,
+            )?;
+        }
         for dependency in &dependent_scenes {
             self.reconcile_native_metadata(&dependency.path, &dependency.source)?;
         }
@@ -2489,24 +2526,12 @@ impl<'a> LoadContext<'a> {
             })
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         let key_work = self.reserve_work(key_bytes)?;
-        let temporary_work = if identity_policy
-            == nara_project::NativeDocumentIdentity::StableMetadata
-        {
-            Some(
-                self.reserve_work(checked_plan_sum(
-                    ProjectContentBudgetKind::WorkBytes,
-                    [
-                        project_path_bytes,
-                        string_retained_bytes(logical_path)?,
-                        string_retained_bytes(logical_path)?
-                            .checked_add(".meta".len())
-                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
-                    ],
-                )?)?,
-            )
-        } else {
-            None
-        };
+        let temporary_work =
+            if identity_policy == nara_project::NativeDocumentIdentity::StableMetadata {
+                Some(self.reserve_work(project_path_bytes)?)
+            } else {
+                None
+            };
         let project_path =
             AssetSourcePath::new(format!("{}/{}", source_root.as_str(), logical_path)).map_err(
                 |_| {
@@ -2524,33 +2549,69 @@ impl<'a> LoadContext<'a> {
                 SourceDocumentKey::project_location(source_universe, project_path, kind)
             }
             nara_project::NativeDocumentIdentity::StableMetadata => {
-                let relative_path = AssetPath::new(logical_path).map_err(|_| {
-                    ProjectContentError::single(
-                        ProjectContentErrorKind::InvalidLogicalPath,
-                        "project.content.source-path-invalid",
-                        "Native document source path is invalid",
-                    )
-                })?;
-                let metadata_path = format!("{logical_path}.meta");
-                let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
-                self.observe_source_read(Some(source_root), &metadata_path)?;
-                let (metadata_bytes, metadata_digest) = self.read_file_inner(
+                let stable_id = self.admit_native_metadata(
                     directory,
-                    &metadata_path,
-                    ceiling,
-                    ContentReadContext::NativeMetadata { source_root },
-                )?;
-                self.verify_catalogued_metadata(&project_path, source_root, metadata_digest)?;
-                self.record_member(
-                    ProjectContentMemberKind::AssetMetadata,
                     source_root,
-                    &metadata_path,
-                    metadata_digest,
+                    logical_path,
+                    &project_path,
+                    kind,
                 )?;
-                let reservation = self.reserve_work(ceiling)?;
-                let identity = AssetMetaIdentityCandidate::decode_json_bytes_owned(
-                    metadata_bytes.into_boxed_slice(),
-                )
+                drop(project_path);
+                self.subtract_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    temporary_work
+                        .expect("stable source admission owns its path scratch")
+                        .reserved,
+                );
+                SourceDocumentKey::stable_asset(stable_id, kind)
+            }
+        };
+        self.native_source_work_bytes = self
+            .native_source_work_bytes
+            .checked_add(key_work.reserved)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        Ok(key)
+    }
+
+    fn admit_native_metadata(
+        &mut self,
+        directory: &DirectoryCapability,
+        source_root: &nara_project::ProjectPath,
+        logical_path: &str,
+        project_path: &AssetSourcePath,
+        kind: SourceDocumentKind,
+    ) -> Result<StableAssetId, ProjectContentError> {
+        let path_bytes = string_retained_bytes(logical_path)?;
+        let path_work = self.reserve_work(checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [path_bytes, path_bytes, ".meta".len()],
+        )?)?;
+        let relative_path = AssetPath::new(logical_path).map_err(|_| {
+            ProjectContentError::single(
+                ProjectContentErrorKind::InvalidLogicalPath,
+                "project.content.source-path-invalid",
+                "Native document source path is invalid",
+            )
+        })?;
+        let metadata_path = format!("{logical_path}.meta");
+        let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
+        self.observe_source_read(Some(source_root), &metadata_path)?;
+        let (metadata_bytes, metadata_digest) = self.read_file_inner(
+            directory,
+            &metadata_path,
+            ceiling,
+            ContentReadContext::NativeMetadata { source_root },
+        )?;
+        self.verify_catalogued_metadata(project_path, source_root, metadata_digest)?;
+        self.record_member(
+            ProjectContentMemberKind::AssetMetadata,
+            source_root,
+            &metadata_path,
+            metadata_digest,
+        )?;
+        let reservation = self.reserve_work(ceiling)?;
+        let identity =
+            AssetMetaIdentityCandidate::decode_json_bytes_owned(metadata_bytes.into_boxed_slice())
                 .map_err(|_| {
                     ProjectContentError::with_identifier(
                         ProjectContentErrorKind::AssetMeta,
@@ -2561,47 +2622,32 @@ impl<'a> LoadContext<'a> {
                     )
                 })?
                 .into_identity();
-                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
-                let expected_kind = match kind {
-                    SourceDocumentKind::Scene => AssetSourceKind::Scene,
-                    SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
-                };
-                if identity.source_kind() != &expected_kind {
-                    return Err(ProjectContentError::with_identifier(
-                        ProjectContentErrorKind::AssetMetaMismatch,
-                        "project.content.native-source-meta-mismatch",
-                        "Stable native document metadata does not match its source",
-                        "source",
-                        logical_path,
-                    ));
-                }
-                let key = SourceDocumentKey::stable_asset(identity.stable_id(), kind);
-                self.catalogue
-                    .get_or_insert_with(ReferenceCatalogue::default);
-                let root_index = self
-                    .catalogue_roots
-                    .as_ref()
-                    .and_then(|roots| roots.iter().position(|root| root == source_root))
-                    .expect("native source reader belongs to the configured catalogue roots");
-                // The read capability supplies this alias; the sidecar can be bound through
-                // another overlapping configured scope to the same canonical source. The
-                // catalogue validates that complete relation before the key can escape.
-                self.index_metadata_identity(relative_path, root_index, metadata_digest, identity)?;
-                drop((project_path, metadata_path));
-                self.subtract_budget(
-                    ProjectContentBudgetKind::WorkBytes,
-                    temporary_work
-                        .expect("stable source admission owns its path scratch")
-                        .reserved,
-                );
-                key
-            }
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        let expected_kind = match kind {
+            SourceDocumentKind::Scene => AssetSourceKind::Scene,
+            SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
         };
-        self.native_source_work_bytes = self
-            .native_source_work_bytes
-            .checked_add(key_work.reserved)
-            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        Ok(key)
+        let stable_id = identity.stable_id();
+        if identity.source_kind() != &expected_kind || stable_id.as_uuid().is_nil() {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::AssetMetaMismatch,
+                "project.content.native-source-meta-mismatch",
+                "Stable native document metadata does not match its source",
+                "source",
+                logical_path,
+            ));
+        }
+        self.catalogue
+            .get_or_insert_with(ReferenceCatalogue::default);
+        let root_index = self
+            .catalogue_roots
+            .as_ref()
+            .and_then(|roots| roots.iter().position(|root| root == source_root))
+            .expect("native source reader belongs to the configured catalogue roots");
+        self.index_metadata_identity(relative_path, root_index, metadata_digest, identity)?;
+        drop(metadata_path);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
+        Ok(stable_id)
     }
 
     fn decode_scene(
@@ -2688,7 +2734,9 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        if self.source_mode == SourceLoadMode::Current && demand == AssetReferenceDemand::Deferred {
+        if !matches!(self.source_mode, SourceLoadMode::DeliveryScene(_))
+            && demand == AssetReferenceDemand::Deferred
+        {
             return self.capture_resolved_source_target(reference, source, source_work, sources);
         }
         if source.source_kind() == &AssetSourceKind::Scene {

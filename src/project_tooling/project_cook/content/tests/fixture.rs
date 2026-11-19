@@ -220,6 +220,15 @@ pub(super) struct Fixture<const CASE: usize> {
 }
 
 impl<const CASE: usize> Fixture<CASE> {
+    pub fn empty_scenes() -> Self {
+        let fixture = Self::new(None);
+        let empty = SceneDocument::default().to_json_string().unwrap();
+        for path in ["scenes/first.scene.json", "scenes/second.scene.json"] {
+            fixture.write(path, empty.as_bytes());
+        }
+        fixture
+    }
+
     pub fn new(optional: Option<u8>) -> Self {
         let parent = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "{PREFIX}{}-{}",
@@ -431,7 +440,7 @@ fn target() -> RuntimeContentTarget {
     RuntimeContentTarget::new("x86_64-pc-windows-msvc", "shared-cook-test").unwrap()
 }
 
-fn write_metadata(
+pub(super) fn write_metadata(
     path: &std::path::Path,
     source: &str,
     alias: &str,

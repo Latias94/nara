@@ -1,10 +1,15 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, fs};
 
 use crate::{
     asset::RuntimeAssetCodec,
     core::ByteLimit,
-    project_host::{ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentErrorKind},
+    fs::{ContentDigest, FsError},
+    project_host::{
+        ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentErrorKind,
+        ProjectContentMemberKind,
+    },
     project_workflow::cooked_content::{CookedContentError, CookedContentLimits},
+    scene::SourceDocumentOrigin,
 };
 
 use super::*;
@@ -12,7 +17,10 @@ use super::*;
 mod fixture;
 mod metadata;
 
-use fixture::{Codec, Domain, Fixture, OPTIONAL, auxiliary, product};
+use fixture::{Codec, Domain, Fixture, OPTIONAL, auxiliary, product, write_metadata};
+
+const STARTUP_META: &str = "scenes/first.scene.json.meta";
+const DECLARED_META: &str = "scenes/second.scene.json.meta";
 
 thread_local! {
     static COOK_BUDGET: RefCell<Option<ProjectContentBudgetHost>> = const { RefCell::new(None) };
@@ -36,6 +44,124 @@ fn assert_source_work_released(host: &ProjectContentBudgetHost) {
     assert_eq!(budget.active(ProjectContentBudgetKind::WorkBytes), 0);
     assert_eq!(budget.active(ProjectContentBudgetKind::EncodedBytes), 0);
     assert_eq!(budget.active(ProjectContentBudgetKind::OpenHandles), 0);
+}
+
+#[test]
+fn dependency_free_scene_roots_cook_from_adjacent_metadata() {
+    let fixture = Fixture::<0>::empty_scenes();
+    fixture.write("assets/unrelated.bin.meta", b"invalid metadata");
+    let plan = resolve_product_recipe(&fixture.candidate, fixture.recipe.clone()).unwrap();
+    let loader = ProjectContentLoader::new(fixture.root.share()).unwrap();
+    let ordinary = loader.load(&fixture.candidate, &plan).unwrap();
+    assert_eq!(ordinary.selected_scene_product(), None);
+    drop(ordinary);
+
+    let cooked = prepare_project_cooked_content(fixture.request(), |context| {
+        let snapshot = context.snapshot();
+        assert!(snapshot.input_action_map().is_none());
+        assert!(matches!(
+            snapshot.selected_scene_source_key().origin(),
+            SourceDocumentOrigin::ProjectLocation { .. }
+        ));
+        Ok(())
+    })
+    .unwrap();
+    let catalog = cooked.content().base().catalog();
+    assert_eq!(catalog.startup_scene(), product(1));
+    assert_eq!(catalog.scenes(), [product(1), product(2)]);
+    assert_eq!(catalog.members().len(), 2);
+    for path in [STARTUP_META, DECLARED_META] {
+        let member = cooked
+            .source()
+            .members()
+            .iter()
+            .find(|member| member.path().as_str() == path)
+            .unwrap();
+        assert_eq!(member.kind(), ProjectContentMemberKind::AssetMetadata);
+        let bytes = fs::read(fixture.path.join(path)).unwrap();
+        assert_eq!(member.digest(), ContentDigest::of_bytes(&bytes));
+    }
+
+    let (_, selection) = cooked.into_parts();
+    selection.verify(&fixture.path).unwrap();
+    let original = fs::read_to_string(fixture.path.join(STARTUP_META)).unwrap();
+    let changed = original.replacen('\n', " ", 1);
+    assert_ne!(changed, original);
+    fixture.write(STARTUP_META, changed.as_bytes());
+    assert!(matches!(
+        selection.verify(&fixture.path),
+        Err(ProjectCookError::Filesystem(FsError::DigestMismatch { .. }))
+    ));
+}
+
+#[test]
+fn dependency_free_scene_cook_rejects_missing_startup_metadata() {
+    let fixture = Fixture::<0>::empty_scenes();
+    fs::remove_file(fixture.path.join(STARTUP_META)).unwrap();
+    let error = prepare_project_cooked_content(fixture.request(), |_| Ok(()))
+        .err()
+        .expect("Cook requires startup metadata");
+    let ProjectCookError::Source(error) = error else {
+        panic!("expected missing source metadata, got {error:?}");
+    };
+    assert_eq!(error.kind(), ProjectContentErrorKind::HostIo);
+    let diagnostic = error.diagnostics().iter().next().unwrap();
+    assert_eq!(diagnostic.code().as_str(), "project.content.host-io");
+    for (key, value) in [("io_kind", "not-found"), ("project-path", STARTUP_META)] {
+        assert!(
+            diagnostic
+                .fields()
+                .iter()
+                .any(|field| { field.key().as_str() == key && field.display_value() == value })
+        );
+    }
+}
+
+#[test]
+fn dependency_free_scene_cook_rejects_duplicate_root_identity() {
+    let fixture = Fixture::<0>::empty_scenes();
+    write_metadata(
+        &fixture.path,
+        "scenes/second.scene.json",
+        "second.scene.json",
+        product(1).source(),
+        AssetSourceKind::Scene,
+    );
+    let error = prepare_project_cooked_content(fixture.request(), |_| Ok(()))
+        .err()
+        .expect("different Scene roots cannot claim the same Product");
+    let ProjectCookError::Source(error) = error else {
+        panic!("expected conflicting source identity, got {error:?}");
+    };
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.delivery.source-identity-conflict"
+    }));
+}
+
+#[test]
+fn selected_scene_metadata_rejects_nil_identity_before_contribution() {
+    for fixture in [Fixture::<0>::empty_scenes(), Fixture::<0>::new(Some(b'A'))] {
+        write_metadata(
+            &fixture.path,
+            "scenes/second.scene.json",
+            "second.scene.json",
+            StableAssetId::from_uuid(uuid::Uuid::nil()),
+            AssetSourceKind::Scene,
+        );
+        let mut visited = Vec::new();
+        let error = prepare_project_cooked_content(fixture.request(), |context| {
+            visited.push(context.snapshot().selected_scene_path().as_str().to_owned());
+            Ok(())
+        })
+        .err()
+        .expect("a nil UUID does not admit a selected Scene Product");
+        let ProjectCookError::Source(error) = error else {
+            panic!("expected invalid source identity, got {error:?}");
+        };
+        assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
+        assert_eq!(visited, ["first.scene.json"]);
+    }
 }
 
 #[test]

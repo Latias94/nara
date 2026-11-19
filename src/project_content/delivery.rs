@@ -10,9 +10,9 @@ use super::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
     ProjectContentLease, ProjectContentLoader, ProjectContentMemberReceipt, ProjectContentSnapshot,
-    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SourceReadiness,
-    StartupContentClosureReceipt, allocation_failed, append_frame, checked_plan_product,
-    checked_plan_sum, string_retained_bytes,
+    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SelectedSceneProduct,
+    SourceReadiness, StartupContentClosureReceipt, allocation_failed, append_frame,
+    checked_plan_product, checked_plan_sum, string_retained_bytes,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,19 +157,25 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
-        self.load_delivery_with_snapshots::<Infallible>(candidate, plan, |_, _| Ok(()))
-            .map_err(ProjectContentError::from)
+        self.load_delivery_with_snapshots::<Infallible>(
+            candidate,
+            plan,
+            SelectedSceneProduct::WhenKnown,
+            |_, _| Ok(()),
+        )
+        .map_err(ProjectContentError::from)
     }
 
     /// Visits each original snapshot before its decoded generation retires.
     ///
-    /// The ordinary startup snapshot is always first. `Startup` initializes the consumer when
+    /// The startup snapshot is always first. `Startup` initializes the consumer when
     /// Deferred targets require strict validation; only `Complete` supplies a strict closure.
     /// Consumer errors stop traversal and prevent publication of a delivery receipt.
     pub(crate) fn load_delivery_with_snapshots<E>(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
+        selected_scene_product: SelectedSceneProduct,
         on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
     ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
         let readiness = self.validate_inputs(candidate, plan)?;
@@ -177,7 +183,12 @@ impl ProjectContentLoader {
             &self.root, candidate, plan,
         )?;
         let (startup, catalogue) = self.load_startup_for_delivery_with_readiness(
-            candidate, plan, None, agreement, &readiness,
+            candidate,
+            plan,
+            None,
+            agreement,
+            &readiness,
+            selected_scene_product,
         )?;
         self.load_delivery_with_readiness(
             candidate,
@@ -185,6 +196,7 @@ impl ProjectContentLoader {
             startup,
             catalogue,
             &readiness,
+            selected_scene_product,
             on_snapshot,
         )
     }
@@ -203,6 +215,7 @@ impl ProjectContentLoader {
             snapshot,
             catalogue,
             &readiness,
+            SelectedSceneProduct::WhenKnown,
             |_, _| Ok(()),
         )
         .map_err(ProjectContentError::from)
@@ -215,6 +228,7 @@ impl ProjectContentLoader {
         snapshot: ProjectContentSnapshot,
         mut catalogue: Option<DeliveryCatalogue>,
         readiness: &SourceReadiness,
+        selected_scene_product: SelectedSceneProduct,
         mut on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
     ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
@@ -307,6 +321,7 @@ impl ProjectContentLoader {
                 catalogue.as_ref(),
                 catalogue.is_none(),
                 readiness,
+                selected_scene_product,
             )?;
             catalogue = next_catalogue.or(catalogue);
             merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;

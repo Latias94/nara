@@ -55,8 +55,11 @@ let prepared = prepare_project_cooked_content(request, |context| {
 The shared entry consumes the source loader's actual compiled Scene and Prefab results,
 Image pixels, Input definitions, Material and TileSet data. It preserves source identity and
 derives travel roots from the selected manifest, including additional authored roots. Dependency
-Scenes do not become public travel roots. Stock Images retain their admitted extent and color
-space; a device-specific transform remains an explicit separate artifact policy. Each additional
+Scenes do not become public travel roots. Every selected Scene needs an adjacent `.meta` with a
+stable identity, including dependency-free roots in `project_location` projects. That identity
+names the cooked Product. The source document keeps its configured identity policy. Stock Images
+retain their admitted extent and color space. A device-specific transform remains an explicit
+separate artifact policy. Each additional
 domain uses its selected `SourceAssetBuild` and complete verified group. A source-only importer
 does not automatically opt into that build contract.
 
