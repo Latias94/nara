@@ -18,7 +18,7 @@ use nara::{
 };
 use support::{Game, MARKER, TRAVEL, action, movement};
 use two_level_game::{
-    CollisionBox, GamePhase, GameResumeError,
+    CollisionBox, GamePhase, GameResumeError, capture_resume,
     levels::{LevelId, LevelKey},
     request_resume,
     resume::{ResumeState, decode_resume, encode_resume},
@@ -593,6 +593,69 @@ fn fresh_source_resume_accepts_mirrored_nonuniform_rotated_geometry_and_moves_it
     assert_eq!(continued.clock.ticks, blocked.clock.ticks + 1);
     assert_eq!(continued.progress, state.progress);
     candidate.close();
+    original.close();
+}
+
+#[test]
+fn rotated_diagonal_movement_rounds_the_wall_and_remains_capturable_after_contact() {
+    let mut original = Game::source();
+    let mut state = original.capture();
+    state.player.translation = [-30.0, -12.0];
+    state.player.rotation = 0.01;
+    state.held = [false, true, false, true];
+    request_resume(&mut original.session, &state).unwrap();
+    original.settle();
+    assert_eq!(
+        encode_resume(&original.capture()).unwrap(),
+        encode_resume(&state).unwrap()
+    );
+
+    let (sin, cos) = state.player.rotation.sin_cos();
+    let horizontal_extent = ACTOR_HALF_EXTENT * (sin.abs() + cos.abs());
+    for step in 1..=9 {
+        let snapshot = original.step();
+        let captured = capture_resume(&original.session).unwrap_or_else(|error| {
+            panic!(
+                "rotated diagonal step {step} must remain capturable at {:?}: {error}",
+                snapshot.player
+            )
+        });
+        assert_eq!(captured.player.translation, snapshot.player.to_array());
+        assert_eq!(captured.player.rotation, state.player.rotation);
+        assert_eq!(captured.clock.ticks, state.clock.ticks + step);
+        assert!(
+            snapshot.player.x + horizontal_extent <= -INNER_HALF_WIDTH + CONTACT_TOLERANCE,
+            "the rotated explorer must stay to the west of the inner wall: {snapshot:?}"
+        );
+    }
+
+    let contact = original.capture();
+    let mut restored = Game::source();
+    request_resume(&mut restored.session, &contact).unwrap();
+    restored.settle();
+    assert_eq!(
+        encode_resume(&restored.capture()).unwrap(),
+        encode_resume(&contact).unwrap()
+    );
+
+    for step in 10..=36 {
+        original.step();
+        restored.step();
+        let continued = assert_equivalent(&original, &restored);
+        assert_eq!(continued.clock.ticks, state.clock.ticks + step);
+        assert_eq!(continued.held, state.held);
+        if step == 13 {
+            assert!(continued.player.translation[1] < contact.player.translation[1] - 4.0);
+        }
+    }
+    let rounded = original.capture();
+    assert!(
+        rounded.player.translation[0] > INNER_HALF_WIDTH + horizontal_extent
+            && rounded.player.translation[1] + horizontal_extent < -48.0,
+        "held diagonal motion must round the south end of the wall: {:?}",
+        rounded.player
+    );
+    restored.close();
     original.close();
 }
 

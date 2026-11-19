@@ -9,7 +9,11 @@ use nara::{
 };
 use nara_rapier2d::{
     StaticCollisionScene, TopDownCharacter, affine_box_collider,
-    rapier::{math::Pose, prelude::SharedShape},
+    rapier::{
+        math::Pose,
+        parry::query::contact,
+        prelude::{QueryFilter, SharedShape},
+    },
 };
 
 use super::{ActiveLevel, content::valid_position};
@@ -140,14 +144,7 @@ impl RoomCollision {
         let local_pose = *collider.position();
         let shape: SharedShape = collider.shared_shape().clone();
         let controller = TopDownCharacter::new(shape, MARGIN).map_err(|error| error.to_string())?;
-        let pose = Pose::translation(transform.translation.x, transform.translation.y) * local_pose;
-        if controller
-            .overlaps(&self.0.scene, pose)
-            .map_err(|error| error.to_string())?
-        {
-            return Err("the player placement overlaps a static wall".into());
-        }
-        Ok(Character {
+        let character = Character {
             room: self.clone(),
             definition,
             rotation: transform.rotation,
@@ -155,7 +152,15 @@ impl RoomCollision {
             position: transform.translation,
             local_pose,
             controller,
-        })
+        };
+        if character
+            .controller
+            .overlaps(&self.0.scene, character.pose_at(character.position))
+            .map_err(|error| error.to_string())?
+        {
+            return Err("the player placement overlaps a static wall".into());
+        }
+        Ok(character)
     }
 
     pub fn validate_representation(&self, world: &World) -> Result<(), String> {
@@ -185,6 +190,65 @@ struct Character {
     position: Vec2,
     local_pose: Pose,
     controller: TopDownCharacter,
+}
+
+impl Character {
+    fn pose_at(&self, position: Vec2) -> Pose {
+        Pose::translation(position.x, position.y) * self.local_pose
+    }
+
+    fn swept_position(&self, desired: Vec2, delta: Duration) -> Result<Vec2, String> {
+        let movement = self
+            .controller
+            .move_shape(
+                &self.room.0.scene,
+                self.pose_at(self.position),
+                desired,
+                delta,
+            )
+            .map_err(|error| error.to_string())?;
+        let position = self.position + movement.translation;
+        if !position.is_finite() {
+            return Err("collision movement returned a nonfinite player position".into());
+        }
+        Ok(position)
+    }
+
+    fn moved_position(&self, desired: Vec2, delta: Duration) -> Result<Vec2, String> {
+        if desired == Vec2::ZERO {
+            return Ok(self.position);
+        }
+        let proposed = self.swept_position(desired, delta)?;
+        if proposed == self.position || !valid_position(proposed) {
+            return Ok(self.position);
+        }
+
+        let scene = &self.room.0.scene;
+        let endpoint = self.pose_at(proposed);
+        let shape = self.controller.shape();
+        let queries = scene.queries(QueryFilter::default().exclude_sensors());
+        let Some((_, wall)) = queries.intersect_shape(endpoint, shape).next() else {
+            return Ok(proposed);
+        };
+        let Ok(Some(hit)) = contact(wall.position(), wall.shape(), &endpoint, shape, 0.0) else {
+            return Ok(self.position);
+        };
+        let normal = Vec2::new(hit.normal1.x, hit.normal1.y);
+        let inward = desired.dot(normal);
+        if !inward.is_finite() || inward >= 0.0 {
+            return Ok(self.position);
+        }
+        let slide = self.swept_position(desired - inward * normal, delta)?;
+        if !valid_position(slide)
+            || self
+                .controller
+                .overlaps(scene, self.pose_at(slide))
+                .map_err(|error| error.to_string())?
+        {
+            return Ok(self.position);
+        }
+        Ok(slide)
+    }
 }
 
 #[derive(Default, Resource)]
@@ -251,22 +315,10 @@ pub(super) fn move_player(
             state.character = Some(character);
         }
         let character = state.character.as_mut().unwrap();
-        let pose = Pose::translation(transform.translation.x, transform.translation.y)
-            * character.local_pose;
         let bounds = Vec2::new(280.0, 150.0);
         let desired =
             (transform.translation + desired).clamp(-bounds, bounds) - transform.translation;
-        let movement = character
-            .controller
-            .move_shape(&room.0.scene, pose, desired, delta)
-            .map_err(|error| error.to_string())?;
-        let mut position = transform.translation + movement.translation;
-        if !position.is_finite() {
-            return Err("collision movement returned a nonfinite player position".into());
-        }
-        if !valid_position(position) {
-            position = transform.translation;
-        }
+        let position = character.moved_position(desired, delta)?;
         world
             .get_mut::<Transform2d>(entity)
             .ok_or("the explorer has no Transform2d")?
