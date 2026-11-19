@@ -1,11 +1,11 @@
 use nara_core::SourceUniverseId;
 
+use super::route_logical_bytes;
 use crate::{
     AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, EntityReference,
-    EntityReferenceCost, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-    PersistentRuntimeReference, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
-    ReferenceInputId, ReferenceInputIdError, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
-    StableAssetId,
+    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop, ReferenceInputId,
+    ReferenceInputIdError, SceneEntityId, SourceDocumentKey, SourceDocumentKind, StableAssetId,
 };
 
 const UNIVERSE: &str = "72011426-37e2-48ba-bc06-78841468889a";
@@ -276,22 +276,28 @@ fn long_routes_charge_a_complete_shared_source_name_for_every_hop() {
         target: AuthoredReferenceTarget::Input(ReferenceInputId::new("target").unwrap()),
     };
     assert_eq!(reference.cost().nodes(), 2 + 2 * 2048);
-    assert_eq!(
-        reference.cost().logical_bytes(),
-        6 + 2048 * ("branch/anchor".len() + 36 + name.len() + 1)
-    );
+    let bytes = 6 + 2048 * ("branch/anchor".len() + 36 + name.len() + 1);
+    assert_eq!(reference.cost().logical_bytes(), bytes);
+    let target = PrefabEntityTarget {
+        through: reference.through,
+        entity: PrefabEntityOrigin::SourceEntity(id("target")),
+    };
+    assert_eq!(target.logical_bytes_up_to(bytes), Some(bytes));
+    assert_eq!(target.logical_bytes_up_to(bytes - 1), None);
+    assert_eq!(target.logical_bytes_up_to(60 * 1024), None);
 }
 
 #[test]
-fn logical_cost_accumulation_saturates_both_counters() {
-    let cost = EntityReferenceCost {
-        nodes: usize::MAX - 1,
-        logical_bytes: usize::MAX - 4,
-    }
-    .saturating_add(2, 37);
-    assert_eq!(cost.nodes(), usize::MAX);
-    assert_eq!(cost.logical_bytes(), usize::MAX);
-    assert_eq!(cost.saturating_add(2, 37), cost);
+fn route_cost_refuses_overflow_before_copying_a_target() {
+    let hop = PrefabInstanceHop {
+        anchor: PrefabEntityOrigin::SourceEntity(id("branch")),
+        expected_base: named_key("base"),
+    };
+    assert_eq!(
+        route_logical_bytes(&[hop], usize::MAX - 4, usize::MAX),
+        None
+    );
+    assert_eq!(route_logical_bytes(&[], 5, 4), None);
 }
 
 #[cfg(feature = "serde")]

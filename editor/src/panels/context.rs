@@ -2,13 +2,14 @@ use nara::{
     project_host::EditorEditPreparationError,
     scene::{
         AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-        PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, SceneCompilationFailure,
-        ScenePatchDocument,
+        PrefabInstanceObservation, PrefabInstancePath, PrefabPropertyIntent, PrefabRevert,
+        SceneCompilationFailure, ScenePatchDocument,
     },
     tooling::{
         EditorAction, EditorAuthoringPage, EditorAuthoringQuery, EditorDocumentId,
         EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityPage,
-        EditorEntityQuery, EditorPropertyObservation, EditorPropertyRead, EditorSourceToolAction,
+        EditorEntityQuery, EditorPrefabPropertyClaimTarget, EditorPropertyObservation,
+        EditorPropertyRead, EditorPropertyReadLimits, EditorSourceToolAction,
         EditorSourceToolError, EditorSourceToolReview, PreparedEditorDocumentConstruction,
         PreparedEditorDocumentEdit,
     },
@@ -97,6 +98,25 @@ impl EditorPanelContext<'_, '_> {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         self.application.read_document_property(request)
+    }
+
+    /// Reads one bounded stored Prefab property claim through the named document's owner.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: EditorPropertyReadLimits,
+    ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
+        self.application.read_prefab_property_claim(claim, limits)
+    }
+
+    /// Prepares Revert of a discovered claim without rebinding its source slot.
+    pub fn prepare_prefab_property_revert(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        self.application
+            .prepare_prefab_property_revert(claim, limits)
     }
 
     /// Observes bounded stored Prefab intent at the exact retained basis.

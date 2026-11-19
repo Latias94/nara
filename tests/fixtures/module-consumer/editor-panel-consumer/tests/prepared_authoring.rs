@@ -56,6 +56,9 @@ mod property_read;
 #[path = "support/direct_member_authoring.rs"]
 mod direct_member_authoring;
 
+#[path = "support/prefab_property_claims.rs"]
+mod prefab_property_claims;
+
 const OWNER: &str = "consumer.prepared";
 
 fn id(value: &str) -> SceneEntityId {
@@ -474,8 +477,9 @@ impl ImguiEditorPanel for ComputedEditPanel {
                     EditorAuthoringProjection::Members { .. } => {
                         panic!("the root-scalar panel does not request member discovery")
                     }
-                    EditorAuthoringProjection::Properties { .. } => {
-                        panic!("the root-scalar panel does not request recursive discovery")
+                    EditorAuthoringProjection::Properties { .. }
+                    | EditorAuthoringProjection::PrefabPropertyClaims { .. } => {
+                        panic!("the root-scalar panel only discovers components and root fields")
                     }
                 });
             }

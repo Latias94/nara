@@ -1,8 +1,13 @@
+use std::sync::Arc;
+
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentPropertyStep, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
-use nara_scene::{AuthoringRecordReadiness, SceneEntityId};
+use nara_scene::{
+    AuthoringRecordReadiness, PrefabEntityTarget, PrefabInstancePath, PrefabInstancePathSegment,
+    PrefabOverlaySlot, SceneEntityId,
+};
 
 use crate::document_query::EditorDocumentQueryOwner;
 use crate::{EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection};
@@ -15,8 +20,8 @@ pub const MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES: usize = 65_536;
 pub const MAX_EDITOR_PROPERTY_READ_SCAN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES: usize = 4 * 1024 * 1024;
 
-/// Operation-local discovery limits. Metadata counts all returned/cursor UTF-8 ID bytes.
-/// Fixed-size fields are bounded independently by row count; this is not an allocator bound.
+/// Operation-local discovery limits. Metadata counts all returned and cursor identity bytes.
+/// This is a logical content allowance, not an allocator bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorAuthoringQueryLimits {
     max_scan_entries: usize,
@@ -57,10 +62,9 @@ impl EditorAuthoringQueryLimits {
         self.max_metadata_bytes
     }
 
-    /// Sets the logical bytes available to source-owned recursive property discovery.
+    /// Sets the logical bytes available to recursive property or Prefab claim discovery.
     ///
-    /// Existing component/root/member queries do not need this allowance, but retaining it in
-    /// the shared limits keeps collection traversal explicit for callers that use `Properties`.
+    /// Component, root and direct member queries do not need this allowance.
     pub fn with_scan_logical_bytes(
         mut self,
         logical_bytes: usize,
@@ -97,6 +101,11 @@ pub enum EditorAuthoringProjection {
         component: ComponentTypeId,
         property: ComponentPropertyPath,
     },
+    /// Enumerates stored property claims of the instance at the target's direct anchor.
+    /// Steps enter nested declarations owned by that same source. No base is loaded.
+    PrefabPropertyClaims {
+        steps: Vec<PrefabInstancePathSegment>,
+    },
 }
 
 /// Exact source and projection to discover, independent of active navigation and selection.
@@ -125,8 +134,15 @@ impl EditorAuthoringQueryTarget {
                     .as_str()
                     .len()
                     .saturating_add(property_metadata_bytes(property)),
+                EditorAuthoringProjection::PrefabPropertyClaims { steps } => {
+                    prefab_path_step_bytes(steps)
+                }
             })
     }
+}
+
+pub(crate) fn prefab_path_step_bytes(steps: &[PrefabInstancePathSegment]) -> usize {
+    steps.len().saturating_mul(9)
 }
 
 fn property_step_metadata_bytes(step: &ComponentPropertyStep) -> usize {
@@ -144,12 +160,21 @@ fn property_step_metadata_bytes(step: &ComponentPropertyStep) -> usize {
 }
 
 pub(crate) fn property_metadata_bytes(property: &ComponentPropertyPath) -> usize {
-    property
-        .steps
-        .iter()
-        .fold(property.root.as_str().len(), |bytes, step| {
-            bytes.saturating_add(property_step_metadata_bytes(step))
-        })
+    property_metadata_bytes_up_to(property, usize::MAX).unwrap_or(usize::MAX)
+}
+
+pub(crate) fn property_metadata_bytes_up_to(
+    property: &ComponentPropertyPath,
+    maximum: usize,
+) -> Option<usize> {
+    let root = property.root.as_str().len();
+    if root > maximum {
+        return None;
+    }
+    property.steps.iter().try_fold(root, |bytes, step| {
+        let bytes = bytes.checked_add(property_step_metadata_bytes(step))?;
+        (bytes <= maximum).then_some(bytes)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,9 +194,21 @@ pub struct EditorAuthoringQuery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorAuthoringCursor {
     pub(crate) owner: EditorDocumentQueryOwner,
-    pub(crate) target: EditorAuthoringQueryTarget,
     pub(crate) kind: EditorDocumentKind,
-    pub(crate) position: AuthoringPagePosition,
+    pub(crate) position: AuthoringCursorPosition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AuthoringCursorPosition {
+    Direct {
+        target: EditorAuthoringQueryTarget,
+        next: AuthoringPagePosition,
+    },
+    PrefabClaims {
+        source: Arc<PrefabPropertyClaimSource>,
+        component_index: usize,
+        claim_index: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,6 +262,38 @@ pub enum EditorAuthoringPropertyStatus {
     Retired,
 }
 
+/// Exact stored claim selected by a query. Cloning preserves its original workspace, basis,
+/// instance path and source slot together. Late reads and Revert still require current admission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorPrefabPropertyClaimTarget {
+    pub(crate) owner: EditorDocumentQueryOwner,
+    pub(crate) source: Arc<PrefabPropertyClaimSource>,
+    pub(crate) slot: PrefabOverlaySlot,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PrefabPropertyClaimSource {
+    pub(crate) basis: EditorDocumentQueryBasis,
+    pub(crate) path: PrefabInstancePath,
+}
+
+impl EditorPrefabPropertyClaimTarget {
+    #[must_use]
+    pub fn basis(&self) -> &EditorDocumentQueryBasis {
+        &self.source.basis
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &PrefabInstancePath {
+        &self.source.path
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> PrefabOverlaySlot {
+        self.slot
+    }
+}
+
 /// Compact actual record/root/member metadata, not a Schema, creation capability or interpreted
 /// payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +328,22 @@ pub enum EditorAuthoringRow {
         edit_capability: bool,
         status: EditorAuthoringPropertyStatus,
     },
+    /// Stored source intent. The claim retains this page's exact instance path and basis.
+    /// The target route and property identify authored intent independently of activation.
+    PrefabPropertyClaim {
+        claim: EditorPrefabPropertyClaimTarget,
+        target: PrefabEntityTarget,
+        component: ComponentTypeId,
+        version: ComponentSchemaVersion,
+        property: ComponentPropertyPath,
+        /// An explicit Set payload, including explicit Null, is distinct from an Absent claim.
+        has_value: bool,
+    },
+    /// The complete authored target/property header cannot fit even on a full-budget page.
+    /// The original claim remains readable and revertible through its exact source slot.
+    OversizedPrefabPropertyClaim {
+        claim: EditorPrefabPropertyClaimTarget,
+    },
 }
 
 /// Owned historical observation. A current page is not mutation authority after its basis changes.
@@ -267,9 +352,11 @@ pub struct EditorAuthoringPage {
     pub target: EditorAuthoringQueryTarget,
     pub rows: Vec<EditorAuthoringRow>,
     pub scanned_entries: usize,
-    /// Source-owned property selector and child-identity work; zero for older projections.
+    /// Logical identity work for property selectors, child identities and Prefab claim headers.
+    /// A claim header that exceeds a limit charges the allowance examined before refusal.
     pub scanned_logical_bytes: usize,
-    /// Aggregate returned and continuation UTF-8 ID bytes, including duplicated identities.
+    /// Aggregate returned and continuation logical identity bytes. Claim addresses and their
+    /// continuation share one immutable path allocation, charged once for this page.
     pub metadata_bytes: usize,
     pub next: Option<EditorAuthoringCursor>,
 }

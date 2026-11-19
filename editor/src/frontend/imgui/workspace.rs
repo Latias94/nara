@@ -4,13 +4,14 @@ use dear_imgui_rs::Ui;
 use nara::project_host::{EditorEditPreparationError, EditorProjectSession};
 use nara::scene::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, SceneCompilationFailure,
-    ScenePatchDocument,
+    PrefabInstanceObservation, PrefabInstancePath, PrefabPropertyIntent, PrefabRevert,
+    SceneCompilationFailure, ScenePatchDocument,
 };
 use nara::tooling::{
     EditorAction, EditorActionOutcome, EditorActionRejection, EditorDocumentId,
-    EditorDocumentQueryBasis, EditorGestureAction, EditorGestureCancelReason, EditorGestureId,
-    EditorGestureOutcome, EditorGestureView, PreparedEditorDocumentConstruction,
+    EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorGestureAction,
+    EditorGestureCancelReason, EditorGestureId, EditorGestureOutcome, EditorGestureView,
+    EditorPrefabPropertyClaimTarget, EditorPropertyReadLimits, PreparedEditorDocumentConstruction,
     PreparedEditorDocumentEdit,
 };
 
@@ -125,6 +126,26 @@ impl ImguiEditorPanelContext<'_, '_> {
     {
         let session = self.query_preparation()?;
         session.read_document_property(request)
+    }
+
+    /// Reads one bounded stored Prefab property claim from its original instance.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: EditorPropertyReadLimits,
+    ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
+        self.query_preparation()?
+            .read_prefab_property_claim(claim, limits)
+    }
+
+    /// Prepares Revert of a discovered claim without rebinding its source slot.
+    pub fn prepare_prefab_property_revert(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        self.authoring_preparation()?
+            .prepare_prefab_property_revert(claim, limits)
     }
 
     #[must_use]

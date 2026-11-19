@@ -43,6 +43,9 @@ mod prefab_declarations;
 #[cfg(feature = "serde")]
 pub(crate) use prefab_declarations::instance_at as prefab_instance_slot_at;
 #[cfg(feature = "serde")]
+#[doc(hidden)]
+pub use prefab_declarations::{PrefabComponentPropertyClaims, PrefabPropertyClaims};
+#[cfg(feature = "serde")]
 pub use prefab_declarations::{
     PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation,
 };

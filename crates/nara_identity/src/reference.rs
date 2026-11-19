@@ -66,6 +66,13 @@ impl PrefabEntityTarget {
             entity: PrefabEntityOrigin::InstanceAddition(entity),
         }
     }
+
+    /// Counts the terminal ID and each hop's anchor and canonical key up to `maximum`.
+    /// Stops at the first hop that would exceed the allowance.
+    #[must_use]
+    pub fn logical_bytes_up_to(&self, maximum: usize) -> Option<usize> {
+        route_logical_bytes(&self.through, self.entity.entity().as_str().len(), maximum)
+    }
 }
 
 /// A declared reference input name, without occurrence or resolution authority.
@@ -203,21 +210,11 @@ impl AuthoredEntityReference {
             AuthoredReferenceTarget::Entity(entity) => entity.entity().as_str().len(),
             AuthoredReferenceTarget::Input(input) => input.as_str().len(),
         };
-        self.through.iter().fold(
-            EntityReferenceCost {
-                nodes: self.cost_nodes(),
-                logical_bytes,
-            },
-            |cost, hop| {
-                let bytes = hop
-                    .anchor
-                    .entity()
-                    .as_str()
-                    .len()
-                    .saturating_add(source_key_logical_bytes(&hop.expected_base));
-                cost.saturating_add(0, bytes)
-            },
-        )
+        EntityReferenceCost {
+            nodes: self.cost_nodes(),
+            logical_bytes: route_logical_bytes(&self.through, logical_bytes, usize::MAX)
+                .unwrap_or(usize::MAX),
+        }
     }
 }
 
@@ -246,13 +243,6 @@ impl EntityReferenceCost {
     #[must_use]
     pub const fn logical_bytes(&self) -> usize {
         self.logical_bytes
-    }
-
-    const fn saturating_add(self, nodes: usize, logical_bytes: usize) -> Self {
-        Self {
-            nodes: self.nodes.saturating_add(nodes),
-            logical_bytes: self.logical_bytes.saturating_add(logical_bytes),
-        }
     }
 }
 
@@ -310,6 +300,22 @@ impl EntityReference {
             Self::Authored { reference } => reference.cost(),
         }
     }
+}
+
+fn route_logical_bytes(
+    through: &[PrefabInstanceHop],
+    endpoint_bytes: usize,
+    maximum: usize,
+) -> Option<usize> {
+    if endpoint_bytes > maximum {
+        return None;
+    }
+    through.iter().try_fold(endpoint_bytes, |bytes, hop| {
+        let bytes = bytes
+            .checked_add(hop.anchor.entity().as_str().len())?
+            .checked_add(source_key_logical_bytes(&hop.expected_base))?;
+        (bytes <= maximum).then_some(bytes)
+    })
 }
 
 fn source_key_logical_bytes(key: &SourceDocumentKey) -> usize {

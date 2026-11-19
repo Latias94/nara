@@ -2,13 +2,14 @@
 
 use nara_scene::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, ScenePatchDocument,
-    ScenePatchOperation,
+    PrefabInstanceObservation, PrefabInstancePath, PrefabPropertyIntent, PrefabRevert,
+    ScenePatchDocument, ScenePatchOperation,
 };
 use nara_tooling::{
     CommittedEditorDocumentConstruction, EditorActionOutcome, EditorActionRejection,
     EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorWorkspaceCommandReport, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    EditorPrefabPropertyClaimTarget, EditorPropertyReadLimits, EditorWorkspaceCommandReport,
+    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
 };
 
 use super::{EditorProjectSession, editor_workspace_command_rejected};
@@ -46,7 +47,7 @@ impl EditorProjectSession {
         self.workspace.query_document_entities(query)
     }
 
-    /// Runs a bounded selection-independent component/root/member query through the owner.
+    /// Runs a bounded selection-independent property or component query through the owner.
     pub fn query_document_authoring(
         &self,
         query: nara_tooling::EditorAuthoringQuery,
@@ -61,6 +62,30 @@ impl EditorProjectSession {
         request: nara_tooling::EditorPropertyRead,
     ) -> Result<nara_tooling::EditorPropertyObservation, EditorDocumentQueryRejection> {
         self.workspace.read_document_property(request)
+    }
+
+    /// Reads one bounded stored Prefab property claim at the original document basis.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: EditorPropertyReadLimits,
+    ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
+        self.workspace.read_prefab_property_claim(claim, limits)
+    }
+
+    /// Prepares Revert of a discovered claim through its original source owner.
+    pub fn prepare_prefab_property_revert(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        self.admit_authoring_preparation()?;
+        self.workspace
+            .validate_prefab_property_claim_target(claim)
+            .map_err(EditorEditPreparationError::QueryBasis)?;
+        self.workspace
+            .prepare_prefab_property_revert(claim, limits)
+            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
     }
 
     /// Reads stored instance intent without requiring a successful composition or selection.
@@ -99,15 +124,20 @@ impl EditorProjectSession {
         &self,
         basis: &EditorDocumentQueryBasis,
     ) -> Result<(), EditorEditPreparationError> {
+        self.admit_authoring_preparation()?;
+        self.workspace
+            .validate_document_query_basis(basis)
+            .map_err(EditorEditPreparationError::QueryBasis)
+    }
+
+    fn admit_authoring_preparation(&self) -> Result<(), EditorEditPreparationError> {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorEditPreparationError::Closing);
         }
         if self.authoring_operation_fenced() {
             return Err(EditorEditPreparationError::Busy);
         }
-        self.workspace
-            .validate_document_query_basis(basis)
-            .map_err(EditorEditPreparationError::QueryBasis)
+        Ok(())
     }
 
     /// Captures intent at the complete retained observation; no IDs or state are published.

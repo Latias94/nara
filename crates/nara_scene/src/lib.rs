@@ -62,6 +62,9 @@ pub use authoring::{
     SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
 };
 #[cfg(feature = "serde")]
+#[doc(hidden)]
+pub use authoring::{PrefabComponentPropertyClaims, PrefabPropertyClaims};
+#[cfg(feature = "serde")]
 pub use authoring_decode::{
     AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringComponentView,
     AuthoringDirectMembers, AuthoringDocumentKind, AuthoringDocumentPublicationError,

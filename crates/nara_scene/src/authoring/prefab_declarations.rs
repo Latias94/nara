@@ -2,13 +2,16 @@
 
 use std::{error::Error, fmt};
 
+use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
+
 use super::{
     PrefabAuthoringSession, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
     SceneAuthoringRevision, SceneAuthoringSession, history_error_report,
 };
 use crate::{
-    AuthoringSchemaBasis, PrefabComponentIntent, PrefabInstance, PrefabInstancePath,
-    PrefabInstancePathSegment, PrefabOverlay, PrefabOverlaySlot, PrefabRevert, SceneEntityRecord,
+    AuthoringSchemaBasis, PrefabComponentIntent, PrefabEntityTarget, PrefabInstance,
+    PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay, PrefabOverlaySlot,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, SceneEntityId, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
@@ -139,7 +142,79 @@ pub struct PrefabInstanceObservation {
     pub nested_instances: Vec<PrefabInstancePath>,
 }
 
+/// Borrowed property declarations from one stored overlay. Indices belong to this revision.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct PrefabPropertyClaims<'a>(&'a [PrefabComponentIntent]);
+
+/// One component's stored property declarations, with their complete authored target.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct PrefabComponentPropertyClaims<'a> {
+    pub target: &'a PrefabEntityTarget,
+    pub component: &'a ComponentTypeId,
+    pub version: ComponentSchemaVersion,
+    pub claims: &'a [PrefabPropertyClaim],
+}
+
+impl<'a> PrefabPropertyClaims<'a> {
+    #[must_use]
+    pub const fn component_intent_count(self) -> usize {
+        self.0.len()
+    }
+
+    /// Looks up a single component slot without walking or decoding its payload.
+    #[must_use]
+    pub fn component(self, index: usize) -> Option<PrefabComponentPropertyClaims<'a>> {
+        let PrefabComponentIntent::Properties {
+            target,
+            component,
+            version,
+            claims,
+        } = self.0.get(index)?
+        else {
+            return None;
+        };
+        Some(PrefabComponentPropertyClaims {
+            target,
+            component,
+            version: *version,
+            claims,
+        })
+    }
+
+    pub fn intent(
+        self,
+        slot: PrefabOverlaySlot,
+    ) -> Result<&'a PrefabPropertyIntent, PrefabDeclarationError> {
+        let PrefabOverlaySlot::Property {
+            component_index,
+            claim_index,
+        } = slot
+        else {
+            return Err(PrefabDeclarationError::SlotNotFound);
+        };
+        self.component(component_index)
+            .and_then(|component| component.claims.get(claim_index))
+            .map(|claim| &claim.intent)
+            .ok_or(PrefabDeclarationError::SlotNotFound)
+    }
+}
+
 impl SceneAuthoringSession {
+    /// Borrows the exact stored property declarations without opening a Prefab dependency.
+    #[doc(hidden)]
+    pub fn prefab_property_claims(
+        &self,
+        anchor: &SceneEntityId,
+        steps: &[PrefabInstancePathSegment],
+    ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
+        if self.authority.published().is_none() {
+            return Err(PrefabDeclarationError::NotAdmitted);
+        }
+        property_claims(&self.document.entities, anchor, steps)
+    }
+
     /// Observes a complete optional declaration after aggregate payload/location admission.
     pub fn observe_prefab_instance(
         &self,
@@ -182,6 +257,19 @@ impl SceneAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
+    /// Borrows the exact stored property declarations without opening a Prefab dependency.
+    #[doc(hidden)]
+    pub fn prefab_property_claims(
+        &self,
+        anchor: &SceneEntityId,
+        steps: &[PrefabInstancePathSegment],
+    ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
+        if self.authority.published().is_none() {
+            return Err(PrefabDeclarationError::NotAdmitted);
+        }
+        property_claims(&self.document.entities, anchor, steps)
+    }
+
     /// Uses the same bounded raw observation without changing nominal Prefab ownership.
     pub fn observe_prefab_instance(
         &self,
@@ -222,6 +310,24 @@ impl PrefabAuthoringSession {
     }
 }
 
+fn property_claims<'a>(
+    entities: &'a [SceneEntityRecord],
+    anchor: &SceneEntityId,
+    steps: &[PrefabInstancePathSegment],
+) -> Result<PrefabPropertyClaims<'a>, PrefabDeclarationError> {
+    if steps.len() > PrefabDeclarationLimits::MAX_DEPTH {
+        return Err(PrefabDeclarationError::BudgetExceeded);
+    }
+    let root = anchor_instance(entities, anchor)?;
+    let overlay = instance_at(root, steps)?
+        .as_ref()
+        .ok_or(PrefabDeclarationError::InstanceAbsent)?
+        .overrides
+        .as_ref()
+        .ok_or(PrefabDeclarationError::OverlayAbsent)?;
+    Ok(PrefabPropertyClaims(&overlay.components))
+}
+
 fn observe(
     entities: &[SceneEntityRecord],
     revision: SceneAuthoringRevision,
@@ -231,7 +337,7 @@ fn observe(
 ) -> Result<PrefabInstanceObservation, PrefabDeclarationError> {
     let mut budget = DeclarationBudget::new(limits);
     budget.location(path.anchor.as_str(), &path.steps)?;
-    let root = anchor_instance(entities, path)?;
+    let root = anchor_instance(entities, &path.anchor)?;
     let instance = instance_at(root, &path.steps)?;
     if let Some(instance) = instance {
         budget.instance(instance, 1)?;
@@ -267,7 +373,7 @@ fn lower_revert(
 ) -> Result<ScenePatchDocument, PrefabDeclarationError> {
     let mut budget = DeclarationBudget::new(limits);
     budget.location(path.anchor.as_str(), &path.steps)?;
-    let root = anchor_instance(entities, path)?;
+    let root = anchor_instance(entities, &path.anchor)?;
     let original = root
         .as_ref()
         .ok_or(PrefabDeclarationError::InstanceAbsent)?;
@@ -307,11 +413,11 @@ fn lower_revert(
 
 fn anchor_instance<'a>(
     entities: &'a [SceneEntityRecord],
-    path: &PrefabInstancePath,
+    anchor: &SceneEntityId,
 ) -> Result<&'a Option<PrefabInstance>, PrefabDeclarationError> {
     // Published Scene and Prefab records retain the same canonical ID ordering as entity_view.
     let index = entities
-        .binary_search_by(|entity| entity.id.cmp(&path.anchor))
+        .binary_search_by(|entity| entity.id.cmp(anchor))
         .map_err(|_| PrefabDeclarationError::AnchorNotFound)?;
     Ok(&entities[index].prefab)
 }

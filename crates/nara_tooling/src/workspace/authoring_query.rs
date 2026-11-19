@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentMemberPathSegment,
@@ -5,7 +7,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     AuthoringEntityView, AuthoringPropertyChild, AuthoringPropertyChildrenContinuation,
-    AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId,
+    AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringRecordFact,
+    PrefabInstancePath, SceneEntityId,
 };
 
 use super::{
@@ -15,10 +18,13 @@ use super::{
 use crate::{
     EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
     EditorAuthoringProjection, EditorAuthoringPropertyStatus, EditorAuthoringQuery,
-    EditorAuthoringQueryPosition, EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorDocumentQueryRejection, EditorPropertyObservation, EditorPropertyRead,
-    EditorPropertyValue,
-    authoring_query::{AuthoringPagePosition, PropertyPagePosition, property_metadata_bytes},
+    EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
+    EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+    EditorPropertyObservation, EditorPropertyRead, EditorPropertyValue,
+    authoring_query::{
+        AuthoringCursorPosition, AuthoringPagePosition, PrefabPropertyClaimSource,
+        PropertyPagePosition, property_metadata_bytes,
+    },
 };
 
 pub(super) fn rejected_basis_report(
@@ -100,7 +106,7 @@ impl EditorWorkspace {
         Ok(slot)
     }
 
-    /// Discovers actual direct components, declared roots, Record members or durable descendants.
+    /// Discovers direct component/property metadata or stored Prefab property claims.
     /// Only collection selectors inspect the selected source's actual/defaulted identities.
     /// Entries without direct durable identity consume scan work without producing a row.
     /// Metadata is preflighted for the complete page and its continuation before any source IDs
@@ -110,6 +116,25 @@ impl EditorWorkspace {
         query: EditorAuthoringQuery,
     ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
         let (target, expected_kind, position) = match query.position {
+            EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                basis,
+                entity,
+                projection: EditorAuthoringProjection::PrefabPropertyClaims { steps },
+            }) => {
+                return self.query_prefab_property_claims(
+                    Arc::new(PrefabPropertyClaimSource {
+                        basis,
+                        path: PrefabInstancePath {
+                            anchor: entity,
+                            steps,
+                        },
+                    }),
+                    None,
+                    0,
+                    0,
+                    query.limits,
+                );
+            }
             EditorAuthoringQueryPosition::Start(target) => {
                 let position = match &target.projection {
                     EditorAuthoringProjection::Components => AuthoringPagePosition::Components {
@@ -128,6 +153,7 @@ impl EditorWorkspace {
                             position: PropertyPagePosition::Initial,
                         }
                     }
+                    EditorAuthoringProjection::PrefabPropertyClaims { .. } => unreachable!(),
                 };
                 (target, None, position)
             }
@@ -135,11 +161,29 @@ impl EditorWorkspace {
                 if cursor.owner != self.document_query_owner {
                     return Err(EditorDocumentQueryRejection::WrongWorkspace);
                 }
-                (cursor.target, Some(cursor.kind), cursor.position)
+                match cursor.position {
+                    AuthoringCursorPosition::Direct { target, next } => {
+                        (target, Some(cursor.kind), next)
+                    }
+                    AuthoringCursorPosition::PrefabClaims {
+                        source,
+                        component_index,
+                        claim_index,
+                    } => {
+                        return self.query_prefab_property_claims(
+                            source,
+                            Some(cursor.kind),
+                            component_index,
+                            claim_index,
+                            query.limits,
+                        );
+                    }
+                }
             }
         };
         let slot = self.resolve_document_query_slot(&target.basis, expected_kind)?;
-        if target.metadata_bytes() > query.limits.max_metadata_bytes() {
+        let target_bytes = target.metadata_bytes();
+        if target_bytes > query.limits.max_metadata_bytes() {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
         if let EditorAuthoringProjection::Properties { property, .. } = &target.projection
@@ -287,13 +331,13 @@ impl EditorWorkspace {
             }
             _ => return Err(EditorDocumentQueryRejection::InvalidContinuation),
         };
-        let mut metadata_bytes = target.metadata_bytes();
+        let mut metadata_bytes = target_bytes;
         for row in &rows {
             metadata_bytes = metadata_bytes.saturating_add(row.metadata_bytes());
         }
         if let Some(next) = &next {
             metadata_bytes = metadata_bytes
-                .saturating_add(target.metadata_bytes())
+                .saturating_add(target_bytes)
                 .saturating_add(next.metadata_bytes());
         }
         if metadata_bytes > query.limits.max_metadata_bytes() {
@@ -301,9 +345,11 @@ impl EditorWorkspace {
         }
         let next = next.map(|position| EditorAuthoringCursor {
             owner: self.document_query_owner.clone(),
-            target: target.clone(),
             kind: slot.kind(),
-            position: position.into_owned(),
+            position: AuthoringCursorPosition::Direct {
+                target: target.clone(),
+                next: position.into_owned(),
+            },
         });
         let rows = rows.into_iter().map(BorrowedRow::into_owned).collect();
         Ok(EditorAuthoringPage {

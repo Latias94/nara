@@ -1044,6 +1044,30 @@ impl EditorApplication {
             .read_document_property(request)
     }
 
+    /// Reads one stored property claim from an exact source slot, even without composition.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &nara::tooling::EditorPrefabPropertyClaimTarget,
+        limits: nara::tooling::EditorPropertyReadLimits,
+    ) -> Result<nara::scene::PrefabPropertyIntent, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .read_prefab_property_claim(claim, limits)
+    }
+
+    /// Prepares Revert of the selected claim at its original document basis and instance path.
+    pub fn prepare_prefab_property_revert(
+        &self,
+        claim: &nara::tooling::EditorPrefabPropertyClaimTarget,
+        limits: nara::scene::PrefabDeclarationLimits,
+    ) -> Result<
+        nara::tooling::PreparedEditorDocumentEdit,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        self.authoring_edit_session()?
+            .prepare_prefab_property_revert(claim, limits)
+    }
+
     /// Observes bounded stored Prefab intent even when its preview cannot activate.
     pub fn observe_prefab_instance(
         &self,

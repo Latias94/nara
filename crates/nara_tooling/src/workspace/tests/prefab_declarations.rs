@@ -1,8 +1,15 @@
 use super::*;
+use crate::{
+    EditorAuthoringProjection, EditorAuthoringQuery, EditorAuthoringQueryLimits,
+    EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
+    EditorPropertyReadLimits,
+};
 use nara_scene::{
-    PrefabAddition, PrefabDeclarationError, PrefabDeclarationLimits, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim, PrefabInstancePath,
-    PrefabInstancePathSegment, PrefabOverlay, PrefabRevert, SourceDocumentKey, SourceDocumentKind,
+    PrefabAddition, PrefabComponentIntent, PrefabDeclarationError, PrefabDeclarationLimits,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceBinding,
+    PrefabInstanceClaim, PrefabInstanceHop, PrefabInstancePath, PrefabInstancePathSegment,
+    PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert,
+    SourceDocumentKey, SourceDocumentKind,
 };
 
 fn root_path() -> PrefabInstancePath {
@@ -52,7 +59,16 @@ fn open_document(
     title: &str,
     basis: &AuthoringSchemaBasis,
 ) -> EditorDocumentId {
-    let source = source_document();
+    open_source(workspace, kind, title, basis, source_document())
+}
+
+fn open_source(
+    workspace: &mut EditorWorkspace,
+    kind: EditorDocumentKind,
+    title: &str,
+    basis: &AuthoringSchemaBasis,
+    source: SceneDocument,
+) -> EditorDocumentId {
     let report = match kind {
         EditorDocumentKind::Scene => {
             let path = format!("scenes/{title}.scene.json");
@@ -136,6 +152,385 @@ fn assert_basis_rejected(
             .any(|entry| entry.code().as_str() == preparation_code),
         "{:?}",
         report.diagnostics
+    );
+}
+
+#[test]
+fn bounded_claim_pages_preserve_typed_targets_and_skip_unrequested_payloads() {
+    use nara_reflect::{ComponentPropertyPath, ComponentPropertyStep};
+
+    let version = ComponentSchemaVersion::ONE;
+    let component = ComponentTypeId::new("test.MissingSettings");
+    let property = ComponentPropertyPath::new(ComponentFieldId::new("settings")).with_steps([
+        ComponentPropertyStep::Member(ComponentFieldId::new("score")),
+    ]);
+    let payload = ComponentValue::String("x".repeat(257 * 1024));
+    let mut source = source_document();
+    let overlay = source.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap();
+    let target = PrefabEntityTarget {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::InstanceAddition(entity_id("nested")),
+            expected_base: overlay.base.clone(),
+        }],
+        entity: PrefabEntityOrigin::SourceEntity(entity_id("inherited")),
+    };
+    overlay.components = vec![
+        PrefabComponentIntent::Suppress {
+            target: PrefabEntityTarget::source(entity_id("inherited")),
+            component: component.clone(),
+        },
+        PrefabComponentIntent::Properties {
+            target: target.clone(),
+            component: component.clone(),
+            version,
+            claims: vec![
+                PrefabPropertyClaim {
+                    path: property.clone(),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::U64(27)),
+                },
+                PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("optional")),
+                    intent: PrefabPropertyIntent::Absent,
+                },
+                PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("nullable")),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::Null),
+                },
+                PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("large")),
+                    intent: PrefabPropertyIntent::Set(payload),
+                },
+            ],
+        },
+    ];
+    let nested = overlay.additions[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap();
+    nested.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(entity_id("inherited")),
+        component: component.clone(),
+        version,
+        claims: vec![PrefabPropertyClaim {
+            path: property.clone(),
+            intent: PrefabPropertyIntent::Set(ComponentValue::U64(82)),
+        }],
+    });
+    let target_bytes = "nested".len() + "inherited".len() + 37 + "base".len();
+    let row_bytes = target_bytes + component.as_str().len() + "settings".len() + "score".len();
+    let after_row = root_path().anchor.as_str().len() * 2 + row_bytes;
+
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        let mut workspace = EditorWorkspace::new();
+        let document = open_source(
+            &mut workspace,
+            kind,
+            "subject",
+            &schema_basis(),
+            source.clone(),
+        );
+        let _ = open_document(
+            &mut workspace,
+            EditorDocumentKind::Scene,
+            "background",
+            &schema_basis(),
+        );
+        let before = workspace.authoring_model();
+        let basis = workspace.document_query_basis(document).unwrap();
+        let path = root_path();
+        assert_eq!(
+            workspace.observe_prefab_instance(&basis, &path, PrefabDeclarationLimits::default()),
+            Err(PrefabDeclarationError::BudgetExceeded.into()),
+        );
+        let start = |path: &PrefabInstancePath| {
+            EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                basis: basis.clone(),
+                entity: path.anchor.clone(),
+                projection: EditorAuthoringProjection::PrefabPropertyClaims {
+                    steps: path.steps.clone(),
+                },
+            })
+        };
+        let first = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: start(&path),
+                limits: EditorAuthoringQueryLimits::new(1, 1, 64).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(first.scanned_entries, 1);
+        assert!(first.rows.is_empty());
+        let next = EditorAuthoringQueryPosition::Continue(first.next.unwrap());
+        let query = |metadata, scan_bytes| EditorAuthoringQuery {
+            position: next.clone(),
+            limits: EditorAuthoringQueryLimits::new(4, 4, metadata)
+                .unwrap()
+                .with_scan_logical_bytes(scan_bytes)
+                .unwrap(),
+        };
+        assert_eq!(
+            workspace.query_document_authoring(query(after_row, row_bytes - 1)),
+            Err(EditorDocumentQueryRejection::PrefabDeclaration(
+                PrefabDeclarationError::BudgetExceeded
+            )),
+        );
+        assert_eq!(
+            workspace.query_document_authoring(query(after_row - 1, row_bytes)),
+            Err(EditorDocumentQueryRejection::MetadataBudgetExceeded),
+        );
+        assert_eq!(
+            EditorWorkspace::new().query_document_authoring(query(after_row, row_bytes)),
+            Err(EditorDocumentQueryRejection::WrongWorkspace)
+        );
+        let page = workspace
+            .query_document_authoring(query(after_row, row_bytes))
+            .unwrap();
+        assert_eq!(
+            workspace
+                .query_document_authoring(query(after_row, row_bytes))
+                .unwrap(),
+            page
+        );
+        let score_slot = PrefabOverlaySlot::Property {
+            component_index: 1,
+            claim_index: 0,
+        };
+        assert_eq!(page.metadata_bytes, after_row);
+        assert_eq!(page.scanned_entries, 1);
+        assert_eq!(page.scanned_logical_bytes, row_bytes);
+        let [
+            EditorAuthoringRow::PrefabPropertyClaim {
+                claim: score,
+                target: found_target,
+                component: found_component,
+                version: found_version,
+                property: found_property,
+                has_value: true,
+            },
+        ] = page.rows.as_slice()
+        else {
+            panic!("expected the exact routed score claim");
+        };
+        assert_eq!(score.basis(), &basis);
+        assert_eq!(score.path(), &path);
+        assert_eq!(score.slot(), score_slot);
+        assert_eq!(found_target, &target);
+        assert_eq!(found_component, &component);
+        assert_eq!(*found_version, version);
+        assert_eq!(found_property, &property);
+        let rest = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Continue(page.next.unwrap()),
+                limits: EditorAuthoringQueryLimits::new(4, 4, 1024).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(rest.rows.len(), 3);
+        assert!(rest.next.is_none());
+        let read = |claim, bytes| {
+            workspace.read_prefab_property_claim(
+                claim,
+                EditorPropertyReadLimits::new(64, 1, bytes).unwrap(),
+            )
+        };
+        assert_eq!(
+            read(score, 8).unwrap(),
+            PrefabPropertyIntent::Set(ComponentValue::U64(27))
+        );
+        assert_eq!(
+            read(score, 7),
+            Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
+        );
+        assert_eq!(
+            EditorWorkspace::new().read_prefab_property_claim(
+                score,
+                EditorPropertyReadLimits::new(64, 1, 8).unwrap()
+            ),
+            Err(EditorDocumentQueryRejection::WrongWorkspace)
+        );
+        for (index, row) in rest.rows.iter().enumerate() {
+            let EditorAuthoringRow::PrefabPropertyClaim {
+                claim, has_value, ..
+            } = row
+            else {
+                panic!("expected a property claim")
+            };
+            assert_eq!(*has_value, index != 0);
+            assert_eq!(
+                read(claim, 8),
+                match index {
+                    0 => Ok(PrefabPropertyIntent::Absent),
+                    1 => Ok(PrefabPropertyIntent::Set(ComponentValue::Null)),
+                    _ => Err(EditorDocumentQueryRejection::ValueBudgetExceeded),
+                }
+            );
+        }
+        let mut nested = path.clone();
+        nested
+            .steps
+            .push(PrefabInstancePathSegment::Addition { index: 0 });
+        let nested_page = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: start(&nested),
+                limits: EditorAuthoringQueryLimits::new(1, 1, 256).unwrap(),
+            })
+            .unwrap();
+        let [EditorAuthoringRow::PrefabPropertyClaim { claim, target, .. }] =
+            nested_page.rows.as_slice()
+        else {
+            panic!("expected one nested claim")
+        };
+        assert_eq!(target, &PrefabEntityTarget::source(entity_id("inherited")));
+        assert_eq!(claim.path(), &nested);
+        assert_eq!(
+            read(claim, 8).unwrap(),
+            PrefabPropertyIntent::Set(ComponentValue::U64(82))
+        );
+        assert_eq!(
+            workspace.read_prefab_property_claim(
+                claim,
+                EditorPropertyReadLimits::new(14, 1, 8).unwrap()
+            ),
+            Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+        );
+        nested.steps[0] = PrefabInstancePathSegment::InstanceClaim { index: 0 };
+        assert_eq!(
+            workspace.query_document_authoring(EditorAuthoringQuery {
+                position: start(&nested),
+                limits: EditorAuthoringQueryLimits::new(1, 1, 256).unwrap(),
+            }),
+            Err(PrefabDeclarationError::InstanceAbsent.into())
+        );
+        assert_eq!(workspace.authoring_model(), before);
+        assert_eq!(document_value(&workspace, document), source);
+    }
+}
+
+#[test]
+fn oversized_claim_header_keeps_its_original_handle_and_does_not_block_the_next_claim() {
+    use nara_reflect::{ComponentPropertyPath, ComponentPropertyStep};
+
+    let mut source = source_document();
+    let anchor = &mut source.entities[0];
+    anchor.id = entity_id(&"a".repeat(22 * 1024));
+    let overlay = anchor.prefab.as_mut().unwrap().overrides.as_mut().unwrap();
+    overlay.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(entity_id("inherited")),
+        component: ComponentTypeId::new("test.Unavailable"),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![
+            PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("settings"))
+                    .with_steps([ComponentPropertyStep::MapEntry("m".repeat(70 * 1024))]),
+                intent: PrefabPropertyIntent::Set(ComponentValue::U64(9)),
+            },
+            PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("overdeep")).with_steps(
+                    std::iter::repeat_n(
+                        ComponentPropertyStep::MapEntry(String::new()),
+                        ComponentPropertyPath::MAX_STEPS + 2,
+                    ),
+                ),
+                intent: PrefabPropertyIntent::Set(ComponentValue::U64(11)),
+            },
+            PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("score")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::U64(10)),
+            },
+        ],
+    });
+    let path = PrefabInstancePath::new(anchor.id.clone());
+    let source = SceneDocument::from_ordered_roots(source.entities);
+    let mut workspace = EditorWorkspace::new();
+    let document = open_source(
+        &mut workspace,
+        EditorDocumentKind::Scene,
+        "large-selector",
+        &schema_basis(),
+        source,
+    );
+    let basis = workspace.document_query_basis(document).unwrap();
+    let start = EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+        basis,
+        entity: path.anchor.clone(),
+        projection: EditorAuthoringProjection::PrefabPropertyClaims { steps: Vec::new() },
+    });
+    let limits = EditorAuthoringQueryLimits::new(2, 1, 64 * 1024).unwrap();
+    let page = workspace
+        .query_document_authoring(EditorAuthoringQuery {
+            position: start,
+            limits,
+        })
+        .unwrap();
+    let [EditorAuthoringRow::OversizedPrefabPropertyClaim { claim }] = page.rows.as_slice() else {
+        panic!("expected an exact handle for the oversized claim");
+    };
+    assert_eq!(claim.path(), &path);
+    assert_eq!(page.metadata_bytes, path.anchor.as_str().len() * 2);
+    assert_eq!(page.scanned_logical_bytes, 64 * 1024 - page.metadata_bytes);
+    let read_limits = EditorPropertyReadLimits::new(64 * 1024, 1, 8).unwrap();
+    assert_eq!(
+        workspace
+            .read_prefab_property_claim(claim, read_limits)
+            .unwrap(),
+        PrefabPropertyIntent::Set(ComponentValue::U64(9))
+    );
+    let next = workspace
+        .query_document_authoring(EditorAuthoringQuery {
+            position: EditorAuthoringQueryPosition::Continue(page.next.unwrap()),
+            limits,
+        })
+        .unwrap();
+    let [EditorAuthoringRow::OversizedPrefabPropertyClaim { claim: overdeep }] =
+        next.rows.as_slice()
+    else {
+        panic!("a preserved over-depth selector cannot bypass the copy budget using empty keys");
+    };
+    assert_eq!(next.scanned_logical_bytes, 0);
+    assert_eq!(
+        workspace
+            .read_prefab_property_claim(overdeep, read_limits)
+            .unwrap(),
+        PrefabPropertyIntent::Set(ComponentValue::U64(11))
+    );
+    let next = workspace
+        .query_document_authoring(EditorAuthoringQuery {
+            position: EditorAuthoringQueryPosition::Continue(next.next.unwrap()),
+            limits,
+        })
+        .unwrap();
+    let [
+        EditorAuthoringRow::PrefabPropertyClaim {
+            claim: following,
+            property,
+            ..
+        },
+    ] = next.rows.as_slice()
+    else {
+        panic!("the next authored selector remains discoverable");
+    };
+    assert_eq!(property.root.as_str(), "score");
+    assert_eq!(
+        workspace
+            .read_prefab_property_claim(following, read_limits)
+            .unwrap(),
+        PrefabPropertyIntent::Set(ComponentValue::U64(10))
+    );
+    assert!(next.next.is_none());
+    let prepared = workspace
+        .prepare_prefab_property_revert(claim, PrefabDeclarationLimits::default())
+        .unwrap();
+    assert!(workspace.commit_authoring_edit(prepared).applied);
+    assert_eq!(
+        workspace.read_prefab_property_claim(following, read_limits),
+        Err(EditorDocumentQueryRejection::StaleRevision)
     );
 }
 
