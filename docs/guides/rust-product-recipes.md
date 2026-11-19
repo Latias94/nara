@@ -538,6 +538,11 @@ if !matches!(report.outcome(), DesktopRunOutcome::Completed(_)) {
 
 These owners select packaged or development project sources and handle bounded cleanup. Desktop
 launch also owns inherited Editor bootstrap, exact source verification, and product identity.
+Standalone desktop launch selects `desktop` by default. Use
+`DesktopProductLaunch::with_standalone_profile("play-flow")` for an explicit alternative manifest
+profile, as in the Two-Level source game's optional menu/HUD. An inherited supervised launch
+retains the original Host-selected profile; this standalone fallback does not override it or change
+the Cargo binary identity. The normal manifest and composition owners still resolve the selection.
 An outer `Ok(report)` means launch preparation succeeded; inspect the report outcome for runtime
 or shutdown failure. Here `game_run_failure` is the game's own diagnostic-to-error conversion.
 When an embedded Host must retain an incomplete owner or choose a different event-loop policy, use

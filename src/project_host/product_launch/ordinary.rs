@@ -31,6 +31,7 @@ pub struct DesktopProductLaunch {
     development_root: PathBuf,
     identity: SupervisedDesktopProductIdentity,
     recipe: ProductRecipe,
+    standalone_profile: String,
     verify_first_present: bool,
 }
 
@@ -53,8 +54,19 @@ impl DesktopProductLaunch {
             development_root: development_root.as_ref().to_path_buf(),
             identity,
             recipe,
+            standalone_profile: "desktop".into(),
             verify_first_present: false,
         })
+    }
+
+    /// Selects the manifest profile for a standalone launch, defaulting to `desktop`.
+    ///
+    /// An inherited supervised launch retains its original Host-selected profile and source
+    /// agreement. This setting does not override that authority or the Cargo binary identity.
+    #[must_use]
+    pub fn with_standalone_profile(mut self, profile: impl Into<String>) -> Self {
+        self.standalone_profile = profile.into();
+        self
     }
 
     /// Requests bounded first-presentation verification for a standalone verification run.
@@ -105,7 +117,7 @@ impl DesktopProductLaunch {
         let profile = session
             .as_ref()
             .map(|session| session.context().profile_name())
-            .unwrap_or("desktop");
+            .unwrap_or(&self.standalone_profile);
         let intent = DesktopRunIntent::new()
             .with_profile(profile)
             .with_recipe(self.recipe);
