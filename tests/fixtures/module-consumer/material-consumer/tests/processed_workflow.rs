@@ -1,9 +1,9 @@
-use std::{convert::Infallible, sync::atomic::Ordering};
+use std::{convert::Infallible, fs::File, sync::atomic::Ordering};
 
 use nara::{
     asset::{AssetRef, RuntimeAssetCodec},
     core::{FormatKind, FormatVersion},
-    fs::ContentDigest,
+    fs::{ContentDigest, FileCapability, TrustMode},
     material::{Material2dDomain, Material2dRuntimeCodec},
     project_workflow::cooked_content::CookedContentError,
     runtime_content::{
@@ -21,9 +21,11 @@ mod runtime;
 
 use project::{
     Fixture, assert_image, authority, catalog_definition, indices_product, material_product,
-    palette_product, parameters, publish_payloads, publish_scene_texture_payloads, scene_product,
+    palette_product, parameters, publish_material_payloads, publish_payloads, scene_product,
     write_catalog,
 };
+
+const MATERIAL_BINDING_MISMATCH: &str = "runtime.content.material-binding-mismatch";
 
 #[test]
 fn source_free_palette_materializes_its_real_scene_and_material_only_texture() {
@@ -119,6 +121,102 @@ fn omitted_palette_member_rejects_the_actual_material_closure_before_gameplay() 
 }
 
 #[test]
+fn scene_material_declaration_mismatch_rejects_finish_and_independent_pack() {
+    let v1 = Fixture::new();
+    let v2 = Fixture::with_declaration_version(2);
+    assert_eq!(v1.material.product(), v2.material.product());
+    let builder = v1.builder_with_material(&v2.material, true).unwrap();
+    let CookedContentError::Runtime(error) = builder.finish().unwrap_err() else {
+        panic!("finish must refuse the Scene binding to the other declaration version");
+    };
+    assert_material_binding_refusal(error);
+
+    let control = v1.assemble(true).unwrap();
+    let (payloads, expectation) = publish_material_payloads(control.base(), &v2.material);
+    let recipe = v1.recipe.clone();
+    let probe = v1.probe.clone();
+    drop(control);
+    drop(v1);
+    let limits = RuntimeContentLimits::default();
+    let captured = RuntimeContentBase::open(
+        &authority(payloads.path()),
+        &expectation,
+        recipe.clone(),
+        limits,
+    )
+    .unwrap();
+    let path = payloads.path().join("content.pack");
+    captured
+        .write_pack(&mut File::create_new(&path).unwrap())
+        .unwrap();
+    drop(captured);
+    let file =
+        FileCapability::from_host_handle(File::open(path).unwrap(), TrustMode::TrustedLocal, 0)
+            .unwrap();
+    let pack = RuntimeContentBase::open_pack(file, &expectation, recipe, limits).unwrap();
+    let acquired = pack
+        .acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(material_product())
+        .expect("the matching Product and its Material payload must individually admit");
+    assert_eq!(acquired.product().generation().declaration().version(), 2);
+    drop(acquired);
+    assert_material_binding_refusal(pack.validate_deep().unwrap_err());
+    runtime::assert_material_binding_refused(pack);
+    probe.assert_not_started();
+
+    let compatible = v2.assemble(true).unwrap().into_base();
+    assert_eq!(compatible.validate_deep().unwrap().members(), 4);
+    drop(v2);
+    let observation = runtime::play(compatible);
+    assert_eq!(observation.material.declaration_version(), 2);
+}
+
+fn assert_material_binding_refusal(error: RuntimeContentError) {
+    assert!(
+        matches!(&error, RuntimeContentError::Asset(error)
+            if error.diagnostic().code().as_str() == MATERIAL_BINDING_MISMATCH),
+        "{error:?}",
+    );
+}
+
+#[test]
+fn scene_texture_override_requires_an_admitted_image_before_building_the_player() {
+    let fixture = Fixture::with_non_image_override();
+    let CookedContentError::Runtime(error) = *fixture.assemble(true).unwrap_err() else {
+        panic!("finish must refuse the Scene override pointing to a Material Product");
+    };
+    assert_material_binding_refusal(error);
+    fixture.probe.assert_not_started();
+    let compatible = Fixture::new();
+    let control = compatible.assemble(true).unwrap();
+    let (payloads, expectation) = fixture.publish_scene_payload(control.base());
+    let recipe = compatible.recipe.clone();
+    let probe = compatible.probe.clone();
+    drop(fixture);
+    drop(control);
+    drop(compatible);
+    let limits = RuntimeContentLimits::default();
+    let captured = RuntimeContentBase::open(
+        &authority(payloads.path()),
+        &expectation,
+        recipe.clone(),
+        limits,
+    )
+    .unwrap();
+    let path = payloads.path().join("content.pack");
+    captured
+        .write_pack(&mut File::create_new(&path).unwrap())
+        .unwrap();
+    drop(captured);
+    let file =
+        FileCapability::from_host_handle(File::open(path).unwrap(), TrustMode::TrustedLocal, 0)
+            .unwrap();
+    let pack = RuntimeContentBase::open_pack(file, &expectation, recipe, limits).unwrap();
+    assert_material_binding_refusal(pack.validate_deep().unwrap_err());
+    runtime::assert_material_binding_refused(pack);
+    probe.assert_not_started();
+}
+
+#[test]
 fn scene_in_material_texture_slot_rejects_finish_and_independent_encoded_base() {
     let fixture = Fixture::new();
     let material = fixture
@@ -136,7 +234,7 @@ fn scene_in_material_texture_slot_rejects_finish_and_independent_encoded_base() 
     fixture.probe.assert_not_started();
 
     let control = fixture.assemble(true).unwrap();
-    let (payloads, expectation) = publish_scene_texture_payloads(control.base(), &material);
+    let (payloads, expectation) = publish_material_payloads(control.base(), &material);
     let recipe = fixture.recipe.clone();
     let probe = fixture.probe.clone();
     drop(material);

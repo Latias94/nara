@@ -4,6 +4,7 @@ use std::{mem::size_of, sync::Arc};
 
 use nara_asset::{AssetProductRef, AssetRef};
 use nara_image::{ImageAsset, ImageDomain};
+use nara_material::Material2dDomain;
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, tilemap_membership_work_bytes,
     validate_persisted_tilemap_membership,
@@ -13,7 +14,7 @@ use super::{
     DecodeLease, RuntimeCodecRole, RuntimeContentAsset, RuntimeContentBase,
     RuntimeContentBudgetKind, RuntimeContentDependencyRole, RuntimeContentError,
     RuntimeContentLease, RuntimeContentMemberKind, RuntimeContentScene, codecs::DecodedAsset,
-    native::validate_tileset_image, traversal::MemberTraversal,
+    materials::SceneMaterialBinding, native::validate_tileset_image, traversal::MemberTraversal,
 };
 use crate::project_content::ProjectDomainAssets;
 
@@ -275,6 +276,7 @@ impl RuntimeContentBase {
             .map_err(RuntimeContentError::Tilemap)?;
         }
         let material = nara_reflect::ComponentTypeId::new("nara.material2d");
+        let materials = domains.collection::<Material2dDomain>();
         for entity in std::iter::once(&scene)
             .chain(dependencies.iter())
             .flat_map(|scene| scene.candidate().document().entities())
@@ -282,30 +284,14 @@ impl RuntimeContentBase {
             let Some(record) = entity.components().get(&material) else {
                 continue;
             };
-            let scratch =
-                crate::project_content::materials::material_record_work_bytes(record.value())
-                    .ok_or(RuntimeContentError::BudgetOverflow {
-                        kind: RuntimeContentBudgetKind::WorkBytes,
-                    })?;
-            let _work = self.inner.budget.reserve(0, scratch)?;
-            crate::project_content::materials::validate_material_record(
-                record.value(),
-                domains.collection::<nara_material::Material2dDomain>(),
-            )
-            .map_err(|_| {
-                RuntimeContentError::Asset(nara_asset::AssetRuntimeError::new(
-                    nara_diagnostic::Diagnostic::error(
-                        nara_diagnostic::DiagnosticCode::new(
-                            "runtime.content.material-binding-mismatch",
-                        )
-                        .expect("engine diagnostic code"),
-                        nara_diagnostic::SafeSummary::new(
-                            "Scene material values do not match the admitted material product",
-                        )
-                        .expect("engine diagnostic summary"),
-                    ),
-                ))
-            })?;
+            let binding = SceneMaterialBinding::read(self, record)?;
+            binding.validate(
+                |product| {
+                    let asset = materials?.get(&AssetRef::Product(product))?;
+                    Some((asset.product(), asset.generation().declaration()))
+                },
+                |product| images.iter().any(|image| image.reference() == product),
+            )?;
         }
         Ok(Arc::new(ProcessedSceneContent {
             scene,

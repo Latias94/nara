@@ -1,19 +1,24 @@
 //! Strict payload validation without retaining the decoded resource closure or publishing stores.
 
-use std::mem::size_of;
+use std::{
+    mem::{size_of, size_of_val},
+    sync::Arc,
+};
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetProductRef, AssetRef};
 use nara_fs::ContentDigest;
 use nara_image::ImageDomain;
-use nara_material::Material2dDomain;
+use nara_material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
+use nara_reflect::ComponentTypeId;
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
 };
 
 use super::{
-    DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
-    RuntimeContentError, RuntimeContentMemberKind, RuntimeContentScene,
+    DecodeBudget, DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
+    RuntimeContentError, RuntimeContentMemberKind, RuntimeContentScene, checked_add,
+    materials::SceneMaterialBinding,
     native::{ImageFact, validate_tileset_image},
     traversal::MemberTraversal,
 };
@@ -22,8 +27,8 @@ use super::{
 ///
 /// Root Scenes, addressable roots and global Input participate. Every reachable Required or
 /// Reference target uses its selected production decoder and complete dependency admission.
-/// First-party Material texture kinds and Image/TileSet/Tilemap CPU constraints are checked
-/// against actual decoded facts and the executable's selected codec roles.
+/// First-party Scene material bindings, Material texture kinds and Image/TileSet/Tilemap CPU
+/// constraints are checked against actual decoded facts and the executable's selected codec roles.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -56,40 +61,47 @@ impl RuntimeContentValidationReport {
 struct NativeFacts {
     images: Vec<(usize, ImageFact)>,
     tilesets: Vec<(usize, TileSetDescriptor)>,
-    requirements: TilemapRequirements,
+    tilemap_requirements: WorkFacts<TilemapMembershipRequirement>,
+    material_bindings: WorkFacts<SceneMaterialBinding>,
+    materials: WorkFacts<MaterialFact>,
     _work: DecodeLease,
 }
 
-struct TilemapRequirements {
-    values: Vec<TilemapMembershipRequirement>,
+struct MaterialFact {
+    member: usize,
+    product: AssetProductRef,
+    declaration: Material2dDeclaration,
     _work: DecodeLease,
 }
 
-impl TilemapRequirements {
-    fn push(
-        &mut self,
-        budget: &std::sync::Arc<super::DecodeBudget>,
-        value: TilemapMembershipRequirement,
-    ) -> Result<(), RuntimeContentError> {
-        // Runtime dependency admission has already required complete Products at every leaf.
-        // In particular, no owned source Path string may escape the parser's scratch charge.
-        if !matches!(value.asset_ref(), AssetRef::Product(_)) {
-            return Err(RuntimeContentError::ProductIdentityMismatch);
+struct WorkFacts<T> {
+    values: Vec<T>,
+    _work: Option<DecodeLease>,
+}
+
+impl<T> WorkFacts<T> {
+    const fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            _work: None,
         }
+    }
+
+    fn push(&mut self, budget: &Arc<DecodeBudget>, value: T) -> Result<(), RuntimeContentError> {
         if self.values.len() == self.values.capacity() {
             let capacity = self.values.len().saturating_mul(2).max(4);
-            let bytes = capacity
-                .checked_mul(size_of::<TilemapMembershipRequirement>())
-                .ok_or(RuntimeContentError::BudgetOverflow {
+            let bytes = capacity.checked_mul(size_of::<T>()).ok_or(
+                RuntimeContentError::BudgetOverflow {
                     kind: RuntimeContentBudgetKind::WorkBytes,
-                })?;
+                },
+            )?;
             // Keep the old allocation and its lease while reserving and moving into the new one.
             // Release them only after their actual slots have been disposed.
             let work = budget.reserve(0, bytes)?;
             let mut values = Vec::with_capacity(capacity);
             values.append(&mut self.values);
             self.values = values;
-            self._work = work;
+            self._work = Some(work);
         }
         self.values.push(value);
         Ok(())
@@ -123,10 +135,9 @@ impl NativeFacts {
         Ok(Self {
             images: Vec::with_capacity(images),
             tilesets: Vec::with_capacity(tilesets),
-            requirements: TilemapRequirements {
-                values: Vec::new(),
-                _work: base.inner.budget.reserve(0, 0)?,
-            },
+            tilemap_requirements: WorkFacts::new(),
+            material_bindings: WorkFacts::new(),
+            materials: WorkFacts::new(),
             _work: work,
         })
     }
@@ -136,24 +147,83 @@ impl NativeFacts {
         base: &RuntimeContentBase,
         scene: &RuntimeContentScene,
     ) -> Result<(), RuntimeContentError> {
-        let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
+        let tilemap = ComponentTypeId::new("nara.tilemap.Tilemap");
+        let material = ComponentTypeId::new("nara.material2d");
         for entity in scene.candidate().document().entities() {
-            let Some(record) = entity.components().get(&tilemap) else {
-                continue;
-            };
-            let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
-                RuntimeContentError::BudgetOverflow {
-                    kind: RuntimeContentBudgetKind::WorkBytes,
-                },
-            )?;
-            let _parser_work = base.inner.budget.reserve(0, scratch)?;
-            if let Some(requirement) = prepare_persisted_tilemap_membership(record.value())
-                .map_err(RuntimeContentError::Tilemap)?
-            {
-                self.requirements.push(&base.inner.budget, requirement)?;
+            if let Some(record) = entity.components().get(&tilemap) {
+                let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
+                    RuntimeContentError::BudgetOverflow {
+                        kind: RuntimeContentBudgetKind::WorkBytes,
+                    },
+                )?;
+                let _parser_work = base.inner.budget.reserve(0, scratch)?;
+                if let Some(requirement) = prepare_persisted_tilemap_membership(record.value())
+                    .map_err(RuntimeContentError::Tilemap)?
+                {
+                    // Only complete Products can escape the parser's scratch charge.
+                    if !matches!(requirement.asset_ref(), AssetRef::Product(_)) {
+                        return Err(RuntimeContentError::ProductIdentityMismatch);
+                    }
+                    self.tilemap_requirements
+                        .push(&base.inner.budget, requirement)?;
+                }
+            }
+            if let Some(record) = entity.components().get(&material) {
+                let binding = SceneMaterialBinding::read(base, record)?;
+                self.material_bindings.push(&base.inner.budget, binding)?;
             }
         }
         Ok(())
+    }
+
+    fn capture_material(
+        &mut self,
+        base: &RuntimeContentBase,
+        member: usize,
+        material: &Material2dAsset,
+    ) -> Result<(), RuntimeContentError> {
+        for (slot, reference) in material.textures() {
+            let AssetRef::Product(target) = reference else {
+                return Err(RuntimeContentError::ProductIdentityMismatch);
+            };
+            let target_member = base
+                .member(*target)
+                .ok_or(RuntimeContentError::UndeclaredProduct)?;
+            if base.plan().runtime_codecs().role(target_member) != Some(RuntimeCodecRole::Image) {
+                let _work = base.inner.budget.reserve(0, slot.len())?;
+                return Err(RuntimeContentError::MaterialTextureKindMismatch {
+                    material: material.product(),
+                    slot: slot.clone(),
+                    target: *target,
+                });
+            }
+        }
+
+        // Keep only the declaration needed by Scene bindings after the decoded Shader drops.
+        let declaration = material.generation().declaration();
+        let fields = declaration.parameters().fields();
+        let textures = declaration.textures();
+        let kind = RuntimeContentBudgetKind::WorkBytes;
+        let mut bytes = checked_add(kind, size_of_val(fields), size_of_val(textures))?;
+        bytes = checked_add(kind, bytes, declaration.id().len())?;
+        for (id, name) in fields.iter().map(|field| (field.id(), field.name())).chain(
+            textures
+                .iter()
+                .map(|texture| (texture.id(), texture.name())),
+        ) {
+            bytes = checked_add(kind, bytes, id.len())?;
+            bytes = checked_add(kind, bytes, name.len())?;
+        }
+        let work = base.inner.budget.reserve(0, bytes)?;
+        self.materials.push(
+            &base.inner.budget,
+            MaterialFact {
+                member,
+                product: material.product(),
+                declaration: declaration.clone(),
+                _work: work,
+            },
+        )
     }
 
     fn finish(mut self, base: &RuntimeContentBase) -> Result<(), RuntimeContentError> {
@@ -170,7 +240,7 @@ impl NativeFacts {
                 .map(|image| image.extent);
             validate_tileset_image(descriptor, extent)?;
         }
-        for requirement in &self.requirements.values {
+        for requirement in &self.tilemap_requirements.values {
             let AssetRef::Product(product) = requirement.asset_ref() else {
                 return Err(RuntimeContentError::ProductIdentityMismatch);
             };
@@ -185,6 +255,29 @@ impl NativeFacts {
             requirement
                 .validate_atlas(atlas)
                 .map_err(RuntimeContentError::Tilemap)?;
+        }
+        self.materials
+            .values
+            .sort_unstable_by_key(|fact| fact.member);
+        let materials = self.materials.values.as_slice();
+        for binding in &self.material_bindings.values {
+            binding.validate(
+                |product| {
+                    let member = base.catalog().member_index(product)?;
+                    let slot = materials
+                        .binary_search_by_key(&member, |fact| fact.member)
+                        .ok()?;
+                    let fact = &materials[slot];
+                    Some((fact.product, &fact.declaration))
+                },
+                |product| {
+                    base.catalog().member_index(product).is_some_and(|member| {
+                        self.images
+                            .binary_search_by_key(&member, |(index, _)| *index)
+                            .is_ok_and(|slot| self.images[slot].1.product == product)
+                    })
+                },
+            )?;
         }
         Ok(())
     }
@@ -243,26 +336,7 @@ impl RuntimeContentBase {
                         }
                         Some(RuntimeCodecRole::Cpu) => {
                             if let Some(material) = asset.typed::<Material2dDomain>() {
-                                for (slot, reference) in material.product().textures() {
-                                    let AssetRef::Product(target) = reference else {
-                                        return Err(RuntimeContentError::ProductIdentityMismatch);
-                                    };
-                                    let target_member = self
-                                        .member(*target)
-                                        .ok_or(RuntimeContentError::UndeclaredProduct)?;
-                                    if self.plan().runtime_codecs().role(target_member)
-                                        != Some(RuntimeCodecRole::Image)
-                                    {
-                                        let _work = self.inner.budget.reserve(0, slot.len())?;
-                                        return Err(
-                                            RuntimeContentError::MaterialTextureKindMismatch {
-                                                material: material.product().product(),
-                                                slot: slot.clone(),
-                                                target: *target,
-                                            },
-                                        );
-                                    }
-                                }
+                                facts.capture_material(self, index, material.product())?;
                             }
                         }
                         None => return Err(RuntimeContentError::CodecNotSelected),
@@ -296,7 +370,7 @@ mod tests {
     };
 
     use super::super::{DecodeBudget, RuntimeContentBudgetKind, RuntimeContentError};
-    use super::TilemapRequirements;
+    use super::WorkFacts;
 
     const DECODER_WORK: usize = 4096;
 
@@ -364,10 +438,7 @@ mod tests {
         let limit = DECODER_WORK + old_bytes + new_bytes;
         let budget = DecodeBudget::new(0, 1, limit);
         let decoder = budget.reserve(0, DECODER_WORK).unwrap();
-        let mut requirements = TilemapRequirements {
-            values: Vec::new(),
-            _work: budget.reserve(0, 0).unwrap(),
-        };
+        let mut requirements = WorkFacts::new();
         for tag in 0..4 {
             requirements
                 .push(&budget, requirement(&budget, tag))
@@ -400,10 +471,7 @@ mod tests {
         let limit = exact - 1;
         let budget = DecodeBudget::new(0, 1, limit);
         let decoder = budget.reserve(0, DECODER_WORK).unwrap();
-        let mut requirements = TilemapRequirements {
-            values: Vec::new(),
-            _work: budget.reserve(0, 0).unwrap(),
-        };
+        let mut requirements = WorkFacts::new();
         for tag in 0..4 {
             requirements
                 .push(&budget, requirement(&budget, tag))

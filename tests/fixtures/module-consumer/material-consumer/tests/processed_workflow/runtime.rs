@@ -27,9 +27,12 @@ use nara::{
     sprite::Sprite,
 };
 
-use super::project::{
-    MATERIAL_ID, actor, assert_image, indices_product, material_product, palette_product,
-    parameters, scene_product,
+use super::{
+    MATERIAL_BINDING_MISMATCH,
+    project::{
+        MATERIAL_ID, actor, assert_image, indices_product, material_product, palette_product,
+        parameters, scene_product,
+    },
 };
 
 #[derive(Clone, Debug, Resource)]
@@ -149,11 +152,14 @@ fn inspect(world: &mut World) {
     );
     assert!(server.path(material.handle().id()).is_none());
     assert_eq!(material.declaration_id(), MATERIAL_ID);
-    assert_eq!(material.declaration_version(), 1);
     assert_eq!(material.parameters(), &parameters(2.0));
     assert!(material.texture_overrides().is_empty());
     let asset = materials.get(material.handle()).unwrap();
     assert_eq!(asset.product(), material_product());
+    assert_eq!(
+        material.declaration_version(),
+        asset.generation().declaration().version(),
+    );
     assert_eq!(asset.default_parameters(), &parameters(0.0));
     assert_eq!(
         asset.textures(),
@@ -258,6 +264,23 @@ fn inspect(world: &mut World) {
         .frames
         .fetch_add(1, Ordering::SeqCst);
     world.resource_mut::<Outcome>().0 = Some(observation);
+}
+
+pub(super) fn assert_material_binding_refused(base: RuntimeContentBase) {
+    let options = HeadlessRunOptions::frames(NonZeroU32::MIN, Duration::ZERO);
+    let mut run = HeadlessRun::<Outcome>::from_runtime_content(base, options, Vec::new());
+    let report = run.execute_bounded();
+    assert!(
+        matches!(report.outcome(), HeadlessRunOutcome::Failed),
+        "{report:?}",
+    );
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == MATERIAL_BINDING_MISMATCH),
+        "{report:?}",
+    );
 }
 
 pub(super) fn play(base: RuntimeContentBase) -> Observation {

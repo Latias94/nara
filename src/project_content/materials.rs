@@ -1,7 +1,9 @@
 //! Candidate-local material validation shared by source and processed Scene preparation.
 
 use nara_material::{Material2dAsset, Material2dRecord};
-use nara_reflect::{ComponentCodecError, ComponentTypeId, ComponentValue, ComponentValueRef};
+use nara_reflect::{
+    ComponentCodecError, ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueRef,
+};
 use nara_scene::CompiledSceneDocument;
 
 use super::{ProjectAssetCollection, ProjectContentError, ProjectContentErrorKind};
@@ -83,11 +85,7 @@ pub(super) fn attach_source_material_views(
     }
 }
 
-pub(crate) fn material_record_work_bytes<'a>(
-    value: impl Into<ComponentValueRef<'a>>,
-) -> Option<usize> {
-    let value = value.into();
-    let cost = value.cost();
+pub(crate) fn material_record_work_bytes(cost: ComponentValueCost) -> Option<usize> {
     cost.nodes()
         .checked_mul(
             std::mem::size_of::<ComponentValue>()
@@ -131,7 +129,7 @@ pub(super) fn validate_source_materials(
             continue;
         };
         let work =
-            context.reserve_work(material_record_work_bytes(record.value()).ok_or_else(
+            context.reserve_work(material_record_work_bytes(record.value_cost()).ok_or_else(
                 || super::overflow_budget(super::ProjectContentBudgetKind::WorkBytes),
             )?)?;
         let result = validate_material_record(record.value(), materials).map_err(|_| {

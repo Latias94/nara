@@ -293,6 +293,37 @@ fn charge(budget: &Arc<DecodeBudget>, limits: RuntimeContentLimits, work: bool) 
     }
 }
 
+#[test]
+fn scene_binding_reserves_known_component_cost_before_parsing() {
+    let fixture = Fixture::new::<Material2dRuntimeCodec>();
+    let limits = RuntimeContentLimits::default();
+    let base = fixture.open(limits);
+    let scene = base.acquire_startup_scene().unwrap();
+    let component = scene.candidate().document().entities()[0]
+        .components()
+        .get(&ComponentTypeId::new("nara.material2d"))
+        .unwrap();
+    let budget = &base.inner.budget;
+    let limit = limits.work_bytes().get();
+    let scratch = material_record_work_bytes(component.value_cost()).unwrap();
+    let in_use = budget.reserve(0, limit).unwrap();
+    assert!(matches!(
+        SceneMaterialBinding::read(&base, component),
+        Err(RuntimeContentError::Budget { kind: RuntimeContentBudgetKind::WorkBytes, required, limit: actual })
+            if required == limit + scratch && actual == limit
+    ));
+    drop(in_use);
+
+    let binding = SceneMaterialBinding::read(&base, component).unwrap();
+    assert_eq!(
+        binding.record.material(),
+        &AssetRef::Product(product(MATERIAL))
+    );
+    assert_eq!(charge(budget, limits, true), scratch);
+    drop(binding);
+    assert_eq!(charge(budget, limits, true), 0);
+}
+
 fn assert_snapshot_custody<S>(
     capture: impl FnOnce(&Material2dAsset) -> S,
     inspect: impl FnOnce(&S),

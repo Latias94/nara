@@ -238,7 +238,9 @@ admitted Product mappings, independently of repeated reference occurrences. Thes
 the mandatory reachable closure, rather than every unused catalog entry.
 
 Deep validation releases heavy decoded outputs between validation units and retains bounded
-cross-member facts. Finite index and native-fact capacity is admitted from catalogue membership
+cross-member facts. Scene Material assignments check the referenced declaration, authored
+parameter values and Image overrides through the same rule used by Player preparation.
+Finite index and native-fact capacity is admitted from catalogue membership
 before traversal, including currently unreachable members; this conservative scratch allowance
 does not decode those members. It publishes no native stores or receiving World state. The report retains
 no decoded resource closure; ordinary preparation and later acquisition still use their original

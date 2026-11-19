@@ -703,6 +703,33 @@ fn generated_field_ids_preserve_full_semantic_keys_and_refuse_invalid_identity()
 }
 
 #[test]
+fn resolved_material_record_distinguishes_primary_alias_and_exact_products() {
+    let declaration = declaration("test.surface", 2);
+    let primary = material_product();
+    let auxiliary = AssetProductRef::new(
+        primary.source(),
+        ImportedProductId::parse_subproduct("33333333-3333-4333-8333-333333333333").unwrap(),
+    )
+    .unwrap();
+    for (reference, matching, other) in [
+        (AssetRef::StableId(primary.source()), primary, auxiliary),
+        (AssetRef::Product(primary), primary, auxiliary),
+        (AssetRef::Product(auxiliary), auxiliary, primary),
+    ] {
+        let record =
+            Material2dRecord::new(reference, &declaration, values(), BTreeMap::new()).unwrap();
+        record
+            .validate_resolved_product(matching, &declaration)
+            .unwrap();
+        assert!(
+            record
+                .validate_resolved_product(other, &declaration)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn record_validates_actual_source_and_processed_assets_before_binding() {
     let asset = source_asset(declaration("test.surface", 2));
     let record = record();

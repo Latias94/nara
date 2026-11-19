@@ -53,9 +53,9 @@ use nara::{
         RuntimeContentMember, RuntimeContentTarget,
     },
     scene::{
-        AuthoringDocumentSource, CompiledSceneCandidate, SceneComponentRecord, SceneDocument,
-        SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-        SourceDocumentKind,
+        AuthoringDocumentSource, CompiledSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits,
+        SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+        SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     },
 };
 use nara_material_module_consumer::startup_materials;
@@ -141,6 +141,21 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub(super) fn new() -> Self {
+        Self::with_declaration_version(1)
+    }
+
+    pub(super) fn with_declaration_version(version: u32) -> Self {
+        Self::with_scene_material(version, BTreeMap::new())
+    }
+
+    pub(super) fn with_non_image_override() -> Self {
+        Self::with_scene_material(
+            1,
+            BTreeMap::from([("palette".to_owned(), AssetRef::path(MATERIAL_PATH).unwrap())]),
+        )
+    }
+
+    fn with_scene_material(version: u32, overrides: BTreeMap<String, AssetRef>) -> Self {
         let root = Root::new();
         for path in ["assets", "scenes", "cache"] {
             fs::create_dir(root.path().join(path)).unwrap();
@@ -161,12 +176,19 @@ impl Fixture {
         let plan =
             resolve_runtime_configuration(&configuration().resolve().unwrap(), recipe.clone())
                 .unwrap();
-        let declaration = startup_materials()
-            .unwrap()
+        let startup_materials = startup_materials().unwrap();
+        let template = startup_materials
             .current(MATERIAL_ID)
             .unwrap()
-            .declaration()
-            .clone();
+            .declaration();
+        let declaration = Material2dDeclaration::new(
+            template.id(),
+            version,
+            template.alpha_mode(),
+            template.parameters().clone(),
+            template.textures().to_vec(),
+        )
+        .unwrap();
         let source = Material2dSource::new(
             declaration.clone(),
             vec![AssetPath::new(SHADER_PATH).unwrap()],
@@ -325,7 +347,7 @@ impl Fixture {
             assert_image(&ImageRuntimeCodec::decode_runtime(bytes).unwrap(), product);
             group
         });
-        let document = scene_document(&plan, &declaration);
+        let document = scene_document(&plan, &declaration, overrides);
         let scene_path = "startup.scene.json";
         fs::write(
             root.path().join("scenes").join(scene_path),
@@ -435,11 +457,51 @@ impl Fixture {
         )?;
         Ok(builder)
     }
+
+    pub(super) fn publish_scene_payload(
+        &self,
+        compatible: &RuntimeContentBase,
+    ) -> (Root, RuntimeContentExpectation) {
+        let bytes = RuntimeSceneCandidate::cook(
+            &self.compiled,
+            compatible.plan().schema_validation().bindings(),
+            self.database.resolver(&asset_scope()),
+            RuntimeSceneLimits::default(),
+        )
+        .unwrap()
+        .to_json_bytes()
+        .unwrap();
+        let root = publish_payloads(compatible);
+        let mut definition = catalog_definition(compatible);
+        let member = definition
+            .members
+            .iter_mut()
+            .find(|member| member.products().contains(&scene_product()))
+            .unwrap();
+        fs::write(root.path().join(member.path()), &bytes).unwrap();
+        *member = RuntimeContentMember::new(
+            member.path(),
+            ContentDigest::of_bytes(&bytes),
+            member.kind().clone(),
+            member.products().to_vec(),
+            member.dependencies().to_vec(),
+        )
+        .unwrap();
+        let catalog =
+            RuntimeContentCatalog::new(definition, RuntimeContentCatalogLimits::default()).unwrap();
+        let expectation = RuntimeContentExpectation::new(
+            ContentDigest::of_bytes(&catalog.to_json_bytes().unwrap()),
+            catalog.target().clone(),
+        );
+        write_catalog(&root, &catalog);
+        (root, expectation)
+    }
 }
 
 fn scene_document(
     plan: &RuntimeConfigurationPlan,
     declaration: &Material2dDeclaration,
+    overrides: BTreeMap<String, AssetRef>,
 ) -> SceneDocument {
     let bindings = plan.schema_validation().bindings();
     let owner = |component: &str| {
@@ -470,10 +532,9 @@ fn scene_document(
         AssetRef::path(MATERIAL_PATH).unwrap(),
         declaration,
         parameters(2.0),
-        BTreeMap::new(),
+        overrides,
     )
     .unwrap();
-    assert!(material.texture_overrides().is_empty());
     SceneDocument::from_ordered_roots([SceneEntityRecord::new(actor())
         .with_component(
             ComponentTypeId::new("nara.sprite.Sprite"),
@@ -590,21 +651,22 @@ pub(super) fn publish_payloads(base: &RuntimeContentBase) -> Root {
     root
 }
 
-pub(super) fn publish_scene_texture_payloads(
+pub(super) fn publish_material_payloads(
     base: &RuntimeContentBase,
     material: &Material2dAsset,
 ) -> (Root, RuntimeContentExpectation) {
     assert_eq!(material.textures().len(), 1);
-    assert_eq!(
-        material.textures()["palette"],
-        AssetRef::Product(scene_product()),
-    );
+    let AssetRef::Product(texture) = &material.textures()["palette"] else {
+        panic!("the encoded Material needs a complete texture Product");
+    };
     let root = publish_payloads(base);
     let bytes = Material2dRuntimeCodec::encode_runtime(material).unwrap();
     let mut definition = catalog_definition(base);
-    definition
-        .members
-        .retain(|member| !member.products().contains(&palette_product()));
+    if *texture != palette_product() {
+        definition
+            .members
+            .retain(|member| !member.products().contains(&palette_product()));
+    }
     let member = definition
         .members
         .iter_mut()
@@ -617,7 +679,7 @@ pub(super) fn publish_scene_texture_payloads(
         member.kind().clone(),
         member.products().to_vec(),
         vec![RuntimeContentDependency::new(
-            scene_product(),
+            *texture,
             RuntimeContentDependencyRole::Required,
         )],
     )

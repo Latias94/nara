@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_asset::{AssetRef, ImportedProductId};
+use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
 use nara_reflect::{
     ComponentCodecError, ComponentMapRef, ComponentValue, ComponentValueMaterializationLimits,
     ComponentValueRef, decode_asset_reference_value, encode_asset_reference_value,
@@ -11,9 +11,7 @@ use crate::{
     declaration::MAX_MATERIAL_TEXTURES, parameters::MAX_MATERIAL_PARAMETERS,
 };
 
-use super::{
-    validate_asset_values, validate_authored_values, validate_declaration, validate_field_id,
-};
+use super::{validate_authored_values, validate_declaration, validate_field_id};
 
 const PARAMETER_TAGS: [&str; 6] = ["f32", "i32", "u32", "vec2", "vec3", "vec4"];
 
@@ -78,13 +76,24 @@ impl Material2dRecord {
 
     /// Validates the entire assignment against the caller's actual loaded material.
     pub fn validate_asset(&self, asset: &Material2dAsset) -> Result<(), ComponentCodecError> {
+        self.validate_resolved_product(asset.product(), asset.generation().declaration())
+    }
+
+    /// Checks the assignment against the exact Product and declaration of an admitted material.
+    ///
+    /// The caller supplies both from the same asset and resolves any source path alias first.
+    /// Stable IDs select only primary Products. Complete references must match exactly.
+    pub fn validate_resolved_product(
+        &self,
+        product: AssetProductRef,
+        declaration: &Material2dDeclaration,
+    ) -> Result<(), ComponentCodecError> {
         let product_matches = match &self.material {
             AssetRef::Path(_) => true,
             AssetRef::StableId(id) => {
-                *id == asset.product().source()
-                    && asset.product().product() == ImportedProductId::PRIMARY
+                *id == product.source() && product.product() == ImportedProductId::PRIMARY
             }
-            AssetRef::Product(product) => *product == asset.product(),
+            AssetRef::Product(reference) => *reference == product,
         };
         if !product_matches {
             return Err(ComponentCodecError::invalid_asset_ref(
@@ -93,13 +102,23 @@ impl Material2dRecord {
                 "the record and the supplied material asset select different Products",
             ));
         }
-        validate_asset_values(
-            &self.declaration_id,
-            self.declaration_version,
-            &self.parameters,
-            &self.texture_overrides,
-            asset,
-        )
+        if self.declaration_id != declaration.id() {
+            return Err(ComponentCodecError::invalid_field(
+                "declaration_id",
+                format!("the actual material declaration ID {}", declaration.id()),
+            ));
+        }
+        if self.declaration_version != declaration.version() {
+            return Err(ComponentCodecError::invalid_field(
+                "declaration_version",
+                format!(
+                    "the actual material declaration version {}",
+                    declaration.version()
+                ),
+            ));
+        }
+        // An admitted asset already guarantees complete defaults for its declared textures.
+        validate_declaration(declaration, &self.parameters, &self.texture_overrides)
     }
 
     /// Encodes the canonical record with the ordinary native materialization limits.

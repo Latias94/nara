@@ -1,13 +1,71 @@
 use std::{any::Any, mem::size_of, sync::Arc};
 
-use nara_material::Material2dAsset;
+use nara_asset::{AssetProductRef, AssetRef, AssetRuntimeError};
+use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_material::{Material2dAsset, Material2dDeclaration, Material2dRecord};
+use nara_scene::CompiledSceneComponent;
 
 use super::{
     DecodeLease, RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentError, checked_add,
 };
+use crate::project_content::materials::material_record_work_bytes;
 
 #[cfg(test)]
 mod tests;
+
+pub(super) struct SceneMaterialBinding {
+    record: Material2dRecord,
+    _work: DecodeLease,
+}
+
+impl SceneMaterialBinding {
+    pub(super) fn read(
+        base: &RuntimeContentBase,
+        component: &CompiledSceneComponent,
+    ) -> Result<Self, RuntimeContentError> {
+        let scratch = material_record_work_bytes(component.value_cost()).ok_or(
+            RuntimeContentError::BudgetOverflow {
+                kind: RuntimeContentBudgetKind::WorkBytes,
+            },
+        )?;
+        let work = base.inner.budget.reserve(0, scratch)?;
+        let record = Material2dRecord::from_component_value(component.value())
+            .map_err(|_| binding_mismatch())?;
+        Ok(Self {
+            record,
+            _work: work,
+        })
+    }
+
+    pub(super) fn validate<'a>(
+        &self,
+        lookup: impl FnOnce(AssetProductRef) -> Option<(AssetProductRef, &'a Material2dDeclaration)>,
+        has_image: impl Fn(AssetProductRef) -> bool,
+    ) -> Result<(), RuntimeContentError> {
+        let AssetRef::Product(selected) = self.record.material() else {
+            return Err(binding_mismatch());
+        };
+        let (product, declaration) = lookup(*selected).ok_or_else(binding_mismatch)?;
+        self.record
+            .validate_resolved_product(product, declaration)
+            .map_err(|_| binding_mismatch())?;
+        if self.record.texture_overrides().values().any(
+            |reference| !matches!(reference, AssetRef::Product(product) if has_image(*product)),
+        ) {
+            return Err(binding_mismatch());
+        }
+        Ok(())
+    }
+}
+
+fn binding_mismatch() -> RuntimeContentError {
+    RuntimeContentError::Asset(AssetRuntimeError::new(Diagnostic::error(
+        DiagnosticCode::new("runtime.content.material-binding-mismatch")
+            .expect("engine diagnostic code"),
+        SafeSummary::new("Scene material values do not match the admitted material product")
+            .expect("engine diagnostic summary"),
+    )))
+}
 
 struct RuntimeMaterialOwner {
     _lease: DecodeLease,
