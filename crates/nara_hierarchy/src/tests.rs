@@ -1,5 +1,7 @@
 use nara_ecs::{
-    Commands, Entity, Resource, World, bevy_ecs::world::CommandQueue, schedule::IntoScheduleConfigs,
+    Commands, Component, Entity, QueryState, ResMut, Resource, World,
+    bevy_ecs::{entity_disabling::Disabled, world::CommandQueue},
+    schedule::IntoScheduleConfigs,
 };
 
 use super::*;
@@ -1023,6 +1025,148 @@ fn plugin_completes_the_latest_ordered_generation() {
         )
     );
     runtime.finish().unwrap();
+}
+
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+struct CustomDisabled;
+
+#[derive(Default, Resource)]
+struct HierarchyRenderRuns(usize);
+
+fn app_with_hierarchy_edge() -> (App, Entity, Entity) {
+    let mut app = App::new();
+    app.add_plugin(HierarchyPlugin).unwrap();
+    app.init_resource::<HierarchyRenderRuns>().unwrap();
+    app.add_systems(
+        CoreStage::Render,
+        |mut runs: ResMut<HierarchyRenderRuns>| {
+            runs.0 += 1;
+        },
+    )
+    .unwrap();
+    let world = app.world_mut().unwrap();
+    world.register_disabling_component::<CustomDisabled>();
+    let parent = world.spawn_empty().id();
+    let child = world.spawn_empty().id();
+    place_root(world, parent);
+    HierarchyWriter::new(world)
+        .place(child, child_last(parent))
+        .unwrap();
+    (app, parent, child)
+}
+
+#[test]
+fn managed_and_public_validation_include_disabled_hierarchy_endpoints() {
+    use std::time::Duration;
+
+    use nara_app::{RealTime, RuntimeInstance};
+
+    let (mut app, parent, child) = app_with_hierarchy_edge();
+    app.add_systems(CoreStage::Update, move |world: &mut World| {
+        match world.resource::<RealTime>().frame {
+            2 => {
+                world.entity_mut(parent).insert(Disabled);
+            }
+            3 => {
+                world.entity_mut(parent).remove::<Disabled>();
+                world.entity_mut(child).insert(CustomDisabled);
+            }
+            4 => {
+                world.entity_mut(parent).insert((Disabled, CustomDisabled));
+            }
+            _ => return,
+        }
+        let unrelated_root = world.spawn_empty().id();
+        place_root(world, unrelated_root);
+    })
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let mut previous_publication = None;
+    for (index, [parent_visible, child_visible]) in
+        [[true, true], [false, true], [true, false], [false, false]]
+            .into_iter()
+            .enumerate()
+    {
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        assert_eq!(world.resource::<HierarchyRenderRuns>().0, index + 1);
+        assert_eq!(validate_hierarchy(world), Ok(()));
+        let order = world.resource::<HierarchyOrder>();
+        assert_eq!(order.len(), index + 2);
+        assert_eq!(order.as_slice()[..2], [parent, child]);
+        let publication = __private::completed_topology_publication(world);
+        assert!(publication.is_some());
+        assert_ne!(publication, previous_publication);
+        previous_publication = publication;
+
+        let mut query = QueryState::<Entity>::try_new(world).unwrap();
+        assert_eq!(query.get(world, parent).is_ok(), parent_visible);
+        assert_eq!(query.get(world, child).is_ok(), child_visible);
+    }
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn managed_and_public_validation_reject_broken_disabled_edges() {
+    use std::time::Duration;
+
+    use nara_app::{RealTime, RuntimeFaultKind, RuntimeInstance, RuntimeState};
+
+    for remove_parent in [true, false] {
+        let (mut app, parent, child) = app_with_hierarchy_edge();
+        app.add_systems(CoreStage::Update, move |world: &mut World| {
+            if world.resource::<RealTime>().frame == 2 {
+                world.entity_mut(parent).insert(Disabled);
+                world.entity_mut(child).insert(CustomDisabled);
+                if remove_parent {
+                    world.entity_mut(child).remove::<Parent>();
+                } else {
+                    world.entity_mut(parent).remove::<Children>();
+                }
+            }
+        })
+        .unwrap();
+
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert!(__private::completed_topology_publication(runtime.world()).is_some());
+        assert_eq!(runtime.world().resource::<HierarchyRenderRuns>().0, 1);
+
+        let error = runtime.drive(Duration::ZERO).unwrap_err();
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::System);
+        assert_eq!(error.fault().source(), "nara.ecs.fallible-execution");
+        assert_eq!(runtime.state(), RuntimeState::Faulted);
+        let world = runtime.world();
+        assert_eq!(world.resource::<HierarchyRenderRuns>().0, 1);
+        assert!(__private::completed_topology_publication(world).is_none());
+        let expected = if remove_parent {
+            HierarchyError::ReverseUnexpected {
+                parent,
+                child,
+                actual_parent: None,
+            }
+        } else {
+            HierarchyError::ReverseMissing { parent, child }
+        };
+        assert_eq!(validate_hierarchy(world), Err(expected));
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
+fn public_validation_rejects_disabled_member_without_placement() {
+    let mut world = World::new();
+    world.register_disabling_component::<CustomDisabled>();
+    let entity = world
+        .spawn((relation::HierarchyMember, CustomDisabled))
+        .id();
+
+    assert_eq!(
+        validate_hierarchy(&world),
+        Err(HierarchyError::PlacementMissing { entity })
+    );
 }
 
 #[test]

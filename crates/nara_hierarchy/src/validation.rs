@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use nara_ecs::{Entity, QueryState, With, World, bevy_ecs::entity::EntityHashMap};
+use nara_ecs::{Component, Entity, World, bevy_ecs::entity::EntityHashMap};
 
 use crate::{Children, HierarchyError, HierarchyRoots, Parent, relation::HierarchyMember};
 
@@ -12,9 +12,6 @@ enum VisitState {
 
 #[derive(Debug, Default)]
 pub(crate) struct HierarchyValidationScratch {
-    parent_query: Option<QueryState<(Entity, &'static Parent)>>,
-    children_query: Option<QueryState<(Entity, &'static Children)>>,
-    member_query: Option<QueryState<Entity, With<HierarchyMember>>>,
     parent_edges: Vec<(Entity, Entity)>,
     parent_by_child: EntityHashMap<Entity>,
     reverse_edges: HashSet<(Entity, Entity)>,
@@ -99,8 +96,8 @@ impl HierarchyValidationScratch {
 
 /// Validates the complete runtime structural hierarchy without recursion.
 ///
-/// Runtime is linear in the number of forward and reverse hierarchy entries. This function does
-/// not consult the generation fast path and is reusable by publication preflight.
+/// Validation includes entities with built-in or custom Bevy disabling components. It checks the
+/// current topology independently of any completed generation.
 pub fn validate_hierarchy(world: &World) -> Result<(), HierarchyError> {
     let mut scratch = HierarchyValidationScratch::default();
     validate_hierarchy_with_scratch(world, &mut scratch)
@@ -121,54 +118,40 @@ pub(crate) fn validate_hierarchy_with_additions(
     scratch.clear();
     let mut stats = HierarchyPreflightStats::default();
 
-    {
-        if scratch.parent_query.is_none() {
-            scratch.parent_query = QueryState::try_new(world);
+    for (entity, parent) in structural_components::<Parent>(world) {
+        stats.record_parent_entity();
+        let parent = parent.parent();
+        if entity == parent {
+            return Err(HierarchyError::SelfParent { entity });
         }
-        if let Some(parent_query) = &mut scratch.parent_query {
-            for (entity, parent) in parent_query.iter(world) {
-                stats.record_parent_entity();
-                let parent = parent.parent();
-                if entity == parent {
-                    return Err(HierarchyError::SelfParent { entity });
-                }
-                if world.get_entity(parent).is_err() {
-                    return Err(HierarchyError::MissingParent {
-                        child: entity,
-                        parent,
-                    });
-                }
-                scratch.parent_edges.push((entity, parent));
-                scratch.parent_by_child.insert(entity, parent);
-            }
+        if world.get_entity(parent).is_err() {
+            return Err(HierarchyError::MissingParent {
+                child: entity,
+                parent,
+            });
         }
+        scratch.parent_edges.push((entity, parent));
+        scratch.parent_by_child.insert(entity, parent);
     }
 
-    {
-        if scratch.children_query.is_none() {
-            scratch.children_query = QueryState::try_new(world);
+    for (entity, children) in structural_components::<Children>(world) {
+        stats.record_children_entity();
+        if children.is_empty() {
+            return Err(HierarchyError::ReverseEmpty { parent: entity });
         }
-        if let Some(children_query) = &mut scratch.children_query {
-            for (entity, children) in children_query.iter(world) {
-                stats.record_children_entity();
-                if children.is_empty() {
-                    return Err(HierarchyError::ReverseEmpty { parent: entity });
-                }
 
-                for child in children.iter() {
-                    if world.get_entity(child).is_err() {
-                        return Err(HierarchyError::ReverseChildMissing {
-                            parent: entity,
-                            child,
-                        });
-                    }
-                    if !scratch.reverse_edges.insert((entity, child)) {
-                        return Err(HierarchyError::ReverseDuplicate {
-                            parent: entity,
-                            child,
-                        });
-                    }
-                }
+        for child in children.iter() {
+            if world.get_entity(child).is_err() {
+                return Err(HierarchyError::ReverseChildMissing {
+                    parent: entity,
+                    child,
+                });
+            }
+            if !scratch.reverse_edges.insert((entity, child)) {
+                return Err(HierarchyError::ReverseDuplicate {
+                    parent: entity,
+                    child,
+                });
             }
         }
     }
@@ -221,6 +204,20 @@ pub(crate) fn validate_hierarchy_with_additions(
     Ok(stats)
 }
 
+fn structural_components<T: Component>(world: &World) -> impl Iterator<Item = (Entity, &T)> {
+    let archetypes = world.archetypes();
+    world
+        .component_id::<T>()
+        .and_then(|component| archetypes.component_index().get(&component))
+        .into_iter()
+        .flat_map(|component_archetypes| component_archetypes.keys())
+        .flat_map(move |&archetype| archetypes[archetype].entities())
+        .filter_map(move |entry| {
+            let entity = entry.id();
+            world.get::<T>(entity).map(|component| (entity, component))
+        })
+}
+
 fn validate_membership(
     world: &World,
     scratch: &mut HierarchyValidationScratch,
@@ -235,16 +232,11 @@ fn validate_membership(
             return Err(HierarchyError::MembershipMissing { entity });
         }
     }
-    if scratch.member_query.is_none() {
-        scratch.member_query = QueryState::try_new(world);
-    }
-    if let Some(query) = &mut scratch.member_query {
-        for entity in query.iter(world) {
-            if !scratch.root_entities.contains(&entity)
-                && !scratch.parent_by_child.contains_key(&entity)
-            {
-                return Err(HierarchyError::PlacementMissing { entity });
-            }
+    for (entity, _) in structural_components::<HierarchyMember>(world) {
+        if !scratch.root_entities.contains(&entity)
+            && !scratch.parent_by_child.contains_key(&entity)
+        {
+            return Err(HierarchyError::PlacementMissing { entity });
         }
     }
     Ok(())

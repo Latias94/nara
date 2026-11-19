@@ -63,6 +63,8 @@ flowchart LR
 - The relation does not opt into linked spawn or linked clone behavior. Structural ancestry does
   not grant despawn, Scene Instance membership, runtime-session ownership, UI layout, visibility,
   persistence, or prefab-provenance authority.
+- Structural validation reads every stored relation and placement. Gameplay query filters can
+  exclude built-in or custom disabled entities from simulation without removing their topology.
 - Scene and prefab stable-ID parent facts are validated and lowered into the runtime relation before
   candidate publication. Runtime relation state never writes topology back into a document or
   advances a saved revision.
