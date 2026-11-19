@@ -258,7 +258,55 @@ fn shared_processed_refuses_changed_descriptor_or_actual_image_before_effects() 
         assert_eq!(fixture.events.len(), events);
         assert_eq!(fixture.owner.retention(), retention);
         assert_eq!(fixture.owner.error(fixture.handle), None);
-        fixture.retire(&claim);
+
+        if matches!(mismatch, Mismatch::Tint | Mismatch::TintBits) {
+            let id = fixture.handle.id();
+            let version = fixture.states.version(id).unwrap().raw();
+            let input = fixture
+                .input(
+                    descriptor,
+                    fixture.images.get(fixture.image_handle).unwrap(),
+                )
+                .with_receipt(claim.clone());
+            let replacements = fixture
+                .owner
+                .prepare_publications(
+                    vec![input],
+                    &[],
+                    &fixture.server,
+                    None,
+                    &fixture.tilesets,
+                    &fixture.states,
+                )
+                .unwrap()
+                .commit(
+                    &fixture.server,
+                    &fixture.images,
+                    &mut fixture.tilesets,
+                    &mut fixture.states,
+                    &mut fixture.events,
+                );
+            assert_eq!(fixture.states.version(id).unwrap().raw(), version + 1);
+            assert!(matches!(
+                fixture.owner.prepare_publications(
+                    Vec::new(),
+                    &[claim],
+                    &fixture.server,
+                    None,
+                    &fixture.tilesets,
+                    &fixture.states,
+                ),
+                Err(TileSetAssetError::Superseded)
+            ));
+            let current = fixture.tilesets.get(fixture.handle).unwrap();
+            assert_eq!(
+                current.material().tint.r.to_bits(),
+                descriptor.tint().r.to_bits()
+            );
+            fixture.retire(&replacements[0]);
+        } else {
+            fixture.retire(&claim);
+        }
     }
 }
 

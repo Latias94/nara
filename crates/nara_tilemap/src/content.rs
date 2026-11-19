@@ -193,6 +193,31 @@ impl SourceImageReference {
 }
 
 impl TileSetDeclaration {
+    fn same_declaration(&self, other: &Self) -> bool {
+        self == other && self.float_bits() == other.float_bits()
+    }
+
+    fn float_bits(&self) -> [u32; 10] {
+        let atlas = self.atlas();
+        let tint = match self {
+            Self::Source { source, .. } => source.tint,
+            Self::Product(descriptor) => descriptor.tint(),
+        };
+        [
+            atlas.tile_size.x,
+            atlas.tile_size.y,
+            atlas.margin.x,
+            atlas.margin.y,
+            atlas.spacing.x,
+            atlas.spacing.y,
+            tint.r,
+            tint.g,
+            tint.b,
+            tint.a,
+        ]
+        .map(f32::to_bits)
+    }
+
     fn from_source(
         record: AssetRecord,
         source: TileSetSource,
@@ -543,7 +568,7 @@ impl TileSetAssets {
             .get(&handle.id())
             .and_then(|entry| entry.accepted_atlas);
         if self.entries.get(&handle.id()).is_some_and(|entry| {
-            entry.declaration == declaration
+            entry.declaration.same_declaration(&declaration)
                 && entry.active
                 && entry.slot == tilesets.slot_revision(handle)
                 && entry.state == states.state_revision(handle.id())
@@ -568,7 +593,7 @@ impl TileSetAssets {
             .entries
             .get(&handle.id())
             .filter(|entry| {
-                entry.declaration == declaration
+                entry.declaration.same_declaration(&declaration)
                     && entry.slot == tilesets.slot_revision(handle)
                     && entry.state == states.state_revision(handle.id())
                     && entry.error != Some(TileSetAssetError::Superseded)

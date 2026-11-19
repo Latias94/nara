@@ -300,7 +300,7 @@ impl TileSetAssets {
                         .ok_or(TileSetAssetError::DependencyUnavailable)?;
                     if !entry.active
                         || entry.error.is_some()
-                        || !shared_declaration_matches(&entry.declaration, &input.declaration)
+                        || !entry.declaration.same_declaration(&input.declaration)
                         || !states.state(input.handle.id()).is_some_and(|state| {
                             state.load_state() == &nara_asset::LoadState::Loaded
                                 && state.usable_version().is_some()
@@ -332,7 +332,7 @@ impl TileSetAssets {
                     }));
                     continue;
                 }
-                if entry.declaration == input.declaration {
+                if entry.declaration.same_declaration(&input.declaration) {
                     Arc::clone(&entry.claim)
                 } else {
                     Arc::new(())
@@ -624,28 +624,4 @@ fn image_matches_input(image: &ImageContentSnapshot, input: &TileSetPublicationI
         && image.format() == input.image.format()
         && image.color_space() == input.image.color_space()
         && same_pixels(image.pixels(), input.image.pixels())
-}
-
-fn shared_declaration_matches(left: &TileSetDeclaration, right: &TileSetDeclaration) -> bool {
-    let encoded_floats = |declaration: &TileSetDeclaration| {
-        let atlas = declaration.atlas();
-        let tint = match declaration {
-            TileSetDeclaration::Source { source, .. } => source.tint,
-            TileSetDeclaration::Product(descriptor) => descriptor.tint(),
-        };
-        [
-            atlas.tile_size.x,
-            atlas.tile_size.y,
-            atlas.margin.x,
-            atlas.margin.y,
-            atlas.spacing.x,
-            atlas.spacing.y,
-            tint.r,
-            tint.g,
-            tint.b,
-            tint.a,
-        ]
-        .map(f32::to_bits)
-    };
-    left == right && encoded_floats(left) == encoded_floats(right)
 }
