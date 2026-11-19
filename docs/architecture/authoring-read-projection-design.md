@@ -236,6 +236,83 @@ an absent component or unknown root is a distinct error. Defaulted Null remains 
 Present Null. Borrowed views cannot survive a mutable session borrow; owned Tooling observations
 have their own historical basis and do not certify current edit authority.
 
+### Stored Prefab property claims
+
+A tool reviewing a stored instance override needs to find an exact claim and inspect its
+payload even if the base is missing or the effective composition is rejected. The existing
+whole-declaration observation remains useful for reviewing structural intent. Property
+inspection uses the same non-active document query and continuation through a dedicated
+projection of one instance declaration. Its entity argument is the direct anchor. Optional
+nested steps follow stored addition or instance-claim slots in that same document.
+
+Discover one page of actual claim headers in declaration order. Each row retains an opaque
+claim address tied to its original workspace, document basis, instance path and slot. The
+header gives its typed target route, component, version, and durable property selector.
+Discovery visits headers only. Reading a selected slot copies its admitted raw
+intent and distinguishes explicit absence from `Set(Null)`. This includes unavailable source
+claims. Interpretation of inheritance, defaults, and effective targets stays with Scene
+composition. Source repair can prepare Revert using the retained claim address. Repeated
+instances with equal declaration indices cannot redirect that address.
+
+Charge each examined component or property claim, then admit aggregate row metadata, the
+page target and the shared claim/continuation path before copying. Stop measuring a header at
+the first identity segment that would exceed the remaining scan allowance. When a header
+exceeds the durable selector depth or cannot fit on a single-row page at the hard cap, return
+`OversizedPrefabPropertyClaim` with the exact address and advance past it. Both the page target
+and retained path must fit the metadata limit. A page with no rows can continue after advancing
+past stored non-property intent. Point reading uses indexed lookup and the existing selected-value
+budget. Qualification covers a named non-active source, an unavailable sibling, cancellation,
+a retained competing Revert, exact Undo/Redo and real Save/Reopen.
+
+At the Godot pin below, `PropertyUtils::get_node_states_stack` samples the editing source
+chain separately from reading current values. Scene serialization also retains explicit
+equal-value pins. At the Bevy pin, a patch can inherit fields from a cached template, while
+the Inspector reads components from the current World. Effective composition and stored
+intent therefore need distinct observations. The instance query here keeps source intent
+available when there is no effective composition to inspect.
+
+- [Godot source-state traversal](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/scene/property_utils.cpp#L239) and [property serialization](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/scene/resources/packed_scene.cpp#L1061).
+- [Bevy cached template patching](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_scene/src/resolved_scene.rs#L472) and [Inspector component discovery](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_inspector/src/details_panel.rs#L1103).
+
+#### November 20 stored-claim qualification
+
+The production path and independent consumer are committed together at `c44a398`.
+Windows x64 release nextest `28fdea69-d2a7-4619-b79f-3d24ae8b1922` passes 322/322 with one
+test skipped. The Identity and Tooling libraries, `authoring_queries`, and `property_children`
+cover unchanged direct reads and the new selection-independent Scene/Prefab claim path.
+The new regressions cover exact target and Schema basis, routed targets, nested declaration
+slots, repeatable and foreign cursor handling, selected payload cost, and continuation past
+unavailable claims with large values or oversized selectors. The large-selector fixture
+exercises a 22 KiB anchor, a 70 KiB key, and an over-depth sequence of empty keys.
+
+Review corrected three custody and capacity errors before that run. A discovered slot now
+retains its own instance path and workspace. Header measurement stops at the allotted bytes
+or selector depth. Rows and their cursor share the path so paging remains possible for the
+long anchor above. Both the header copy and subsequent Revert continue to use their own
+existing budgets. Discovery avoids the former whole-instance copy for property review.
+
+The independently locked `prepared_authoring` target passes 12/12 in Windows release
+nextest `596991ac-38b7-4671-b4ec-6e8de6fa5fe1`. The two new trajectories use the registered
+semantic panel in an ordinary project. Each discovers two anchors with equal slot indices,
+selects a claim from its read value, cancels a candidate, and retains two competing candidates
+across panel drives. Exactly one publishes. Undo/Redo and attempt-matched Save/Reopen verify the
+complete containing Scene or Prefab, including preserved unavailable intent and unchanged base
+file bytes. The reopened source rejects both retained addresses and their old cursor.
+The same build's hidden-window Windows/DX12 embedded Host passes 1/1 in
+`76ae8d1e-bc39-4bbb-b0a9-f58753bf4364`, covering native startup, painting and close while the
+claim workflow itself runs without a native window. The tests use Rust 1.95.0. Scoped library
+correctness Clippy, root and independent formatting, and changed documentation links pass.
+The earlier broad Scene unit-test build was superseded before test execution.
+
+#### Effective instance fields
+
+The next consumer needs the effective value and the provenance of its inheritance separately
+from a stored claim. Use the Scene compiler's actual selected instance and the Host's demanded
+source receipts. Include two mounts of one base, a root-bound alias, an equal-value pin, a
+later base change, and an independently loaded missing or stale dependency. Compare the
+visible value after Revert with the selected underlying declaration. A retained effective
+observation must identify its source and dependency versions through preparation and publication.
+
 ## Workspace Contract
 
 Use a common document-query basis for entity and authoring projections: explicit document,

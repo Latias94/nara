@@ -73,6 +73,12 @@ document, selection and history across panel close and reopen, with independent 
 This is static trusted source composition, not a dynamic plugin ABI or project-time code loader.
 Only this Editor consumer selects GUI dependencies; runtime and headless module consumers do not.
 
+The `prepared_authoring` target includes a registered semantic panel that pages stored property
+claims in a non-active Scene or Prefab, reads selected values, and prepares an exact Revert.
+The fixture drives one successful and one competing stale submission, then exercises Undo/Redo
+and reads the complete saved and reopened containing document. See the
+[stored claim qualification](../../../docs/architecture/authoring-read-projection-design.md#november-20-stored-claim-qualification).
+
 The same member adapts `consumer.text` through an explicitly compiled
 `EditorSourceAssetDomain` and a typed Import/Reimport panel. The adapter names the independent
 source domain; `EditorNativeComposition::build` creates the configured application/frontend pair. Its

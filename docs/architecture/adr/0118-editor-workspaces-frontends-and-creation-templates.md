@@ -574,6 +574,11 @@ direct nested property on an explicitly named non-active Scene through the exist
 candidate and ordered submission route. This does not introduce a second query service, history,
 candidate registry or panel-owned inverse.
 
+The same authoring query and panel context expose stored Prefab property-claim pages for a
+named containing Scene or Prefab. A panel may use the row's retained claim address to read one
+bounded raw payload and review a Revert under the original query basis. The stored-claim
+projection works before effective composition and stays tied to the authored container.
+
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
 Session may also return a bounded selector-directed property observation through that read-only
 borrow, without action/result multi-frame choreography just to read a scalar. Empty selector steps

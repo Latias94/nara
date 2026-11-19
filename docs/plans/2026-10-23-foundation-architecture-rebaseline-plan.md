@@ -562,10 +562,13 @@ metadata admission before copies, explicit read presence and refusal of scans th
 advance. Shared owners pass 1839/1839, the independent semantic Host passes 8/8 through the
 complete non-active nested-leaf edit/history/Save/Reopen workflow, and the retained independent
 prepared-authoring target passes 10/10. The linked qualification records exact runs, review
-corrections and limits. Prefab-overlay field queries, full field query,
-shared-owner preparation locality and the remaining
-preparation-cost comparison obligations stay open. Do not turn process-local incarnation counters
-into durable allocated identities merely to complete the first consumer.
+corrections and limits. The [stored Prefab claim successor](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
+provides bounded access to authored override declarations from the same query interface. Selected
+claims retain their exact containing-source address through raw reads and prepared Revert.
+Effective Prefab fields require the actual selected composition and its dependency basis.
+Full field query, value pagination, unopened source queries, shared-owner preparation locality
+and the remaining cost comparison stay open. Use durable source and occurrence identities
+when adding the effective field projection.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

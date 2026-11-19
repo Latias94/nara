@@ -155,6 +155,14 @@ Rules:
   Bound scanning and copied declarations before allocation. Declaration review focus is local
   tool state, not a second selected-entity owner. A prepared source repair may commit while
   composition remains rejected; source, composition, native preview and Save outcomes are separate.
+- The stored property-claim projection pages one source-owned overlay by direct anchor and
+  nested declaration steps. Each row binds the exact property slot to its original workspace,
+  path and revision. Full headers retain the authored target, component version and property
+  selector. An oversized header retains its claim address for reading and Revert. Point reads
+  preserve the stored Set or Absent intent independently of its effective value or Schema
+  availability. Source-owned Revert consumes the original basis and slot through the existing
+  transaction, including for an unresolved base. See the
+  [stored Prefab claim contract](../authoring-read-projection-design.md#stored-prefab-property-claims).
 - Reviewed Prefab conversion retains its original nominal source candidate and actual dependency
   evidence through submission. Root incarnation/revision/Schema, accepted source receipt and the
   selected file or working-copy lineage for each demanded dependency must remain current.

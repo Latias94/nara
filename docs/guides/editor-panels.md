@@ -202,8 +202,9 @@ The finite context access delegates as follows:
 |---|---|
 | `document_query_basis`, `query_document_entities` | Capture an open document's exact basis and enumerate bounded direct source records. |
 | `query_document_authoring`, `read_document_property` | Discover bounded component/root metadata and read a bounded selected property. |
+| `read_prefab_property_claim` | Read one bounded stored Set or Absent intent from a discovered Prefab property slot. |
 | `observe_prefab_instance`, `prefab_composition_failure` | Observe stored Prefab intent or a verified composition failure at the exact basis. |
-| `prepare_authoring_edit`, `prepare_authoring_property_edit`, `prepare_prefab_revert` | Prepare an unpublished source-owned edit and inverse. |
+| `prepare_authoring_edit`, `prepare_authoring_property_edit`, `prepare_prefab_revert`, `prepare_prefab_property_revert` | Prepare an unpublished source-owned edit and inverse. |
 | `begin_authoring_construction`, `prepare_authoring_construction` | Build bounded construction intent and prepare its fixed local-to-source-ID mapping. |
 | `source_tool_review` | Borrow the existing Session-owned review. |
 
@@ -887,6 +888,24 @@ successful preview. Nested addition and instance-claim paths refer to indices in
 snapshot. The complete query basis fences source incarnation, revision and Schema admission;
 requery after any change rather than transplanting old indices. Scene/Prefab sessions provide
 the same bounded primitives, with their caller responsible for validating retained Schema basis.
+
+For property-only review, pass `EditorAuthoringProjection::PrefabPropertyClaims { steps }` to
+`query_document_authoring` with the direct anchor as the query target's `entity`. Reuse the
+continuation to page the same instance. A page can have no rows when it advances past other
+component intents. Each `EditorAuthoringRow::PrefabPropertyClaim` gives an opaque claim address,
+typed target, component version and durable property path. Its `has_value` flag includes explicit
+`Set(Null)`. A header above the hard metadata cap produces `OversizedPrefabPropertyClaim` with
+the same exact address. When a row cannot fit the requested limits, raise those limits within
+the documented caps or request a smaller page.
+
+Use `read_prefab_property_claim(&claim, read_limits)` for the selected slot. The
+result is the original `PrefabPropertyIntent` even when the base or a component Schema cannot
+be resolved. The read checks instance-path metadata and the selected payload's value limits.
+Use `prepare_prefab_property_revert(&claim, limits)` to remove it. Both operations use the
+address's original instance path, revision and Schema. The tool can inspect the returned
+forward and inverse edits before committing. A copy refusal for a
+large value leaves its header available for review. These operations observe the saved or dirty
+working declaration in the containing source and do not resolve inherited values.
 
 Revert removes only the selected intent and preserves unknown siblings. Removing the last property
 claim removes its empty Properties container but retains the overlay's base pin.

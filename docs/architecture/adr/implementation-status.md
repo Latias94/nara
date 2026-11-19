@@ -4155,7 +4155,15 @@ neither requires a native window. Shared owners pass 1839/1839, the independent 
 passes 8/8 and the retained independent prepared-authoring target passes 10/10. The linked
 qualification retains run IDs, actual review corrections and final focused/static checks.
 Production and independent consumer revisions are `7f45d87` and `0737909`.
-Full R2, Prefab-overlay discovery and locality/performance comparisons remain open.
+Full R2 and locality/performance comparisons remain open.
+
+The November 20 [stored Prefab claim successor](../authoring-read-projection-design.md#november-20-stored-claim-qualification)
+at `c44a398` pages stored property claims in a named Scene or Prefab. A row binds its original workspace,
+document basis, instance path and source slot through bounded raw reads and existing prepared
+Revert. Oversized headers retain their address so paging can progress while keeping the same
+payload and metadata ceilings. On Windows, Identity and Tooling pass 322/322, the independent
+panel target passes 12/12 with non-active Scene and Prefab Save/Reopen, and the DX12 embedded Host
+passes 1/1. Effective inherited fields and their dependency-version fences remain open.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query
