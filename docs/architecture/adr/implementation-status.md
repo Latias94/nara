@@ -2344,6 +2344,13 @@ independent asset-domain 15/15 pass. The engine cohort also verifies release of 
 reservations after both name-query and encoded-read budget refusal.
 [Typed source spelling repair](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#typed-source-file-spelling)
 
+The November 20 [TileSet draw publication repair](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#tileset-draw-publication)
+at `34a5070` requires the usable managed TileSet version and its exact storage slot for new
+Tilemap extraction. A shared Sprite continues to draw after TileSet revocation, and earlier
+captures keep their original pixels. On Windows, Sprite rendering passes 61/61, the independently
+locked TileSet consumer 14/14, and offscreen WGPU readback 1/1. The linked source review records
+the remaining TileSet owner recovery cases.
+
 The [task-result/replay publication correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
 at `e67bdca` / `0f979aa` closes review F9/F11 within their original owners. `OrderedTaskResults`
 now rejects a different completion owner before insertion, returns the original handle untouched

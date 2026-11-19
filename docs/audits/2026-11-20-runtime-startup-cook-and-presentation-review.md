@@ -178,3 +178,45 @@ engine cohort passes 143/143 in `fd3e0484-a354-46e4-bf42-e5992bda6f88`. Two-Leve
 `e2f42a30-4d88-4f25-be8b-b2fdec88fb57`, and the independently locked asset-domain cohort passes
 15/15 in `e8e11514-238a-45a3-9ccf-80f1a926df0a`. Scoped correctness Clippy passes for the
 engine and sample targets. Root and sample formatting and changed document links pass.
+
+### TileSet draw publication
+
+Commit `34a5070` makes stock extraction check the usable TileSet version and its exact
+published slot once per map before admitting its captured Image. Code-first TileSets without a
+managed Image snapshot continue through their existing path. Earlier draw batches keep their
+captured Image.
+[Extraction](../../crates/nara_sprite_render/src/extract.rs)
+
+The source regression removes the catalog record and sends the normal public removal event on the
+same frame. The first Windows run, `9080d8b9-15f8-4e1a-abd3-279115f59b95`, found two batches
+after revocation where only the Sprite should draw. The repaired run,
+`9abdfa57-5b38-40f0-88e7-05cda3afce35`, passes 61/61. It observes four fresh frames with only
+the Sprite and the original retained packet with both draws. A separate control refuses a
+processed TileSet value copied into a foreign store while the original version reports usable.
+The existing tests cover last-good rendering when a newer atlas fails or hits its retention budget.
+[Source regression](../../crates/nara_sprite_render/tests/tileset_content.rs) ·
+[Foreign slot regression](../../crates/nara_sprite_render/src/tests/source_refresh.rs)
+
+The independently locked consumer passes 14/14 in `71836144-7fad-4bf9-93cb-e5cb9f2001f9`.
+It covers source-free startup and travel, primary and auxiliary products, native resource
+retirement, and retained captures. The WGPU offscreen readback passes 1/1 in
+`5480e777-f67d-4ae9-9f68-1e3a0459855e`, comparing exact pixels for the primary and auxiliary
+products after the original typed stores and owner retire. These runs use Windows x64 and Rust
+1.95.0. Sprite renderer correctness Clippy and format checks pass.
+[Independent TileSet consumer](../../tests/fixtures/module-consumer/tests/runtime_tileset_delivery.rs) ·
+[WGPU readback](../../crates/nara_render_wgpu/src/readback_tests.rs)
+
+Godot queues a TileMapLayer update when the selected TileSet changes. Bevy's render asset
+cache retires prepared allocations on last use. Nara's current TileSet publication governs new
+draws, and already captured packets retain their exact pixels.
+[Godot TileSet change](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/modules/tilemap/tile_map_layer.cpp#L2008) ·
+[Bevy render asset extraction](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_render/src/render_asset.rs#L331)
+
+Independent source review identified two existing recovery gaps. A source notification can
+supersede the owner's state revision and leave a retired atlas held in the typed slot. The
+original claim can then block Scene replacement after the catalog record returns. A terminal
+load attempt that preserves the old usable version can also make a later plain source request
+lose last-good on dependency failure. Both cases still need verification through the source
+owner's recovery workflow.
+[Reconciliation](../../crates/nara_tilemap/src/content.rs) ·
+[Scene replacement](../../src/project_host/runtime/content_residency/tilesets.rs)
