@@ -37,7 +37,7 @@ use nara::{
         RelativeComponent, TrustMode,
     },
     project_host::{
-        EditorProjectSession, TrustedCompiledEditorProjectIntent,
+        EditorProjectCloseProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
         advanced::built_in_schema_providers,
     },
     reflect::AuthoringSchemaBundle,
@@ -478,6 +478,103 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
             reason: EditorPersistenceRejection::TargetChanged,
         }) if rejected_document == document
     ));
+}
+
+#[test]
+fn save_refuses_a_changed_stable_scene_identity_and_can_retry() {
+    use nara::asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
+
+    let project = TestProject::new("stable-scene-save");
+    let manifest = project.root.join("nara.toml");
+    let stable_manifest = fs::read_to_string(&manifest)
+        .unwrap()
+        .replace("project_location", "stable_metadata");
+    fs::write(manifest, stable_manifest).unwrap();
+    let sidecar = project.root.join("scenes/startup.scene.json.meta");
+    let metadata = |id| {
+        AssetMeta::new(
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str(id).unwrap(),
+                AssetPath::new("startup.scene.json").unwrap(),
+                AssetSourceKind::Scene,
+            ),
+            (),
+        )
+        .to_json_string()
+        .unwrap()
+    };
+    let admitted = metadata("a48d60e2-8ede-4103-b721-f6a0533fb99f");
+    let replacement = metadata("be8c37d3-2cd3-4cdf-9479-004f3cd0866d");
+    fs::write(&sidecar, &admitted).unwrap();
+    let original = fs::read(project.scene_path()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let document = editor.current_frame().workspace().active_document.unwrap();
+        assert!(apply_scene_patch(
+            &mut editor,
+            document,
+            add_entity_patch("local")
+        ));
+        let draft = current_scene_model(&editor, document);
+        assert!(draft.dirty);
+
+        let save = |editor: &mut EditorProjectSession| {
+            assert!(matches!(
+                editor_driver::request_persistence(
+                    editor,
+                    EditorPersistenceCommand::Save {
+                        document: Some(document),
+                    },
+                ),
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
+            editor_driver::drive_persistence_until_result(editor)
+                .persistence()
+                .result()
+        };
+        fs::write(&sidecar, &replacement).unwrap();
+        assert_eq!(
+            save(&mut editor),
+            Some(EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Save,
+                document: Some(document),
+                reason: EditorPersistenceRejection::SourceBindingMismatch,
+            })
+        );
+        assert_eq!(fs::read(project.scene_path()).unwrap(), original);
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), replacement);
+        assert_eq!(current_scene_model(&editor, document), draft);
+
+        let repaired = format!("{admitted}\n");
+        fs::write(&sidecar, &repaired).unwrap();
+        assert!(matches!(
+            save(&mut editor),
+            Some(EditorPersistenceResult::Saved { document: saved, revision, .. })
+                if saved == document && revision == draft.revision
+        ));
+        assert!(
+            fs::read_to_string(project.scene_path())
+                .unwrap()
+                .contains("\"local\"")
+        );
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), repaired);
+        assert!(!current_scene_model(&editor, document).dirty);
+    }));
+    let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+    while !matches!(
+        editor.advance_close(),
+        EditorProjectCloseProgress::Complete(_)
+    ) {
+        assert!(Instant::now() < deadline, "Editor Close did not settle");
+        thread::sleep(ASYNC_POLL_INTERVAL);
+    }
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 #[test]

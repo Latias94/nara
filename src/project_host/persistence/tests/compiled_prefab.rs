@@ -144,6 +144,7 @@ fn prefab_open_shares_scene_basis_and_preserves_unavailable_records_through_save
                     checkpoint: authority.capture(&workspace, document).unwrap(),
                 },
                 None,
+                None,
             ),
             PrefabSaveOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
         ));
@@ -158,6 +159,7 @@ fn prefab_open_shares_scene_basis_and_preserves_unavailable_records_through_save
                 .unwrap()
                 .session()
                 .authoring_readmission(),
+            None,
         ) else {
             panic!("the real Prefab Host must save against its retained authoring basis");
         };

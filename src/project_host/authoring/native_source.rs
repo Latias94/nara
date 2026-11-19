@@ -3,11 +3,14 @@ use std::sync::Arc;
 use nara_asset::{
     AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetSourceKind, AssetSourcePath,
 };
-use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativeComponent,
+    RelativePath,
+};
 use nara_project::{
     EffectiveProjectPaths, EffectiveProjectSettings, NativeDocumentIdentity, ProjectPath,
 };
-use nara_scene::{SourceDocumentKey, SourceDocumentKind};
+use nara_scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 
 use super::document::AuthoringDocumentAdmissionError;
 use super::{
@@ -334,6 +337,33 @@ impl NativeDocumentSourcePolicy {
                 metadata: None,
             });
         }
+        let (key, metadata, _) = self.admit_metadata(
+            root,
+            open_path,
+            path,
+            kind,
+            dependency_depth,
+            metadata_limit,
+        )?;
+        Ok(AdmittedNativeDocumentSource {
+            key,
+            source_identity: file.identity(),
+            metadata: Some(metadata),
+        })
+    }
+
+    fn admit_metadata(
+        &self,
+        root: &DirectoryCapability,
+        open_path: &str,
+        path: &str,
+        kind: SourceDocumentKind,
+        dependency_depth: usize,
+        metadata_limit: usize,
+    ) -> Result<
+        (SourceDocumentKey, NativeMetadataObservation, FileCapability),
+        AuthoringDocumentAdmissionError,
+    > {
         let metadata_path = RelativePath::new(format!("{open_path}.meta"))
             .map_err(AuthoringDocumentAdmissionError::RelativePath)?;
         let metadata_file = root
@@ -374,10 +404,9 @@ impl NativeDocumentSourcePolicy {
         if !path_matches || metadata.identity().source_kind() != &expected_kind {
             return Err(AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch);
         }
-        Ok(AdmittedNativeDocumentSource {
-            key: SourceDocumentKey::stable_asset(metadata.identity().stable_id(), kind),
-            source_identity: file.identity(),
-            metadata: Some(NativeMetadataObservation {
+        Ok((
+            SourceDocumentKey::stable_asset(metadata.identity().stable_id(), kind),
+            NativeMetadataObservation {
                 path: metadata_path,
                 source: Arc::new(AuthoringSourceFact::native_metadata(
                     ProjectPath::new(format!("{path}.meta"))
@@ -388,7 +417,74 @@ impl NativeDocumentSourcePolicy {
                     encoded_bytes,
                     dependency_depth,
                 )),
-            }),
+            },
+            metadata_file,
+        ))
+    }
+}
+
+/// The stable identity admitted for an open document, carried with its queued Save.
+pub(crate) struct StableDocumentSaveSource {
+    policy: NativeDocumentSourcePolicy,
+    project_path: Arc<str>,
+    key: SourceDocumentKey,
+}
+
+impl StableDocumentSaveSource {
+    pub(crate) fn capture(
+        settings: &EffectiveProjectSettings,
+        project_path: &Arc<str>,
+        key: &SourceDocumentKey,
+    ) -> Option<Self> {
+        matches!(key.origin(), SourceDocumentOrigin::StableAsset { .. }).then(|| Self {
+            policy: NativeDocumentSourcePolicy::new(settings),
+            project_path: Arc::clone(project_path),
+            key: key.clone(),
+        })
+    }
+
+    pub(crate) fn observe(
+        &self,
+        parent: &DirectoryCapability,
+        target: &RelativeComponent,
+    ) -> Option<StableDocumentSaveWitness> {
+        let leaf = target.to_str()?;
+        if self.project_path.rsplit('/').next() != Some(leaf) {
+            return None;
+        }
+        let (current, metadata, file) = self
+            .policy
+            .admit_metadata(
+                parent,
+                leaf,
+                &self.project_path,
+                self.key.kind(),
+                0,
+                AssetMetaFileLimits::default().encoded_bytes().get(),
+            )
+            .ok()?;
+        (current == self.key).then_some(StableDocumentSaveWitness {
+            path: metadata.path,
+            file,
+            digest: metadata.source.digest(),
+        })
+    }
+}
+
+/// Keeps the sidecar observed before the body switch alive for the post-switch comparison.
+pub(crate) struct StableDocumentSaveWitness {
+    path: RelativePath,
+    file: FileCapability,
+    digest: ContentDigest,
+}
+
+impl StableDocumentSaveWitness {
+    pub(crate) fn revalidate(&self, parent: &DirectoryCapability) -> bool {
+        parent.open_file_exact(&self.path).is_ok_and(|current| {
+            current.same_object(&self.file).is_ok_and(|same| same)
+                && current
+                    .verify_digest(self.digest, self.digest.length())
+                    .is_ok()
         })
     }
 }

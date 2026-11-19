@@ -3,6 +3,7 @@ pub(super) use super::file_publication::{
     FilePublicationHost, FilePublicationOutcome, FilePublicationRejection,
 };
 
+use super::authoring::native_source::StableDocumentSaveSource;
 #[cfg(test)]
 pub(super) use super::file_publication::CleanupTestControl;
 
@@ -299,6 +300,7 @@ impl PersistenceFileState {
     fn save_preflighted(
         &mut self,
         encoded: EncodedEditorPersistenceCheckpoint,
+        native_source: Option<&StableDocumentSaveSource>,
     ) -> PersistenceSaveOutcome {
         if encoded.bytes().len() > self.limits.encoded_bytes().get() {
             return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
@@ -307,6 +309,7 @@ impl PersistenceFileState {
         publish_editor_checkpoint(
             &mut self.publication,
             encoded,
+            native_source,
             #[cfg(test)]
             std::mem::take(&mut self.reject_next_valid_receipt),
         )
@@ -428,6 +431,7 @@ impl ScenePersistenceHost {
         &mut self,
         candidate: SceneSaveCandidate,
         authoring: Option<AuthoringDocumentReadmission>,
+        native_source: Option<&StableDocumentSaveSource>,
     ) -> SceneSaveOutcome {
         let Some(authoring) = authoring else {
             return PersistenceSaveOutcome::Rejected(
@@ -469,7 +473,7 @@ impl ScenePersistenceHost {
             }
         }
         self.file.validated_authoring_digest = Some(encoded.digest());
-        let outcome = self.file.save_preflighted(encoded);
+        let outcome = self.file.save_preflighted(encoded, native_source);
         if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
             self.file.validated_authoring_digest = None;
         }
@@ -571,6 +575,7 @@ impl PrefabPersistenceHost {
         &mut self,
         candidate: PrefabSaveCandidate,
         authoring: Option<AuthoringDocumentReadmission>,
+        native_source: Option<&StableDocumentSaveSource>,
     ) -> PrefabSaveOutcome {
         let Some(authoring) = authoring else {
             return PersistenceSaveOutcome::Rejected(
@@ -617,7 +622,7 @@ impl PrefabPersistenceHost {
             }
         }
         self.file.validated_authoring_digest = Some(encoded.digest());
-        let outcome = self.file.save_preflighted(encoded);
+        let outcome = self.file.save_preflighted(encoded, native_source);
         if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
             self.file.validated_authoring_digest = None;
         }
@@ -731,6 +736,7 @@ fn validate_authoring_prefab_save(
 pub(super) fn publish_editor_checkpoint(
     publication: &mut FilePublicationHost,
     encoded: EncodedEditorPersistenceCheckpoint,
+    native_source: Option<&StableDocumentSaveSource>,
     #[cfg(test)] reject_receipt: bool,
 ) -> PersistenceSaveOutcome {
     let previous_identity = match publication.binding() {
@@ -741,7 +747,16 @@ pub(super) fn publish_editor_checkpoint(
             );
         }
     };
-    let accepted = match publication.publish(encoded.bytes()) {
+    let outcome = match native_source {
+        Some(source) => publication.publish_guarded(encoded.bytes(), |parent, target| {
+            let witness = source
+                .observe(parent, target)
+                .ok_or(FilePublicationRejection::SourceBindingMismatch)?;
+            Ok(move |parent: &DirectoryCapability| witness.revalidate(parent))
+        }),
+        None => publication.publish(encoded.bytes()),
+    };
+    let accepted = match outcome {
         FilePublicationOutcome::Published(accepted) => accepted,
         FilePublicationOutcome::Rejected(reason) => {
             return PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason));
@@ -798,6 +813,9 @@ const fn editor_publication_rejection(
     match rejection {
         FilePublicationRejection::TargetChanged => EditorPersistenceRejection::TargetChanged,
         FilePublicationRejection::TargetDeleted => EditorPersistenceRejection::TargetDeleted,
+        FilePublicationRejection::SourceBindingMismatch => {
+            EditorPersistenceRejection::SourceBindingMismatch
+        }
         FilePublicationRejection::LockUnavailable => EditorPersistenceRejection::LockUnavailable,
         FilePublicationRejection::UnsupportedGuarantee => {
             EditorPersistenceRejection::UnsupportedGuarantee
@@ -1181,6 +1199,7 @@ mod tests {
                 .unwrap()
                 .session()
                 .authoring_readmission(),
+            None,
         ) else {
             panic!("a rejected post-publication receipt must be uncertain");
         };
@@ -1207,6 +1226,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
         ));
@@ -1248,6 +1268,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             SceneSaveOutcome::Saved { .. }
         ));
@@ -1305,6 +1326,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             SceneSaveOutcome::Rejected(EditorPersistenceRejection::DocumentKindMismatch)
         ));
@@ -1323,6 +1345,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             PrefabSaveOutcome::Rejected(EditorPersistenceRejection::DocumentKindMismatch)
         ));
@@ -1347,6 +1370,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             PrefabSaveOutcome::Rejected(EditorPersistenceRejection::SourceBindingMismatch)
         ));
@@ -1365,6 +1389,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             SceneSaveOutcome::Failed(EditorPersistenceFailureStage::Validate)
         ));
@@ -1378,6 +1403,7 @@ mod tests {
                     .unwrap()
                     .session()
                     .authoring_readmission(),
+                None,
             ),
             PrefabSaveOutcome::Failed(EditorPersistenceFailureStage::Validate)
         ));
@@ -1424,6 +1450,7 @@ mod tests {
                 .unwrap()
                 .session()
                 .authoring_readmission(),
+            None,
         ) else {
             panic!("the canonical Prefab source should publish through the shared receipt lane");
         };
@@ -1548,7 +1575,8 @@ mod tests {
                 SceneSaveCandidate {
                     checkpoint: bypass_checkpoint,
                 },
-                None
+                None,
+                None,
             ),
             SceneSaveOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
         ));
@@ -1562,6 +1590,7 @@ mod tests {
                 .unwrap()
                 .session()
                 .authoring_readmission(),
+            None,
         ) else {
             panic!("the preservation-safe encoded Scene should publish");
         };

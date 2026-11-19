@@ -113,6 +113,7 @@ pub(in crate::project_host) enum FilePublicationFailureStage {
 pub(in crate::project_host) enum FilePublicationRejection {
     TargetChanged,
     TargetDeleted,
+    SourceBindingMismatch,
     LockUnavailable,
     UnsupportedGuarantee,
     RequiresReconcile,
@@ -603,6 +604,22 @@ impl FilePublicationHost {
     }
 
     pub(in crate::project_host) fn publish(&mut self, bytes: &[u8]) -> FilePublicationOutcome {
+        self.publish_guarded(bytes, |_, _| Ok(|_: &DirectoryCapability| true))
+    }
+
+    /// Observes a caller-owned source binding immediately before the name switch and confirms
+    /// that same observation before accepting the receipt. A failed confirmation is uncertain.
+    pub(in crate::project_host) fn publish_guarded<Confirm>(
+        &mut self,
+        bytes: &[u8],
+        observe: impl FnOnce(
+            &DirectoryCapability,
+            &RelativeComponent,
+        ) -> Result<Confirm, FilePublicationRejection>,
+    ) -> FilePublicationOutcome
+    where
+        Confirm: FnOnce(&DirectoryCapability) -> bool,
+    {
         if let Err(reason) = self.preflight() {
             return FilePublicationOutcome::Rejected(reason);
         }
@@ -707,6 +724,14 @@ impl FilePublicationHost {
             }
         };
         let source = FilePublicationSource { file, digest };
+        let confirm = match observe(&self.parent, &self.target) {
+            Ok(confirm) => confirm,
+            Err(reason) => {
+                drop(source);
+                self.discard_candidate(temporary);
+                return FilePublicationOutcome::Rejected(reason);
+            }
+        };
 
         let receipt =
             match self
@@ -763,6 +788,7 @@ impl FilePublicationHost {
                             )
                             .is_ok()
                 })
+            || !confirm(&self.parent)
         {
             self.uncertain = true;
             return FilePublicationOutcome::Uncertain(evidence);

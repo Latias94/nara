@@ -285,6 +285,13 @@ flowchart TD
   project-location policy binds the authored universe and complete project-relative path. A
   resolver lends the canonical key and immutable document together; callers must not assemble
   them from an `AssetRef` after lookup.
+- Ordinary stable-metadata Scene and Prefab Save carries the admitted document key into the
+  original file publication. Before switching the body name, the worker admits the adjacent
+  sidecar through the publication's retained parent and compares its key to the open document.
+  A mismatch refuses the write and leaves the draft and history available. Successful publication
+  also requires the same sidecar object and bytes after the switch. An observed change at that
+  point requires reconciliation. Project-location documents use their existing body binding. These
+  observations bound a two-file publication and cannot make an uncoordinated two-file edit atomic.
 - Canonical Prefab binding is required for every resolver, including code-authored and
   document-only expansion. The resolver has one required operation returning the bound key and
   document. Every `SourceEntity` projection step retains that key; there is no source-keyless result or

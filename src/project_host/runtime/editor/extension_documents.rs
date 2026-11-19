@@ -265,6 +265,7 @@ impl ExtensionPersistenceLane {
                 publish_editor_checkpoint(
                     host,
                     encoded,
+                    None,
                     #[cfg(test)]
                     false,
                 )

@@ -6,6 +6,7 @@ use nara_scene::AuthoringDocumentReadmission;
 use nara_tasks::{TaskHandle, TaskPools};
 
 use super::*;
+use crate::project_host::authoring::native_source::StableDocumentSaveSource;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -14,6 +15,7 @@ pub(super) struct SaveWork {
     lane: PersistenceLane,
     candidate: Option<PendingSave>,
     authoring: Option<AuthoringDocumentReadmission>,
+    native_source: Option<StableDocumentSaveSource>,
     started: bool,
     outcome: Option<PersistenceSaveOutcome>,
     #[cfg(test)]
@@ -34,6 +36,7 @@ impl BackgroundSave {
         lane: PersistenceLane,
         candidate: PendingSave,
         authoring: Option<AuthoringDocumentReadmission>,
+        native_source: Option<StableDocumentSaveSource>,
         pools: &TaskPools,
         #[cfg(test)] gate: Option<SaveTestGate>,
     ) -> Self {
@@ -42,6 +45,7 @@ impl BackgroundSave {
             lane,
             candidate: Some(candidate),
             authoring,
+            native_source,
             started: false,
             outcome: None,
             #[cfg(test)]
@@ -60,16 +64,17 @@ impl BackgroundSave {
                     work.wait_at(SaveTestPhase::BeforePublication);
                     let candidate = work.candidate.take().expect("a save runs once");
                     let basis = work.authoring.take();
+                    let native_source = work.native_source.as_ref();
                     work.outcome = Some(match (&mut work.lane, candidate) {
                         (PersistenceLane::Scene(lane), PendingSave::Scene(candidate)) => lane
                             .host
-                            .with_worker(|host| host.save_owned(candidate, basis))
+                            .with_worker(|host| host.save_owned(candidate, basis, native_source))
                             .unwrap_or(PersistenceSaveOutcome::Rejected(
                                 EditorPersistenceRejection::Busy,
                             )),
                         (PersistenceLane::Prefab(lane), PendingSave::Prefab(candidate)) => lane
                             .host
-                            .with_worker(|host| host.save_owned(candidate, basis))
+                            .with_worker(|host| host.save_owned(candidate, basis, native_source))
                             .unwrap_or(PersistenceSaveOutcome::Rejected(
                                 EditorPersistenceRejection::Busy,
                             )),

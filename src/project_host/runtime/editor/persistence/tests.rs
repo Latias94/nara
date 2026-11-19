@@ -17,6 +17,7 @@ mod initial_open;
 #[cfg(feature = "presentation-2d")]
 mod preview_epoch;
 mod reopen_failures;
+mod save_identity;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
@@ -1160,11 +1161,11 @@ fn direct_save(
     match lane {
         PersistenceLane::Scene(lane) => lane
             .host
-            .try_with(|host| host.save_owned(SceneSaveCandidate { checkpoint }, authoring))
+            .try_with(|host| host.save_owned(SceneSaveCandidate { checkpoint }, authoring, None))
             .unwrap(),
         PersistenceLane::Prefab(lane) => lane
             .host
-            .try_with(|host| host.save_owned(PrefabSaveCandidate { checkpoint }, authoring))
+            .try_with(|host| host.save_owned(PrefabSaveCandidate { checkpoint }, authoring, None))
             .unwrap(),
         PersistenceLane::Extension(_) => unreachable!(),
     }

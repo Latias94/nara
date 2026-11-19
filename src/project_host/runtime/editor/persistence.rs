@@ -24,6 +24,7 @@ use nara_scene::SceneEntityId;
 use nara_tooling::EditorDocumentSourceBinding;
 
 use crate::project_host::authoring::AuthoringDocumentAdmissionError;
+use crate::project_host::authoring::native_source::StableDocumentSaveSource;
 use crate::project_host::persistence::{
     OpenedPrefabPersistence, OpenedPrefabReopen, PersistenceSaveOutcome, PrefabReopenOutcome,
     PrefabSaveCandidate,
@@ -118,6 +119,7 @@ impl EditorProjectSession {
                 candidate,
                 authoring,
             } => {
+                let native_source = self.capture_stable_save_source(&lane);
                 self.persistence = PersistenceState::Pending {
                     attempt,
                     operation,
@@ -125,6 +127,7 @@ impl EditorProjectSession {
                         lane,
                         candidate,
                         authoring,
+                        native_source,
                         self.authoring_runtime.persistence_tasks(),
                         #[cfg(test)]
                         self.next_save_gate.take(),
@@ -171,6 +174,22 @@ impl EditorProjectSession {
             }
         };
         self.persistence = PersistenceState::Terminal { attempt, result };
+    }
+
+    fn capture_stable_save_source(
+        &self,
+        lane: &PersistenceLane,
+    ) -> Option<StableDocumentSaveSource> {
+        let (path, key) = match lane {
+            PersistenceLane::Scene(lane) => (&lane.project_path, &lane.source_key),
+            PersistenceLane::Prefab(lane) => (&lane.project_path, &lane.source_key),
+            PersistenceLane::Extension(_) => return None,
+        };
+        let settings = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => snapshot.settings(),
+            EditorExecutionLane::TrustedCompiled(lane) => lane.content_candidate.settings(),
+        };
+        StableDocumentSaveSource::capture(settings, path, key)
     }
 
     fn capture_persistence_lane(

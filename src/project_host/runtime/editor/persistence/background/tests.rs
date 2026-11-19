@@ -144,6 +144,7 @@ impl SaveFixture {
             lane,
             PendingSave::Scene(self.candidate()),
             authoring,
+            None,
             pools,
             gate,
         )
@@ -161,7 +162,7 @@ impl SaveFixture {
             .authoring_readmission();
         assert!(matches!(
             lane.host
-                .try_with(|host| host.save_owned(self.candidate(), authoring))
+                .try_with(|host| host.save_owned(self.candidate(), authoring, None))
                 .unwrap(),
             PersistenceSaveOutcome::Saved { .. }
         ));
@@ -343,7 +344,7 @@ fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
         .authoring_readmission();
     assert!(matches!(
         lane.host
-            .try_with(|host| host.save_owned(fixture.candidate(), authoring))
+            .try_with(|host| host.save_owned(fixture.candidate(), authoring, None))
             .unwrap(),
         PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
     ));

@@ -197,7 +197,7 @@ impl EditorSchemaOwnerAdoptionFailure {
     pub(super) fn publication_rejected(reason: FilePublicationRejection) -> Self {
         use FilePublicationRejection as E;
         let (code, summary) = match reason {
-            E::TargetChanged => (
+            E::TargetChanged | E::SourceBindingMismatch => (
                 "project.editor.schema-owner-target-changed",
                 "The selected metadata file changed before publication",
             ),

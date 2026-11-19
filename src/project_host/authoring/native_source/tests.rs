@@ -160,6 +160,83 @@ fn location_content_revalidation_keeps_the_canonical_path_without_reading_metada
     assert_eq!(budget.usage().retained_candidate_bytes(), 0);
 }
 
+#[test]
+fn body_switch_requires_reconciliation_when_the_observed_sidecar_changes() {
+    use crate::project_host::file_publication::{
+        FilePublicationHost, FilePublicationOutcome, FilePublicationRejection,
+    };
+
+    for replace_object in [false, true] {
+        let fixture = NativeFixture::new(SourceDocumentKind::Scene);
+        let root = DirectoryCapability::from_host_handle(
+            host_directory(&fixture.root).unwrap(),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+        )
+        .unwrap();
+        let path = fixture.path();
+        let body_path = fixture.root.join(path);
+        let metadata_path = fixture.root.join(format!("{path}.meta"));
+        let original_metadata = fs::read(&metadata_path).unwrap();
+        let candidate = b"new source body";
+        let (parent, target) = root
+            .resolve_file_parent(&RelativePath::new(path).unwrap())
+            .unwrap();
+        let old_file = parent.open_child_file(&target).unwrap();
+        let old_digest = old_file.digest(1024).unwrap();
+        let mut publication =
+            FilePublicationHost::from_existing(parent, target, old_file, old_digest, 1024);
+        let source = StableDocumentSaveSource {
+            policy: fixture.policy(NativeDocumentIdentity::StableMetadata),
+            project_path: Arc::from(path),
+            key: SourceDocumentKey::stable_asset(
+                StableAssetId::parse_str(NativeFixture::ID).unwrap(),
+                SourceDocumentKind::Scene,
+            ),
+        };
+        let body = &body_path;
+        let metadata = &metadata_path;
+        let original = &original_metadata;
+        let fixture = &fixture;
+        assert_eq!(fs::read(body).unwrap(), b"captured source body");
+        let outcome = publication.publish_guarded(candidate, |parent, target| {
+            let witness = source
+                .observe(parent, target)
+                .ok_or(FilePublicationRejection::SourceBindingMismatch)?;
+            Ok(move |parent: &DirectoryCapability| {
+                assert_eq!(fs::read(body).unwrap(), candidate);
+                if replace_object {
+                    fs::rename(metadata, metadata.with_extension("previous")).unwrap();
+                    fs::write(metadata, original).unwrap();
+                } else {
+                    fs::write(
+                        metadata,
+                        fixture.metadata(
+                            "1a284ca2-c86f-40d7-9111-13b202ea1349",
+                            "source.scene.json",
+                            AssetSourceKind::Scene,
+                        ),
+                    )
+                    .unwrap();
+                }
+                witness.revalidate(parent)
+            })
+        });
+        let FilePublicationOutcome::Uncertain(evidence) = outcome else {
+            panic!("a completed body switch with changed metadata must require reconciliation");
+        };
+        assert_eq!(fs::read(body).unwrap(), candidate);
+        assert_eq!(
+            evidence.receipt().published_content_digest(),
+            Some(ContentDigest::of_bytes(candidate))
+        );
+        assert!(publication.accepted_source_observation().is_none());
+        assert!(matches!(
+            publication.publish(b"retry"),
+            FilePublicationOutcome::Rejected(FilePublicationRejection::RequiresReconcile)
+        ));
+    }
+}
+
 struct NativeFixture {
     root: PathBuf,
     kind: SourceDocumentKind,
