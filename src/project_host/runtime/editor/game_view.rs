@@ -1329,6 +1329,13 @@ pub(super) fn take_candidate(
     }
 }
 
+pub(super) fn capture_enabled(runtime: &nara_app::RuntimeInstance) -> bool {
+    runtime
+        .world()
+        .get_resource::<EditorGameViewBridge>()
+        .is_some_and(|bridge| bridge.capture_enabled)
+}
+
 pub(super) fn set_capture_enabled(
     runtime: &mut nara_app::RuntimeInstance,
     enabled: bool,

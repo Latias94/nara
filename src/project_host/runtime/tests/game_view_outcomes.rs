@@ -498,6 +498,174 @@ fn step_uses_sealed_no_views_after_extracted_views_change() {
 }
 
 #[test]
+fn closing_game_view_settles_step_before_or_after_the_control_receipt() {
+    for close_after_control_receipt in [false, true] {
+        let project = TestProject::new("game-view-close-during-step");
+        let mut editor = open_game(&project, false);
+        let initial = take_candidate(&mut editor);
+        assert_eq!(initial.packet().views().len(), 1);
+        editor
+            .complete_game_view_candidate(initial.content_rejected("settle before Pause"))
+            .unwrap();
+        pause_game_for_step(&mut editor);
+        let before = fixed_tick(&mut editor);
+        let pending = Some(EditorPlayOperationResult::Pending {
+            operation: EditorPlayOperation::StepFixedTick,
+        });
+        let cancelled = Some(EditorPlayOperationResult::Cancelled {
+            operation: EditorPlayOperation::StepFixedTick,
+        });
+
+        assert_eq!(
+            dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+            EditorPlayRequestResult::Accepted,
+        );
+        if close_after_control_receipt {
+            let stepped = editor.drive_editor_frame(Duration::from_secs(1));
+            assert_eq!(stepped.play().state(), EditorPlayState::Stepping);
+            assert_eq!(stepped.play().result(), pending);
+            assert!(editor.game_step_requires_runtime_drive());
+            assert_eq!(fixed_tick(&mut editor), before + 1);
+        }
+        editor
+            .set_game_view_source_active(false, "the Game view was closed")
+            .unwrap();
+        if close_after_control_receipt {
+            assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+            assert_eq!(editor.play_view().result(), cancelled);
+        } else {
+            assert_eq!(editor.play_view().result(), pending);
+            assert_eq!(fixed_tick(&mut editor), before);
+            assert_eq!(
+                dispatch_game_play_action(&mut editor, EditorPlayAction::Resume),
+                EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy),
+            );
+        }
+
+        for _ in 0..3 {
+            let paused = editor.drive_editor_frame(Duration::from_secs(1));
+            assert_eq!(paused.play().state(), EditorPlayState::Paused);
+            assert_eq!(paused.play().result(), cancelled);
+            assert_eq!(fixed_tick(&mut editor), before + 1);
+            assert!(!editor.game_step_requires_runtime_drive());
+            assert!(editor.take_game_view_candidate().unwrap().is_none());
+        }
+        assert_eq!(editor.test_game_view_in_flight(), None);
+        assert!(
+            !editor
+                .test_game_view_runtime()
+                .world()
+                .contains_resource::<nara_render::__private::PresentedWorldFrame>()
+        );
+        assert_eq!(
+            dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+            EditorPlayRequestResult::Accepted,
+        );
+        let stepped_without_view = editor.drive_editor_frame(Duration::from_secs(1));
+        assert_eq!(stepped_without_view.play().state(), EditorPlayState::Paused);
+        assert_eq!(
+            stepped_without_view.play().result(),
+            Some(EditorPlayOperationResult::Applied {
+                operation: EditorPlayOperation::StepFixedTick,
+                generation: Some(editor.test_game_view_runtime().generation().get()),
+            }),
+        );
+        assert_eq!(fixed_tick(&mut editor), before + 2);
+        assert!(!editor.game_step_requires_runtime_drive());
+        assert!(editor.take_game_view_candidate().unwrap().is_none());
+        assert_eq!(
+            dispatch_game_play_action(&mut editor, EditorPlayAction::Resume),
+            EditorPlayRequestResult::Accepted,
+        );
+        assert_eq!(
+            editor.drive_editor_frame(Duration::ZERO).play().state(),
+            EditorPlayState::Running,
+        );
+        assert!(editor.take_game_view_candidate().unwrap().is_none());
+        stop_game(&mut editor);
+    }
+}
+
+#[test]
+fn resize_before_step_control_receipt_cannot_rebind_step_presentation() {
+    let project = TestProject::new("game-view-resize-during-step");
+    let mut editor = open_game(&project, false);
+    pause_game_for_step(&mut editor);
+    let original = editor.active_game_start_request().unwrap();
+    let before = fixed_tick(&mut editor);
+    assert_eq!(
+        dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    assert!(
+        editor
+            .resize_game_view(Extent2d::new(800, 540).unwrap())
+            .unwrap()
+    );
+    let resized = editor.active_game_start_request().unwrap();
+    assert_ne!(resized, original);
+    assert_eq!(resized.runtime_generation(), original.runtime_generation());
+
+    let paused = editor.drive_editor_frame(Duration::ZERO);
+    let cancelled = Some(EditorPlayOperationResult::Cancelled {
+        operation: EditorPlayOperation::StepFixedTick,
+    });
+    assert_eq!(paused.play().state(), EditorPlayState::Paused);
+    assert_eq!(paused.play().result(), cancelled);
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    assert!(!editor.game_step_requires_runtime_drive());
+    assert!(editor.take_game_view_candidate().unwrap().is_none());
+
+    editor.drive_editor_frame(Duration::ZERO);
+    let candidate = editor.take_game_view_candidate().unwrap().unwrap();
+    assert_eq!(candidate.identity().start(), resized);
+    editor
+        .complete_game_view_candidate(candidate.content_rejected("settle the resized CPU capture"))
+        .unwrap();
+    assert_eq!(editor.play_view().result(), cancelled);
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    stop_game(&mut editor);
+}
+
+#[test]
+fn runtime_fault_wins_over_step_target_retirement_before_control_receipt() {
+    let project = TestProject::new("game-view-close-before-step-fault");
+    let mut editor = open_game(&project, false);
+    pause_game_for_step(&mut editor);
+    let before = fixed_tick(&mut editor);
+    assert_eq!(
+        dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    editor
+        .set_game_view_source_active(false, "the Game view was closed")
+        .unwrap();
+    assert!(
+        editor
+            .test_game_view_runtime()
+            .fault_reporter()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::System,
+                "nara.test.game-view-closed-step-fault",
+            ))
+    );
+
+    let faulted = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(faulted.play().state(), EditorPlayState::Faulted);
+    assert_eq!(
+        faulted.play().result(),
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::StepFixedTick,
+            failure: EditorPlayFailure::Runtime,
+        }),
+    );
+    assert_eq!(fixed_tick(&mut editor), before);
+    assert!(!editor.game_step_requires_runtime_drive());
+    assert!(editor.take_game_view_candidate().unwrap().is_none());
+    stop_game(&mut editor);
+}
+
+#[test]
 fn public_step_and_resume_are_busy_until_the_original_step_presentation_settles() {
     let project = TestProject::new("game-view-step-exclusive-presentation");
     let mut editor = open_game(&project, false);

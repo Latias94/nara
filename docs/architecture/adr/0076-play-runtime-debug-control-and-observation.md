@@ -141,7 +141,10 @@ The stable semantic operations are:
   An embedded Game View can complete that Step without a presentation receipt when the stepped
   frame has sealed with no visible views for the current target. A frame that has yet to yield
   a disposition keeps its presentation pending. The exact fixed tick remains observable in both
-  cases.
+  cases. The Step retains the Game View target selected at admission. If that target retires,
+  its presentation is cancelled when the original control settles, including retirement before
+  the first drive. A Runtime fault still settles the control as failed. A Step admitted with
+  presentation disabled completes from the control receipt alone.
 - **Stop** requests finite service shutdown and runtime disposal. A host reports clean completion
   only after its bounded close contract succeeds. Under ADR 0084's accepted state vocabulary, a
   timeout or participant failure that leaves a registered owner unfinished remains `Stopping` or

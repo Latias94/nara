@@ -682,10 +682,19 @@ enum EditorStepPresentationState {
     },
 }
 
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+#[derive(Clone, Copy)]
+enum EditorStepPresentationTarget {
+    Original(EditorGameStartRequest),
+    Retired,
+}
+
 #[derive(Clone, Copy)]
 struct PendingEditorControl {
     operation: EditorPlayOperation,
     ticket: RuntimeControlTicket,
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    step_target: Option<EditorStepPresentationTarget>,
 }
 
 struct PendingApplyChanges {
@@ -2452,15 +2461,15 @@ impl EditorProjectSession {
         if !source_is_idle {
             return Err(EditorGameViewBridgeFailure::CandidateBusy);
         }
-        if !active {
-            self.cancel_game_step_presentation();
-        }
         {
             let runtime = self
                 .trusted_compiled_mut()
                 .and_then(|lane| lane.runtime_host.running_runtime_mut())
                 .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
             game_view::set_capture_enabled(runtime, false)?;
+        }
+        if !active {
+            self.cancel_game_step_presentation();
         }
 
         // Retirement must return an already-produced candidate after new capture admission closes.
@@ -2515,7 +2524,6 @@ impl EditorProjectSession {
             return Ok(false);
         }
 
-        self.cancel_game_step_presentation();
         self.set_game_view_source_active(false, "the Game View geometry was superseded")?;
         let resized = start.resized(extent)?;
         {
@@ -2549,6 +2557,11 @@ impl EditorProjectSession {
         let Some(lane) = self.trusted_compiled_mut() else {
             return false;
         };
+        if let Some(pending) = lane.pending_control.as_mut()
+            && pending.step_target.is_some()
+        {
+            pending.step_target = Some(EditorStepPresentationTarget::Retired);
+        }
         if lane.pending_step_presentation.take().is_some() {
             self.play_result = Some(EditorPlayOperationResult::Cancelled {
                 operation: EditorPlayOperation::StepFixedTick,
@@ -2562,8 +2575,7 @@ impl EditorProjectSession {
     /// Requests a Host-owned recovery pause without resolving a pending document decision.
     ///
     /// The Host must first retire the Game source, then keep driving and retry after `Busy`.
-    /// Existing controls retain their exact tickets. A queued Step may create a presentation
-    /// wait during that drive, so retry once more before deciding that recovery is ready.
+    /// Existing controls retain their exact tickets until the Runtime resolves them.
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     pub fn request_runtime_pause_for_gpu_recovery(&mut self) -> EditorPlayRequestResult {

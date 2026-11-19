@@ -310,6 +310,20 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        let step_target = match &lane.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } if operation == EditorPlayOperation::StepFixedTick
+                && lane
+                    .runtime_host
+                    .running_runtime()
+                    .is_some_and(game_view::capture_enabled) =>
+            {
+                Some(EditorStepPresentationTarget::Original(game.start))
+            }
+            _ => None,
+        };
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
         let mut game_capture_suspended = false;
         #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
         let game_capture_suspended = false;
@@ -351,7 +365,12 @@ impl EditorProjectSession {
         match requested {
             Ok(ticket) => {
                 if let Some(lane) = self.trusted_compiled_mut() {
-                    lane.pending_control = Some(PendingEditorControl { operation, ticket });
+                    lane.pending_control = Some(PendingEditorControl {
+                        operation,
+                        ticket,
+                        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                        step_target,
+                    });
                 }
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                 EditorPlayRequestResult::Accepted
@@ -865,57 +884,15 @@ impl EditorProjectSession {
             .trusted_compiled()
             .and_then(|lane| lane.pending_control);
         if let Some(pending) = pending {
-            let (status, generation) = self.trusted_compiled().map_or((None, None), |lane| {
-                (
-                    lane.runtime_host.runtime_control_status(pending.ticket),
-                    lane.runtime_host.running_runtime_generation(),
-                )
-            });
+            let status = self
+                .trusted_compiled()
+                .and_then(|lane| lane.runtime_host.runtime_control_status(pending.ticket));
             match status {
-                Some(RuntimeControlStatus::Applied) => {
-                    if let Some(lane) = self.trusted_compiled_mut() {
-                        lane.pending_control = None;
-                    }
+                Some(RuntimeControlStatus::Applied) => self.complete_applied_control(
+                    pending,
                     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                    let requires_presentation =
-                        pending.operation == EditorPlayOperation::StepFixedTick && game.is_some();
-                    #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
-                    let requires_presentation = false;
-                    if requires_presentation {
-                        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                        {
-                            if let Some(lane) = self.trusted_compiled_mut() {
-                                lane.pending_step_presentation = game
-                                    .filter(|game| {
-                                        game.start.runtime_generation()
-                                            == pending.ticket.generation()
-                                    })
-                                    .and_then(|game| {
-                                        let frame =
-                                            lane.runtime_host
-                                                .running_runtime()?
-                                                .world()
-                                                .get_resource::<nara_app::RuntimeFrameStatus>()?;
-                                        Some(EditorStepPresentationState::AwaitingCandidate {
-                                            start: game.start,
-                                            after_app_frame: frame.frame,
-                                        })
-                                    });
-                                if lane.pending_step_presentation.is_none() {
-                                    self.play_result = Some(EditorPlayOperationResult::Failed {
-                                        operation: pending.operation,
-                                        failure: EditorPlayFailure::Presentation,
-                                    });
-                                }
-                            }
-                        }
-                    } else {
-                        self.play_result = Some(EditorPlayOperationResult::Applied {
-                            operation: pending.operation,
-                            generation,
-                        });
-                    }
-                }
+                    game,
+                ),
                 Some(RuntimeControlStatus::Failed(_)) | None => {
                     if let Some(lane) = self.trusted_compiled_mut() {
                         lane.pending_control = None;
@@ -943,6 +920,59 @@ impl EditorProjectSession {
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             game,
         }
+    }
+
+    fn complete_applied_control(
+        &mut self,
+        pending: PendingEditorControl,
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))] game: Option<
+            ActiveEditorGameView,
+        >,
+    ) {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return;
+        };
+        lane.pending_control = None;
+        let operation = pending.operation;
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        match pending.step_target {
+            Some(EditorStepPresentationTarget::Retired) => {
+                self.play_result = Some(EditorPlayOperationResult::Cancelled { operation });
+                return;
+            }
+            Some(EditorStepPresentationTarget::Original(start)) => {
+                let after_app_frame = game
+                    .filter(|game| {
+                        game.start == start
+                            && start.runtime_generation() == pending.ticket.generation()
+                    })
+                    .and_then(|_| lane.runtime_host.running_runtime())
+                    .and_then(|runtime| {
+                        runtime
+                            .world()
+                            .get_resource::<nara_app::RuntimeFrameStatus>()
+                    })
+                    .map(|frame| frame.frame);
+                if let Some(after_app_frame) = after_app_frame {
+                    lane.pending_step_presentation =
+                        Some(EditorStepPresentationState::AwaitingCandidate {
+                            start,
+                            after_app_frame,
+                        });
+                } else {
+                    self.play_result = Some(EditorPlayOperationResult::Failed {
+                        operation,
+                        failure: EditorPlayFailure::Presentation,
+                    });
+                }
+                return;
+            }
+            None => {}
+        }
+        self.play_result = Some(EditorPlayOperationResult::Applied {
+            operation,
+            generation: lane.runtime_host.running_runtime_generation(),
+        });
     }
 
     fn poll_runtime_edit(&mut self) {
