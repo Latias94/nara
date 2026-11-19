@@ -83,3 +83,62 @@ Keeping the same 8,192 static entities under one unrelated parent reduced the in
 Rust 1.95.0 on Windows x64. Public CPU and headless probes used temporary source projects and the shared build dependencies. The two presentation findings additionally used Vulkan offscreen readback. The TileSet probe reached freshly extracted CPU draw batches. The WAV alias check reached Export staging. Native window input, physical watcher delivery, complete Export publication for that alias case, and non-Windows behavior remain outside the evidence here.
 
 The 21 repair controls covered indexed Undo, persisted floats, disabled hierarchy edges, Step retirement and resize, wide-integer Cook, stable Image/Material relocation, UI overflow, camera subviews, Inspector reference text, unchanged placement, TileSet sharing, projectile targeting, pickup opacity, additive unload, fixed-clock presentation and audio observation. The two newer Prefab query controls covered bounded pagination and continuing past an oversized header. All 23 ran from existing release test binaries. The review made no workspace-wide build or timing qualification.
+
+## Repair status
+
+### Runtime startup and paused capture
+
+In `3861f45`, the Host requires a queue when the frozen plugin plan includes the gameplay command
+plugin or when the caller supplies commands at startup. Source Projects with an omitted preset
+and an explicit `minimal` preset both pass Check, start without the queue and complete a fixed
+tick with the authored Prefab, Sprite and Image resident. Adding the plugin explicitly and using
+`local-headless` each make the queue available. Commands without a queue still reject startup.
+The existing control that removes an expected queue during plugin setup still rejects the
+candidate and retires the acquired owners once. [Startup admission](../../src/project_host/runtime.rs)
+
+Paused capture returns the Runtime's original fault diagnostic and discards the value when a
+worker reports a fault during the callback. A subsequent capture with the same fault skips the
+callback. The original session still physically closes and reports failure. A completed healthy
+pause yields the requested value. [Public startup and capture regressions](../../tests/project_runtime_boot/admission.rs)
+
+The pre-fix run `d0ea044e-84a3-44c6-8bc3-29487bf973e6` logged the missing queue and successful
+`Ok(42)` before the test processes aborted on assertion failure. After the repair, Windows x64
+Rust 1.95.0 nextest passed all 25 selected public boot and owner cleanup tests in
+`cbe55dd9-88e7-44c5-afe1-2e5f44e1fe7e`.
+
+### Runtime members and build observations
+
+In `2727116`, Project Cook chooses the stock payloads required by the encoded Scenes, global
+Input and verified artifact groups. Embedded image bytes remain in the typed Product, and the
+source PNG still participates in cache invalidation and publication revalidation. Linked image
+Products add the actual Image payload. The original builder still rejects unreachable explicit
+members.
+
+The independently locked consumer writes and reopens real packs and starts a fresh Headless
+Player. It verifies two members for an embedded badge and three for a linked badge, checks the
+actual decoded bytes or pixels, rejects the stale group after a same-length PNG change, and
+rebuilds with `RawInputChanged`. Its two-root case delivers exactly five members and visits the
+earlier Image source once more after a later build introduces the dependency. Each Scene's
+contribution runs once. Both the complete delivery digest and ordinary startup stamp are checked
+before adopting the second traversal's receipt. Temporary selection indexes and the first
+delivery receipt release their budget before the phases that no longer need them.
+[Independent consumer](../../tests/fixtures/module-consumer/asset-domain-consumer/tests/project_cook_runtime_selection.rs)
+
+Windows x64 Rust 1.95.0 nextest `625c3202-4d05-495b-ac53-f20a403b4cd2` passes all 11 selected
+tests across Project Cook, compound source workflows and processed Headless Host. The first
+consumer attempt exposed a missing Image codec in the fixture. The final recipe explicitly
+selects that codec and both linked cases pass through deep validation.
+
+The final engine cohort passes 64/64 in `01553836-c8b7-435a-b20f-5d2c268e2ea8`, covering the
+public Runtime boot and content delivery targets, the startup retirement control and the Cook
+owners. Releasing the transient metadata charge lets final validation pass at the exact assembly
+work limit. Setting the limit one byte lower still rejects final validation.
+The Two-Level Game's `cook_runtime` and `cook_source` targets pass 37/37 in
+`cac0a5f9-d2d0-4105-881f-83ef7ac3143a`. They cover shared atlas and animation delivery, typed
+Material and TileSet payloads, source-free decoding, selected Schema, and source drift before
+publication. The repair runs cover Windows Headless execution and pack I/O.
+
+Scoped engine correctness Clippy, strict Clippy for the independent Cook test, and root and
+consumer format checks pass. The three independent Cook cases pass again in
+`3123949d-7b9b-41b9-bde7-d94053385fdf` after the fixture's scoped large-error lint allowance for
+the original public error type.

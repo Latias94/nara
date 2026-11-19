@@ -2325,6 +2325,13 @@ Original generated-project compilation and custom-schema/source Export pass; the
 data-component test consumer is corrected at `abc0a95` and its ten workflows pass. Root/sample
 correctness Clippy, affected Editor compilation and final format/document checks pass.
 
+The November 20 [Runtime dependency selection repair](../../plans/2026-10-31-cooked-player-delivery-plan.md#project-cook-runtime-dependency-selection)
+at `2727116` keeps construction inputs in source revalidation and selects stock pack payloads
+using the encoded Scenes, global Input and verified group dependencies. The independently locked
+Windows consumer run passes 11 tests, including actual pack decode, PNG drift and a later
+Scene's demand for stock data from an earlier snapshot. Engine 64/64 and Two-Level Cook 37/37
+pass. Complete explicit groups still undergo final reachability validation.
+
 The [task-result/replay publication correction](../../research/2026-11-18-engine-architecture-review-reconciliation.md#runtime-result-and-replay-publication-corrections)
 at `e67bdca` / `0f979aa` closes review F9/F11 within their original owners. `OrderedTaskResults`
 now rejects a different completion owner before insertion, returns the original handle untouched
@@ -3193,6 +3200,12 @@ passes 12/12 on Windows CPU, including failed-candidate isolation, execution fau
 pending/completed-error close.
 The linked plan records initial review defects and fixes, exact verification revisions and limits.
 This prerequisite does not complete R12 or the foundation rebaseline.
+
+The November 20 [startup and capture repair](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#runtime-startup-and-paused-capture)
+at `3861f45` passes 25 Windows boot and cleanup tests. The same public Host starts command-free
+`minimal` projects with their real Scene, Prefab and Image. A selected gameplay command plugin or
+pending startup commands still require a queue. Paused capture returns the original Runtime fault
+when a worker reports during observation and discards the game value before publication.
 
 The same day's [game reconstruction successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#game-reconstruction-and-actual-rust-builds)
 adds bounded game-owned semantic state, original admitted source-content stamps, fresh-runtime

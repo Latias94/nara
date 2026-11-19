@@ -168,6 +168,29 @@ qualifies desktop and audible placements. General cross-compilation, foreign exe
 native-library deployment, complete shipping schema stripping and numeric runtime budgets
 remain open. This closes the shared Cook unit, not full R7/R12/Foundation.
 
+## Project Cook Runtime Dependency Selection
+
+The [Cook review](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#cook-forces-a-source-image-into-a-pack-after-the-importer-has-baked-it-into-another-product)
+found a source importer whose build embeds an observed PNG in another Product. The shared Cook
+entry now chooses stock payloads using the declared Scene and global Input roots and the Required
+and Reference edges of actual cooked Scenes and supplied groups. The builder still validates
+complete members and rejects surplus explicit groups. A stock input absent from the Runtime
+closure stays in the original source and build observations used by the cache and publication.
+
+The normal traversal encodes only selected stock payloads while each strict snapshot is borrowed.
+A demand first introduced after an earlier snapshot has retired can revisit the source traversal
+once and use the previously admitted stock provider. The first receipt releases its source
+budget before that traversal. The new receipt must match both the original delivery digest and
+startup stamp. This reuses the original contribution results and releases decoded generations
+between roots. Temporary selection indexes release their assembly charge before final validation.
+
+The [repair evidence](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#runtime-members-and-build-observations)
+records the independently locked consumer with an embedded PNG, a linked Image, stale selection
+and actual rebuild, and a second Scene adding a dependency on an earlier snapshot's Image.
+The three new cases pass within the 11-test Windows consumer run. The engine's boot, delivery
+and Cook cohort passes 64/64, and the Two-Level Game's Cook targets pass 37/37 with their selected
+source and source-free payloads.
+
 ## Request-Owned Generated Rust Input Successor
 
 Remove the shared-source bootstrap write used by Two-Level and the independent delivery fixtures.

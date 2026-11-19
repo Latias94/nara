@@ -1038,6 +1038,24 @@ also checks for a still-existing prior location before moving its UID mapping. B
 at its path-based source event boundary. [Godot scan](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/file_system/editor_file_system.cpp#L919-L938)
 · [Bevy source event handling](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/server/mod.rs#L1991-L2021)
 
+### November 20 Runtime Startup And Cook Review
+
+The [fourth consumer review](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md)
+identifies two supported workflows that can pass Check and fail at the next owning step.
+Qualify command-free startup under the default `minimal` preset and preserve the command queue
+obligation for a selected Gameplay Command plugin or actual startup commands. Paused capture
+uses the original Runtime fault at the observation boundary, including a first fault reported
+by a worker while game validation runs.
+
+Project Cook must assemble the Processed Product closure selected by Scene and global startup
+roots, including dependencies declared by built codecs. A consumed construction input still
+participates in source and cache revalidation. The low-level assembly remains responsible for
+strict package membership. Qualify both a linked and an embedded Image through the same typed
+contributor and a fresh headless Player. The [startup and paused capture regressions](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#runtime-startup-and-paused-capture)
+pass 25 Windows public boot and owner cleanup tests. The [Cook consumer regressions](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#runtime-members-and-build-observations)
+pass 11 tests, including linked and embedded payloads, cache invalidation and a later Scene's
+dependency on an Image from an earlier source snapshot.
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
