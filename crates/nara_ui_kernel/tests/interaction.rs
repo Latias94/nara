@@ -2230,6 +2230,170 @@ fn focus_visibility_rejects_buttons_with_empty_surface_or_ancestor_intersection(
 }
 
 #[test]
+fn visible_overflow_keeps_a_child_presented_after_its_parent_leaves_the_clip() {
+    use nara_ui_kernel::{UiColorRole, UiScrollDelta, UiVisual};
+
+    let button_key = exact_key("overflow", "button");
+    let container_key = exact_key("overflow", "container");
+    let clip_key = exact_key("overflow", "clip");
+    let button_rect = UiRect::from_origin_size(50.0, 10.0, 30.0, 30.0).unwrap();
+    let clip_rect = UiRect::from_origin_size(0.0, 0.0, 100.0, 80.0).unwrap();
+    let position = UiPoint::new(60.0, 20.0);
+    let listener = UiInteraction::default()
+        .with_enabled(true)
+        .with_pointer_motion(true)
+        .with_scroll(true);
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let mut initial_route = None;
+
+    for (revision, container_x, overflow, style_visible, expected_parent) in [
+        (1, 80.0, UiOverflow::Visible, true, Some(&container_key)),
+        (2, 120.0, UiOverflow::Visible, true, Some(&clip_key)),
+        (3, 120.0, UiOverflow::Clip, true, None),
+        (4, 80.0, UiOverflow::Visible, false, None),
+    ] {
+        let child = UiNode::new(UiStyle::absolute(50.0 - container_x, 10.0, 30.0, 30.0))
+            .with_key(node_key("button"))
+            .with_interaction(UiInteraction::focus_target())
+            .with_visual(UiVisual::role(UiColorRole::Focus))
+            .with_semantics(UiSemantics::new(UiSemanticRole::Button, "Button").unwrap());
+        let container = UiNode::new(
+            UiStyle::absolute(container_x, 0.0, 40.0, 50.0)
+                .with_overflow(overflow)
+                .with_visible(style_visible),
+        )
+        .with_key(node_key("container"))
+        .with_interaction(listener)
+        .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Container").unwrap())
+        .with_child(child);
+        let clip = clipping_parent(0.0, 0.0, 100.0, 80.0, container)
+            .with_key(node_key("clip"))
+            .with_interaction(listener)
+            .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Clip").unwrap());
+        let snapshot = UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("overflow"), UiLayer::Base, UiStyle::fill()).with_child(clip),
+            )
+            .build()
+            .unwrap();
+        let frame = compile(&mut compiler, &snapshot, revision);
+        assert!(frame.diagnostics().is_empty());
+        if style_visible {
+            let layout = frame
+                .layouts()
+                .iter()
+                .find(|layout| layout.key() == Some(&button_key))
+                .unwrap();
+            assert_eq!(layout.rect(), button_rect);
+        }
+        let route = submit(&mut journal, Arc::clone(&frame), revision);
+        let mut session = UiInteractionSession::default();
+        if revision == 1 {
+            initial_route = Some(route);
+        } else if revision == 2 {
+            let historical = session
+                .dispatch(&journal, initial_route.unwrap(), move_pointer(position))
+                .unwrap();
+            assert_eq!(
+                historical.rejection(),
+                Some(&UiNonActivation::TargetHidden {
+                    target: container_key.clone(),
+                }),
+            );
+        }
+        let navigation = session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction: UiNavigation::Next,
+                },
+            )
+            .unwrap();
+        let semantics = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+        let published_button = semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &button_key);
+        assert_eq!(
+            semantics
+                .nodes()
+                .iter()
+                .any(|node| node.key() == &container_key),
+            expected_parent == Some(&container_key),
+        );
+        if let Some(parent) = expected_parent {
+            let motion = session
+                .dispatch(&journal, route, move_pointer(position))
+                .unwrap();
+            let events = motion.consumed().unwrap().events();
+            assert!(events.iter().any(|event| {
+                event.phase() == UiRoutePhase::Target
+                    && event.target() == &button_key
+                    && event.kind() == &UiRoutedEventKind::HoverChanged { hovered: true }
+            }));
+            assert!(events.iter().any(|event| {
+                event.phase() == UiRoutePhase::Target
+                    && event.target() == parent
+                    && event.kind() == &UiRoutedEventKind::PointerMoved
+            }));
+            let scroll = session
+                .dispatch(
+                    &journal,
+                    route,
+                    UiInputEvent::Pointer(UiPointerInput::scroll(
+                        SEAT,
+                        POINTER,
+                        position,
+                        UiScrollDelta::Lines(UiPoint::new(0.0, 1.0)),
+                    )),
+                )
+                .unwrap();
+            assert!(scroll.consumed().unwrap().events().iter().any(|event| {
+                event.phase() == UiRoutePhase::Target
+                    && event.target() == parent
+                    && event.kind() == &UiRoutedEventKind::Scrolled
+            }));
+        }
+        let press = session
+            .dispatch(
+                &journal,
+                route,
+                pointer_button(UiButtonPhase::Pressed, position),
+            )
+            .unwrap();
+
+        if let Some(parent) = expected_parent {
+            assert_eq!(frame.paint().len(), 1);
+            let paint = &frame.paint()[0];
+            assert_eq!(paint.key(), Some(&button_key));
+            assert_eq!(paint.rect(), button_rect);
+            assert_eq!(paint.clip_rect(), Some(clip_rect));
+            assert!(press.consumed().unwrap().events().iter().any(|event| {
+                event.phase() == UiRoutePhase::Target
+                    && event.target() == &button_key
+                    && event.kind() == &UiRoutedEventKind::Pressed
+            }));
+            assert!(navigation.consumed().is_some());
+            let published_button = published_button.unwrap();
+            assert_eq!(published_button.parent(), Some(parent));
+            assert_eq!(published_button.rect(), button_rect);
+            assert!(published_button.state().focused());
+        } else {
+            assert!(frame.paint().is_empty());
+            assert_eq!(press.rejection(), Some(&UiNonActivation::NoPointerTarget));
+            assert_eq!(
+                navigation.rejection(),
+                Some(&UiNonActivation::NoFocusTarget)
+            );
+            assert!(published_button.is_none());
+        }
+    }
+}
+
+#[test]
 fn focus_visibility_directional_navigation_uses_clipped_origin_and_destination_centers() {
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(

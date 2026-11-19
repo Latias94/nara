@@ -110,7 +110,7 @@ pub(super) fn compile_root(
     let mut mesh_counts = MeshCounts::default();
     let mut origins = vec![UiPoint::new(0.0, 0.0); flat.len()];
     let mut clips = vec![ClipState::Unclipped; flat.len()];
-    let mut visible = vec![false; flat.len()];
+    let mut style_visibility = vec![false; flat.len()];
     let mut semantic_ancestors = vec![None; flat.len()];
 
     for (index, node) in flat.iter().enumerate() {
@@ -139,12 +139,12 @@ pub(super) fn compile_root(
         let inherited_clip = node
             .parent
             .map_or(ClipState::Unclipped, |parent| clips[parent]);
-        let parent_visible = node.parent.is_none_or(|parent| visible[parent]);
+        let parent_style_visible = node.parent.is_none_or(|parent| style_visibility[parent]);
+        let style_visible = parent_style_visible && node.node.style.visible;
+        style_visibility[index] = style_visible;
         let clipped = inherited_clip.intersect(rect);
-        let node_visible = parent_visible
-            && node.node.style.visible
-            && !rect.size().is_empty()
-            && !matches!(clipped, ClipState::Empty);
+        let node_visible =
+            style_visible && !rect.size().is_empty() && !matches!(clipped, ClipState::Empty);
         let surface_rect = rect.intersect(surface_bounds);
         let physical_rect = surface_rect.and_then(snap_clipped);
         let visible_bounds = if node_visible {
@@ -160,7 +160,6 @@ pub(super) fn compile_root(
             None
         };
         let physical_rect = physical_rect.unwrap_or_default();
-        visible[index] = node_visible;
         clips[index] = if node.node.style.overflow == UiOverflow::Clip {
             clipped
         } else {

@@ -122,10 +122,10 @@ pub(super) fn nearest_pointer_listener(
         else {
             continue;
         };
-        if !interested(layout.interaction()) {
+        if !layout.visible_on_surface() || !interested(layout.interaction()) {
             continue;
         }
-        if let Some(reason) = target_rejection(frame, latest, modal_root, &target) {
+        if let Some(reason) = surface_target_rejection(frame, latest, modal_root, &target) {
             return Err(reason);
         }
         if !layout.interaction().enabled() || !key_is_enabled(latest, &target) {

@@ -144,6 +144,8 @@ Immutable interaction declarations identify supported buttons and interest in mo
 Captured motion targets its original owner even outside that owner's bounds. Otherwise motion
 and scroll target the nearest eligible keyed ancestor of the exact event-time hit. The ordinary
 keyed route provides observation phases, while only one target is selected for the operation.
+Listener selection skips ancestors with no visible surface pixels on that frame. If the selected
+listener has since become hidden, the existing historical guard rejects the operation.
 This is a finite listener-selection contract, not arbitrary mutable event callbacks or a new
 propagation owner. A component cannot infer capture from hover or an ancestor observation.
 
@@ -282,6 +284,9 @@ receipt. Retirement is permanent and cannot be restored.
 Authored semantics are descriptive, not an independent behavior authority. An actionable semantic
 fact is published only when the exact presented behavior snapshot owns and can resolve that action.
 Compilation intersects node geometry with ancestor clips and the Surface Slot content rect.
+Style visibility applies to the subtree. In a visible subtree, a non-clipping node passes its
+inherited clip to its children even when its own rectangle lies outside that clip. Each child
+uses its own intersection for drawing and interaction.
 Keyboard focus, navigation, activation and platform semantics use that same visible region after
 snapping to physical pixels. A control with no covered pixels has no focus destination or
 semantic action. Directional navigation uses the centers of the visible logical regions. A
