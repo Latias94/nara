@@ -6,7 +6,7 @@ use parley::{
     editing::PlainEditor,
     fontique::{Blob, Collection, CollectionOptions, FontInfoOverride, SourceCache},
 };
-use swash::{CacheKey, FontRef, scale::ScaleContext};
+use swash::{CacheKey, FontRef};
 use thiserror::Error;
 
 use crate::{
@@ -14,6 +14,7 @@ use crate::{
     TextDirection, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits, TextLine, TextRun,
     TextTypography, TextWidthMeasurement,
     face::{MAX_FONT_FACES, MAX_TOTAL_FONT_BYTES},
+    raster::GlyphRasterizer,
 };
 
 /// Cumulative work observed by one [`TextEngine`], with every counter saturating at [`u64::MAX`].
@@ -56,7 +57,7 @@ pub struct TextEngine {
     pub(crate) limits: TextLimits,
     pub(crate) font_context: FontContext,
     pub(crate) layout_context: LayoutContext<()>,
-    scale_context: ScaleContext,
+    rasterizer: GlyphRasterizer,
     pub(crate) work_stats: TextWorkStats,
 }
 
@@ -156,7 +157,7 @@ impl TextEngine {
             limits,
             font_context,
             layout_context: LayoutContext::new(),
-            scale_context: ScaleContext::new(),
+            rasterizer: GlyphRasterizer::default(),
             work_stats: TextWorkStats::default(),
         })
     }
@@ -415,18 +416,25 @@ impl TextEngine {
                     {
                         return Err(TextLayoutError::NonFiniteResult);
                     }
+                    let (key, _) = GlyphRasterKey {
+                        face_id,
+                        glyph_id,
+                        physical_size_bits: physical_size.to_bits(),
+                        subpixel_x: 0,
+                        subpixel_y: 0,
+                    }
+                    .at_position(
+                        [glyph.x, glyph.y],
+                        [0.0; 2],
+                        [0.0; 2],
+                        request.scale_factor(),
+                    );
                     glyphs.push(PositionedGlyph {
                         x: glyph.x,
                         y: glyph.y,
                         advance: glyph.advance,
                         run_index,
-                        key: GlyphRasterKey {
-                            face_id,
-                            glyph_id,
-                            physical_size_bits: physical_size.to_bits(),
-                            subpixel_x: quarter_pixel(glyph.x * request.scale_factor()),
-                            subpixel_y: quarter_pixel(glyph.y * request.scale_factor()),
-                        },
+                        key,
                     });
                 }
                 runs.push(TextRun {
@@ -476,7 +484,7 @@ impl TextEngine {
     pub(crate) fn raster_context(
         &mut self,
         face_id: FontFaceId,
-    ) -> Option<(FontRef<'_>, &mut ScaleContext)> {
+    ) -> Option<(FontRef<'_>, &mut GlyphRasterizer)> {
         let font = self.fonts.iter().find(|font| font.face.id() == face_id)?;
         Some((
             FontRef {
@@ -484,7 +492,7 @@ impl TextEngine {
                 offset: font.swash_offset,
                 key: font.swash_key,
             },
-            &mut self.scale_context,
+            &mut self.rasterizer,
         ))
     }
 }
@@ -598,10 +606,6 @@ const fn parley_alignment(alignment: TextAlignment) -> Alignment {
         TextAlignment::Left => Alignment::Left,
         TextAlignment::Right => Alignment::Right,
     }
-}
-
-pub(crate) fn quarter_pixel(value: f32) -> u8 {
-    (value.rem_euclid(1.0) * 4.0).floor() as u8
 }
 
 #[cfg(test)]

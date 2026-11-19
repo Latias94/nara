@@ -84,7 +84,7 @@ impl TextPaintSnapshot {
 pub enum TextWindowError {
     #[error("prepared text requires the original complete ordered font set")]
     FontSetMismatch,
-    #[error("text window must have finite ordered clip edges and finite placement")]
+    #[error("text window requires finite ordered clip edges and representable glyph placement")]
     InvalidWindow,
     #[error("prepared text has {actual} diagnostics; maximum is {maximum}")]
     DiagnosticLimitExceeded { actual: usize, maximum: usize },
@@ -166,9 +166,9 @@ impl TextEngine {
     /// Prepares the same window with exact renderer placement.
     ///
     /// `clip` and `origin` use the target's logical coordinates; `physical_origin` is the physical
-    /// content origin. Baselines use `physical_origin + (origin + glyph_position) * target_scale`,
-    /// rounded to the nearest integer, just as the UI renderer does. Raster subpixel phases use
-    /// those same unsnapped baselines. Clip edges use the same mapping and rounding.
+    /// content origin. Baselines use `physical_origin + (origin + glyph_position) * target_scale`
+    /// and are quantized to quarter pixels for both rasterization and placement. Clip edges
+    /// are mapped to the nearest physical pixel.
     ///
     /// Each call scans at most the receiver's admitted full glyph count and rasterizes each distinct
     /// key once to obtain actual ink placement, including overhang and zero-advance marks. It
@@ -210,8 +210,9 @@ impl TextEngine {
         if !clip.into_iter().all(f32::is_finite) {
             return Err(TextWindowError::InvalidWindow);
         }
-        let clip = clip.map(snap);
+        let [clip_x0, clip_y0, clip_x1, clip_y1] = clip.map(|edge| f64::from(edge.round()));
         let source = snapshot.layout();
+        let physical_size_bits = (source.typography().logical_size() * target_scale).to_bits();
         let mut output = TextLayout {
             typography: source.typography,
             width: source.width,
@@ -231,41 +232,29 @@ impl TextEngine {
                     .work_stats
                     .paint_window_glyphs_scanned
                     .saturating_add(1);
-                let baseline = [
-                    physical_origin[0] + (origin[0] + glyph.x()) * target_scale,
-                    physical_origin[1] + (origin[1] + glyph.y()) * target_scale,
-                ];
-                if !baseline.into_iter().all(f32::is_finite) {
-                    return Err(TextWindowError::InvalidWindow);
-                }
                 let mut glyph = glyph.clone();
-                glyph.key.physical_size_bits =
-                    (snapshot.typography().logical_size() * target_scale).to_bits();
-                glyph.key.subpixel_x = crate::engine::quarter_pixel(baseline[0]);
-                glyph.key.subpixel_y = crate::engine::quarter_pixel(baseline[1]);
-                let (left, top, width, height) = match footprints.get(&glyph.key()).copied() {
+                glyph.key.physical_size_bits = physical_size_bits;
+                let placement = glyph
+                    .physical_placement(origin, physical_origin, target_scale)
+                    .ok_or(TextWindowError::InvalidWindow)?;
+                let key = placement.key();
+                let (left, top, width, height) = match footprints.get(&key).copied() {
                     Some(footprint) => footprint,
                     None => {
-                        let raster = self.rasterize(glyph.key())?;
+                        let raster = self.rasterize(key)?;
                         let footprint =
                             (raster.left(), raster.top(), raster.width(), raster.height());
-                        footprints.insert(glyph.key(), footprint);
+                        footprints.insert(key, footprint);
                         footprint
                     }
                 };
-                let x0 = snap(baseline[0]).saturating_add(left);
-                let y0 = snap(baseline[1]).saturating_sub(top);
-                let x1 = x0.saturating_add(width as i32);
-                let y1 = y0.saturating_add(height as i32);
-                if clip[0] < clip[2]
-                    && clip[1] < clip[3]
-                    && x0 < x1
-                    && y0 < y1
-                    && x0 < clip[2]
-                    && clip[0] < x1
-                    && y0 < clip[3]
-                    && clip[1] < y1
+                let [x0, y0, x1, y1] = placement
+                    .raster_bounds(left, top, width, height)
+                    .ok_or(TextWindowError::InvalidWindow)?;
+                if f64::from(x0).max(clip_x0) < f64::from(x1).min(clip_x1)
+                    && f64::from(y0).max(clip_y0) < f64::from(y1).min(clip_y1)
                 {
+                    glyph.key = key;
                     glyph.run_index = output.runs.len();
                     output.glyphs.push(glyph);
                 }
@@ -278,8 +267,4 @@ impl TextEngine {
         }
         Ok(Arc::new(output))
     }
-}
-
-fn snap(value: f32) -> i32 {
-    value.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }

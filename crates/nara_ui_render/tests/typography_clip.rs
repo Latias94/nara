@@ -121,6 +121,88 @@ fn visible_ink(packet: &UiPaintPacket) -> Vec<(i32, i32, u8)> {
 }
 
 #[test]
+fn subpixel_glyph_ink_moves_forward_and_matches_one_pixel_paint_windows() {
+    let mut text = TextEngine::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+    let editor = TextEditor::new(&mut text, "H", 20.0).unwrap();
+    let glyph = &editor.layout().glyphs()[0];
+    let snapshot = editor.paint_snapshot();
+    for scale in [1.0, 1.25, 1.5] {
+        let environment = environment(scale);
+        let physical_origin = environment.content_transform().physical_content_origin();
+        for axis in 0..2 {
+            let mut initial_center = None;
+            let mut edge = None;
+            let coordinate = |&(x, y, _): &(i32, i32, u8)| if axis == 0 { x } else { y };
+            for shift in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let mut baseline = [32.0, 52.0];
+                baseline[axis] += shift;
+                let x = (baseline[0] - physical_origin.x()) / scale - glyph.x();
+                let y = (baseline[1] - physical_origin.y()) / scale - glyph.y();
+                let full = packet(
+                    UiNode::new(UiStyle::absolute(x, y, 64.0, 48.0))
+                        .with_key(UiLocalKey::runtime("typography-clip", "full-text").unwrap())
+                        .with_text(UiText::new("H", 20.0).unwrap()),
+                    environment,
+                );
+                let ink = visible_ink(&full);
+                let (weight, weighted_position) =
+                    ink.iter().fold((0.0, 0.0), |(weight, sum), pixel| {
+                        let alpha = f64::from(pixel.2);
+                        (
+                            weight + alpha,
+                            sum + (f64::from(coordinate(pixel)) + 0.5) * alpha,
+                        )
+                    });
+                assert!(weight > 0.0);
+                let center = weighted_position / weight;
+                let movement = center - *initial_center.get_or_insert(center);
+                assert!(
+                    (movement - f64::from(shift)).abs() < 0.1,
+                    "ink moved {movement} for axis {axis} at scale {scale}, shift {shift}"
+                );
+
+                let edge =
+                    *edge.get_or_insert_with(|| ink.iter().map(coordinate).min().unwrap() + 1);
+                let [min_x, min_y, max_x, max_y] = if axis == 0 {
+                    [edge, 20, edge + 1, 80]
+                } else {
+                    [20, edge, 80, edge + 1]
+                };
+                let clip_x = (min_x as f32 - physical_origin.x()) / scale;
+                let clip_y = (min_y as f32 - physical_origin.y()) / scale;
+                let window = packet(
+                    UiNode::new(UiStyle::absolute(
+                        clip_x,
+                        clip_y,
+                        (max_x - min_x) as f32 / scale,
+                        (max_y - min_y) as f32 / scale,
+                    ))
+                    .with_key(UiLocalKey::runtime("typography-clip", "clipped-text").unwrap())
+                    .with_prepared_text(
+                        UiPreparedText::new(snapshot.clone())
+                            .with_draw_offset(UiPoint::new(x - clip_x, y - clip_y)),
+                    ),
+                    environment,
+                );
+                let expected = ink
+                    .into_iter()
+                    .filter(|(x, y, _)| (min_x..max_x).contains(x) && (min_y..max_y).contains(y))
+                    .collect::<Vec<_>>();
+                assert!(
+                    !expected.is_empty(),
+                    "scale {scale}, axis {axis}, shift {shift}"
+                );
+                assert_eq!(
+                    visible_ink(&window),
+                    expected,
+                    "scale {scale}, axis {axis}, shift {shift}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn short_line_height_windows_preserve_original_ink_above_the_shifted_draw_origin() {
     let automatic = TextTypography::new(20.0).unwrap();
     let short = automatic.with_line_height(6.0).unwrap();

@@ -1,6 +1,6 @@
 use nara_text::{
-    FontFace, GlyphRasterError, TextDirection, TextEdit, TextEditor, TextEngine, TextLayoutError,
-    TextLayoutRequest, TextLimits, TextRect, TextWindowError, bundled_font_face,
+    FontFace, GlyphRasterError, TextDirection, TextEdit, TextEditor, TextEngine, TextLayout,
+    TextLayoutError, TextLayoutRequest, TextLimits, TextRect, TextWindowError, bundled_font_face,
 };
 
 fn engine(limits: TextLimits) -> TextEngine {
@@ -194,6 +194,155 @@ fn exact_placement_rekeys_physical_size_and_subpixel_phase_without_moving_glyphs
                 "fractional placement must change raster identity"
             );
         }
+    }
+}
+
+fn raster_ink(
+    engine: &mut TextEngine,
+    layout: &TextLayout,
+    origin: [f32; 2],
+    physical_origin: [f32; 2],
+) -> Vec<(i32, i32, u8)> {
+    let mut ink = Vec::new();
+    for glyph in layout.glyphs() {
+        let placement = glyph
+            .physical_placement(origin, physical_origin, 1.0)
+            .unwrap();
+        assert_eq!(placement.key(), glyph.key());
+        let raster = engine.rasterize(glyph.key()).unwrap();
+        let [left, top, _, _] = placement
+            .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+            .unwrap();
+        for (index, &alpha) in raster.mask().iter().enumerate() {
+            if alpha != 0 {
+                let width = raster.width() as usize;
+                ink.push((
+                    left + (index % width) as i32,
+                    top + (index / width) as i32,
+                    alpha,
+                ));
+            }
+        }
+    }
+    ink
+}
+
+#[test]
+fn negative_subpixel_baselines_move_raster_ink_and_preserve_edge_clip_coverage() {
+    let mut engine = engine(TextLimits::default());
+    let editor = TextEditor::new(&mut engine, "H", 20.0).unwrap();
+    let glyph = &editor.layout().glyphs()[0];
+    let snapshot = editor.paint_snapshot();
+    let physical_origin = [-2.25, -3.5];
+    let full_clip = clip(-64.0, 64.0);
+    let edge_clip = clip(-9.0 - physical_origin[0], -8.0 - physical_origin[0]);
+    let mut initial_center = None;
+    let mut translated_integer_ink = None;
+    for (shift, quantized_shift) in [
+        (0.0, 0.0),
+        (0.25, 0.25),
+        (0.5, 0.5),
+        (0.75, 0.75),
+        (0.9375, 1.0),
+        (1.0, 1.0),
+    ] {
+        let origin = [
+            -11.0 + shift - physical_origin[0] - glyph.x(),
+            -10.0 + shift - physical_origin[1] - glyph.y(),
+        ];
+        let full = engine
+            .prepare_window_at(&snapshot, full_clip, 1.0, origin, physical_origin)
+            .unwrap();
+        let ink = raster_ink(&mut engine, &full, origin, physical_origin);
+        let (weight, weighted_x, weighted_y) =
+            ink.iter()
+                .fold((0.0, 0.0, 0.0), |(weight, sum_x, sum_y), &(x, y, alpha)| {
+                    let alpha = f64::from(alpha);
+                    (
+                        weight + alpha,
+                        sum_x + (f64::from(x) + 0.5) * alpha,
+                        sum_y + (f64::from(y) + 0.5) * alpha,
+                    )
+                });
+        assert!(weight > 0.0);
+        let center = [weighted_x / weight, weighted_y / weight];
+        let initial = *initial_center.get_or_insert(center);
+        for axis in 0..2 {
+            let movement = center[axis] - initial[axis];
+            assert!(
+                (movement - quantized_shift).abs() < 0.1,
+                "ink moved {movement} for axis {axis} at physical shift {shift}"
+            );
+        }
+        let translated = translated_integer_ink.get_or_insert_with(|| {
+            ink.iter()
+                .map(|&(x, y, alpha)| (x + 1, y + 1, alpha))
+                .collect::<Vec<_>>()
+        });
+        if quantized_shift == 1.0 {
+            assert_eq!(&ink, translated);
+        }
+
+        let expected = ink
+            .into_iter()
+            .filter(|(x, _, _)| *x == -9)
+            .collect::<Vec<_>>();
+        assert!(
+            !expected.is_empty(),
+            "edge contains ink at physical shift {shift}"
+        );
+        let window = engine
+            .prepare_window_at(&snapshot, edge_clip, 1.0, origin, physical_origin)
+            .unwrap();
+        let clipped = raster_ink(&mut engine, &window, origin, physical_origin)
+            .into_iter()
+            .filter(|(x, _, _)| *x == -9)
+            .collect::<Vec<_>>();
+        assert_eq!(clipped, expected, "physical shift {shift}");
+    }
+}
+
+#[test]
+fn glyph_placement_checks_signed_bearings_and_extreme_physical_bounds() {
+    let mut engine = engine(TextLimits::default());
+    let editor = TextEditor::new(&mut engine, "H", 20.0).unwrap();
+    let glyph = &editor.layout().glyphs()[0];
+    let origin = [-glyph.x(), -glyph.y()];
+    let placement = glyph.physical_placement(origin, [-2.0, -3.0], 1.0).unwrap();
+    assert_eq!(placement.raster_bounds(-3, -4, 8, 2), Some([-5, 1, 3, 3]));
+
+    let positive_limit = i32::MAX as f32;
+    let negative_limit = i32::MIN as f32;
+    let placement = glyph
+        .physical_placement(
+            [origin[0], origin[1] - 1.0],
+            [negative_limit, positive_limit],
+            1.0,
+        )
+        .unwrap();
+    assert_eq!(
+        placement.raster_bounds(1, 2, 2, 2),
+        Some([i32::MIN + 1, i32::MAX - 2, i32::MIN + 3, i32::MAX])
+    );
+    assert_eq!(placement.raster_bounds(-1, 2, 1, 1), None);
+    assert_eq!(placement.raster_bounds(0, 1, 1, 2), None);
+    assert_eq!(placement.raster_bounds(0, i32::MIN, 1, 1), None);
+    assert!(
+        glyph
+            .physical_placement(origin, [positive_limit, 0.0], 1.0)
+            .is_none()
+    );
+
+    let snapshot = editor.paint_snapshot();
+    for physical_origin in [
+        [positive_limit, 0.0],
+        [0.0, negative_limit],
+        [f32::MAX, 0.0],
+    ] {
+        assert_eq!(
+            engine.prepare_window_at(&snapshot, clip(-64.0, 64.0), 1.0, origin, physical_origin),
+            Err(TextWindowError::InvalidWindow)
+        );
     }
 }
 

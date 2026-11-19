@@ -776,13 +776,15 @@ fn paint_text(
     let layout = text.prepare_window_at(source, clip, canvas.scale, origin, [0.0; 2])?;
     let [cx0, cy0, cx1, cy1] = canvas.edges(clip);
     for glyph in layout.glyphs() {
-        let raster = text.rasterize(glyph.key())?;
-        let left = ((origin[0] + glyph.x()) * canvas.scale).round() as i32 + raster.left();
-        let top = ((origin[1] + glyph.y()) * canvas.scale).round() as i32 - raster.top();
-        let right = (left + raster.width() as i32).min(cx1);
-        let bottom = (top + raster.height() as i32).min(cy1);
-        for y in top.max(cy0)..bottom {
-            for x in left.max(cx0)..right {
+        let placement = glyph
+            .physical_placement(origin, [0.0; 2], canvas.scale)
+            .ok_or("glyph placement is outside the consumer's physical canvas range")?;
+        let raster = text.rasterize(placement.key())?;
+        let [left, top, right, bottom] = placement
+            .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+            .ok_or("glyph ink is outside the consumer's physical canvas range")?;
+        for y in top.max(cy0)..bottom.min(cy1) {
+            for x in left.max(cx0)..right.min(cx1) {
                 let mask_index = (y - top) as usize * raster.width() as usize + (x - left) as usize;
                 let alpha = u32::from(raster.mask()[mask_index]);
                 let index = (y as usize * canvas.width as usize + x as usize) * 4;

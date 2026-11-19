@@ -22,4 +22,4 @@ pub use layout::{
 };
 pub use limits::TextLimits;
 pub use paint::{TextPaintSnapshot, TextWindowError};
-pub use raster::{GlyphRaster, GlyphRasterError};
+pub use raster::{GlyphPlacement, GlyphRaster, GlyphRasterError};

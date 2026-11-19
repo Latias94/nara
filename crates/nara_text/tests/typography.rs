@@ -286,11 +286,12 @@ fn retained_snapshots_keep_typography_real_faces_and_target_scale_ink_after_reco
                 let Some(pixel) = raster.mask().iter().position(|coverage| *coverage != 0) else {
                     continue;
                 };
-                let x = (glyph.x() * scale).round()
-                    + raster.left() as f32
-                    + (pixel % raster.width() as usize) as f32;
-                let y = (glyph.y() * scale).round() - raster.top() as f32
-                    + (pixel / raster.width() as usize) as f32;
+                let placement = glyph.physical_placement([0.0; 2], [0.0; 2], scale).unwrap();
+                let [left, top, _, _] = placement
+                    .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+                    .unwrap();
+                let x = left as f32 + (pixel % raster.width() as usize) as f32;
+                let y = top as f32 + (pixel / raster.width() as usize) as f32;
                 let pixel_clip = TextRect {
                     x0: x / scale,
                     y0: y / scale,

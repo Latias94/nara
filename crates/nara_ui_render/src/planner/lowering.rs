@@ -1,7 +1,7 @@
 use std::{alloc::Layout, collections::HashSet, mem::size_of, sync::Arc};
 
 use nara_render::{RenderResourceSnapshot, RenderTarget};
-use nara_text::GlyphRasterKey;
+use nara_text::{GlyphPlacement, GlyphRasterKey, TextLayout};
 use nara_ui_kernel::{
     UiEnvironment, UiFrame, UiImageId, UiMesh, UiPaintPrimitive, UiPhysicalRect, UiPoint, UiRect,
     UiResolvedBrush,
@@ -150,10 +150,11 @@ fn collect_referenced_glyphs(
     let mut seen = HashSet::new();
     let mut requested = Vec::new();
     for primitive in frame.paint() {
-        let UiPaintPrimitive::Text { layout, .. } = primitive else {
+        let UiPaintPrimitive::Text { rect, layout, .. } = primitive else {
             continue;
         };
-        for key in layout.glyphs().iter().map(|glyph| glyph.key()) {
+        for placement in glyph_placements(*rect, layout, frame.environment()) {
+            let key = placement?.key();
             if seen.contains(&key) {
                 continue;
             }
@@ -172,6 +173,26 @@ fn collect_referenced_glyphs(
         }
     }
     Ok(requested)
+}
+
+fn glyph_placements(
+    rect: UiRect,
+    layout: &TextLayout,
+    environment: UiEnvironment,
+) -> impl Iterator<Item = Result<GlyphPlacement, UiPresentationContentError>> + '_ {
+    let origin = rect.origin();
+    let transform = environment.content_transform();
+    let physical_origin = transform.physical_content_origin();
+    let scale = transform.content_scale_factor();
+    layout.glyphs().iter().map(move |glyph| {
+        glyph
+            .physical_placement(
+                [origin.x(), origin.y()],
+                [physical_origin.x(), physical_origin.y()],
+                scale,
+            )
+            .ok_or(UiPresentationContentError::ArithmeticOverflow)
+    })
 }
 
 pub(super) fn lower_packet(
@@ -438,12 +459,12 @@ fn append_glyphs(
     primitives: &mut Vec<UiPacketPrimitive>,
     pages: &mut Vec<UiGlyphAtlasPageSnapshot>,
     page_indices: &mut Vec<(u16, u16)>,
-    layout: &nara_text::TextLayout,
+    layout: &TextLayout,
     context: GlyphAppendContext<'_>,
 ) -> Result<(), UiPresentationContentError> {
-    let origin = context.content_rect.origin();
-    for glyph in layout.glyphs() {
-        let Some(slot) = context.atlas.slot(glyph.key()) else {
+    for placement in glyph_placements(context.content_rect, layout, context.environment) {
+        let placement = placement?;
+        let Some(slot) = context.atlas.slot(placement.key()) else {
             return Err(UiPresentationContentError::ArithmeticOverflow);
         };
         let GlyphSlot::Atlas {
@@ -458,28 +479,10 @@ fn append_glyphs(
         else {
             continue;
         };
-        // A baseline may lie outside the surface while its glyph ink remains visible. Map paint
-        // coordinates without the hit-test bounds check, then clip the complete raster below.
-        let transform = context.environment.content_transform();
-        let physical_origin = transform.physical_content_origin();
-        let scale = transform.content_scale_factor();
-        let baseline_x = physical_origin.x() + (origin.x() + glyph.x()) * scale;
-        let baseline_y = physical_origin.y() + (origin.y() + glyph.y()) * scale;
-        if !baseline_x.is_finite() || !baseline_y.is_finite() {
-            return Err(UiPresentationContentError::ArithmeticOverflow);
-        }
-        let baseline_x = snap_physical_coordinate(baseline_x);
-        let baseline_y = snap_physical_coordinate(baseline_y);
-        let width_i32 =
-            i32::try_from(width).map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
-        let height_i32 =
-            i32::try_from(height).map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
-        let Some(rect) = UiPacketRect::new(
-            baseline_x.saturating_add(left),
-            baseline_y.saturating_sub(top),
-            baseline_x.saturating_add(left).saturating_add(width_i32),
-            baseline_y.saturating_sub(top).saturating_add(height_i32),
-        ) else {
+        let [x0, y0, x1, y1] = placement
+            .raster_bounds(left, top, width, height)
+            .ok_or(UiPresentationContentError::ArithmeticOverflow)?;
+        let Some(rect) = UiPacketRect::new(x0, y0, x1, y1) else {
             continue;
         };
         let Some(clip) = primitive_clip(context.clip, rect) else {
@@ -672,10 +675,6 @@ fn primitive_clip(
         Some(clip) => clip.intersect(primitive_rect).map(Some),
         None => Some(None),
     }
-}
-
-fn snap_physical_coordinate(value: f32) -> i32 {
-    value.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
 #[cfg(test)]

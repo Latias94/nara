@@ -147,8 +147,10 @@ old snapshots retain that observation after the live editor changes.
 `TextEngine::prepare_window()` admits that complete source under the receiver's byte, line, glyph,
 diagnostic and scale limits and returns only glyphs whose actual raster placement intersects the
 local clip. `prepare_window_at()` additionally takes the exact logical draw origin and physical
-content origin used by the renderer; target-scale size and subpixel phases are rebuilt from those
-baselines. Both methods preserve full metrics and original visual order/coordinates without
+content origin used by the renderer. `PositionedGlyph::physical_placement()` derives the integer
+baseline and the raster phase from the same quarter-pixel position. External renderers can use
+its key and `raster_bounds()` to match the ink bounds used for culling. Both window methods preserve
+full metrics and original visual order/coordinates without
 reshaping substrings. Raster extent policy applies even to excluded glyphs. A returned layout
 owns only its window glyphs and reindexed runs, with no retained complete-layout resource.
 

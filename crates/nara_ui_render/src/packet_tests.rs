@@ -208,8 +208,14 @@ fn finite_fallback_fonts_keep_exact_glyph_masks_in_the_owned_atlas() {
         .paint()
         .iter()
         .filter_map(|primitive| {
-            if let UiPaintPrimitive::Text { layout, .. } = primitive {
-                Some(layout.glyphs().iter().map(|glyph| glyph.key()))
+            if let UiPaintPrimitive::Text { rect, layout, .. } = primitive {
+                let origin = [rect.origin().x(), rect.origin().y()];
+                Some(layout.glyphs().iter().map(move |glyph| {
+                    glyph
+                        .physical_placement(origin, [0.0; 2], 1.0)
+                        .unwrap()
+                        .key()
+                }))
             } else {
                 None
             }
@@ -584,17 +590,27 @@ fn visible_glyph_ink_survives_a_baseline_outside_the_surface() {
         let baseline = UiPoint::new(rect.origin().x() + glyph.x(), rect.origin().y() + glyph.y());
         assert!(baseline.y() >= authored_height);
         assert!(transform.authored_to_physical(baseline).is_none());
+        let physical_origin = transform.physical_content_origin();
+        let placement_at = |rect: UiRect, glyph: &nara_text::PositionedGlyph| {
+            glyph
+                .physical_placement(
+                    [rect.origin().x(), rect.origin().y()],
+                    [physical_origin.x(), physical_origin.y()],
+                    scale,
+                )
+                .unwrap()
+        };
+        let placement = placement_at(*rect, glyph);
         let mut text = TextEngine::new(bundled_font_face().unwrap(), Default::default()).unwrap();
-        let raster = text.rasterize(glyph.key()).unwrap();
+        let raster = text.rasterize(placement.key()).unwrap();
         assert!(raster.width() > 0 && raster.height() > 0);
-        let physical_baseline_x =
-            (transform.physical_content_origin().x() + baseline.x() * scale).round() as i32;
-        let physical_baseline_y =
-            (transform.physical_content_origin().y() + baseline.y() * scale).round() as i32;
+        let [left, top, _, _] = placement
+            .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+            .unwrap();
         let visible = environment.physical_rect(*rect).unwrap();
         let has_visible_ink = raster.mask().iter().enumerate().any(|(index, alpha)| {
-            let x = physical_baseline_x + raster.left() + (index % raster.width() as usize) as i32;
-            let y = physical_baseline_y - raster.top() + (index / raster.width() as usize) as i32;
+            let x = left + (index % raster.width() as usize) as i32;
+            let y = top + (index / raster.width() as usize) as i32;
             *alpha != 0
                 && x >= visible.min_x()
                 && x < visible.max_x()
@@ -608,7 +624,7 @@ fn visible_glyph_ink_survives_a_baseline_outside_the_surface() {
         let physical_bottom = (transform.physical_content_origin().y()
             + transform.physical_content_size().height())
         .round() as i32;
-        assert!(physical_baseline_y >= physical_bottom);
+        assert!(top + raster.top() >= physical_bottom);
         let packet = UiPresentationPlanner::default()
             .plan(
                 candidate,
@@ -643,9 +659,12 @@ fn visible_glyph_ink_survives_a_baseline_outside_the_surface() {
             panic!("the outside glyph must still reach packet clipping")
         };
         assert!(environment.physical_rect(*rect).is_some());
-        let outside_baseline = transform.physical_content_origin().y()
-            + (rect.origin().y() + layout.glyphs()[0].y()) * scale;
-        assert!(outside_baseline.round() as i32 - raster.top() >= physical_bottom);
+        let placement = placement_at(*rect, &layout.glyphs()[0]);
+        let raster = text.rasterize(placement.key()).unwrap();
+        let [_, top, _, _] = placement
+            .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+            .unwrap();
+        assert!(top >= physical_bottom);
         let outside_packet = UiPresentationPlanner::default()
             .plan(
                 outside,
@@ -1573,15 +1592,18 @@ fn prepared_windows_match_full_layout_packet_pixels_for_bidi_ligatures_and_mark_
         let mut mark_ink = None;
         let mut overhang_ink = None;
         for glyph in full.glyphs() {
-            let raster = text.rasterize(glyph.key()).unwrap();
-            let baseline_x = (glyph.x() * scale).round() as i32;
-            let baseline_y = (glyph.y() * scale).round() as i32;
+            let placement = glyph.physical_placement([0.0; 2], [0.0; 2], scale).unwrap();
+            let raster = text.rasterize(placement.key()).unwrap();
+            let [left, top, _, _] = placement
+                .raster_bounds(raster.left(), raster.top(), raster.width(), raster.height())
+                .unwrap();
+            let baseline_x = glyph.x() * scale;
             for (index, alpha) in raster.mask().iter().enumerate() {
                 if *alpha == 0 {
                     continue;
                 }
-                let x = baseline_x + raster.left() + (index % raster.width() as usize) as i32;
-                let y = baseline_y - raster.top() + (index / raster.width() as usize) as i32;
+                let x = left + (index % raster.width() as usize) as i32;
+                let y = top + (index / raster.width() as usize) as i32;
                 // Keep the probe inside the actual content clip as well as the surface.
                 if x < 0
                     || y < 0
@@ -1601,7 +1623,7 @@ fn prepared_windows_match_full_layout_packet_pixels_for_bidi_ligatures_and_mark_
                     mark_ink.get_or_insert(pixel);
                 }
                 if glyph.advance() > 0.0
-                    && (x < baseline_x || x as f32 >= baseline_x as f32 + glyph.advance() * scale)
+                    && ((x as f32) < baseline_x || x as f32 >= baseline_x + glyph.advance() * scale)
                 {
                     overhang_ink.get_or_insert(pixel);
                 }
