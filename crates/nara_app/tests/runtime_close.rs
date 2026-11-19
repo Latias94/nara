@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginShutdownObligationId, RuntimeCandidateRetirementState, RuntimeCloseCause,
-    RuntimeCloseContext, RuntimeCloseErrorDisposition, RuntimeCloseParticipant,
+    PluginShutdownContext, PluginShutdownObligationId, RuntimeCandidateRetirementState,
+    RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseErrorDisposition, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
     RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeInstance, RuntimeObligationLedger,
-    RuntimeState,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault, RuntimeFaultDetail,
+    RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
 };
 
 const PARTICIPANT: RuntimeCloseParticipantId =
@@ -27,6 +27,57 @@ const REJECTED_PARTICIPANT: RuntimeCloseParticipantId =
 const RETAINED_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REJECTED_PLUGIN, PluginCategory::Runtime)
         .shutdown_obligations(&[DECLARED_OBLIGATION]);
+
+struct ShutdownFault;
+
+impl Plugin for ShutdownFault {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.desktop-close-fault"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, _: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        context
+            .world()
+            .resource::<RuntimeFaultReporter>()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::RequiredService,
+                Self::declaration().id.as_str(),
+            ));
+        Ok(())
+    }
+}
+
+#[test]
+fn finish_returns_shutdown_fault_with_successful_physical_close() {
+    let mut app = App::new();
+    app.add_plugin(ShutdownFault).unwrap();
+    let runtime = RuntimeInstance::start(app).unwrap();
+    let reporter = runtime.fault_reporter();
+    assert!(runtime.fault().is_none());
+
+    let failure = runtime.finish().unwrap_err();
+
+    let expected = RuntimeFault::engine(
+        RuntimeFaultKind::RequiredService,
+        ShutdownFault::declaration().id.as_str(),
+    );
+    assert_eq!(failure.fault(), Some(&expected));
+    assert!(failure.to_string().contains(expected.source()));
+    assert_eq!(reporter.fault(), Some(expected));
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert!(failure.close_evidence().is_empty());
+}
 
 #[derive(Clone, Default)]
 struct CustodyProbe {
@@ -282,6 +333,27 @@ fn completed_participant_error_retires_physically_and_finish_retains_failure() {
 }
 
 #[test]
+fn finish_reports_cleanup_failure_without_redelivering_drive_fault() {
+    let (mut runtime, _) = with_close_error(RuntimeCloseParticipantPhase::Begin);
+    let fault = RuntimeFault::engine(RuntimeFaultKind::RequiredTask, "nara.test.delivered-fault");
+    let reporter = runtime.fault_reporter();
+    assert!(reporter.report(fault.clone()));
+    assert_eq!(runtime.drive(Duration::ZERO).unwrap_err().fault(), &fault);
+
+    let failure = runtime.finish().unwrap_err();
+
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert!(failure.close_evidence().has_terminal_failure());
+    assert_eq!(failure.fault(), Some(&fault));
+    assert!(!failure.to_string().contains(fault.source()));
+    assert!(!format!("{failure:?}").contains(fault.source()));
+    assert_eq!(reporter.fault(), Some(fault));
+}
+
+#[test]
 fn stop_control_reports_completed_participant_error_without_remaining_stopping() {
     let (mut runtime, _) = with_close_error(RuntimeCloseParticipantPhase::Poll);
     let RuntimeControlRequestResult::Accepted(ticket) =
@@ -304,14 +376,24 @@ fn stop_control_reports_completed_participant_error_without_remaining_stopping()
     );
 }
 
-struct RetryOnce(bool);
+#[derive(Default)]
+struct RetryOnce {
+    attempted: bool,
+    fault_on_retry: Option<RuntimeFault>,
+}
 
 impl RuntimeCloseParticipant for RetryOnce {
     fn begin_close(
         &mut self,
-        _: &mut RuntimeCloseContext<'_>,
+        context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        if std::mem::replace(&mut self.0, true) {
+        if std::mem::replace(&mut self.attempted, true) {
+            if let Some(fault) = self.fault_on_retry.take() {
+                context
+                    .world()
+                    .resource::<RuntimeFaultReporter>()
+                    .report(fault);
+            }
             Ok(RuntimeCloseProgress::Complete)
         } else {
             Err(RuntimeCloseParticipantError::retryable(
@@ -331,7 +413,9 @@ impl RuntimeCloseParticipant for RetryOnce {
 #[test]
 fn successful_retry_preserves_history_without_reporting_terminal_failure() {
     let mut obligations = RuntimeObligationLedger::new();
-    obligations.register(PARTICIPANT, RetryOnce(false)).unwrap();
+    obligations
+        .register(PARTICIPANT, RetryOnce::default())
+        .unwrap();
     let mut runtime =
         RuntimeInstance::start_with_options(App::new(), obligations, RuntimeClosePolicy::default())
             .unwrap();
@@ -361,6 +445,52 @@ fn successful_retry_preserves_history_without_reporting_terminal_failure() {
     assert!(!evidence.has_terminal_failure());
     assert!(evidence.pending_participants().is_empty());
     assert_eq!(evidence.causes(), history.as_slice());
+}
+
+#[test]
+fn finish_returns_fault_first_reported_during_close_retry() {
+    let detail = RuntimeFaultDetail::new(
+        "nara.test.retry-runtime-fault",
+        "A required service reported a fault during close",
+        "nara.test.close-retry",
+    )
+    .unwrap();
+    let fault = RuntimeFault::engine_with_detail(
+        RuntimeFaultKind::RequiredService,
+        "nara.test.close-retry",
+        detail,
+    );
+    let mut obligations = RuntimeObligationLedger::new();
+    obligations
+        .register(
+            PARTICIPANT,
+            RetryOnce {
+                attempted: false,
+                fault_on_retry: Some(fault.clone()),
+            },
+        )
+        .unwrap();
+    let mut runtime =
+        RuntimeInstance::start_with_options(App::new(), obligations, RuntimeClosePolicy::default())
+            .unwrap();
+    runtime.request_control(RuntimeControl::Stop);
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
+    assert!(runtime.fault().is_none());
+    let history = runtime.close_evidence().causes().to_vec();
+
+    let failure = runtime.finish().unwrap_err();
+
+    assert_eq!(failure.fault(), Some(&fault));
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    let evidence = failure.close_evidence();
+    assert_eq!(evidence.causes(), history.as_slice());
+    assert!(!evidence.has_terminal_failure());
+    assert!(evidence.pending_participants().is_empty());
 }
 
 struct PendingUntilReleased(Arc<AtomicBool>);

@@ -258,7 +258,13 @@ fn previously_reported_fault_prevents_custom_schedule_execution() {
     let runs = runtime.world().resource::<CustomRuns>().0;
     let state = runtime.state();
     let retained_fault = runtime.fault().cloned();
-    runtime.finish().unwrap();
+    let retirement = runtime.finish().unwrap_err();
+    assert_eq!(retirement.fault(), Some(&first));
+    assert_eq!(
+        retirement.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert!(retirement.close_evidence().is_empty());
 
     assert_eq!(
         result,

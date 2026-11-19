@@ -1,5 +1,6 @@
 use std::{
     any::{TypeId, type_name},
+    cell::Cell,
     collections::VecDeque,
     fmt::{self, Debug, Display, Formatter},
     sync::{
@@ -1785,6 +1786,7 @@ pub enum RuntimeCandidateRetirementState {
 pub struct RuntimeRetirement {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
+    execution_fault_delivered: bool,
 }
 
 impl Debug for RuntimeRetirement {
@@ -1793,13 +1795,17 @@ impl Debug for RuntimeRetirement {
             .debug_struct("RuntimeRetirement")
             .field("generation", &self.generation)
             .field("state", &self.retirement_state())
-            .field("fault", &self.fault())
+            .field("fault", &self.fault_for_handoff())
+            .field("close_evidence", &self.close_evidence())
             .finish_non_exhaustive()
     }
 }
 
 impl Display for RuntimeRetirement {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(fault) = self.fault_for_handoff() {
+            write!(formatter, "runtime fault {fault:?}, ")?;
+        }
         write!(
             formatter,
             "runtime physical close is {:?}; causes={:?}",
@@ -1824,7 +1830,11 @@ impl RuntimeRetirement {
     }
 
     fn new(owner: RuntimeOwner, generation: RuntimeGeneration) -> Self {
-        Self { owner, generation }
+        Self {
+            owner,
+            generation,
+            execution_fault_delivered: false,
+        }
     }
 
     #[must_use]
@@ -1850,6 +1860,13 @@ impl RuntimeRetirement {
     #[must_use]
     pub fn fault(&self) -> Option<&RuntimeFault> {
         self.owner.reporter().fault_ref()
+    }
+
+    fn fault_for_handoff(&self) -> Option<&RuntimeFault> {
+        if self.execution_fault_delivered {
+            return None;
+        }
+        self.fault()
     }
 
     pub fn drive_retirement(&mut self) -> RuntimeCandidateRetirementState {
@@ -2109,6 +2126,7 @@ pub struct RuntimeInstance {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
     state: RuntimeState,
+    execution_fault_delivered: Cell<bool>,
     pending_control: Option<PendingRuntimeControl>,
     control_results: VecDeque<RuntimeControlRecord>,
     next_control_ticket: u64,
@@ -2256,6 +2274,7 @@ impl RuntimeInstance {
             owner,
             generation,
             state,
+            execution_fault_delivered: Cell::new(false),
             pending_control: None,
             control_results: VecDeque::new(),
             next_control_ticket: 1,
@@ -2300,7 +2319,11 @@ impl RuntimeInstance {
 
     pub fn begin_retirement(mut self) -> RuntimeRetirement {
         self.owner.begin_close();
-        RuntimeRetirement::new(self.owner, self.generation)
+        RuntimeRetirement {
+            owner: self.owner,
+            generation: self.generation,
+            execution_fault_delivered: self.execution_fault_delivered.into_inner(),
+        }
     }
 
     /// Blocks for one physical-close attempt within this runtime's existing close policy.
@@ -2310,18 +2333,18 @@ impl RuntimeInstance {
     /// should use [`Self::request_control`] and [`Self::drive`] to remain responsive.
     /// A terminal teardown failure also returns that owner with `Retired` state and retained
     /// failure evidence. Historical timeouts do not turn a subsequently completed close into failure.
+    /// An execution fault that has not been returned by an execution operation is available on
+    /// the returned retirement owner even when physical close succeeded.
     pub fn finish(self) -> Result<RuntimeCloseEvidence, RuntimeRetirement> {
         let mut retirement = self.begin_retirement();
         retirement.owner.finish_close_attempt();
-        match retirement.retirement_state() {
-            RuntimeCandidateRetirementState::Retired
-                if !retirement.close_evidence().has_terminal_failure() =>
-            {
-                Ok(retirement.close_evidence().clone())
-            }
-            RuntimeCandidateRetirementState::Retired
-            | RuntimeCandidateRetirementState::Retiring
-            | RuntimeCandidateRetirementState::RetirementIncomplete => Err(retirement),
+        if retirement.retirement_state() == RuntimeCandidateRetirementState::Retired
+            && !retirement.close_evidence().has_terminal_failure()
+            && retirement.fault_for_handoff().is_none()
+        {
+            Ok(retirement.close_evidence().clone())
+        } else {
+            Err(retirement)
         }
     }
 
@@ -2377,6 +2400,7 @@ impl RuntimeInstance {
         };
         if let Some(fault) = fault {
             let RuntimeDriveError::Faulted { fault } = self.enter_fault(fault);
+            self.execution_fault_delivered.set(true);
             return Err(RuntimeScheduleError::Faulted { fault });
         }
         Ok(())
@@ -2423,12 +2447,18 @@ impl RuntimeInstance {
         } else {
             DriverScopeAuthorityPolicy::Full
         };
-        self.owner
-            .capture_driver_scope(authority_policy, |world| {
-                let mut scope = RuntimeDriverScope { world, state };
-                operation(&mut scope)
-            })
-            .map_err(|fault| RuntimeScopeError::Faulted { fault })
+        let result = self.owner.capture_driver_scope(authority_policy, |world| {
+            let mut scope = RuntimeDriverScope { world, state };
+            operation(&mut scope)
+        });
+        let delivered_fault = match &result {
+            Ok(outcome) => outcome.post_operation_fault.is_some(),
+            Err(_) => true,
+        };
+        if delivered_fault {
+            self.execution_fault_delivered.set(true);
+        }
+        result.map_err(|fault| RuntimeScopeError::Faulted { fault })
     }
 
     /// Applies a typed port while retaining its input until scope entry succeeds.
@@ -2583,6 +2613,8 @@ impl RuntimeInstance {
             && self.fault().is_none()
         {
             self.last_frame_kind = outcome.frame_kind();
+        } else if result.is_err() {
+            self.execution_fault_delivered.set(true);
         }
         result
     }
@@ -3319,7 +3351,7 @@ mod tests {
             assert_eq!(drops.load(Ordering::SeqCst), 0);
             assert_eq!(fault.kind(), RuntimeFaultKind::RequiredService);
             assert_eq!(runtime.fault(), Some(&fault));
-            let _ = runtime.finish();
+            assert!(runtime.finish().unwrap().is_empty());
             drop(returned);
             assert_eq!(drops.load(Ordering::SeqCst), 1);
         }
@@ -3347,7 +3379,7 @@ mod tests {
             .__with_owned_driver_port::<OwnedInputPort>(input)
             .unwrap_err();
         let fault = runtime.fault().cloned();
-        let _ = runtime.finish();
+        assert!(runtime.finish().unwrap().is_empty());
 
         assert_eq!(original, std::ptr::from_ref(&*returned));
         assert_eq!(drops.load(Ordering::SeqCst), 0);

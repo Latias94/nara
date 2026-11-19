@@ -197,6 +197,8 @@ need it.
   its subsequent cleanup succeeds. Delivery association is activation-local, not global
   diagnostic-text/code deduplication. A Runner result acknowledges only the Runtime fault it
   actually represents, not an unrelated stored fault.
+  `RuntimeInstance::finish` also returns the retirement owner when it is the first execution
+  handoff to carry the fault. `Retired` and the close evidence still describe physical cleanup.
 - Physical task workers/queues may be explicitly shared under ADRs 0008/0052. Each registered
   activity retains separate admission, coalescing, completion-cutoff and physical-return custody.
   Runtime `Stopped` proves that activity returned, not that the Host's shared workers joined.
