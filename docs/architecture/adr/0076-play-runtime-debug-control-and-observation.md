@@ -351,7 +351,9 @@ Caller-driven Headless products retain the existing project Host through `Headle
 Source admission and processed Runtime-base custody, control tickets, fixed stepping, command
 admission and physical retirement keep their existing owners. Paused capture requires an actual
 completed managed frame; Startup with paused time alone is insufficient. The read-only capture
-closure owns game-specific eligibility and semantic state validation. A queue rejection preserves
+closure owns game-specific eligibility and semantic state validation. Capture checks the original
+Runtime fault before and after the closure. When a fault is observed, the caller receives the
+original diagnostic and any computed checkpoint value is discarded. A queue rejection preserves
 the incumbent, and a fault detected after command admission retains the actual admission output.
 An exact fixed transaction is followed by a full paused maintenance frame before capture is
 admitted. Expected control refusal remains retryable, and AppExit revokes further execution and

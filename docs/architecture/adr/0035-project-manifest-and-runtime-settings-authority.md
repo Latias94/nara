@@ -199,6 +199,11 @@ The runtime preset is one of `minimal`, `local-headless`, or `server`. Capabilit
 coarse ADR 0079 feature names. A profile capability patch replaces the requested set rather than
 merging it, so one manifest plus profile has one auditable request.
 
+The default `minimal` preset can start a Scene with an empty startup command list and no gameplay
+command plugin. The Host requires a gameplay command queue when the resolved plan selects the
+plugin or the caller supplies startup commands. A missing required queue rejects the unpublished
+candidate and follows the original Runtime retirement path.
+
 ### Authored Source Authority
 
 `source_universe` is an authored UUID namespace for named and project-location sources. It is not

@@ -30,7 +30,7 @@ use nara_asset::{
 };
 use nara_diagnostic::{Diagnostic, DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier};
 use nara_ecs::{Mut, Resource, World};
-use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
+use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
 use nara_reflect::{
     SchemaCompositionFingerprint, component_registry, validate_component_registry_authority,
@@ -1796,11 +1796,20 @@ fn materialize_runtime(
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
     verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
-    if !world.contains_resource::<GameplayCommandQueue>() {
-        return Err(HostFault::new(single_error(
+    let requires_command_queue = !commands.is_empty()
+        || plan
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == GAMEPLAY_COMMAND_PLUGIN_ID);
+    let missing_command_queue = || {
+        HostFault::new(single_error(
             "project.run.command-queue-missing",
             "Project runtime has no semantic command queue",
-        )));
+        ))
+    };
+    if requires_command_queue && !world.contains_resource::<GameplayCommandQueue>() {
+        return Err(missing_command_queue());
     }
     // Processed Scene decoding resolves complete Products through installed native resources.
     // Publish those resources while the candidate is still unpublished, before Scene admission.
@@ -1821,10 +1830,10 @@ fn materialize_runtime(
                 "Project runtime fault reporter is unavailable",
             ))
         })?;
-    {
+    if requires_command_queue {
         let mut queue = world
             .get_resource_mut::<GameplayCommandQueue>()
-            .expect("the queue presence was checked before scene allocation");
+            .ok_or_else(missing_command_queue)?;
         for command in commands {
             queue.submit(command).map_err(|_| {
                 faults.report(RuntimeFault::engine(

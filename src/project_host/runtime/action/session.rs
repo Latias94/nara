@@ -275,19 +275,34 @@ impl HeadlessSession {
 
     /// Runs game-owned capture validation only at a healthy completed paused frame.
     ///
+    /// A Runtime fault observed before or during the operation returns its diagnostic and
+    /// discards the captured value.
+    ///
     /// The returned game value can itself be a validation result. This does not certify that
     /// future commands, authoritative services or unsupported game state are checkpointable.
     pub fn capture<R>(
         &self,
         operation: impl FnOnce(&World) -> R,
     ) -> Result<R, HeadlessSessionError> {
-        if self.exit.is_some()
-            || !self.paused_boundary
-            || self.state() != Some(RuntimeState::Paused)
-        {
+        let runtime = self
+            .host
+            .as_ref()
+            .and_then(ProjectHost::running_runtime)
+            .ok_or(HeadlessSessionError::NotPaused)?;
+        let state = runtime.state();
+        let capture_fault = || {
+            runtime.fault().map(|fault| {
+                HeadlessSessionError::Runtime(super::super::runtime_scope_failure_report(fault))
+            })
+        };
+        if let Some(error) = capture_fault() {
+            return Err(error);
+        }
+        if self.exit.is_some() || !self.paused_boundary || state != RuntimeState::Paused {
             return Err(HeadlessSessionError::NotPaused);
         }
-        self.observe(operation)
+        let result = self.observe(operation);
+        capture_fault().map_or(result, Err)
     }
 
     /// Captures scheduling phase through the original time owner at this paused boundary.

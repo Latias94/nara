@@ -3,6 +3,9 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
+#[path = "project_runtime_boot/admission.rs"]
+mod admission;
+
 #[cfg(feature = "presentation-ui")]
 #[path = "support/profile_font_boot.rs"]
 mod profile_font_boot;

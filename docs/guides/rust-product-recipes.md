@@ -571,6 +571,8 @@ Dropping a run with live cleanup responsibilities abandons the caller's custody 
 Use `project_host::HeadlessSession` when a caller must retain the same Headless product between
 operations. `new(project_root, recipe)` selects source content;
 `from_runtime_content(base)` retains the admitted immutable base and its original executable plan.
+The default `minimal` preset supports command-free startup. Select the gameplay command plugin
+when the game needs its semantic command queue.
 Call `start` once, `frame(real_delta)` for a complete App frame, or `pause` followed by `step` for
 one exact fixed tick at a time. Each step also runs a complete paused maintenance frame, including
 TaskUpdate and Last, before capture becomes available again. `resume` applies the existing Runtime
@@ -581,12 +583,13 @@ and refuses subsequent driving and command admission; read-only final observatio
 available.
 
 `observe` reads the original published World under its Schema checks. `capture` invokes its
-read-only closure only after a healthy paused frame has completed. The game must also validate
-command acknowledgement, pending/future commands, authoritative services and its complete semantic
-state; the closure can return its own validation result. Initial paused Startup does not by itself
-enable capture. `submit` uses the existing gameplay queue; `CommandRejected` leaves the incumbent
-usable, while `CommandFault` retains the actual admission result together with a subsequent managed
-fault. Reconcile that output before handling the fault.
+read-only closure only after a healthy paused frame has completed. If the Runtime faults during
+the closure, `capture` returns the original diagnostic and discards the value. The game must also
+validate command acknowledgement, pending and future commands, authoritative services and its
+complete semantic state. The closure can return its own validation result. Initial paused Startup
+does not by itself enable capture. `submit` uses the existing gameplay queue. `CommandRejected`
+leaves the incumbent usable. `CommandFault` retains the actual admission result together with
+a subsequent managed fault. Reconcile that output before handling the fault.
 
 Poll `close` until `HeadlessSessionClose::Complete` or `Failed`. `Pending` retains the same physical
 owner for the next call; `is_closed` becomes true only at physical completion. `Failed` reports
