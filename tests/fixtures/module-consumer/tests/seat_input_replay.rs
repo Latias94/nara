@@ -482,6 +482,88 @@ fn two_seat_raw_and_semantic_artifacts_replay_every_fixed_tick() {
     semantic_replay.finish();
 }
 
+#[test]
+fn normalized_axis_values_round_trip_through_the_semantic_recording() {
+    use recording::{Admission, DeviceOrigin};
+
+    let raw = RawRecording::new(vec![
+        RawOperation::Endpoint {
+            window: Window::Guest,
+            seat: Seat::Controller,
+        },
+        RawOperation::Focus {
+            window: Window::Guest,
+            seat: Seat::Controller,
+            focused: true,
+        },
+        RawOperation::Connect {
+            device: 0,
+            window: Window::Guest,
+            seat: Seat::Controller,
+            origin: DeviceOrigin::Platform,
+        },
+        RawOperation::Axis {
+            device: 0,
+            axis: 0,
+            value: AxisValue::new(0.625).unwrap(),
+            admission: Admission::Accept,
+        },
+        RawOperation::Frame {
+            real_delta_nanos: fixed_nanos(1),
+            steps: 1,
+            checkpoint: "half-scale".to_owned(),
+        },
+        RawOperation::Axis {
+            device: 0,
+            axis: 0,
+            value: AxisValue::new(0.95).unwrap(),
+            admission: Admission::Accept,
+        },
+        RawOperation::Frame {
+            real_delta_nanos: fixed_nanos(1),
+            steps: 1,
+            checkpoint: "non-dyadic-decimal".to_owned(),
+        },
+    ]);
+    let mut live = Harness::new(Bindings::OriginalV1, false, false);
+    live.play(&raw);
+    let recording = SemanticRecording::capture(live.capture());
+    for (tick, value) in recording
+        .ticks
+        .iter()
+        .zip([0.5, f64::from((0.95_f32 - 0.25) / 0.75)])
+    {
+        assert!(
+            tick.commands.iter().any(|entry| {
+                Player::from_target(entry.command.target()) == Some(Player::Indigo)
+                    && entry.command.payload().get("value")
+                        == Some(&GameplayCommandValue::F64(value))
+            }),
+            "{tick:?}"
+        );
+    }
+    assert_eq!(recording.ticks.len(), 2);
+    let bytes = recording.encode();
+    for bindings in [Bindings::OriginalV1, Bindings::ReboundV1] {
+        let mut replay = Harness::new(bindings, true, false);
+        assert_eq!(replay.import_semantic(&bytes).unwrap(), recording);
+        replay.play_controls(&raw);
+        assert_eq!(
+            replay
+                .capture()
+                .iter()
+                .map(|tick| &tick.state)
+                .collect::<Vec<_>>(),
+            live.capture()
+                .iter()
+                .map(|tick| &tick.state)
+                .collect::<Vec<_>>()
+        );
+        replay.finish();
+    }
+    live.finish();
+}
+
 fn changed_semantic(
     recording: &SemanticRecording,
     change: impl FnOnce(&mut SemanticRecording),
