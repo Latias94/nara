@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Instant};
 
+use nara_app::{FrameExecutionStart, RuntimeGeneration};
 use nara_ecs::{Res, Resource, SystemParam, SystemSet, World};
 #[cfg(feature = "stock-ui")]
 use nara_render::RenderFrameState;
@@ -7,7 +8,7 @@ use nara_render::RenderFrameState;
 use nara_render::RenderTarget;
 #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use nara_render::ViewportRect;
-use nara_render::{RenderFramePacket, RenderFramePacketError};
+use nara_render::{RenderFramePacket, RenderFramePacketError, RenderWindowPacket};
 #[cfg(all(test, feature = "stock-sprite"))]
 use nara_sprite_render::__private::SpriteBatches;
 #[cfg(all(test, feature = "stock-ui"))]
@@ -362,12 +363,20 @@ enum CapturePhase {
     Closed,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct WgpuCapturedNoViews {
+    runtime_generation: RuntimeGeneration,
+    window: RenderWindowPacket,
+    app_frame_index: u64,
+}
+
 #[derive(Default, Resource)]
 pub(crate) struct WgpuFramePacketSlot {
     phase: CapturePhase,
     capture: Option<Arc<dyn CapturedPolicy>>,
     collection_error: Option<WgpuFrameCaptureError>,
     current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
+    no_views: Option<WgpuCapturedNoViews>,
     #[cfg(feature = "stock-ui")]
     ui_submissions: Option<WgpuUiSubmissionState>,
 }
@@ -420,6 +429,7 @@ impl WgpuFramePacketSlot {
         self.phase = CapturePhase::Closed;
         self.capture = None;
         self.current = None;
+        self.no_views = None;
         self.collection_error = None;
         #[cfg(feature = "stock-ui")]
         {
@@ -520,11 +530,30 @@ impl WgpuFramePacketSlot {
         self.current = Some(Err(self.collection_error.take().unwrap_or(error)));
     }
 
+    pub(crate) fn seal_no_views(
+        &mut self,
+        source: Option<(RuntimeGeneration, RenderWindowPacket)>,
+        frame_start: FrameExecutionStart,
+    ) {
+        if !self.is_collecting() {
+            return;
+        }
+        self.seal(Ok(None), frame_start.frame(), frame_start.started_at());
+        if matches!(self.current, Some(Ok(None))) {
+            self.no_views = source.map(|(runtime_generation, window)| WgpuCapturedNoViews {
+                runtime_generation,
+                window,
+                app_frame_index: frame_start.frame(),
+            });
+        }
+    }
+
     pub(crate) fn take_batch(&mut self) -> Option<WgpuCapturedPolicyBatch> {
         let captured = self.current.take()?;
         self.phase = CapturePhase::Idle;
         Some(WgpuCapturedPolicyBatch {
             captured,
+            no_views: self.no_views.take(),
             #[cfg(feature = "stock-ui")]
             ui: self.ui_submissions.take(),
         })
@@ -535,11 +564,37 @@ impl WgpuFramePacketSlot {
 #[derive(Debug)]
 pub struct WgpuCapturedPolicyBatch {
     pub(crate) captured: Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>,
+    no_views: Option<WgpuCapturedNoViews>,
     #[cfg(feature = "stock-ui")]
     pub(crate) ui: Option<WgpuUiSubmissionState>,
 }
 
 impl WgpuCapturedPolicyBatch {
+    #[must_use]
+    pub const fn app_frame_index(&self) -> Option<u64> {
+        match &self.captured {
+            Ok(Some(frame)) => Some(frame.app_frame_index),
+            Ok(None) => match self.no_views {
+                Some(no_views) => Some(no_views.app_frame_index),
+                None => None,
+            },
+            Err(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn no_views_app_frame(
+        &self,
+        runtime_generation: RuntimeGeneration,
+        window: RenderWindowPacket,
+    ) -> Option<u64> {
+        self.no_views
+            .filter(|facts| {
+                facts.runtime_generation == runtime_generation && facts.window == window
+            })
+            .map(|facts| facts.app_frame_index)
+    }
+
     /// Takes a render-only capture without depending on this crate's unified feature set.
     ///
     /// A batch carrying UI presentation permissions requires a UI-aware consumer. Refusal drops
@@ -1309,6 +1364,7 @@ mod tests {
     fn render_only_capture_is_stable_under_stock_ui_feature_unification() {
         let batch = WgpuCapturedPolicyBatch {
             captured: Ok(None),
+            no_views: None,
             #[cfg(feature = "stock-ui")]
             ui: None,
         };

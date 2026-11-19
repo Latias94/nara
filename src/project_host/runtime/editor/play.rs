@@ -141,6 +141,41 @@ impl EditorProjectSession {
         )
     }
 
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    pub(super) fn settle_game_step_without_views(&mut self, game: ActiveEditorGameView) {
+        let Some(lane) = self.trusted_compiled() else {
+            return;
+        };
+        let Some(EditorStepPresentationState::AwaitingCandidate {
+            start,
+            after_app_frame,
+        }) = lane.pending_step_presentation
+        else {
+            return;
+        };
+        if game.in_flight.is_none()
+            && game.start == start
+            && lane
+                .runtime_host
+                .running_runtime()
+                .and_then(|runtime| game_view::sealed_no_views_app_frame(runtime, start))
+                .is_some_and(|app_frame| app_frame > after_app_frame)
+        {
+            self.complete_game_step_presentation(start);
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    pub(super) fn complete_game_step_presentation(&mut self, start: EditorGameStartRequest) {
+        self.trusted_compiled_mut()
+            .expect("a completed Game Step retains its Runtime owner")
+            .pending_step_presentation = None;
+        self.play_result = Some(EditorPlayOperationResult::Applied {
+            operation: EditorPlayOperation::StepFixedTick,
+            generation: Some(start.runtime_generation().get()),
+        });
+    }
+
     pub(crate) fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
         if (self.source_tools.reclamation_fenced() || self.authoring_operation_fenced())
             && matches!(

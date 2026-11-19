@@ -1,8 +1,13 @@
 use super::*;
 
-use nara_app::{CoreStage, RuntimeControl, RuntimeControlRequestResult, RuntimeState};
+use nara_app::{CoreStage, FixedTime, RuntimeControl, RuntimeControlRequestResult, RuntimeState};
 use nara_ecs::Commands;
-use nara_tooling::{EditorPlayCommand, EditorPlayRequestResult, EditorPlayState};
+use nara_render::{Extent2d, ExtractedView, ExtractedViews, RenderFrame, ViewportRect};
+use nara_render_wgpu::{WGPU_CAPTURE_PLUGIN_ID, WgpuPolicyCaptureSet};
+use nara_tooling::{
+    EditorPlayAction, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
+    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
+};
 
 use super::super::editor::{
     EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
@@ -33,8 +38,46 @@ impl Plugin for GameViewCameraPlugin {
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         nara_transform::Transform2d::default(),
-        nara_render::Camera2d::default(),
+        nara_render::Camera2d {
+            viewport: ViewportRect::new(480, 0, 480, 540),
+            ..Default::default()
+        },
     ));
+}
+
+#[derive(Debug, Default)]
+struct RepopulateViewsAfterSeal;
+
+impl Plugin for RepopulateViewsAfterSeal {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.repopulate-views-after-seal"),
+            PluginCategory::Tooling,
+        )
+        .requires_plugins(&[WGPU_CAPTURE_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            CoreStage::Render,
+            repopulate_views_after_seal
+                .after(WgpuPolicyCaptureSet::Seal)
+                .before(WgpuPolicyCaptureSet::Publish),
+        )?;
+        Ok(())
+    }
+}
+
+fn repopulate_views_after_seal(
+    mut views: nara_ecs::ResMut<ExtractedViews>,
+    mut previous: nara_ecs::Local<Option<ExtractedView>>,
+) {
+    if let Some(view) = views.as_slice().first().copied() {
+        *previous = Some(view);
+    } else if let Some(view) = *previous {
+        views.push(view);
+    }
 }
 
 #[cfg(feature = "presentation-ui")]
@@ -298,6 +341,292 @@ fn step_after_an_outstanding_game_candidate_uses_the_new_step_capture() {
         })
     ));
     stop_game(&mut editor);
+}
+
+#[test]
+fn step_completes_without_presentation_when_resize_clips_every_game_view() {
+    let project = TestProject::new("game-view-step-with-no-views");
+    let mut editor = open_game(&project, false);
+    let first = take_candidate(&mut editor);
+    assert_eq!(first.packet().views().len(), 1);
+    assert_eq!(
+        Some(first.packet().views()[0].viewport),
+        ViewportRect::new(480, 0, 480, 540),
+    );
+    editor
+        .complete_game_view_candidate(first.content_rejected("settle the initial CPU capture"))
+        .unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted,
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().state(),
+        EditorPlayState::Paused,
+    );
+
+    let clipped_extent = Extent2d::new(480, 540).unwrap();
+    assert!(editor.resize_game_view(clipped_extent).unwrap());
+    let resized = editor.active_game_start_request().unwrap();
+    let resolution = resized.logical_window().resolution;
+    assert_eq!(
+        Extent2d::new(resolution.physical_width, resolution.physical_height),
+        Some(clipped_extent),
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    let (previous_tick, previous_render_frame) = {
+        let world = editor.test_game_view_runtime().world();
+        assert!(world.resource::<ExtractedViews>().is_empty());
+        (
+            world.resource::<FixedTime>().tick(),
+            world.resource::<RenderFrame>().index,
+        )
+    };
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    let stepped = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(stepped.play().state(), EditorPlayState::Stepping);
+    assert_eq!(
+        stepped.play().result(),
+        Some(EditorPlayOperationResult::Pending {
+            operation: EditorPlayOperation::StepFixedTick,
+        }),
+    );
+    assert!(editor.game_step_requires_runtime_drive());
+    {
+        let world = editor.test_game_view_runtime().world();
+        assert_eq!(world.resource::<FixedTime>().tick(), previous_tick + 1);
+        assert_eq!(world.resource::<RenderFrame>().index, previous_render_frame);
+    }
+
+    let expected = Some(EditorPlayOperationResult::Applied {
+        operation: EditorPlayOperation::StepFixedTick,
+        generation: Some(resized.runtime_generation().get()),
+    });
+    for _ in 0..3 {
+        let paused = editor.drive_editor_frame(Duration::from_secs(1));
+        assert_eq!(paused.play().state(), EditorPlayState::Paused);
+        assert_eq!(paused.play().result(), expected);
+        assert!(!editor.game_step_requires_runtime_drive());
+        assert!(editor.take_game_view_candidate().unwrap().is_none());
+    }
+    assert_eq!(editor.active_game_start_request(), Some(resized));
+    assert_eq!(editor.test_game_view_in_flight(), None);
+    let world = editor.test_game_view_runtime().world();
+    assert_eq!(world.resource::<FixedTime>().tick(), previous_tick + 1);
+    assert!(world.resource::<RenderFrame>().index > previous_render_frame);
+    assert!(world.resource::<ExtractedViews>().is_empty());
+    assert!(!world.contains_resource::<nara_render::__private::PresentedWorldFrame>());
+    assert_eq!(
+        world
+            .resource::<nara_render_wgpu::WgpuRenderObservation>()
+            .frame_transaction_stats()
+            .presents(),
+        0,
+    );
+    stop_game(&mut editor);
+}
+
+#[test]
+fn step_uses_sealed_no_views_after_extracted_views_change() {
+    let project = TestProject::new("game-view-step-with-post-seal-view-mutation");
+    #[cfg(feature = "presentation-ui")]
+    project.write_ui_authoring_documents(None, None);
+    let recipe = crate::ProductRecipe::new()
+        .add_plugin::<RepopulateViewsAfterSeal>()
+        .unwrap();
+    let (mut editor, request) =
+        open_game_awaiting_target(&project, cfg!(feature = "presentation-ui"), recipe);
+    let activation = editor.prepare_game_start_activation(request).unwrap();
+    editor.commit_game_start_activation(activation);
+    let initial = take_candidate(&mut editor);
+    editor
+        .complete_game_view_candidate(initial.content_rejected("settle the initial CPU capture"))
+        .unwrap();
+    pause_game_for_step(&mut editor);
+    assert!(
+        editor
+            .resize_game_view(Extent2d::new(480, 540).unwrap())
+            .unwrap()
+    );
+    let before = fixed_tick(&mut editor);
+    #[cfg(feature = "presentation-ui")]
+    let rejected_before = editor
+        .test_game_view_runtime()
+        .world()
+        .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
+        .content_rejections;
+
+    assert_eq!(
+        dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().state(),
+        EditorPlayState::Stepping,
+    );
+    let paused = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(paused.play().state(), EditorPlayState::Paused);
+    assert_eq!(
+        paused.play().result(),
+        Some(EditorPlayOperationResult::Applied {
+            operation: EditorPlayOperation::StepFixedTick,
+            generation: Some(request.runtime_generation().get()),
+        }),
+    );
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    assert!(editor.take_game_view_candidate().unwrap().is_none());
+    let world = editor.test_game_view_runtime().world();
+    assert_eq!(world.resource::<ExtractedViews>().len(), 1);
+    #[cfg(feature = "presentation-ui")]
+    {
+        assert_eq!(
+            world
+                .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
+                .content_rejections,
+            rejected_before + 1,
+        );
+        let receiver = nara_ui_render::__private::backend_outcome_receiver(world).unwrap();
+        assert_eq!(receiver.pending_backend_count(), 0);
+        assert!(!receiver.has_unsettled_backend_results());
+        assert!(crate::ui_presentation::latest_presented_ui_observation(world).is_none());
+    }
+    stop_game(&mut editor);
+}
+
+#[test]
+fn public_step_and_resume_are_busy_until_the_original_step_presentation_settles() {
+    let project = TestProject::new("game-view-step-exclusive-presentation");
+    let mut editor = open_game(&project, false);
+    pause_game_for_step(&mut editor);
+    let before = fixed_tick(&mut editor);
+    assert_eq!(
+        dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(editor.game_step_requires_runtime_drive());
+
+    let pending = Some(EditorPlayOperationResult::Pending {
+        operation: EditorPlayOperation::StepFixedTick,
+    });
+    for action in [EditorPlayAction::StepFixedTick, EditorPlayAction::Resume] {
+        assert_eq!(
+            dispatch_game_play_action(&mut editor, action),
+            EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy),
+        );
+    }
+    let stepping = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(stepping.play().state(), EditorPlayState::Stepping);
+    assert_eq!(stepping.play().result(), pending);
+    let candidate = editor.take_game_view_candidate().unwrap().unwrap();
+    assert!(!editor.game_step_requires_runtime_drive());
+
+    for action in [EditorPlayAction::StepFixedTick, EditorPlayAction::Resume] {
+        assert_eq!(
+            dispatch_game_play_action(&mut editor, action),
+            EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy),
+        );
+    }
+    assert_eq!(
+        editor
+            .drive_editor_frame_with_runtime(Duration::ZERO, false)
+            .play()
+            .result(),
+        pending,
+    );
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    let identity = candidate.identity();
+    drop(candidate);
+    editor
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui_deferred(identity))
+        .unwrap();
+    assert!(editor.game_step_requires_runtime_drive());
+    stop_game(&mut editor);
+}
+
+#[test]
+fn runtime_fault_before_game_step_presentation_publishes_a_terminal_failure() {
+    let project = TestProject::new("game-view-step-presentation-runtime-fault");
+    let mut editor = open_game(&project, false);
+    pause_game_for_step(&mut editor);
+    let before = fixed_tick(&mut editor);
+    assert_eq!(
+        dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().state(),
+        EditorPlayState::Stepping,
+    );
+    assert!(editor.game_step_requires_runtime_drive());
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    assert!(editor.take_game_view_candidate().unwrap().is_none());
+    assert!(
+        editor
+            .test_game_view_runtime()
+            .fault_reporter()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::System,
+                "nara.test.game-view-step-fault"
+            ),)
+    );
+
+    let faulted = editor.drive_editor_frame(Duration::from_secs(1));
+    assert_eq!(faulted.play().state(), EditorPlayState::Faulted);
+    assert_eq!(
+        faulted.play().result(),
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::StepFixedTick,
+            failure: EditorPlayFailure::Presentation,
+        }),
+    );
+    assert!(!editor.game_step_requires_runtime_drive());
+    assert!(editor.take_game_view_candidate().unwrap().is_none());
+    assert_eq!(fixed_tick(&mut editor), before + 1);
+    stop_game(&mut editor);
+}
+
+fn dispatch_game_play_action(
+    editor: &mut EditorProjectSession,
+    action: EditorPlayAction,
+) -> EditorPlayRequestResult {
+    let batch = EditorActionBatch::new(
+        editor.current_frame().revision(),
+        [EditorAction::Play(action)],
+    );
+    let report = editor.dispatch_editor_actions(batch).unwrap();
+    let [EditorActionOutcome::Play(result)] = report.outcomes() else {
+        panic!("expected one Play action outcome");
+    };
+    *result
+}
+
+fn fixed_tick(editor: &mut EditorProjectSession) -> u64 {
+    editor
+        .test_game_view_runtime()
+        .world()
+        .resource::<FixedTime>()
+        .tick()
+}
+
+fn pause_game_for_step(editor: &mut EditorProjectSession) {
+    assert_eq!(
+        dispatch_game_play_action(editor, EditorPlayAction::Pause),
+        EditorPlayRequestResult::Accepted,
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().state(),
+        EditorPlayState::Paused,
+    );
+    if let Some(candidate) = editor.take_game_view_candidate().unwrap() {
+        editor
+            .complete_game_view_candidate(candidate.content_rejected("settle before Step"))
+            .unwrap();
+    }
 }
 
 fn stop_game(editor: &mut EditorProjectSession) {
@@ -775,6 +1104,11 @@ fn game_completion_after_the_first_stop_drive_cannot_publish_interaction_or_worl
     while editor.play_view().state() != EditorPlayState::Paused {
         editor.drive_editor_frame(Duration::ZERO);
         assert!(Instant::now() < deadline);
+    }
+    if let Some(candidate) = editor.take_game_view_candidate().unwrap() {
+        editor
+            .complete_game_view_candidate(candidate.content_rejected("settle before Step"))
+            .unwrap();
     }
     assert_eq!(
         editor.request_play(EditorPlayCommand::StepFixedTick),

@@ -306,16 +306,14 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        if lane.pending_step_presentation.is_some() && !retires_runtime {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
         let mut game_capture_suspended = false;
         #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
         let game_capture_suspended = false;
         if retires_runtime {
-            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            {
-                if let Some(lane) = self.trusted_compiled_mut() {
-                    lane.pending_step_presentation = None;
-                }
-            }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             if matches!(
                 self.trusted_compiled().map(|lane| &lane.runtime_owner),
@@ -708,20 +706,22 @@ impl EditorProjectSession {
         if let Err(fault) = driven {
             let _ = self.diagnostics.extend(fault.diagnostics);
             self.cancel_pending_runtime_edit_without_port();
-            let pending = self
-                .trusted_compiled_mut()
-                .and_then(|lane| lane.pending_control.take());
-            if let Some(pending) = pending {
-                self.play_result = Some(EditorPlayOperationResult::Failed {
-                    operation: pending.operation,
-                    failure: EditorPlayFailure::Runtime,
-                });
-            }
-            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            {
-                if let Some(lane) = self.trusted_compiled_mut() {
-                    lane.pending_step_presentation = None;
-                }
+            let failed = self.trusted_compiled_mut().and_then(|lane| {
+                let failed = lane
+                    .pending_control
+                    .take()
+                    .map(|pending| (pending.operation, EditorPlayFailure::Runtime));
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                let failed = failed.or(lane.pending_step_presentation.take().map(|_| {
+                    (
+                        EditorPlayOperation::StepFixedTick,
+                        EditorPlayFailure::Presentation,
+                    )
+                }));
+                failed
+            });
+            if let Some((operation, failure)) = failed {
+                self.play_result = Some(EditorPlayOperationResult::Failed { operation, failure });
             }
             return EditorRuntimeOwnerState::Active {
                 source,
@@ -885,9 +885,28 @@ impl EditorProjectSession {
                         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                         {
                             if let Some(lane) = self.trusted_compiled_mut() {
-                                lane.pending_step_presentation = generation.map(|generation| {
-                                    EditorStepPresentationState::AwaitingCandidate { generation }
-                                });
+                                lane.pending_step_presentation = game
+                                    .filter(|game| {
+                                        game.start.runtime_generation()
+                                            == pending.ticket.generation()
+                                    })
+                                    .and_then(|game| {
+                                        let frame =
+                                            lane.runtime_host
+                                                .running_runtime()?
+                                                .world()
+                                                .get_resource::<nara_app::RuntimeFrameStatus>()?;
+                                        Some(EditorStepPresentationState::AwaitingCandidate {
+                                            start: game.start,
+                                            after_app_frame: frame.frame,
+                                        })
+                                    });
+                                if lane.pending_step_presentation.is_none() {
+                                    self.play_result = Some(EditorPlayOperationResult::Failed {
+                                        operation: pending.operation,
+                                        failure: EditorPlayFailure::Presentation,
+                                    });
+                                }
                             }
                         }
                     } else {
@@ -914,6 +933,10 @@ impl EditorProjectSession {
                 }
                 Some(RuntimeControlStatus::Pending) => {}
             }
+        }
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        if let Some(game) = game {
+            self.settle_game_step_without_views(game);
         }
         EditorRuntimeOwnerState::Active {
             source,

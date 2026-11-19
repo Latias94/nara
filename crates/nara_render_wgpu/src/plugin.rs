@@ -11,7 +11,7 @@ use nara_ecs::{
     Query, Res, ResMut, Resource, SystemParam, SystemSet, schedule::IntoScheduleConfigs,
 };
 use nara_render::{
-    ExtractedViews, RenderBackendState, RenderBackendStatus, RenderFrame,
+    ExtractedViews, RenderBackendState, RenderBackendStatus, RenderFrame, RenderWindowPacket,
     build_render_frame_packet_with_world_canvas,
 };
 #[cfg(feature = "stock-ui")]
@@ -368,7 +368,16 @@ fn seal_wgpu_frame_packet(
         return;
     }
     if views.as_slice().is_empty() {
-        slot.seal(Ok(None), frame_start.frame(), frame_start.started_at());
+        let window = windows
+            .single()
+            .ok()
+            .filter(|window| !window.resolution.is_zero_sized())
+            .map(|window| RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            });
+        slot.seal_no_views(generation.as_deref().copied().zip(window), *frame_start);
         return;
     }
     let Some(generation) = generation.map(|generation| *generation) else {

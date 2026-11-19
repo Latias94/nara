@@ -674,7 +674,8 @@ impl EditorRuntimeOwnerState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum EditorStepPresentationState {
     AwaitingCandidate {
-        generation: u64,
+        start: EditorGameStartRequest,
+        after_app_frame: u64,
     },
     AwaitingPresentation {
         identity: EditorGameViewCandidateIdentity,
@@ -2337,13 +2338,17 @@ impl EditorProjectSession {
             };
             game.in_flight = Some(identity);
         }
-        if let Some(EditorStepPresentationState::AwaitingCandidate { generation }) =
-            lane.pending_step_presentation
-        {
-            if generation == identity.runtime_generation().get() {
-                lane.pending_step_presentation =
-                    Some(EditorStepPresentationState::AwaitingPresentation { identity });
-            }
+        if matches!(
+            lane.pending_step_presentation,
+            Some(EditorStepPresentationState::AwaitingCandidate {
+                start,
+                after_app_frame,
+            }) if identity.start() == start
+                && identity.runtime_generation() == start.runtime_generation()
+                && identity.app_frame_index() > after_app_frame
+        ) {
+            lane.pending_step_presentation =
+                Some(EditorStepPresentationState::AwaitingPresentation { identity });
         }
         Ok(Some(candidate))
     }
@@ -2392,18 +2397,15 @@ impl EditorProjectSession {
                         game_view::GameViewCompletionOutcome::Presentation(
                             EditorGameViewCompletionDisposition::Presented,
                         ) => {
-                            lane.pending_step_presentation = None;
-                            self.play_result = Some(EditorPlayOperationResult::Applied {
-                                operation: EditorPlayOperation::StepFixedTick,
-                                generation: Some(identity.runtime_generation().get()),
-                            });
+                            self.complete_game_step_presentation(identity.start());
                         }
                         game_view::GameViewCompletionOutcome::Presentation(
                             EditorGameViewCompletionDisposition::Deferred,
                         ) => {
                             lane.pending_step_presentation =
                                 Some(EditorStepPresentationState::AwaitingCandidate {
-                                    generation: identity.runtime_generation().get(),
+                                    start: identity.start(),
+                                    after_app_frame: identity.app_frame_index(),
                                 });
                         }
                         game_view::GameViewCompletionOutcome::Presentation(

@@ -145,7 +145,7 @@ impl Plugin for EditorGameViewBridgePlugin {
         app.insert_resource(EditorGameViewBridge::new(self.config))?
             .__register_driver_port::<EditorGameViewBridge>(apply_driver_input)?;
         #[cfg(feature = "render-wgpu")]
-        app.add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
+        app.add_systems(CoreStage::Last, capture_editor_game_view_frame)?;
         Ok(())
     }
 
@@ -313,6 +313,7 @@ pub(super) fn start_request(
 struct EditorGameViewRuntimeCandidateIdentity {
     runtime_generation: RuntimeGeneration,
     frame_index: u64,
+    app_frame_index: u64,
     sequence: u64,
 }
 
@@ -337,6 +338,10 @@ impl EditorGameViewCandidateIdentity {
     #[must_use]
     pub const fn frame_index(self) -> u64 {
         self.runtime.frame_index
+    }
+
+    pub(super) const fn app_frame_index(self) -> u64 {
+        self.runtime.app_frame_index
     }
 }
 
@@ -759,6 +764,11 @@ pub enum EditorGameViewBridgeFailure {
 enum EditorGameViewBridgeSlot {
     Empty,
     #[cfg_attr(not(feature = "render-wgpu"), allow(dead_code))]
+    NoViews {
+        runtime_generation: RuntimeGeneration,
+        app_frame_index: u64,
+    },
+    #[cfg_attr(not(feature = "render-wgpu"), allow(dead_code))]
     Buffered(PendingEditorGameViewCandidate),
     InFlight(EditorGameViewRuntimeCandidateIdentity),
 }
@@ -799,7 +809,10 @@ impl EditorGameViewBridge {
     }
 
     fn is_idle(&self) -> bool {
-        if !matches!(self.slot, EditorGameViewBridgeSlot::Empty) {
+        if !matches!(
+            self.slot,
+            EditorGameViewBridgeSlot::Empty | EditorGameViewBridgeSlot::NoViews { .. }
+        ) {
             return false;
         }
         #[cfg(feature = "presentation-ui")]
@@ -829,6 +842,7 @@ impl EditorGameViewBridge {
         let identity = EditorGameViewRuntimeCandidateIdentity {
             runtime_generation: captured.runtime_generation,
             frame_index: captured.input.packet().frame_index(),
+            app_frame_index: captured.app_frame_index,
             sequence,
         };
         self.pending_world_presentation = captured
@@ -872,7 +886,10 @@ impl EditorGameViewBridge {
         }
         let slot = std::mem::replace(&mut self.slot, EditorGameViewBridgeSlot::Empty);
         let EditorGameViewBridgeSlot::Buffered(candidate) = slot else {
-            debug_assert!(matches!(slot, EditorGameViewBridgeSlot::Empty));
+            debug_assert!(matches!(
+                slot,
+                EditorGameViewBridgeSlot::Empty | EditorGameViewBridgeSlot::NoViews { .. }
+            ));
             return EditorGameViewBridgeOutput::Pending;
         };
         self.slot = EditorGameViewBridgeSlot::InFlight(candidate.identity);
@@ -905,6 +922,13 @@ impl EditorGameViewBridge {
     fn invalidate_world_presentation(&mut self) {
         self.pending_world_presentation = None;
         self.world_presentation_guard = None;
+        self.discard_no_views();
+    }
+
+    fn discard_no_views(&mut self) {
+        if matches!(self.slot, EditorGameViewBridgeSlot::NoViews { .. }) {
+            self.slot = EditorGameViewBridgeSlot::Empty;
+        }
     }
 
     fn reconfigure(
@@ -1140,56 +1164,58 @@ impl EditorGameViewBridge {
 #[cfg(feature = "render-wgpu")]
 struct CapturedEditorGameViewCandidate {
     runtime_generation: RuntimeGeneration,
+    app_frame_index: u64,
     input: WgpuRenderInput,
     #[cfg(feature = "presentation-ui")]
     ui_submission: Option<WgpuUiSubmission>,
 }
 
 #[cfg(feature = "render-wgpu")]
-fn capture_editor_game_view_candidate(world: &mut World) {
-    if !world.contains_resource::<EditorGameViewBridge>() {
+fn capture_editor_game_view_frame(world: &mut World) {
+    let Some(mut bridge) = world.get_resource_mut::<EditorGameViewBridge>() else {
         return;
-    }
+    };
+    bridge.discard_no_views();
+    let config = bridge.config;
     #[cfg(feature = "presentation-ui")]
     if !world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
         bridge.flush_rejected_ui_outcomes(world)
     }) {
         return;
     }
-    let Some(bridge) = world.get_resource::<EditorGameViewBridge>() else {
-        return;
-    };
-    let config = bridge.config;
-    let captured = capture_candidate(world, config);
-    let mut bridge = world.resource_mut::<EditorGameViewBridge>();
-    match captured {
-        Ok(Some(candidate)) => {
-            if let Err(failure) = bridge.publish(candidate) {
-                bridge.failure = Some(failure);
-            }
-        }
-        Ok(None) => {}
-        Err(failure) => bridge.failure = Some(failure),
+    if let Err(failure) = publish_sealed_capture(world, config) {
+        world.resource_mut::<EditorGameViewBridge>().failure = Some(failure);
     }
 }
 
 #[cfg(feature = "render-wgpu")]
-fn capture_candidate(
+fn publish_sealed_capture(
     world: &mut World,
     config: EditorGameViewCaptureConfig,
-) -> Result<Option<CapturedEditorGameViewCandidate>, EditorGameViewBridgeFailure> {
+) -> Result<(), EditorGameViewBridgeFailure> {
     let Some(batch) = take_captured_policy_batch(world) else {
-        return Ok(None);
+        return Ok(());
     };
+    let runtime_generation = world.get_resource::<RuntimeGeneration>().copied();
+    let app_frame_index = batch.app_frame_index();
+    let no_views = runtime_generation.and_then(|generation| {
+        batch
+            .no_views_app_frame(generation, config.logical_window)
+            .map(|app_frame_index| EditorGameViewBridgeSlot::NoViews {
+                runtime_generation: generation,
+                app_frame_index,
+            })
+    });
     #[cfg(feature = "presentation-ui")]
     let (captured, ui_submission) = batch.into_parts();
     #[cfg(not(feature = "presentation-ui"))]
     let captured = batch.into_render_input();
 
+    let can_capture = world.resource::<EditorGameViewBridge>().can_capture();
     let captured = (|| {
         // Consume each sealed batch in its own CoreLast. Keeping a second batch behind an
         // outstanding Game candidate would let a later Step observe an earlier capture.
-        if !world.resource::<EditorGameViewBridge>().can_capture() {
+        if !can_capture {
             return Ok(None);
         }
         let input =
@@ -1203,10 +1229,8 @@ fn capture_candidate(
         {
             return Err(EditorGameViewBridgeFailure::CandidateSequenceExhausted);
         }
-        let runtime_generation = world
-            .get_resource::<RuntimeGeneration>()
-            .copied()
-            .ok_or(EditorGameViewBridgeFailure::MissingRuntimeGeneration)?;
+        let runtime_generation =
+            runtime_generation.ok_or(EditorGameViewBridgeFailure::MissingRuntimeGeneration)?;
         let packet = input.packet();
         if packet.source_generation().runtime_generation() != Some(runtime_generation) {
             return Err(EditorGameViewBridgeFailure::CandidateSourceMismatch);
@@ -1221,12 +1245,16 @@ fn capture_candidate(
     })();
 
     match captured {
-        Ok(Some((runtime_generation, input))) => Ok(Some(CapturedEditorGameViewCandidate {
-            runtime_generation,
-            input,
-            #[cfg(feature = "presentation-ui")]
-            ui_submission,
-        })),
+        Ok(Some((runtime_generation, input))) => world
+            .resource_mut::<EditorGameViewBridge>()
+            .publish(CapturedEditorGameViewCandidate {
+                runtime_generation,
+                app_frame_index: app_frame_index
+                    .expect("a sealed Game candidate retains its App frame"),
+                input,
+                #[cfg(feature = "presentation-ui")]
+                ui_submission,
+            }),
         result => {
             #[cfg(feature = "presentation-ui")]
             if let Some(ui) = ui_submission {
@@ -1245,9 +1273,35 @@ fn capture_candidate(
                     return Err(EditorGameViewBridgeFailure::CompletionAuthorityMismatch);
                 }
             }
-            result.map(|_| None)
+            result?;
+            if can_capture && let Some(no_views) = no_views {
+                world.resource_mut::<EditorGameViewBridge>().slot = no_views;
+            }
+            Ok(())
         }
     }
+}
+
+pub(super) fn sealed_no_views_app_frame(
+    runtime: &nara_app::RuntimeInstance,
+    start: EditorGameStartRequest,
+) -> Option<u64> {
+    let world = runtime.world();
+    let bridge = world.get_resource::<EditorGameViewBridge>()?;
+    let EditorGameViewBridgeSlot::NoViews {
+        runtime_generation,
+        app_frame_index,
+    } = bridge.slot
+    else {
+        return None;
+    };
+    (runtime.state() == RuntimeState::Paused
+        && runtime_generation == runtime.generation()
+        && runtime_generation == start.runtime_generation()
+        && bridge.capture_enabled
+        && bridge.config == start.capture_config()
+        && bridge.failure.is_none())
+    .then_some(app_frame_index)
 }
 
 pub(super) fn take_candidate(
@@ -2118,6 +2172,7 @@ mod world_presentation_tests {
         mapped: bool,
     ) -> EditorGameViewRuntimeCandidateIdentity {
         let generation = packet.source_generation().runtime_generation().unwrap();
+        let app_frame_index = packet.frame_index();
         let installation = WgpuPolicyDefinition::new(PickingPolicy).install().unwrap();
         let input = installation
             .capture(packet, std::sync::Arc::new(mapped))
@@ -2126,6 +2181,7 @@ mod world_presentation_tests {
         bridge
             .publish(CapturedEditorGameViewCandidate {
                 runtime_generation: generation,
+                app_frame_index,
                 input,
                 #[cfg(feature = "presentation-ui")]
                 ui_submission: None,

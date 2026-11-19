@@ -138,6 +138,10 @@ The stable semantic operations are:
   includes gameplay command `Admit -> Consume -> Capture -> Acknowledge`, rotates trackers at the
   declared app boundary exactly once, preserves the configured paused/time-scale state, and
   returns to paused.
+  An embedded Game View can complete that Step without a presentation receipt when the stepped
+  frame has sealed with no visible views for the current target. A frame that has yet to yield
+  a disposition keeps its presentation pending. The exact fixed tick remains observable in both
+  cases.
 - **Stop** requests finite service shutdown and runtime disposal. A host reports clean completion
   only after its bounded close contract succeeds. Under ADR 0084's accepted state vocabulary, a
   timeout or participant failure that leaves a registered owner unfinished remains `Stopping` or
