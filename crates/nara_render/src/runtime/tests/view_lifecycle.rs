@@ -126,6 +126,156 @@ fn camera_edits_order_resize_target_and_pause_preserve_view_identity() {
 }
 
 #[test]
+fn split_viewports_follow_the_window_extent_and_recover_their_original_layout() {
+    let mut app = lifecycle_app(true);
+    let world = app.world_mut().unwrap();
+    let authored_right = ViewportRect::new(640, 0, 640, 720).unwrap();
+    let right = world
+        .spawn((
+            Camera2d {
+                viewport: Some(authored_right),
+                ..Default::default()
+            },
+            Transform2d::default(),
+        ))
+        .id();
+    let left = world
+        .spawn((
+            Camera2d {
+                viewport: ViewportRect::new(0, 0, 640, 720),
+                order: 1,
+                ..Default::default()
+            },
+            Transform2d::default(),
+        ))
+        .id();
+    let mut runtime = start_runtime(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    let original_right = camera_view(&runtime, right);
+    let original_left = camera_view(&runtime, left);
+
+    for (width, visible_right) in [(960, 320), (640, 0), (480, 0), (1280, 640)] {
+        let resolution = nara_window::WindowResolution::new(width, 720);
+        edit_world(&mut runtime, move |world| {
+            for mut window in world.query::<&mut Window>().iter_mut(world) {
+                window.resolution = resolution;
+            }
+        });
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        let window = Window {
+            resolution,
+            ..Window::default()
+        };
+        let packet = build_render_frame_packet(
+            runtime.generation(),
+            world.resource::<RenderFrame>().index,
+            Some(window.id),
+            [&window],
+            world.resource::<ExtractedViews>(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            world.get::<Camera2d>(right).unwrap().viewport,
+            Some(authored_right)
+        );
+        let left = camera_view(&runtime, left);
+        assert_eq!(left.id, original_left.id);
+        assert_eq!(
+            left.viewport,
+            ViewportRect::new(0, 0, width.min(640), 720).unwrap()
+        );
+        if visible_right == 0 {
+            assert_eq!(packet.views(), &[left]);
+            assert_eq!(left.load, ViewLoadOp::Clear(Color::BLACK));
+        } else {
+            let right = camera_view(&runtime, right);
+            assert_eq!(packet.views(), &[right, left]);
+            assert_eq!(right.id, original_right.id);
+            assert_eq!(right.load, ViewLoadOp::Clear(Color::BLACK));
+            assert_eq!(left.load, ViewLoadOp::Load);
+            assert_eq!(
+                right.viewport,
+                ViewportRect::new(640, 0, visible_right, 720).unwrap()
+            );
+            let center = Vec2::new(640.0 + visible_right as f32 * 0.5, 360.0);
+            assert_eq!(right.world_to_viewport(Vec2::ZERO), center);
+            assert_eq!(right.viewport_to_world(center), Some(Vec2::ZERO));
+            assert!(
+                right
+                    .world_to_viewport(Vec2::new(50.0, 30.0))
+                    .abs_diff_eq(center + Vec2::new(50.0, -30.0), 1.0e-4)
+            );
+        }
+    }
+
+    assert_eq!(camera_view(&runtime, right), original_right);
+    assert_eq!(camera_view(&runtime, left), original_left);
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn explicit_world_canvas_viewports_are_clipped_to_the_raster_and_skip_a_zero_window() {
+    let mut app = lifecycle_app(true);
+    let world = app.world_mut().unwrap();
+    let canvas = WorldCanvas::new(200, 100).unwrap();
+    world.insert_resource(canvas);
+    let authored = ViewportRect::new(120, 30, u32::MAX, u32::MAX).unwrap();
+    let camera = world
+        .spawn((
+            Camera2d {
+                viewport: Some(authored),
+                ..Default::default()
+            },
+            Transform2d::default(),
+        ))
+        .id();
+    let mut runtime = start_runtime(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    let original = camera_view(&runtime, camera);
+    assert_eq!(
+        original.viewport,
+        ViewportRect::new(120, 30, 80, 70).unwrap()
+    );
+
+    for (width, height) in [(64, 32), (0, 32), (350, 210)] {
+        let resolution = nara_window::WindowResolution::new(width, height);
+        edit_world(&mut runtime, move |world| {
+            for mut window in world.query::<&mut Window>().iter_mut(world) {
+                window.resolution = resolution;
+            }
+        });
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        let window = Window {
+            resolution,
+            ..Window::default()
+        };
+        let packet = build_render_frame_packet_with_world_canvas(
+            runtime.generation(),
+            world.resource::<RenderFrame>().index,
+            Some(window.id),
+            [&window],
+            world.resource::<ExtractedViews>(),
+            Some(canvas),
+        )
+        .unwrap();
+        assert_eq!(
+            world.get::<Camera2d>(camera).unwrap().viewport,
+            Some(authored)
+        );
+        if width == 0 {
+            assert!(packet.is_none());
+            assert!(world.resource::<ExtractedViews>().is_empty());
+        } else {
+            assert_eq!(packet.unwrap().views(), &[original]);
+        }
+    }
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn missing_zero_and_filtered_targets_preserve_the_camera_lifetime() {
     let mut app = lifecycle_app(false);
     let camera = app
@@ -138,11 +288,22 @@ fn missing_zero_and_filtered_targets_preserve_the_camera_lifetime() {
     assert!(runtime.world().resource::<ExtractedViews>().is_empty());
     let id = runtime.world().resource::<CameraViewLifetimes>().ids[&camera];
 
+    edit_world(&mut runtime, move |world| {
+        world.get_mut::<Camera2d>(camera).unwrap().viewport = ViewportRect::new(0, 0, 640, 360);
+    });
+    runtime.drive(Duration::ZERO).unwrap();
+    let explicit = camera_view(&runtime, camera);
+    assert_eq!(explicit.id, id);
+    assert_eq!(
+        explicit.viewport,
+        ViewportRect::new(0, 0, 640, 360).unwrap()
+    );
+
     edit_world(&mut runtime, |world| {
         world.spawn(Window::default());
     });
     runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(camera_view(&runtime, camera).id, id);
+    assert_eq!(camera_view(&runtime, camera), explicit);
 
     edit_world(&mut runtime, |world| {
         for mut window in world.query::<&mut Window>().iter_mut(world) {
@@ -175,7 +336,9 @@ fn missing_zero_and_filtered_targets_preserve_the_camera_lifetime() {
         RenderTarget::Image(image),
     ] {
         edit_world(&mut runtime, move |world| {
-            world.get_mut::<Camera2d>(camera).unwrap().target = target;
+            let mut camera = world.get_mut::<Camera2d>(camera).unwrap();
+            camera.target = target;
+            camera.viewport = None;
         });
         runtime.drive(Duration::ZERO).unwrap();
         assert!(runtime.world().resource::<ExtractedViews>().is_empty());

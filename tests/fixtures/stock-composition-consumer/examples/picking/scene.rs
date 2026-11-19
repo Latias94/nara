@@ -89,7 +89,7 @@ struct Requests(Arc<Mutex<VecDeque<Request>>>);
 struct CurrentMode(Mode);
 
 #[derive(Resource)]
-struct OriginalWorld(Arc<AtomicBool>);
+pub(super) struct OriginalWorld(pub(super) Arc<AtomicBool>);
 
 impl Drop for OriginalWorld {
     fn drop(&mut self) {

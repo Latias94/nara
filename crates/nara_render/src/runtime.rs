@@ -1,6 +1,6 @@
 use crate::{
-    Camera2d, CapturedRenderTime, Color, ExtractedView, ExtractedViews, RenderTarget, RenderViewId,
-    ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
+    Camera2d, CapturedRenderTime, Color, Extent2d, ExtractedView, ExtractedViews, RenderTarget,
+    RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
@@ -801,14 +801,12 @@ fn extract_views(
             })
             .map_err(BevyError::error)?;
         let global = spatial.global(camera_entity).map_err(BevyError::error)?;
-        let Some(viewport) = camera.viewport.or_else(|| {
-            viewport_for_target(
-                camera.target,
-                primary_window_id,
-                &windows,
-                canvas.as_deref().copied(),
-            )
-        }) else {
+        let Some(viewport) = viewport_for_camera(
+            camera,
+            primary_window_id,
+            &windows,
+            canvas.as_deref().copied(),
+        ) else {
             continue;
         };
 
@@ -872,21 +870,45 @@ pub fn begin_render_frame(mut frame: ResMut<RenderFrame>) {
     frame.begin_render();
 }
 
-fn viewport_for_target(
-    target: RenderTarget,
+fn viewport_for_camera(
+    camera: &Camera2d,
     primary_window_id: Option<WindowId>,
     windows: &Query<&Window>,
     canvas: Option<WorldCanvas>,
 ) -> Option<ViewportRect> {
-    let window_id = target.window_id(primary_window_id)?;
-    windows
+    let Some(window_id) = camera.target.window_id(primary_window_id) else {
+        return camera.viewport;
+    };
+    let Some(resolution) = windows
         .iter()
         .find(|window| window.id == window_id)
-        .filter(|window| !window.resolution.is_zero_sized())
-        .and_then(|window| match canvas {
-            Some(canvas) => ViewportRect::from_extent(canvas.extent()),
-            None => ViewportRect::from_window_resolution(window.resolution),
-        })
+        .map(|window| window.resolution)
+    else {
+        return camera.viewport;
+    };
+    if resolution.is_zero_sized() {
+        return None;
+    }
+    let extent = canvas.map_or(
+        Extent2d {
+            width: resolution.physical_width,
+            height: resolution.physical_height,
+        },
+        WorldCanvas::extent,
+    );
+    let Some(authored) = camera.viewport else {
+        return ViewportRect::from_extent(extent);
+    };
+    ViewportRect::new(
+        authored.physical_x,
+        authored.physical_y,
+        authored
+            .physical_width
+            .min(extent.width.saturating_sub(authored.physical_x)),
+        authored
+            .physical_height
+            .min(extent.height.saturating_sub(authored.physical_y)),
+    )
 }
 
 #[cfg(test)]

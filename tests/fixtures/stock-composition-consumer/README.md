@@ -201,6 +201,11 @@ bytes after later replays. An injected observer panic separately checks original
 HWND and event-pump retirement before rethrow. These checks do not measure physical scanout,
 human mouse delivery or production performance.
 
+The `--split-resize` path uses the stock policy with two explicit Viewports in one native window.
+It shrinks the right View, moves it entirely beyond the target, then restores both Views without
+restarting the Runtime or WGPU Host. The observer checks picking against each presented rectangle,
+and the original HWND and event pump retire through ordinary `DesktopRun` close.
+
 Prebuild the example before invoking the ignored tests; the test wrapper never runs Cargo.
 `NARA_STOCK_PICKING_WINDOW_EXE` can select another absolute prebuilt executable. Select
 `NARA_WGPU_FORCE_FALLBACK=0` for hardware or `1` for an explicit software control. Mixed-DPI
@@ -217,9 +222,9 @@ cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consu
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test picking_window --run-ignored only --test-threads=1 --no-tests fail --success-output immediate
 ```
 
-The final command includes physical mixed-DPI acceptance and the injected-failure control.
-To select only the ordinary single-display trajectory, add
-`-E 'test(ordinary_runtime_picking_matches_pixels_on_one_native_display)'`.
+The final command includes physical mixed-DPI acceptance, the injected-failure control and split
+resize. To select checks that run on one display, add
+`-E 'not test(ordinary_runtime_picking_matches_pixels_across_actual_mixed_dpi_displays)'`.
 
 ### Owning and source consumers
 

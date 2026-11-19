@@ -33,6 +33,12 @@ fn ordinary_runtime_picking_matches_pixels_on_one_native_display() -> Result<(),
 
 #[test]
 #[ignore = "requires a Windows desktop and the prebuilt picking_window example"]
+fn split_view_runtime_survives_native_resize_and_restores_picking() -> Result<(), String> {
+    run_native_picking("--split-resize", false)
+}
+
+#[test]
+#[ignore = "requires a Windows desktop and the prebuilt picking_window example"]
 fn observer_failure_retires_original_window_before_resuming_its_panic() -> Result<(), String> {
     run_native_picking("--single-display", true)
 }
@@ -105,10 +111,22 @@ fn run_native_picking(mode: &str, fail_observer: bool) -> Result<(), String> {
             diagnostics()
         ));
     }
-    validate_summary(&output, mode).map_err(|error| format!("{error}\n{}", diagnostics()))?;
+    let marker = if mode == "--split-resize" {
+        let summary = "SPLIT_RESIZE_OK original_runtime_retired=true original_window_destroyed=true original_pump_returned=true";
+        if output.lines().filter(|line| *line == summary).count() != 1 {
+            return Err(format!(
+                "native split resize omitted its exact success summary\n{}",
+                diagnostics()
+            ));
+        }
+        "SPLIT_RESIZE_OK"
+    } else {
+        validate_summary(&output, mode).map_err(|error| format!("{error}\n{}", diagnostics()))?;
+        "PICKING_WINDOW_OK"
+    };
     if errors
         .lines()
-        .any(|line| line.split_ascii_whitespace().next() == Some("PICKING_WINDOW_OK"))
+        .any(|line| line.split_ascii_whitespace().next() == Some(marker))
     {
         return Err(format!(
             "the success marker must occur only once, on stdout\n{}",

@@ -13,6 +13,9 @@ mod oracle;
 #[cfg(windows)]
 #[path = "picking/scene.rs"]
 mod scene;
+#[cfg(windows)]
+#[path = "picking/split_resize.rs"]
+mod split_resize;
 
 #[cfg(windows)]
 mod application {
@@ -496,37 +499,7 @@ mod application {
             assert!(observed.borrow().transitions >= 4);
             Ok(())
         }));
-        run.request_close();
-        let close = Instant::now() + Duration::from_secs(15);
-        while !matches!(
-            run.progress(),
-            DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
-        ) {
-            assert!(
-                Instant::now() < close,
-                "original DesktopRun retirement deadline"
-            );
-            if run.poll(Duration::from_millis(10)) == DesktopRunProgress::CleanupIncomplete {
-                let _ = run.execute();
-            }
-        }
-        let report = run.execute();
-        assert_eq!(
-            report.outcome(),
-            DesktopRunOutcome::Completed(AppExit::Requested)
-        );
-        assert!(!report.diagnostics().has_errors(), "{report:?}");
-        assert!(
-            dropped.load(Ordering::Acquire),
-            "the original World must be destroyed"
-        );
-        if let Some(probe) = &probe {
-            probe.verify_destroyed().map_err(io::Error::other)?;
-        }
-        assert!(
-            run.take_event_loop().is_some(),
-            "original physical pump returns after retirement"
-        );
+        retire_original(&mut run, probe.as_ref(), &dropped)?;
         drop(run);
         if let Some(payload) = observed.borrow_mut().failure.take() {
             eprintln!(
@@ -546,11 +519,50 @@ mod application {
         );
         Ok(())
     }
+
+    pub(super) fn retire_original(
+        run: &mut DesktopRun,
+        probe: Option<&NativeProbe>,
+        dropped: &AtomicBool,
+    ) -> Result<()> {
+        run.request_close();
+        let close = Instant::now() + Duration::from_secs(15);
+        while !matches!(
+            run.progress(),
+            DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
+        ) {
+            if Instant::now() >= close {
+                return Err(io::Error::other("original DesktopRun retirement deadline").into());
+            }
+            if run.poll(Duration::from_millis(10)) == DesktopRunProgress::CleanupIncomplete {
+                let _ = run.execute();
+            }
+        }
+        let report = run.execute();
+        let world_retired = dropped.load(Ordering::Acquire);
+        let window = probe.map(NativeProbe::verify_destroyed);
+        let pump_returned = run.take_event_loop().is_some();
+        if report.outcome() != DesktopRunOutcome::Completed(AppExit::Requested)
+            || report.diagnostics().has_errors()
+            || !world_retired
+            || window.as_ref().is_some_and(std::result::Result::is_err)
+            || !pump_returned
+        {
+            return Err(io::Error::other(format!(
+                "original DesktopRun retirement world={world_retired} window={window:?} pump={pump_returned}: {report:?}"
+            )).into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    application::run()
+    if std::env::args().nth(1).as_deref() == Some("--split-resize") {
+        split_resize::run()
+    } else {
+        application::run()
+    }
 }
 
 #[cfg(not(windows))]

@@ -6,8 +6,10 @@ use crate::{CapturedRenderTime, RenderTarget, RenderViewId, ViewportRect, WorldC
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Camera2d {
     pub target: RenderTarget,
-    /// Raster rectangle in world-canvas pixels when configured, otherwise destination pixels.
-    /// None uses the complete world canvas or destination extent.
+    /// Authored raster rectangle in world-canvas pixels when configured, otherwise target pixels.
+    /// With a Window available, extraction uses its intersection with the current raster.
+    /// `None` uses the whole raster. Without Window geometry, extraction requires an explicit
+    /// rectangle and packet admission checks it against the supplied target.
     pub viewport: Option<ViewportRect>,
     /// Explicit target clear. Otherwise the first view clears with `ClearColor` and later views load.
     pub clear_color: Option<Color>,

@@ -199,14 +199,14 @@ jobs:
         env:
           CARGO_TARGET_DIR: "${{ github.workspace }}/target"
         run: cargo build --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --example picking_window
-      - name: Test presented world picking and observer retirement through DX12 software rendering
+      - name: Test world picking, split resize and observer retirement through DX12 software rendering
         if: runner.os == 'Windows'
         timeout-minutes: 10
         env:
           CARGO_TARGET_DIR: "${{ github.workspace }}/target"
           WGPU_BACKEND: dx12
           NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --test picking_window --run-ignored only -E 'test(ordinary_runtime_picking_matches_pixels_on_one_native_display) | test(observer_failure_retires_original_window_before_resuming_its_panic)' --test-threads=1 --no-fail-fast --no-tests fail
+        run: cargo nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --test picking_window --run-ignored only -E 'test(ordinary_runtime_picking_matches_pixels_on_one_native_display) | test(observer_failure_retires_original_window_before_resuming_its_panic) | test(split_view_runtime_survives_native_resize_and_restores_picking)' --test-threads=1 --no-fail-fast --no-tests fail
       - name: Verify original native retirement after fixture callback panics
         if: runner.os == 'Windows'
         timeout-minutes: 10

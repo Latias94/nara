@@ -23,7 +23,7 @@ use windows_sys::Win32::{
         },
         WindowsAndMessaging::{
             FindWindowW, GetClientRect, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-            IsWindow, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+            IsWindow, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
         },
     },
 };
@@ -180,6 +180,43 @@ impl NativeProbe {
             return Err(native_error("SetWindowPos"));
         }
         Ok(())
+    }
+
+    /// Request a physical client extent through the original HWND's normal resize path.
+    pub fn resize_client(&self, size: [u32; 2]) -> Result<bool, String> {
+        let current = self.geometry()?.size;
+        if size == current {
+            return Ok(false);
+        }
+        let outer = self.outer_rect()?;
+        let width = i32::try_from(
+            i64::from(outer.right) - i64::from(outer.left) + i64::from(size[0])
+                - i64::from(current[0]),
+        )
+        .map_err(|_| "native outer width is out of range")?;
+        let height = i32::try_from(
+            i64::from(outer.bottom) - i64::from(outer.top) + i64::from(size[1])
+                - i64::from(current[1]),
+        )
+        .map_err(|_| "native outer height is out of range")?;
+        self.validate_window()?;
+        // SAFETY: the same process/thread/title-validated HWND receives an ordinary resize.
+        // NOMOVE and NOZORDER ignore the position and null insertion handle.
+        if unsafe {
+            SetWindowPos(
+                self.window,
+                ptr::null_mut(),
+                0,
+                0,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER,
+            )
+        } == 0
+        {
+            return Err(native_error("SetWindowPos"));
+        }
+        Ok(true)
     }
 
     /// Verify destruction after the original DesktopRun has completely retired.
