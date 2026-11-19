@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     io::{self, Cursor, Read, Write},
 };
 
@@ -9,12 +9,17 @@ use nara_fs::{
 use nara_project::ProjectPath;
 
 use super::{ProjectExportBuildReceipt, ProjectExportMemberSource, ProjectExportPlanReceipt};
-use crate::project_host::ProjectContentDeliveryReceipt;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ProjectExportStageError {
     #[error("failed to create export directory {path}")]
     CreateDirectory {
+        path: ProjectPath,
+        #[source]
+        source: FsError,
+    },
+    #[error("failed to open staged export directory {path}")]
+    OpenDirectory {
         path: ProjectPath,
         #[source]
         source: FsError,
@@ -64,11 +69,6 @@ pub(super) enum ProjectExportStageError {
     },
 }
 
-struct ExportDirectories {
-    by_path: BTreeMap<String, DirectoryCapability>,
-    creation_order: Vec<String>,
-}
-
 enum ExportMemberReader<'a> {
     Executable(Cursor<&'a [u8]>),
     Content(CapabilityReader<'a>),
@@ -86,10 +86,11 @@ impl Read for ExportMemberReader<'_> {
 pub(super) fn stage_export_tree(
     staging: DirectoryCapability,
     plan: &ProjectExportPlanReceipt,
-    delivery_content: &ProjectContentDeliveryReceipt,
+    project_root: &DirectoryCapability,
     build: &ProjectExportBuildReceipt,
 ) -> Result<(), ProjectExportStageError> {
     let directories = create_directories(&staging, plan)?;
+    let mut open_parent = None::<(&str, DirectoryCapability)>;
     for (member, source) in plan.members.iter().zip(plan.sources.iter()) {
         let target = RelativePath::new(member.path.as_str())
             .expect("the export planner publishes valid target paths");
@@ -100,18 +101,22 @@ pub(super) fn stage_export_tree(
             .expect("the closed export layout places every member below a directory");
         let leaf = RelativeComponent::new(leaf)
             .expect("the export planner publishes valid target components");
-        let parent = directories
-            .by_path
-            .get(parent_path)
-            .expect("the export planner creates every member parent");
+        if open_parent
+            .as_ref()
+            .is_none_or(|(path, _)| *path != parent_path)
+        {
+            open_parent = Some((parent_path, open_staged_directory(&staging, parent_path)?));
+        }
+        let (_, parent) = open_parent
+            .as_ref()
+            .expect("the current member parent is open");
         let content_source;
         let mut source_reader = match source {
             ProjectExportMemberSource::Executable(target) => {
                 ExportMemberReader::Executable(Cursor::new(build.executable_bytes(*target)))
             }
             ProjectExportMemberSource::Content(source_path) => {
-                content_source = delivery_content
-                    .project_root()
+                content_source = project_root
                     .open_file(
                         &RelativePath::new(source_path.as_str())
                             .expect("the project-content owner publishes valid source paths"),
@@ -182,12 +187,10 @@ pub(super) fn stage_export_tree(
                 source,
             })?;
     }
-    for path in directories.creation_order.iter().rev() {
-        let directory = directories
-            .by_path
-            .get(path)
-            .expect("every created export directory remains owned until synchronization");
-        sync_directory(directory).map_err(|source| ProjectExportStageError::SyncDirectory {
+    drop(open_parent);
+    for path in directories.iter().rev() {
+        let directory = open_staged_directory(&staging, path)?;
+        sync_directory(&directory).map_err(|source| ProjectExportStageError::SyncDirectory {
             path: ProjectPath::new(path.clone())
                 .expect("the export planner creates valid directory paths"),
             source,
@@ -200,10 +203,11 @@ pub(super) fn stage_export_tree(
 fn create_directories(
     staging: &DirectoryCapability,
     plan: &ProjectExportPlanReceipt,
-) -> Result<ExportDirectories, ProjectExportStageError> {
+) -> Result<BTreeSet<String>, ProjectExportStageError> {
     let mut paths = BTreeSet::new();
     for directory in plan.runtime_directories() {
-        let components = directory.as_str().split('/').collect::<Vec<_>>();
+        let target = format!("project/{directory}");
+        let components = target.split('/').collect::<Vec<_>>();
         for depth in 1..=components.len() {
             paths.insert(components[..depth].join("/"));
         }
@@ -214,33 +218,36 @@ fn create_directories(
             paths.insert(components[..depth].join("/"));
         }
     }
-    let mut directories = BTreeMap::new();
-    let mut creation_order = Vec::with_capacity(paths.len());
-    for path in paths {
+    for path in &paths {
         let (parent_path, leaf) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
         let leaf = RelativeComponent::new(leaf)
             .expect("the export planner creates valid directory components");
-        let parent = if parent_path.is_empty() {
-            staging
-        } else {
-            directories
-                .get(parent_path)
-                .expect("parent export directories are ordered before children")
-        };
-        let directory = parent.create_child_directory(&leaf).map_err(|source| {
+        let parent = open_staged_directory(staging, parent_path)?;
+        parent.create_child_directory(&leaf).map_err(|source| {
             ProjectExportStageError::CreateDirectory {
                 path: ProjectPath::new(path.clone())
                     .expect("the export planner creates valid directory paths"),
                 source,
             }
         })?;
-        creation_order.push(path.clone());
-        directories.insert(path, directory);
     }
-    Ok(ExportDirectories {
-        by_path: directories,
-        creation_order,
-    })
+    Ok(paths)
+}
+
+fn open_staged_directory(
+    staging: &DirectoryCapability,
+    path: &str,
+) -> Result<DirectoryCapability, ProjectExportStageError> {
+    if path.is_empty() {
+        return Ok(staging.share());
+    }
+    let target = RelativePath::new(path).expect("the export planner creates valid directory paths");
+    staging
+        .open_directory(&target)
+        .map_err(|source| ProjectExportStageError::OpenDirectory {
+            path: ProjectPath::new(path).expect("the export directory is project-relative"),
+            source,
+        })
 }
 
 fn sync_directory(directory: &DirectoryCapability) -> Result<(), FsError> {

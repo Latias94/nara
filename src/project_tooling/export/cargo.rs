@@ -50,28 +50,27 @@ impl CargoBuildOutput {
 
 pub(super) fn build(
     project_root: &Path,
-    startup_content: &StartupContentClosureReceipt,
+    startups: [&StartupContentClosureReceipt; 2],
 ) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
-    build_with_target_directory(project_root, startup_content, None)
+    build_with_target_directory(project_root, startups, None)
 }
 
 #[cfg(test)]
 pub(super) fn build_in_target_directory(
     project_root: &Path,
-    startup_content: &StartupContentClosureReceipt,
+    startups: [&StartupContentClosureReceipt; 2],
     target_directory: &Path,
 ) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
-    build_with_target_directory(project_root, startup_content, Some(target_directory))
+    build_with_target_directory(project_root, startups, Some(target_directory))
 }
 
 fn build_with_target_directory(
     project_root: &Path,
-    startup_content: &StartupContentClosureReceipt,
+    startups: [&StartupContentClosureReceipt; 2],
     target_directory: Option<&Path>,
 ) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
     let inputs = project_rust_input_inventory(project_root)?;
-    let preparation =
-        ProjectExportBuildPreparation::capture(startup_content, inputs.iter().cloned())?;
+    let preparation = ProjectExportBuildPreparation::capture(startups, inputs.iter().cloned())?;
     verify_project_path_authority(project_root, &preparation)?;
     let tools = CargoBuildTools::discover_in(project_root)?;
     let mut rustc = Command::new(tools.rustc_path());
@@ -102,10 +101,7 @@ fn build_with_target_directory(
     let package = CargoMetadataFacts::package_name_for_manifest(&metadata, &manifest)
         .map_err(|_| CargoBuildAdapterError::Selection)?;
     let mut captured = Vec::with_capacity(2);
-    for role in [
-        ProjectExportBinaryTarget::Headless,
-        ProjectExportBinaryTarget::Desktop,
-    ] {
+    for role in ProjectExportBinaryTarget::ALL {
         let selection = CargoBuildSelection::new(
             &package,
             role.cargo_target_name(),
@@ -140,7 +136,7 @@ fn build_with_target_directory(
     desktop.verify_original()?;
     let [headless_observation, desktop_observation] = acceptance::observe_built_products(
         "export-prepublication",
-        startup_content,
+        startups,
         [
             (
                 ProjectExportBinaryTarget::Headless,

@@ -379,11 +379,11 @@ try {
 }
 ```
 
-The executables use their sibling project/ tree and do not need the development
-project's CWD. Keep that tree with them. A published candidate that fails product
-acceptance remains present and is reported as such; do not treat it as success.
-This is a source-carrying declared-content development candidate, not a full project
-backup or final distribution package. Inactive variant sources are not exported.
+Keep the sibling `project/` tree with the executables. It carries the complete declared
+Scene deliveries for both the base Headless settings and the `desktop` profile. Each
+executable checks its own startup agreement. Extra sources that neither delivery uses
+are outside the package. A published candidate that fails product acceptance remains
+available for inspection and Export reports the failure.
 
 ## What to measure
 

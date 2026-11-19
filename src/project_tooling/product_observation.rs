@@ -4,10 +4,7 @@ use std::{
     io::{self, Write},
 };
 
-use crate::{
-    fs::ContentDigest,
-    project_host::{ProjectContentMemberKind, StartupContentClosureReceipt},
-};
+use crate::{fs::ContentDigest, project_host::StartupContentClosureReceipt};
 
 pub use crate::project_workflow::ProjectExportBinaryTarget as ProductObservationTarget;
 
@@ -50,21 +47,22 @@ pub fn record_product_observation(
             "product observation attempt is invalid",
         ));
     }
+    if !target.matches_startup_profile(closure) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "product observation startup closure does not match the export profile",
+        ));
+    }
     let executable = ContentDigest::of_bytes(&fs::read(env::current_exe()?)?);
     let manifest = closure.manifest_digest();
     let content = closure.content_digest();
     let closure_plan = closure.closure_plan_digest();
-    let bundle = closure
-        .members()
-        .iter()
-        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
-        .map(crate::project_host::ProjectContentMemberReceipt::digest)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "product observation requires the admitted authoring schema bundle",
-            )
-        })?;
+    let bundle = closure.runtime_schema_bundle_digest().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "product observation requires the admitted authoring schema bundle",
+        )
+    })?;
     let profile = product_profile(target);
     let value = serde_json::json!({
         "version":2,"attempt":attempt,"target":target.cargo_target_name(),"profile":profile,
@@ -84,9 +82,9 @@ pub fn record_product_observation(
 }
 
 pub(super) const fn product_profile(target: ProductObservationTarget) -> &'static str {
-    match target {
-        ProductObservationTarget::Headless => "default",
-        ProductObservationTarget::Desktop => "desktop",
+    match target.content_profile() {
+        Some(profile) => profile,
+        None => "default",
     }
 }
 

@@ -5,8 +5,6 @@ use std::{fmt, sync::Arc};
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
 };
-#[cfg(feature = "project-tooling")]
-use nara_reflect::SchemaCompositionFingerprint;
 
 use crate::project_host::StartupContentClosureReceipt;
 #[cfg(feature = "project-tooling")]
@@ -29,6 +27,8 @@ pub enum ProjectExportBinaryTarget {
 }
 
 impl ProjectExportBinaryTarget {
+    pub(crate) const ALL: [Self; 2] = [Self::Headless, Self::Desktop];
+
     #[must_use]
     pub const fn cargo_target_name(self) -> &'static str {
         match self {
@@ -37,11 +37,24 @@ impl ProjectExportBinaryTarget {
         }
     }
 
-    const fn index(self) -> usize {
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::Headless => 0,
             Self::Desktop => 1,
         }
+    }
+
+    pub(crate) const fn content_profile(self) -> Option<&'static str> {
+        match self {
+            Self::Headless => None,
+            Self::Desktop => Some("desktop"),
+        }
+    }
+
+    pub(crate) fn matches_startup_profile(self, startup: &StartupContentClosureReceipt) -> bool {
+        startup
+            .settings_lineage()
+            .matches_manifest_profile(startup.manifest_digest(), self.content_profile())
     }
 }
 
@@ -127,33 +140,28 @@ impl ProjectExportBuildReceipt {
 
     pub(super) fn revalidate(
         &self,
-        startup_content: &StartupContentClosureReceipt,
+        startups: [&StartupContentClosureReceipt; 2],
     ) -> Result<(), ProjectExportBuildError> {
-        if startup_content.project_root_identity() != self.project_root_identity {
-            return Err(ProjectExportBuildError::ProjectAuthorityMismatch);
-        }
-        self.build_input_revision
-            .revalidate(&startup_content.project_root())?;
-        let authoring_schema_bundle_digest = startup_content
-            .runtime_schema_bundle_digest()
-            .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
-        let schema_fingerprint = startup_content.schema_fingerprint().to_string();
-        for executable in &self.executables {
-            let agreement = &self.product_agreements[executable.receipt.target.index()];
-            if !agreement.matches_inputs(
-                &executable.receipt,
-                startup_content.manifest_digest(),
-                startup_content.content_digest(),
-                startup_content.closure_plan_digest(),
-                authoring_schema_bundle_digest,
-                &schema_fingerprint,
-            ) {
-                return Err(ProjectExportBuildError::ProductAgreementMismatch {
-                    target: executable.receipt.target,
-                });
+        validate_startup_sources(self.project_root_identity, startups)?;
+        self.verify_build_inputs(&startups[0].project_root())?;
+        for (target, startup) in ProjectExportBinaryTarget::ALL.into_iter().zip(startups) {
+            let executable = &self.executables[target.index()].receipt;
+            if !self.product_agreements[target.index()].matches_inputs(executable, startup) {
+                return Err(ProjectExportBuildError::ProductAgreementMismatch { target });
             }
         }
         Ok(())
+    }
+
+    pub(super) fn verify_build_inputs(
+        &self,
+        project_root: &DirectoryCapability,
+    ) -> Result<(), ProjectExportBuildError> {
+        self.build_input_revision.revalidate(project_root)
+    }
+
+    pub(super) const fn product_agreements(&self) -> &[ProjectExportProductAgreement; 2] {
+        &self.product_agreements
     }
 
     pub(super) fn executable_bytes(&self, target: ProjectExportBinaryTarget) -> &[u8] {
@@ -192,32 +200,22 @@ struct PreparedExecutable {
 pub struct ProjectExportBuildPreparation {
     project_root: DirectoryCapability,
     revision: BuildInputRevision,
-    manifest_digest: ContentDigest,
-    startup_content_digest: ContentDigest,
-    startup_closure_plan_digest: ContentDigest,
-    authoring_schema_bundle_digest: ContentDigest,
-    schema_fingerprint: SchemaCompositionFingerprint,
+    startups: [StartupContentClosureReceipt; 2],
 }
 
 #[cfg(feature = "project-tooling")]
 impl ProjectExportBuildPreparation {
     pub fn capture(
-        startup_content: &StartupContentClosureReceipt,
+        startups: [&StartupContentClosureReceipt; 2],
         inputs: impl IntoIterator<Item = RelativePath>,
     ) -> Result<Self, ProjectExportBuildError> {
-        let project_root = startup_content.project_root();
+        let project_root = startups[0].project_root();
+        validate_startup_sources(project_root.identity(), startups)?;
         let revision = BuildInputRevision::capture(&project_root, inputs)?;
-        let authoring_schema_bundle_digest = startup_content
-            .runtime_schema_bundle_digest()
-            .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
         Ok(Self {
             project_root,
             revision,
-            manifest_digest: startup_content.manifest_digest(),
-            startup_content_digest: startup_content.content_digest(),
-            startup_closure_plan_digest: startup_content.closure_plan_digest(),
-            authoring_schema_bundle_digest,
-            schema_fingerprint: startup_content.schema_fingerprint(),
+            startups: startups.map(StartupContentClosureReceipt::clone),
         })
     }
 
@@ -279,11 +277,7 @@ impl ProjectExportBuildPreparation {
         let agreements = bind_product_agreements(
             agreements,
             [&headless.receipt, &desktop.receipt],
-            self.manifest_digest,
-            self.startup_content_digest,
-            self.startup_closure_plan_digest,
-            self.authoring_schema_bundle_digest,
-            &self.schema_fingerprint.to_string(),
+            self.startups.each_ref(),
         )?;
         Ok(ProjectExportBuildReceipt {
             project_root_identity: self.project_root.identity(),
@@ -305,19 +299,27 @@ impl fmt::Debug for ProjectExportBuildPreparation {
             .debug_struct("ProjectExportBuildPreparation")
             .field("project_root_identity", &self.project_root.identity())
             .field("build_input_digest", &self.revision.digest)
-            .field("manifest_digest", &self.manifest_digest)
-            .field("startup_content_digest", &self.startup_content_digest)
-            .field(
-                "startup_closure_plan_digest",
-                &self.startup_closure_plan_digest,
-            )
-            .field(
-                "authoring_schema_bundle_digest",
-                &self.authoring_schema_bundle_digest,
-            )
-            .field("schema_fingerprint", &self.schema_fingerprint)
+            .field("startups", &self.startups)
             .finish()
     }
+}
+
+fn validate_startup_sources(
+    project_root_identity: FileIdentity,
+    startups: [&StartupContentClosureReceipt; 2],
+) -> Result<(), ProjectExportBuildError> {
+    for (target, startup) in ProjectExportBinaryTarget::ALL.into_iter().zip(startups) {
+        if startup.project_root_identity() != project_root_identity {
+            return Err(ProjectExportBuildError::ProjectAuthorityMismatch);
+        }
+        if !target.matches_startup_profile(startup) {
+            return Err(ProjectExportBuildError::StartupProfileMismatch { target });
+        }
+        if !startup.has_runtime_schema_agreement() {
+            return Err(ProjectExportBuildError::RuntimeSchemaAgreementMissing);
+        }
+    }
+    Ok(())
 }
 
 /// Exact pre-publication observation made by one selected product executable.
@@ -325,14 +327,15 @@ impl fmt::Debug for ProjectExportBuildPreparation {
 /// The private Cargo Adapter may construct this value only after the executable has run its own
 /// provider-capable startup path and reported the exact schema and source facts it admitted.
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct ProjectExportProductAgreement {
     target: ProjectExportBinaryTarget,
     executable_digest: ContentDigest,
-    manifest_digest: ContentDigest,
-    startup_content_digest: ContentDigest,
-    startup_closure_plan_digest: ContentDigest,
-    authoring_schema_bundle_digest: ContentDigest,
-    schema_fingerprint: Box<str>,
+    pub(crate) manifest_digest: ContentDigest,
+    pub(crate) startup_content_digest: ContentDigest,
+    pub(crate) startup_closure_plan_digest: ContentDigest,
+    pub(crate) authoring_schema_bundle_digest: ContentDigest,
+    pub(crate) schema_fingerprint: Box<str>,
     observation_digest: ContentDigest,
 }
 
@@ -340,19 +343,15 @@ impl ProjectExportProductAgreement {
     fn matches_inputs(
         &self,
         executable: &ProjectExportExecutableReceipt,
-        manifest_digest: ContentDigest,
-        startup_content_digest: ContentDigest,
-        startup_closure_plan_digest: ContentDigest,
-        authoring_schema_bundle_digest: ContentDigest,
-        schema_fingerprint: &str,
+        startup: &StartupContentClosureReceipt,
     ) -> bool {
         self.target == executable.target
             && self.executable_digest == executable.digest
-            && self.manifest_digest == manifest_digest
-            && self.startup_content_digest == startup_content_digest
-            && self.startup_closure_plan_digest == startup_closure_plan_digest
-            && self.authoring_schema_bundle_digest == authoring_schema_bundle_digest
-            && self.schema_fingerprint.as_ref() == schema_fingerprint
+            && self.manifest_digest == startup.manifest_digest()
+            && self.startup_content_digest == startup.content_digest()
+            && self.startup_closure_plan_digest == startup.closure_plan_digest()
+            && Some(self.authoring_schema_bundle_digest) == startup.runtime_schema_bundle_digest()
+            && self.schema_fingerprint.as_ref() == startup.schema_fingerprint().to_string()
     }
 
     #[cfg(feature = "project-tooling")]
@@ -413,27 +412,16 @@ impl fmt::Debug for ProjectExportProductAgreement {
 fn bind_product_agreements(
     agreements: [ProjectExportProductAgreement; 2],
     executables: [&ProjectExportExecutableReceipt; 2],
-    manifest_digest: ContentDigest,
-    startup_content_digest: ContentDigest,
-    startup_closure_plan_digest: ContentDigest,
-    authoring_schema_bundle_digest: ContentDigest,
-    schema_fingerprint: &str,
+    startups: [&StartupContentClosureReceipt; 2],
 ) -> Result<[ProjectExportProductAgreement; 2], ProjectExportBuildError> {
     let mut ordered: [Option<ProjectExportProductAgreement>; 2] = array::from_fn(|_| None);
     for agreement in agreements {
         let target = agreement.target;
-        let executable = executables[target.index()];
-        if !agreement.matches_inputs(
-            executable,
-            manifest_digest,
-            startup_content_digest,
-            startup_closure_plan_digest,
-            authoring_schema_bundle_digest,
-            schema_fingerprint,
-        ) {
+        let index = target.index();
+        if !agreement.matches_inputs(executables[index], startups[index]) {
             return Err(ProjectExportBuildError::ProductAgreementMismatch { target });
         }
-        if ordered[target.index()].replace(agreement).is_some() {
+        if ordered[index].replace(agreement).is_some() {
             return Err(ProjectExportBuildError::DuplicateProductAgreement { target });
         }
     }
@@ -822,6 +810,8 @@ pub enum ProjectExportBuildError {
     },
     #[error("the Cargo build receipt belongs to another project authority")]
     ProjectAuthorityMismatch,
+    #[error("startup content was not checked for the {target:?} product profile")]
+    StartupProfileMismatch { target: ProjectExportBinaryTarget },
     #[error("the {target:?} product reported an invalid schema fingerprint")]
     InvalidProductSchemaFingerprint { target: ProjectExportBinaryTarget },
     #[error("the {target:?} product was observed more than once")]

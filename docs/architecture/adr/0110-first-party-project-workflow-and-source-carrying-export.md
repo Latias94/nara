@@ -253,9 +253,9 @@ actual consumer qualification; selecting this contract alone does not mark it co
   no starter-only loader or hidden provider list.
 - Version one is complete-schema-only. Missing providers or unknown manifest/schema fields fail
   closed for check, repair and export.
-- Desktop and presentation-free headless binaries consume the same manifest byte digest,
-  ProductRecipe, schema composition and startup-source content digest. Each product retains its own
-  profile-bound `ProjectSettingsLineage`; neither lineage is presented as the other's identity. A
+- Desktop and presentation-free headless binaries share the manifest byte digest, `ProductRecipe`,
+  and schema composition. Each executable's startup content and closure plan match its effective
+  profile's Check receipt. Each product retains its own profile-bound `ProjectSettingsLineage`. A
   bounded desktop verification mode requires an exact first-party presented receipt matching the
   admitted startup content and live backend generation within a product-owned timeout, uses the real
   Winit/WGPU path and exits through normal App/Host shutdown; initialization alone or a test-private
@@ -288,11 +288,17 @@ actual consumer qualification; selecting this contract alone does not mark it co
   delivery digest, bound to one project, manifest and schema authority. Differing kind/digest facts
   for the same path reject. The owner loads roots sequentially and independently charges retained
   union facts, without keeping all decoded Scene/Image values or generation leases resident.
-- Export consumes the delivery receipt and reopens every exact member through `nara_fs`; it does
-  not rediscover dependencies. Pre-staging and pre-publication revalidation cover the complete
-  union. Startup product observations remain distinct from the delivery plan and do not prove
-  that a later Scene has already been activated. Source receipts are bounded observations, not a
-  simultaneous filesystem snapshot or runtime-residency grant.
+- Export consumes each shipped executable's complete delivery receipt. For the current two
+  products, Headless uses base settings and Desktop uses the `desktop` profile. The plan unites
+  their runtime directories and exact file observations by project-relative path. Conflicting
+  observations for one path refuse preparation. Revalidation reopens the complete union through
+  `nara_fs` before staging and again before publication. This uses the loader's existing dependency
+  discovery. Source receipts describe bounded observations and confer no runtime residency.
+  When another profile's members enter a selected profile's source roots, rerun that profile's
+  strict Check on the staged tree and require the same startup and delivery. This catches a change
+  in reference resolution that matching individual member digests cannot express. A rejected
+  non-empty staging tree follows the existing directory-publication orphan outcome. The tool
+  reports the affected profile and the original bounded Check diagnostics with that outcome.
 - Exact Cargo artifacts are selected from one `cargo build --locked` JSON stream by invocation,
   workspace/manifest, package, binary target, triple, named profile and normalized features. A private
   build-input revision binds the closed five-file inventory: `Cargo.toml`, `Cargo.lock`,
@@ -301,8 +307,8 @@ actual consumer qualification; selecting this contract alone does not mark it co
   an engine-owned Rust resolver. This additional observation does not capture every module,
   local dependency, build-script, environment or procedural-macro input. Executable digests own
   the actual delivered runtime bytes; neither `--locked` nor this revision freezes all sources.
-- A build receipt revalidates its executable startup observations against the current manifest,
-  startup content, closure plan, authoring bundle and schema fingerprint. Fresh Check results
+- A build receipt revalidates each executable's startup observation against its profile's current
+  manifest, startup content, closure plan, authoring bundle and schema fingerprint. Fresh Check results
   cannot retarget an earlier build observation to changed startup content merely because Rust
   inputs and executable bytes remain unchanged. A change exclusive to another declared Scene
   does not require claiming that the executable already activated that Scene.

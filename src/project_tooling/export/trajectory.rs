@@ -12,7 +12,7 @@ use crate::{
     project_host::ProjectContentDeliveryReceipt,
     project_workflow::{
         ProjectContentMemberKind, ProjectExportBinaryTarget, ProjectExportMemberKind,
-        ProjectExportMemberReceipt, ProjectExportRequest, StartupContentClosureReceipt,
+        ProjectExportMemberReceipt, ProjectExportPlanReceipt, ProjectExportRequest,
         prepare_project_export,
     },
 };
@@ -23,6 +23,9 @@ use super::{
     cargo,
 };
 use crate::project_tooling::host_fs;
+
+#[path = "../../project_workflow/export/profile_fixture.rs"]
+mod profile_fixture;
 
 struct CheckArguments {
     project: PathBuf,
@@ -48,6 +51,7 @@ mod check {
 
 const PROJECT_SLUG: &str = "fresh-project-trajectory";
 const REPLACEMENT_SCENE: &str = "repaired.scene.json";
+const DESKTOP_STARTUP_SCENE: &str = "desktop-startup.scene.json";
 const EDITED_CLEAR_COLOR_R: f64 = 0.14;
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
 
@@ -143,11 +147,10 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     let project_parent = root.path().join("projects");
     let export_parent = root.path().join("exports");
     let unrelated_cwd = root.path().join("unrelated-cwd");
-    let cargo_target = root.shared_cargo_target();
+    let cargo_target = root.target.clone();
     fs::create_dir_all(&project_parent).unwrap();
     fs::create_dir_all(&export_parent).unwrap();
     fs::create_dir_all(&unrelated_cwd).unwrap();
-    fs::create_dir_all(&cargo_target).unwrap();
     let mut public_commands = PublicCommandRehearsal::new(&checkout, &cargo_target);
 
     let create_started = Instant::now();
@@ -183,12 +186,15 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     drop(created);
 
     let edited_scene_digest = edit_startup_scene(&project);
+    profile_fixture::install_profiled_level(&project);
+    install_desktop_startup(&project);
     public_commands.expect_success(&project, ["check", "."].map(OsString::from));
     let checked_before = check_products(&project);
     assert_ne!(
         checked_before.headless.startup_content().content_digest(),
         created_content_digest
     );
+    let desktop_startup_before = checked_before.desktop.startup_content().content_digest();
     generate_lockfile(&project, &unrelated_cwd);
 
     let first_run_started = Instant::now();
@@ -214,9 +220,7 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     );
     let first_export_elapsed_ms = elapsed_ms(first_export_started);
 
-    let original_scene = project.join("scenes/startup.scene.json");
-    let replacement_scene = project.join(format!("scenes/{REPLACEMENT_SCENE}"));
-    fs::rename(&original_scene, &replacement_scene).unwrap();
+    let replacement_scene = move_startup_scene(&project);
     assert_eq!(
         ContentDigest::of_bytes(&fs::read(&replacement_scene).unwrap()),
         edited_scene_digest
@@ -264,6 +268,10 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     let after_manifest_digest = checked_after.headless.manifest_digest();
     let after_content_digest = checked_after.headless.startup_content().content_digest();
     assert_ne!(after_manifest_digest, issue_manifest_digest);
+    assert_eq!(
+        checked_after.desktop.startup_content().content_digest(),
+        desktop_startup_before,
+    );
     assert_eq!(
         checked_after
             .headless
@@ -342,22 +350,22 @@ struct CheckedProducts {
 }
 
 fn check_products(project: &Path) -> CheckedProducts {
-    let headless = check::execute(CheckArguments {
-        project: project.to_path_buf(),
-        profile: None,
-    })
-    .unwrap();
-    let desktop = check::execute(CheckArguments {
-        project: project.to_path_buf(),
-        profile: Some("desktop".to_owned()),
-    })
+    let [headless, desktop] = ProjectExportRequest::check_deliveries(
+        host_fs::readable_directory(project).unwrap(),
+        &crate::ProductRecipe::new(),
+    )
     .unwrap();
     assert_eq!(headless.manifest_digest(), desktop.manifest_digest());
-    assert_eq!(
+    assert_ne!(
         headless.startup_content().content_digest(),
         desktop.startup_content().content_digest()
     );
+    assert_ne!(
+        headless.startup_content().closure_plan_digest(),
+        desktop.startup_content().closure_plan_digest()
+    );
     assert_ne!(headless.settings_lineage(), desktop.settings_lineage());
+    assert_ne!(headless.delivery_digest(), desktop.delivery_digest());
     CheckedProducts { headless, desktop }
 }
 
@@ -522,11 +530,9 @@ fn run_source_products(
             ProjectExportBinaryTarget::Headless,
             &headless_path,
             headless_digest,
-            checked.headless.manifest_digest(),
-            checked.headless.startup_content().content_digest(),
-            checked.headless.startup_content().closure_plan_digest(),
-            authoring_bundle_digest(checked.headless.startup_content()),
-        ),
+            checked.headless.startup_content(),
+        )
+        .unwrap(),
         working_directory,
         source_product_command(
             project,
@@ -549,11 +555,9 @@ fn run_source_products(
             ProjectExportBinaryTarget::Desktop,
             &desktop_path,
             desktop_digest,
-            checked.desktop.manifest_digest(),
-            checked.desktop.startup_content().content_digest(),
-            checked.desktop.startup_content().closure_plan_digest(),
-            authoring_bundle_digest(checked.desktop.startup_content()),
-        ),
+            checked.desktop.startup_content(),
+        )
+        .unwrap(),
         working_directory,
         source_product_command(
             project,
@@ -679,14 +683,12 @@ fn export_project(
 ) -> AcceptedExport {
     let manifest_digest = checked.headless.manifest_digest();
     let content_digest = checked.headless.startup_content().content_digest();
-    assert_eq!(manifest_digest, checked.desktop.manifest_digest());
-    assert_eq!(
-        content_digest,
-        checked.desktop.startup_content().content_digest()
-    );
     let build = cargo::build_in_target_directory(
         project,
-        checked.headless.startup_content(),
+        [
+            checked.headless.startup_content(),
+            checked.desktop.startup_content(),
+        ],
         target_directory,
     )
     .unwrap()
@@ -694,12 +696,17 @@ fn export_project(
     let prepared = prepare_project_export(ProjectExportRequest::new(
         host_fs::writable_directory(parent).unwrap(),
         RelativeComponent::new(destination).unwrap(),
-        checked.headless,
+        [checked.headless, checked.desktop],
         build,
+        crate::ProductRecipe::new(),
     ))
     .unwrap();
-    drop(checked.desktop);
-    assert_eq!(prepared.plan().startup_content_digest(), content_digest);
+    assert_eq!(
+        prepared
+            .plan()
+            .startup_content_digest(ProjectExportBinaryTarget::Headless),
+        content_digest
+    );
     assert_eq!(
         manifest_member_digest(prepared.plan().members()),
         manifest_digest
@@ -717,22 +724,39 @@ fn export_project(
             OsString::from(destination),
         ],
     );
-    let root = parent.join(destination);
-    validate_export_command_observation(
-        &command_observation,
-        prepared.plan().members(),
-        prepared.plan().startup_content_digest(),
-        prepared.plan().build_input_digest(),
-        prepared.plan().member_plan_digest(),
-        manifest_digest,
-    );
+    validate_export_command_observation(&command_observation, prepared.plan());
     let plan = ExportPlanEvidence {
-        startup_content_digest: prepared.plan().startup_content_digest(),
+        startup_content_digest: prepared
+            .plan()
+            .startup_content_digest(ProjectExportBinaryTarget::Headless),
         build_input_digest: prepared.plan().build_input_digest(),
         member_plan_digest: prepared.plan().member_plan_digest(),
         members: prepared.plan().members().to_vec().into_boxed_slice(),
     };
     drop(prepared);
+    let original = parent.join(destination);
+    let root = parent.join(format!("{destination}-relocated"));
+    #[cfg(windows)]
+    let rename_deadline = Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match fs::rename(&original, &root) {
+            Ok(()) => break,
+            #[cfg(windows)]
+            Err(error)
+                if Instant::now() < rename_deadline
+                    && (error.kind() == std::io::ErrorKind::PermissionDenied
+                        || error.raw_os_error()
+                            == Some(
+                                windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION as i32,
+                            )) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(error) => panic!("failed to relocate the published export {destination}: {error}"),
+        }
+    }
+    assert!(!original.exists());
+    profile_fixture::assert_profiled_level_images(&root.join("project"));
     let accepted = AcceptedExport {
         root,
         destination: destination.to_owned(),
@@ -746,36 +770,29 @@ fn export_project(
     accepted
 }
 
-fn validate_export_command_observation(
-    value: &Value,
-    members: &[ProjectExportMemberReceipt],
-    startup_content_digest: ContentDigest,
-    build_input_digest: ContentDigest,
-    member_plan_digest: ContentDigest,
-    manifest_digest: ContentDigest,
-) {
+fn validate_export_command_observation(value: &Value, plan: &ProjectExportPlanReceipt) {
     assert_eq!(value.get("version").and_then(Value::as_u64), Some(1));
     assert_eq!(
         value.get("startup_content"),
-        Some(&digest_value(startup_content_digest))
+        Some(&digest_value(
+            plan.startup_content_digest(ProjectExportBinaryTarget::Headless)
+        ))
     );
     assert_eq!(
         value.get("build_input"),
-        Some(&digest_value(build_input_digest))
+        Some(&digest_value(plan.build_input_digest()))
     );
     assert_eq!(
         value.get("member_plan"),
-        Some(&digest_value(member_plan_digest))
+        Some(&digest_value(plan.member_plan_digest()))
     );
     let products = value
         .get("products")
         .and_then(Value::as_array)
         .expect("the export command observation contains product receipts");
     assert_eq!(products.len(), 2);
-    for (product, target) in products.iter().zip([
-        ProjectExportBinaryTarget::Headless,
-        ProjectExportBinaryTarget::Desktop,
-    ]) {
+    for (product, target) in products.iter().zip(ProjectExportBinaryTarget::ALL) {
+        let agreement = plan.product_agreement(target);
         assert_eq!(
             product.get("target").and_then(Value::as_str),
             Some(target.cargo_target_name())
@@ -786,15 +803,30 @@ fn validate_export_command_observation(
         );
         assert_eq!(
             product.get("executable"),
-            Some(&digest_value(export_executable_digest(members, target)))
+            Some(&digest_value(export_executable_digest(
+                plan.members(),
+                target
+            )))
         );
         assert_eq!(
             product.get("manifest"),
-            Some(&digest_value(manifest_digest))
+            Some(&digest_value(agreement.manifest_digest))
         );
         assert_eq!(
             product.get("content"),
-            Some(&digest_value(startup_content_digest))
+            Some(&digest_value(agreement.startup_content_digest))
+        );
+        assert_eq!(
+            product.get("closure_plan"),
+            Some(&digest_value(agreement.startup_closure_plan_digest))
+        );
+        assert_eq!(
+            product.get("authoring_schema_bundle"),
+            Some(&digest_value(agreement.authoring_schema_bundle_digest))
+        );
+        assert_eq!(
+            product.get("schema_fingerprint").and_then(Value::as_str),
+            Some(agreement.schema_fingerprint.as_ref())
         );
         assert!(
             product
@@ -871,29 +903,73 @@ fn product_value(product: &ProductProcessObservationReceipt) -> Value {
     })
 }
 
-fn authoring_bundle_digest(closure: &StartupContentClosureReceipt) -> ContentDigest {
-    closure
-        .members()
-        .iter()
-        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
-        .expect("checked product closure contains its authoring schema bundle")
-        .digest()
-}
-
 fn edit_startup_scene(project: &Path) -> ContentDigest {
     let path = project.join("scenes/startup.scene.json");
-    let mut document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    edit_scene_clear_color(&path, 0.06, EDITED_CLEAR_COLOR_R)
+}
+
+fn edit_scene_clear_color(path: &Path, original: f64, updated: f64) -> ContentDigest {
+    let mut document: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     let value = document
         .pointer_mut(
             "/payload/entities/0/components/nara.render.Camera2d/value/value/clear_color/value/r/value",
         )
         .expect("the starter exposes one documented clear-color edit");
-    assert_eq!(value.as_f64(), Some(0.06));
-    *value = json!(EDITED_CLEAR_COLOR_R);
+    assert_eq!(value.as_f64(), Some(original));
+    *value = json!(updated);
     let mut bytes = serde_json::to_vec_pretty(&document).unwrap();
     bytes.push(b'\n');
-    fs::write(&path, &bytes).unwrap();
+    fs::write(path, &bytes).unwrap();
     ContentDigest::of_bytes(&bytes)
+}
+
+fn install_desktop_startup(project: &Path) {
+    let scenes = project.join("scenes");
+    let path = scenes.join(DESKTOP_STARTUP_SCENE);
+    fs::copy(scenes.join("startup.scene.json"), &path).unwrap();
+    edit_scene_clear_color(&path, EDITED_CLEAR_COLOR_R, 0.28);
+    profile_fixture::write_scene_sidecar(
+        &scenes,
+        DESKTOP_STARTUP_SCENE,
+        "f12228c8-740f-4a2c-9ec1-bac91b72bf14",
+    );
+    let manifest_path = project.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        manifest_path,
+        format!(
+            "{manifest}\n[profiles.desktop.startup]\ndefault_scene = '{DESKTOP_STARTUP_SCENE}'\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn move_startup_scene(project: &Path) -> PathBuf {
+    use nara_asset::{
+        AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath, AssetSourceKind,
+    };
+
+    let scenes = project.join("scenes");
+    let replacement = scenes.join(REPLACEMENT_SCENE);
+    fs::rename(scenes.join("startup.scene.json"), &replacement).unwrap();
+    let old_meta_path = scenes.join("startup.scene.json.meta");
+    let original =
+        AssetMetaIdentityCandidate::decode_json_bytes(&fs::read(&old_meta_path).unwrap()).unwrap();
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            original.identity().stable_id(),
+            AssetPath::new(REPLACEMENT_SCENE).unwrap(),
+            AssetSourceKind::Scene,
+        ),
+        (),
+    );
+    fs::write(
+        scenes.join(format!("{REPLACEMENT_SCENE}.meta")),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(old_meta_path).unwrap();
+    replacement
 }
 
 fn generate_lockfile(project: &Path, working_directory: &Path) {
@@ -948,10 +1024,6 @@ impl TrajectoryRoot {
 
     fn path(&self) -> &Path {
         &self.path
-    }
-
-    fn shared_cargo_target(&self) -> PathBuf {
-        self.target.join("nara-fper-product-cache")
     }
 }
 

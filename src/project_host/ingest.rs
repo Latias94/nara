@@ -340,6 +340,17 @@ fn project_settings_lineage(
     }
 }
 
+#[cfg(feature = "project-workflow")]
+impl ProjectSettingsLineage {
+    pub(crate) fn matches_manifest_profile(
+        self,
+        manifest_digest: ContentDigest,
+        profile: Option<&str>,
+    ) -> bool {
+        self == project_settings_lineage(manifest_digest, profile, self.project_root_identity)
+    }
+}
+
 fn project_profile_error(error: ProjectProfileError) -> ProjectCandidateError {
     match error {
         ProjectProfileError::InvalidManifest { diagnostics }

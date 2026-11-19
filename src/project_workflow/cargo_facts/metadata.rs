@@ -113,6 +113,24 @@ impl CargoMetadataFacts {
             .name)
     }
 
+    #[cfg(feature = "project-tooling")]
+    pub(crate) fn package_declares_feature(
+        metadata: &[u8],
+        expected_package_manifest: &Path,
+        feature: &str,
+    ) -> Result<bool, CargoMetadataFactsError> {
+        let value = metadata_document(metadata, expected_package_manifest)?;
+        let package = manifest_owner(&value, expected_package_manifest)?;
+        let features = package
+            .metadata
+            .get("features")
+            .and_then(Value::as_object)
+            .ok_or(CargoMetadataFactsError::InvalidField {
+                field: "packages[].features",
+            })?;
+        Ok(features.contains_key(feature))
+    }
+
     pub fn package(&self) -> &CargoPackageGraphFact {
         &self.declaration.package
     }

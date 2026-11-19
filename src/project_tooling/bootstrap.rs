@@ -88,7 +88,12 @@ pub fn invoke_project_tool(
             *parent = fs::canonicalize(&parent).map_err(ProjectToolInvocationError::Resolve)?;
         }
     }
-    let executable = build_headless(request.project(), request.profile() == Some("desktop"))?;
+    let desktop_feature = match &request {
+        ProjectToolRequest::Export { .. } => DesktopToolFeature::IfDeclared,
+        _ if request.profile() == Some("desktop") => DesktopToolFeature::Required,
+        _ => DesktopToolFeature::Disabled,
+    };
+    let executable = build_headless(request.project(), desktop_feature)?;
     let mut command = Command::new(executable);
     command
         .current_dir(request.project())
@@ -188,7 +193,16 @@ mod completion_tests {
     }
 }
 
-fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolInvocationError> {
+enum DesktopToolFeature {
+    Disabled,
+    Required,
+    IfDeclared,
+}
+
+fn build_headless(
+    project: &Path,
+    desktop_feature: DesktopToolFeature,
+) -> Result<PathBuf, ProjectToolInvocationError> {
     let manifest = project.join("Cargo.toml");
     let tools = CargoBuildTools::discover_in(project)?;
     if !project.join("Cargo.lock").is_file() {
@@ -216,30 +230,45 @@ fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolI
         ));
     }
     let host = parse_host_target(&bytes)?;
-    let mut metadata = Command::new(tools.cargo_path());
-    metadata
-        .current_dir(project)
-        .args([
-            "metadata",
-            "--locked",
-            "--no-default-features",
-            "--format-version",
-            "1",
-            "--manifest-path",
-        ])
-        .arg(&manifest)
-        .arg("--filter-platform")
-        .arg(&host)
-        .env("RUSTC", tools.rustc_path());
-    if desktop {
-        metadata.args(["--features", "desktop"]);
-    }
-    let (status, bytes) = bounded_output(&mut metadata, 16 * 1024 * 1024)?;
-    if !status.success() {
-        return Err(ProjectToolInvocationError::Bootstrap(
-            "Cargo could not discover the project's headless tool target".to_owned(),
-        ));
-    }
+    let load_metadata = |arguments: &[&str]| {
+        let mut metadata = Command::new(tools.cargo_path());
+        metadata
+            .current_dir(project)
+            .args([
+                "metadata",
+                "--locked",
+                "--no-default-features",
+                "--format-version",
+                "1",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .arg("--filter-platform")
+            .arg(&host)
+            .args(arguments)
+            .env("RUSTC", tools.rustc_path());
+        let (status, bytes) = bounded_output(&mut metadata, 16 * 1024 * 1024)?;
+        if !status.success() {
+            return Err(ProjectToolInvocationError::Bootstrap(
+                "Cargo could not discover the project's headless tool target".to_owned(),
+            ));
+        }
+        Ok(bytes)
+    };
+    let desktop = match desktop_feature {
+        DesktopToolFeature::Disabled => false,
+        DesktopToolFeature::Required => true,
+        DesktopToolFeature::IfDeclared => {
+            let declarations = load_metadata(&["--no-deps"])?;
+            CargoMetadataFacts::package_declares_feature(&declarations, &manifest, "desktop")
+                .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?
+        }
+    };
+    let bytes = load_metadata(if desktop {
+        &["--features", "desktop"]
+    } else {
+        &[]
+    })?;
     let package = CargoMetadataFacts::package_name_for_manifest(&bytes, &manifest)
         .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
     // This is the desktop-2D starter's tool policy. The generic Cargo contract neither names

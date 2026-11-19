@@ -8,9 +8,9 @@ use crate::{
     ProductRecipe,
     fs::{PathValidationError, RelativeComponent},
     project_workflow::{
-        ProjectCheckError, ProjectCheckRequest, ProjectExportOrphan, ProjectExportOutcome,
-        ProjectExportPlanError, ProjectExportReceipt, ProjectExportRejection, ProjectExportRequest,
-        ProjectExportUnresolved, check_project, prepare_project_export,
+        ProjectCheckError, ProjectExportOrphan, ProjectExportOutcome, ProjectExportPlanError,
+        ProjectExportReceipt, ProjectExportRejection, ProjectExportRequest,
+        ProjectExportUnresolved, prepare_project_export,
     },
 };
 use serde_json::json;
@@ -87,9 +87,14 @@ pub(crate) fn execute(
     let parent_path =
         fs::canonicalize(arguments.parent).map_err(ExportCommandError::ResolveParent)?;
     let project_root = host_fs::readable_directory(&project_path)?;
-    let delivery = check_project(ProjectCheckRequest::new(project_root, recipe))?;
-    let manifest_digest = delivery.manifest_digest();
-    let build = cargo::build(&project_path, delivery.startup_content())?.into_receipt();
+    let deliveries = ProjectExportRequest::check_deliveries(project_root, &recipe)?;
+    let build = cargo::build(
+        &project_path,
+        deliveries
+            .each_ref()
+            .map(|delivery| delivery.startup_content()),
+    )?
+    .into_receipt();
     let publication_parent = host_fs::writable_directory(&parent_path)?;
     let destination_name = arguments.destination;
     let published_root = parent_path.join(&destination_name);
@@ -98,12 +103,13 @@ pub(crate) fn execute(
     let prepared = prepare_project_export(ProjectExportRequest::new(
         publication_parent,
         destination,
-        delivery,
+        deliveries,
         build,
+        recipe,
     ))?;
     Ok(match prepared.publish() {
         ProjectExportOutcome::Published(receipt) => {
-            match acceptance::accept(&published_root, receipt.plan(), manifest_digest) {
+            match acceptance::accept(&published_root, receipt.plan()) {
                 Ok(acceptance) => ExportCommandOutcome::Accepted {
                     receipt,
                     acceptance,
@@ -162,7 +168,7 @@ pub(super) fn record_acceptance_observation(
     let value = json!({
         "version": 1,
         "attempt": attempt,
-        "startup_content": digest_json(plan.startup_content_digest()),
+        "startup_content": digest_json(plan.startup_content_digest(crate::project_workflow::ProjectExportBinaryTarget::Headless)),
         "build_input": digest_json(plan.build_input_digest()),
         "member_plan": digest_json(plan.member_plan_digest()),
         "products": products,

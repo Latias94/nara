@@ -12,7 +12,10 @@ use std::{
 
 use crate::{
     ProductRecipe,
-    project_workflow::{ProjectCheckRequest, ProjectExportMemberKind, check_project},
+    project_workflow::{
+        ProjectCheckRequest, ProjectExportMemberKind, ProjectExportOrphan, ProjectExportRejection,
+        check_project,
+    },
 };
 use thiserror::Error;
 
@@ -157,6 +160,10 @@ enum ToolError {
     Check(#[from] crate::project_workflow::ProjectCheckError),
     #[error(transparent)]
     Export(#[from] export::ExportCommandError),
+    #[error(transparent)]
+    ExportRejected(Box<ProjectExportRejection>),
+    #[error(transparent)]
+    ExportOrphaned(Box<ProjectExportOrphan>),
     #[error("startup Scene repair failed")]
     Repair(crate::project_workflow::ProjectStartupSceneRepairError),
     #[error("the manifest was published but repair acceptance could not be established")]
@@ -209,6 +216,20 @@ impl ToolError {
                 "project.tool.export-preparation-failed",
                 "Export preparation failed before publication",
             ),
+            Self::ExportRejected(rejection) => {
+                return ProjectToolFailure::from_export_publication(
+                    operation,
+                    false,
+                    rejection.staged_delivery_failure(),
+                );
+            }
+            Self::ExportOrphaned(orphan) => {
+                return ProjectToolFailure::from_export_publication(
+                    operation,
+                    true,
+                    orphan.staged_delivery_failure(),
+                );
+            }
             Self::Operation {
                 stage,
                 code,
@@ -223,11 +244,22 @@ impl ToolError {
 pub(crate) fn test_schema_failure_protocol_roundtrip(
     error: crate::project_host::schema::SchemaRefreshError,
 ) -> ProjectToolFailure {
-    let response =
-        protocol::encode_response("schema-write", Err(ToolError::Schema(error))).unwrap();
+    test_failure_protocol_roundtrip("schema-write", ToolError::Schema(error))
+}
+
+#[cfg(test)]
+pub(crate) fn test_export_orphan_protocol_roundtrip(
+    orphan: ProjectExportOrphan,
+) -> ProjectToolFailure {
+    test_failure_protocol_roundtrip("export", ToolError::ExportOrphaned(Box::new(orphan)))
+}
+
+#[cfg(test)]
+fn test_failure_protocol_roundtrip(operation: &str, error: ToolError) -> ProjectToolFailure {
+    let response = protocol::encode_response(operation, Err(error)).unwrap();
     let mut bytes = serde_json::to_vec(&response).unwrap();
     bytes.push(b'\n');
-    protocol::decode_response(&bytes, "schema-write")
+    protocol::decode_response(&bytes, operation)
         .unwrap()
         .unwrap_err()
 }
@@ -289,16 +321,12 @@ fn execute(
                         product_observations: acceptance.products().len(),
                     })
                 }
-                export::ExportCommandOutcome::Rejected(_rejection) => Err(ToolError::operation(
-                    ProjectToolFailureStage::Publication,
-                    "project.tool.export-rejected",
-                    "Export publication was rejected",
-                )),
-                export::ExportCommandOutcome::Orphaned(_orphan) => Err(ToolError::operation(
-                    ProjectToolFailureStage::Publication,
-                    "project.tool.export-orphaned",
-                    "Export left an orphaned candidate requiring cleanup",
-                )),
+                export::ExportCommandOutcome::Rejected(rejection) => {
+                    Err(ToolError::ExportRejected(Box::new(rejection)))
+                }
+                export::ExportCommandOutcome::Orphaned(orphan) => {
+                    Err(ToolError::ExportOrphaned(Box::new(orphan)))
+                }
                 export::ExportCommandOutcome::Unresolved(_unresolved) => Err(ToolError::operation(
                     ProjectToolFailureStage::Publication,
                     "project.tool.export-unresolved",
