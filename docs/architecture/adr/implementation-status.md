@@ -2175,6 +2175,21 @@ desktop passes on an isolated unchanged rerun after a recorded foreground interr
 The twelve minimal-feature controls, correctness Clippy, formatting, dependency and document checks pass. Full
 R7/R10/R12/Foundation remains active; physical controller interaction remains unqualified.
 
+The [opt-in source-game round flow](../../plans/2026-10-20-persistent-two-level-game-plan.md#opt-in-playable-round-flow)
+at `c2cf3dd`/`ffa7303` uses private typed gameplay policy over the original Input, time, command
+and Scene owners.
+Title, new round, pause/continue, completion, return to title and exit have seven passing public
+source-game trajectories within the final 236-test release cohort; minimal feature controls pass
+13/13. They retain the original fixed
+acknowledgement while draining pre-pause ordinary intent, distinguish Host pause from zero game
+scale, and reset only after actual new Scene reconstruction. Default exploration and checkpoint/
+Resume wire formats remain unchanged; exact reconstruction rejects the unrepresented flow.
+The optional existing-UI HUD/native profile passes actual Windows DX12 physical keyboard acceptance
+on RTX 4090. It joins original native/UI submissions, positive text paint and glyph facts, and
+completes original HWND, Runtime, pump and containing-process cleanup. The standalone ordinary
+entry also passes; initial foreground refusal runs and corrections remain in the owner record.
+General state hooks and scoped lifetime automation remain OQ-034; full Foundation remains active.
+
 The [actual-game recording successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` adds a source/headless exact-step game tool through the original command, Session and Scene
 owners. It captures successful consumption, requires the original generation/tick acknowledgement,

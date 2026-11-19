@@ -16,6 +16,108 @@ The user authorizes implementation and fearless refactoring. This plan does not 
 foundation/locality units or create a new Goal. Root owns integration and serial Cargo/fmt/Git;
 research and implementation lanes have disjoint live file ownership. Preserve untracked vendor.
 
+## Opt-In Playable Round Flow
+
+The next Runtime consumer adds an explicit game-owned flow without changing the default
+exploration recipe or the Save/Resume wire formats. Boot freezes game time before the first
+frame plan, then exposes a title, new round, playing, pause/continue, completion, return to title,
+and exit. The round goal is one collected pickup in each main Meadow and Cavern occurrence.
+Menu feedback and keyboard controls must be usable in an ordinary desktop window; this is a
+small game presentation, not resumed Editor component development.
+
+Keep `GamePhase` as the existing Scene preparation/reconstruction status. A separate opt-in
+plugin owns round flow. It uses the original `RuntimeTimeSettings.time_scale`, retaining the
+previous positive scale, and never changes the Host-owned `paused` flag. Always-enabled frame
+actions drive menus even when there are no fixed ticks. Non-playing phases disable gameplay
+input and clear held game intent. On continue, the first resumed original fixed transaction
+ignores stale ordinary gameplay actions while retaining movement terminals and the original
+command capture/acknowledgement. Only its completed boundary reopens gameplay input. No queue
+replacement, extra paused step, synthetic acknowledgement, or second clock is introduced.
+
+New rounds use the original `travel::begin` and Scene preparation/commit/reconstruction path.
+Associate success with the new Scene occurrence, settled original request and successful
+reconstruction. Reset round statistics only after that success. Preparation/preflight refusal
+retains the old game and menu; post-commit reconstruction failure remains explicitly degraded.
+Starting cannot be abandoned into an unrelated menu with an outstanding request. Exit always
+uses the original App/native shutdown. The additional plugin and mapping lifetime remain
+unsupported by exact reconstruction instead of borrowing the old eligibility proof.
+
+Qualify the real game through public source startup, Input, time and command owners: frozen
+title/pause, actual new Scene, zero-tick command backlog, fresh-press continuation, Host pause
+independence, task progress, real pickup completion, successful reset and failed-start behavior.
+Run one actual Windows desktop input/presentation/cleanup trajectory. Keep controller delivery,
+general state-machine APIs, cooked menu delivery and Editor UI as separate successors. The
+pinned Bevy State source (`03ed5a27c92715c8fa2188f31f04e454ec39942f`) supports separate game
+transition policy; its World-owned schedule storage is not Nara's App-owned schedule authority.
+
+### Round Flow Implementation And Qualification
+
+The ordinary launch seam lands at `c2cf3dd`; the complete game flow and acceptance consumer land
+at `ffa7303`.
+
+The game now has an opt-in `flow::with_play_flow` recipe contribution, separate `FlowSnapshot`
+and private transition state. Its independently enabled `play-flow` desktop profile composes the
+existing Runtime UI and presentation owners; a game-owned HUD projects phase, goals and keyboard
+instructions without adding an Editor component layer. The ordinary launch owner accepts an
+explicit standalone profile while inherited supervised source/profile authority still wins.
+The optional UI closure adds existing accessibility/presentation packages to the sample lock;
+no existing package version or source is replaced. The common authoring bundle is refreshed
+through the selected profile; additional UI metadata does not activate UI on the default game.
+
+The first release CPU cohort passes 159/159 in `ad7d45ca-8cc9-4b7b-a931-10f7f5fd4c7f`:
+152 library controls and seven complete source-game trajectories. These cover title freeze before
+the first planned tick, original Scene replacement while scaled time is stopped, held-source
+cancellation, zero-tick M/E/movement backlog followed by original consumption/acknowledgement,
+Host/game pause independence, exact Resume refusal, real pickups in both main levels, full new-round
+reset, preparation refusal and source repair. The startup-content recovery control starts with an
+invalid checkpoint role, returns from Degraded to a persistent Title, repairs source and confirms
+a new initialized Scene with actual moving animation. Review corrected both persistent-Title and
+initialization-recovery paths. Menu binding installation errors fail through original Startup
+cleanup rather than displaying a menu whose controls were not installed. The initial fallible
+Startup system used the wrong ECS result type; it now returns the substrate's actual `BevyError`.
+
+The selected profile's original `schema-write` and `schema-check` both pass. All seven existing
+owners are preserved byte-for-value, with one additional native UI owner. The first UI release
+rebuild after local target cleanup takes 26m02s; this is an observed build, not a frame-time or
+edit-to-result budget.
+
+Actual Windows DX12 acceptance passes 1/1 in `910aab4f-2975-4966-9112-e6d4e9199f98` on the
+original NVIDIA GeForce RTX 4090, with the supervised-process cleanup receipt. A preceding direct
+execution also passes the same full trajectory. Physical Enter, D, Escape, E, T and X operate
+the original native window: title, a new Scene, held movement, stopped pause clock, release while
+paused, stationary continuation, fresh movement, real pickup, Scene travel, title, a second fresh
+round and normal exit. At each selected phase, the original native and UI submission facts agree;
+the exact presented semantic text joins its own nonempty clipped Text paint with positive alpha
+and actual submitted glyph quads. The final original HWND is destroyed, Runtime retires, and the
+physical event loop returns. The ordinary `desktop --play-flow --verify-first-present` entry also
+passes, exercising the standalone profile selection without an embedded test Host.
+
+Two initial contained native attempts encounter Windows foreground activation refusal; both
+complete original native/process cleanup without forced termination. The test now permits bounded
+normal focus activation and records its HWND even on activation failure so cleanup remains
+observable. It never injects Alt to force focus. Physical release custody records a successful
+KeyUp once and never replays it after native close. Independent review corrected those test paths
+and a transparent-text false positive before the passing run. No compositor scanout, physical
+controller, screenshot pixel-oracle or numeric performance claim follows from these submission
+facts. General state hooks, flow-aware exact reconstruction, controller menus and cooked flow
+delivery remain outside this unit.
+
+Final affected release regression passes 236/236 with no skips in
+`e2679fd9-e385-482e-b781-5f4c4b188959`. It includes the library and flow controls plus original
+source gameplay, authored Input, Resume, concurrent rooms, cooker source/runtime admission,
+animation and live-command behavior against the refreshed common bundle. Minimal no-default
+`cooked-player` plus all seven CPU flow controls pass 13/13 in
+`d9939ee0-baf6-4b3c-a1d8-6ae0bb5b9acd`, without UI or development services. The omitted-option
+default desktop also passes first-presentation verification. Round completion itself is covered
+by the public CPU game trajectory, not claimed as a displayed native Complete frame. Correctness
+Clippy passes for the changed sample library, entrypoints and tests, and the owning root Host/UI
+feature closure. Existing advisory warnings remain; no warning cleanup or performance gain is
+claimed. Both independent review lanes are closed with their concrete findings corrected.
+
+Root/sample formatting and document link/heading, manifest/lock/Schema and whitespace checks pass.
+All scoped worker/reviewer lanes are closed; the fifteen paused Editor/Dialogue files retain their
+original byte hashes. No remote publication or branch movement is part of this unit.
+
 ## Source Agreement And Processed Material Kind Successor
 
 Before extracting a shared cooked entry, repair the two confirmed delivery gaps from the

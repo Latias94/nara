@@ -654,6 +654,11 @@ flowchart LR
   transition conflict and ordering policy, Exit/cleanup/Enter fault behavior, and the exact scoped
   entity/resource/message/service contracts. This hypothesis does not accept ADR 0084 or ADR 0089
   and does not authorize a state crate or public scheduler API.
+- **Concrete consumer**: The [Two-Level opt-in round flow](../plans/2026-10-20-persistent-two-level-game-plan.md#opt-in-playable-round-flow)
+  implements a private flat policy over the original Input, time, command and Scene owners. It
+  distinguishes gameplay menus from Scene preparation and Host pause. Seven source-game CPU
+  trajectories pass, including complete rounds and failed-start recovery; this does not select
+  general transition hooks, scoped lifetime automation, or a `bevy_state` adapter.
 
 ## OQ-035: Spatial World Partition, Streaming, and Origin Policy
 

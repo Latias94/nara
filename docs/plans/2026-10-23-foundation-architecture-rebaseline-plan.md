@@ -1771,6 +1771,22 @@ graphs and document checks pass. The owning record retains exact runs and platfo
 This adds no runtime frame validator, new backend framework, World, clock or resource owner;
 full R7/R10/R12/Foundation remains active and paused UI/Dialogue is preserved.
 
+The [opt-in round flow](2026-10-20-persistent-two-level-game-plan.md#opt-in-playable-round-flow)
+at `c2cf3dd`/`ffa7303` adds game-owned Title, new round, Playing, Pause/Continue, real pickup
+completion, restart and exit. Its private flat policy composes the original time, Input, gameplay
+command and Scene owners;
+it does not introduce a public state machine or conflate Scene preparation with Host pause.
+Final affected release qualification passes 236/236, including seven full flow trajectories;
+the minimal no-development/no-UI closure passes 13/13. The first resumed
+original fixed transaction drains old ordinary gameplay intent before fresh input is enabled,
+and failed preparation preserves the old round. Success resets round state only after actual new
+Scene reconstruction. A separately selected desktop profile and existing Runtime UI supply the
+game HUD. Actual physical keyboard/UI acceptance passes on Windows DX12 hardware, joining original
+UI/native submission receipts and preserving original window/Runtime/pump cleanup; the ordinary
+standalone profile entry also passes. The owning record distinguishes initial foreground refusals,
+their complete cleanup, build cost and remaining limits. This does not resume Editor/UI/Dialogue
+product development or complete R7/R10/R12/Foundation.
+
 The [actual-game recording successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` extends that usable Runtime path: a finite source/headless semantic program drives the
 original exact-step Session, records actual successful Capture plus original acknowledgement,

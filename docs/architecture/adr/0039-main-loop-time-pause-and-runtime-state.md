@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-16
+**Last Revised**: 2026-11-19
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -133,6 +133,13 @@ The product contract is:
   a Godot-style scene tree or object lifecycle.
 - Editor/tooling mode (`Edit`, `Play`, `Paused`) is separate from gameplay state. Tooling may map
   its mode into runtime pause/time policy, but it is not the global app state model.
+- A game-owned menu may freeze virtual time with zero `time_scale` while retaining the prior
+  positive scale; it does not take ownership of the Host's managed pause flag. Menu actions remain
+  frame operations, independent of fixed-tick gameplay commands. If gameplay input is disabled
+  across a menu, the game must reconcile already queued intent through its existing command
+  transaction before accepting fresh gameplay. Context cancellation alone does not withdraw
+  previously admitted commands. The opt-in Two-Level round flow is a concrete consumer of these
+  boundaries, not a general state-machine or transition-hook API.
 
 ## Runner and Redraw Policy
 
