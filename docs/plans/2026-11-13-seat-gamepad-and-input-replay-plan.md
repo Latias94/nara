@@ -208,6 +208,133 @@ formats. Physical controller hardware, foreign native retirement, analog game mo
 shipping Player backend selection, rumble and numeric input-latency budgets remain open.
 Full R10/R12 and the Foundation Goal remain active.
 
+## Explicit Controllers Through Cooked Player Delivery
+
+Status: implemented at `4b862a9`, with native qualification at `a332a2f`, November 19.
+Windows source-free silent/audio controller composition and the preserved original placements
+are qualified below. Physical controller interaction remains unqualified. Extend the source-game
+backend into actual source-free delivery before selecting another runtime subsystem. Preserve
+paused Editor/UI/Dialogue work and the full R7/R10/R12/Foundation scope.
+
+The game owns an explicit `--controllers none|gilrs` cooker choice, independent of its
+headless, silent desktop or audible desktop placement. The default remains `none`; headless
+native controllers refuse. Gilrs selection requires the optional gamepad feature and supported
+Windows target. Both audible and silent desktop Players must compose it with their existing
+runtime recipes. Do not create a generic backend registry or enumerate a new engine runtime
+for every native-service combination.
+
+One finite game-owned selection binds its existing binary, requested Cargo features, content
+profile and actual recipe. The cooker and Player share those rules; the core build and catalog
+owners retain actual compiler features, fingerprints, target and immutable generated input.
+All-features availability does not itself activate native controllers. Original keyboard-only
+profile names remain unchanged; controller-selected profiles are distinct and must fail closed
+when opened by an unavailable or wrong-placement Player. Source and processed selections use
+the same fixed controller configuration and original native close participant.
+
+Qualification must execute the ordinary cooker, relocate its complete installation, remove
+copied source/import cache and tool access, then run the actual selected Player through its
+original contained process owner. Preserve the complete physical keyboard, play, room, pixel,
+Save/fresh Restore, continued-travel and physical cleanup controls. The combined audio/controller
+selection retains the original WASAPI sample and native-retirement proof. Original keyboard-only
+controls remain independently selected. A presented inventory observation can report the actual
+installed backend and connected-device count; it is not physical button evidence or a new
+cleanup receipt. Zero connected devices remain an explicit hardware limit.
+
+Keep source/headless and silent default dependency selections free of Gilrs. Test finite profile
+composition and actual cooked-content fingerprints without acquiring devices during preparation.
+Reject unsupported combinations/targets at the selected boundary. No extra per-frame Scene audit,
+wire field, input queue, clock or runtime manager is selected. Focused consumer tests, independent
+review, actual native execution and precise local commits own the resulting evidence.
+
+### Controller Player Implementation And Qualification
+
+The game's shared `delivery::PlayerSelection` now owns the finite runtime/controller choice.
+The cooker parses `--controllers none|gilrs`; it selects explicit Cargo features, recipe and
+content profile while the original Cargo/catalog owners still capture actual compiler output
+and fingerprints. The three old profile names are unchanged. Source desktop and both cooked
+desktop placements share the same controller configuration helper, preserving original canonical
+route and limit bytes. Headless and desktop entries check their own placement before opening
+content. No runtime-native acquisition occurs during recipe/plan construction.
+
+The first library/cooker/source-entry production check passes with `gamepad,cook,audio-cpal`.
+The initial CPU test compilation rejects a new `unwrap_err()` because the owning
+`PreparedProjectCook` intentionally has no Debug requirement. The test now explicitly matches
+its expected error; no engine trait or resource owner is changed for that assertion. The complete
+affected library, cooked-content/source, controller gameplay, Player entry, protocol-corruption
+and PCM-oracle selection passes **270/270**, with fifteen explicit native skips, in
+`be2f6c32-a42a-414e-9fcf-9d362fb4c350`. It includes real resolved plans and cooked catalogs for
+both controller placements, unchanged authored Input/schema/codecs, wrong-recipe/profile refusal
+and unsupported-target rejection before source/store work.
+
+Independent production review finds no P1/P2 in the shared selection, feature/profile/recipe
+binding or original Player cleanup. Consumer review identifies an acceptance gap: both old
+keyboard native paths explicitly passed the new `none` option, leaving omission untested on
+desktop. The silent desktop control now omits it, while audible desktop still passes `none`.
+The original complete workflows and exact publication/features/catalog/controller observations
+remain unchanged. Bounded rereview closes that finding with no remaining P1/P2. Native
+generated-input compilation, complete Player execution and final checks follow below.
+
+The first genuine controller-enabled silent desktop delivery passes **1/1** in
+`b41670b0-ffd9-4139-8263-b8de4951d6eb`. The original cooker builds an explicit native-target,
+default-disabled Player, publishes its bound pack, then the original fixture relocates the
+installation and removes copied source/cache/tool access. Actual hardware DX12 execution
+retains physical authored J input, rooms, collision, atlas pixels, complete Save/fresh Restore,
+twenty further travels, scripted controls and software first-presentation control. Successful
+saved, continued and finite results observe `gilrs-wgi` with **zero connected devices**, original
+Runtime retirement and physical event-loop return. The original process cleanup reports empty
+containment, stopped readers and drained output. The 1028-second trajectory includes the first
+release build for the explicit target; it is not a runtime frame-time measurement. Combined
+audio/controller and the original keyboard-only delivery controls follow separately.
+
+The controller-enabled audible delivery separately passes **1/1** in
+`6913dd3b-a123-46a8-80f3-fdfbc010eb92` on Windows, hardware DX12/RTX4090 and WASAPI. Its relocated
+pack retains the original two positive processes and two distinct corruption refusals. The
+independent oracle compares **348672 callback samples** against original acquired PCM with
+**zero maximum absolute error**, including pickup/travel causes and stale-scope cancellation.
+The finite verified and physical WM_CLOSE trajectories both observe `gilrs-wgi` with zero
+devices, original Runtime retirement, event-loop return and successful physical process cleanup.
+Source/cache paths remain unavailable. Callback equality does not establish human audibility,
+hardware-controller interaction or an audio/input latency budget. The 381-second trajectory
+includes its explicit-target build. Original keyboard/headless delivery controls follow.
+
+The original delivery selection `dcb8fa27-0a98-4768-9138-dc8e98898ec0` passes the complete
+keyboard-only audible and headless workflows. Audible success records observe `none` with
+zero devices; its independent PCM oracle compares **351552 samples** with zero maximum
+absolute error. Headless retains its real captured build, source/cache removal, fresh
+Save/Restore, continued behavior, corruption refusals and original native process cleanup.
+The default silent desktop case is interrupted during a physical L-key injection: the OS
+foreground observation becomes None, and the existing exact-window assertion fails. The
+original child/worker cleanup still completes. This result is a failure, not a skipped pass.
+
+Without source or assertion changes, the isolated default-desktop rerun passes **1/1** in
+`6ad0df3e-b3fc-4116-8d5e-7161242fea01`, retaining the original complete trajectory and twenty
+additional travels. The cooker omits `--controllers`, and actual saved/continued/finite records
+all observe `none`, zero devices, original Runtime retirement and event-loop return. The
+first foreground interruption remains recorded separately from this final qualification.
+No focus-assertion relaxation or auto-retry policy is added to the product or test framework.
+
+Final correctness Clippy passes for the selected library, cooker/source and all three Player
+entries plus affected source/content/native-consumer test targets. This is a correctness gate,
+not a warning-free-workspace claim. The default-disabled `cooked-player` selection separately
+passes **12/12** in `7403e208-791b-409a-97da-af208cb86185`: headless configuration/Player entry,
+unavailable controller rejection and profile/target policy compile and execute without
+development, desktop, audio or gamepad features.
+
+Root and independent sample formatting checks pass. The headless `cooked-player` and ordinary
+`cooked-player,desktop` normal/build graphs exclude Gilrs; explicit `cooked-player,gamepad`
+includes the native adapter. This unit changes no dependency version, source or lockfile.
+TOML/lock, CI YAML, added local document links/headings and whitespace checks pass. The local
+CI addition runs selection/content controls without native acquisition; no remote CI or push
+was performed. All five scoped workers/reviewers are closed, and the fifteen paused
+UI/Dialogue files remain byte-identical. No Cargo or native-test process remains owned by
+this unit after closure.
+
+The selected Windows delivery unit is complete, including both new controller choices and
+the original three Player placements. It does not establish physical button/stick/hotplug
+gameplay, foreign native retirement, input/audio latency budgets, rumble, arbitrary service
+reconstruction or a universal backend-selection interface. Existing SaveSlot, continuation
+and recording formats are unchanged. Full R7/R10/R12/Foundation remains active.
+
 ## Actual Game Recording And Replay Successor
 
 Status: implemented and qualified at `da96f1e` for the source/headless profile below.

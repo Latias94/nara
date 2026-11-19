@@ -1752,6 +1752,25 @@ document checks and both shipping graphs preserve the optional dependency bounda
 hardware button/stick/hotplug play, foreign backend retirement, force feedback, analog game
 movement and shipping Player selection remain open. Full R10/R12/Foundation is not complete.
 
+The [explicit controller delivery successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#explicit-controllers-through-cooked-player-delivery)
+at `4b862a9`/`a332a2f` extends that source backend into independently selected silent and audible
+desktop Players.
+The game shares one finite runtime/controller selection among cooker, binary and recipe;
+original Cargo/catalog owners retain actual compiler features and fingerprints. `--controllers`
+defaults to `none`; feature availability alone never activates a native service. Controller
+profiles are distinct while the original three names, fifteen-member content, save and resume
+formats remain unchanged. Shared configuration preserves source/cooked route and limits.
+Affected CPU controls pass 270/270. Actual relocated source-free controller desktop and
+controller/audio desktop workflows each pass, including the original full gameplay/pixel/Save/
+Restore/continued-travel and WASAPI oracles. Both observe zero connected hardware controllers,
+retain original native cleanup and make no physical button/stick or input-latency claim.
+Original keyboard/audio and headless deliveries also pass; the omitted-option default desktop
+rerun passes after a separately recorded foreground interruption, retaining every original
+assertion. Minimal-feature controls pass 12/12; correctness Clippy, formatting, dependency
+graphs and document checks pass. The owning record retains exact runs and platform limits.
+This adds no runtime frame validator, new backend framework, World, clock or resource owner;
+full R7/R10/R12/Foundation remains active and paused UI/Dialogue is preserved.
+
 The [actual-game recording successor](2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` extends that usable Runtime path: a finite source/headless semantic program drives the
 original exact-step Session, records actual successful Capture plus original acknowledgement,
