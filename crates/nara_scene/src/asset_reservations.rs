@@ -1,8 +1,8 @@
 use std::fmt;
 
 use nara_asset::{
-    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetReferenceResolver, AssetServer,
-    AssetSourceKind, Handle,
+    AssetError, AssetProductRef, AssetRecord, AssetRef, AssetRefError, AssetReferenceResolver,
+    AssetServer, AssetSourceKind, AssetSourcePath, Handle,
 };
 use nara_ecs::World;
 use nara_reflect::{ComponentApplyBatch, ComponentCodecError};
@@ -66,6 +66,18 @@ impl SceneAssetReservations {
         reference: AssetProductRef,
     ) -> Result<Handle<T>, AssetError> {
         self.batch.reserve_product(reference)
+    }
+
+    /// Stages the verified relocation of a source's primary Product in this private catalogue.
+    ///
+    /// The source owner verifies both paths. A successful Scene commit publishes the relocation
+    /// under the original World and catalogue guard.
+    pub fn relocate_primary_source(
+        &mut self,
+        previous: &AssetSourcePath,
+        record: &AssetRecord,
+    ) -> Result<(), AssetError> {
+        self.batch.relocate_primary_source(previous, record)
     }
 
     /// Observes the catalogue that component decoding will extend and commit on success.

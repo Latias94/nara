@@ -60,6 +60,12 @@ actual Scene sidecars. Ordinary source preparation retains its Immediate documen
 resolved Deferred target facts; strict saved-source Check/Export validates both demands. Those
 source receipts and declared-root checks remain separate from this immutable processed base.
 
+For an Image or Material referenced by stable ID or primary Product, move the source and its
+sidecar together, preserve the UUID and update the sidecar's path. Source Scene replacement can
+then publish the new location while keeping the existing handle, including after leaving and
+returning to the Scene. Duplicate UUIDs and occupied destination paths refuse replacement. Update
+any authored path references when moving their targets.
+
 Use `ProjectScenes::request_additive(product)` in a first-party Host to prepare a Deferred Scene
 from the current primary Scene's admitted closure. The ordinary travel roots remain separate.
 Continue simulation while the request is Preparing. At an exclusive boundary, inspect the Ready

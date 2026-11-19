@@ -118,7 +118,7 @@ pub(super) struct Resident {
     pub gameplay: GameProgress,
 }
 
-pub(super) fn resident(world: &mut World) -> Resident {
+pub(super) fn assert_scene_owns_updates(world: &World) {
     assert!(
         world
             .get_resource::<AssetSourceChanges>()
@@ -130,6 +130,10 @@ pub(super) fn resident(world: &mut World) -> Resident {
             .get_resource::<AssetReloadRequests>()
             .is_none_or(AssetReloadRequests::is_empty),
     );
+}
+
+pub(super) fn resident(world: &mut World) -> Resident {
+    assert_scene_owns_updates(world);
     assert_eq!(world.query::<&Sprite>().iter(world).count(), 1);
     assert_eq!(world.query::<&Material2d>().iter(world).count(), 1);
     let (entity, sprite, material, gameplay) = {

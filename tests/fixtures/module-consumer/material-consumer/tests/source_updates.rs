@@ -32,6 +32,8 @@ mod observations;
 #[allow(dead_code)]
 #[path = "persistent_workflow/project.rs"]
 mod project;
+#[path = "source_updates/stable_rename.rs"]
+mod stable_rename;
 
 use observations::{Candidate, Resident, prepared, resident};
 use project::{
@@ -170,9 +172,8 @@ fn write_asset(world: &World, path: &str, bytes: impl AsRef<[u8]>) {
     fs::write(asset_path(world, path), bytes).unwrap();
 }
 
-fn select_material(world: &World, shader_path: &str, texture: AssetProductRef) {
-    let current =
-        Material2dSource::decode(&fs::read(asset_path(world, MATERIAL_PATH)).unwrap()).unwrap();
+fn select_material(world: &World, path: &str, shader_path: &str, texture: AssetProductRef) {
+    let current = Material2dSource::decode(&fs::read(asset_path(world, path)).unwrap()).unwrap();
     let next = Material2dSource::new(
         current.declaration().clone(),
         vec![AssetPath::new(shader_path).unwrap()],
@@ -180,7 +181,7 @@ fn select_material(world: &World, shader_path: &str, texture: AssetProductRef) {
         BTreeMap::from([("palette".to_owned(), AssetRef::Product(texture))]),
     )
     .unwrap();
-    write_asset(world, MATERIAL_PATH, next.encode().unwrap());
+    write_asset(world, path, next.encode().unwrap());
 }
 
 fn status(world: &mut World) -> ProjectSceneSourceUpdateStatus {
@@ -533,7 +534,7 @@ fn update_game(world: &mut World) {
                 acknowledge(world, &mut game);
                 idle(world);
                 assert!(!asset_path(world, NEXT_SHADER).exists());
-                select_material(world, NEXT_SHADER, palette_product());
+                select_material(world, MATERIAL_PATH, NEXT_SHADER, palette_product());
                 changed(world, MATERIAL_PATH);
                 game.step = Step::Missing;
             }
@@ -592,7 +593,7 @@ fn update_game(world: &mut World) {
                 );
                 acknowledge(world, &mut game);
                 idle(world);
-                select_material(world, NEXT_SHADER, indices_product());
+                select_material(world, MATERIAL_PATH, NEXT_SHADER, indices_product());
                 changed(world, MATERIAL_PATH);
                 game.step = Step::TextureSelection;
             }
@@ -729,25 +730,13 @@ fn update_game(world: &mut World) {
     });
 }
 
-#[test]
-fn game_owns_semantic_source_updates_and_preserves_last_good_residency_and_progress() {
-    let project = Project::new();
-    assert!(!project.root().join(format!("{STARTUP}.meta")).exists());
-    let scene_bytes = fs::read(project.root().join(STARTUP)).unwrap();
-    let files = GameFiles(project.root().to_path_buf());
-    let product = recipe()
-        .add_configured_plugin::<PaletteGame, _, _>(files, |files| PaletteGame(files.clone()))
-        .unwrap();
-    let intent = HeadlessRunIntent::frames(NonZeroU32::new(6000).unwrap(), Duration::ZERO)
-        .with_recipe(product)
-        .with_cleanup_timeout(Duration::from_secs(5))
-        .stop_when(|game: &Workflow| game.step == Step::Done);
-    let mut run = HeadlessRun::<Workflow>::new(project.capability(), intent, Vec::new());
+fn run_source_workflow<O: Resource + Clone>(project: &Project, intent: HeadlessRunIntent<O>) -> O {
+    let mut run = HeadlessRun::<O>::new(project.capability(), intent, Vec::new());
     let deadline = Instant::now() + Duration::from_secs(30);
-    let outcome = loop {
+    loop {
         let report = run.execute_bounded();
         match report.outcome() {
-            HeadlessRunOutcome::Completed(game) => break game.clone(),
+            HeadlessRunOutcome::Completed(game) => return game.clone(),
             HeadlessRunOutcome::Failed => {
                 panic!(
                     "semantic source HeadlessRun failed: {:?}",
@@ -762,7 +751,23 @@ fn game_owns_semantic_source_updates_and_preserves_last_good_residency_and_progr
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
-    };
+    }
+}
+
+#[test]
+fn game_owns_semantic_source_updates_and_preserves_last_good_residency_and_progress() {
+    let project = Project::new();
+    assert!(!project.root().join(format!("{STARTUP}.meta")).exists());
+    let scene_bytes = fs::read(project.root().join(STARTUP)).unwrap();
+    let files = GameFiles(project.root().to_path_buf());
+    let product = recipe()
+        .add_configured_plugin::<PaletteGame, _, _>(files, |files| PaletteGame(files.clone()))
+        .unwrap();
+    let intent = HeadlessRunIntent::frames(NonZeroU32::new(6000).unwrap(), Duration::ZERO)
+        .with_recipe(product)
+        .with_cleanup_timeout(Duration::from_secs(5))
+        .stop_when(|game: &Workflow| game.step == Step::Done);
+    let outcome = run_source_workflow(&project, intent);
     assert_eq!(outcome.step, Step::Done);
     assert_eq!(outcome.requests.len(), 11);
     assert_eq!(outcome.commits, 8);

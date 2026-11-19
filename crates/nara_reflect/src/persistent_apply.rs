@@ -560,6 +560,20 @@ impl ComponentApplyBatch {
         &self.context.asset_server
     }
 
+    /// Stages a content owner's verified source relocation with the original catalogue guard.
+    #[doc(hidden)]
+    pub fn relocate_primary_source(
+        &mut self,
+        previous: &AssetSourcePath,
+        record: &AssetRecord,
+    ) -> Result<(), AssetError> {
+        self.context
+            .asset_server
+            .relocate_primary_source(previous, record)?;
+        self.context.asset_server_touched = true;
+        Ok(())
+    }
+
     /// Reserves an explicitly admitted Product in this unpublished catalogue.
     ///
     /// The concrete content owner still prepares actual values and verifies their membership,

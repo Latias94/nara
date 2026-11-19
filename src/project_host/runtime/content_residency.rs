@@ -318,6 +318,9 @@ impl PreparedResidency {
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
         let catalog = PreparedCatalog::prepare(world, content, current, None)?;
         let mut bindings = SceneAssetReservations::from_world(world);
+        if let (Some(_), ResidencyInput::Source(snapshot)) = (current, content) {
+            catalog.stage_source_relocations(snapshot, &mut bindings)?;
+        }
         let images = prepare_images(
             world,
             content,

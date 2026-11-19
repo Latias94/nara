@@ -156,6 +156,55 @@ fn source_path_alias_joins_its_primary_product_without_changing_handle() {
 }
 
 #[test]
+fn relocating_a_primary_source_checks_both_paths_and_preserves_product_handles() {
+    let original = source_record();
+    let moved = AssetRecord::new(
+        original.stable_id(),
+        AssetSourcePath::new("textures/renamed.png").unwrap(),
+        AssetSourceKind::Image,
+    );
+    let primary = product(1, ImportedProductId::PRIMARY);
+    let selected = product(1, auxiliary());
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<String>(&original).unwrap();
+    let auxiliary_handle = server.reserve_product::<u32>(selected).unwrap();
+
+    let baseline = server.clone();
+    assert!(matches!(
+        server.relocate_primary_source(moved.path(), &moved),
+        Err(AssetError::ConflictingAssetIdentity { .. })
+    ));
+    assert_eq!(server, baseline);
+    let mut occupied = baseline.clone();
+    let destination = occupied.reserve_path_id(moved.path().clone()).unwrap();
+    let occupied_baseline = occupied.clone();
+    assert_eq!(
+        occupied.relocate_primary_source(original.path(), &moved),
+        Err(AssetError::PathAlreadyBound {
+            path: moved.path().clone(),
+            existing_id: destination,
+            requested_id: handle.id(),
+        })
+    );
+    assert_eq!(occupied, occupied_baseline);
+
+    server
+        .relocate_primary_source(original.path(), &moved)
+        .unwrap();
+    assert_eq!(server.id_for_path(original.path()), None);
+    assert_eq!(server.id_for_path(moved.path()), Some(handle.id()));
+    assert_eq!(server.path(handle.id()), Some(moved.path()));
+    assert_eq!(server.reserve_record::<String>(&moved), Ok(handle));
+    assert_eq!(server.get_product_handle::<String>(primary), Some(handle));
+    assert_eq!(server.get_product_handle::<u32>(primary), None);
+    assert_eq!(
+        server.get_product_handle::<u32>(selected),
+        Some(auxiliary_handle)
+    );
+    assert_eq!(server.path(auxiliary_handle.id()), None);
+}
+
+#[test]
 fn product_ids_are_scoped_by_source_and_distinguish_primary_from_auxiliary() {
     let mut server = AssetServer::new();
     let primary = product(1, ImportedProductId::PRIMARY);

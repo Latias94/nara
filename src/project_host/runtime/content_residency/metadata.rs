@@ -1,6 +1,6 @@
 //! Closed content authority and admission for residency-owned metadata.
 
-use nara_asset::{AssetId, AssetProductRef};
+use nara_asset::{AssetId, AssetProductRef, ImportedProductId};
 use nara_tilemap::TileSetDescriptor;
 use std::sync::Arc;
 
@@ -125,6 +125,69 @@ impl PreparedCatalog {
             Self::Source { change, scope, .. } => Some(change.database.resolver(scope)),
             Self::Processed { .. } => None,
         }
+    }
+
+    pub(super) fn stage_source_relocations(
+        &self,
+        snapshot: &ProjectContentSnapshot,
+        bindings: &mut SceneAssetReservations,
+    ) -> Result<(), HostFault> {
+        let Self::Source {
+            original,
+            change,
+            scope,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if !snapshot.has_complete_reference_catalogue() {
+            return Ok(());
+        }
+        let materials = snapshot.domain_assets().collection::<Material2dDomain>();
+        let published_paths = snapshot.images().iter().map(|image| image.path()).chain(
+            materials
+                .iter()
+                .flat_map(|collection| collection.source_records().map(AssetRecord::path)),
+        );
+        for record in published_paths.filter_map(|path| change.owned_record(path)) {
+            let primary = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+                .map_err(|_| binding_changed())?;
+            let server = bindings.staged_server();
+            let id = match record.source_kind() {
+                AssetSourceKind::Image => server
+                    .get_product_handle::<ImageAsset>(primary)
+                    .map(|handle| handle.id()),
+                AssetSourceKind::Other(kind) if kind == Material2dDomain::SOURCE_KIND => server
+                    .get_product_handle::<Material2dAsset>(primary)
+                    .map(|handle| handle.id()),
+                _ => continue,
+            };
+            let Some(previous) = id.and_then(|id| server.path(id)) else {
+                continue;
+            };
+            if previous == record.path() {
+                continue;
+            }
+            if scope.relative_path(previous).is_none()
+                || scope.relative_path(record.path()).is_none()
+                || change.database.record_for_path(previous).is_some()
+                || original
+                    .as_ref()
+                    .and_then(|db| db.record_for_path(previous))
+                    .is_some_and(|old| {
+                        old.stable_id() != record.stable_id()
+                            || old.source_kind() != record.source_kind()
+                    })
+            {
+                return Err(binding_changed());
+            }
+            let previous = previous.clone();
+            bindings
+                .relocate_primary_source(&previous, record)
+                .map_err(|_| binding_changed())?;
+        }
+        Ok(())
     }
 
     pub(super) fn runtime_lease(&self) -> Option<&Arc<RuntimeContentLease>> {

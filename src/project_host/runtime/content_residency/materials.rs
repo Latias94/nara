@@ -272,7 +272,7 @@ impl MaterialPublications {
                 return Err(identity_conflict());
             }
             let ours = old.get(&handle.id()).filter(|material| {
-                material.product == product && material.identity.record == record
+                material.product == product && (!additive || material.identity.record == record)
             });
             if additive && let Some(material) = ours {
                 if !material.matches(server, values, states)

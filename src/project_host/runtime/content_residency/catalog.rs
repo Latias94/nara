@@ -53,6 +53,14 @@ impl CatalogChange {
             owned: next_owned,
         })
     }
+
+    pub(super) fn owned_record(&self, path: &AssetSourcePath) -> Option<&AssetRecord> {
+        let index = self
+            .owned
+            .binary_search_by(|record| record.path().cmp(path))
+            .ok()?;
+        self.owned.get(index)
+    }
 }
 
 fn conflict() -> HostFault {

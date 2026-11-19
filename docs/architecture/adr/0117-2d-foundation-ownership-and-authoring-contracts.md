@@ -247,6 +247,12 @@ mounted UUIDs fail instead of silently remapping immutable packs. Runtime export
 operation, not a lossless authoring round trip. This narrows the admitted work under
 0037/0038/0058/0101/0103 without accepting Proposed 0083/0087/0088 wholesale.
 
+Source Scene replacement can relocate a primary Image or Material's weak path binding in its
+existing transaction. The admitted source catalogue establishes one location for the stable ID.
+The World must retain the expected prior binding, and its destination must be available. The new
+catalogue, path binding and typed publication share the same commit. A prior Scene's retirement
+may leave a weak binding, so an exact relocation can also preserve that handle on re-entry.
+
 Published usable value/revision is independent from the latest load attempt and diagnostic.
 Preparation consumes the published revision even if a later attempt failed. Removal, identity
 invalidation, or successful replacement invalidates the corresponding derivation. Async completions

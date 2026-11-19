@@ -170,7 +170,7 @@ impl ImagePublications {
             }
             let original = owned_by_id
                 .get(&handle.id())
-                .filter(|image| image.product == product && image.record == record);
+                .filter(|image| image.product == product && (!additive || image.record == record));
             if additive && let Some(original) = original {
                 if !original.matches(server, images, states)
                     || images.get(handle).is_none_or(|resident| {

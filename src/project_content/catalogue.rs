@@ -30,6 +30,12 @@ pub(crate) struct DeliveryCatalogue {
 }
 
 impl LoadContext<'_> {
+    pub(super) fn has_complete_reference_catalogue(&self) -> bool {
+        self.catalogue
+            .as_ref()
+            .is_some_and(|catalogue| catalogue.complete)
+    }
+
     pub(super) fn take_delivery_catalogue(&mut self) -> Option<DeliveryCatalogue> {
         self.completed_delivery_catalogue.take()
     }
@@ -37,10 +43,7 @@ impl LoadContext<'_> {
     fn capture_delivery_catalogue(&mut self) -> Result<(), ProjectContentError> {
         if !self.capture_delivery_catalogue
             || self.completed_delivery_catalogue.is_some()
-            || !self
-                .catalogue
-                .as_ref()
-                .is_some_and(|catalogue| catalogue.complete)
+            || !self.has_complete_reference_catalogue()
         {
             return Ok(());
         }
@@ -88,11 +91,7 @@ impl LoadContext<'_> {
     }
 
     pub(super) fn ensure_reference_catalogue(&mut self) -> Result<(), ProjectContentError> {
-        if self
-            .catalogue
-            .as_ref()
-            .is_some_and(|catalogue| catalogue.complete)
-        {
+        if self.has_complete_reference_catalogue() {
             return Ok(());
         }
         let root_count = self

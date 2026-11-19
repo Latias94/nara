@@ -301,6 +301,46 @@ impl AssetServer {
         Ok(id)
     }
 
+    /// Moves the path of an existing primary Product while retaining its identity and type claim.
+    ///
+    /// The caller must have verified the source relocation and retain authority over both paths.
+    /// A stale predecessor or occupied destination leaves both path indices unchanged. This moves
+    /// only the weak alias; the content owner still owns resource publication and retirement.
+    pub fn relocate_primary_source(
+        &mut self,
+        previous: &AssetSourcePath,
+        record: &AssetRecord,
+    ) -> Result<(), AssetError> {
+        let primary = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+            .map_err(AssetError::InvalidProductIdentity)?;
+        let id = self
+            .products
+            .get(&primary)
+            .copied()
+            .ok_or(AssetError::UnknownProduct(primary))?;
+        if self.path(id) != Some(previous) || self.paths.get(previous) != Some(&id) {
+            return Err(AssetError::ConflictingAssetIdentity {
+                path: previous.clone(),
+                stable_id: record.stable_id(),
+            });
+        }
+        if previous == record.path() {
+            return Ok(());
+        }
+        if let Some(existing_id) = self.paths.get(record.path()).copied() {
+            return Err(AssetError::PathAlreadyBound {
+                path: record.path().clone(),
+                existing_id,
+                requested_id: id,
+            });
+        }
+
+        self.paths.remove(previous);
+        self.paths.insert(record.path().clone(), id);
+        self.reverse_paths.insert(id, record.path().clone());
+        Ok(())
+    }
+
     pub fn reserve_anonymous<T: 'static>(&mut self) -> Result<Handle<T>, AssetError> {
         let id = AssetId::allocate()?;
         self.type_claims

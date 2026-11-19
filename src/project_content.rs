@@ -299,6 +299,7 @@ struct ProjectContentSnapshotInner {
     delivery_scene_metadata: Option<ProjectContentMemberReceipt>,
     source_upgrade_required: bool,
     deferred_source_targets: bool,
+    complete_reference_catalogue: bool,
     input: Option<ProjectInputContent>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
@@ -504,6 +505,10 @@ impl ProjectContentSnapshot {
 
     pub(crate) fn asset_database(&self) -> &ProjectAssetDatabase {
         self.inner.sources.database()
+    }
+
+    pub(crate) fn has_complete_reference_catalogue(&self) -> bool {
+        self.inner.complete_reference_catalogue
     }
 
     /// Borrows the actual catalogue and authored asset-path scope admitted for this content.
@@ -2113,6 +2118,7 @@ impl<'a> LoadContext<'a> {
             sources.resolved_sources,
             sources.resolved_source_work_bytes,
         )?;
+        let complete_reference_catalogue = self.has_complete_reference_catalogue();
         self.release_catalogue_work();
         drop((scenes, prefabs, assets));
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
@@ -2291,6 +2297,7 @@ impl<'a> LoadContext<'a> {
                 delivery_scene_metadata,
                 source_upgrade_required: self.source_upgrade_required,
                 deferred_source_targets,
+                complete_reference_catalogue,
                 input,
                 prefabs,
                 images,
