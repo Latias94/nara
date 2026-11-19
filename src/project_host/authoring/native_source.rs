@@ -77,6 +77,27 @@ impl NativeDocumentSourcePolicy {
         )
     }
 
+    pub(crate) fn verify_stable_association(
+        &self,
+        root: &DirectoryCapability,
+        path: &str,
+        kind: SourceDocumentKind,
+        stable_id: nara_asset::StableAssetId,
+    ) -> Result<(), AuthoringDocumentAdmissionError> {
+        let (key, _, _) = self.admit_metadata(
+            root,
+            path,
+            path,
+            kind,
+            0,
+            AssetMetaFileLimits::default().encoded_bytes().get(),
+        )?;
+        if key != SourceDocumentKey::stable_asset(stable_id, kind) {
+            return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
+        }
+        Ok(())
+    }
+
     pub(super) fn admit_budgeted(
         &self,
         root: &DirectoryCapability,

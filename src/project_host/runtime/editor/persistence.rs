@@ -20,11 +20,13 @@ pub(super) use retirement::RetainedHostGuard;
 pub(super) use retirement::{HostCustody, HostCustodyPlugin, RetainedHost};
 
 use nara_asset::{AssetPath, AssetRef};
-use nara_scene::SceneEntityId;
+use nara_scene::{SceneEntityId, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 use nara_tooling::EditorDocumentSourceBinding;
 
 use crate::project_host::authoring::AuthoringDocumentAdmissionError;
-use crate::project_host::authoring::native_source::StableDocumentSaveSource;
+use crate::project_host::authoring::native_source::{
+    NativeDocumentSourcePolicy, StableDocumentSaveSource,
+};
 use crate::project_host::persistence::{
     OpenedPrefabPersistence, OpenedPrefabReopen, PersistenceSaveOutcome, PrefabReopenOutcome,
     PrefabSaveCandidate,
@@ -246,42 +248,48 @@ impl EditorProjectSession {
                 "project.editor.document-open-busy",
             );
         }
-        let source_binding = match self.prefab_source_binding(document, base_revision, entity) {
-            Ok(source_binding) => source_binding,
-            Err(code) => {
-                return editor_workspace_command_rejected(self.workspace.active_document(), code);
-            }
-        };
+        let (path, expected_source_key) =
+            match self.resolve_anchored_prefab(document, base_revision, entity) {
+                Ok((path, key)) => (path, key.clone()),
+                Err(code) => {
+                    return editor_workspace_command_rejected(
+                        self.workspace.active_document(),
+                        code,
+                    );
+                }
+            };
         let prefab_directory = match &self.execution {
             EditorExecutionLane::Authoring(snapshot) => snapshot.settings().paths.prefabs.as_str(),
             EditorExecutionLane::TrustedCompiled(lane) => {
                 lane.content_candidate.settings().paths.prefabs.as_str()
             }
         };
-        let project_path: Arc<str> =
-            Arc::from(format!("{prefab_directory}/{}", source_binding.locator()));
+        let project_path: Arc<str> = Arc::from(format!("{prefab_directory}/{}", path.as_str()));
         if let Some(document) = self.exact_source_owner(&project_path) {
-            return if self.workspace.document_kind(document) == Some(EditorDocumentKind::Prefab) {
-                self.workspace.activate_document(document)
-            } else {
-                editor_workspace_command_rejected(
+            return match self.prefab_lanes.get(&document) {
+                Some(lane) if lane.source_key == expected_source_key => {
+                    self.workspace.activate_document(document)
+                }
+                Some(_) => editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.prefab-source-identity-changed",
+                ),
+                None => editor_workspace_command_rejected(
                     self.workspace.active_document(),
                     "project.editor.document-source-already-open",
-                )
+                ),
             };
         }
         let exclusion = match &self.execution {
             EditorExecutionLane::Authoring(_) => self.exclude_project_source_aliases(&project_path),
-            EditorExecutionLane::TrustedCompiled(lane) => {
-                RelativePath::new(source_binding.locator())
-                    .map_err(|_| SourceAdmissionError::SourceRead)
-                    .and_then(|path| {
-                        lane.prefab_root
-                            .open_file(&path)
-                            .map_err(|_| SourceAdmissionError::SourceRead)
-                    })
-                    .and_then(|file| self.exclude_source_aliases(&project_path, &file))
-            }
+            EditorExecutionLane::TrustedCompiled(lane) => RelativePath::new(path.as_str())
+                .map_err(|_| SourceAdmissionError::SourceRead)
+                .and_then(|path| {
+                    lane.prefab_root
+                        .open_file(&path)
+                        .map_err(|_| SourceAdmissionError::SourceRead)
+                })
+                .and_then(|file| self.exclude_source_aliases(&project_path, &file)),
         };
         if let Err(error) = exclusion {
             return editor_workspace_command_rejected(
@@ -290,30 +298,12 @@ impl EditorProjectSession {
             );
         }
         if self.authoring_project().is_some() {
-            return self.open_authoring_prefab_source(source_binding);
+            return self.open_authoring_prefab_source(path, expected_source_key);
         }
         let Some(lane) = self.trusted_compiled() else {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.prefab-runtime-lane-unavailable",
-            );
-        };
-        let Some(expected_source_key) = lane
-            .snapshot
-            .prefabs()
-            .iter()
-            .find(|prefab| {
-                lane.snapshot
-                    .prefab_resolution()
-                    .scope()
-                    .relative_path(prefab.path())
-                    == Some(source_binding.locator())
-            })
-            .map(|prefab| prefab.source_key().clone())
-        else {
-            return editor_workspace_command_rejected(
-                self.workspace.active_document(),
-                "project.editor.prefab-source-outside-content-closure",
             );
         };
         if let Err(code) = self.exclude_native_source_key(&project_path, &expected_source_key) {
@@ -354,6 +344,7 @@ impl EditorProjectSession {
                 );
             }
         };
+        let source_binding = EditorDocumentSourceBinding::new(path.as_str().to_owned());
         let opened = PrefabPersistenceHost::open_authoring(
             &lane.prefab_root,
             source_binding.clone(),
@@ -481,17 +472,10 @@ impl EditorProjectSession {
 
     fn open_authoring_prefab_source(
         &mut self,
-        source_binding: EditorDocumentSourceBinding,
+        path: AssetPath,
+        expected_source_key: SourceDocumentKey,
     ) -> EditorWorkspaceCommandReport {
-        let path = match AssetPath::new(source_binding.locator().to_owned()) {
-            Ok(path) => path,
-            Err(_) => {
-                return editor_workspace_command_rejected(
-                    self.workspace.active_document(),
-                    "project.editor.prefab-source-path-invalid",
-                );
-            }
-        };
+        let source_binding = EditorDocumentSourceBinding::new(path.as_str().to_owned());
         let (project_root, prefab_directory, snapshot_observation, native_source, published) = {
             let Some(snapshot) = self.authoring_project() else {
                 return editor_workspace_command_rejected(
@@ -642,7 +626,12 @@ impl EditorProjectSession {
                 error.code(),
             );
         }
-        let source_key = native_source.key().clone();
+        if native_source.key() != &expected_source_key {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-source-identity-changed",
+            );
+        }
         let authoring_source = {
             let Some(project) = self.authoring_project() else {
                 unreachable!("authoring Prefab Open retains its project");
@@ -663,7 +652,7 @@ impl EditorProjectSession {
                 ),
             }
         };
-        if let Err(code) = self.exclude_native_source_key(&project_path, &source_key) {
+        if let Err(code) = self.exclude_native_source_key(&project_path, &expected_source_key) {
             return editor_workspace_command_rejected(self.workspace.active_document(), code);
         }
         if let Err(error) = host
@@ -721,7 +710,7 @@ impl EditorProjectSession {
             document,
             EditorPrefabPersistenceLane {
                 project_path,
-                source_key,
+                source_key: expected_source_key,
                 authoring_source: Some(authoring_source),
                 document,
                 host,
@@ -730,12 +719,12 @@ impl EditorProjectSession {
         report
     }
 
-    fn prefab_source_binding(
+    fn resolve_anchored_prefab(
         &self,
         document: EditorDocumentId,
         base_revision: nara_scene::SceneAuthoringRevision,
         entity: &SceneEntityId,
-    ) -> Result<EditorDocumentSourceBinding, &'static str> {
+    ) -> Result<(AssetPath, &SourceDocumentKey), &'static str> {
         let scene = self
             .workspace
             .scene(document)
@@ -757,49 +746,59 @@ impl EditorProjectSession {
             .prefab
             .as_ref()
             .ok_or("project.editor.prefab-source-not-an-anchor")?;
-        let resolved_source;
         if !instance.source.is_primary() {
             return Err("project.editor.prefab-source-product-unsupported");
         }
-        let source = match &instance.source {
-            AssetRef::Path(source) => source,
+        let (source, stable_id) = match &instance.source {
+            AssetRef::Path(source) => (source.clone(), None),
             reference @ (AssetRef::StableId(_) | AssetRef::Product(_)) => {
-                resolved_source = match &self.execution {
-                    EditorExecutionLane::Authoring(snapshot) => {
-                        let resolver = snapshot.prefab_resolution();
-                        resolver
-                            .resolve_ref(reference)
-                            .ok()
-                            .and_then(|record| resolver.scope().relativize(record.path()))
-                    }
-                    EditorExecutionLane::TrustedCompiled(lane) => {
-                        let resolver = lane.snapshot.prefab_resolution();
-                        resolver
-                            .resolve_ref(reference)
-                            .ok()
-                            .and_then(|record| resolver.scope().relativize(record.path()))
-                    }
-                }
-                .ok_or("project.editor.prefab-source-stable-id-unresolved")?;
-                &resolved_source
+                let resolver = match &self.execution {
+                    EditorExecutionLane::Authoring(snapshot) => snapshot.prefab_resolution(),
+                    EditorExecutionLane::TrustedCompiled(lane) => lane.snapshot.prefab_resolution(),
+                };
+                let unresolved = "project.editor.prefab-source-stable-id-unresolved";
+                let record = resolver
+                    .resolve_ref(reference)
+                    .map_err(|_| unresolved)?;
+                let path = resolver.scope().relativize(record.path()).ok_or(unresolved)?;
+                (path, Some(record.stable_id()))
             }
         };
-        let source_is_admitted = match &self.execution {
-            EditorExecutionLane::Authoring(snapshot) => snapshot.prefab(source).is_some(),
-            EditorExecutionLane::TrustedCompiled(lane) => {
-                lane.snapshot.prefabs().iter().any(|prefab| {
+        let key = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => snapshot
+                .prefab(&source)
+                .map(|prefab| prefab.native_source().key()),
+            EditorExecutionLane::TrustedCompiled(lane) => lane
+                .snapshot
+                .prefabs()
+                .iter()
+                .find(|prefab| {
                     lane.snapshot
                         .prefab_resolution()
                         .scope()
                         .relative_path(prefab.path())
                         == Some(source.as_str())
                 })
-            }
-        };
-        if !source_is_admitted {
-            return Err("project.editor.prefab-source-outside-content-closure");
+                .map(|prefab| prefab.source_key()),
         }
-        Ok(EditorDocumentSourceBinding::new(source.as_str().to_owned()))
+        .ok_or("project.editor.prefab-source-outside-content-closure")?;
+        if let Some(stable_id) = stable_id
+            && let SourceDocumentOrigin::ProjectLocation { path, .. } = key.origin()
+        {
+            let settings = match &self.execution {
+                EditorExecutionLane::Authoring(snapshot) => snapshot.settings(),
+                EditorExecutionLane::TrustedCompiled(lane) => lane.content_candidate.settings(),
+            };
+            NativeDocumentSourcePolicy::new(settings)
+                .verify_stable_association(
+                    &self.source_project_root(),
+                    path.as_str(),
+                    SourceDocumentKind::Prefab,
+                    stable_id,
+                )
+                .map_err(|_| "project.editor.prefab-source-identity-changed")?;
+        }
+        Ok((source, key))
     }
 
     #[cfg(test)]

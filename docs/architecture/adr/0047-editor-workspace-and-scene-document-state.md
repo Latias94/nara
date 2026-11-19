@@ -552,6 +552,11 @@ Rules:
   configured root remain independently persistent documents without an invented asset-domain key.
   ADR 0113 owns the outstanding saved-source obligations for trusted project-content refresh;
   document Close does not erase those obligations.
+- Opening a Prefab from a Scene anchor carries the resolved `SourceDocumentKey` to the file
+  lane. The configured path locates the lane, and its admitted key authorizes activation or a
+  new Open. A different key at the same path leaves the active Scene and the existing draft intact.
+  For a document keyed by location, a stable asset reference additionally requires the current
+  sidecar to retain the resolved asset identity before opening or reusing the lane.
 - Each private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
   idle periods after an operation failed. Its runtime retirement registration is independent of
   task results and remains accountable for temporary cleanup after session abandonment. Operations

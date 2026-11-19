@@ -232,6 +232,132 @@ fn anchored_prefab_open_reuses_the_browser_slot_despite_locator_scope() {
 }
 
 #[test]
+fn stable_prefab_anchors_reuse_only_the_resolved_source_identity() {
+    const PREFAB: &str = "prefabs/shared.prefab.json";
+    const ORIGINAL: &str = "64a2efa1-70cb-4779-8386-dda7c9541bd2";
+    const REPLACEMENT: &str = "c535c4c0-8d2b-4a78-af2f-6112d26fb914";
+
+    for (identity, reidentified) in [
+        ("stable_metadata", true),
+        ("stable_metadata", false),
+        ("project_location", true),
+        ("project_location", false),
+    ] {
+        let project = TestProject::new("anchored-stable-prefab-reuse");
+        let manifest = project.root.join("nara.toml");
+        let manifest_bytes = fs::read_to_string(&manifest)
+            .unwrap()
+            .replace("project_location", identity);
+        fs::write(manifest, manifest_bytes).unwrap();
+        let metadata = |name, kind, id| {
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str(id).unwrap(),
+                    AssetPath::new(name).unwrap(),
+                    kind,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap()
+        };
+        let startup = metadata(
+            "startup.scene.json",
+            AssetSourceKind::Scene,
+            "a48d60e2-8ede-4103-b721-f6a0533fb99f",
+        );
+        fs::write(project.root.join("scenes/startup.scene.json.meta"), startup).unwrap();
+        let sidecar = project.root.join(format!("{PREFAB}.meta"));
+        let original_meta = metadata("shared.prefab.json", AssetSourceKind::Prefab, ORIGINAL);
+        let original_prefab = editable_authoring_prefab("original")
+            .to_json_string()
+            .unwrap();
+        fs::write(project.root.join(PREFAB), &original_prefab).unwrap();
+        fs::write(&sidecar, &original_meta).unwrap();
+        let anchor = nara_identity::SceneEntityId::new("anchor").unwrap();
+        let mut record = SceneEntityRecord::new(anchor.clone());
+        record.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
+            arguments: None,
+            source: AssetRef::stable_id(ORIGINAL).unwrap(),
+            overrides: None,
+        });
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots([record])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let mut editor = open_generic_editor_with_ready_index(&project);
+        let scene = editor.workspace().active_document().unwrap();
+        let selected_meta = if reidentified {
+            let changed = metadata("shared.prefab.json", AssetSourceKind::Prefab, REPLACEMENT);
+            fs::write(&sidecar, &changed).unwrap();
+            let opened = open_prefab_from_scene(&mut editor, scene, &anchor);
+            assert!(!opened.applied, "{opened:?}");
+            assert_eq!(editor.workspace().active_document(), Some(scene));
+            assert_eq!(editor.workspace().len(), 1);
+            changed
+        } else {
+            original_meta
+        };
+        let index = if reidentified {
+            refresh_project_source_index(&mut editor)
+        } else {
+            editor.project_source_index_snapshot().unwrap()
+        };
+        let prefab = opened_document(editor.open_indexed_authoring_document(
+            index,
+            PREFAB,
+            AuthoringDocumentKind::Prefab,
+        ));
+        make_authoring_name_dirty(&mut editor, prefab, "browser-draft");
+        let draft = |editor: &editor::EditorProjectSession| {
+            let slot = editor.workspace().prefab(prefab).unwrap();
+            (
+                slot.session().document().clone(),
+                slot.revision(),
+                slot.saved_revision(),
+                slot.is_dirty(),
+                slot.session().history_status(),
+            )
+        };
+        let before = draft(&editor);
+        assert!(before.3);
+        assert!(
+            editor
+                .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument {
+                    document: scene,
+                })
+                .applied
+        );
+
+        let opened = open_prefab_from_scene(&mut editor, scene, &anchor);
+        assert_eq!(opened.applied, !reidentified, "{opened:?}");
+        assert_eq!(
+            opened.active_document,
+            Some(if reidentified { scene } else { prefab })
+        );
+        if reidentified {
+            assert_eq!(
+                opened.diagnostics.iter().next().unwrap().code().as_str(),
+                "project.editor.prefab-source-identity-changed"
+            );
+        }
+        assert_eq!(editor.workspace().len(), 2);
+        assert_eq!(draft(&editor), before);
+        assert_eq!(
+            fs::read_to_string(project.root.join(PREFAB)).unwrap(),
+            original_prefab
+        );
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), selected_meta);
+        drive_editor_close_to_completion(&mut editor);
+    }
+}
+
+#[test]
 fn late_alias_is_rejected_after_preparation_before_additive_publication() {
     let project = TestProject::new("late-source-alias");
     let source = project.root.join("scenes/startup.scene.json");
