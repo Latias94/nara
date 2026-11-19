@@ -18,12 +18,12 @@ use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 #[cfg(feature = "serde")]
 use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
-    AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPublicationRevision,
-    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
-    AssetReloadRequests, AssetServer, AssetSlotRevision, AssetSourceChangeKind, AssetSourcePath,
-    AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets,
-    Handle, ImageRecoveryContinuity, ImageReloadConsumer, ImageReloadDrainError,
-    ImageReloadRegistrationError, register_image_reload_consumer,
+    AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetMutationBaseline,
+    AssetPublicationRevision, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest,
+    AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSlotRevision,
+    AssetSourceChangeKind, AssetSourcePath, AssetStateError, AssetStateRevision, AssetStates,
+    AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImageRecoveryContinuity, ImageReloadConsumer,
+    ImageReloadDrainError, ImageReloadRegistrationError, register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
@@ -310,6 +310,7 @@ pub(super) struct ImageReloadAttempt {
 }
 
 impl ImageReloadAttempt {
+    #[cfg(test)]
     pub(super) fn capture(
         request: AssetReloadRequest,
         handle: Handle<ImageAsset>,
@@ -323,13 +324,22 @@ impl ImageReloadAttempt {
             images,
             states,
         )?;
-        Ok(Self {
+        Ok(Self::new(request, handle, publication, settings))
+    }
+
+    fn new(
+        request: AssetReloadRequest,
+        handle: Handle<ImageAsset>,
+        publication: ImagePublicationSnapshot,
+        settings: Option<ImageImportSettings>,
+    ) -> Self {
+        Self {
             request,
             handle,
             publication,
             settings,
             recovery: None,
-        })
+        }
     }
 
     fn is_current(
@@ -378,10 +388,18 @@ impl ReadyImageImportJob {
     }
 }
 
+struct ImageReloadCaptureFailure {
+    request: AssetReloadRequest,
+    handle: Handle<ImageAsset>,
+    baseline: AssetMutationBaseline<ImageAsset>,
+    error: ImagePublicationFailureKind,
+}
+
 #[derive(Default, Resource)]
 struct ReadyImageJobs {
     imports: Vec<ReadyImageImportJob>,
     removals: Vec<ImageReloadAttempt>,
+    capture_failures: Vec<ImageReloadCaptureFailure>,
 }
 
 #[derive(Default, Resource)]
@@ -721,14 +739,15 @@ fn spawn_image_reload_jobs(
         .stale
         .saturating_add(pending.retire_superseded(&generations));
     for request in requests.drain_images(consumer)? {
-        let previous_recovery = recoveries.images.remove(&request.asset_id());
-        if request
-            .resolved_state_revision()
-            .is_none_or(|expected| expected != &states.state_revision(request.asset_id()))
+        if !generations.is_current_request(&request)
+            || request
+                .resolved_state_revision()
+                .is_none_or(|expected| expected != &states.state_revision(request.asset_id()))
         {
             stats.stale = stats.stale.saturating_add(1);
             continue;
         }
+        let previous_recovery = recoveries.images.remove(&request.asset_id());
         let handle = match asset_server.claim::<ImageAsset>(request.asset_id()) {
             Ok(handle) => handle,
             Err(error) => {
@@ -746,13 +765,42 @@ fn spawn_image_reload_jobs(
                 && recovery.record == request.record()
         });
         let recovering_removed = previous_recovery.is_some();
-        let mut attempt = match ImageReloadAttempt::capture(request, handle, &images, &states) {
-            Ok(attempt) => attempt,
-            Err(_) => {
-                stats.stale = stats.stale.saturating_add(1);
+        let record = request.record();
+        let captured = if request.request_kind() == AssetReloadRequestKind::Remove {
+            ImagePublicationSnapshot::capture_removal(
+                &record,
+                handle,
+                request.expected_version(),
+                &images,
+                &states,
+            )
+            .map(|publication| (publication, None))
+        } else {
+            ImagePublicationSnapshot::capture_with_settings(
+                &record,
+                handle,
+                request.expected_version(),
+                &images,
+                &states,
+            )
+        };
+        let (publication, settings) = match captured {
+            Ok(captured) => captured,
+            Err(error) => {
+                if let Ok(baseline) = images.prepare_mutation(handle, &states) {
+                    ready.capture_failures.push(ImageReloadCaptureFailure {
+                        request,
+                        handle,
+                        baseline,
+                        error,
+                    });
+                } else {
+                    stats.stale = stats.stale.saturating_add(1);
+                }
                 continue;
             }
         };
+        let mut attempt = ImageReloadAttempt::new(request, handle, publication, settings);
         if attempt.request.request_kind() == AssetReloadRequestKind::Remove
             || desired
                 .images
@@ -1103,6 +1151,29 @@ fn apply_image_reload_results(
                 &mut stats,
             );
         }
+    }
+
+    for failure in std::mem::take(&mut ready.capture_failures) {
+        let request = &failure.request;
+        let error = ImageReloadError::Publication(failure.error);
+        if !generations.is_current_request(request)
+            || ImagePublicationSnapshot::validate_source_binding(
+                &asset_server,
+                failure.handle,
+                request.stable_id(),
+                request.path(),
+            )
+            .is_err()
+            || failure
+                .baseline
+                .record_failure(&mut images, &mut states, &mut events, error.stable_code())
+                .is_err()
+        {
+            stats.stale = stats.stale.saturating_add(1);
+            continue;
+        }
+        diagnostics.push(image_reload_diagnostic(request.path(), &error));
+        stats.failed = stats.failed.saturating_add(1);
     }
 
     recoveries

@@ -4517,6 +4517,138 @@ fn image_plugin_rejects_first_load_without_accepted_settings() {
 }
 
 #[test]
+fn image_reload_capture_failure_settles_only_the_current_request() {
+    use nara_asset::{AssetEvent, AssetProductRef, AssetReloadRequests, ImportedProductId};
+
+    for superseded in [false, true] {
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(Path::new("."), record.clone());
+        let pixels = [255, 0, 0, 255];
+        let image = ImageAsset::from_product(
+            AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY).unwrap(),
+            ImageExtent::new(1, 1),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            pixels.to_vec(),
+        )
+        .unwrap();
+        let world = app.world_mut().unwrap();
+        let handle = world
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(&record)
+            .unwrap();
+        let version =
+            world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+                images
+                    .commit_loaded(
+                        handle,
+                        image,
+                        &mut world.resource_mut::<AssetStates>(),
+                        &mut AssetEvents::default(),
+                        None,
+                        None,
+                    )
+                    .unwrap()
+            });
+        let slot = world.resource::<Assets<ImageAsset>>().slot_revision(handle);
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .modified(record.path().clone())
+            .unwrap();
+
+        if superseded {
+            app.add_systems(
+                CoreStage::TaskUpdate,
+                (move |mut generations: ResMut<AssetLoadGenerations>| {
+                    generations.begin_request(handle.id());
+                })
+                .in_set(AssetTaskUpdateSet::ApplyResults)
+                .before(ImageReloadInternalSet::ApplyResults),
+            )
+            .unwrap();
+        }
+
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+
+        let world = runtime.world();
+        let state = world.resource::<AssetStates>().state(handle.id()).unwrap();
+        let images = world.resource::<Assets<ImageAsset>>();
+        assert_eq!(state.version(), version);
+        assert_eq!(state.usable_version(), Some(version));
+        assert_eq!(images.slot_revision(handle), slot);
+        assert_eq!(images.get(handle).unwrap().pixels(), &pixels);
+        assert!(world.resource::<AssetReloadRequests>().is_empty());
+        let stats = world.resource::<ImageReloadStats>();
+        assert_eq!(stats.spawned, 0);
+        assert_eq!(stats.pending, 0);
+
+        let events = world.resource::<AssetEvents>();
+        let diagnostics = world.resource::<AssetReloadDiagnostics>();
+        if superseded {
+            assert_eq!(state.load_state(), &LoadState::Loading);
+            assert_eq!(stats.failed, 0);
+            assert_eq!(stats.stale, 1);
+            assert!(events.is_empty());
+            assert!(diagnostics.is_empty());
+        } else {
+            let code = "image.reload-publication-failed";
+            assert_eq!(
+                state.load_state(),
+                &LoadState::Failed {
+                    message: code.to_owned(),
+                }
+            );
+            assert_eq!(stats.failed, 1);
+            assert_eq!(stats.stale, 0);
+            assert_eq!(
+                events.iter().copied().collect::<Vec<_>>(),
+                [AssetEvent::new(
+                    handle.id(),
+                    version,
+                    AssetEventKind::ReloadFailed
+                )]
+            );
+            assert_eq!(diagnostics.iter().len(), 1);
+            let diagnostic = diagnostics.iter().next().unwrap();
+            assert_eq!(diagnostic.code().as_str(), code);
+            assert_eq!(diagnostic_field(diagnostic, "reason"), "target-mismatch");
+
+            edit_image_pipeline(
+                &mut runtime,
+                ImagePipelineEdit::SourceChange {
+                    path: record.path().clone(),
+                    kind: AssetSourceChangeKind::Removed,
+                },
+            );
+            runtime.drive(Duration::ZERO).unwrap();
+            let world = runtime.world();
+            let state = world.resource::<AssetStates>().state(handle.id()).unwrap();
+            assert_eq!(state.load_state(), &LoadState::Removed);
+            assert_eq!(state.usable_version(), None);
+            assert!(state.version() > version);
+            assert!(world.resource::<Assets<ImageAsset>>().get(handle).is_none());
+            assert!(world.resource::<AssetReloadRequests>().is_empty());
+            let stats = world.resource::<ImageReloadStats>();
+            assert_eq!((stats.spawned, stats.pending, stats.removed), (0, 0, 1));
+            assert_eq!(stats.stale, 0);
+            assert_eq!(
+                world
+                    .resource::<AssetEvents>()
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                [
+                    AssetEvent::new(handle.id(), version, AssetEventKind::ReloadFailed),
+                    AssetEvent::new(handle.id(), state.version(), AssetEventKind::Removed),
+                ]
+            );
+        }
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
 fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");

@@ -2,7 +2,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use nara_asset::{
     AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetSourcePath, AssetStateError,
-    AssetStates, AssetVersion, Assets, Handle, ImportRecipe, StableAssetId,
+    AssetStates, AssetVersion, Assets, Handle, ImportRecipe, ImportedProductId, StableAssetId,
 };
 use nara_fs::ContentDigest;
 
@@ -85,6 +85,25 @@ impl ImagePublicationSnapshot {
             images.get(handle),
             images,
             states,
+            false,
+        )
+    }
+
+    pub(crate) fn capture_removal(
+        source: &AssetRecord,
+        handle: Handle<ImageAsset>,
+        expected_version: AssetVersion,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Result<Self, ImagePublicationFailureKind> {
+        Self::capture_observed(
+            source,
+            handle,
+            expected_version,
+            images.get(handle),
+            images,
+            states,
+            true,
         )
     }
 
@@ -95,15 +114,24 @@ impl ImagePublicationSnapshot {
         previous: Option<&ImageAsset>,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
+        allow_product_only_retirement: bool,
     ) -> Result<Self, ImagePublicationFailureKind> {
         if states.version(handle.id()).unwrap_or(AssetVersion::ZERO) != expected_version {
             return Err(ImagePublicationFailureKind::Stale);
         }
-        if previous.is_some_and(|image| {
-            image.source().is_none_or(|metadata| {
-                metadata.stable_id() != source.stable_id() || metadata.path() != source.path()
-            })
-        }) {
+        let matches_source = |image: &ImageAsset| match image.source() {
+            Some(metadata) => {
+                metadata.stable_id() == source.stable_id() && metadata.path() == source.path()
+            }
+            None => {
+                allow_product_only_retirement
+                    && image.product().is_some_and(|product| {
+                        product.source() == source.stable_id()
+                            && product.product() == ImportedProductId::PRIMARY
+                    })
+            }
+        };
+        if previous.is_some_and(|image| !matches_source(image)) {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
         let baseline = images
@@ -127,8 +155,15 @@ impl ImagePublicationSnapshot {
         states: &AssetStates,
     ) -> Result<(Self, Option<ImageImportSettings>), ImagePublicationFailureKind> {
         let previous = images.get(handle);
-        let snapshot =
-            Self::capture_observed(source, handle, expected_version, previous, images, states)?;
+        let snapshot = Self::capture_observed(
+            source,
+            handle,
+            expected_version,
+            previous,
+            images,
+            states,
+            false,
+        )?;
         let settings = states
             .state(handle.id())
             .and_then(|state| state.usable_version())
@@ -179,19 +214,33 @@ impl ImagePublicationSnapshot {
         &self,
         asset_server: &AssetServer,
     ) -> Result<(), ImagePublicationFailureKind> {
+        Self::validate_source_binding(
+            asset_server,
+            self.handle,
+            self.source_stable_id,
+            &self.source_path,
+        )
+    }
+
+    pub(crate) fn validate_source_binding(
+        asset_server: &AssetServer,
+        handle: Handle<ImageAsset>,
+        stable_id: StableAssetId,
+        path: &AssetSourcePath,
+    ) -> Result<(), ImagePublicationFailureKind> {
         let bound_stable_id = asset_server
-            .stable_id(self.handle.id())
+            .stable_id(handle.id())
             .ok_or(ImagePublicationFailureKind::UnknownAsset)?;
-        if bound_stable_id != self.source_stable_id {
+        if bound_stable_id != stable_id {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
         let bound_path = asset_server
-            .path(self.handle.id())
+            .path(handle.id())
             .ok_or(ImagePublicationFailureKind::UnknownAsset)?;
-        if bound_path != &self.source_path {
+        if bound_path != path {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
-        if asset_server.get_handle::<ImageAsset>(self.handle.id()) != Some(self.handle) {
+        if asset_server.get_handle::<ImageAsset>(handle.id()) != Some(handle) {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
         Ok(())
