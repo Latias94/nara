@@ -7,7 +7,7 @@ use super::{
     },
     state::{PointerCapture, SurfaceState},
 };
-use crate::{UiDispatchBatch, UiFrame, UiInteraction, UiKey};
+use crate::{UiDispatchBatch, UiFrame, UiInteraction, UiKey, UiRouteStamp};
 
 pub(super) fn pointer_button_is_unsupported(
     state: &SurfaceState,
@@ -138,7 +138,7 @@ pub(super) fn pointer_press(
     input: UiPointerInput,
     frame: &UiFrame,
     latest: &UiFrame,
-    presentation_epoch: u64,
+    route: UiRouteStamp,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
     let seat = input.seat();
@@ -187,10 +187,12 @@ pub(super) fn pointer_press(
         .expect("pointer preflight creates state")
         .captured = Some(PointerCapture {
         target: target.clone(),
-        presentation_epoch,
+        presentation_epoch: route.presentation_epoch(),
         button,
     });
-    if is_focusable_key(frame, latest, state.modal_root.as_ref(), &target) {
+    if !state.focus_is_stale(route)
+        && is_focusable_key(frame, latest, state.modal_root.as_ref(), &target)
+    {
         set_focus(state, seat, Some(target.clone()), frame, batch);
     }
     route_pointer_event(frame, &target, UiRoutedEventKind::Pressed, input, batch);

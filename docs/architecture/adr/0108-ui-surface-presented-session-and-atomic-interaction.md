@@ -287,6 +287,11 @@ snapping to physical pixels. A control with no covered pixels has no focus desti
 semantic action. Directional navigation uses the centers of the visible logical regions. A
 visible disabled control may retain focus but cannot activate. Pointer capture keeps its
 existing continuity and cancellation rules.
+Each visible semantic node names its nearest published semantic ancestor. A visible overflow
+child can attach directly to the Surface root when all of its semantic ancestors are clipped.
+Implicit activation uses the focus assignment for the presented route. A focus change on a
+successor presentation makes older implicit activations stale, even if focus later returns to
+the same key. Navigation and activation delivered in order on one presentation remain usable.
 
 ## Alternatives Considered
 

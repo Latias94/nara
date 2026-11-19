@@ -1475,6 +1475,13 @@ fn pointer_capture_cannot_cross_presentation_generations() {
         )
         .unwrap();
     assert!(pressed.consumed().is_some());
+    let stale_activation = session
+        .dispatch(&journal, historical_route, keyboard_activation())
+        .unwrap();
+    assert_eq!(
+        stale_activation.rejection(),
+        Some(&UiNonActivation::StaleFocus)
+    );
     let semantics = session
         .semantic_snapshot(&journal, latest_route, SEAT)
         .unwrap();
@@ -1580,12 +1587,7 @@ fn historical_input_reconciles_against_the_latest_presentation_before_routing() 
             },
         )
         .unwrap();
-    assert_eq!(
-        rejected.rejection(),
-        Some(&UiNonActivation::TargetRetired {
-            target: exact_key("modal", "retry")
-        })
-    );
+    assert_eq!(rejected.rejection(), Some(&UiNonActivation::StaleFocus));
     let semantics = session
         .semantic_snapshot(&journal, latest_route, SEAT)
         .unwrap();
@@ -1598,6 +1600,199 @@ fn historical_input_reconciles_against_the_latest_presentation_before_routing() 
             .state()
             .focused()
     );
+}
+
+#[test]
+fn historical_activation_preserves_focus_and_same_presentation_navigation() {
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let frame = compile(&mut compiler, &snapshot(false), 1);
+    let historical = submit(&mut journal, Arc::clone(&frame), 10);
+    let mut session = UiInteractionSession::default();
+    let tab = UiInputEvent::Navigate {
+        seat: SEAT,
+        direction: UiNavigation::Next,
+    };
+    session.dispatch(&journal, historical, tab.clone()).unwrap();
+    assert_keyboard_activation(&mut session, &journal, historical, "base", "first");
+
+    let latest = submit(&mut journal, frame, 11);
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap();
+    assert_keyboard_activation(&mut session, &journal, historical, "base", "first");
+
+    let navigation = session.dispatch(&journal, historical, tab.clone()).unwrap();
+    assert!(navigation.consumed().is_some());
+    let stale = session
+        .dispatch(&journal, historical, keyboard_activation())
+        .unwrap();
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "second");
+    session.dispatch(&journal, latest, tab).unwrap();
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "first");
+}
+
+#[test]
+fn historical_focus_writes_cannot_redirect_an_intermediate_presentation_activation() {
+    let authored = |revision, clip_width| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                    clipping_parent(
+                        0.0,
+                        0.0,
+                        clip_width,
+                        80.0,
+                        button("first", "First", "first", 10.0, 10.0, true),
+                    ),
+                    button("second", "Second", "second", 110.0, 10.0, true),
+                    button("third", "Third", "third", 210.0, 10.0, true),
+                ]),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let original = submit(
+        &mut journal,
+        compile(&mut compiler, &authored(1, 100.0), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let tab = UiInputEvent::Navigate {
+        seat: SEAT,
+        direction: UiNavigation::Next,
+    };
+    session.dispatch(&journal, original, tab.clone()).unwrap();
+    assert_keyboard_activation(&mut session, &journal, original, "base", "first");
+
+    let intermediate = submit(
+        &mut journal,
+        compile(&mut compiler, &authored(2, 5.0), 1),
+        11,
+    );
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap();
+    let latest = submit(
+        &mut journal,
+        compile(&mut compiler, &authored(3, 5.0), 1),
+        12,
+    );
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap();
+
+    let third = exact_key("base", "third");
+    let stale_focus = UiAccessibilityInput::focus_target_from_route(original, SEAT, third.clone());
+    let rejected = session
+        .dispatch_accessibility(&journal, stale_focus)
+        .unwrap();
+    assert_eq!(rejected.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, intermediate, "base", "second");
+
+    let rejected = session.dispatch(&journal, original, tab).unwrap();
+    assert_eq!(rejected.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, intermediate, "base", "second");
+
+    let position = UiPoint::new(220.0, 20.0);
+    for (phase, kind) in [
+        (UiButtonPhase::Pressed, UiRoutedEventKind::Pressed),
+        (
+            UiButtonPhase::Released,
+            UiRoutedEventKind::Released { inside: true },
+        ),
+    ] {
+        let outcome = session
+            .dispatch(&journal, original, pointer_button(phase, position))
+            .unwrap();
+        assert!(outcome.consumed().unwrap().events().iter().any(|event| {
+            event.phase() == UiRoutePhase::Target
+                && event.target() == &third
+                && event.kind() == &kind
+        }));
+        assert_keyboard_activation(&mut session, &journal, intermediate, "base", "second");
+    }
+
+    let compatible_focus = UiAccessibilityInput::focus_target_from_route(intermediate, SEAT, third);
+    let focused = session
+        .dispatch_accessibility(&journal, compatible_focus)
+        .unwrap();
+    assert!(focused.consumed().is_some());
+    let stale = session
+        .dispatch(&journal, intermediate, keyboard_activation())
+        .unwrap();
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "third");
+}
+
+#[test]
+fn historical_activation_stays_stale_after_focus_round_trip_and_seat_cancellation() {
+    let mut journal = hosted_journal();
+    let frame = compile(&mut compiler(), &snapshot(false), 1);
+    let historical = submit(&mut journal, Arc::clone(&frame), 10);
+    let mut session = UiInteractionSession::default();
+    let tab = UiInputEvent::Navigate {
+        seat: SEAT,
+        direction: UiNavigation::Next,
+    };
+    session.dispatch(&journal, historical, tab.clone()).unwrap();
+
+    let latest = submit(&mut journal, Arc::clone(&frame), 11);
+    for _ in 0..2 {
+        session.dispatch(&journal, latest, tab.clone()).unwrap();
+        let stale = session
+            .dispatch(&journal, historical, keyboard_activation())
+            .unwrap();
+        assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+    }
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "first");
+
+    let rejected_focus = session
+        .dispatch(
+            &journal,
+            historical,
+            UiInputEvent::FocusTarget {
+                seat: SEAT,
+                target: exact_key("base", "second"),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rejected_focus.rejection(),
+        Some(&UiNonActivation::StaleFocus)
+    );
+    let stale = session
+        .dispatch(&journal, historical, keyboard_activation())
+        .unwrap();
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "first");
+
+    let successor = submit(&mut journal, frame, 12);
+    for reset_route in [historical, successor] {
+        let mut session = session.clone();
+        let cancelled = session
+            .dispatch(
+                &journal,
+                reset_route,
+                UiInputEvent::SeatCancelled { seat: SEAT },
+            )
+            .unwrap();
+        assert!(cancelled.consumed().is_some());
+        let stale = session
+            .dispatch(&journal, latest, keyboard_activation())
+            .unwrap();
+        assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+        let unfocused = session
+            .dispatch(&journal, successor, keyboard_activation())
+            .unwrap();
+        assert_eq!(unfocused.rejection(), Some(&UiNonActivation::NoFocusTarget));
+
+        session.dispatch(&journal, successor, tab.clone()).unwrap();
+        assert_keyboard_activation(&mut session, &journal, successor, "base", "first");
+    }
 }
 
 #[test]
@@ -1724,6 +1919,7 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
 fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
     for (name, input) in [
         ("pointer", move_pointer(UiPoint::new(20.0, 20.0))),
+        ("keyboard activation", keyboard_activation()),
         (
             "navigate",
             UiInputEvent::Navigate {
@@ -1756,8 +1952,22 @@ fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
         );
         let mut session = UiInteractionSession::default();
         session
+            .dispatch(
+                &journal,
+                predecessor,
+                UiInputEvent::FocusTarget {
+                    seat: SEAT,
+                    target: exact_key("base", "first"),
+                },
+            )
+            .unwrap();
+        session
             .dispatch(&journal, predecessor, UiInputEvent::GeometryInvalidated)
             .unwrap();
+        let stale = session
+            .dispatch(&journal, predecessor, input.clone())
+            .unwrap();
+        assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleGeometry));
         journal.advance_surface_slot(SURFACE, 1, 2).unwrap();
         let successor = submit(
             &mut journal,
@@ -2203,13 +2413,29 @@ fn focus_visibility_reconciles_focus_and_capture_when_a_control_leaves_view() {
             .unwrap();
         assert!(control.state().focused());
         assert!(control.state().pressed());
+        assert_keyboard_activation(&mut session, &journal, initial_route, "base", "moving");
 
+        let (mut staged_session, staged_cleanup) = staged.into_parts();
         let route = submit(&mut journal, successor, 11);
+        let staged_adoption = staged_session
+            .reconcile_latest_presentation(&journal, SURFACE, &[])
+            .unwrap()
+            .unwrap();
+        assert!(staged_adoption.events().is_empty());
         let cleanup = session
             .reconcile_latest_presentation(&journal, SURFACE, &[])
             .unwrap()
             .unwrap();
-        assert_eq!(cleanup.events(), staged.dispatch().events());
+        assert_eq!(cleanup.events(), staged_cleanup.events());
+        for session in [&mut session, &mut staged_session] {
+            for _ in 0..2 {
+                let stale = session
+                    .dispatch(&journal, initial_route, keyboard_activation())
+                    .unwrap();
+                assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+            }
+        }
+        assert_keyboard_activation(&mut staged_session, &journal, route, "base", "backup");
         let after = session.semantic_snapshot(&journal, route, SEAT).unwrap();
         assert_eq!(after.nodes().len(), 1);
         assert_eq!(after.nodes()[0].key(), &backup);

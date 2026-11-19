@@ -7,7 +7,8 @@ use super::{
     UiInputEvent, UiNonActivation, UiPointerInputKind, UiSeatId, UiSemanticFact,
     UiSemanticSnapshot, UiSemanticState,
     focus::{
-        activate_target, committed_focus, focus_fact, is_focusable_key, navigate_focus, set_focus,
+        activate_target, committed_focus, focus_fact, is_focusable_key, navigate_focus,
+        set_input_focus,
     },
     pointer::{
         pointer_button_is_unsupported, pointer_move, pointer_press, pointer_release, pointer_scroll,
@@ -134,10 +135,9 @@ impl UiInteractionSession {
         );
         let reconciliation_changed = reconciled != initial;
         let reconciliation_generation_differs = target.revision() != latest.revision()
-            || route.presentation_epoch() != latest.receipt().presentation_epoch();
+            || route.presentation_epoch() != latest_route.presentation_epoch();
         if reconciliation_changed {
-            reconciled.presentation_epoch = Some(latest.receipt().presentation_epoch());
-            reconciled.presented_route = Some(UiRouteStamp::from_receipt(latest.receipt()));
+            reconciled.record_presentation(latest_route);
             self.ensure_event_limit(&reconciliation)?;
             if reconciliation_generation_differs || !reconciliation.events().is_empty() {
                 self.commit_surface(route.surface_id(), reconciled);
@@ -170,8 +170,7 @@ impl UiInteractionSession {
         }
 
         let mut candidate = reconciled.clone();
-        candidate.presentation_epoch = Some(latest.receipt().presentation_epoch());
-        candidate.presented_route = Some(UiRouteStamp::from_receipt(latest.receipt()));
+        candidate.record_presentation(latest_route);
         if let Err(error) = preflight_input_identity(&mut candidate, &input) {
             if reconciliation_changed {
                 self.commit_surface(route.surface_id(), reconciled);
@@ -208,6 +207,7 @@ impl UiInteractionSession {
                 if remove_surface {
                     self.surfaces.remove(&route.surface_id());
                 } else {
+                    candidate.bind_focus_change();
                     self.commit_surface(route.surface_id(), candidate);
                 }
                 Ok(UiDispatchOutcome::Consumed(input_batch))
@@ -236,6 +236,7 @@ impl UiInteractionSession {
         invalidated_keys: &[UiKey],
     ) -> Result<Option<UiDispatchBatch>, UiDispatchError> {
         let target = journal.latest(surface)?;
+        let route = UiRouteStamp::from_receipt(target.receipt());
         self.preflight_surface(surface)?;
         let initial = self.surfaces.get(&surface).cloned().unwrap_or_default();
         let mut candidate = initial.clone();
@@ -265,8 +266,7 @@ impl UiInteractionSession {
             target.frame(),
             &mut reconciliation,
         );
-        candidate.presentation_epoch = Some(target.receipt().presentation_epoch());
-        candidate.presented_route = Some(UiRouteStamp::from_receipt(target.receipt()));
+        candidate.record_presentation(route);
         if candidate == initial {
             return Ok(None);
         }
@@ -301,7 +301,9 @@ impl UiInteractionSession {
         let initial = self.surfaces.get(&surface).cloned().unwrap_or_default();
         let mut candidate = initial.clone();
         preflight_seat(&mut candidate, owner_seat)?;
-        let current_epoch = initial.presentation_epoch;
+        let current_epoch = initial
+            .presented_route
+            .map(UiRouteStamp::presentation_epoch);
         let mut reconciliation =
             UiDispatchBatch::reconciliation(candidate_frame.revision(), current_epoch.unwrap_or(1));
         reconcile_presented_pointer_state(
@@ -528,14 +530,7 @@ fn apply_input(
                     UiPointerInputKind::Button {
                         phase: UiButtonPhase::Pressed,
                         ..
-                    } => pointer_press(
-                        state,
-                        input,
-                        frame,
-                        latest,
-                        route.presentation_epoch(),
-                        batch,
-                    ),
+                    } => pointer_press(state, input, frame, latest, route, batch),
                     UiPointerInputKind::Button {
                         phase: UiButtonPhase::Released,
                         ..
@@ -557,16 +552,24 @@ fn apply_input(
             }
         }
         UiInputEvent::Navigate { seat, direction } => {
-            if let Err(reason) = navigate_focus(state, seat, direction, frame, latest, batch) {
+            if let Err(reason) = navigate_focus(state, seat, direction, frame, latest, route, batch)
+            {
                 return Ok(UiInputApplication::Rejected(reason));
             }
         }
         UiInputEvent::ActivateFocused { seat, source } => {
-            let Some(target) = state.seats.get(&seat).and_then(|seat| seat.focused.clone()) else {
+            if state.focus_is_stale(route) {
+                return Ok(UiInputApplication::Rejected(UiNonActivation::StaleFocus));
+            }
+            let Some(target) = state
+                .seats
+                .get(&seat)
+                .and_then(|seat| seat.focused.as_ref())
+            else {
                 return Ok(UiInputApplication::Rejected(UiNonActivation::NoFocusTarget));
             };
             if let Err(reason) = activate_target(
-                &target,
+                target,
                 None,
                 source,
                 frame,
@@ -579,7 +582,9 @@ fn apply_input(
         }
         UiInputEvent::FocusTarget { seat, target } => {
             if is_focusable_key(frame, latest, state.modal_root.as_ref(), &target) {
-                set_focus(state, seat, Some(target), frame, batch);
+                if let Err(reason) = set_input_focus(state, seat, target, frame, route, batch) {
+                    return Ok(UiInputApplication::Rejected(reason));
+                }
             } else if let Some(reason) =
                 surface_target_rejection(frame, latest, state.modal_root.as_ref(), &target)
             {

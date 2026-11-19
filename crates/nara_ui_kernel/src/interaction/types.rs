@@ -288,6 +288,7 @@ pub enum UiNonActivation {
         target: UiKey,
     },
     StaleGeometry,
+    StaleFocus,
     TargetRetired {
         target: UiKey,
     },

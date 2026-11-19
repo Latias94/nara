@@ -5,10 +5,11 @@ use std::sync::Arc;
 use accesskit::{Action, ActionRequest, NodeId, Role, TreeId};
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
-    UiAccessibilityInput, UiActionId, UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment,
-    UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiKey, UiLayer, UiLocalKey,
-    UiNode, UiRevision, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiSemanticRole, UiSemantics,
-    UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
+    UiAccessibilityInput, UiActionId, UiActivationSource, UiAuthoringSnapshotBuilder, UiCompiler,
+    UiEnvironment, UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiKey,
+    UiLayer, UiLocalKey, UiNode, UiRevision, UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp,
+    UiRoutedEventKind, UiSeatId, UiSemanticRole, UiSemantics, UiSize, UiStyle,
+    UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
 use nara_winit::{
     WinitAccessibilityActionRequest, WinitAccessibilityEndpointRetirement, WinitAccessibilityError,
@@ -94,6 +95,119 @@ fn text_input_publication_retains_label_empty_value_and_focus_without_set_value_
     assert_eq!(update.focus, *node_id);
     assert!(node.supports_action(Action::Focus));
     assert!(!node.supports_action(Action::SetValue));
+}
+
+#[test]
+fn visible_overflow_publishes_under_the_nearest_visible_semantic_ancestor() {
+    let surface = UiSurfaceId::new(92).unwrap();
+    let seat = UiSeatId::PRIMARY;
+    let root = UiRootKey::runtime("accessibility-test", "overflow").unwrap();
+    let outer = UiKey::root(root.clone()).unwrap();
+    let group_local = UiLocalKey::runtime("accessibility-test", "group").unwrap();
+    let group = exact_key(&root, &group_local);
+    let inner_local = UiLocalKey::runtime("accessibility-test", "inner").unwrap();
+    let inner = exact_key(&root, &inner_local);
+    let child_local = UiLocalKey::runtime("accessibility-test", "child").unwrap();
+    let child = exact_key(&root, &child_local);
+    let action = UiActionId::new("child").unwrap();
+    let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+    let environment = UiEnvironment::new(surface, 320.0, 180.0, 1.0, 1, 1, 1, 1).unwrap();
+
+    for (group_x, include_outer, expected_parent) in [
+        (360.0, false, None),
+        (360.0, true, Some(&outer)),
+        (220.0, true, Some(&inner)),
+    ] {
+        let mut authored_root = UiRoot::new(root.clone(), UiLayer::Base, UiStyle::fill());
+        if include_outer {
+            authored_root = authored_root
+                .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Outer").unwrap());
+        }
+        let button = UiNode::new(UiStyle::absolute(250.0 - group_x, 0.0, 80.0, 40.0))
+            .with_key(child_local.clone())
+            .with_interaction(UiInteraction::focus_target())
+            .with_semantics(
+                UiSemantics::new(UiSemanticRole::Button, "Child")
+                    .unwrap()
+                    .with_action(action.clone())
+                    .unwrap(),
+            );
+        let inner_group = UiNode::new(UiStyle::absolute(0.0, 0.0, 80.0, 80.0))
+            .with_key(inner_local.clone())
+            .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Inner").unwrap())
+            .with_child(button);
+        let group_node = UiNode::new(UiStyle::absolute(group_x, 20.0, 80.0, 80.0))
+            .with_key(group_local.clone())
+            .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Group").unwrap())
+            .with_child(inner_group);
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(authored_root.with_child(group_node))
+            .build()
+            .unwrap();
+        let frame = compiler
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let (mut journal, authority) =
+            nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+        journal.install_surface(surface, 1).unwrap();
+        let receipt = authority.submit(&mut journal, frame, 1).unwrap();
+        let route = UiRouteStamp::from_receipt(receipt);
+        let mut session = UiInteractionSession::default();
+        let focus = UiAccessibilityInput::focus_target(receipt, seat, child.clone());
+        assert!(
+            session
+                .dispatch_accessibility(&journal, focus.clone())
+                .unwrap()
+                .consumed()
+                .is_some()
+        );
+
+        let semantics = session
+            .semantic_snapshot_with_action_authority(&journal, route, seat, |key, candidate| {
+                key == &child && candidate == &action
+            })
+            .unwrap();
+        let mut publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+        let publication = publisher.publish_update(&semantics).unwrap();
+        let tree = publisher.committed_update().unwrap().accesskit_update();
+        let child_id = publisher.node_id(&child).unwrap();
+        let parent_id = expected_parent.map_or_else(
+            || tree.tree.as_ref().unwrap().root,
+            |parent| publisher.node_id(parent).unwrap(),
+        );
+        let (_, parent) = tree.nodes.iter().find(|(id, _)| *id == parent_id).unwrap();
+        assert_eq!(parent.children(), &[child_id]);
+        assert_eq!(publisher.node_id(&group).is_some(), group_x < 320.0);
+        assert_eq!(publisher.node_id(&inner).is_some(), group_x < 320.0);
+
+        let (_, node) = tree.nodes.iter().find(|(id, _)| *id == child_id).unwrap();
+        assert_eq!(node.role(), Role::Button);
+        assert_eq!(
+            node.bounds(),
+            Some(accesskit::Rect::new(250.0, 20.0, 320.0, 60.0))
+        );
+        assert_eq!(tree.focus, child_id);
+        assert!(node.supports_action(Action::Focus));
+        assert!(node.supports_action(Action::Click));
+        let mapped_focus = publisher
+            .map_action(&platform_action(publication, Action::Focus, child_id))
+            .unwrap();
+        assert_eq!(mapped_focus, focus);
+
+        let click = publisher
+            .map_action(&platform_action(publication, Action::Click, child_id))
+            .unwrap();
+        let outcome = session.dispatch_accessibility(&journal, click).unwrap();
+        let activation = UiRoutedEventKind::ActivateRequested {
+            action: action.clone(),
+            source: UiActivationSource::Accessibility,
+        };
+        assert!(outcome.consumed().unwrap().events().iter().any(|event| {
+            event.phase() == UiRoutePhase::Target
+                && event.target() == &child
+                && event.kind() == &activation
+        }));
+    }
 }
 
 #[test]

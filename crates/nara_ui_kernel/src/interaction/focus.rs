@@ -3,7 +3,7 @@ use super::{
     routing::{published_layout, route_event, surface_target_rejection},
     state::SurfaceState,
 };
-use crate::{UiDispatchBatch, UiFocusFact, UiFrame, UiKey, UiRect, UiRootKey};
+use crate::{UiDispatchBatch, UiFocusFact, UiFrame, UiKey, UiRect, UiRootKey, UiRouteStamp};
 
 pub(super) fn set_focus(
     state: &mut SurfaceState,
@@ -17,6 +17,7 @@ pub(super) fn set_focus(
         return;
     }
     let previous = std::mem::replace(&mut seat_state.focused, next.clone());
+    state.mark_focus_changed();
     if let Some(previous) = previous {
         route_event(
             frame,
@@ -35,12 +36,34 @@ pub(super) fn set_focus(
     }
 }
 
+pub(super) fn set_input_focus(
+    state: &mut SurfaceState,
+    seat: UiSeatId,
+    target: UiKey,
+    frame: &UiFrame,
+    route: UiRouteStamp,
+    batch: &mut UiDispatchBatch,
+) -> Result<(), UiNonActivation> {
+    if state.focus_is_stale(route)
+        && state
+            .seats
+            .get(&seat)
+            .and_then(|seat| seat.focused.as_ref())
+            != Some(&target)
+    {
+        return Err(UiNonActivation::StaleFocus);
+    }
+    set_focus(state, seat, Some(target), frame, batch);
+    Ok(())
+}
+
 pub(super) fn navigate_focus(
     state: &mut SurfaceState,
     seat: UiSeatId,
     direction: UiNavigation,
     frame: &UiFrame,
     latest: &UiFrame,
+    route: UiRouteStamp,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
     let candidates = focus_candidates(frame, latest, state.modal_root.as_ref());
@@ -64,8 +87,7 @@ pub(super) fn navigate_focus(
             .and_then(|current| directional_focus(current, direction, frame, &candidates))
             .unwrap_or_else(|| candidates[0].key().clone()),
     };
-    set_focus(state, seat, Some(next), frame, batch);
-    Ok(())
+    set_input_focus(state, seat, next, frame, route, batch)
 }
 
 fn sequential_focus(

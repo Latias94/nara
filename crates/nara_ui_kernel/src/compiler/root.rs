@@ -111,8 +111,11 @@ pub(super) fn compile_root(
     let mut origins = vec![UiPoint::new(0.0, 0.0); flat.len()];
     let mut clips = vec![ClipState::Unclipped; flat.len()];
     let mut visible = vec![false; flat.len()];
+    let mut semantic_ancestors = vec![None; flat.len()];
 
     for (index, node) in flat.iter().enumerate() {
+        let semantic_parent = node.parent.and_then(|parent| semantic_ancestors[parent]);
+        semantic_ancestors[index] = semantic_parent;
         let layout = &layouts[index];
         let parent_origin = node
             .parent
@@ -392,14 +395,16 @@ pub(super) fn compile_root(
             ));
         }
         if let Some(semantics) = &node.node.semantics {
+            let key = node
+                .key
+                .as_ref()
+                .expect("required semantic key is validated");
+            semantic_ancestors[index] = Some(key);
             semantic_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),
                 UiSemanticNode {
-                    key: node
-                        .key
-                        .clone()
-                        .expect("required semantic key is validated"),
-                    parent: node.semantic_parent.clone(),
+                    key: key.clone(),
+                    parent: semantic_parent.cloned(),
                     role: semantics.role,
                     name: semantics.name.clone(),
                     value: semantics.value.clone(),
@@ -414,11 +419,12 @@ pub(super) fn compile_root(
                 },
             ));
         } else if let (Some(text), Some(key)) = (&node.node.text, &node.key) {
+            semantic_ancestors[index] = Some(key);
             semantic_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),
                 UiSemanticNode {
                     key: key.clone(),
-                    parent: node.semantic_parent.clone(),
+                    parent: semantic_parent.cloned(),
                     role: UiSemanticRole::Text,
                     name: text.semantic_text().to_owned(),
                     value: None,
@@ -506,7 +512,6 @@ fn flatten_root<'a>(
         1,
         Vec::new(),
         None,
-        None,
         &mut nodes,
         &mut keys,
         limits,
@@ -522,7 +527,6 @@ fn visit_node<'a>(
     parent: Option<usize>,
     depth: usize,
     stacking_ancestors: Vec<(i32, usize)>,
-    semantic_parent: Option<UiKey>,
     keyed_parent: Option<UiKey>,
     nodes: &mut Vec<FlatNode<'a>>,
     keys: &mut BTreeSet<UiKey>,
@@ -589,12 +593,6 @@ fn visit_node<'a>(
     }
 
     let index = nodes.len();
-    let establishes_semantics = node.semantics.is_some() || (node.text.is_some() && key.is_some());
-    let child_semantic_parent = if establishes_semantics {
-        key.clone()
-    } else {
-        semantic_parent.clone()
-    };
     let child_keyed_parent = key.clone().or_else(|| keyed_parent.clone());
     let mut child_stacking = stacking_ancestors.clone();
     if node.style.stacking_context {
@@ -607,7 +605,6 @@ fn visit_node<'a>(
         key,
         structural_index: index,
         stacking_ancestors,
-        semantic_parent,
         keyed_parent,
     });
     for child in &node.children {
@@ -618,7 +615,6 @@ fn visit_node<'a>(
             Some(index),
             depth + 1,
             child_stacking.clone(),
-            child_semantic_parent.clone(),
             child_keyed_parent.clone(),
             nodes,
             keys,
@@ -735,7 +731,6 @@ pub(super) struct FlatNode<'a> {
     key: Option<UiKey>,
     structural_index: usize,
     stacking_ancestors: Vec<(i32, usize)>,
-    semantic_parent: Option<UiKey>,
     keyed_parent: Option<UiKey>,
 }
 

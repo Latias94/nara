@@ -84,8 +84,9 @@ pub(super) struct SeatState {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct SurfaceState {
-    pub(super) presentation_epoch: Option<u64>,
     pub(super) presented_route: Option<UiRouteStamp>,
+    focus_since: Option<UiRouteStamp>,
+    focus_change_pending: bool,
     /// The latest geometry invalidation, scoped to its Surface Slot lineage.
     ///
     /// Presentation epochs are only ordered within one slot lifetime. Keeping the lineage with
@@ -98,6 +99,36 @@ pub(super) struct SurfaceState {
 }
 
 impl SurfaceState {
+    pub(super) fn record_presentation(&mut self, route: UiRouteStamp) {
+        self.presented_route = Some(route);
+        self.bind_focus_change();
+    }
+
+    pub(super) fn mark_focus_changed(&mut self) {
+        self.focus_change_pending = true;
+    }
+
+    pub(super) fn bind_focus_change(&mut self) {
+        let Some(route) = self.presented_route else {
+            return;
+        };
+        if std::mem::take(&mut self.focus_change_pending)
+            && self.focus_since.is_none_or(|since| {
+                !UiRouteLineage::from_route(since).matches(route)
+                    || since.presentation_epoch() < route.presentation_epoch()
+            })
+        {
+            self.focus_since = Some(route);
+        }
+    }
+
+    pub(super) fn focus_is_stale(&self, route: UiRouteStamp) -> bool {
+        self.focus_since.is_some_and(|since| {
+            UiRouteLineage::from_route(since).matches(route)
+                && route.presentation_epoch() < since.presentation_epoch()
+        })
+    }
+
     pub(super) fn invalidate_geometry(&mut self, route: UiRouteStamp) {
         let invalidation = UiGeometryInvalidation::from_route(route);
         let replace = match self.invalidated_geometry {
@@ -519,9 +550,11 @@ pub(super) fn cancel_seat(
     for pointer in pointers {
         cancel_pointer(state, seat, pointer, frame, batch, true);
     }
-    if let Some(mut seat_state) = state.seats.remove(&seat)
-        && let Some(focused) = seat_state.focused.take()
-    {
+    let Some(seat_state) = state.seats.remove(&seat) else {
+        return;
+    };
+    state.mark_focus_changed();
+    if let Some(focused) = seat_state.focused {
         route_event(
             frame,
             &focused,
