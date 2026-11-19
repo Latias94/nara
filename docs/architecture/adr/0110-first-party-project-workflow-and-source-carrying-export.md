@@ -165,12 +165,12 @@ this content preparation. It compares the complete expected Cargo package,
 binary, profile, target, default-feature policy and requested features; actual compiled features
 and tool observations remain separate recorded facts. Cargo and content profiles stay independent.
 The Player does not accept a manifest or argument that overrides its compiled expectation.
-An application may share an explicit finite selection among its cooker and Player recipes,
-including optional native input alongside its chosen desktop/audio placement. Compiled feature
-availability alone does not activate such a service. The game's bound selection determines
-its actual recipe and distinct content profile; the existing catalog and build owners still
-verify their original fingerprints and actual compiler facts. This is application policy,
-not an engine-wide interpretation of profile names or a second feature resolver.
+An application may share an explicit finite selection among its cooker and Player recipes.
+Two-Level selects native input, desktop/audio placement and game flow independently. Its bound
+selection determines the actual recipe and distinct content profile. Compiled features make
+services available. Only the selected recipe activates them. Existing catalog and build owners
+still verify their original fingerprints and actual compiler facts. The game owns the policy
+behind its profile names and requested features.
 This is a trusted implementation contract, not proof that arbitrary code consumed the input,
 hermetic compilation, global freshness or remote authenticity. The catalog never includes the final
 executable digest; the delivery manifest records both afterward, without a digest cycle.

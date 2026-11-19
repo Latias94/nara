@@ -1136,6 +1136,15 @@ without changing root/domain owners, dependency versions or locks. Complete root
 stripping, a dedicated-server product, numeric budgets, foreign execution and full R7/R10/R12
 remain separate; UI/Dialogue product work stays paused.
 
+The [cooked round successor](2026-10-20-persistent-two-level-game-plan.md#cooked-round-implementation-and-qualification)
+binds the game's existing Title, play, pause and completion policy to separately selected silent
+and audible desktop packages. The game supplies the recipe, Cargo features and content profile
+through the existing Cook/build/publication owners. Actual relocated Windows DX12 packages pass
+2/2 through tick-zero Title, a pending Save launch, physical Start, pause, both pickups, displayed
+Complete, reset and original cleanup. The audible path also retires its original WASAPI stream.
+The owning record retains the start-order and render-projection corrections and exact native and
+CPU evidence. Dedicated server, foreign targets and the remaining R7/R10/R12 requirements stay open.
+
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
 its adapter. Build a verified immutable base Runtime catalog; directory transport is sufficient.

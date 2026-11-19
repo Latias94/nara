@@ -469,8 +469,8 @@ without the production test filter. Ordinary CPU/fallback checks run with
 Build the cooker with `cook,desktop` and select `--runtime desktop` explicitly. It resolves the
 project's `desktop` profile and builds `player_desktop` with `cooked-player,desktop`. The default
 profile and `player` binary remain the headless placement. Both selections reject an incompatible
-window setting or an authored startup Input selection: this game declares its keyboard bindings
-in the executable and needs no separately cooked Input asset.
+window setting. The selected global Input definition is cooked as its original immutable Product;
+source and shipped gameplay use the same authored bindings.
 
 ```text
 cargo +1.95.0 run --locked --offline --release --no-default-features --features cook,desktop --bin cook -- --runtime desktop --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelDesktop --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
@@ -494,11 +494,11 @@ presentation, submits the first-tick launch intent, and resumes through the orig
 control ticket. It does not construct a second input or window owner.
 Queue admission and application are separate facts. The original gameplay consumer records its
 first launch result, observable through `player_launch_result(&World)`; the desktop entry requires
-that result before Ready. An invalid initial save configuration is refused after original cleanup.
+that result before exploration Ready. An invalid initial save configuration is refused after original cleanup.
 Later ordinary K/L operation errors remain recoverable in the running game.
 
 `TWO_LEVEL_DESKTOP_READY` reports accepted launch and resumed gameplay after a matching native
-presentation. Optional `TWO_LEVEL_DESKTOP_OBSERVATION` records are bounded semantic-change
+presentation in exploration mode. Optional `TWO_LEVEL_DESKTOP_OBSERVATION` records are bounded semantic-change
 diagnostics; `TWO_LEVEL_DESKTOP_RESULT` follows original Runtime/pump retirement. Their presentation
 facts describe actual submitted/presented work and the associated gameplay state. They do not
 establish screenshot pixels, scanout or GPU duration. The CPU Image proofs retain their own scope.
@@ -508,13 +508,53 @@ receipts and reports `scene_receipts_sampled` after eviction. A recoverable K/L 
 as `gameplay_error` and remains in the game snapshot until an ordinary successful command clears it.
 
 The [desktop successor plan](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#source-free-desktop-player-successor)
-owns qualification and its limits. Physical acceptance runs the relocated package through actual
-keyboard play, checkpoint Save, normal native Close, a fresh process and Restore. It requires an
-idle Windows desktop, all game keys released, an explicit adapter, and serial Cargo because the
-test builds the real Player:
+owns qualification and its limits. Physical acceptance runs the relocated exploration package
+through actual keyboard play, checkpoint Save, normal native Close, a fresh process and Restore.
+It requires an idle Windows desktop, all game keys released, an explicit adapter, and serial Cargo
+because the test builds the real Player:
 
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook,desktop --test cooked_desktop --run-ignored only -E 'test(production_cooked_desktop_accepts_physical_play_save_and_fresh_restore)' --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate
+```
+
+### Cooked Round Flow
+
+Build the cooker with `cook,play-flow` and select `--runtime desktop --flow round`. The omitted
+`--flow` option selects `exploration`. For audible rounds use `--runtime audio-desktop` and also
+compile the cooker with `audio-cpal`. Controllers remain an independent `--controllers` selection.
+Round profiles bind the existing UI-capable `play-flow` manifest profile and the same game flow/HUD
+recipe in preparation and in the generated Player. Headless round selection is refused.
+
+```text
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --no-default-features --features cook,play-flow --bin cook -- --runtime desktop --flow round --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelRound --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+```
+
+The same three published files remain executable-relative and relocatable. No source fonts,
+importer cache or toolchain are needed to draw the HUD. Run `player_desktop --observe --save
+ABSOLUTE_CHECKPOINT_PATH`, then use Enter, Escape, T and X as in the source round flow.
+`--verify-first-present` can finish on the actual Title at tick zero. The old scripted
+Travel/Save/Restore verification modes are refused for a round product; K/L remain ordinary
+game actions after starting a round.
+
+Round READY follows the original Host Resume and a matching current HUD. Its
+`initial_title_presentation` retains the actual Title at tick zero. If Enter starts the game before
+Resume confirmation is delivered, READY can report current Playing while retaining that original
+Title. A supplied Save launch is admitted but remains pending on the Title; `launch_accepted` becomes
+true only after the original first resumed fixed transaction consumes it. The `flow` observation
+distinguishes the game snapshot from its matching presented HUD and carries original UI/native
+receipt facts. `flow.input_focused` reports the original Input endpoint's acknowledged focus;
+physical automation waits for it after activating the window. The cooked Input proof retains the
+admitted source definition alongside the exact runtime menu derivation. Observation sequence,
+stream limits and terminal cleanup policy remain shared with exploration. The `play-flow-check`
+feature enables the optional native acceptance tool. Shipping requires only `play-flow`.
+
+The [cooked round plan](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#cooked-round-flow-successor)
+records the package and native qualification. Select both physical round tests on an idle
+Windows desktop with `WGPU_BACKEND=dx12`, `NARA_WGPU_FORCE_FALLBACK=0`, and the same serial Cargo
+environment. The audio case also requires a usable WASAPI endpoint.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook,play-flow,audio-cpal --test cooked_round_flow --run-ignored only -E 'test(production_cooked_round_)' --test-threads=1 --no-fail-fast --no-tests fail
 ```
 
 ## Exact Game Reconstruction

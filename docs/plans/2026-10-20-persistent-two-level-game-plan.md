@@ -118,6 +118,136 @@ Root/sample formatting and document link/heading, manifest/lock/Schema and white
 All scoped worker/reviewer lanes are closed; the fifteen paused Editor/Dialogue files retain their
 original byte hashes. No remote publication or branch movement is part of this unit.
 
+## Cooked Round Flow Successor
+
+Extend the completed source flow through actual source-free desktop Players. Keep the game-owned
+runtime, controller and flow selections orthogonal: `--flow exploration|round` defaults to the
+existing exploration product. Round selection chooses the existing UI-capable manifest profile,
+the same flow/HUD recipe and explicit Cargo features for the cooker and the generated Player.
+Existing exploration profile names, binaries and content remain valid; new round profile names
+bind the changed composition. A headless round is refused because this Player has no frame-menu
+driver. Feature availability alone never enables menus or native controllers.
+
+The title must become usable and publish truthful readiness before any fixed tick. Pending
+first-tick Save launch intent is admitted once, remains pending on the title and is consumed by
+the original launch/command owner on the first resumed transaction. Do not fake consumption,
+advance an extra title tick or lose the launch when draining old ordinary input. Scripted
+exploration verification modes are explicitly refused for the round product before opening the
+runtime pack; finite first-presentation mode remains useful. Host initial pause/resume, original
+physical Input, App exit and retained native cleanup keep their current owners.
+
+Retain the original admitted Input definition and the exact derived menu definition together in
+the game-owned flow. Cooked evidence must distinguish those owners instead of claiming the
+installed derived map is byte-identical to cooked gameplay bindings. Use existing immutable
+handles and one startup derivation; no per-frame map reconstruction or new authority is needed.
+Optional observations join flow phase/goals and actual presented HUD text to original UI/native
+receipts. Unchanged product frames do not emit unbounded observations.
+
+Qualify actual release cooking, relocation, unavailable source/cache/tool paths, title at tick zero,
+physical start, movement/pickup, pause/release/continue, travel and second pickup, displayed
+completion, new round reset, Save launch consumption and original cleanup. Keep original
+exploration source-free and minimal-feature controls. Controller composition and audible round
+selection use the existing native service owners; physical controller buttons and new PCM/perf
+claims need their own evidence. General state hooks, flow-aware exact reconstruction and Editor UI
+remain separate work. Split optional native acceptance tooling from the shipping HUD feature.
+
+### Cooked Round Implementation And Qualification
+
+Implementation and regression coverage are in `ad2f1ee`. `PlayerSelection` owns the finite flow
+choice alongside runtime and controllers. Existing
+exploration names remain unchanged; four round profiles select the same compiled flow/HUD over
+silent or audible desktop and optional Gilrs. The original cooker, Cargo bootstrap and catalog
+owners still bind actual recipes, features and targets. Shipping `play-flow` no longer includes
+the Win32 acceptance driver; `play-flow-check` selects that separate test executable explicitly.
+
+The first release CPU cohort passes 233/233, with seven existing ignored native controls, in
+`a749de75-f24c-4776-b7b1-177146afa21e`. It covers all supported selection/profile roundtrips,
+source/cooked core content agreement and nine full game-flow trajectories. The new Save launch
+control proves pending custody throughout zero-tick Title, exact original first-batch acceptance
+and acknowledgement, ordinary Save and reuse through a second new round. A missing-parent Save
+launch retains its actual failure and still completes the original batch; another round cannot
+rewrite that first result. `FlowBindings` retains the original admitted definition and exact menu
+derivation; cooked diagnostics compare the original definition while checking the installed owner.
+
+Independent review found a startup ordering defect: an early Enter could leave Title before the
+outer Host delivered Resume confirmation, permanently missing a READY condition tied to current
+Title0. The corrected Player retains one genuine initial Title presentation and publishes READY
+against a healthy matching current HUD after confirmed Resume. `initial_title_presentation`
+explicitly marks the historical proof; it never replaces current UI/native receipts. A dedicated
+native ordering control holds back only confirmation delivery until after real
+Playing. It passes 1/1 in `0d70f667-9400-4679-b70c-dcbdea7125fb`: the original Runtime
+applies Resume, physical Enter starts a new Scene, the original first fixed batch consumes Save
+launch intent, and a matching Playing HUD appears while READY remains false. Delivering the
+already-confirmed result then emits exactly one READY with current Playing and the retained
+historical Title. The original HWND, Runtime, physical pump and containing process all retire.
+The observer receives immutable content identity from the original entrypoint rather than
+importing generated metadata directly; pack admission still uses original compiled expectations.
+
+Actual release Cook, relocated silent/audible Player execution and the deterministic readiness
+control are separate gates. The first Cook/native attempts compile actual packages but fail normal
+Windows foreground activation; their original process cleanup completes without forced termination.
+After activation, early attempts stopped at the first Enter transition. The fixture now waits
+for a visible, enabled and restored original HWND, matching native keyboard focus, and the
+existing Input endpoint's acknowledged focus before its first key. Menu keys stay Down until a
+newer matching presentation, then return Up. Key injection still checks the exact original
+window. Bounded diagnostics retain the first failure and trailing cleanup; waiting for the
+next presentation reads the original exit record if the Player closes unexpectedly.
+
+The first run with that focus handoff (`05689590-895c-47e8-a9e7-e565cc2b43a5`) reaches a real
+new round and Meadow pickup in both packages, then both windows close at the first Pause.
+Replaying the retained installations exposes the same Player error in each. The frame observer
+sees cleared movement intent but a Sprite still using a walking clip. The game previously
+changed flow state in `Last`, after extraction and after the ordinary animation projection.
+Flow now advances in `Update`, including zero-tick menu frames, with its HUD ordered afterward
+before extraction. A transition that clears held movement immediately projects the original
+idle clip. `Last` still captures the final game snapshot and refreshes the read-only paused flow
+observation during Host pause. That refresh uses the settled `RuntimeFrameStatus.simulation_paused`
+fact, which also covers the native elapsed interval that completes a Resume request. The original
+fixed batch still owns command acknowledgement and clock cadence.
+
+The ownership comparison uses Bevy's pinned render extraction boundary (`03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_render/src/pipelined_rendering.rs`) and Godot's ordinary scene-tree processing before
+transform publication (`7a37606a433c0e7735525037cdf774f043146a21`, `scene/main/scene_tree.cpp`).
+Nara keeps its existing schedules. The game settles the state used by extraction instead of
+adding a post-render reconciliation. The existing Sprite evidence remains the runtime oracle.
+
+The affected release suite passes 246/246, with seven other tests excluded, in
+`223fa7d6-0f29-47b5-bdc6-17a5fc0908d1`. The public source consumer observes idle Sprite UVs in
+`Extract` on the first Paused frame and on the final pickup's Complete frame, before D is
+released. A Host-paused exact Step produces one fixed tick and a pickup, then its original
+maintenance frame publishes the goal while retaining the same game phase. The probe's first
+run exposed an assumption about the optional `FlowSnapshot`: default exploration does not
+install it. The final probe admits its absence and the original exploration control passes.
+
+The first rerun after the schedule correction (`f6d77b74-2b5c-428e-b69f-5961c9513036`)
+completes the silent Player's physical trajectory, including Complete, restart, Save and original
+retirement. Its outer test fails when the Rust harness prepends its test label to the structured
+worker report. The audio case stops at Windows focus admission. The worker report now starts on
+its own line so the outer assertion can read the exact structured result.
+
+Both complete package tests then pass in `aa81cf7f-1bc9-4ba8-bbb5-70bef62c38aa` on Windows with
+Rust 1.95.0 and RTX 4090 DX12. Each compiles the actual Cook-bound Player, relocates the three-file
+installation, removes the isolated source and cook cache, and starts a sealed worker with Cargo
+and Rustc unavailable on `PATH`. The fixture checks one full physical keyboard round, one fresh
+Title process and two early refusals. Both original interactive Players consume the pending Save launch after
+Start, pick up a gem in each Scene, pause with D held, release and resume stationary, write a
+checkpoint, show Complete, restart, return to Title and exit. Original window, Runtime, pump,
+process containment and output all retire. The audible Player admits real WASAPI callbacks and
+pickup effects, then retires its original stream. These results cover submitted HUD and Sprite
+state and native service custody. Scanout, audio audibility or PCM measurement, physical
+controllers, other platforms and flow-aware exact reconstruction remain separate qualification.
+
+After the schedule fix, the selected source/native wrappers first stop at Title waiting for
+foreground in `9a36fdd6-bb64-49cd-963f-241692ba3bc1`. Both children return complete process and
+native cleanup. Direct reruns of those same release test binaries pass the source play-flow
+trajectory in 2.89 seconds and delayed Resume-confirmation readiness in 1.71 seconds. They retain
+physical input, matched presentation and original cleanup assertions.
+
+The minimal no-default `cook,cooked-player` selection passes 30/30 in
+`2153c5b8-480b-4b46-a039-45c0b2a6d6b2`. It exercises exploration selection, explicit Round
+refusal without its feature, cook-only admission and the source game policy using public Hosts.
+The selected release correctness Clippy gate and root and sample formatting checks also pass.
+
 ## Source Agreement And Processed Material Kind Successor
 
 Before extracting a shared cooked entry, repair the two confirmed delivery gaps from the

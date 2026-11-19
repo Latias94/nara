@@ -228,6 +228,18 @@ profile names remain unchanged, and controller profiles carry distinct names. No
 state enters the content pack or save format. See [game usage](../../samples/two-level-game/README.md#optional-native-controller)
 and the [delivery qualification](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#explicit-controllers-through-cooked-player-delivery).
 
+The game's `--flow exploration|round` choice is separate from runtime and controller selection.
+Round desktop and audible desktop profiles use the existing UI composition and game-owned menu
+policy. They publish a usable presented Title before the first fixed tick; pending first-tick Save
+intent is reported separately and is consumed by the original gameplay transaction after Start.
+The cooked Input definition and exact menu derivation retain their original immutable handles.
+The Player retains the tick-zero Title submission. READY can report a newer current HUD if Enter
+starts the round before Host Resume confirmation is delivered. HUD observations join the original
+UI and native submission facts. The cooker defaults to exploration. It rejects headless Round,
+and the Round Player rejects incompatible scripted verification selections before opening the pack. See the
+[game command](../../samples/two-level-game/README.md#cooked-round-flow) and
+[owning unit](../plans/2026-10-20-persistent-two-level-game-plan.md#cooked-round-flow-successor).
+
 The same game's [explorer animation](../../samples/two-level-game/src/animation.rs) uses one
 shared four-frame Image Product in both travel Scenes. Atlas regions are evaluated Sprite state
 derived from the existing logical clock and held intent. The

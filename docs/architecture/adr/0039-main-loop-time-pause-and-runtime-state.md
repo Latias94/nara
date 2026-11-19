@@ -140,6 +140,10 @@ The product contract is:
   transaction before accepting fresh gameplay. Context cancellation alone does not withdraw
   previously admitted commands. The opt-in Two-Level round flow is a concrete consumer of these
   boundaries, not a general state-machine or transition-hook API.
+- The round consumer settles menu state and its visible projections before `Extract`. On entering
+  Pause or Complete, clearing held movement and projecting the idle Sprite belong to the same
+  transition. The HUD consumes the resulting state before extraction. `Last` can publish the
+  game snapshot or refresh a Host-paused observation without mutating the state already drawn.
 
 ## Runner and Redraw Policy
 

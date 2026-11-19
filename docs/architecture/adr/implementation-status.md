@@ -2190,6 +2190,16 @@ completes original HWND, Runtime, pump and containing-process cleanup. The stand
 entry also passes; initial foreground refusal runs and corrections remain in the owner record.
 General state hooks and scoped lifetime automation remain OQ-034; full Foundation remains active.
 
+The [cooked round successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#cooked-round-implementation-and-qualification)
+extends the same round through the original Cook, independent Player expectation and native Runtime
+owners. Runtime, controllers and flow are explicit game selections. The admitted Input definition
+and its menu derivation retain exact handles. READY carries the original Title submission and the
+current HUD even when a real Start precedes Resume confirmation. Menu state, Sprite animation and
+the HUD agree before extraction. Both relocated Windows DX12 packages pass the full physical round
+and original cleanup, including actual WASAPI callbacks and retirement for audio. The linked record
+owns the precise results. General state hooks, flow-aware exact reconstruction, physical controller
+play, PCM verification for this round and other targets remain open.
+
 The [actual-game recording successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` adds a source/headless exact-step game tool through the original command, Session and Scene
 owners. It captures successful consumption, requires the original generation/tick acknowledgement,
