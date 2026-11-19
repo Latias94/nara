@@ -54,8 +54,10 @@ TileSet remain valid. The renderer defensively rejects invalid runtime regions.
 TileSetAssets keeps the latest desired source separately from its published Image content.
 A published TileSet owns the exact immutable pixels and atlas it validated. Sprite consumers can
 advance to a newer Image while a TileSet whose successor fails retains its coherent old picture.
-Image/source identity revocation removes the publication; retaining a handle does not retain
-authority. Removing and recreating an Image cannot revive an old revoked publication.
+For each new draw, a managed TileSet needs a usable version in its published storage slot and
+authority to sample its captured Image. Revoking either publication stops new Tilemap draws,
+even if the typed storage still holds the old value. Previously captured packets retain their
+exact pixels. Removing and recreating an Image cannot revive an old revoked publication.
 
 First requests and dependency changes may use an authorized published Image even while its next
 reload is pending or has failed. Only a cold Loading dependency without published content waits.

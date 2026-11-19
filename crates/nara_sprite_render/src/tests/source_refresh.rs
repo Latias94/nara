@@ -447,6 +447,7 @@ fn tileset_mutations_aba_and_foreign_stores_refresh_current_inputs() {
         .commit_loaded(image, pixels, &mut states, &mut events, None, None)
         .unwrap();
     prepared.commit(&server, &images, &mut tilesets, &mut states, &mut events);
+    let managed_value = tilesets.get(handle).unwrap().clone();
     drop(owner);
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
@@ -507,14 +508,29 @@ fn tileset_mutations_aba_and_foreign_stores_refresh_current_inputs() {
                 world.insert_resource(foreign);
             }
             19 => world.get_mut::<Tilemap>(entity).unwrap().tileset = Some(alternate),
+            22 => {
+                world
+                    .resource_mut::<Assets<TileSet>>()
+                    .insert(handle, managed_value.clone());
+                world.get_mut::<Tilemap>(entity).unwrap().tileset = Some(handle);
+            }
             _ => {}
         }
     })
     .unwrap();
 
     let mut runtime = RuntimeInstance::start(app).unwrap();
-    let frames = capture_frames(&mut runtime, 21);
+    let frames = capture_frames(&mut runtime, 24);
+    let world = runtime.world();
+    let states = world.resource::<AssetStates>();
+    let usable = states
+        .state(handle.id())
+        .and_then(nara_asset::AssetState::usable_version);
+    let published_slot = states.published_slot_revision(handle.id()).cloned();
+    let actual_slot = world.resource::<Assets<TileSet>>().slot_revision(handle);
     runtime.finish().unwrap();
+    assert!(usable.is_some());
+    assert_ne!(published_slot, Some(actual_slot));
 
     for frame in &frames[..3] {
         assert_eq!(frame.len(), 1);
@@ -525,9 +541,10 @@ fn tileset_mutations_aba_and_foreign_stores_refresh_current_inputs() {
         assert_eq!(captured.pixels(), [63, 127, 255, 255].repeat(32));
         assert!(captured.same_allocation(frames[0].as_slice()[0].image_content.as_ref().unwrap()));
     }
-    for frame in &frames[3..] {
+    for frame in &frames[3..21] {
         assert!(frame.as_slice()[0].image_content.is_none());
     }
+    assert!(frames[21..].iter().all(ExtractedSprites::is_empty));
     let plain = Color::rgba(0.5, 0.25, 1.0, 0.5);
     let expected = [
         (
@@ -580,7 +597,9 @@ fn tileset_mutations_aba_and_foreign_stores_refresh_current_inputs() {
             AlphaMode2d::Blend,
         ),
     ];
-    for (frames, (image, min, size, color, alpha_mode)) in frames.chunks_exact(3).zip(expected) {
+    for (frames, (image, min, size, color, alpha_mode)) in
+        frames[..21].chunks_exact(3).zip(expected)
+    {
         for frame in frames {
             assert_eq!(frame.len(), 1);
             let extracted = &frame.as_slice()[0];

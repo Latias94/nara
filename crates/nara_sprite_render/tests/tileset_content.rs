@@ -2,8 +2,9 @@ use std::{collections::VecDeque, time::Duration};
 
 use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
-    AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath,
-    AssetStates, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
+    AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetServer, AssetSourceChanges,
+    AssetSourceKind, AssetSourcePath, AssetSourcePlugin, AssetStates, Assets, Handle,
+    ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion, LoadState,
     ProjectAssetDatabase, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
@@ -47,6 +48,7 @@ enum Action {
         update_atlas: bool,
     },
     Remove,
+    RemoveTileSetSource,
 }
 
 fn apply_edit(world: &mut World) {
@@ -100,6 +102,17 @@ fn apply_edit(world: &mut World) {
                         .unwrap();
                 });
             });
+        }
+        Action::RemoveTileSetSource => {
+            assert!(
+                world
+                    .resource_mut::<ProjectAssetDatabase>()
+                    .remove_exact(&adaptable)
+            );
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .removed(adaptable.path().clone())
+                .unwrap();
         }
     }
 }
@@ -388,7 +401,7 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
     );
 }
 
-fn atlas_reload_runtime() -> (RuntimeInstance, Handle<TileSet>) {
+fn atlas_reload_app() -> (App, Handle<TileSet>) {
     let mut app = content_app(TileSetAssetLimits::new(
         ItemLimit::ONE,
         ItemLimit::new(4).unwrap(),
@@ -442,6 +455,11 @@ fn atlas_reload_runtime() -> (RuntimeInstance, Handle<TileSet>) {
             update_atlas: false,
         })),
     });
+    (app, tileset)
+}
+
+fn atlas_reload_runtime() -> (RuntimeInstance, Handle<TileSet>) {
+    let (app, tileset) = atlas_reload_app();
     (RuntimeInstance::start(app).unwrap(), tileset)
 }
 
@@ -524,4 +542,56 @@ fn dropping_a_retained_packet_retries_the_pending_atlas_when_capacity_is_availab
     assert_eq!(owner.retention().bytes, 8);
     assert_eq!(world.resource::<AssetEvents>().len(), failed_events + 1);
     runtime.finish().unwrap();
+}
+
+#[test]
+fn source_removal_revokes_new_tilemap_batches_while_a_shared_sprite_keeps_drawing() {
+    let (mut app, tileset) = atlas_reload_app();
+    app.add_plugins(AssetSourcePlugin).unwrap();
+    let world = app.world_mut().unwrap();
+    let mut edits = world.resource_mut::<Edits>();
+    edits.actions.truncate(1);
+    edits.actions.push_back(Action::RemoveTileSetSource);
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let retained_packet = runtime.world().resource::<SpriteBatches>().clone();
+    let observations: Vec<_> = (0..4)
+        .map(|_| {
+            runtime.drive(Duration::ZERO).unwrap();
+            let world = runtime.world();
+            let states = world.resource::<AssetStates>();
+            let state = states.state(tileset.id()).cloned();
+            let has_slot = states.published_slot_revision(tileset.id()).is_some();
+            let retains_value = world
+                .resource::<Assets<TileSet>>()
+                .get(tileset)
+                .and_then(TileSet::image_content)
+                .is_some();
+            let batches = world.resource::<SpriteBatches>().clone();
+            (state, has_slot, retains_value, batches)
+        })
+        .collect();
+    runtime.finish().unwrap();
+
+    assert_atlas_packet(&retained_packet, 10, 10);
+    let retained_sprite = retained_packet
+        .as_slice()
+        .iter()
+        .find(|batch| batch.kind == SpriteBatchKind::Sprite)
+        .unwrap();
+    for (state, has_slot, retains_value, batches) in observations {
+        let state = state.unwrap();
+        assert_eq!(
+            state.load_state(),
+            &LoadState::Failed {
+                message: "asset.reload-record-missing".to_owned(),
+            }
+        );
+        assert!(state.usable_version().is_none());
+        assert!(!has_slot);
+        assert!(retains_value);
+        assert_eq!(batches.len(), 1, "revoked TileSet emitted a new batch");
+        assert_eq!(batches.as_slice(), std::slice::from_ref(retained_sprite));
+    }
 }

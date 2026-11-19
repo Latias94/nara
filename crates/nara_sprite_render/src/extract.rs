@@ -96,27 +96,15 @@ pub(crate) fn extract_sprites(
             continue;
         };
         let tileset = tilemap.tileset.and_then(|handle| {
-            tilesets
-                .as_deref()
-                .and_then(|tilesets| tilesets.get(handle))
+            extract_tileset(
+                handle,
+                tilesets.as_deref()?,
+                server.as_deref(),
+                states.as_deref(),
+                images.as_deref(),
+            )
         });
-        let missing_coherent_content = tileset.is_some_and(|tileset| {
-            let Some(image) = tileset.image_content() else {
-                return false;
-            };
-            match (server.as_deref(), states.as_deref(), images.as_deref()) {
-                (Some(server), Some(states), Some(images)) => {
-                    !image.is_authorized(server, states, images)
-                }
-                _ => true,
-            }
-        });
-        if missing_coherent_content {
-            scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
-            continue;
-        }
-        let missing_tileset = tilemap.tileset.is_some() && tileset.is_none();
-        if missing_tileset {
+        if tilemap.tileset.is_some() && tileset.is_none() {
             scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
             continue;
         }
@@ -140,6 +128,27 @@ pub(crate) fn extract_sprites(
     extracted.replace(&mut scratch.sprites);
     *stats = scratch.stats;
     Ok(())
+}
+
+fn extract_tileset<'a>(
+    handle: Handle<TileSet>,
+    tilesets: &'a Assets<TileSet>,
+    server: Option<&AssetServer>,
+    states: Option<&AssetStates>,
+    images: Option<&Assets<ImageAsset>>,
+) -> Option<&'a TileSet> {
+    let tileset = tilesets.get(handle)?;
+    let Some(image) = tileset.image_content() else {
+        return Some(tileset);
+    };
+    let states = states?;
+    states.state(handle.id())?.usable_version()?;
+    if states.published_slot_revision(handle.id()) != Some(&tilesets.slot_revision(handle)) {
+        return None;
+    }
+    image
+        .is_authorized(server?, states, images?)
+        .then_some(tileset)
 }
 
 enum MaterialExtractionError {

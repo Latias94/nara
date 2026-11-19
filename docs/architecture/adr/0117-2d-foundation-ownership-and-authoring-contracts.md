@@ -273,8 +273,11 @@ that passed extent admission. A later valid Image publication may advance a Spri
 an incompatible TileSet successor retains its coherent eligible last-good atlas and pixels. An
 Image publication epoch distinguishes replacement from removal or identity revocation. The current
 managed Image publication must also match the exact storage slot: raw mutable storage access cannot
-authorize retained derived content. Resolved TileSet fields are private; changing its Image/atlas
-through a code-first builder discards the admitted content snapshot.
+authorize retained derived content. New Tilemap extraction also requires a usable managed TileSet
+publication in its exact storage slot. A revoked TileSet can retain its CPU value and an authorized
+Image without authorizing new draws. Already captured draws keep their original content. Resolved
+TileSet fields are private. Changing its Image/atlas through a code-first builder discards the
+admitted content snapshot.
 
 Material rendering freezes its effective binding and complete texture Image snapshots during
 the original Extract. Authored Material textures use managed Image publication admission;
