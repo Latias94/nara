@@ -579,6 +579,12 @@ named containing Scene or Prefab. A panel may use the row's retained claim addre
 bounded raw payload and review a Revert under the original query basis. The stored-claim
 projection works before effective composition and stays tied to the authored container.
 
+Registered semantic panels can also submit a selected effective instance inspection, borrow
+the admitted observation, and request Revert of an exact containing-source claim. The Host
+owns the operation and reviewed candidate. The panel uses the original operation identity to
+read, submit Commit or Cancel, and observe the retained result. The containing working copy can
+stay in a non-active tab throughout the operation.
+
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
 Session may also return a bounded selector-directed property observation through that read-only
 borrow, without action/result multi-frame choreography just to read a scalar. Empty selector steps

@@ -1222,3 +1222,31 @@ selector-directed consumer also computes a keyed/map scalar edit without copying
 root subtree. The experiment does not implement nested discovery, value pagination or unopened-source querying. Prepared panel
 submission has its own contract and qualification scope rather than following from read-only
 query outcomes.
+
+## Inspect An Effective Prefab Field
+
+In an authoring project, use `EditorPrefabInspectionAction::Inspect` with the query basis of a
+named open Scene or Prefab and its direct instance anchor. Submit it as `EditorAction::PrefabInspection`.
+Keep the inspection ID from the accepted dispatch and wait for `frame.prefab_inspection()`
+to report `Ready` for that ID. The semantic panel's `prefab_effective_observation` borrows
+the selected compiler result without changing the active document or selection.
+
+Enumerate `targets()` or resume after a typed target with `targets_after()`. Choose a target
+and its actual component, then use the admitted root fields and `property_value` with a
+selector work budget. A value is Present, Defaulted or Missing. `copy_value` materializes
+only that value under a separate allowance and gives local references their original authored
+routes. The property exposes its contributing record and the claim controlling the selector.
+An explicit Set equal to its inherited value still appears as a claim.
+
+For a property with `revert_claim()`, submit `PrepareRevert` with the same inspection ID and
+the exact target, component and property path. Once the frame reports `Review`, the panel can
+borrow `prefab_inspection_revert_patch` and submit `Commit` or `Cancel`. Preparation and Commit
+verify the files and open Prefab working copies used by the original inspection. A terminal
+`Reverted` result carries the new revision. Acknowledge the result and begin a fresh inspection
+to read the newly inherited value. Undo, Redo and Save remain ordinary Workspace operations.
+When inspection alone is enough, submit `Cancel` and acknowledge its result before starting
+another inspection.
+
+An inspection reads one selected occurrence. Per-frame reads use that retained observation.
+The stored claim query remains available when composition fails or when a tool needs to repair
+a dormant declaration. [Effective instance contract](../architecture/authoring-read-projection-design.md#effective-instance-fields)

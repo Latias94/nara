@@ -565,10 +565,13 @@ prepared-authoring target passes 10/10. The linked qualification records exact r
 corrections and limits. The [stored Prefab claim successor](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 provides bounded access to authored override declarations from the same query interface. Selected
 claims retain their exact containing-source address through raw reads and prepared Revert.
-Effective Prefab fields require the actual selected composition and its dependency basis.
-Full field query, value pagination, unopened source queries, shared-owner preparation locality
-and the remaining cost comparison stay open. Use durable source and occurrence identities
-when adding the effective field projection.
+The [effective instance field successor](../architecture/authoring-read-projection-design.md#effective-instance-fields)
+uses the selected compiler and the Host's actual dependency evidence. A registered semantic
+panel can inspect a non-active Scene or Prefab, find the controlling authored claim, and Revert
+it through the existing prepared edit, history and persistence owners. Explicit Revert checks
+the original files and working copies at the owning drive. Full field query, value pagination,
+unopened source queries, shared-owner preparation locality and the remaining cost comparison
+stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

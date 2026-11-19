@@ -132,6 +132,10 @@ Rules:
   and commit still checks the source owner, revision and Schema admission.
   Property-claim discovery retains the original instance path and slot together. Preparing Revert
   from that address delegates to the same source operation and preserves its exact inverse.
+  Effective inspection can supply the same path and slot when the selected field has an exact
+  controlling claim in the containing source. The Host retains the prepared edit and verifies
+  the original composition sources before consuming it. Undo and Redo use the resulting ordinary
+  history entry.
 - Complete instance conversion is a dedicated source-owned preparation, not an arbitrary populated
   record patch. It compiles the actual selected instance, allocates persistent local IDs and lowers
   one exact declaration/record transaction. Its closed replay footprint remains with the same

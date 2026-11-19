@@ -163,6 +163,12 @@ Rules:
   availability. Source-owned Revert consumes the original basis and slot through the existing
   transaction, including for an unresolved base. See the
   [stored Prefab claim contract](../authoring-read-projection-design.md#stored-prefab-property-claims).
+- The effective instance observation retains one selected anchor in an explicitly named Scene
+  or Prefab and the file or working copy selected for each actual compiler demand. Reads borrow
+  that original snapshot. Exact containing-source property Revert revalidates this custody
+  before preparing the ordinary edit and again before consuming the reviewed candidate. The
+  Session retains pending work through physical return on Cancel or Close. See the
+  [effective field contract](../authoring-read-projection-design.md#effective-instance-fields).
 - Reviewed Prefab conversion retains its original nominal source candidate and actual dependency
   evidence through submission. Root incarnation/revision/Schema, accepted source receipt and the
   selected file or working-copy lineage for each demanded dependency must remain current.

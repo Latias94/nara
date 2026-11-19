@@ -4163,7 +4163,15 @@ document basis, instance path and source slot through bounded raw reads and exis
 Revert. Oversized headers retain their address so paging can progress while keeping the same
 payload and metadata ceilings. On Windows, Identity and Tooling pass 322/322, the independent
 panel target passes 12/12 with non-active Scene and Prefab Save/Reopen, and the DX12 embedded Host
-passes 1/1. Effective inherited fields and their dependency-version fences remain open.
+passes 1/1. The [effective field successor](../authoring-read-projection-design.md#effective-field-verification)
+at `d175fa3` reads the selected compiler's merged records, defaults, claims and typed reference
+endpoints.
+A registered semantic panel can ask the Host to Revert an exact containing claim and use
+ordinary history and persistence. The Host keeps only actual source validation receipts and
+revalidates them at the consuming drive. The Scene selection passes 68/68. Host and the shared
+native DX12 conversion pass 19/19. The final independent release run passes all fourteen
+ordinary panel cases and the DX12 embedded Host. Full R2 still includes complete field queries,
+value pagination, unopened source queries and preparation locality evidence.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query

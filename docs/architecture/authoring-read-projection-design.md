@@ -1,7 +1,7 @@
 ---
 title: Selection-Independent Authoring Read Projections
 date: 2026-10-25
-status: Bounded direct-source recursive child discovery and independent panel workflow qualified; full R2 remains open
+status: Direct source discovery and selected Prefab field inspection; full R2 remains open
 ---
 
 # Selection-Independent Authoring Read Projections
@@ -306,12 +306,80 @@ The earlier broad Scene unit-test build was superseded before test execution.
 
 #### Effective instance fields
 
-The next consumer needs the effective value and the provenance of its inheritance separately
-from a stored claim. Use the Scene compiler's actual selected instance and the Host's demanded
-source receipts. Include two mounts of one base, a root-bound alias, an equal-value pin, a
-later base change, and an independently loaded missing or stale dependency. Compare the
-visible value after Revert with the selected underlying declaration. A retained effective
-observation must identify its source and dependency versions through preparation and publication.
+The Editor inspects one directly owned anchor of a named open Scene or Prefab. The existing
+selected-instance compiler supplies surviving targets, merged component records and applied
+property claims. A read reports the effective field and the declaration that contributed to it.
+This includes explicit Set claims equal to the inherited value and Absent claims that expose a
+default or leave an optional root missing. Target routes keep their authored source/addition
+facets and canonical base pins. Root-bound aliases share the same effective record. Copied
+entity references use authored routes from the containing document and retain persistent IDs.
+
+The Host captures the containing source, its nominal Schema basis and the file or working copy
+that supplies each actually demanded Prefab. Open working-copy inputs retain their immutable
+documents. The loader acquires a dependency's physical file observation only when selecting that
+working copy. It releases decoded dependencies after the observation is ready and keeps their
+source validation receipts. Borrowed discovery can query a retained snapshot without recompiling.
+Selector traversal has a separate work allowance, and copying a selected value has explicit node,
+byte and depth limits. The operation retains one bounded selected composition and uses the
+compiler's existing work allowance. A panel can borrow the snapshot once per update and read
+multiple fields from it. The borrow checks retained working-copy and document participation.
+Individual field reads then use the snapshot's index.
+
+An exact controlling property claim in the containing source can initiate Revert. An inherited
+claim or a claim covering a broader selector does not authorize removing that declaration from
+this address. Preparing and committing a Revert each check the live source and working-copy
+identity and revalidate physical source evidence in the same Session drive that consumes it.
+The existing prepared edit supplies the review and original transaction. Cancel and Session
+Close retain pending inspection work until physical return. Revert changes the containing source
+and creates one normal history entry. Read a new observation to see the value revealed by Revert.
+
+The acceptance workflow uses two mounts of one base, a root-bound alias, an equal-value pin,
+and a later base change. It checks stale and missing demanded sources, unrelated invalid sources,
+the newly inherited value, exact Undo/Redo, and Save/Reopen of both containing source kinds.
+The retained value represents the bytes and working copies originally acquired. A read of that
+snapshot performs no disk access. Revert's explicit validation may read the admitted sources and
+stable lookup scope on the owner thread. File observations provide bounded revalidation under the
+existing filesystem contract. The operation composes source records without resource hydration
+or Native preview admission.
+
+##### Effective field verification
+
+The implementation and independent consumer land together at `d175fa3`.
+On Windows x64 with Rust 1.95.0, release nextest `e268fc9e-e8a1-48dc-8527-571a849f753a`
+passes 68/68 selected Scene tests. The new cases cover merged root aliases, ordered claim
+origins, working defaults and their reference demand, and three typed references under one
+4,096-byte Map key. The latter copies the complete result at exactly eight nodes, 4,099
+logical bytes and depth three. Each limit one unit lower refuses the same copy. The other
+selected tests cover existing conversion, selected compilation and stored declaration Revert.
+
+The first independent panel run `75312a87-026f-438d-be04-49c8f04b83d6` passes 14/14
+on Windows in release. It includes both new registered semantic panel workflows alongside the
+existing authoring cases. The new workflows refuse same-length base edits before preparation
+and after review. Each then reads the inherited value after an exact Revert and verifies the
+complete source through Undo, Redo, Save and Reopen.
+
+Review moved the physical Revert fence into the consuming Session drive and put inspection
+work into the public maintenance signal. Dependency file acquisition now waits for the existing
+persistence owner only on actual compiler demand. The containing Prefab's shared document is
+charged once for inspection. The validation receipt accounts for the surviving source facts,
+working-copy selection and file capabilities after the compiler inputs are released.
+
+Windows nextest `0adc5d06-0be7-4292-a0d1-b263bdd9781c` passes 19/19 selected tests. The
+Host cases exercise deferred working-copy file acquisition, release of the worker's budget,
+same-length disk drift between dispatch and the consuming drive, and physical Close after
+Cancel. The existing native Windows/DX12 conversion still completes its Scene and Prefab
+Review, Commit, Undo/Redo, Save and Reopen trajectory. That native case qualifies the shared
+acquisition route. The effective-field workflow has its own semantic panel consumer.
+
+The final independently locked Windows release run `88c2e869-8a09-4643-ba8f-507a2b8aebb0`
+passes 15/15 with the optional cost diagnostic outside the selection. The fourteen ordinary
+panel tests include the two complete effective-field workflows. The DX12 embedded Host verifies
+hidden-window startup, painting and normal close with the same build. No latency or allocation
+target was selected for this unit.
+
+Affected library correctness Clippy passes for Scene, Tooling, Nara and Editor. Scene also
+builds with default features disabled. Root and independent panel formatting checks and local
+documentation links pass.
 
 ## Workspace Contract
 

@@ -105,6 +105,11 @@ root, placement and inline-reference replacement; value relocation alone does no
   actual source/asset demand. The Scene compiler owns selection; the Host owns bounded reads,
   immutable source/metadata receipts and revalidation. Superseded branch diagnostics do not make
   a valid replacement unsavable or force reads of its inactive dependencies.
+- Effective field inspection uses the selected compiler's surviving component programs and
+  root aliases. It reports the complete contributing declaration and applied property claims
+  separately from value presence. References copied from that observation use typed authored
+  endpoints relative to the containing source. The exact containing claim may feed the
+  source-owned Revert. Its interpretation is bound to the captured composition and Schema.
 - Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
   admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.
   `InstanceAddition` enters the preceding anchor's overlay-local namespace without claiming the
