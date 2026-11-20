@@ -1238,6 +1238,15 @@ Complete, reset and original cleanup. The audible path also retires its original
 The owning record retains the start-order and render-projection corrections and exact native and
 CPU evidence. Dedicated server, foreign targets and the remaining R7/R10/R12 requirements stay open.
 
+The [controller round successor](2026-10-20-persistent-two-level-game-plan.md#controller-round-successor)
+uses the same game-owned menu and bindings in source Desktop and the controller-selected
+cooked Player. The shared startup derivation checks the selected Input before Cook builds the
+Player. Actual normalized button edges exercise the complete game, including retained gameplay
+roles for East and Select and fresh input across pause. The controller and keyboard packages
+both pass the relocated Windows DX12 workflow. The controller package acquires WGI, presents
+its control instructions and completes the native trajectory through its keyboard fallback.
+The owning record distinguishes normalized controller input from physical device coverage.
+
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
 its adapter. Build a verified immutable base Runtime catalog; directory transport is sufficient.

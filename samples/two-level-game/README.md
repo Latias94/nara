@@ -158,6 +158,19 @@ requires an explicit `--save ABSOLUTE_PATH`. These are mapped positional buttons
 of the glyphs printed on a particular controller. Analog stick samples are supported by the
 backend but are not movement bindings in this game's Button-based control scheme.
 
+For the complete round flow, launch with both selections.
+
+```text
+cargo run --features play-flow,gamepad --bin desktop -- --play-flow --gamepad
+```
+
+Start begins and restarts rounds and toggles pause and continue. While a menu is open, East
+returns to Title from Pause or Complete, and Select exits. East and Select resume their authored
+gameplay roles while playing. Keyboard R still retries. In the controller Round, Start replaces
+the original gamepad Retry binding in the installed map. The authored definition stays intact.
+If a custom map binds Start to another command, choose a different button for that command
+before running or cooking the controller Round.
+
 Each current controller uses the explicitly selected PRIMARY window/seat. The same ActionMap
 combines keyboard and controller contributions, so releasing one source does not release another
 held source. Focus loss and physical disconnection terminate accepted controls through Input's
@@ -527,6 +540,8 @@ Build the cooker with `cook,play-flow` and select `--runtime desktop --flow roun
 compile the cooker with `audio-cpal`. Controllers remain an independent `--controllers` selection.
 Round profiles bind the existing UI-capable `play-flow` manifest profile and the same game flow/HUD
 recipe in preparation and in the generated Player. Headless round selection is refused.
+For a controller Round, add the `gamepad` feature and `--controllers gilrs`. The cooked HUD
+shows the same keyboard and controller controls as the source launch.
 
 ```text
 cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --no-default-features --features cook,play-flow --bin cook -- --runtime desktop --flow round --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelRound --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release

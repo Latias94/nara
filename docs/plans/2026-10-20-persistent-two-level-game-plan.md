@@ -248,6 +248,95 @@ The minimal no-default `cook,cooked-player` selection passes 30/30 in
 refusal without its feature, cook-only admission and the source game policy using public Hosts.
 The selected release correctness Clippy gate and root and sample formatting checks also pass.
 
+## Controller Round Successor
+
+The published controller profile can move and travel, but the Round title still requires a
+keyboard. Complete one round using controller input through the existing InputTimeline, action
+contexts, fixed gameplay commands, Scene travel and game-owned flow. Use the same round recipe
+in source Desktop and the controller-selected cooked Player. Keep keyboard alternatives.
+
+Start begins or restarts a round and toggles pause or continue according to the current phase.
+The controller Round derives its own mapping during Startup and replaces only the authored
+gameplay Start-to-Retry binding. Keyboard R still retries. An unrelated authored Start binding
+refuses the controller Round. East returns to Title from a menu and Select exits from a menu.
+Those buttons keep their original gameplay roles while playing, and other authored contexts
+retain their bindings. The menu context requires a fresh press after opening, so physical holds
+cannot transfer between roles. The admitted source or cooked action definition remains available
+separately from this derived definition. Display the controller instructions only for the
+selected controller Round.
+
+Cook invokes the same derivation once against its admitted global Input before building the
+Player. An incompatible Round stops at its source contribution and the original Input stays
+eligible for compatible selections. Use the retained definition in the existing Cook observation,
+with the same source publication fence. The pinned Bevy example exposes physical button edges,
+and Godot maps events to actions. Nara's Input owns both transition and action projection here;
+the game owns only its menu and gameplay context selection.
+[Bevy](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/examples/input/gamepad_input.rs#L12-L18)
+[Godot](https://github.com/godotengine/godot/blob/7a37606a433c0e7735525037cdf774f043146a21/core/input/input_map.cpp#L279-L306)
+
+Qualify exact input and clock behavior through the public source Runtime, including held movement,
+continued play, two pickups, travel, completion, restart and exit. Qualify actual Cook, relocated
+Player startup and the derived HUD with the selected Windows backend. Normalized controller
+input and native context acquisition are distinct checks. Physical controller execution requires
+an actual connected device. The flow adds no new input, time, Scene or platform owner.
+
+### Controller Round Qualification
+
+The implementation and public regression consumers land together at `d20ad95`.
+
+The first Windows release run `4e51ced9-4e08-4b7f-b584-a8360a93e38e` passes 16/17. The
+controller-only round reaches both pickups, completion, a fresh round and exit. The conflicting
+Start case exposes a pre-existing error path in Round initialization. A plain I/O error from
+the Startup system reaches Bevy's panic handler, and the test process aborts. Round initialization
+now converts the typed mapping error through the original managed fault route. Cook uses the same
+mapping rules to refuse the incompatible Input definition before compiling the Player.
+
+Independent review identifies an unnecessary rejection of East and Select in disabled authored
+contexts. The derivation preserves all of those bindings. The source trajectory keeps a disabled
+photo context and checks its original bindings, context crossing in both directions, and fresh
+gameplay presses that still open and close the two deferred regions.
+
+The first combined Cook and native-tool build exposes a missing `GameFlow` re-export in the
+acceptance tool's local adapter. The shared content module now imports the selection from its
+game delivery owner, so the cooker and acceptance tool compile the same check.
+
+Windows x64 Rust 1.95.0 release nextest `98cf3b3f-5d0e-4a39-b0e2-c04fde758c18` passes all 244
+selected ordinary tests, with 11 ignored cases outside the run. The source rejection returns the
+classified Start diagnostic, closes the Runtime and preserves the authored file. Cook refuses the
+same change, admits the edited definition for exploration, then accepts the Round after repair.
+The controller-only game completes both pickups, pauses with controls held, resumes stationary,
+restarts and exits. The ordinary Windows DX12 Desktop command also reaches and verifies the
+first Title presentation with `--play-flow --gamepad --verify-first-present`.
+
+The first native package run `d9fa5eb2-3e04-4042-a2c8-290ccc3f3cfd` successfully cooks and
+relocates both desktop selections. The controller Player submits its HUD with the WGI inventory
+and the new Title instructions. It times out before READY because startup still requires the
+literal keyboard-only text. READY now requires the actual game HUD's control instructions to
+appear in the matched submission along with the heading and goals. The initial Title and later
+current HUD use that same check. The keyboard Player in the first run reaches READY and waits
+for foreground input.
+
+The corrected native run `faf5194b-853c-406c-ad3a-7e502b614942` passes the ordinary keyboard
+package in 127.213 seconds. The controller package also reaches READY, then stops at the
+test's Windows foreground deadline. The isolated controller retry
+`e05ba3fa-7ddc-4ca9-a9d1-4c5077c4a1b9` passes in 65.396 seconds, including actual Cook, Player
+build and relocation. It opens the native WGI backend with zero controllers connected and
+submits matching controller instructions on an RTX 4090 through DX12. Win32 scan-code input
+then exercises the keyboard fallback through the complete round, with both pickups, score 20, Save,
+restart, Title and normal exit. The original Runtime, HWND, event pump and process containment
+retire, and the already built package also passes finite first-presentation and two refusal
+controls. These native runs cover keyboard input, WGI acquisition and presented HUD receipts.
+The controller-only run uses normalized events through the source Runtime. Physical device
+button or hotplug verification, other platform execution and performance budgets remain open.
+
+After the READY correction, the final release regressions pass the same 244/244, with 11
+ignored cases outside the selection, in `2ef72d56-756b-415a-af3f-c03d7d440420`. The default
+keyboard round keeps its original runtime selection. Callers of `with_play_flow` now explicitly
+select `PlayFlowControls::Keyboard` or `PlayFlowControls::KeyboardAndGamepad`. Scoped correctness
+Clippy and both workspace format checks pass.
+[Source Round tests](../../samples/two-level-game/tests/play_flow.rs)
+[Cooked package tests](../../samples/two-level-game/tests/cooked_round_flow.rs)
+
 ## Source Agreement And Processed Material Kind Successor
 
 Before extracting a shared cooked entry, repair the two confirmed delivery gaps from the

@@ -2223,6 +2223,16 @@ and original cleanup, including actual WASAPI callbacks and retirement for audio
 owns the precise results. General state hooks, flow-aware exact reconstruction, physical controller
 play, PCM verification for this round and other targets remain open.
 
+The [controller round successor](../../plans/2026-10-20-persistent-two-level-game-plan.md#controller-round-qualification)
+at `d20ad95` extends the same sample workflow with a controller-selected Round. Start operates the round
+and keyboard R remains Retry. The original Input owner provides cancellation and fresh-press
+semantics for the game-owned menu contexts. Both Startup and Cook derive the same mapping from
+the admitted definition. The source consumer plays, pauses, travels, completes a round, restarts
+and exits through normalized controller input. Both relocated Windows DX12 desktop selections
+complete the keyboard trajectory. The controller package presents its distinct instructions and
+reports a live WGI inventory with zero devices, with the original window and Runtime retired at
+exit. Physical device delivery remains a separate gate.
+
 The [actual-game recording successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#actual-game-recording-and-replay-successor)
 at `da96f1e` adds a source/headless exact-step game tool through the original command, Session and Scene
 owners. It captures successful consumption, requires the original generation/tick acknowledgement,
