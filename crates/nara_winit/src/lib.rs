@@ -1297,6 +1297,7 @@ impl WinitApp {
             self.accessibility_sessions.insert(window_id, session);
             platform_window.set_visible(self.initial_visibility);
         }
+        self.input_gate = WinitInputGate::reset_for_focus(platform_window.has_focus());
         self.connect_window_input(window_id)?;
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Created { window_id })
@@ -2476,6 +2477,7 @@ pub fn convert_key_code(code: WinitKeyCode) -> Option<KeyCode> {
         WinitKeyCode::Escape => KeyCode::Escape,
         WinitKeyCode::Space => KeyCode::Space,
         WinitKeyCode::Enter => KeyCode::Enter,
+        WinitKeyCode::Tab => KeyCode::Character('\t'),
         WinitKeyCode::ArrowUp => KeyCode::ArrowUp,
         WinitKeyCode::ArrowDown => KeyCode::ArrowDown,
         WinitKeyCode::ArrowLeft => KeyCode::ArrowLeft,

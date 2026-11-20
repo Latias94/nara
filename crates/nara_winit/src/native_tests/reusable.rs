@@ -12,7 +12,7 @@ use windows_sys::{
     Win32::{
         Foundation::HWND,
         UI::{
-            Input::KeyboardAndMouse::VK_W,
+            Input::KeyboardAndMouse::{VK_RETURN, VK_TAB, VK_W},
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, HWND_MESSAGE, IsWindowVisible, MSG, PM_NOREMOVE,
                 PeekMessageW, PostMessageW, WM_KEYDOWN, WM_KEYFIRST, WM_KEYLAST, WM_KEYUP,
@@ -639,12 +639,145 @@ fn retire_native_keyboard(mut session: WinitSession, original: Arc<WinitWindow>)
 }
 
 #[track_caller]
-fn post_focus_test_message(hwnd: HWND, message: u32, wparam: usize, lparam: isize) {
+fn post_test_window_message(hwnd: HWND, message: u32, wparam: usize, lparam: isize) {
     assert_ne!(
         unsafe { PostMessageW(hwnd, message, wparam, lparam) },
         0,
         "PostMessageW({message:#x}): {}",
         std::io::Error::last_os_error(),
+    );
+}
+
+#[derive(Default, nara_ecs::Resource)]
+struct PostedKeyTransitions(Vec<nara_input::InputTimelineEntry>);
+
+#[test]
+#[ignore = "requires a Windows message pump with a hidden HWND; run in its own nextest process"]
+fn native_posted_tab_and_return_publish_balanced_key_edges() {
+    use nara_app::CoreStage;
+    use nara_ecs::{Res, ResMut};
+    use nara_input::{
+        ButtonTransitionPhase::{Pressed, Released},
+        InputEventKind, InputEventOrigin, InputFrameObservations, InputPlugin,
+    };
+
+    let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
+    builder.with_any_thread(true);
+    let event_loop = WinitEventLoop::from_native(builder.build().unwrap());
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin {
+        primary_window: Some(Window::new(
+            "nara posted Tab and Return",
+            WindowResolution::new(320, 180),
+        )),
+    })
+    .unwrap();
+    app.add_plugin(InputPlugin).unwrap();
+    app.init_resource::<PostedKeyTransitions>().unwrap();
+    app.add_systems(
+        CoreStage::Last,
+        |input: Res<InputFrameObservations>, mut keys: ResMut<PostedKeyTransitions>| {
+            keys.0.extend(
+                input
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .filter(|entry| matches!(entry.kind(), InputEventKind::Key { .. })),
+            );
+        },
+    )
+    .unwrap();
+
+    let mut session = WinitRunner::new(WinitControlFlow::Wait)
+        .with_initial_visibility(false)
+        .__start_with_presentation_on(
+            RuntimeInstance::start(app).unwrap(),
+            Box::new(NoPresentationDriver),
+            Duration::from_secs(1),
+            Some(event_loop),
+        );
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        poll_native_keyboard_until(&mut session, |session| {
+            session
+                .app
+                .as_ref()
+                .unwrap()
+                .platform_windows
+                .contains_key(&WindowId::PRIMARY)
+        });
+        let app = session.app.as_ref().unwrap();
+        let window = &app.platform_windows[&WindowId::PRIMARY];
+        assert_eq!(window.is_visible(), Some(false));
+        assert!(!window.has_focus());
+        assert!(!app.input_gate.focused);
+        let hwnd = keyboard_hwnd(window);
+        let post_key = |key: u16, scan_code: u32| {
+            let down = (scan_code << 16) | 1;
+            let up = (down | 0xc000_0000) as i32 as isize;
+            post_test_window_message(hwnd, WM_KEYDOWN, usize::from(key), down as isize);
+            post_test_window_message(hwnd, WM_KEYUP, usize::from(key), up);
+        };
+        post_key(VK_TAB, 0x0f);
+        post_test_window_message(hwnd, WM_NCACTIVATE, 1, -1);
+        post_test_window_message(hwnd, WM_SETFOCUS, 0, 0);
+        poll_native_keyboard_until(&mut session, |session| {
+            let app = session.app.as_ref().unwrap();
+            app.platform_windows[&WindowId::PRIMARY].has_focus() && app.input_gate.focused
+        });
+
+        post_key(VK_TAB, 0x0f);
+        post_key(VK_RETURN, 0x1c);
+
+        let expected = [
+            (KeyCode::Character('\t'), Pressed),
+            (KeyCode::Character('\t'), Released),
+            (KeyCode::Enter, Pressed),
+            (KeyCode::Enter, Released),
+        ]
+        .map(|(key, phase)| InputEventKind::Key { key, phase });
+        poll_native_keyboard_until(&mut session, |session| {
+            session
+                .runtime()
+                .world()
+                .resource::<PostedKeyTransitions>()
+                .0
+                .iter()
+                .any(|entry| entry.kind() == expected[3])
+        });
+        let entries = &session
+            .runtime()
+            .world()
+            .resource::<PostedKeyTransitions>()
+            .0;
+        assert_eq!(
+            entries.iter().map(|entry| entry.kind()).collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            entries
+                .windows(2)
+                .all(|pair| pair[0].sequence() < pair[1].sequence())
+        );
+        let input_window = InputWindowId::new(WindowId::PRIMARY.get());
+        for entry in entries {
+            assert_eq!(entry.origin(), InputEventOrigin::Platform);
+            assert_eq!(entry.member_origin(), Some(InputEventOrigin::Platform));
+            assert_eq!(entry.invalidation(), None);
+            assert_eq!(entry.route().window(), input_window);
+            assert_eq!(entry.route().seat(), InputSeatId::PRIMARY);
+            assert_eq!(entry.route().pointer(), None);
+        }
+        for [press, release] in entries.as_chunks::<2>().0 {
+            assert_eq!(press.press_sequence(), Some(press.sequence()));
+            assert_eq!(release.press_sequence(), Some(press.sequence()));
+        }
+    }));
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+    outcome.unwrap_or_else(|payload| resume_unwind(payload));
+    assert_eq!(
+        session.into_retired().unwrap().result,
+        Ok(AppExit::Requested)
     );
 }
 
@@ -728,7 +861,7 @@ fn native_ordinary_refocus_admits_first_fresh_press_after_release_to_another_hwn
 
         let post_focus = |session: &mut WinitSession, focused: bool| {
             let message = if focused { WM_SETFOCUS } else { WM_KILLFOCUS };
-            post_focus_test_message(hwnd, message, receiver.0 as usize, 0);
+            post_test_window_message(hwnd, message, receiver.0 as usize, 0);
             poll_native_keyboard_until(session, |session| {
                 let app = session.app.as_ref().unwrap();
                 app.platform_windows[&WindowId::PRIMARY].has_focus() == focused
@@ -737,7 +870,7 @@ fn native_ordinary_refocus_admits_first_fresh_press_after_release_to_another_hwn
             });
         };
         let post_w = |session: &mut WinitSession, target, message, lparam| {
-            post_focus_test_message(target, message, usize::from(VK_W), lparam);
+            post_test_window_message(target, message, usize::from(VK_W), lparam);
             let key_message_pending = || {
                 let mut message = MSG::default();
                 unsafe {
@@ -750,7 +883,7 @@ fn native_ordinary_refocus_admits_first_fresh_press_after_release_to_another_hwn
             });
         };
 
-        post_focus_test_message(hwnd, WM_NCACTIVATE, 1, -1);
+        post_test_window_message(hwnd, WM_NCACTIVATE, 1, -1);
         post_focus(&mut session, true);
         post_w(&mut session, hwnd, WM_KEYDOWN, W_DOWN);
         step_native_keyboard(&mut session);

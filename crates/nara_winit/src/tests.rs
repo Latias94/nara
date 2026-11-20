@@ -90,6 +90,7 @@ fn converts_common_keyboard_codes_and_physical_keys() {
         (WinitKeyCode::Escape, KeyCode::Escape),
         (WinitKeyCode::Enter, KeyCode::Enter),
         (WinitKeyCode::Space, KeyCode::Space),
+        (WinitKeyCode::Tab, KeyCode::Character('\t')),
         (WinitKeyCode::ArrowLeft, KeyCode::ArrowLeft),
         (WinitKeyCode::KeyA, KeyCode::Character('a')),
         (WinitKeyCode::Digit1, KeyCode::Character('1')),
