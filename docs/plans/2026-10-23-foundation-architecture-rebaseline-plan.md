@@ -1061,6 +1061,17 @@ proves exact spelling before caching bytes. Check rejects an incorrect case alia
 the requested path. The Two-Level Sound Bank verifies the corrected spelling through decoded PCM.
 [Auxiliary spelling repair](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#typed-source-file-spelling)
 
+### November 20 Cook, Prefab Revert And Input Review
+
+The [fifth review repair record](../audits/2026-11-20-cooked-dependencies-prefab-revert-and-input-review.md#repair-status)
+tracks the first-build Image dependency, the stock Sprite publication role, effective Prefab
+Revert capacity, and shared Input/UI correctness. Runtime UI and Gilrs use the same standard
+gamepad button identities. Hit testing uses the existing clipped pixel coverage, and current
+modal motion records the pointer location even over the underlay. Ordinary Windows refocus can
+accept a fresh key press through Winit without bypassing the paused handoff's physical checks.
+The effective Revert action carries the source owner's bounded declaration allowance through
+the existing review, publication and Undo history.
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime

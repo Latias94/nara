@@ -78,5 +78,53 @@ Image publication codec. The diagnostic names the Scene, entity, field and targe
 ordinary consumer verifies a fresh Headless startup, direct acquisition through the CPU codec,
 and null and omitted Sprite bindings. [Sprite publication regression](../../tests/cooked_sprite_publication.rs)
 
-The related Windows results are recorded in the Cook plan. The other five findings remain open in
-this report. [Cook qualification](../plans/2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)
+The Cook plan records verification of the two repairs, including relocation and startup of the
+source-free one-Scene pack. [Cook qualification](../plans/2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)
+
+### Effective Prefab Revert capacity
+
+Commit `9c61130` makes `PrepareRevert` carry `PrefabDeclarationLimits`. The Host preserves the
+source owner's budget diagnostic and reports `BudgetExceeded`. The existing patch charges the
+complete expected and replacement declarations. The independent registered-panel consumer
+proves both real-file workflows with a 140,000-byte sibling note. The default refusal preserves
+the full file, document basis and history. The 1 MiB allowance permits Review, Commit, Save, Undo,
+Redo and Reopen, preserving the sibling and other mount. The tests also change a live dependency
+before preparation and after Review to check the same publication fence. Windows release
+nextest `e173f1b3-84ac-4a64-8ed3-d6a9ae9d5e2b` passes 14 selected panel tests, with one outside
+the run. The Engine Host cohort `3c65302f-9731-44cf-91a5-168c50508fe6` passes 10 tests, including
+dependency drift between dispatch and the drive that consumes the request.
+[Panel regression](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection.rs)
+
+### Gamepad and presented pointer routing
+
+Commit `6250e24` shares `GamepadButton` between Gilrs and Runtime UI and retains the original
+binding codes. The presented menu checks every D-pad direction, the resulting South activation,
+suppression of the gameplay Right edge, and right-stick click delivery to gameplay.
+
+Current-presentation modal motion records the observed position and clears hover over the
+underlay. The regression checks coordinate-free and explicitly positioned clicks, then
+activates Retry at its actual location. Hit registration and dispatch now share the existing
+visible pixel coverage used by focus and semantics. The tests check zero and one foreground
+pixel column, an intentional unpainted hit area, and a historical press against a successor
+that lost its pixel coverage. Windows nextest `17cd1bde-3a9a-4678-ad20-53751788d82f` passes
+519 tests across Input, Gilrs, Runtime UI and UI Kernel, with one outside the run. The three
+new integrated Runtime UI cases failed on the prior implementation in
+`2eadfd6f-93d2-480e-959c-6d9f79b80b03`. Two-Level release nextest
+`795344af-2ce9-4728-bfb4-d54d0334f413` passes 17 tests, including normalized D-pad movement and
+the controller-only round. Windows WGI initialization and retirement pass in
+`987f6fc8-a20a-4995-99c2-5aed1deb1a09`, with zero connected controllers.
+[Presented UI regressions](../../crates/nara_ui/src/adapter_input_regression_tests.rs)
+
+### Ordinary Windows refocus
+
+Commit `551db20` admits a fresh nonrepeat physical press after ordinary Winit focus loss on
+Windows, including when key-up went to another window. Synthetic focus key events and repeats
+stay suppressed. A paused handoff retains its physical reconciliation and admission requirements.
+Windows release nextest `938396cd-3ea2-4b99-a31d-86f990def774` passes all 99 selected Winit tests.
+The separately selected hidden-HWND test passes in `e5c5463a-d365-4f8c-a4c0-6b7352bce2c8`. It posts focus and
+key messages to the original and receiver HWNDs, exercising fixed-step Move and Stop through
+the actual message pump. The D-pad regressions use normalized input. Physical controller input
+and physical Windows foreground switching remain unqualified. [Windows regression](../../crates/nara_winit/src/native_tests/reusable.rs)
+
+All-target, all-feature correctness Clippy passes for the changed owner crates. Formatting
+checks pass for the root workspace and the independent panel package.

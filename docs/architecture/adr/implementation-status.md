@@ -4666,6 +4666,12 @@ relocation, Game View Step, presented UI and picking. The recorded regressions c
 Workspace commands, real source and processed files, and exact Runtime control and presentation
 receipts on Windows.
 
+The [fifth workflow repair record](../../audits/2026-11-20-cooked-dependencies-prefab-revert-and-input-review.md#repair-status)
+tracks Cook's build-declared Image closure and Sprite publication role, plus shared gamepad
+identities, pointer pixel coverage, modal pointer motion, ordinary Windows key recovery and the
+effective Prefab Revert declaration allowance. The record includes independent panel, Runtime UI
+and Windows message-pump verification.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected
