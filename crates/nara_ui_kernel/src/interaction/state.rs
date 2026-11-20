@@ -263,6 +263,9 @@ pub(super) fn reconcile_presented_pointer_state(
     invalidated: &[UiKey],
     batch: &mut UiDispatchBatch,
 ) {
+    if !state.has_pointer_facts() {
+        return;
+    }
     let Some((previous, previous_epoch)) = previous else {
         cancel_all_pointers(state, latest, batch);
         return;

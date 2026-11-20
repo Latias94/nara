@@ -14,6 +14,9 @@ use crate::runtime::{UiAdapterError, UiRuntimeState, state::UiReducerPreparation
 
 use super::journal::{UiActionAdmissionError, UiActionDraft, UiActionJournal};
 
+#[cfg(test)]
+mod tests;
+
 const MAX_UI_ROUTE_REJECTIONS: usize = 64;
 
 pub(crate) fn execute(

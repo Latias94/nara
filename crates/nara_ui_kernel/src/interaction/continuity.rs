@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use super::routing::{active_modal_root, published_layout, route_path};
-use crate::{UiFrame, UiHitRegion, UiKey, UiPoint, UiRect};
+use crate::{UiFrame, UiHitRegion, UiKey, UiLayoutFact, UiPoint, UiRect};
 
 fn environment_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
     let previous = previous.environment();
@@ -16,43 +18,13 @@ fn environment_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
 
 pub(super) fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
     environment_is_equivalent(previous, latest)
-        && previous
-            .layouts()
-            .iter()
-            .filter_map(|layout| {
-                layout.key().map(|key| {
-                    let input = layout.interaction();
-                    (
-                        key,
-                        layout.route_parent(),
-                        layout.visible(),
-                        input.pointer_motion(),
-                        input.scroll(),
-                        input.pointer_buttons(),
-                        input.capture_continuity(),
-                    )
-                })
-            })
-            .eq(latest.layouts().iter().filter_map(|layout| {
-                layout.key().map(|key| {
-                    let input = layout.interaction();
-                    (
-                        key,
-                        layout.route_parent(),
-                        layout.visible(),
-                        input.pointer_motion(),
-                        input.scroll(),
-                        input.pointer_buttons(),
-                        input.capture_continuity(),
-                    )
-                })
-            }))
+        && active_modal_root(previous) == active_modal_root(latest)
         && previous
             .hit_regions()
             .iter()
             .map(hit_geometry)
             .eq(latest.hit_regions().iter().map(hit_geometry))
-        && active_modal_root(previous) == active_modal_root(latest)
+        && propagation_is_equivalent(previous, latest)
 }
 
 fn hit_geometry(region: &UiHitRegion) -> (&UiKey, UiRect, Option<UiRect>, UiPoint, UiPoint) {
@@ -63,6 +35,46 @@ fn hit_geometry(region: &UiHitRegion) -> (&UiKey, UiRect, Option<UiRect>, UiPoin
         region.minimum,
         region.maximum,
     )
+}
+
+fn propagation_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
+    if previous.hit_regions().is_empty() {
+        return true;
+    }
+    let mut remaining_layouts = keyed_layouts(previous);
+    let latest_layouts = keyed_layouts(latest);
+    for region in previous.hit_regions() {
+        let mut current = Some(region.key());
+        while let Some(key) = current {
+            let Some(previous) = remaining_layouts.remove(key) else {
+                break;
+            };
+            let Some(latest) = latest_layouts.get(key) else {
+                return false;
+            };
+            let previous_input = previous.interaction();
+            let latest_input = latest.interaction();
+            if previous.route_parent() != latest.route_parent()
+                || previous.visible() != latest.visible()
+                || previous_input.pointer_motion() != latest_input.pointer_motion()
+                || previous_input.scroll() != latest_input.scroll()
+                || previous_input.pointer_buttons() != latest_input.pointer_buttons()
+                || previous_input.capture_continuity() != latest_input.capture_continuity()
+            {
+                return false;
+            }
+            current = previous.route_parent();
+        }
+    }
+    true
+}
+
+fn keyed_layouts(frame: &UiFrame) -> BTreeMap<&UiKey, &UiLayoutFact> {
+    frame
+        .layouts()
+        .iter()
+        .filter_map(|layout| layout.key().map(|key| (key, layout)))
+        .collect()
 }
 
 pub(super) fn capture_declarations_are_equivalent(

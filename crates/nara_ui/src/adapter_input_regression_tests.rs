@@ -170,6 +170,59 @@ fn mouse_hit_and_paint_agree_for_zero_and_one_pixel_foreground_buttons() {
 }
 
 #[test]
+fn tab_advances_once_and_wraps_with_keyboard_activation() {
+    let mut app = ui_app();
+    install_test_surface(app.configuration_world());
+    let world = app.configuration_world();
+    let root = test_root(world, UiLayer::Base, "menu");
+    let resume = test_button(world, "Resume", UiStyle::absolute(10.0, 10.0, 80.0, 40.0));
+    let settings = test_button(
+        world,
+        "Settings",
+        UiStyle::absolute(100.0, 10.0, 80.0, 40.0),
+    );
+    place_ui_tree(world, root, &[resume, settings]);
+    app.update().unwrap();
+    let frame = ui_candidate_frame(app.world(), surface_id())
+        .unwrap()
+        .unwrap();
+    let receipt = app.present_frame(frame, 1).unwrap();
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("tab-menu").unwrap())
+        .unwrap();
+    let window = InputWindowId::new(11);
+    let seat = InputSeatId::PRIMARY;
+    let tab = KeyCode::Character('\t');
+    for (key, expected) in [
+        (tab, "Resume"),
+        (tab, "Settings"),
+        (KeyCode::Enter, "Settings"),
+        (tab, "Resume"),
+    ] {
+        for edge in [
+            ButtonDriverInput::Press(key),
+            ButtonDriverInput::Release(key),
+        ] {
+            app.timeline().admit_keyboard(window, seat, edge).unwrap();
+            app.update().unwrap();
+            let semantic = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).unwrap();
+            let focused = semantic
+                .nodes()
+                .iter()
+                .filter(|node| node.state().focused())
+                .map(|node| node.name())
+                .collect::<Vec<_>>();
+            assert_eq!(focused, [expected]);
+        }
+    }
+    let [activation] = actions(&app, &cursor) else {
+        panic!("only Enter must activate the focused button");
+    };
+    assert_eq!(activation.action().as_str(), "Settings");
+    assert_eq!(activation.source(), UiActivationSource::Keyboard);
+}
+
+#[test]
 fn stock_dpad_navigates_each_direction_and_consumes_the_gameplay_edge() {
     const SOUTH: u16 = 0;
     const RIGHT_THUMB: u16 = 12;

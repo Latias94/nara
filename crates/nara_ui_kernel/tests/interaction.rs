@@ -3097,31 +3097,32 @@ fn assert_successor_cancels_pointer_capture(initial: Arc<UiFrame>, successor: Ar
 
 #[test]
 fn keyed_ancestor_reparenting_cancels_pointer_capture_with_fixed_generations() {
-    let ancestor = UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0))
-        .with_key(node_key("ancestor"))
-        .with_child(button("first", "First", "first", 10.0, 10.0, true));
-    let parent =
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0)).with_key(node_key("parent"));
-    let initial = UiAuthoringSnapshotBuilder::new(1)
-        .with_root(
-            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
-                .with_child(parent.clone().with_child(ancestor.clone())),
-        )
-        .build()
-        .unwrap();
-    let successor = UiAuthoringSnapshotBuilder::new(2)
-        .with_root(
-            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
-                .with_children([parent, ancestor]),
-        )
-        .build()
-        .unwrap();
     let mut compiler = compiler();
-    let initial = compile_for_slot(&mut compiler, &initial, 1, 1, 1, 1);
-    let successor = compile_for_slot(&mut compiler, &successor, 1, 1, 1, 1);
-    assert_eq!(initial.hit_regions(), successor.hit_regions());
+    for (routed_x, sibling_x) in [(10.0, 110.0), (110.0, 10.0)] {
+        let ancestor = UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0))
+            .with_key(node_key("ancestor"))
+            .with_child(button("routed", "Routed", "routed", routed_x, 10.0, true));
+        let parent =
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0)).with_key(node_key("parent"));
+        let sibling = button("sibling", "Sibling", "sibling", sibling_x, 10.0, true);
+        let root = || UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill());
+        let initial = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                root()
+                    .with_children([parent.clone().with_child(ancestor.clone()), sibling.clone()]),
+            )
+            .build()
+            .unwrap();
+        let successor = UiAuthoringSnapshotBuilder::new(2)
+            .with_root(root().with_children([parent, ancestor, sibling]))
+            .build()
+            .unwrap();
+        let initial = compile_for_slot(&mut compiler, &initial, 1, 1, 1, 1);
+        let successor = compile_for_slot(&mut compiler, &successor, 1, 1, 1, 1);
+        assert_eq!(initial.hit_regions(), successor.hit_regions());
 
-    assert_successor_cancels_pointer_capture(initial, successor);
+        assert_successor_cancels_pointer_capture(initial, successor);
+    }
 }
 
 #[test]
