@@ -97,6 +97,32 @@ fn competing_owner_and_same_identity_external_bytes_are_not_overwritten() {
 }
 
 #[test]
+fn a_committed_read_does_not_authorize_a_later_file_replacement() {
+    let directory = Directory::new();
+    let path = directory.path();
+    let mut slot = SaveSlot::open(&path).unwrap();
+    slot.save(&checkpoint(1)).unwrap();
+    let mut other = SaveSlot::open(&path).unwrap();
+    other.save(&checkpoint(2)).unwrap();
+    let (loaded, binding) = slot.prepare_load().unwrap();
+    assert_eq!(loaded.checkpoint.score, 2);
+    assert!(matches!(
+        slot.save(&checkpoint(3)),
+        Err(SaveIoError::Conflict)
+    ));
+
+    let latest = other.save(&checkpoint(4)).unwrap();
+    slot.accept_load(binding);
+    assert!(matches!(
+        slot.save(&checkpoint(5)),
+        Err(SaveIoError::Conflict)
+    ));
+    let bytes = fs::read(&path).unwrap();
+    assert_eq!(ContentDigest::of_bytes(&bytes), latest.digest);
+    assert_eq!(decode_checkpoint(&bytes).unwrap().checkpoint.score, 4);
+}
+
+#[test]
 fn post_publication_change_is_uncertain_until_a_validated_readback_reconciles() {
     let directory = Directory::new();
     let mut slot = SaveSlot::open(&directory.path()).unwrap();

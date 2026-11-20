@@ -372,6 +372,10 @@ checks, interruption before publication, and pure bounded format/migration cases
 `--verify-first-present` proves presentation only; it does not prove that a human exercised every
 key or that a particular platform has passed the full interactive trajectory.
 
+A successful Restore adopts the exact file observed by that attempt when its destination Scene
+commits. A rejected Restore preserves the previous write baseline and any existing save conflict.
+Rejected travel also preserves the content stamps used by subsequent exact Resume captures.
+
 When sharing `CARGO_TARGET_DIR` with another independent workspace that also builds a `headless`
 binary, explicitly build this package's `headless` before running these process tests. Use the
 same profile/features as the test run, for example `cargo build --manifest-path

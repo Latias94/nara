@@ -686,6 +686,62 @@ fn changed_cavern_content_in_a_verified_copy_refuses_resume_and_leaves_original_
 }
 
 #[test]
+fn rejected_travel_keeps_the_last_committed_content_stamp_for_new_captures() {
+    let project = ProjectCopy::new();
+    let mut game = Game::from_project(project.root());
+    assert_eq!(
+        game.command(action(TRAVEL)).level,
+        Some(LevelKey::main(LevelId::Cavern))
+    );
+    collect_near_pickup(&mut game, 10);
+    assert_eq!(
+        game.command(action(TRAVEL)).level,
+        Some(LevelKey::main(LevelId::Meadow))
+    );
+    let incumbent = game.snapshot().current_instance;
+    let basis = game.capture();
+    assert_eq!(basis.compatibility.levels.len(), 2);
+    assert_eq!(basis.counters.travel_count, 2);
+
+    let cavern = project.root().join("scenes/cavern.scene.json");
+    let original = fs::read_to_string(&cavern).unwrap();
+    let invalid_candidate = original.replace("\"gem-near\"", "\"gem-renamed\"");
+    assert_ne!(invalid_candidate, original);
+    fs::write(&cavern, invalid_candidate).unwrap();
+    game.submit(action(TRAVEL));
+    assert_eq!(game.session.step().unwrap(), None);
+    let deadline = Instant::now() + DEADLINE;
+    let rejected = loop {
+        let snapshot = game.snapshot();
+        if snapshot.phase == GamePhase::Running && snapshot.error.is_some() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline, "{snapshot:?}");
+        game.maintenance();
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert!(
+        rejected
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("saved pickup does not exist")
+    );
+    assert_eq!(rejected.current_instance, incumbent);
+    assert_eq!(rejected.score, 10);
+    assert_eq!(rejected.travel_count, 2);
+
+    fs::write(&cavern, original).unwrap();
+    game.command(action(MARKER));
+    let captured = game.capture();
+    assert_eq!(captured.compatibility.levels, basis.compatibility.levels);
+    assert_eq!(captured.progress.score, 10);
+    assert_eq!(captured.progress.markers.len(), 1);
+    let mut recovered = Game::from_project(project.root());
+    restore_candidate(&game, &mut recovered, &captured);
+}
+
+#[test]
 fn resume_requires_a_fresh_candidate_with_an_empty_original_command_queue() {
     let mut original = Game::source();
     let state = meaningful_game(&mut original);

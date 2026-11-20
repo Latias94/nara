@@ -52,6 +52,9 @@ enum Binding {
         digest: ContentDigest,
     },
 }
+
+pub(crate) struct CheckpointBinding(Binding);
+
 impl Binding {
     fn expected(self) -> ExpectedTarget {
         match self {
@@ -113,6 +116,14 @@ impl SaveSlot {
 
     /// Reads and validates before changing the conflict baseline, including after uncertain save.
     pub fn load(&mut self) -> Result<DecodedCheckpoint, SaveIoError> {
+        let (decoded, binding) = self.prepare_load()?;
+        self.accept_load(binding);
+        Ok(decoded)
+    }
+
+    pub(crate) fn prepare_load(
+        &mut self,
+    ) -> Result<(DecodedCheckpoint, CheckpointBinding), SaveIoError> {
         if !self.retry_cleanup() {
             return Err(SaveIoError::CleanupPending);
         }
@@ -121,12 +132,16 @@ impl SaveSlot {
         let decoded = decode_checkpoint(&bytes)?;
         let digest = ContentDigest::of_bytes(&bytes);
         file.verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)?;
-        self.binding = Binding::Existing {
+        let binding = CheckpointBinding(Binding::Existing {
             identity: file.identity(),
             digest,
-        };
+        });
+        Ok((decoded, binding))
+    }
+
+    pub(crate) fn accept_load(&mut self, binding: CheckpointBinding) {
+        self.binding = binding.0;
         self.uncertain = false;
-        Ok(decoded)
     }
 
     pub fn save(&mut self, checkpoint: &Checkpoint) -> Result<SaveReceipt, SaveIoError> {

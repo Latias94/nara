@@ -181,15 +181,15 @@ pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
 }
 
 pub(super) fn validate_content(
-    world: &mut World,
+    world: &World,
     level: LevelId,
     source: Option<ProjectSceneContentStamp>,
-) -> Result<(), String> {
+) -> Result<Option<LevelContentStamp>, String> {
     let Some(source) = source else {
         if is_pending(world) {
             return Err("exact reconstruction requires admitted source content facts".into());
         }
-        return Ok(());
+        return Ok(None);
     };
     let record = stamp(level, source);
     let control = world.resource::<ResumeControl>();
@@ -204,11 +204,14 @@ pub(super) fn validate_content(
             return Err(format!("resume content compatibility rejected {level:?}"));
         }
     }
+    Ok(Some(record))
+}
+
+pub(super) fn commit_content(world: &mut World, stamps: Vec<LevelContentStamp>) {
     world
         .resource_mut::<ResumeControl>()
         .levels
-        .insert(level, record);
-    Ok(())
+        .extend(stamps.into_iter().map(|record| (record.level, record)));
 }
 
 pub(super) fn is_pending(world: &World) -> bool {
@@ -403,7 +406,7 @@ pub(super) fn begin_from_command(
     }
     let progress = state.progress.clone();
     world.resource_mut::<ResumeControl>().pending = Some(state);
-    if let Err(error) = travel::begin(world, progress, true) {
+    if let Err(error) = travel::begin(world, progress, travel::TravelKind::Resume) {
         world.resource_mut::<ResumeControl>().pending = None;
         return Err(error);
     }

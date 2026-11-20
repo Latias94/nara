@@ -14,7 +14,7 @@ use nara::{
 use super::PLUGIN_ID;
 use crate::save::{
     Checkpoint,
-    io::{SaveIoError, SaveSlot},
+    io::{CheckpointBinding, SaveIoError, SaveSlot},
 };
 
 pub(super) const OBLIGATION: PluginShutdownObligationId =
@@ -53,15 +53,24 @@ impl Storage {
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
-    pub fn load(&self) -> Result<Checkpoint, String> {
+    pub(super) fn prepare_load(&self) -> Result<(Checkpoint, CheckpointBinding), String> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_mut()
             .ok_or("no application save path was supplied")?
-            .load()
-            .map(|decoded| decoded.checkpoint)
+            .prepare_load()
+            .map(|(decoded, binding)| (decoded.checkpoint, binding))
             .map_err(|error| error.to_string())
+    }
+
+    pub(super) fn accept_load(&self, binding: CheckpointBinding) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+            .expect("a prepared checkpoint read has the original application save slot")
+            .accept_load(binding);
     }
 }
 

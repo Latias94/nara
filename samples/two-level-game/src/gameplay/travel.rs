@@ -33,7 +33,8 @@ use super::{
 use crate::{
     command::decode_movement,
     levels::{LevelId, LevelKey},
-    save::{Checkpoint, CheckpointLocation, MAX_MARKERS},
+    resume::LevelContentStamp,
+    save::{Checkpoint, CheckpointLocation, MAX_MARKERS, io::CheckpointBinding},
 };
 
 #[derive(Resource, Default)]
@@ -49,8 +50,15 @@ struct Pending {
     checkpoint: Checkpoint,
     target: LevelKey,
     validate: Vec<LevelId>,
+    content: Vec<LevelContentStamp>,
     request: Option<ProjectSceneRequestId>,
-    restore: bool,
+    kind: TravelKind,
+}
+
+pub(super) enum TravelKind {
+    Travel,
+    Resume,
+    RestoreCheckpoint(CheckpointBinding),
 }
 
 enum ConsumedInput {
@@ -148,15 +156,17 @@ pub(super) fn consume(world: &mut World) {
                     level: target,
                     anchor: SceneEntityId::new("checkpoint").unwrap(),
                 };
-                begin(world, checkpoint, false)
+                begin(world, checkpoint, TravelKind::Travel)
             }
             RETRY => retry_current(world),
             MARKER => add_marker(world),
             SIDE_ROOM => side_room::toggle(world, Room::SideRoom),
             LOOKOUT => side_room::toggle(world, Room::Lookout),
             SAVE => save_checkpoint(world),
-            RESTORE => match world.resource::<Storage>().load() {
-                Ok(checkpoint) => begin(world, checkpoint, true),
+            RESTORE => match world.resource::<Storage>().prepare_load() {
+                Ok((checkpoint, binding)) => {
+                    begin(world, checkpoint, TravelKind::RestoreCheckpoint(binding))
+                }
                 Err(error) => Err(error),
             },
             _ => Ok(()),
@@ -244,7 +254,7 @@ fn retry_current(world: &mut World) -> Result<(), String> {
 pub(super) fn begin(
     world: &mut World,
     checkpoint: Checkpoint,
-    restore: bool,
+    kind: TravelKind,
 ) -> Result<(), String> {
     checkpoint.validate().map_err(|error| error.to_string())?;
     if world.resource::<Travel>().pending.is_some() {
@@ -265,8 +275,9 @@ pub(super) fn begin(
         target: checkpoint.location.level,
         checkpoint,
         validate: validate.into_iter().collect(),
+        content: Vec::new(),
         request: None,
-        restore,
+        kind,
     });
     let mut session = world.resource_mut::<Session>();
     session.phase = GamePhase::Preparing;
@@ -337,12 +348,16 @@ pub(super) fn advance(world: &mut World) {
             return;
         }
     };
-    if let Err(error) = super::resume::validate_content(world, level, stamp) {
-        cancel_ack(world, request);
-        reject(world, error);
-        return;
-    }
-    if !pending.restore && level == pending.target.level() {
+    let stamp = match super::resume::validate_content(world, level, stamp) {
+        Ok(stamp) => stamp,
+        Err(error) => {
+            cancel_ack(world, request);
+            reject(world, error);
+            return;
+        }
+    };
+    let restore = !matches!(pending.kind, TravelKind::Travel);
+    if !restore && level == pending.target.level() {
         pending.checkpoint.location.anchor = content.checkpoint.clone();
     }
     if let Err(error) = content.validate_progress(level, &pending.checkpoint) {
@@ -355,6 +370,7 @@ pub(super) fn advance(world: &mut World) {
         reject(world, error);
         return;
     }
+    pending.content.extend(stamp);
     if !pending.validate.is_empty() {
         cancel_ack(world, request);
         pending.validate.pop();
@@ -397,6 +413,10 @@ pub(super) fn advance(world: &mut World) {
         );
         return;
     }
+    super::resume::commit_content(world, pending.content);
+    if let TravelKind::RestoreCheckpoint(binding) = pending.kind {
+        world.resource::<Storage>().accept_load(binding);
+    }
     *world.resource_mut::<Rooms>() = Rooms::default();
     #[cfg(all(windows, feature = "audio-cpal"))]
     crate::audio::scene_replaced(world);
@@ -406,7 +426,7 @@ pub(super) fn advance(world: &mut World) {
         session.markers.clear();
         session.phase = GamePhase::Reconstructing;
         session.travel_count = session.travel_count.saturating_add(1);
-        session.restores = session.restores.saturating_add(u32::from(pending.restore));
+        session.restores = session.restores.saturating_add(u32::from(restore));
     }
     match reconstruct(world) {
         Ok(()) => {
@@ -420,12 +440,12 @@ pub(super) fn advance(world: &mut World) {
             session.held = held;
             session.phase = GamePhase::Running;
             #[cfg(all(windows, feature = "audio-cpal"))]
-            if !pending.restore {
+            if !restore {
                 crate::audio::travel_entered(world, pending.target);
             }
             println!(
                 "two_level_game: entered {:?} score={} restored={}",
-                pending.target, pending.checkpoint.score, pending.restore
+                pending.target, pending.checkpoint.score, restore
             );
         }
         Err(error) => fail(world, error),

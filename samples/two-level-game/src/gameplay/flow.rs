@@ -505,7 +505,7 @@ fn new_round(world: &mut World) {
         level: LevelKey::main(LevelId::Meadow),
         anchor: nara::identity::SceneEntityId::new("checkpoint").expect("static anchor"),
     });
-    match travel::begin(world, checkpoint, false) {
+    match travel::begin(world, checkpoint, travel::TravelKind::Travel) {
         Ok(()) => {
             let mut flow = world.resource_mut::<Flow>();
             let return_to = flow.phase;

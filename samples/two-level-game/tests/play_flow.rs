@@ -1245,6 +1245,125 @@ fn controller_save_then_pause_writes_once() {
 }
 
 #[cfg(feature = "gamepad")]
+#[test]
+fn a_rejected_restore_preserves_the_other_rounds_save_until_restore_commits() {
+    use GamepadButton::{LeftShoulder, RightShoulder, Start};
+    use two_level_game::save::decode_checkpoint;
+
+    let project = ProjectCopy::new();
+    let save = project.save_path();
+    let mut incumbent = controller_game_with_save(&project);
+    incumbent.start_round();
+    incumbent.driver.tap_button(LeftShoulder);
+    incumbent.frame(STEP);
+    assert_eq!(incumbent.snapshot().saves, 1);
+    assert_eq!(
+        decode_checkpoint(&fs::read(&save).unwrap())
+            .unwrap()
+            .checkpoint
+            .score,
+        0
+    );
+    let incumbent_scene = incumbent.instance();
+
+    {
+        let mut other_round = controller_game_with_save(&project);
+        other_round.start_round();
+        other_round.command('e');
+        other_round.settle_level(LevelId::Cavern);
+        other_round.collect_near_pickup();
+        other_round.driver.tap_button(LeftShoulder);
+        other_round.frame(STEP);
+        assert_eq!(other_round.snapshot().saves, 1);
+    }
+    let other_bytes = fs::read(&save).unwrap();
+    let other_checkpoint = decode_checkpoint(&other_bytes).unwrap().checkpoint;
+    assert_eq!(
+        other_checkpoint.location.level,
+        LevelKey::main(LevelId::Cavern)
+    );
+    assert_eq!(other_checkpoint.score, 10);
+
+    let assert_conflict = |game: &Game| {
+        let state = game.snapshot();
+        assert_eq!(state.saves, 1, "{state:?}");
+        assert_eq!(state.restores, 0, "{state:?}");
+        assert_eq!(state.score, 0);
+        assert_eq!(game.instance(), incumbent_scene);
+        assert!(
+            state
+                .error
+                .as_ref()
+                .is_some_and(|error| error.contains("checkpoint changed")),
+            "{state:?}"
+        );
+        assert_eq!(fs::read(&save).unwrap(), other_bytes);
+    };
+    incumbent.driver.tap_button(LeftShoulder);
+    incumbent.frame(STEP);
+    assert_conflict(&incumbent);
+
+    let destination = project.root().join("scenes/cavern.scene.json");
+    let source = fs::read(&destination).unwrap();
+    fs::write(&destination, b"{ malformed target").unwrap();
+    incumbent.driver.tap_button(RightShoulder);
+    incumbent.frame(STEP);
+    let deadline = Instant::now() + DEADLINE;
+    while incumbent.snapshot().phase == GamePhase::Preparing {
+        assert!(
+            Instant::now() < deadline,
+            "the rejected Restore did not settle"
+        );
+        incumbent.frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let rejected = incumbent.snapshot();
+    assert_eq!(rejected.phase, GamePhase::Running);
+    assert_eq!(rejected.restores, 0);
+    assert_eq!(incumbent.instance(), incumbent_scene);
+    assert!(
+        rejected
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("scene-format-invalid")),
+        "{rejected:?}"
+    );
+    fs::write(&destination, source).unwrap();
+
+    incumbent.driver.tap_button(LeftShoulder);
+    incumbent.frame(STEP);
+    assert_conflict(&incumbent);
+
+    incumbent.driver.tap_button(LeftShoulder);
+    incumbent.driver.tap_button(Start);
+    incumbent.frame(Duration::ZERO);
+    assert_eq!(incumbent.flow().phase, FlowPhase::Paused);
+    assert_eq!(fs::read(&save).unwrap(), other_bytes);
+    incumbent.driver.tap_button(Start);
+    incumbent.frame(Duration::ZERO);
+    assert_eq!(incumbent.flow().phase, FlowPhase::Resuming);
+    incumbent.frame(STEP);
+    assert_eq!(incumbent.flow().phase, FlowPhase::Playing);
+    assert_conflict(&incumbent);
+
+    incumbent.driver.tap_button(RightShoulder);
+    incumbent.frame(STEP);
+    incumbent.settle_level(LevelId::Cavern);
+    assert_eq!(incumbent.snapshot().restores, 1);
+    assert_eq!(incumbent.snapshot().score, 10);
+    assert_ne!(incumbent.instance(), incumbent_scene);
+    incumbent.driver.tap_button(LeftShoulder);
+    incumbent.frame(STEP);
+    assert_eq!(incumbent.snapshot().saves, 2);
+    assert_eq!(
+        decode_checkpoint(&fs::read(&save).unwrap())
+            .unwrap()
+            .checkpoint,
+        other_checkpoint
+    );
+}
+
+#[cfg(feature = "gamepad")]
 fn controller_game_with_save(project: &ProjectCopy) -> Game {
     let recipe = with_play_flow(
         configured_recipe(RunOptions {
