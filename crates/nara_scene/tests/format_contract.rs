@@ -1340,14 +1340,18 @@ fn migration_results_reapply_shape_limits_for_scene_prefab_and_patch() {
 
 #[test]
 fn migration_results_validate_json_and_ron_encoded_limits() {
-    let registry = migrating_text_registry(0);
+    let migrated_text = "'".repeat(128);
+    let registry = migrating_text_registry_with_value(ComponentValue::map([(
+        "current",
+        ComponentValue::String(migrated_text.clone()),
+    )]));
 
     let legacy_scene =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let current_scene =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
-            .with_component(migrating_text_id(), current_text_record("x"))]);
+            .with_component(migrating_text_id(), current_text_record(&migrated_text))]);
     let scene_limits = ron_only_encoded_limits(
         &legacy_scene.to_json_string().unwrap(),
         &current_scene.to_json_string().unwrap(),
@@ -1365,7 +1369,7 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let current_prefab =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
-            .with_component(migrating_text_id(), current_text_record("x"))]);
+            .with_component(migrating_text_id(), current_text_record(&migrated_text))]);
     let prefab_limits = ron_only_encoded_limits(
         &legacy_prefab.to_json_string().unwrap(),
         &current_prefab.to_json_string().unwrap(),
@@ -1386,7 +1390,7 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
     let current_patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: scene_id("target"),
         component: migrating_text_id(),
-        value: current_text_record("x"),
+        value: current_text_record(&migrated_text),
     }]);
     let patch_limits = ron_only_encoded_limits(
         &legacy_patch.to_json_string().unwrap(),

@@ -1587,7 +1587,9 @@ fn validate_ron_shape(encoded: &[u8], limits: SerdeShapeLimits) -> Result<(), Sc
 }
 
 fn canonical_ron_pretty_config() -> ron::ser::PrettyConfig {
-    ron::ser::PrettyConfig::default().new_line("\n".to_owned())
+    ron::ser::PrettyConfig::default()
+        .new_line("\n".to_owned())
+        .indentor("  ".to_owned())
 }
 
 struct BoundedEncodedBuffer<'a> {

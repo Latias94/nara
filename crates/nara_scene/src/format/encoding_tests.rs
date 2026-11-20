@@ -38,6 +38,39 @@ fn source_and_prefab_string_apis_preserve_the_canonical_pretty_output() {
 }
 
 #[test]
+fn large_dual_u64_sources_round_trip_within_the_default_ron_byte_limit() {
+    let rows = (1..=32_768)
+        .map(|index| {
+            ComponentValue::map([
+                ("id", ComponentValue::U64(index)),
+                ("value", ComponentValue::U64(index)),
+            ])
+        })
+        .collect();
+    let record = SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            ("rows", ComponentValue::List(rows)),
+            ("scalar", ComponentValue::U64(7)),
+        ]),
+    );
+    let entity = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap())
+        .with_component(ComponentTypeId::new("test.KeyedRows"), record);
+    let scene = SceneDocument::from_ordered_roots([entity]);
+    let limits = SceneFileLimits::default();
+    validate_scene_publication_shape(&scene, limits).unwrap();
+    let decoded = SceneDocumentCandidate::decode_ron_str(&scene.to_ron_string().unwrap()).unwrap();
+    assert!(decoded.document == scene, "Scene RON changed the source");
+    drop(decoded);
+
+    let prefab = PrefabDocument::new(scene.placements, scene.entities);
+    validate_prefab_publication_shape(&prefab, limits).unwrap();
+    let decoded =
+        PrefabDocumentCandidate::decode_ron_str(&prefab.to_ron_string().unwrap()).unwrap();
+    assert!(decoded.document == prefab, "Prefab RON changed the source");
+}
+
+#[test]
 fn each_document_encoder_accepts_exact_output_and_refuses_one_byte_short() {
     let source = source();
     let prefab = prefab(&source);
