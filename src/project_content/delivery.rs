@@ -1,13 +1,13 @@
 use std::{collections::BTreeMap, convert::Infallible, fmt, mem::size_of, sync::Arc};
 
-use nara_asset::StableAssetId;
+use nara_asset::{AssetSourceKind, AssetSourcePath, StableAssetId};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
 
 use super::catalogue::DeliveryCatalogue;
 use super::{
-    ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
+    ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, BudgetTicket, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
     ProjectContentLease, ProjectContentLoader, ProjectContentMemberReceipt, ProjectContentSnapshot,
     ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SelectedSceneProduct,
@@ -62,6 +62,19 @@ struct DeliveryInner {
     _lease: ProjectContentLease,
 }
 
+#[cfg_attr(not(feature = "project-tooling"), allow(dead_code))]
+pub(crate) struct DeliverySources {
+    pub(super) catalogue: Option<DeliveryCatalogue>,
+    pub(super) identities: BTreeMap<StableAssetId, DeliverySourceIdentity>,
+    _budget: BudgetTicket,
+}
+
+pub(super) struct DeliverySourceIdentity {
+    pub(super) path: AssetSourcePath,
+    #[cfg_attr(not(feature = "project-tooling"), allow(dead_code))]
+    pub(super) is_image: bool,
+}
+
 impl ProjectContentDeliveryReceipt {
     #[must_use]
     pub fn startup_content(&self) -> &StartupContentClosureReceipt {
@@ -81,6 +94,15 @@ impl ProjectContentDeliveryReceipt {
     #[must_use]
     pub fn members(&self) -> &[ProjectContentMemberReceipt] {
         &self.inner.members
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(super) fn member_for_path(&self, path: &str) -> Option<&ProjectContentMemberReceipt> {
+        let members = self.members();
+        let index = members
+            .binary_search_by(|member| member.path().as_str().cmp(path))
+            .ok()?;
+        Some(&members[index])
     }
 
     #[must_use]
@@ -163,6 +185,7 @@ impl ProjectContentLoader {
             SelectedSceneProduct::WhenKnown,
             |_, _| Ok(()),
         )
+        .map(|(receipt, _)| receipt)
         .map_err(ProjectContentError::from)
     }
 
@@ -177,7 +200,8 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         selected_scene_product: SelectedSceneProduct,
         on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
-    ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
+    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliverySources>), DeliveryVisitError<E>>
+    {
         let readiness = self.validate_inputs(candidate, plan)?;
         let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
             &self.root, candidate, plan,
@@ -218,6 +242,7 @@ impl ProjectContentLoader {
             SelectedSceneProduct::WhenKnown,
             |_, _| Ok(()),
         )
+        .map(|(receipt, _)| receipt)
         .map_err(ProjectContentError::from)
     }
 
@@ -230,7 +255,8 @@ impl ProjectContentLoader {
         readiness: &SourceReadiness,
         selected_scene_product: SelectedSceneProduct,
         mut on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
-    ) -> Result<ProjectContentDeliveryReceipt, DeliveryVisitError<E>> {
+    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliverySources>), DeliveryVisitError<E>>
+    {
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
             delivery_error(
                 "project.delivery.startup-mismatch",
@@ -288,7 +314,8 @@ impl ProjectContentLoader {
         roots.dedup();
 
         let mut source_identities = BTreeMap::new();
-        merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
+        let mut identity_budget = self.budget_host.reserve();
+        merge_delivery_source_identities(&mut source_identities, &snapshot, &mut identity_budget)?;
         let mut members = BTreeMap::<String, ProjectContentMemberReceipt>::new();
         self.merge_delivery_members(
             &mut members,
@@ -324,7 +351,11 @@ impl ProjectContentLoader {
                 selected_scene_product,
             )?;
             catalogue = next_catalogue.or(catalogue);
-            merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
+            merge_delivery_source_identities(
+                &mut source_identities,
+                &snapshot,
+                &mut identity_budget,
+            )?;
             self.merge_delivery_members(
                 &mut members,
                 &snapshot,
@@ -336,7 +367,12 @@ impl ProjectContentLoader {
             // No decoded Scene/Image or generation lease escapes into the delivery receipt.
             drop(snapshot);
         }
-        drop(source_identities);
+        let mut retained_identities = None;
+        if matches!(selected_scene_product, SelectedSceneProduct::Required) {
+            retained_identities = Some((source_identities, identity_budget));
+        } else {
+            drop((source_identities, identity_budget));
+        }
 
         let array_work = checked_plan_product(
             ProjectContentBudgetKind::WorkBytes,
@@ -404,7 +440,12 @@ impl ProjectContentLoader {
         // Receipt, startup closure and catalogue leases still own their original reservations;
         // the bounded final read must overlap them rather than hiding publication's peak.
         readiness.revalidate(self, candidate)?;
-        Ok(receipt)
+        let sources = retained_identities.map(|(identities, budget)| DeliverySources {
+            catalogue,
+            identities,
+            _budget: budget,
+        });
+        Ok((receipt, sources))
     }
 
     fn merge_delivery_members(
@@ -433,18 +474,12 @@ impl ProjectContentLoader {
         {
             if let Some(previous) = members.get(member.path().as_str()) {
                 if previous != member {
-                    return Err(delivery_error(
-                        "project.delivery.member-changed",
-                        "A shared delivery source changed between Scene loads",
-                    ));
+                    return Err(delivery_member_changed());
                 }
                 continue;
             }
             if members.len() >= self.limits.limit(ProjectContentBudgetKind::Files) {
-                return Err(delivery_error(
-                    "project.delivery.member-limit",
-                    "Delivery exceeds the project content file limit",
-                ));
+                return Err(delivery_member_limit());
             }
             let work = checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
@@ -466,58 +501,59 @@ impl ProjectContentLoader {
 }
 
 fn merge_delivery_source_identities(
-    identities: &mut BTreeMap<StableAssetId, ProjectPath>,
+    identities: &mut BTreeMap<StableAssetId, DeliverySourceIdentity>,
     snapshot: &ProjectContentSnapshot,
-    budget: &mut super::BudgetTicket,
+    budget: &mut BudgetTicket,
 ) -> Result<(), ProjectContentError> {
     // Source content retains every actually used Scene association in the same canonical index.
     // Delivery neither reconstructs a directory prefix nor rediscovers dependency identities.
     for record in snapshot.asset_database().records() {
-        admit_delivery_source_identity(
-            identities,
-            record.stable_id(),
-            record.path().as_str(),
-            budget,
+        let stable_id = record.stable_id();
+        let path = record.path();
+        if let Some(existing) = identities.get(&stable_id) {
+            if &existing.path == path {
+                continue;
+            }
+            return Err(ProjectContentError::single(
+                ProjectContentErrorKind::AssetMetaMismatch,
+                "project.delivery.source-identity-conflict",
+                "Different delivery source paths claim the same stable identity",
+            ));
+        }
+        let work = checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                size_of::<(StableAssetId, DeliverySourceIdentity)>(),
+                BTREE_ENTRY_OVERHEAD,
+                path.as_str().len(),
+            ],
         )?;
+        budget
+            .add(ProjectContentBudgetKind::WorkBytes, work)
+            .map_err(ProjectContentError::budget)?;
+        identities.insert(
+            stable_id,
+            DeliverySourceIdentity {
+                path: path.clone(),
+                is_image: record.source_kind() == &AssetSourceKind::Image,
+            },
+        );
     }
     Ok(())
 }
 
-fn admit_delivery_source_identity(
-    identities: &mut BTreeMap<StableAssetId, ProjectPath>,
-    stable_id: StableAssetId,
-    source_path: &str,
-    budget: &mut super::BudgetTicket,
-) -> Result<(), ProjectContentError> {
-    if let Some(existing) = identities.get(&stable_id) {
-        if existing.as_str() == source_path {
-            return Ok(());
-        }
-        return Err(ProjectContentError::single(
-            ProjectContentErrorKind::AssetMetaMismatch,
-            "project.delivery.source-identity-conflict",
-            "Different delivery source paths claim the same stable identity",
-        ));
-    }
-    let work = checked_plan_sum(
-        ProjectContentBudgetKind::WorkBytes,
-        [
-            size_of::<(StableAssetId, ProjectPath)>(),
-            BTREE_ENTRY_OVERHEAD,
-            source_path.len(),
-        ],
-    )?;
-    budget
-        .add(ProjectContentBudgetKind::WorkBytes, work)
-        .map_err(ProjectContentError::budget)?;
-    let path = ProjectPath::new(source_path).map_err(|_| {
-        delivery_error(
-            "project.delivery.source-path-invalid",
-            "Delivery source has an invalid project-relative path",
-        )
-    })?;
-    identities.insert(stable_id, path);
-    Ok(())
+pub(super) fn delivery_member_changed() -> ProjectContentError {
+    delivery_error(
+        "project.delivery.member-changed",
+        "A shared delivery source changed between reads",
+    )
+}
+
+pub(super) fn delivery_member_limit() -> ProjectContentError {
+    delivery_error(
+        "project.delivery.member-limit",
+        "Delivery exceeds the project content file limit",
+    )
 }
 
 fn delivery_error(code: &'static str, summary: &'static str) -> ProjectContentError {

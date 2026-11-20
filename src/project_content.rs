@@ -4,6 +4,8 @@ mod budget;
 mod catalogue;
 mod closure;
 mod delivery;
+#[cfg(feature = "project-tooling")]
+mod delivery_images;
 mod domains;
 mod input;
 pub(crate) mod materials;
@@ -78,6 +80,8 @@ pub use closure::{
     ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
     ProjectSceneContentStamp, StartupContentClosureReceipt,
 };
+#[cfg(feature = "project-tooling")]
+pub(crate) use delivery::DeliverySources;
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
 pub(crate) use domains::ProjectAssetDomains;
@@ -1617,6 +1621,11 @@ struct WorkReservation {
     reserved: usize,
 }
 
+struct DeliveryImageExpectation {
+    metadata: ContentDigest,
+    source: Option<ContentDigest>,
+}
+
 fn source_scope(root: &nara_project::ProjectPath) -> Result<AssetPathScope, ProjectContentError> {
     AssetSourcePath::new(root.as_str())
         .map(AssetPathScope::under)
@@ -1718,13 +1727,10 @@ impl<'a> LoadContext<'a> {
         })
     }
 
-    fn load(
+    fn bind_source_roots(
         &mut self,
         candidate: &ProjectSettingsCandidate,
-        selected_scene: Option<SourceSceneSelection<'_>>,
-        input_reuse: Option<&ProjectInputContent>,
-    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
+    ) -> Result<(), ProjectContentError> {
         let settings = candidate.settings();
         let scope_work = checked_plan_sum(
             ProjectContentBudgetKind::WorkBytes,
@@ -1748,6 +1754,18 @@ impl<'a> LoadContext<'a> {
             settings.paths.prefabs.clone(),
             settings.paths.scenes.clone(),
         ]);
+        Ok(())
+    }
+
+    fn load(
+        &mut self,
+        candidate: &ProjectSettingsCandidate,
+        selected_scene: Option<SourceSceneSelection<'_>>,
+        input_reuse: Option<&ProjectInputContent>,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
+        self.bind_source_roots(candidate)?;
+        let settings = candidate.settings();
         let input = self.load_input(candidate, input_reuse)?;
         self.content_closure
             .as_mut()
@@ -2890,9 +2908,10 @@ impl<'a> LoadContext<'a> {
         for path in paths {
             self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let result = self.load_image(assets, asset_root, &path);
+            let result = self.load_image(assets, asset_root, &path, None);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
-            images.push(result?);
+            let (image, _) = result?;
+            images.push(image);
             let queued_work = queued_source_path_work_bytes(&path)?;
             drop(path);
             self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_work);
@@ -3151,22 +3170,37 @@ impl<'a> LoadContext<'a> {
         assets: &DirectoryCapability,
         asset_root: &nara_project::ProjectPath,
         path: &AssetPath,
-    ) -> Result<ProjectImageContent, ProjectContentError> {
+        expected: Option<DeliveryImageExpectation>,
+    ) -> Result<(ProjectImageContent, ContentDigest), ProjectContentError> {
+        let read = if expected.is_some() {
+            ContentReadContext::ExactProjectMember {
+                source_root: asset_root,
+            }
+        } else {
+            ContentReadContext::Asset
+        };
         let meta_path = path.meta_path();
         self.observe_source_read(Some(asset_root), &meta_path)?;
-        let (meta_bytes, meta_digest) = self.read_file(
+        let (meta_bytes, meta_digest) = self.read_file_inner(
             assets,
             &meta_path,
             nara_asset::AssetMetaFileLimits::default()
                 .encoded_bytes()
                 .get(),
+            read,
         )?;
-        self.record_member(
-            ProjectContentMemberKind::AssetMetadata,
-            asset_root,
-            &meta_path,
-            meta_digest,
-        )?;
+        if let Some(expected) = &expected {
+            if meta_digest != expected.metadata {
+                return Err(catalogue::metadata_source_changed(path.as_str()));
+            }
+        } else {
+            self.record_member(
+                ProjectContentMemberKind::AssetMetadata,
+                asset_root,
+                &meta_path,
+                meta_digest,
+            )?;
+        }
         let meta = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&meta_bytes)
             .map_err(|_| {
                 ProjectContentError::with_identifier(
@@ -3202,22 +3236,24 @@ impl<'a> LoadContext<'a> {
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         let record_path_work = self.reserve_work(record_path_bytes)?;
         let record = identity.into_record(&self.asset_scope);
-        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
-        if let Some(indexed) = self.asset_database.record_for_path(record.path()) {
-            if indexed != &record {
-                return Err(catalogue::identity_conflict(path));
+        if expected.is_none() {
+            self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
+            if let Some(indexed) = self.asset_database.record_for_path(record.path()) {
+                if indexed != &record {
+                    return Err(catalogue::identity_conflict(path));
+                }
+            } else {
+                self.reserve_asset_database_work(&record)?;
+                self.asset_database.insert(record.clone()).map_err(|_| {
+                    ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::AssetMetaMismatch,
+                        "project.content.asset-identity-conflict",
+                        "Project asset identity conflicts within the Scene closure",
+                        "asset",
+                        path.as_str(),
+                    )
+                })?;
             }
-        } else {
-            self.reserve_asset_database_work(&record)?;
-            self.asset_database.insert(record.clone()).map_err(|_| {
-                ProjectContentError::with_identifier(
-                    ProjectContentErrorKind::AssetMetaMismatch,
-                    "project.content.asset-identity-conflict",
-                    "Project asset identity conflicts within the Scene closure",
-                    "asset",
-                    path.as_str(),
-                )
-            })?;
         }
         let ceiling = self
             .loader
@@ -3226,7 +3262,15 @@ impl<'a> LoadContext<'a> {
             .max_encoded_bytes()
             .get();
         self.observe_source_read(Some(asset_root), path.as_str())?;
-        let (source_bytes, source_digest) = self.read_file(assets, path.as_str(), ceiling)?;
+        let (source_bytes, source_digest) =
+            self.read_file_inner(assets, path.as_str(), ceiling, read)?;
+        if expected
+            .as_ref()
+            .and_then(|expected| expected.source)
+            .is_some_and(|digest| digest != source_digest)
+        {
+            return Err(delivery::delivery_member_changed());
+        }
         let source_path_bytes = record.path().as_str().len();
         let import = self
             .loader
@@ -3241,13 +3285,15 @@ impl<'a> LoadContext<'a> {
         let work_before = self.reserve_image_memory(source_path_bytes, memory, record_path_work)?;
         let image = import.import().map_err(map_image_import_error)?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, work_before)?;
-        self.record_member(
-            ProjectContentMemberKind::AssetSource,
-            asset_root,
-            path.as_str(),
-            source_digest,
-        )?;
-        Ok(ProjectImageContent { image })
+        if expected.is_none() {
+            self.record_member(
+                ProjectContentMemberKind::AssetSource,
+                asset_root,
+                path.as_str(),
+                source_digest,
+            )?;
+        }
+        Ok((ProjectImageContent { image }, source_digest))
     }
 
     fn reserve_image_memory(

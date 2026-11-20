@@ -18,10 +18,12 @@ use crate::{
     image::ImageAsset,
     input::ActionMapAsset,
     material::{Material2dAsset, Material2dDomain},
-    project_content::{DeliverySnapshotPhase, DeliveryVisitError, SelectedSceneProduct},
+    project_content::{
+        DeliverySnapshotPhase, DeliverySources, DeliveryVisitError, SelectedSceneProduct,
+    },
     project_host::{
-        ProjectContentLoader, ProjectContentMemberKind, ProjectContentSnapshot,
-        ProjectTileSetContent, resolve_product_recipe,
+        ProjectContentDeliveryReceipt, ProjectContentLoader, ProjectContentMemberKind,
+        ProjectContentSnapshot, ProjectTileSetContent, RuntimePlan, resolve_product_recipe,
     },
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
     runtime_content::RuntimeContentDependencyRole,
@@ -604,12 +606,73 @@ fn reserve_output(builder: &mut CookedContentBuilder) -> Result<(), ProjectCookE
     Ok(())
 }
 
+fn cook_demanded_images(
+    loader: &ProjectContentLoader,
+    request: &ProjectCookRequest<'_>,
+    plan: &RuntimePlan,
+    delivery: &(ProjectContentDeliveryReceipt, Option<DeliverySources>),
+    outputs: &mut BTreeMap<AssetProductRef, Output>,
+    builder: &mut CookedContentBuilder,
+    observations: &mut Observations,
+) -> Result<(), DeliveryVisitError<ProjectCookError>> {
+    let mut demands = outputs
+        .iter_mut()
+        .filter(|(product, output)| {
+            product.product() == ImportedProductId::PRIMARY
+                && matches!(
+                    **output,
+                    Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
+                )
+        })
+        .peekable();
+    if demands.peek().is_none() {
+        return Ok(());
+    }
+
+    let (receipt, sources) = delivery;
+    let sources = sources
+        .as_ref()
+        .expect("strict Cook retains delivery sources");
+    let mut sources = loader.delivery_images(request.candidate, plan, sources, receipt)?;
+    for (&product, output) in demands {
+        let acquired = sources.with_image(product, |image, source, metadata| {
+            let path = image.path();
+            observations.raw(
+                builder,
+                path.as_str(),
+                Some(ArtifactContentDigest::from_content(source)),
+            )?;
+            let metadata_path_bytes = path.as_str().len().checked_add(5).ok_or_else(overflow)?;
+            builder.admit_consumer_work(
+                metadata_path_bytes
+                    .checked_add(metadata_bytes::<(
+                        AssetSourcePath,
+                        Option<ArtifactContentDigest>,
+                    )>(metadata_path_bytes)?)
+                    .ok_or_else(overflow)?,
+            )?;
+            observations.raw(
+                builder,
+                &path.meta_path(),
+                Some(ArtifactContentDigest::from_content(metadata)),
+            )?;
+            builder.add_image(image.image())?;
+            Ok(())
+        })?;
+        if acquired {
+            *output = Output::Stock(StockKind::Image, StockState::Cooked);
+        }
+    }
+    Ok(())
+}
+
 /// Cooks the selected source project without reconstructing its identities or recompiling Scenes.
 ///
 /// Stock payloads are selected through delivery roots and the assembled Runtime dependencies.
 /// Stock Images preserve their admitted pixels, color space and extent through the stock Runtime
 /// codec. Device-specific image transforms remain explicit separate artifact contributions.
-/// Complete source snapshots are borrowed sequentially and released by the original loader.
+/// Complete source snapshots are borrowed sequentially. Images first demanded by built Products
+/// use the same loader and contribute their own source and metadata observations.
 pub fn prepare_project_cooked_content(
     request: ProjectCookRequest<'_>,
     mut contribute: impl FnMut(&mut ProjectCookContext<'_>) -> Result<(), ProjectCookError>,
@@ -641,7 +704,7 @@ fn prepare(
         DeliveryVisitError::Content(error) => ProjectCookError::Source(error),
         DeliveryVisitError::Visit(error) => error,
     };
-    let receipt = loader
+    let delivery = loader
         .load_delivery_with_snapshots(
             request.candidate,
             &plan,
@@ -696,12 +759,13 @@ fn prepare(
     let needs_replay = |outputs: &BTreeMap<AssetProductRef, Output>| {
         outputs
             .values()
-            .any(|output| matches!(output, Output::Stock(_, StockState::Demanded)))
+            .any(|output| matches!(output, Output::Stock(kind, StockState::Demanded) if *kind != StockKind::Image))
     };
-    let receipt = if needs_replay(&outputs) {
+    let delivery = if needs_replay(&outputs) {
+        let (receipt, _) = &delivery;
         let expected_delivery = receipt.delivery_digest();
         let expected_startup = receipt.startup_content().content_closure().stamp();
-        drop(receipt);
+        drop(delivery);
         let replay = loader
             .load_delivery_with_snapshots(
                 request.candidate,
@@ -725,8 +789,8 @@ fn prepare(
                 },
             )
             .map_err(delivery_error)?;
-        if replay.delivery_digest() != expected_delivery
-            || replay.startup_content().content_closure().stamp() != expected_startup
+        if replay.0.delivery_digest() != expected_delivery
+            || replay.0.startup_content().content_closure().stamp() != expected_startup
         {
             return Err(ProjectCookError::Invalid(
                 "source delivery changed while selecting cooked dependencies".into(),
@@ -734,8 +798,20 @@ fn prepare(
         }
         replay
     } else {
-        receipt
+        delivery
     };
+    cook_demanded_images(
+        &loader,
+        &request,
+        &plan,
+        &delivery,
+        &mut outputs,
+        &mut builder,
+        &mut observations,
+    )
+    .map_err(delivery_error)?;
+    let (receipt, sources) = delivery;
+    drop(sources);
     let output_bytes = metadata_bytes::<(AssetProductRef, Output)>(0)?
         .checked_mul(outputs.len())
         .ok_or_else(overflow)?;

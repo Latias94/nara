@@ -91,8 +91,11 @@ impl SourceAssetImporter for BadgeDomain {
         if !png.starts_with(PNG_SIGNATURE) || body.image.product() != ImportedProductId::PRIMARY {
             return Err(AssetImportError::domain(invalid_badge()));
         }
-        let source_image = (settings.image_delivery != ImageDelivery::LinkedAtBuild)
-            .then_some(AssetRef::Product(body.image));
+        let source_image = match settings.image_delivery {
+            ImageDelivery::Embedded => Some(AssetRef::Path(body.png)),
+            ImageDelivery::Linked => Some(AssetRef::Product(body.image)),
+            ImageDelivery::LinkedAtBuild => None,
+        };
         let build_image =
             (settings.image_delivery == ImageDelivery::LinkedAtBuild).then_some(body.image);
         if settings.image_delivery == ImageDelivery::Embedded {

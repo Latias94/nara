@@ -29,6 +29,16 @@ pub(crate) struct DeliveryCatalogue {
     _budget: BudgetTicket,
 }
 
+pub(super) fn metadata_source_changed(path: &str) -> ProjectContentError {
+    ProjectContentError::with_identifier(
+        ProjectContentErrorKind::HostAuthorityRejected,
+        "project.content.asset-metadata-source-changed",
+        "Asset metadata changed after stable reference resolution; retry content loading",
+        "asset",
+        path,
+    )
+}
+
 impl LoadContext<'_> {
     pub(super) fn has_complete_reference_catalogue(&self) -> bool {
         self.catalogue
@@ -640,13 +650,7 @@ impl LoadContext<'_> {
                 .is_none()
                 || expected.digest != digest
             {
-                return Err(ProjectContentError::with_identifier(
-                    ProjectContentErrorKind::HostAuthorityRejected,
-                    "project.content.asset-metadata-source-changed",
-                    "Asset metadata changed after stable reference resolution; retry content loading",
-                    "asset",
-                    path.as_str(),
-                ));
+                return Err(metadata_source_changed(path.as_str()));
             }
         }
         Ok(())

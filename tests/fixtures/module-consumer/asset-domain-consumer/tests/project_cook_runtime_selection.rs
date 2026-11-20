@@ -33,10 +33,11 @@ use nara::{
     ecs::Component,
     fs::{ContentDigest, DirectoryCapability, FsError, RelativePath},
     identity::EntityLookup,
-    image::{ImageAsset, ImageExtent, ImageImportSettings, ImageRuntimeCodec},
+    image::{ImageAsset, ImageDomain, ImageExtent, ImageImportSettings, ImageRuntimeCodec},
     project_host::{
-        HeadlessSession, HeadlessSessionClose, ProjectContentMemberKind, ProjectDomainAssets,
-        ProjectSettingsCandidate, ingest_project_manifest, resolve_product_recipe,
+        HeadlessSession, HeadlessSessionClose, ProjectContentBudgetKind, ProjectContentLimits,
+        ProjectContentMemberKind, ProjectDomainAssets, ProjectSettingsCandidate,
+        ingest_project_manifest, resolve_product_recipe,
     },
     project_tooling::{
         host_fs::{readable_directory, readable_file, writable_directory},
@@ -44,7 +45,7 @@ use nara::{
     },
     project_workflow::{
         ProjectCheckRequest, check_project,
-        cooked_content::{CookedContentLimits, PreparedRuntimeContent},
+        cooked_content::{CookedContentError, CookedContentLimits, PreparedRuntimeContent},
     },
     reflect::{
         ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
@@ -52,8 +53,9 @@ use nara::{
         PersistentComponent, PersistentComponentProvider,
     },
     runtime_content::{
-        RuntimeCodecDefinitionId, RuntimeContentBase, RuntimeContentDependency,
-        RuntimeContentDependencyRole, RuntimeContentLimits, RuntimeContentTarget,
+        RuntimeCodecDefinitionId, RuntimeContentBase, RuntimeContentCatalogError,
+        RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentError,
+        RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget,
     },
     scene::{SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord},
 };
@@ -68,14 +70,18 @@ const SCENE: &str = "startup.scene.json";
 const BADGE: &str = "badge.json";
 const LATER_SCENE: &str = "later.scene.json";
 const LATER_BADGE: &str = "later.badge.json";
+const EXTRA_BADGE: &str = "extra.badge.json";
 const PNG: &str = "badge.png";
 const PNG_SOURCE: &str = "assets/badge.png";
+const PNG_SIDECAR: &str = "assets/badge.png.meta";
 const SCENE_ID: &str = "25910000-0000-4000-8000-000000000001";
 const BADGE_ID: &str = "25910000-0000-4000-8000-000000000002";
 const IMAGE_ID: &str = "25910000-0000-4000-8000-000000000003";
 const UNUSED_ID: &str = "25910000-0000-4000-8000-000000000004";
 const LATER_SCENE_ID: &str = "25910000-0000-4000-8000-000000000006";
 const LATER_BADGE_ID: &str = "25910000-0000-4000-8000-000000000007";
+const EXTRA_BADGE_ID: &str = "25910000-0000-4000-8000-000000000009";
+const EARLY_IMAGE_ID: &str = "25900000-0000-4000-8000-000000000003";
 const PLACEMENT: &str = "consumer.cook-badge.Placement";
 const PNG_BEFORE: &[u8] = include_bytes!("../../../images/valid-rgba-1x1.png");
 const PNG_AFTER: &[u8] = &[
@@ -97,11 +103,141 @@ fn project_cook_retains_linked_image_and_rebuilds_after_source_drift() {
 }
 
 #[test]
+fn project_cook_resolves_an_image_first_required_by_the_only_scene_build() {
+    exercise_project_cook(ImageDelivery::LinkedAtBuild);
+}
+
+#[test]
 #[allow(
     clippy::result_large_err,
     reason = "The public Cook contribution callback returns ProjectCookError."
 )]
-fn project_cook_revisits_earlier_image_once_for_later_scene() {
+fn project_cook_observes_the_build_selected_image_separately_from_the_raw_import_input() {
+    let scratch = Scratch::new();
+    let project = scratch.0.join("project");
+    let recipe = recipe();
+    let (root, candidate) = write_project(
+        &project,
+        ImageDelivery::LinkedAtBuild,
+        None,
+        BadgeReference::Path,
+        &recipe,
+    );
+    let selected = product(UNUSED_ID);
+    let selected_path = "assets/unused.png";
+    let selected_sidecar = "assets/unused.png.meta";
+    fs::write(project.join(selected_path), PNG_AFTER).unwrap();
+    fs::write(
+        project.join("assets").join(BADGE),
+        serde_json::to_vec(&BadgeSource {
+            png: AssetPath::new(PNG).unwrap(),
+            image: selected,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+
+    let store = open_store(&scratch.0);
+    let implementation = implementation_digest();
+    let request = build_request(&root, BADGE, implementation);
+    let build = || build_source::<BadgeDomain>(&store, &request, |_| Ok(())).unwrap();
+    let built = build();
+    assert_eq!(
+        built.group().members()[0].dependencies,
+        [(selected, AssetReferenceDemand::Immediate)]
+    );
+    assert!(built.group().observations().iter().all(|observation| !matches!(observation,
+        ArtifactBuildObservation::Raw {path, ..} if [selected_path, selected_sidecar].contains(&path.as_str()))));
+
+    let cook = |recipe: ProductRecipe| {
+        prepare_project_cooked_content(
+            ProjectCookRequest {
+                root: &root,
+                candidate: &candidate,
+                recipe,
+                target: RuntimeContentTarget::new("consumer-headless", "badge").unwrap(),
+                store: &store,
+                implementation,
+                limits: CookedContentLimits::default(),
+            },
+            |context| {
+                assert!(context.snapshot().images().is_empty());
+                context.add_group::<BadgeDomain>(built.group())
+            },
+        )
+    };
+    let (content, selection) = cook(recipe.clone()).unwrap().into_parts();
+    assert_raw_observation(selection.observations(), selected_path, PNG_AFTER);
+    assert_raw_observation(
+        selection.observations(),
+        selected_sidecar,
+        &fs::read(project.join(selected_sidecar)).unwrap(),
+    );
+    assert_png_observation(selection.observations(), PNG_BEFORE);
+    assert!(content.base().member(product(IMAGE_ID)).is_none());
+    let image = content
+        .base()
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(selected)
+        .unwrap();
+    assert_eq!(image.product().pixels(), [232, 64, 24, 255]);
+    selection.verify(&project).unwrap();
+
+    let receipt = selection.delivery_receipt();
+    assert!(
+        receipt
+            .members()
+            .iter()
+            .all(|member| { ![selected_path, selected_sidecar].contains(&member.path().as_str()) })
+    );
+    let source_files = receipt.members().len();
+    let recipe_with_file_limit = |limit| {
+        recipe.clone().with_source_content_limits(
+            ProjectContentLimits::default()
+                .with_limit(ProjectContentBudgetKind::Files, limit)
+                .unwrap(),
+        )
+    };
+    let over_limit = cook(recipe_with_file_limit(source_files + 1));
+    assert!(matches!(over_limit, Err(ProjectCookError::Source(error))
+        if error.diagnostics().iter().any(|diagnostic| diagnostic.code().as_str() == "project.delivery.member-limit")));
+    let (_, exact) = cook(recipe_with_file_limit(source_files + 2))
+        .unwrap()
+        .into_parts();
+    exact.verify(&project).unwrap();
+
+    fs::write(project.join(selected_path), PNG_BEFORE).unwrap();
+    assert!(matches!(selection.verify(&project),
+        Err(ProjectCookError::Filesystem(FsError::DigestMismatch { expected, actual }))
+        if expected == ContentDigest::of_bytes(PNG_AFTER) && actual == ContentDigest::of_bytes(PNG_BEFORE)));
+    let reused = build();
+    assert_eq!(reused.status(), ArtifactBuildStatus::Hit);
+    assert_eq!(reused.group().digest(), built.group().digest());
+    let (content, selection) = cook(recipe.clone()).unwrap().into_parts();
+    selection.verify(&project).unwrap();
+    let image = content
+        .base()
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(selected)
+        .unwrap();
+    assert_eq!(image.product().pixels(), [24, 120, 220, 255]);
+}
+
+#[test]
+fn project_cook_reacquires_the_earlier_image_without_reimporting_its_scene() {
+    exercise_cross_scene_images(None);
+}
+
+#[test]
+fn project_cook_can_acquire_known_and_new_images_in_either_product_order() {
+    for extra_image in [UNUSED_ID, EARLY_IMAGE_ID] {
+        exercise_cross_scene_images(Some(extra_image));
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook contribution callback returns ProjectCookError."
+)]
+fn exercise_cross_scene_images(extra_image_id: Option<&str>) {
     let scratch = Scratch::new();
     let project = scratch.0.join("project");
     let recipe = recipe();
@@ -109,8 +245,42 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
         &project,
         ImageDelivery::Embedded,
         Some(ImageDelivery::LinkedAtBuild),
+        BadgeReference::Path,
         &recipe,
     );
+    let assets = project.join("assets");
+    let extra_image = extra_image_id.map(product);
+    if let Some(id) = extra_image_id {
+        fs::write(assets.join("unused.png"), PNG_AFTER).unwrap();
+        write_meta(
+            &assets,
+            "unused.png",
+            id,
+            AssetSourceKind::Image,
+            ImageImportSettings::default(),
+        );
+        write_badge_source(
+            &assets,
+            EXTRA_BADGE,
+            EXTRA_BADGE_ID,
+            product(id),
+            ImageDelivery::LinkedAtBuild,
+        );
+        let document = SceneDocument::from_ordered_roots([
+            badge_entity(placement_id(), AssetRef::path(LATER_BADGE).unwrap()),
+            badge_entity(
+                SceneEntityId::new("extra-badge-placement").unwrap(),
+                AssetRef::path(EXTRA_BADGE).unwrap(),
+            ),
+        ]);
+        fs::write(
+            project.join("scenes").join(LATER_SCENE),
+            document.to_json_string().unwrap(),
+        )
+        .unwrap();
+    } else {
+        fs::write(assets.join("unused.png.meta"), b"invalid").unwrap();
+    }
     let store = open_store(&scratch.0);
     let implementation = implementation_digest();
     let build_group = |path| {
@@ -121,6 +291,7 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
     };
     let embedded_group = build_group(BADGE);
     let linked_group = build_group(LATER_BADGE);
+    let extra_group = extra_image.map(|_| build_group(EXTRA_BADGE));
     let imports_before = badge::embedded_imports();
     let mut contributions = Vec::new();
     let image = product(IMAGE_ID);
@@ -137,6 +308,7 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
         },
         |context| {
             let snapshot = context.snapshot();
+            contributions.push(snapshot.selected_scene_product().unwrap());
             let group = match snapshot.selected_scene_path().as_str() {
                 SCENE => {
                     let [available] = snapshot.images() else {
@@ -147,19 +319,22 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
                 }
                 LATER_SCENE => {
                     assert!(snapshot.images().is_empty());
+                    if let Some(group) = &extra_group {
+                        context.add_group::<BadgeDomain>(group)?;
+                    }
                     &linked_group
                 }
                 path => panic!("unexpected Scene contribution: {path}"),
             };
-            contributions.push(snapshot.selected_scene_product().unwrap());
             context.add_group::<BadgeDomain>(group)
         },
     )
     .expect("Project Cook must recover the earlier stock Image for the later Badge");
     assert_eq!(contributions, roots);
-    assert_eq!(badge::embedded_imports() - imports_before, 2);
+    assert_eq!(badge::embedded_imports() - imports_before, 1);
 
-    let (content, _) = prepared.into_parts();
+    let (content, selection) = prepared.into_parts();
+    selection.verify(&project).unwrap();
     let base = reopen_pack(content, &scratch.0.join("later.pack"), &recipe);
     let catalog = base.catalog();
     let [startup, later] = roots;
@@ -167,10 +342,10 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
     let linked = product(LATER_BADGE_ID);
     assert_eq!(catalog.startup_scene(), startup);
     assert_eq!(catalog.scenes(), roots);
-    assert_eq!(catalog.members().len(), 5);
+    let member_count = if extra_image.is_some() { 7 } else { 5 };
+    assert_eq!(catalog.members().len(), member_count);
     for (member, dependency) in [
         (startup, Some(embedded)),
-        (later, Some(linked)),
         (embedded, None),
         (linked, Some(image)),
         (image, None),
@@ -180,9 +355,40 @@ fn project_cook_revisits_earlier_image_once_for_later_scene() {
             dependency.map(required).as_slice()
         );
     }
+    let mut later_dependencies = vec![required(linked)];
+    if let Some(extra_image) = extra_image {
+        let extra_badge = product(EXTRA_BADGE_ID);
+        later_dependencies.push(required(extra_badge));
+        assert_eq!(
+            catalog
+                .member_for_product(extra_badge)
+                .unwrap()
+                .dependencies(),
+            [required(extra_image)]
+        );
+        assert!(
+            catalog
+                .member_for_product(extra_image)
+                .unwrap()
+                .dependencies()
+                .is_empty()
+        );
+        let selected = base
+            .acquire_asset::<ImageDomain, ImageRuntimeCodec>(extra_image)
+            .unwrap();
+        assert_eq!(selected.product().pixels(), [232, 64, 24, 255]);
+    }
+    assert_eq!(
+        catalog.member_for_product(later).unwrap().dependencies(),
+        later_dependencies
+    );
+    let known = base
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(image)
+        .unwrap();
+    assert_eq!(known.product().pixels(), [24, 120, 220, 255]);
     let complete = base.validate_deep().unwrap();
-    assert_eq!(complete.members(), 5);
-    assert_eq!(complete.products(), 5);
+    assert_eq!(complete.members(), member_count);
+    assert_eq!(complete.products(), member_count);
 }
 
 #[allow(
@@ -193,18 +399,32 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     let scratch = Scratch::new();
     let project = scratch.0.join("project");
     let recipe = recipe();
-    let (root, candidate) = write_project(&project, image_delivery, None, &recipe);
+    let (root, candidate) = write_project(
+        &project,
+        image_delivery,
+        None,
+        BadgeReference::Product,
+        &recipe,
+    );
 
     let checked = check_project(ProjectCheckRequest::new(root.share(), recipe.clone())).unwrap();
-    assert!(checked.members().iter().any(|member| {
+    let png_was_read = checked.members().iter().any(|member| {
         member.path().as_str() == PNG_SOURCE
             && member.kind() == ProjectContentMemberKind::AssetSource
             && member.digest() == ContentDigest::of_bytes(PNG_BEFORE)
-    }));
-    assert!(checked.members().iter().any(|member| {
-        member.path().as_str() == "assets/badge.png.meta"
+    });
+    assert!(
+        png_was_read,
+        "source import consumes the PNG as a raw input"
+    );
+    let image_was_selected = checked.members().iter().any(|member| {
+        member.path().as_str() == PNG_SIDECAR
             && member.kind() == ProjectContentMemberKind::AssetMetadata
-    }));
+    });
+    assert_eq!(
+        image_was_selected,
+        image_delivery != ImageDelivery::LinkedAtBuild
+    );
 
     let store = open_store(&scratch.0);
     let implementation = implementation_digest();
@@ -220,7 +440,7 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     let group = hit.into_group();
     drop(built);
 
-    let image = (image_delivery == ImageDelivery::Linked).then(|| product(IMAGE_ID));
+    let image = (image_delivery != ImageDelivery::Embedded).then(|| product(IMAGE_ID));
     let edge = image.map(|image| (image, AssetReferenceDemand::Immediate));
     let [member] = group.members() else {
         panic!("the badge build must produce one member");
@@ -239,22 +459,77 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
         limits: CookedContentLimits::default(),
     };
     let cook_retained = || {
-        prepare_project_cooked_content(cook_request(), |context| {
+        let mut visits = 0;
+        let result = prepare_project_cooked_content(cook_request(), |context| {
+            visits += 1;
+            if image_delivery == ImageDelivery::LinkedAtBuild {
+                assert!(context.snapshot().images().is_empty());
+            }
             context.add_group::<BadgeDomain>(&group)
-        })
+        });
+        assert_eq!(visits, 1);
+        result
     };
     let first = cook_retained().expect("Project Cook must deliver the badge's Runtime closure");
     let (content, selection) = first.into_parts();
     assert_png_observation(selection.observations(), PNG_BEFORE);
     selection.verify(&project).unwrap();
     observe_player(
-        content,
-        &scratch.0.join("first.pack"),
-        &recipe,
+        reopen_pack(content, &scratch.0.join("first.pack"), &recipe),
         image,
         PNG_BEFORE,
         [24, 120, 220, 255],
     );
+
+    if image_delivery == ImageDelivery::LinkedAtBuild {
+        let sidecar_path = project.join(PNG_SIDECAR);
+        let sidecar = fs::read(&sidecar_path).unwrap();
+        assert_raw_observation(selection.observations(), PNG_SIDECAR, &sidecar);
+        let replacement = String::from_utf8(sidecar.clone())
+            .unwrap()
+            .replace(IMAGE_ID, "25910000-0000-4000-8000-000000000008");
+        let changed = ContentDigest::of_bytes(replacement.as_bytes());
+        let original = ContentDigest::of_bytes(&sidecar);
+        assert_eq!(changed.length(), original.length());
+        assert_ne!(changed, original);
+        fs::write(&sidecar_path, &replacement).unwrap();
+        let drift = selection.verify(&project).unwrap_err();
+        assert!(
+            matches!(drift, ProjectCookError::Filesystem(FsError::DigestMismatch { expected, actual })
+            if expected == original && actual == changed),
+            "{drift:?}"
+        );
+        let Err(error) = cook_retained() else {
+            panic!("a changed Image identity satisfied the original Product");
+        };
+        assert!(
+            matches!(
+                error,
+                ProjectCookError::Content(CookedContentError::Runtime(RuntimeContentError::Catalog(
+                    RuntimeContentCatalogError::MissingDependencyProduct { product: missing, .. }
+                ))) if missing == product(IMAGE_ID)
+            ),
+            "{error:?}"
+        );
+        fs::write(&sidecar_path, &sidecar).unwrap();
+        selection.verify(&project).unwrap();
+
+        let drift = prepare_project_cooked_content(cook_request(), |context| {
+            context.add_group::<BadgeDomain>(&group)?;
+            fs::write(&sidecar_path, &replacement).unwrap();
+            Ok(())
+        });
+        fs::write(&sidecar_path, &sidecar).unwrap();
+        let Err(error) = drift else {
+            panic!("an admitted Image sidecar changed before its late read");
+        };
+        assert!(
+            matches!(error, ProjectCookError::Source(ref source)
+            if source.diagnostics().iter().any(|entry|
+                entry.code().as_str() == "project.content.asset-metadata-source-changed")),
+            "{error:?}"
+        );
+    }
 
     fs::write(project.join(PNG_SOURCE), PNG_AFTER).unwrap();
     let drift = selection.verify(&project).unwrap_err();
@@ -277,6 +552,7 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     );
     assert_ne!(rebuilt.group().digest(), group.digest());
     assert_png_observation(rebuilt.group().observations(), PNG_AFTER);
+    drop(selection);
 
     let second = prepare_project_cooked_content(cook_request(), |context| {
         context.add_source_assets::<BadgeDomain>()
@@ -285,24 +561,39 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     let (content, selection) = second.into_parts();
     assert_png_observation(selection.observations(), PNG_AFTER);
     selection.verify(&project).unwrap();
-    observe_player(
-        content,
-        &scratch.0.join("second.pack"),
-        &recipe,
-        image,
-        PNG_AFTER,
-        [232, 64, 24, 255],
-    );
+    let pack = scratch.0.join("second.pack");
+    let base = if image_delivery == ImageDelivery::LinkedAtBuild {
+        let expectation = write_pack(content, &pack);
+        drop((selection, request, root));
+        let original = project.canonicalize().unwrap();
+        assert_eq!(original.parent(), Some(scratch.0.as_path()));
+        let retired = scratch.0.join("retired-project");
+        assert!(!retired.exists());
+        fs::rename(original, retired).unwrap();
+        assert!(!project.exists());
+        let relocated = scratch.0.join("relocated");
+        fs::create_dir(&relocated).unwrap();
+        let published = relocated.join("content.pack");
+        fs::rename(&pack, &published).unwrap();
+        open_pack(&published, &expectation, &recipe)
+    } else {
+        reopen_pack(content, &pack, &recipe)
+    };
+    observe_player(base, image, PNG_AFTER, [232, 64, 24, 255]);
 }
 
 fn assert_png_observation(observations: &[ArtifactBuildObservation], png: &[u8]) {
+    assert_raw_observation(observations, PNG_SOURCE, png);
+}
+
+fn assert_raw_observation(observations: &[ArtifactBuildObservation], path: &str, bytes: &[u8]) {
     let expected = ArtifactBuildObservation::Raw {
-        path: AssetSourcePath::new(PNG_SOURCE).unwrap(),
-        digest: Some(ArtifactContentDigest::of_bytes(png)),
+        path: AssetSourcePath::new(path).unwrap(),
+        digest: Some(ArtifactContentDigest::of_bytes(bytes)),
     };
     assert!(
         observations.contains(&expected),
-        "missing PNG observation: {expected:?}"
+        "missing source observation: {expected:?}"
     );
 }
 
@@ -311,15 +602,26 @@ fn reopen_pack(
     pack: &Path,
     recipe: &ProductRecipe,
 ) -> RuntimeContentBase {
+    let expectation = write_pack(content, pack);
+    open_pack(pack, &expectation, recipe)
+}
+
+fn write_pack(content: PreparedRuntimeContent, pack: &Path) -> RuntimeContentExpectation {
     content
         .base()
         .write_pack(&mut File::create_new(pack).unwrap())
         .unwrap();
-    let expectation = content.expectation().clone();
-    drop(content);
+    content.expectation().clone()
+}
+
+fn open_pack(
+    pack: &Path,
+    expectation: &RuntimeContentExpectation,
+    recipe: &ProductRecipe,
+) -> RuntimeContentBase {
     RuntimeContentBase::open_pack(
         readable_file(pack).unwrap(),
-        &expectation,
+        expectation,
         recipe.clone(),
         RuntimeContentLimits::default(),
     )
@@ -331,15 +633,12 @@ fn required(target: AssetProductRef) -> RuntimeContentDependency {
 }
 
 fn observe_player(
-    content: PreparedRuntimeContent,
-    pack: &Path,
-    recipe: &ProductRecipe,
+    base: RuntimeContentBase,
     image: Option<AssetProductRef>,
     expected_png: &[u8],
     expected_pixel: [u8; 4],
 ) {
-    let catalog_digest = content.expectation().catalog_digest();
-    let base = reopen_pack(content, pack, recipe);
+    let catalog_digest = base.catalog_digest();
     let catalog = base.catalog();
     let scene = product(SCENE_ID);
     let badge = product(BADGE_ID);
@@ -483,10 +782,17 @@ fn recipe() -> ProductRecipe {
         .unwrap()
 }
 
+#[derive(Clone, Copy)]
+enum BadgeReference {
+    Path,
+    Product,
+}
+
 fn write_project(
     project: &Path,
     image_delivery: ImageDelivery,
     later_image_delivery: Option<ImageDelivery>,
+    reference: BadgeReference,
     recipe: &ProductRecipe,
 ) -> (DirectoryCapability, ProjectSettingsCandidate) {
     for directory in ["assets", "scenes", "prefabs"] {
@@ -526,6 +832,7 @@ pending_capacity = 16
         (SCENE, SCENE_ID),
         (BADGE, BADGE_ID),
         image_delivery,
+        reference,
     );
     if let Some(image_delivery) = later_image_delivery {
         manifest.push_str(&format!("\n[content]\nscenes = [\"{LATER_SCENE}\"]\n"));
@@ -534,6 +841,7 @@ pending_capacity = 16
             (LATER_SCENE, LATER_SCENE_ID),
             (LATER_BADGE, LATER_BADGE_ID),
             image_delivery,
+            reference,
         );
     }
     fs::write(project.join("nara.toml"), manifest).unwrap();
@@ -570,30 +878,50 @@ fn write_badge_scene(
     (scene, scene_id): (&str, &str),
     (badge, badge_id): (&str, &str),
     image_delivery: ImageDelivery,
+    reference: BadgeReference,
 ) {
-    let placement = Placement {
-        badge: AssetRef::Product(product(badge_id)),
+    let reference = match reference {
+        BadgeReference::Path => AssetRef::path(badge).unwrap(),
+        BadgeReference::Product => AssetRef::Product(product(badge_id)),
     };
-    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(placement_id())
-        .with_component(
-            ComponentTypeId::new(PLACEMENT),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                placement.__encode_persistent_component().unwrap(),
-            ),
-        )]);
+    let document = SceneDocument::from_ordered_roots([badge_entity(placement_id(), reference)]);
     let scenes = project.join("scenes");
     fs::write(scenes.join(scene), document.to_json_string().unwrap()).unwrap();
     write_meta(&scenes, scene, scene_id, AssetSourceKind::Scene, ());
 
-    let assets = project.join("assets");
+    write_badge_source(
+        &project.join("assets"),
+        badge,
+        badge_id,
+        product(IMAGE_ID),
+        image_delivery,
+    );
+}
+
+fn badge_entity(id: SceneEntityId, badge: AssetRef) -> SceneEntityRecord {
+    SceneEntityRecord::new(id).with_component(
+        ComponentTypeId::new(PLACEMENT),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            Placement { badge }.__encode_persistent_component().unwrap(),
+        ),
+    )
+}
+
+fn write_badge_source(
+    assets: &Path,
+    badge: &str,
+    badge_id: &str,
+    image: AssetProductRef,
+    image_delivery: ImageDelivery,
+) {
     let source = BadgeSource {
         png: AssetPath::new(PNG).unwrap(),
-        image: product(IMAGE_ID),
+        image,
     };
     fs::write(assets.join(badge), serde_json::to_vec(&source).unwrap()).unwrap();
     write_meta(
-        &assets,
+        assets,
         badge,
         badge_id,
         AssetSourceKind::Other(BadgeDomain::SOURCE_KIND.into()),
