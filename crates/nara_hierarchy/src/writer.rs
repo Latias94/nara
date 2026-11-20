@@ -349,6 +349,39 @@ impl<'world> HierarchyWriter<'world> {
         self.apply(HierarchyOperation::Remove { entity, from })
     }
 
+    /// Detaches an exact group of leaves before the caller despawns those entities.
+    ///
+    /// The supplied placements must match the sequential removal order. The batch rejects
+    /// leaves with despawn hooks or observers that could affect the remaining entities.
+    /// Despawn the admitted entities before running other World work.
+    pub fn remove_leaf_batch_for_despawn(
+        &mut self,
+        placements: &[(Entity, HierarchyPlacement)],
+    ) -> Result<(), HierarchyError> {
+        if placements.is_empty() {
+            return Ok(());
+        }
+        prepare_mutation_baseline(self.world);
+        let mut entities = Vec::with_capacity(placements.len());
+        let mut operations = Vec::with_capacity(placements.len());
+        for &(entity, from) in placements {
+            if self
+                .world
+                .get::<Children>(entity)
+                .is_some_and(|children| !children.is_empty())
+            {
+                return Err(HierarchyError::HasChildren { entity });
+            }
+            entities.push(entity);
+            operations.push(HierarchyOperation::Remove { entity, from });
+        }
+        let prepared = prepare_writer_batch(self.world, &operations)?;
+        validate_hierarchy_retirement_despawn(self.world, &entities, &[])
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+        prepared.commit(self.world);
+        Ok(())
+    }
+
     /// Applies one failure-atomic ordered hierarchy operation.
     pub fn apply(&mut self, operation: HierarchyOperation) -> Result<(), HierarchyError> {
         self.apply_batch(&[operation])

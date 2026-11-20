@@ -1762,6 +1762,11 @@ and an actual change to the floor's geometry still replaces its pair. The collis
 21/21 and the independent render-policy cohort passes 11/11 on Windows.
 [Fixed collision continuity](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)
 
+Reference Game batches ordered, lifecycle-free projectile leaves through `HierarchyWriter`.
+The product retains per-projectile order for nested and observed despawn. Its selected Windows
+release cohort passes 48/48, including exact surviving roots and children.
+[Projectile retirement evidence](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#reference-game-projectile-retirement)
+
 The [visible authored-collision continuation](../../plans/2026-11-04-authored-collision-derivation-plan.md#visible-runtime-native-qualification)
 combines that same domain with public Scene editing and ordinary Sprite/stock capture. The domain
 now exports its original canonical Schema provider instead of each consumer claiming another

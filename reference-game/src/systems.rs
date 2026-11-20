@@ -8,14 +8,15 @@ use nara::{
     app::RuntimeFaultReporter,
     core::ItemLimit,
     ecs::{
-        Entity, Mut, With, Without, bevy_ecs::error::BevyError, bevy_ecs::system::SystemState,
-        system::SystemParam,
+        Entity, Mut, With, Without, bevy_ecs::entity::EntityHashSet, bevy_ecs::error::BevyError,
+        bevy_ecs::system::SystemState, system::SystemParam,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     hierarchy::{
-        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter, Parent,
+        Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
+        HierarchyWriter, Parent,
     },
-    identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
+    identity::{EntityLookup, SpawnedSceneInstance, WorldEntityToken, spawn_identity_entity},
     prelude::{
         Commands, Component, ComponentSchema, ComponentTypeId, FixedTime,
         PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
@@ -1321,20 +1322,8 @@ fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
             retire_and_despawn_scene_entity(world, *entity)
                 .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
         }
-        for (_, token) in expired_projectiles {
-            let placement =
-                HierarchyPlacement::current(world, token.entity()).ok_or_else(|| {
-                    BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
-                })?;
-            HierarchyWriter::new(world)
-                .remove(token.entity(), placement)
-                .map_err(|_| BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy))?;
-            if !world.despawn(token.entity()) || !owner.forget_projectile(token) {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::ProjectileDespawn,
-                ));
-            }
-        }
+        retire_expired_projectiles(world, &mut owner, &expired_projectiles)
+            .map_err(BevyError::error)?;
         let kills = u64::try_from(dead_enemies.len())
             .map_err(|_| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
         let earned = kills
@@ -1352,6 +1341,246 @@ fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
         state.record_defeats(score, defeated_enemies);
         Ok(())
     })
+}
+
+fn retire_expired_projectiles(
+    world: &mut World,
+    owner: &mut WaveRunOwner,
+    projectiles: &[(u64, WorldEntityToken)],
+) -> Result<(), ReferenceSimulationError> {
+    let batch = projectiles.len() > 1 && {
+        world.flush();
+        expired_projectile_placements(world, projectiles).is_ok_and(|removals| {
+            HierarchyWriter::new(world)
+                .remove_leaf_batch_for_despawn(&removals)
+                .is_ok()
+        })
+    };
+    for (_, token) in projectiles.iter().copied() {
+        if !batch {
+            let placement = HierarchyPlacement::current(world, token.entity())
+                .ok_or(ReferenceSimulationError::InvalidSpatialHierarchy)?;
+            HierarchyWriter::new(world)
+                .remove(token.entity(), placement)
+                .map_err(|_| ReferenceSimulationError::InvalidSpatialHierarchy)?;
+        }
+        if !world.despawn(token.entity()) || !owner.forget_projectile(token) {
+            return Err(ReferenceSimulationError::ProjectileDespawn);
+        }
+    }
+    Ok(())
+}
+
+/// Visits each affected sibling list once. Removing later siblings first keeps each original
+/// predecessor available for the writer's sequential placement check.
+fn expired_projectile_placements(
+    world: &World,
+    projectiles: &[(u64, WorldEntityToken)],
+) -> Result<Vec<(Entity, HierarchyPlacement)>, ReferenceSimulationError> {
+    let mut groups = BTreeMap::<Option<Entity>, EntityHashSet>::new();
+    for &(_, token) in projectiles {
+        let entity = token.entity();
+        let parent = world.get::<Parent>(entity).map(Parent::parent);
+        groups.entry(parent).or_default().insert(entity);
+    }
+    let mut removals = Vec::with_capacity(projectiles.len());
+    for (parent, members) in groups {
+        let (owner, siblings) = if let Some(parent) = parent {
+            (
+                HierarchyPlacementOwner::Parent { parent },
+                world.get::<Children>(parent).map(Children::as_slice),
+            )
+        } else {
+            (
+                HierarchyPlacementOwner::Root,
+                world
+                    .get_resource::<HierarchyRoots>()
+                    .map(HierarchyRoots::as_slice),
+            )
+        };
+        let siblings = siblings.ok_or(ReferenceSimulationError::InvalidSpatialHierarchy)?;
+        for (index, &entity) in siblings.iter().enumerate().rev() {
+            if members.contains(&entity) {
+                let from = index.checked_sub(1).map_or_else(
+                    || HierarchyPlacement::first(owner),
+                    |previous| HierarchyPlacement::after(owner, siblings[previous]),
+                );
+                removals.push((entity, from));
+            }
+        }
+    }
+    if removals.len() != projectiles.len() {
+        return Err(ReferenceSimulationError::InvalidSpatialHierarchy);
+    }
+    Ok(removals)
+}
+
+#[cfg(test)]
+mod projectile_retirement_tests {
+    use super::*;
+    use nara::{
+        ecs::bevy_ecs::{lifecycle::Despawn, observer::On},
+        identity::{WorldIdentityDomain, WorldIdentityDomainSettings, register_scene_instance},
+        prelude::Resource,
+    };
+
+    fn retirement_world() -> (World, WaveRunOwner) {
+        let mut world = World::new();
+        let domain =
+            WorldIdentityDomain::new(&world, WorldIdentityDomainSettings::default()).unwrap();
+        world.insert_resource(domain);
+        let receipt = register_scene_instance(&mut world, []).unwrap();
+        (world, WaveRunOwner::new(receipt, BTreeMap::new()))
+    }
+
+    #[test]
+    fn one_retirement_batch_preserves_surviving_sibling_order() {
+        let (mut world, _) = retirement_world();
+        let [lead, parent, middle, tail, child] = std::array::from_fn(|_| world.spawn_empty().id());
+        let [first, second, last, child_first, child_last] =
+            std::array::from_fn(|_| spawn_identity_entity(&mut world).unwrap());
+        let roots = [
+            lead,
+            first.entity(),
+            second.entity(),
+            parent,
+            middle,
+            last.entity(),
+            tail,
+        ];
+        let children = [child_first.entity(), child, child_last.entity()];
+        let place = |entity, owner| HierarchyOperation::Place {
+            entity,
+            placement: HierarchyPlacement::last(owner),
+        };
+        let initial = roots
+            .into_iter()
+            .map(|root| place(root, HierarchyPlacementOwner::Root))
+            .chain(
+                children
+                    .into_iter()
+                    .map(|child| place(child, HierarchyPlacementOwner::Parent { parent })),
+            )
+            .collect::<Vec<_>>();
+        HierarchyWriter::new(&mut world)
+            .apply_batch(&initial)
+            .unwrap();
+
+        let removals = expired_projectile_placements(
+            &world,
+            &[
+                (1, first),
+                (2, child_last),
+                (3, last),
+                (4, second),
+                (5, child_first),
+            ],
+        )
+        .unwrap();
+        HierarchyWriter::new(&mut world)
+            .remove_leaf_batch_for_despawn(&removals)
+            .unwrap();
+
+        assert_eq!(
+            world.resource::<HierarchyRoots>().as_slice(),
+            &[lead, parent, middle, tail]
+        );
+        assert_eq!(world.get::<Children>(parent).unwrap().as_slice(), &[child]);
+        for token in [first, second, last, child_first, child_last] {
+            assert!(HierarchyPlacement::current(&world, token.entity()).is_none());
+            assert!(world.get_entity(token.entity()).is_ok());
+        }
+    }
+
+    #[test]
+    fn nested_projectiles_retire_child_first_in_projectile_order() {
+        let (mut world, mut owner) = retirement_world();
+        let [child, parent] = std::array::from_fn(|_| spawn_identity_entity(&mut world).unwrap());
+        let mut writer = HierarchyWriter::new(&mut world);
+        writer
+            .place(
+                parent.entity(),
+                HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            )
+            .unwrap();
+        writer
+            .place(
+                child.entity(),
+                HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                    parent: parent.entity(),
+                }),
+            )
+            .unwrap();
+        assert!(owner.record_projectile(child));
+        assert!(owner.record_projectile(parent));
+
+        retire_expired_projectiles(&mut world, &mut owner, &[(1, child), (2, parent)]).unwrap();
+
+        assert!(world.resource::<HierarchyRoots>().is_empty());
+        assert!(owner.projectile_tokens().is_empty());
+        assert!(world.get_entity(child.entity()).is_err());
+        assert!(world.get_entity(parent.entity()).is_err());
+    }
+
+    #[derive(Resource)]
+    struct ObservedSecondProjectilePlacement(bool);
+
+    #[test]
+    fn observed_despawn_preserves_the_next_projectiles_placement_until_its_turn() {
+        for initially_placed in [true, false] {
+            let (mut world, mut owner) = retirement_world();
+            let survivor = world.spawn_empty().id();
+            let [first, second] =
+                std::array::from_fn(|_| spawn_identity_entity(&mut world).unwrap());
+            for token in [first, second] {
+                world.entity_mut(token.entity()).insert(ProjectileRole);
+                assert!(owner.record_projectile(token));
+            }
+            let root = HierarchyPlacementOwner::Root;
+            let mut writer = HierarchyWriter::new(&mut world);
+            writer
+                .place(first.entity(), HierarchyPlacement::last(root))
+                .unwrap();
+            writer
+                .place(survivor, HierarchyPlacement::last(root))
+                .unwrap();
+            if initially_placed {
+                writer
+                    .place(second.entity(), HierarchyPlacement::last(root))
+                    .unwrap();
+            }
+            world.add_observer(
+                move |event: On<Despawn<ProjectileRole>>, mut commands: Commands| {
+                    if event.entity == first.entity() {
+                        commands.queue(move |world: &mut World| {
+                            let from = HierarchyPlacement::current(world, second.entity());
+                            let to = HierarchyPlacement::first(root);
+                            let mut writer = HierarchyWriter::new(world);
+                            match from {
+                                Some(from) => {
+                                    writer.move_entity(second.entity(), from, to).unwrap()
+                                }
+                                None => writer.place(second.entity(), to).unwrap(),
+                            }
+                            world
+                                .insert_resource(ObservedSecondProjectilePlacement(from.is_some()));
+                        });
+                    }
+                },
+            );
+
+            retire_expired_projectiles(&mut world, &mut owner, &[(1, first), (2, second)]).unwrap();
+
+            assert_eq!(
+                world.resource::<ObservedSecondProjectilePlacement>().0,
+                initially_placed
+            );
+            assert_eq!(world.resource::<HierarchyRoots>().as_slice(), &[survivor]);
+            assert!(owner.projectile_tokens().is_empty());
+            assert!(world.get_entity(first.entity()).is_err());
+            assert!(world.get_entity(second.entity()).is_err());
+        }
+    }
 }
 
 pub(crate) fn evaluate_wave_outcome(

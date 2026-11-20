@@ -331,3 +331,22 @@ select their source entity. The collapsed control and surrounding clear pixels p
 Windows Vulkan hardware run `41871552-a3bd-493e-b35d-da873eeb6fec` passes all four composition
 tests on an RTX 4090. The regression joins actual offscreen image output and its display receipt.
 [Composition regression](../../tests/fixtures/stock-composition-consumer/tests/composition.rs)
+
+### Reference Game projectile retirement
+
+The reference game sends same-tick, lifecycle-free leaf retirements through one ordered writer
+batch. It scans each affected sibling list once and builds removal placements in reverse sibling
+order so each `After` anchor remains present when validated. The game then despawns its own
+entities and drops their tokens in `ProjectileId` order. If collection or writer admission cannot
+form the batch, the original sequential path reads each projectile's actual placement when it
+retires. That order lets a child retire before its parent and lets a despawn observer move or place
+a later projectile before its turn. Scene entities still retire through the Scene identity owner.
+
+Reference Game nextest `141bbf67-5995-48cc-a692-f10043df1b03` passes all 48 selected tests with
+the `desktop` feature on Windows. The cases check exact survivor order, complete token
+retirement, nested and observed despawn, and two projectiles resolving their hits on one tick.
+The product UI cohort also preserves the distinct default, hovered, pressed and focused Retry
+appearance. The timing table above remains the release baseline for writer operations. This
+repair targets one real caller and leaves immediate projectile spawning on its current entry point.
+[Reference game retirement](../../reference-game/src/systems.rs) ·
+[Hierarchy lifetime boundary](../architecture/adr/0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md#decision)

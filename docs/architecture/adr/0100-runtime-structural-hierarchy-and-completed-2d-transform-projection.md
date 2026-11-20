@@ -159,6 +159,11 @@ flowchart LR
   their owned teardown paths to the hierarchy projection and continue retiring only their explicit
   memberships. This ADR does not accept a scene-session, scene-travel, candidate-initialization,
   or runtime-derived-entity ownership API.
+- `HierarchyWriter::remove_leaf_batch_for_despawn` accepts an explicit ordered set of leaves.
+  The writer validates the placements and checks that despawn would run only the hierarchy's
+  admitted hooks before detaching the group. The lifecycle owner still owns identity and immediate
+  despawn under the same exclusive World access. A caller with observed or nested retirement can
+  retain its established per-entity order.
 
 ADR 0101 refines this decision with deterministic root/sibling order and exact runtime placement
 operations. This ADR does not independently accept `KeepWorld`, visibility inheritance, UI tree
