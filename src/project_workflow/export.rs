@@ -587,7 +587,7 @@ fn plan_export(
     build: &ProjectExportBuildReceipt,
 ) -> Result<ProjectExportPlanReceipt, ProjectExportPlanError> {
     let mut directories = BTreeMap::new();
-    let mut content_members = BTreeMap::<_, &ProjectContentMemberReceipt>::new();
+    let mut content_members = BTreeMap::<_, ProjectContentMemberReceipt>::new();
     for delivery in deliveries {
         directories.extend(
             delivery
@@ -598,13 +598,14 @@ fn plan_export(
         for member in delivery.members() {
             match content_members.entry(member.path().as_str()) {
                 Entry::Vacant(entry) => {
-                    entry.insert(member);
+                    entry.insert(member.clone());
                 }
-                Entry::Occupied(entry) if *entry.get() == member => {}
-                Entry::Occupied(_) => {
-                    return Err(ProjectExportPlanError::ContentObservationConflict {
-                        path: member.path().clone(),
-                    });
+                Entry::Occupied(mut entry) => {
+                    if !entry.get_mut().merge_usage(member) {
+                        return Err(ProjectExportPlanError::ContentObservationConflict {
+                            path: member.path().clone(),
+                        });
+                    }
                 }
             }
         }

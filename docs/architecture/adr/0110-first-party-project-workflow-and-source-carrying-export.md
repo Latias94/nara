@@ -309,13 +309,15 @@ actual consumer qualification; selecting this contract alone does not mark it co
   source discovery pass.
 - Strict Check validates startup and every declared Scene with the same bounded loader. It returns
   a separate `ProjectContentDeliveryReceipt`: sorted roots, exact deduplicated member facts and a
-  delivery digest, bound to one project, manifest and schema authority. Differing kind/digest facts
-  for the same path reject. The owner loads roots sequentially and independently charges retained
-  union facts, without keeping all decoded Scene/Image values or generation leases resident.
+  delivery digest, bound to one project, manifest and schema authority. A typed file use can share
+  a path with a raw read of the same digest. Different bytes or competing typed uses reject. The
+  owner loads roots sequentially and independently charges retained union facts, without keeping
+  all decoded Scene/Image values or generation leases resident.
 - Export consumes each shipped executable's complete delivery receipt. For the current two
   products, Headless uses base settings and Desktop uses the `desktop` profile. The plan unites
-  their runtime directories and exact file observations by project-relative path. Conflicting
-  observations for one path refuse preparation. Revalidation reopens the complete union through
+  their runtime directories and exact file observations by project-relative path, using the same
+  typed and raw file-use rule as Check. Export copies a shared file once and retains the two
+  original profile observations. Revalidation reopens the complete union through
   `nara_fs` before staging and again before publication. This uses the loader's existing dependency
   discovery. Source receipts describe bounded observations and confer no runtime residency.
   When another profile's members enter a selected profile's source roots, rerun that profile's

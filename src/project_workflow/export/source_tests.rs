@@ -335,11 +335,9 @@ fn deferred_dependency_only_scenes_and_importer_reads_export_and_recheck_after_r
     assert!(!project.root.join("changed-future").exists());
 }
 
-#[test]
-fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencies() {
+fn install_source_text_scene(project: &SourceProject, root: &DirectoryCapability) {
     use nara_reflect::PersistentComponentProvider;
-    let project = SourceProject::new();
-    let root = host_fs::readable_directory(&project.root).unwrap();
+
     let metadata = nara_asset::AssetMeta::new(
         nara_asset::AssetMetaIdentity::new(
             nara_asset::StableAssetId::parse_str("4bc478ea-9882-49e8-91f1-62a2d5e9dc07").unwrap(),
@@ -354,7 +352,6 @@ fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencie
     )
     .unwrap();
     fs::write(project.root.join("assets/text.txt"), b"main source").unwrap();
-    fs::write(project.root.join("assets/suffix.txt"), b"original").unwrap();
     let component = SourceText {
         source: nara_asset::AssetRef::path("text.txt").unwrap(),
     };
@@ -386,6 +383,14 @@ fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencie
             .unwrap(),
     )
     .unwrap();
+}
+
+#[test]
+fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencies() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    install_source_text_scene(&project, &root);
+    fs::write(project.root.join("assets/suffix.txt"), b"original").unwrap();
     let recipe = source_text_recipe();
     let deliveries = ProjectExportRequest::check_deliveries(root.share(), &recipe).unwrap();
     let delivery = &deliveries[0];
@@ -442,6 +447,144 @@ fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencie
         fs::read(project.root.join("published/project/assets/suffix.txt")).unwrap(),
         b"original"
     );
+}
+
+#[test]
+fn export_merges_matching_input_and_raw_asset_uses_across_profiles() {
+    use crate::project_host::ProjectContentMemberKind::{AssetSource, InputActionMap};
+
+    use super::{ProjectExportMemberKind::Content, ProjectExportOutcome};
+
+    const SHARED_INPUT: &str = "assets/suffix.txt";
+    const OTHER_INPUT: &str = "assets/other.actions.json";
+    let input: &[u8] =
+        include_bytes!("../../../crates/nara_input/tests/fixtures/formats/v1/action-map.json");
+    let digest = ContentDigest::of_bytes(input);
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    install_source_text_scene(&project, &root);
+    for path in [SHARED_INPUT, OTHER_INPUT] {
+        fs::write(project.root.join(path), input).unwrap();
+    }
+    let manifest_path = project.root.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    let recipe = source_text_recipe();
+
+    for (name, headless, desktop) in [
+        ("both-shared", SHARED_INPUT, SHARED_INPUT),
+        ("headless-shared", SHARED_INPUT, OTHER_INPUT),
+        ("desktop-shared", OTHER_INPUT, SHARED_INPUT),
+        ("both-other", OTHER_INPUT, OTHER_INPUT),
+    ] {
+        fs::write(
+            &manifest_path,
+            format!(
+                "{manifest}\n[input]\naction_map = '{headless}'\n\n\
+                 [profiles.desktop.input]\naction_map = '{desktop}'\n"
+            ),
+        )
+        .unwrap();
+        let deliveries = ProjectExportRequest::check_deliveries(root.share(), &recipe).unwrap();
+        for (delivery, input_path) in deliveries.iter().zip([headless, desktop]) {
+            let expected_kind = if input_path == SHARED_INPUT {
+                InputActionMap
+            } else {
+                AssetSource
+            };
+            let shared = delivery
+                .members()
+                .iter()
+                .find(|member| member.path().as_str() == SHARED_INPUT)
+                .unwrap();
+            assert_eq!((shared.kind(), shared.digest()), (expected_kind, digest));
+        }
+
+        let build = project
+            .synthetic_build(
+                startups(&deliveries),
+                &deliveries[0].schema_fingerprint().to_string(),
+            )
+            .unwrap();
+        let prepared = prepare_project_export(ProjectExportRequest::new(
+            host_fs::writable_directory(&project.root).unwrap(),
+            RelativeComponent::new(name).unwrap(),
+            deliveries.clone(),
+            build,
+            recipe.clone(),
+        ))
+        .unwrap_or_else(|error| panic!("{name} must prepare: {error:?}"));
+        let shared_kind = if [headless, desktop].contains(&SHARED_INPUT) {
+            InputActionMap
+        } else {
+            AssetSource
+        };
+        let includes_other = [headless, desktop].contains(&OTHER_INPUT);
+        for (path, kind) in [
+            (SHARED_INPUT, Some(shared_kind)),
+            (OTHER_INPUT, includes_other.then_some(InputActionMap)),
+        ] {
+            let exported = format!("project/{path}");
+            let mut members = prepared
+                .plan()
+                .members()
+                .iter()
+                .filter(|member| member.path().as_str() == exported);
+            assert_eq!(
+                members
+                    .next()
+                    .map(|member| (member.kind(), member.digest())),
+                kind.map(|kind| (Content(kind), digest)),
+                "{name}: {exported}"
+            );
+            assert!(members.next().is_none(), "{name}: duplicate {exported}");
+        }
+        let published = match prepared.publish() {
+            ProjectExportOutcome::Published(receipt) => receipt,
+            other => panic!("{name} must publish: {other:?}"),
+        };
+        let plan = published.plan();
+        assert_eq!(
+            plan.delivery_digest(),
+            super::digest_profile_deliveries(&deliveries)
+        );
+        for (target, startup) in ProjectExportBinaryTarget::ALL
+            .into_iter()
+            .zip(startups(&deliveries))
+        {
+            assert_eq!(
+                plan.startup_content_digest(target),
+                startup.content_digest()
+            );
+            assert_eq!(
+                plan.startup_closure_plan_digest(target),
+                startup.closure_plan_digest()
+            );
+        }
+
+        let relocated = project.root.join(format!("relocated-{name}"));
+        fs::rename(project.root.join(name), &relocated).unwrap();
+        let relocated = relocated.join("project");
+        assert_eq!(fs::read(relocated.join(SHARED_INPUT)).unwrap(), input);
+        if includes_other {
+            assert_eq!(fs::read(relocated.join(OTHER_INPUT)).unwrap(), input);
+        } else {
+            assert!(!relocated.join(OTHER_INPUT).exists());
+        }
+        let relocated_root = host_fs::readable_directory(&relocated).unwrap();
+        let rechecked = ProjectExportRequest::check_deliveries(relocated_root, &recipe).unwrap();
+        for (checked, original) in rechecked.iter().zip(&deliveries) {
+            assert_ne!(
+                checked.project_root_identity(),
+                original.project_root_identity()
+            );
+            assert_eq!(checked.members(), original.members());
+            assert_eq!(checked.delivery_digest(), original.delivery_digest());
+            assert_eq!(
+                checked.startup_content().content_closure().stamp(),
+                original.startup_content().content_closure().stamp()
+            );
+        }
+    }
 }
 
 #[test]

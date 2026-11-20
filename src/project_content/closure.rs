@@ -87,8 +87,9 @@ impl ProjectContentMemberReceipt {
         self.digest().length()
     }
 
-    pub(super) fn merge_usage(&mut self, member: &Self) -> bool {
-        self.facts.merge(member.facts)
+    /// Combines uses of one project-relative file under a shared project authority.
+    pub(crate) fn merge_usage(&mut self, member: &Self) -> bool {
+        self.path == member.path && self.facts.merge(member.facts)
     }
 }
 
@@ -644,6 +645,39 @@ impl ProjectContentMemberKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn member_usage_merge_rejects_different_paths_bytes_and_typed_roles() {
+        use ProjectContentMemberKind::{AssetSource, InputActionMap, Scene};
+
+        let path = ProjectPath::new("assets/input.json").unwrap();
+        let digest = ContentDigest::of_bytes(b"original");
+        let input = ProjectContentMemberReceipt::new(InputActionMap, path.clone(), digest);
+        let mut merged = input.clone();
+        assert!(merged.merge_usage(&ProjectContentMemberReceipt::new(
+            AssetSource,
+            path.clone(),
+            digest,
+        )));
+        let expected = merged.clone();
+
+        for rejected in [
+            ProjectContentMemberReceipt::new(
+                AssetSource,
+                ProjectPath::new("assets/other.json").unwrap(),
+                digest,
+            ),
+            ProjectContentMemberReceipt::new(
+                AssetSource,
+                path.clone(),
+                ContentDigest::of_bytes(b"modified"),
+            ),
+            ProjectContentMemberReceipt::new(Scene, path, digest),
+        ] {
+            assert!(!merged.merge_usage(&rejected));
+            assert_eq!(merged, expected);
+        }
+    }
 
     #[test]
     fn an_authoring_member_used_as_raw_data_still_contributes_to_runtime_content() {
