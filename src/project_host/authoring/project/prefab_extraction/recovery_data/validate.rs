@@ -26,6 +26,7 @@ pub(super) fn validate_payload(
     payload: &RecoveryPayload,
     limits: PrefabExtractionRecoveryLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
+    check_current_encoding: bool,
 ) -> Result<(), PrefabExtractionRecoveryError> {
     check_counts(
         payload.complete_original_sources.len(),
@@ -73,33 +74,28 @@ pub(super) fn validate_payload(
             &source.key,
             source.encoding,
             source.original_disk.bytes(),
-            None,
+            false,
             None,
             limits.scene,
             budget,
         )?;
         let save_current = source.disposition == RecoverySourceDisposition::SaveCurrent;
-        let expected = if save_current {
-            source.output.as_ref().map(RecoveryBlob::bytes)
-        } else {
-            None
-        };
+        if save_current
+            && source.output.as_ref().map(RecoveryBlob::digest)
+                != Some(source.reviewed_working.digest())
+        {
+            return Err(PrefabExtractionRecoveryError::SaveCurrentMismatch);
+        }
         let found = validate_source(
             &source.path,
             &source.key,
             source.encoding,
             source.reviewed_working.bytes(),
-            expected,
+            save_current && check_current_encoding,
             selected.then_some(&payload.selection.root),
             limits.scene,
             budget,
-        )
-        .map_err(|error| match error {
-            PrefabExtractionRecoveryError::NonCanonicalOutput if save_current => {
-                PrefabExtractionRecoveryError::SaveCurrentMismatch
-            }
-            other => other,
-        })?;
+        )?;
         if selected && !found {
             return Err(PrefabExtractionRecoveryError::SelectionInvalid);
         }
@@ -109,7 +105,7 @@ pub(super) fn validate_payload(
                 &source.key,
                 source.encoding,
                 output.bytes(),
-                Some(output.bytes()),
+                check_current_encoding,
                 None,
                 limits.scene,
                 budget,
@@ -121,7 +117,7 @@ pub(super) fn validate_payload(
         &payload.q.key,
         payload.q.encoding,
         payload.q.output.bytes(),
-        Some(payload.q.output.bytes()),
+        check_current_encoding,
         None,
         limits.scene,
         budget,
@@ -611,7 +607,7 @@ fn validate_source(
     key: &SourceDocumentKey,
     encoding: RecoverySourceEncoding,
     bytes: &[u8],
-    canonical_expected: Option<&[u8]>,
+    check_current_encoding: bool,
     selected_root: Option<&SceneEntityId>,
     limits: SceneFileLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
@@ -627,30 +623,28 @@ fn validate_source(
     let result = (|| {
         let tree = decode_source(key.kind(), encoding.into(), bytes, limits, budget)
             .map_err(source_decode_error)?;
-        if canonical_expected.is_some() {
+        if check_current_encoding {
             tree.admit_canonical_comparison(bytes.len(), budget)
                 .map_err(source_decode_error)?;
         }
         match tree {
             SourceTree::Scene(document) => {
-                if let Some(expected) = canonical_expected {
-                    if !canonical_scene_source_matches(document, encoding.into(), expected, limits)
+                if check_current_encoding
+                    && !canonical_scene_source_matches(document, encoding.into(), bytes, limits)
                         .map_err(|_| PrefabExtractionRecoveryError::SourceInvalid)?
-                    {
-                        return Err(PrefabExtractionRecoveryError::NonCanonicalOutput);
-                    }
+                {
+                    return Err(PrefabExtractionRecoveryError::NonCanonicalOutput);
                 }
                 Ok(false)
             }
             SourceTree::Prefab(document) => {
                 let found = selected_root
                     .is_some_and(|root| document.entities.iter().any(|entity| &entity.id == root));
-                if let Some(expected) = canonical_expected {
-                    if !canonical_prefab_source_matches(document, encoding.into(), expected, limits)
+                if check_current_encoding
+                    && !canonical_prefab_source_matches(document, encoding.into(), bytes, limits)
                         .map_err(|_| PrefabExtractionRecoveryError::SourceInvalid)?
-                    {
-                        return Err(PrefabExtractionRecoveryError::NonCanonicalOutput);
-                    }
+                {
+                    return Err(PrefabExtractionRecoveryError::NonCanonicalOutput);
                 }
                 Ok(found)
             }

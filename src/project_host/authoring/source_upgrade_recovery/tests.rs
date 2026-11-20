@@ -1255,7 +1255,12 @@ fn expanding_lowercase_paths_and_roots_admit_storage_and_work_before_folding() {
     for (maximum, admitted) in [(path_storage, true), (path_storage - 1, false)] {
         let mut shared = budget();
         shared.limits.retained_candidate_bytes = ByteLimit::new(maximum).unwrap();
-        let result = validate_payload(payload, SourceUpgradeRecoveryLimits::default(), &mut shared);
+        let result = validate_payload(
+            payload,
+            SourceUpgradeRecoveryLimits::default(),
+            &mut shared,
+            true,
+        );
         if admitted {
             assert!(matches!(
                 result,

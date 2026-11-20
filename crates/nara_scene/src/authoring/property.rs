@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_reflect::{
-    ComponentFieldId, ComponentFieldPathError, ComponentPropertyError, ComponentPropertyPath,
-    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    __private::exact_component_value_witness, ComponentFieldId, ComponentFieldPathError,
+    ComponentPropertyError, ComponentPropertyPath, ComponentSchema, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue,
 };
 
 use super::{
-    PrefabAuthoringSession, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
-    SceneAuthoringRevision, SceneAuthoringSession, history_error_report,
+    AuthoringHistoryScope, PrefabAuthoringSession, PreparedPrefabAuthoringEdit,
+    PreparedSceneAuthoringEdit, SceneAuthoringRevision, SceneAuthoringSession,
+    history_error_report,
 };
 use crate::{
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
@@ -15,6 +17,7 @@ use crate::{
         AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_LOGICAL_BYTES,
         MAX_AUTHORING_FIELD_VALUE_NODES, MAX_AUTHORING_FIELD_WRITES,
     },
+    patch::{DefaultPropertyDirection, DefaultPropertyEdit},
 };
 
 /// One current-version replacement relative to an Available direct component in one document.
@@ -49,7 +52,7 @@ impl SceneAuthoringSession {
         }
         let state = self.authority.published().ok_or_else(rejected)?;
         let patch = lower(&self.document.entities, state, edits, &BTreeMap::new())?;
-        self.prepare_authoring_edit(base_revision, &patch)
+        self.prepare_scoped_authoring_edit(base_revision, &patch, AuthoringHistoryScope::Ordinary)
     }
 }
 
@@ -65,7 +68,7 @@ impl PrefabAuthoringSession {
         }
         let state = self.authority.published().ok_or_else(rejected)?;
         let patch = lower(&self.document.entities, state, edits, &BTreeMap::new())?;
-        self.prepare_authoring_edit(base_revision, &patch)
+        self.prepare_scoped_authoring_edit(base_revision, &patch, AuthoringHistoryScope::Ordinary)
     }
 }
 
@@ -143,7 +146,7 @@ fn lower_with_write_limit<'a>(
             Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
         ),
     >::new();
-    let mut root_updates = edits
+    let root_updates = edits
         .iter()
         .filter(|edit| edit.property.steps.is_empty())
         .map(|edit| (&edit.entity, &edit.component, &edit.property.root))
@@ -191,9 +194,8 @@ fn lower_with_write_limit<'a>(
         };
         let target = (&edit.entity, &edit.component, &edit.property.root);
         let reject = |error| property_rejection(&error, schema, Some(operation_index));
-        if initialize_missing_root(schema, candidate, *contextual_defaults, edit).map_err(reject)? {
-            root_updates.insert(target);
-        }
+        let materialized = initialize_missing_root(schema, candidate, *contextual_defaults, edit)
+            .map_err(reject)?;
         edit.property
             .replace_in_candidate(
                 schema,
@@ -204,12 +206,23 @@ fn lower_with_write_limit<'a>(
             )
             .map_err(reject)?;
         if !root_updates.contains(&target) {
-            nested_updates.push(ScenePatchOperation::ReplaceProperty {
-                entity: edit.entity.clone(),
-                component: edit.component.clone(),
-                component_version: edit.component_version,
-                property: edit.property.clone(),
-                value: edit.value.clone(),
+            nested_updates.push(match materialized {
+                Some(default) => ScenePatchOperation::DefaultProperty(DefaultPropertyEdit {
+                    entity: edit.entity.clone(),
+                    component: edit.component.clone(),
+                    component_version: edit.component_version,
+                    property: edit.property.clone(),
+                    value: edit.value.clone(),
+                    default_witness: exact_component_value_witness(default),
+                    direction: DefaultPropertyDirection::Materialize,
+                }),
+                None => ScenePatchOperation::ReplaceProperty {
+                    entity: edit.entity.clone(),
+                    component: edit.component.clone(),
+                    component_version: edit.component_version,
+                    property: edit.property.clone(),
+                    value: edit.value.clone(),
+                },
             });
         }
     }
@@ -240,42 +253,41 @@ fn lower_with_write_limit<'a>(
     Ok(ScenePatchDocument::new(operations))
 }
 
-fn initialize_missing_root(
-    schema: &ComponentSchema,
+fn initialize_missing_root<'a>(
+    schema: &'a ComponentSchema,
     candidate: &mut ComponentValue,
-    contextual_defaults: Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
+    contextual_defaults: Option<&'a BTreeMap<ComponentFieldId, ComponentValue>>,
     edit: &AuthoringPropertyEdit,
-) -> Result<bool, ComponentPropertyError> {
+) -> Result<Option<&'a ComponentValue>, ComponentPropertyError> {
     let Some(field) = schema
         .fields()
         .iter()
         .find(|field| field.id() == &edit.property.root)
     else {
-        return Ok(false);
+        return Ok(None);
     };
     if matches!(
         candidate.get_path(field.path()),
         Err(ComponentFieldPathError::MissingField { .. }
             | ComponentFieldPathError::IndexOutOfBounds { .. })
     ) {
-        let value = if edit.property.steps.is_empty() {
-            &edit.value
-        } else if let Some(default) = contextual_defaults
-            .and_then(|defaults| defaults.get(field.id()))
-            .or(field.default_value())
-        {
-            default
+        let default = if edit.property.steps.is_empty() {
+            None
         } else {
-            return Ok(false);
+            let Some(default) = contextual_defaults
+                .and_then(|defaults| defaults.get(field.id()))
+                .or(field.default_value())
+            else {
+                return Ok(None);
+            };
+            Some(default)
         };
-        // The ordinary root patch will retain original absence as RemoveField. Never create
-        // ancestors or merge an explicit root; set_path keeps that existing storage contract.
         candidate
-            .set_path(field.path(), value.clone())
+            .set_path(field.path(), default.unwrap_or(&edit.value).clone())
             .map_err(ComponentPropertyError::ValueUnavailable)?;
-        return Ok(true);
+        return Ok(default);
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn rejected() -> ScenePatchReport {

@@ -176,16 +176,7 @@ impl AuthoringDocumentState {
         admit: &mut AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         successor.require_reclassification_successor_of(&self.schema_basis(), kind)?;
-        classify_source_with_admission(
-            AuthoringSourceParts {
-                placements: &document.placements,
-                entities: &document.entities,
-                inputs: Some(&document.inputs),
-            },
-            self,
-            successor,
-            admit,
-        )
+        classify_source_with_admission(document.into(), self, successor, self.encoding, admit)
     }
 }
 
@@ -195,22 +186,14 @@ pub(super) fn classify_with_admission(
     successor: &AuthoringSchemaBasis,
     admit: &mut AdmissionCallback<'_>,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
-    classify_source_with_admission(
-        AuthoringSourceParts {
-            placements: &document.placements,
-            entities: &document.entities,
-            inputs: None,
-        },
-        state,
-        successor,
-        admit,
-    )
+    classify_source_with_admission(document.into(), state, successor, state.encoding, admit)
 }
 
 pub(super) fn classify_source_with_admission(
     document: AuthoringSourceParts<'_>,
     state: &AuthoringDocumentState,
     successor: &AuthoringSchemaBasis,
+    encoding: Option<SceneFileEncoding>,
     admit: &mut AdmissionCallback<'_>,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
     admit(
@@ -237,6 +220,7 @@ pub(super) fn classify_source_with_admission(
             state.kind,
             Arc::clone(&successor.0),
             state.limits,
+            encoding,
             Some(&mut callback),
         )
     };
@@ -595,12 +579,14 @@ pub(super) fn check_reference_grammar(
 pub(super) fn validate_prefab_shape(
     document: &PrefabDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     admit: Option<&mut AdmissionCallback<'_>>,
 ) -> Result<(), ScenePatchReport> {
     match admit {
         Some(admit) => crate::format::validate_prefab_publication_shape_with_admission(
             document,
             limits,
+            encoding,
             |bytes| admit("publication-buffer", Some(bytes)),
         )
         .map_err(|error| match error {
@@ -611,11 +597,12 @@ pub(super) fn validate_prefab_shape(
                 )
             }
         }),
-        None => crate::format::validate_prefab_publication_shape(document, limits).map_err(|_| {
-            structure::authoring_structure_rejection(
-                "Authoring structure exceeds the persistent Prefab format boundary",
-            )
-        }),
+        None => crate::format::validate_prefab_publication_shape(document, limits, encoding)
+            .map_err(|_| {
+                structure::authoring_structure_rejection(
+                    "Authoring structure exceeds the persistent Prefab format boundary",
+                )
+            }),
     }
 }
 

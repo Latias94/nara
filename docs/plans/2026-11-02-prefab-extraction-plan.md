@@ -783,10 +783,12 @@ passes rather than repeatedly seeking through inventory iterators.
 
 Keep the package's grammar/configuration admission distinct from complete extraction admission.
 It checks exact blob commitments, complete unchanged Ready configuration and Schema bytes,
-canonical outputs, legal selection/profile, identities, paths and the SaveCurrent relation. It
-does not establish that the serialized physical inventory is complete or that the stored cut
-preserves every occurrence. The actual Pending-bound recovery owner must establish both through
-the neutral inventory and the existing borrowed stored-pair verifier. New Q and sidecar roles
+legal selection/profile, identities, paths and the SaveCurrent relation. Package preparation
+checks the current encoder's canonical outputs. Recovery parses the committed bytes under the
+supported file contract and preserves their original digest. SaveCurrent binds the output to the
+same authenticated reviewed working bytes. The Pending-bound recovery owner establishes complete
+physical inventory and stored cut correspondence through the neutral inventory and the existing
+borrowed stored-pair verifier. New Q and sidecar roles
 classify absence as not yet created; absence of an original source is a conflict. Neither current
 output bytes nor a digest match can stand in for a historical replacement receipt.
 

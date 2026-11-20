@@ -555,6 +555,18 @@ fn source_disposition_and_save_current_relations_are_checked() {
         fixture.create(PrefabExtractionRecoveryLimits::default(), &mut budget()),
         Err(PrefabExtractionRecoveryError::SaveCurrentMismatch)
     ));
+    let mut value = json(&Fixture::new().package());
+    let saved = value["payload"]["complete_original_sources"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|source| source["disposition"] == "save_current")
+        .unwrap();
+    replace_blob(&mut saved["output"], &fixture.originals[0].original);
+    assert!(matches!(
+        decode_json(value),
+        Err(PrefabExtractionRecoveryError::SaveCurrentMismatch)
+    ));
     for disposition in [
         RecoverySourceDisposition::SaveCurrent,
         RecoverySourceDisposition::ReplaceSource,

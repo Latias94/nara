@@ -2,6 +2,7 @@ use std::{
     error::Error,
     fs,
     path::PathBuf,
+    process::Command,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -9,9 +10,12 @@ use std::{
 use nara_asset::{
     AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, AssetSourcePath, StableAssetId,
 };
-use nara_core::ItemLimit;
+use nara_core::{ItemLimit, PersistentFileEnvelope};
 use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, RelativePath};
-use nara_project::{ProjectAuthoringState, ProjectManifest, ProjectPath};
+use nara_project::{
+    ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest, ProjectAuthoringState,
+    ProjectManifest, ProjectPath,
+};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
@@ -20,8 +24,9 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SceneFileEncoding, SourceDocumentKey, SourceDocumentKind,
+    PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, SceneFileEncoding, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 use super::{
@@ -66,6 +71,7 @@ const SCRIPT_METADATA_PATH: &str = "scripts/nested/open.scene.json.meta";
 const UNCHANGED_METADATA_PATH: &str = "scenes/unchanged.scene.json.meta";
 const SCRIPT_ID: &str = "1d3d0cf3-6a95-4457-97bd-7f2e41f3b72f";
 static NEXT_PROJECT: AtomicU64 = AtomicU64::new(1);
+const RECOVERY_CHILD_ROOT: &str = "NARA_TEST_SCHEMA_UPGRADE_RECOVERY_ROOT";
 
 struct Member {
     path: &'static str,
@@ -426,6 +432,54 @@ impl Fixture {
         }
     }
 
+    fn store_four_space_prefab_successor(
+        &mut self,
+        edit: impl FnOnce(&mut PrefabDocument),
+    ) -> ProjectAuthoringRecoveryDigest {
+        let prefab = &self.members[0];
+        let mut document = PrefabDocumentCandidate::decode_ron_bytes(&prefab.successor)
+            .unwrap()
+            .into_composition_source()
+            .unwrap();
+        edit(&mut document);
+        let envelope: PersistentFileEnvelope<serde::de::IgnoredAny> =
+            ron::de::from_bytes(&prefab.successor).unwrap();
+        let successor = ron::ser::to_string_pretty(
+            &envelope.map_payload(|_| document),
+            ron::ser::PrettyConfig::default()
+                .new_line("\n".to_owned())
+                .indentor("    ".to_owned()),
+        )
+        .unwrap();
+        assert_ne!(successor.as_bytes(), prefab.successor);
+
+        let digest = |bytes: &[u8]| {
+            let digest = ContentDigest::of_bytes(bytes);
+            ProjectAuthoringRecoveryDigest::from_parts(digest.length(), *digest.as_bytes())
+        };
+        let package = fs::read(self.directory.join(RECOVERY_PATH)).unwrap();
+        let mut package: serde_json::Value = serde_json::from_slice(&package).unwrap();
+        let member = &mut package["payload"]["members"][0];
+        assert_eq!(member["path"].as_str(), Some(prefab.path));
+        member["successor"] = serde_json::json!({
+            "bytes": &successor,
+            "digest": digest(successor.as_bytes()),
+        });
+        let package = serde_json::to_vec(&package).unwrap();
+        let operation = digest(&package);
+        let mut manifest = ProjectManifest::parse_toml_bytes(&self.ready_manifest)
+            .manifest
+            .unwrap();
+        manifest.authoring.state = ProjectAuthoringState::Pending(
+            ProjectAuthoringRecovery::new(ProjectPath::new(RECOVERY_PATH).unwrap(), operation)
+                .unwrap(),
+        );
+        self.replace(RECOVERY_PATH, &package);
+        self.replace("nara.toml", &manifest.to_canonical_toml_bytes().unwrap());
+        self.members[0].successor = successor.into_bytes();
+        operation
+    }
+
     fn assert_pending(&self) {
         let manifest =
             ProjectManifest::parse_toml_bytes(&fs::read(self.directory.join("nara.toml")).unwrap())
@@ -685,12 +739,14 @@ fn cause<'a, T: Error + 'static>(mut error: &'a (dyn Error + 'static)) -> Option
 
 #[test]
 fn all_old_pending_reviews_dirty_working_and_finishes_with_actual_ready_and_ordinary_admission() {
-    let fixture = Fixture::new();
+    let mut fixture = Fixture::new();
+    let operation = fixture.store_four_space_prefab_successor(|_| {});
     let frozen = fixture.freeze();
     fixture.assert_pending();
     let recovery = fixture.inspect(complete_limits()).unwrap();
     let view = recovery.view();
     assert_eq!(view.phase, AuthoredSchemaUpgradeRecoveryPhase::Review);
+    assert_eq!(view.operation, operation);
     assert_eq!(view.source_count, 4);
     assert_eq!(view.completed_sources, 0);
     assert!(!view.bundle_complete);
@@ -982,7 +1038,8 @@ fn scripts_successor_final_validation_refuses_source_metadata_membership_and_neg
 
 #[test]
 fn mixed_sources_and_new_bundle_preserve_already_new_and_unchanged_leaves() {
-    let fixture = Fixture::new();
+    let mut fixture = Fixture::new();
+    let operation = fixture.store_four_space_prefab_successor(|_| {});
     fixture.replace(fixture.members[0].path, &fixture.members[0].successor);
     fixture.replace(BUNDLE_PATH, &fixture.successor_bundle);
     let skipped: Vec<_> = fixture
@@ -998,8 +1055,13 @@ fn mixed_sources_and_new_bundle_preserve_already_new_and_unchanged_leaves() {
             .contains(&file.path)
         })
         .collect();
+    fixture.assert_pending();
     let recovery = fixture.inspect(complete_limits()).unwrap();
+    assert_eq!(recovery.view().operation, operation);
     let review = recovery.review().unwrap();
+    let prefab = review.sources().next().unwrap();
+    assert_eq!(prefab.project_path, fixture.members[0].path);
+    assert_eq!(prefab.successor, fixture.members[0].successor);
     assert_eq!(
         review.bundle_state(),
         AuthoredSchemaUpgradeRecoveryMemberState::Successor
@@ -1018,6 +1080,127 @@ fn mixed_sources_and_new_bundle_preserve_already_new_and_unchanged_leaves() {
     );
     fixture.complete(recovery);
     fixture.assert_unchanged(&skipped);
+}
+
+#[test]
+fn four_space_v1_schema_upgrade_resumes_in_a_fresh_process() {
+    let mut fixture = Fixture::new();
+    fixture.store_four_space_prefab_successor(|_| {});
+    let prefab = &fixture.members[0];
+    fixture.replace(prefab.path, &prefab.successor);
+    let retained = fixture
+        .freeze()
+        .into_iter()
+        .filter(|file| [prefab.path, fixture.members[2].path, RECOVERY_PATH].contains(&file.path))
+        .collect::<Vec<_>>();
+    fixture.assert_pending();
+    let (_, module) = module_path!().split_once("::").unwrap();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact"])
+        .arg(format!("{module}::four_space_schema_upgrade_child_entry"))
+        .arg("--nocapture")
+        .env(RECOVERY_CHILD_ROOT, &fixture.directory)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    assert!(
+        child.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert!(
+        stdout.contains("schema-upgrade recovery published Ready"),
+        "{stdout}"
+    );
+
+    fixture.assert_unchanged(&retained);
+    assert_eq!(
+        fs::read(fixture.directory.join("nara.toml")).unwrap(),
+        fixture.ready_manifest
+    );
+    assert_eq!(
+        fs::read(fixture.directory.join(BUNDLE_PATH)).unwrap(),
+        fixture.successor_bundle
+    );
+    for member in &fixture.members {
+        assert_eq!(
+            fs::read(fixture.directory.join(member.path)).unwrap(),
+            member.successor
+        );
+    }
+    let schema = AuthoringProjectAdmissionHost::default()
+        .prepare(fixture.root.share(), None)
+        .unwrap()
+        .admit_bundle()
+        .unwrap()
+        .publish();
+    let adapters = project_authoring_adapters(schema.bundle()).unwrap();
+    let project = PreparedAuthoringProject::new(schema, adapters)
+        .admit_startup_closure()
+        .unwrap()
+        .publish()
+        .snapshot();
+    assert_eq!(project.readiness(), AuthoringProjectReadiness::Complete);
+}
+
+#[test]
+#[ignore = "owned by four_space_v1_schema_upgrade_resumes_in_a_fresh_process"]
+fn four_space_schema_upgrade_child_entry() {
+    let Some(root) = std::env::var_os(RECOVERY_CHILD_ROOT) else {
+        return;
+    };
+    let root = host_fs::writable_directory(&PathBuf::from(root)).unwrap();
+    let mut recovery =
+        AuthoredSchemaUpgradeRecovery::inspect(root, None, complete_limits()).unwrap();
+    let review = recovery.review().unwrap();
+    let prefab = review.sources().next().unwrap();
+    assert_eq!(prefab.encoding, SceneFileEncoding::Ron);
+    assert_eq!(
+        prefab.observed,
+        AuthoredSchemaUpgradeRecoveryMemberState::Successor
+    );
+    assert!(
+        std::str::from_utf8(prefab.successor)
+            .unwrap()
+            .lines()
+            .any(|line| line == "    format_version: 1,")
+    );
+    let operation = recovery.view().operation;
+    publish_sources(&mut recovery);
+    prepare_ready(&mut recovery);
+    let view = recovery.advance().unwrap();
+    assert_eq!(view.phase, AuthoredSchemaUpgradeRecoveryPhase::Complete);
+    assert!(view.bundle_complete && !view.cleanup_pending && !view.uncertain);
+    let receipt = recovery.into_receipt().unwrap();
+    assert_eq!(receipt.operation(), operation);
+    assert_eq!(receipt.source_count(), view.completed_sources);
+    println!("schema-upgrade recovery published Ready");
+}
+
+#[test]
+fn pending_four_space_ron_with_an_added_root_is_refused_before_review() {
+    let mut fixture = Fixture::new();
+    fixture.store_four_space_prefab_successor(|prefab| {
+        let extra = SceneEntityRecord::new(SceneEntityId::new("extra").unwrap());
+        prefab
+            .placements
+            .push(SceneEntityPlacement::root(extra.id.clone()));
+        prefab.entities.push(extra);
+    });
+    let frozen = fixture.freeze();
+    let error = fixture.inspect(complete_limits()).unwrap_err();
+    assert_eq!(
+        error.kind(),
+        AuthoredSchemaUpgradeRecoveryErrorKind::SourceTransition
+    );
+    assert_eq!(error.source_index(), Some(0));
+    let report = error.source_report().unwrap();
+    assert_eq!(
+        report.diagnostics.iter().next().unwrap().code().as_str(),
+        "scene.authored-schema-upgrade-refused"
+    );
+    fixture.assert_unchanged(&frozen);
+    fixture.assert_pending();
 }
 
 #[test]

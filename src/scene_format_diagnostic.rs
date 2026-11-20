@@ -80,6 +80,14 @@ pub(crate) fn scene_format_diagnostic(
             let diagnostic = number(diagnostic, "observed_version", u64::from(*observed));
             number(diagnostic, "supported_version", u64::from(*expected))
         }
+        SceneFormatError::SessionOnlyPatchOperation { operation_index } => {
+            let diagnostic = identifier(diagnostic, "reason", "session-only-patch-operation");
+            number(
+                diagnostic,
+                "operation_index",
+                u64::try_from(*operation_index).unwrap_or(u64::MAX),
+            )
+        }
         SceneFormatError::Budget(error) => budget(
             diagnostic,
             match error.kind {

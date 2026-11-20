@@ -75,6 +75,7 @@ fn classify(
         AuthoringDocumentKind::Scene,
         basis,
         limits,
+        None,
     )
 }
 
@@ -648,6 +649,7 @@ fn source_transactions_preserve_both_snapshot_sides_through_scene_and_prefab_his
         AuthoringDocumentKind::Prefab,
         empty_basis(),
         SceneFileLimits::default(),
+        None,
     )
     .unwrap();
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document(

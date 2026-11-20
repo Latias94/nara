@@ -60,6 +60,10 @@ Rules:
   canonical unsuffixed names.
 - Each document kind publishes a strict compatibility matrix. Until an ADR grants a compatibility
   window, the only readable version is canonical version 1.
+- A pending authoring transaction retains the exact source output bytes committed at preparation.
+  Recovery parses those bytes under the supported file contract and verifies the stored transition
+  under the admitted Schema. Preparation applies current writer formatting to new output and
+  recovery uses the original byte commitment.
 - A document migration chain is added only when an ADR names the retained version, owner, fixtures,
   support window, and removal trigger.
 - Document migrations are pure transformations from one known document version to the next. They do
@@ -75,6 +79,11 @@ Rules:
 - Component migration results are revalidated iteratively against the candidate's depth, node,
   container, single-string, cumulative-string, and logical component-value budgets before
   publication. A migration cannot publish a value that the same file boundary would reject.
+- File-backed Scene and Prefab candidates retain their publication encoding through editing,
+  history replay, and Schema reclassification. Publication checks the complete source against
+  that encoding's byte and shape limits. An explicit conversion checks the requested encoding
+  when it writes the converted bytes. Unbound authoring candidates continue to admit both source
+  encodings before publication.
 - Whole-component patch values may use the registered component migration chain. A field write from
   an older component schema version is rejected until an explicit field-value migration contract
   exists; a stable field ID proves identity, not that an old scalar or asset-reference value keeps

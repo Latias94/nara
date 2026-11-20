@@ -960,9 +960,11 @@ changes a keyed item's identity, use the new key in later operations in that bat
 creates the reverse selector for Undo. The replay allowance covers actual changed payloads and
 both selector directions. Complete validation still checks the resulting source and its history.
 
-An explicit whole-root write or first nested write into a defaulted root uses a root-field patch
-and its complete replay allowance. Undo of the latter restores the omitted root. The entire batch
-publishes as one history entry. This interface addresses direct source records. Use the Prefab
+An explicit whole-root write uses a root-field patch and its complete replay allowance. A first
+nested write into a defaulted root materializes that root in the source. Its local history retains
+the selected write and the default's value witness. Undo restores omission and the value reads as
+`Defaulted` again. Redo reconstructs the edit from that same default. The complete candidate must
+fit its destination encoding. The entire batch publishes as one history entry. Use the Prefab
 overlay interface for instance overrides and effective values.
 
 Workspace, Project Session and Application preparation takes the complete retained

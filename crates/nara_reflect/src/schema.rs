@@ -2208,6 +2208,48 @@ fn feed_path(hasher: &mut blake3::Hasher, path: &ComponentFieldPath) {
 }
 
 fn feed_value(hasher: &mut blake3::Hasher, value: &ComponentValue) {
+    feed_value_with_zero_sign(hasher, value, false);
+}
+
+/// Fingerprints an already admitted value for exact in-memory replay, including signed zero.
+pub fn exact_component_value_witness(value: &ComponentValue) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    feed_bytes(&mut hasher, b"nara.component-value-witness.v1");
+    feed_value_with_zero_sign(&mut hasher, value, true);
+    *hasher.finalize().as_bytes()
+}
+
+/// Compares two admitted component values without normalizing floating-point zero.
+pub fn component_values_exactly_match(left: &ComponentValue, right: &ComponentValue) -> bool {
+    match (left, right) {
+        (ComponentValue::F64(left), ComponentValue::F64(right)) => {
+            left.get().to_bits() == right.get().to_bits()
+        }
+        (ComponentValue::List(left), ComponentValue::List(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| component_values_exactly_match(left, right))
+        }
+        (ComponentValue::Map(left), ComponentValue::Map(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|((left_key, left), (right_key, right))| {
+                        left_key == right_key && component_values_exactly_match(left, right)
+                    })
+        }
+        _ => left == right,
+    }
+}
+
+fn feed_value_with_zero_sign(
+    hasher: &mut blake3::Hasher,
+    value: &ComponentValue,
+    preserve_zero_sign: bool,
+) {
     feed_bytes(hasher, &[component_value_kind_tag(value.kind())]);
     match value {
         ComponentValue::Null => {}
@@ -2215,21 +2257,26 @@ fn feed_value(hasher: &mut blake3::Hasher, value: &ComponentValue) {
         ComponentValue::I64(value) => feed_bytes(hasher, &value.to_le_bytes()),
         ComponentValue::U64(value) => feed_bytes(hasher, &value.to_le_bytes()),
         ComponentValue::F64(value) => {
-            let normalized = if value.get() == 0.0 { 0.0 } else { value.get() };
-            feed_bytes(hasher, &normalized.to_bits().to_le_bytes());
+            let number = value.get();
+            let number = if !preserve_zero_sign && number == 0.0 {
+                0.0
+            } else {
+                number
+            };
+            feed_bytes(hasher, &number.to_bits().to_le_bytes());
         }
         ComponentValue::String(value) => feed_str(hasher, value),
         ComponentValue::List(values) => {
             feed_len(hasher, values.len());
             for value in values {
-                feed_value(hasher, value);
+                feed_value_with_zero_sign(hasher, value, preserve_zero_sign);
             }
         }
         ComponentValue::Map(values) => {
             feed_len(hasher, values.len());
             for (key, value) in values {
                 feed_str(hasher, key);
-                feed_value(hasher, value);
+                feed_value_with_zero_sign(hasher, value, preserve_zero_sign);
             }
         }
         ComponentValue::EntityReference(reference) => match reference {

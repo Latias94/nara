@@ -1339,7 +1339,7 @@ fn migration_results_reapply_shape_limits_for_scene_prefab_and_patch() {
 }
 
 #[test]
-fn migration_results_validate_json_and_ron_encoded_limits() {
+fn scene_and_prefab_migration_check_the_bound_encoding_and_unbound_checks_both() {
     let migrated_text = "'".repeat(128);
     let registry = migrating_text_registry_with_value(ComponentValue::map([(
         "current",
@@ -1352,17 +1352,40 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
     let current_scene =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), current_text_record(&migrated_text))]);
-    let scene_limits = ron_only_encoded_limits(
-        &legacy_scene.to_json_string().unwrap(),
+    let legacy_scene_json = legacy_scene.to_json_string().unwrap();
+    let legacy_scene_ron = legacy_scene.to_ron_string().unwrap();
+    let scene_limits = limits_where_only_migrated_ron_overflows(
+        legacy_scene_json.len().max(legacy_scene_ron.len()),
         &current_scene.to_json_string().unwrap(),
         &current_scene.to_ron_string().unwrap(),
     );
-    assert_scene_migration_shape_rejected(
-        "ron-encoded-bytes",
-        "scene.file-post-migration-format-invalid",
-        &registry,
+    let scene = SceneDocumentCandidate::decode_json_bytes_with_limits(
+        legacy_scene_json.as_bytes(),
         scene_limits,
-    );
+    )
+    .unwrap()
+    .canonicalize(&registry)
+    .unwrap();
+    assert_eq!(scene.document(), &current_scene);
+    assert!(matches!(
+        scene.document().to_ron_string_with_limits(scene_limits),
+        Err(SceneFormatError::EncodedBytesExceeded { .. })
+    ));
+    let scene_ron = SceneDocumentCandidate::decode_ron_bytes_with_limits(
+        legacy_scene_ron.as_bytes(),
+        scene_limits,
+    )
+    .unwrap();
+    let scene_unbound =
+        SceneDocumentCandidate::from_source_document(legacy_scene, scene_limits).unwrap();
+    for candidate in [scene_ron, scene_unbound] {
+        let error = candidate.canonicalize(&registry).unwrap_err();
+        assert_shape_budget_error(
+            "ron-encoded-bytes",
+            "scene.file-post-migration-format-invalid",
+            error.diagnostics(),
+        );
+    }
 
     let legacy_prefab =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
@@ -1370,18 +1393,49 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
     let current_prefab =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), current_text_record(&migrated_text))]);
-    let prefab_limits = ron_only_encoded_limits(
-        &legacy_prefab.to_json_string().unwrap(),
+    let legacy_prefab_json = legacy_prefab.to_json_string().unwrap();
+    let legacy_prefab_ron = legacy_prefab.to_ron_string().unwrap();
+    let prefab_limits = limits_where_only_migrated_ron_overflows(
+        legacy_prefab_json.len().max(legacy_prefab_ron.len()),
         &current_prefab.to_json_string().unwrap(),
         &current_prefab.to_ron_string().unwrap(),
     );
-    assert_prefab_migration_shape_rejected(
-        "ron-encoded-bytes",
-        "scene.file-post-migration-format-invalid",
-        &registry,
+    let prefab = PrefabDocumentCandidate::decode_json_bytes_with_limits(
+        legacy_prefab_json.as_bytes(),
         prefab_limits,
-    );
+    )
+    .unwrap()
+    .canonicalize(&registry)
+    .unwrap();
+    assert_eq!(prefab.document(), &current_prefab);
+    assert!(matches!(
+        prefab.document().to_ron_string_with_limits(prefab_limits),
+        Err(SceneFormatError::EncodedBytesExceeded { .. })
+    ));
+    let prefab_ron = PrefabDocumentCandidate::decode_ron_bytes_with_limits(
+        legacy_prefab_ron.as_bytes(),
+        prefab_limits,
+    )
+    .unwrap();
+    let prefab_unbound =
+        PrefabDocumentCandidate::from_source_document(legacy_prefab, prefab_limits).unwrap();
+    for candidate in [prefab_ron, prefab_unbound] {
+        let error = candidate.canonicalize(&registry).unwrap_err();
+        assert_shape_budget_error(
+            "ron-encoded-bytes",
+            "scene.file-post-migration-format-invalid",
+            error.diagnostics(),
+        );
+    }
+}
 
+#[test]
+fn patch_migration_retains_its_dual_format_admission() {
+    let migrated_text = "'".repeat(128);
+    let registry = migrating_text_registry_with_value(ComponentValue::map([(
+        "current",
+        ComponentValue::String(migrated_text.clone()),
+    )]));
     let legacy_patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: scene_id("target"),
         component: migrating_text_id(),
@@ -1392,8 +1446,8 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
         component: migrating_text_id(),
         value: current_text_record(&migrated_text),
     }]);
-    let patch_limits = ron_only_encoded_limits(
-        &legacy_patch.to_json_string().unwrap(),
+    let patch_limits = limits_where_only_migrated_ron_overflows(
+        legacy_patch.to_json_string().unwrap().len(),
         &current_patch.to_json_string().unwrap(),
         &current_patch.to_ron_string().unwrap(),
     );
@@ -2104,16 +2158,15 @@ fn current_text_record(value: &str) -> SceneComponentRecord {
     )
 }
 
-fn ron_only_encoded_limits(
-    legacy_json: &str,
+fn limits_where_only_migrated_ron_overflows(
+    legacy_bytes: usize,
     current_json: &str,
     current_ron: &str,
 ) -> SceneFileLimits {
-    let maximum = legacy_json.len().max(current_json.len());
+    let maximum = legacy_bytes.max(current_json.len());
     assert!(
         maximum < current_ron.len(),
-        "test payload must fit canonical JSON but exceed the same RON byte limit: legacy JSON {}, current JSON {}, current RON {}",
-        legacy_json.len(),
+        "test payload must fit canonical JSON but exceed the same RON byte limit: legacy {legacy_bytes}, current JSON {}, current RON {}",
         current_json.len(),
         current_ron.len()
     );

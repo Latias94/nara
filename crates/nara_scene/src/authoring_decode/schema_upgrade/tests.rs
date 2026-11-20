@@ -242,6 +242,7 @@ fn prepare(
         original,
         candidate,
         upgrade,
+        AuthoredUpgradeOutput::Live(None),
         &mut |_, bytes| bytes.map(|_| ()).ok_or_else(refused),
     )
 }
@@ -381,9 +382,13 @@ fn required_field_upgrade_uses_omitted_contextual_defaults_with_small_document_l
     .publish();
     let state = Arc::unwrap_or_clone(published.into_parts().1);
     let admitted = state
-        .prepare_authored_upgrade(&original, &candidate, &upgrade, &mut |_, bytes| {
-            bytes.map(|_| ()).ok_or_else(refused)
-        })
+        .prepare_authored_upgrade(
+            &original,
+            &candidate,
+            &upgrade,
+            AuthoredUpgradeOutput::Live(None),
+            &mut |_, bytes| bytes.map(|_| ()).ok_or_else(refused),
+        )
         .unwrap();
     assert_eq!(admitted.schema_basis(), upgrade.successor);
     assert_eq!(admitted.file_limits(), limits);
@@ -516,7 +521,13 @@ fn an_equivalent_old_basis_cannot_replace_the_original_source_admission() {
     let state = classify(&original, &equivalent);
     assert!(
         state
-            .prepare_authored_upgrade(&original, &document(true), &upgrade, &mut |_, _| Ok(()),)
+            .prepare_authored_upgrade(
+                &original,
+                &document(true),
+                &upgrade,
+                AuthoredUpgradeOutput::Live(None),
+                &mut |_, _| Ok(()),
+            )
             .is_err()
     );
 }
@@ -696,22 +707,28 @@ fn validation_returns_the_original_owner_admission_refusal() {
         "publication-buffer",
     ] {
         let report = state
-            .prepare_authored_upgrade(&original, &candidate, &upgrade, &mut |stage, bytes| {
-                if stage == refused_stage {
-                    let mut diagnostics = DiagnosticReport::default();
-                    diagnostics.push(diagnostic_error(
-                        "trial.authored-upgrade-work-refused",
-                        "The project owner refused further upgrade validation work",
-                    ));
-                    Err(ScenePatchReport {
-                        applied: false,
-                        inverse: None,
-                        diagnostics,
-                    })
-                } else {
-                    bytes.map(|_| ()).ok_or_else(refused)
-                }
-            })
+            .prepare_authored_upgrade(
+                &original,
+                &candidate,
+                &upgrade,
+                AuthoredUpgradeOutput::Live(None),
+                &mut |stage, bytes| {
+                    if stage == refused_stage {
+                        let mut diagnostics = DiagnosticReport::default();
+                        diagnostics.push(diagnostic_error(
+                            "trial.authored-upgrade-work-refused",
+                            "The project owner refused further upgrade validation work",
+                        ));
+                        Err(ScenePatchReport {
+                            applied: false,
+                            inverse: None,
+                            diagnostics,
+                        })
+                    } else {
+                        bytes.map(|_| ()).ok_or_else(refused)
+                    }
+                },
+            )
             .unwrap_err();
         assert_eq!(
             report.diagnostics.iter().next().unwrap().code().as_str(),

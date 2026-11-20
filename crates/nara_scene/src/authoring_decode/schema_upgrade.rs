@@ -20,11 +20,12 @@ impl AuthoringDocumentState {
     /// Classifies a retained original through the ordinary source walker under one exact basis.
     /// The source owner already admitted its state/source storage before calling this bridge.
     pub(crate) fn classify_authored_upgrade_source(
-        document: &SceneDocument,
+        document: AuthoringSourceParts<'_>,
         source: AuthoringDocumentSource,
         kind: AuthoringDocumentKind,
         previous: &AuthoringSchemaBasis,
         limits: SceneFileLimits,
+        encoding: Option<SceneFileEncoding>,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         let mut refusal = None;
@@ -35,12 +36,13 @@ impl AuthoringDocumentState {
                     AuthoringDocumentPublicationError::new(DiagnosticReport::default())
                 })
             };
-            classify_scene_document_impl(
+            classify_source_document_impl(
                 document,
                 source,
                 kind,
                 Arc::clone(&previous.0),
                 limits,
+                encoding,
                 Some(&mut callback),
             )
         };
@@ -627,6 +629,11 @@ impl AuthoredFieldUpgrade {
     }
 }
 
+pub(crate) enum AuthoredUpgradeOutput {
+    Live(Option<SceneFileEncoding>),
+    DecodedStored,
+}
+
 impl AuthoringDocumentState {
     /// Classifies the complete replacement only after its original basis and raw footprint pass.
     ///
@@ -637,6 +644,7 @@ impl AuthoringDocumentState {
         original: &SceneDocument,
         candidate: &SceneDocument,
         upgrade: &AuthoredFieldUpgrade,
+        output: AuthoredUpgradeOutput,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         if self.document_kind() != AuthoringDocumentKind::Scene {
@@ -648,16 +656,23 @@ impl AuthoringDocumentState {
             upgrade,
             admit,
         )?;
-        crate::format::validate_scene_publication_shape_with_admission(
-            candidate,
-            self.limits,
-            |bytes| admit("publication-buffer", Some(bytes)),
-        )
-        .map_err(|error| match error {
-            crate::format::PublicationShapeAdmissionError::Admission(report) => report,
-            crate::format::PublicationShapeAdmissionError::Format(_) => refused(),
-        })?;
-        self.classify_authored_upgrade(candidate, upgrade, admit)
+        let encoding = if let AuthoredUpgradeOutput::Live(destination) = output {
+            let encoding = self.encoding.or(destination);
+            crate::format::validate_scene_publication_shape_with_admission(
+                candidate,
+                self.limits,
+                encoding,
+                |bytes| admit("publication-buffer", Some(bytes)),
+            )
+            .map_err(|error| match error {
+                crate::format::PublicationShapeAdmissionError::Admission(report) => report,
+                crate::format::PublicationShapeAdmissionError::Format(_) => refused(),
+            })?;
+            encoding
+        } else {
+            self.encoding
+        };
+        self.classify_authored_upgrade(candidate.into(), upgrade, encoding, admit)
     }
 
     pub(crate) fn prepare_authored_prefab_upgrade(
@@ -665,6 +680,7 @@ impl AuthoringDocumentState {
         original: &PrefabDocument,
         candidate: &PrefabDocument,
         upgrade: &AuthoredFieldUpgrade,
+        output: AuthoredUpgradeOutput,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         if self.document_kind() != AuthoringDocumentKind::Prefab
@@ -678,16 +694,14 @@ impl AuthoringDocumentState {
             upgrade,
             admit,
         )?;
-        reclassification::validate_prefab_shape(candidate, self.limits, Some(admit))?;
-        // The incumbent structural/classification kernel reads a Scene projection. Reserve its
-        // complete coexisting copy before instantiate; footprint proof itself only borrows Prefab.
-        reclassification::admit_document(
-            &candidate.placements,
-            &candidate.entities,
-            self.limits,
-            admit,
-        )?;
-        self.classify_authored_upgrade(&candidate.instantiate(), upgrade, admit)
+        let encoding = if let AuthoredUpgradeOutput::Live(destination) = output {
+            let encoding = self.encoding.or(destination);
+            reclassification::validate_prefab_shape(candidate, self.limits, encoding, Some(admit))?;
+            encoding
+        } else {
+            self.encoding
+        };
+        self.classify_authored_upgrade(candidate.into(), upgrade, encoding, admit)
     }
 
     fn validate_authored_upgrade(
@@ -724,12 +738,18 @@ impl AuthoringDocumentState {
 
     fn classify_authored_upgrade(
         &self,
-        candidate: &SceneDocument,
+        candidate: AuthoringSourceParts<'_>,
         upgrade: &AuthoredFieldUpgrade,
+        encoding: Option<SceneFileEncoding>,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
-        let next =
-            reclassification::classify_with_admission(candidate, self, &upgrade.successor, admit)?;
+        let next = reclassification::classify_source_with_admission(
+            candidate,
+            self,
+            &upgrade.successor,
+            encoding,
+            admit,
+        )?;
         let owner = upgrade.previous.component_schema_owner(&upgrade.component);
         if next.record_facts.iter().any(|record| {
             record.component() == &upgrade.component

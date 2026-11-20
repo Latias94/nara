@@ -4,9 +4,8 @@
 //! the original nominal basis, source, kind and file policy; it grants no replacement authority.
 
 use super::{
-    AuthoringDocumentKind, AuthoringDocumentState, AuthoringSourceParts, DiagnosticReport,
-    PrefabDocument, SceneDocument, ScenePatchReport, diagnostic_error, reclassification,
-    structure::authoring_structure_rejection,
+    AuthoringDocumentKind, AuthoringDocumentState, DiagnosticReport, PrefabDocument, SceneDocument,
+    ScenePatchReport, diagnostic_error, reclassification, structure::authoring_structure_rejection,
 };
 use crate::format::{
     PublicationShapeAdmissionError, validate_prefab_publication_shape_with_admission,
@@ -36,9 +35,12 @@ impl AuthoringDocumentState {
             self.limits,
             admit,
         )?;
-        validate_scene_publication_shape_with_admission(candidate, self.limits, |bytes| {
-            admit("publication-buffer", Some(bytes))
-        })
+        validate_scene_publication_shape_with_admission(
+            candidate,
+            self.limits,
+            self.encoding,
+            |bytes| admit("publication-buffer", Some(bytes)),
+        )
         .map_err(publication_error)?;
         reclassification::classify_with_admission(candidate, self, &self.schema_basis(), admit)
     }
@@ -64,18 +66,18 @@ impl AuthoringDocumentState {
             self.limits,
             admit,
         )?;
-        validate_prefab_publication_shape_with_admission(candidate, self.limits, |bytes| {
-            admit("publication-buffer", Some(bytes))
-        })
+        validate_prefab_publication_shape_with_admission(
+            candidate,
+            self.limits,
+            self.encoding,
+            |bytes| admit("publication-buffer", Some(bytes)),
+        )
         .map_err(publication_error)?;
         reclassification::classify_source_with_admission(
-            AuthoringSourceParts {
-                placements: &candidate.placements,
-                entities: &candidate.entities,
-                inputs: Some(&candidate.inputs),
-            },
+            candidate.into(),
             self,
             &self.schema_basis(),
+            self.encoding,
             admit,
         )
     }

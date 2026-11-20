@@ -1093,6 +1093,11 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                     return true;
                 }
             }
+            ScenePatchOperation::DefaultProperty(edit)
+                if component_uses_ui_domain(edit.component()) =>
+            {
+                return true;
+            }
             _ => {}
         }
     }

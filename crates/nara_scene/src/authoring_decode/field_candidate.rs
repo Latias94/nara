@@ -47,7 +47,11 @@ impl PreparedFieldCandidate<'_> {
             placements: self.document.placements,
             entities: self.document.entities,
         };
-        crate::format::validate_prefab_publication_shape(&prefab, self.state.limits)?;
+        crate::format::validate_prefab_publication_shape(
+            &prefab,
+            self.state.limits,
+            self.state.encoding,
+        )?;
         self.document = SceneDocument {
             placements: prefab.placements,
             entities: prefab.entities,
@@ -66,7 +70,12 @@ impl PreparedFieldCandidate<'_> {
             placements: self.document.placements,
             entities: self.document.entities,
         };
-        reclassification::validate_prefab_shape(&prefab, self.state.limits, Some(admit))?;
+        reclassification::validate_prefab_shape(
+            &prefab,
+            self.state.limits,
+            self.state.encoding,
+            Some(admit),
+        )?;
         self.document = SceneDocument {
             placements: prefab.placements,
             entities: prefab.entities,
@@ -90,6 +99,7 @@ impl PreparedFieldCandidate<'_> {
                 state.kind,
                 Arc::clone(&state.basis),
                 state.limits,
+                state.encoding,
             ),
         }
     }

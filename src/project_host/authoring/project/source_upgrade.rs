@@ -312,14 +312,22 @@ impl PreparedAuthoredSourceUpgrade {
                         member.key.clone(),
                         binding,
                         revision,
-                        SceneDocumentCandidate::from_source_document(document, scene_limits)?,
+                        SceneDocumentCandidate::from_source_document_with_encoding(
+                            document,
+                            member.encoding.into(),
+                            scene_limits,
+                        )?,
                     ),
                     SourceTree::Prefab(document) => EditorAuthoredSchemaUpgradeProposal::prefab(
                         selected.document,
                         member.key.clone(),
                         binding,
                         revision,
-                        PrefabDocumentCandidate::from_source_document(document, scene_limits)?,
+                        PrefabDocumentCandidate::from_source_document_with_encoding(
+                            document,
+                            member.encoding.into(),
+                            scene_limits,
+                        )?,
                     ),
                 };
                 proposals.push(proposal);
@@ -360,14 +368,22 @@ impl PreparedAuthoredSourceUpgrade {
                     .map_err(SourceUpgradePreparationError::Document)?;
                 let result = match tree {
                     SourceTree::Scene(document) => admit_authored_upgrade_scene_source(
-                        SceneDocumentCandidate::from_source_document(document, scene_limits)?,
+                        SceneDocumentCandidate::from_source_document_with_encoding(
+                            document,
+                            member.encoding.into(),
+                            scene_limits,
+                        )?,
                         source,
                         upgrade.previous_basis(),
                         work,
                     )
                     .map(|(session, retained)| UnopenedIncumbent::Scene(session, retained)),
                     SourceTree::Prefab(document) => admit_authored_upgrade_prefab_source(
-                        PrefabDocumentCandidate::from_source_document(document, scene_limits)?,
+                        PrefabDocumentCandidate::from_source_document_with_encoding(
+                            document,
+                            member.encoding.into(),
+                            scene_limits,
+                        )?,
                         source,
                         upgrade.previous_basis(),
                         work,
@@ -401,7 +417,11 @@ impl PreparedAuthoredSourceUpgrade {
                         .prepare_authored_upgrade_with_retained_source(
                             &member.key,
                             original.revision(),
-                            SceneDocumentCandidate::from_source_document(document, scene_limits)?,
+                            SceneDocumentCandidate::from_source_document_with_encoding(
+                                document,
+                                member.encoding.into(),
+                                scene_limits,
+                            )?,
                             upgrade,
                             retained,
                             work,
@@ -414,7 +434,11 @@ impl PreparedAuthoredSourceUpgrade {
                         .prepare_authored_upgrade_with_retained_source(
                             &member.key,
                             original.revision(),
-                            PrefabDocumentCandidate::from_source_document(document, scene_limits)?,
+                            PrefabDocumentCandidate::from_source_document_with_encoding(
+                                document,
+                                member.encoding.into(),
+                                scene_limits,
+                            )?,
                             upgrade,
                             retained,
                             work,

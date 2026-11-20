@@ -183,6 +183,7 @@ pub mod __private {
         validate_explicit_component_value, validate_explicit_component_value_with_admission,
         validate_schema_capabilities,
     };
+    pub use crate::schema::{component_values_exactly_match, exact_component_value_witness};
 
     use crate::{
         ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,

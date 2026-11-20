@@ -12,10 +12,13 @@ use std::{
 };
 
 use nara_fs::FileCapability;
-use nara_project::{ProjectAuthoringState, ProjectManifest};
+use nara_project::{
+    ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest, ProjectAuthoringState,
+    ProjectManifest,
+};
 use nara_scene::SceneCompilationLimits;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::*;
 use crate::project_host::{
@@ -369,6 +372,63 @@ fn pending_project(pressure: bool) -> ProcessProject {
         oracle,
         _container: container,
     }
+}
+
+fn recovery_digest(bytes: &[u8]) -> ProjectAuthoringRecoveryDigest {
+    let digest = ContentDigest::of_bytes(bytes);
+    ProjectAuthoringRecoveryDigest::from_parts(digest.length(), *digest.as_bytes())
+}
+
+fn rewrite_closed_ron_output(project: &mut ProcessProject) -> ProjectAuthoringRecovery {
+    let mut pending = manifest(&project.root);
+    let ProjectAuthoringState::Pending(reference) = &pending.authoring.state else {
+        panic!("the producer must leave a Pending manifest");
+    };
+    let package_path = project.root.join(reference.recovery_path().as_str());
+    let encoded = test_host_fs::readable_file(&package_path)
+        .unwrap()
+        .read_to_end_bounded(1024 * 1024)
+        .expect("the producer package fits the 1 MiB fixture limit");
+    assert_eq!(recovery_digest(&encoded), reference.recovery_digest());
+    let mut package: Value = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(package["kind"], "prefab_extraction_recovery");
+    assert_eq!(package["format_version"], 1);
+    let source = package["payload"]["complete_original_sources"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|source| source["path"] == CLOSED)
+        .expect("the fixture has a closed RON dependant");
+    assert_eq!(source["encoding"], "ron");
+    assert_eq!(source["disposition"], "rewrite_closed");
+    let output = &mut source["output"];
+    let expected = project.oracle.outputs.get_mut(Path::new(CLOSED)).unwrap();
+    let current = output["bytes"].as_str().unwrap();
+    assert_eq!(current.as_bytes(), expected.as_slice());
+    assert!(current.lines().any(|line| line == "  format_version: 1,"));
+
+    let mut legacy = String::new();
+    for line in current.split_inclusive('\n') {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        assert_eq!(indent % 2, 0, "unexpected indentation in {CLOSED}");
+        legacy.push_str(&line[..indent]);
+        legacy.push_str(line);
+    }
+    *expected = legacy.as_bytes().to_vec();
+    *output = json!({"digest": recovery_digest(legacy.as_bytes()), "bytes": legacy});
+
+    let encoded = serde_json::to_vec_pretty(&package).unwrap();
+    let reference =
+        ProjectAuthoringRecovery::new(reference.recovery_path().clone(), recovery_digest(&encoded))
+            .unwrap();
+    pending.authoring.state = ProjectAuthoringState::Pending(reference.clone());
+    fs::write(package_path, encoded).unwrap();
+    fs::write(
+        project.root.join("nara.toml"),
+        pending.to_canonical_toml_bytes().unwrap(),
+    )
+    .unwrap();
+    reference
 }
 
 fn recovery(project: &ProcessProject, action: &str, stop: &[&str]) -> Value {
@@ -842,6 +902,54 @@ fn subprocess_interruption_matrix_recovers_exact_review_and_preserves_already_ne
         assert_eq!(complete["operation"], initial["operation"]);
         assert_identity_preserved(&project, &retained);
         assert_ready(&project);
+    }
+}
+
+#[test]
+#[ignore = "requires NARA_PREFAB_EXTRACTION_RECOVERY_EXE built separately with project-workflow-cli only"]
+fn subprocess_v1_four_space_ron_recovery_preserves_exact_outputs_and_published_identity() {
+    for partially_published in [false, true] {
+        let mut project = pending_project(false);
+        let reference = rewrite_closed_ron_output(&mut project);
+        let expected_published = if partially_published {
+            let stopped = recovery(&project, "resume", &["--stop-after-files", "5"]);
+            assert_eq!(stopped["status"], "stopped", "{stopped}");
+            assert_eq!(stopped["completed_files"], 5);
+            assert_eq!(stopped["ready_published"], false);
+            5
+        } else {
+            0
+        };
+        let retained = published_outputs(&project);
+        assert_eq!(retained.len(), expected_published);
+        assert!(retained.len() < project.oracle.outputs.len());
+        assert_eq!(
+            retained.iter().any(|(path, _)| path == Path::new(CLOSED)),
+            partially_published,
+            "{CLOSED} must already be published at the mixed boundary"
+        );
+
+        let inspected = inspect_read_only(&project);
+        assert_eq!(
+            inspected["operation"],
+            json!({
+                "path": reference.recovery_path().as_str(),
+                "digest": reference.recovery_digest(),
+            })
+        );
+        assert_pending_open(&project);
+        let complete = recovery(&project, "resume", &["--all"]);
+        assert_eq!(complete["status"], "complete", "{complete}");
+        assert_eq!(complete["operation"], inspected["operation"]);
+        assert_eq!(complete["completed_files"], project.oracle.outputs.len());
+        assert_eq!(complete["ready_published"], true);
+        assert_eq!(complete["outcome_consumed"], true);
+        assert_eq!(
+            complete["outcome"]["ready_receipt"]["published_is_candidate"],
+            true
+        );
+        assert_ready(&project);
+        assert_identity_preserved(&project, &retained);
     }
 }
 

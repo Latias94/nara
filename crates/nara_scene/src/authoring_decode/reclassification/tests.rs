@@ -60,6 +60,7 @@ fn classify(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> Authoring
         AuthoringDocumentKind::Scene,
         Arc::clone(&basis.0),
         SceneFileLimits::default(),
+        None,
     )
     .unwrap()
 }

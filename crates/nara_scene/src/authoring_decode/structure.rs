@@ -298,7 +298,9 @@ fn prepare_structure_from_parts(
     }
     if work.is_none()
         && admit.is_none()
-        && crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err()
+        && state.kind == super::AuthoringDocumentKind::Scene
+        && crate::format::validate_scene_publication_shape(&candidate, state.limits, state.encoding)
+            .is_err()
     {
         return Err(authoring_structure_rejection(
             "Authoring structure exceeds the persistent format boundary",
@@ -330,10 +332,13 @@ fn prepare_structure_from_parts(
         admit("source-edit-topology", topology_work_bytes(&candidate))?;
     }
     crate::patch::validate_source_edit_topology(&candidate)?;
-    if let Some(admit) = admit.as_deref_mut() {
+    if let Some(admit) = admit.as_deref_mut()
+        && state.kind == super::AuthoringDocumentKind::Scene
+    {
         crate::format::validate_scene_publication_shape_with_admission(
             &candidate,
             state.limits,
+            state.encoding,
             |bytes| admit("publication-buffer", Some(bytes)),
         )
         .map_err(|error| match error {
@@ -351,6 +356,7 @@ fn prepare_structure_from_parts(
         crate::format::validate_scene_publication_shape_with_admission(
             &candidate,
             state.limits,
+            state.encoding,
             |bytes| work.reserve("publication-buffer", Some(bytes)),
         )
         .map_err(|error| match error {
@@ -378,6 +384,7 @@ fn prepare_structure_from_parts(
             state.kind,
             Arc::clone(&state.basis),
             state.limits,
+            state.encoding,
         )
         .map_err(|error| ScenePatchReport {
             applied: false,
@@ -953,6 +960,7 @@ mod tests {
                     kind,
                     Arc::clone(&basis),
                     file_limits,
+                    None,
                 )
                 .unwrap();
                 let patch = ScenePatchDocument::new([if remove_entity {

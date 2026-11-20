@@ -206,9 +206,10 @@ reuse the admitted catalog's sorted slices; they do not hide full retired-root s
 lookup still has its admitted bound and may build diagnostic prefixes; this is not allocation-free.
 Reading never creates source. The source-mutation successor under ADR 0026 may initialize only
 the target missing root in its private candidate, using a declared default for nested writes and
-the supplied value for an explicit root write. It does not merge explicit/partial roots, create
-storage ancestors or materialize unrelated defaults. The existing root patch supplies the exact
-absence-restoring inverse; read permission alone still grants no mutation authority.
+the supplied value for an explicit root write. The default-backed edit retains its selector,
+replacement and exact default witness. Undo checks the materialized result before restoring
+omission. Storage parents must already exist. The draft still requires the current typed mutation
+authority and publication limits.
 
 Add a borrowed semantic view of one admitted direct source entity. The owning session retains
 its document and classification together. Reuse the canonical sorted entity sequence for binary
@@ -628,8 +629,8 @@ A tool can page an authored collection and edit an existing member using its dur
 selector. For an explicit root, the source patch records the selected replacement and the
 inverse records the previous selected value. Changing the key of a keyed-list item updates the
 inverse selector to the resulting key. Later writes in the same transaction can use that key.
-An explicit whole-root write or the first nested write into an omitted defaulted root still
-uses root-field history, preserving the original presence or absence when replayed.
+An explicit whole-root write uses root-field history. The first nested write into an omitted
+defaulted root uses the local materialization operation, whose inverse restores omission.
 
 Qualification uses non-active Scene and Prefab documents with 4,097 stored keyed records.
 It prepares and previews selected edits through the registered panel, verifies the record after
@@ -639,7 +640,7 @@ history. The existing bounds apply to actual replacement payloads, selectors, an
 directions of history. Complete source classification and publication admission still apply.
 Private staging allows the admitted source and one bounded field patch. This lets an exact-limit
 document shrink one field and grow another in the same transaction. Publication and history replay
-check the final source against its original file limits.
+check the final source against its file limits and retained destination encoding.
 
 The seventh workflow review reproduced the original fixed threshold at 86 two-field records.
 Godot pairs a property write with the previous property value for Undo, and Bevy Reflect offers

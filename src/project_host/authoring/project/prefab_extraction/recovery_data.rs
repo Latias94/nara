@@ -551,7 +551,7 @@ impl PrefabExtractionRecovery {
                 roots,
                 missing_sidecars,
             };
-            validate::validate_payload(&payload, limits, budget)?;
+            validate::validate_payload(&payload, limits, budget, true)?;
             let encoded = admission::encode(&payload, limits, budget)?;
             budget.charge_source_bytes(0, 0, encoded.len(), 0)?;
             let digest = digest(&encoded);
@@ -570,7 +570,7 @@ impl PrefabExtractionRecovery {
     ) -> Result<Self, PrefabExtractionRecoveryError> {
         with_candidate_storage(budget, |budget| {
             let payload = admission::decode_payload(encoded, limits, budget)?;
-            validate::validate_payload(&payload, limits, budget)?;
+            validate::validate_payload(&payload, limits, budget, false)?;
             budget.charge_source_bytes(0, 0, checked_mul(encoded.len(), 2)?, encoded.len())?;
             let digest = digest(encoded);
             let encoded = encoded.to_vec();

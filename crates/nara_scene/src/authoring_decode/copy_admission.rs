@@ -40,15 +40,12 @@ impl AuthoringSchemaBasis {
                 })
             };
             classify_source_document_impl(
-                AuthoringSourceParts {
-                    placements: &document.placements,
-                    entities: &document.entities,
-                    inputs: Some(&document.inputs),
-                },
+                document.into(),
                 AuthoringDocumentSource::new(source.clone()),
                 AuthoringDocumentKind::Prefab,
                 Arc::clone(&self.0),
                 limits,
+                None,
                 Some(&mut callback),
             )
         };

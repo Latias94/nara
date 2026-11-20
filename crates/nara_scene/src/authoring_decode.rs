@@ -46,22 +46,28 @@ use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    __private::ComponentPropertyReadIndex, AuthoringSchemaBundle, CatalogFingerprint,
-    ComponentCapability, ComponentFieldId, ComponentFieldPathSegment, ComponentPropertyPath,
-    ComponentSchema, ComponentSchemaContributionReceipt, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-    DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
+    __private::{
+        ComponentPropertyAdmissionError, ComponentPropertyReadIndex,
+        component_values_exactly_match, exact_component_value_witness,
+    },
+    AuthoringSchemaBundle, CatalogFingerprint, ComponentCapability, ComponentFieldId,
+    ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentPropertyPath, ComponentSchema, ComponentSchemaContributionReceipt,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReference,
+    EntityReference, PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
     PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
     PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
-    SceneFileLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    SceneFileEncoding, SceneFileLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     diagnostics::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
     },
+    patch::{DefaultPropertyDirection, DefaultPropertyEdit},
 };
 
 /// Stable project-relative or stable-asset identity of one persistent authoring document.
@@ -213,13 +219,14 @@ impl AuthoringDocumentReadmission {
             )
             .into());
         }
-        let (document, limits) = candidate.into_authoring_parts();
+        let (document, limits, encoding) = candidate.into_authoring_parts();
         let state = classify_scene_document(
             &document,
             self.state.source.clone(),
             AuthoringDocumentKind::Scene,
             Arc::clone(&self.state.basis),
             limits,
+            encoding.or(self.state.encoding),
         )?;
         Ok(SceneAuthoringDocumentCandidate { document, state })
     }
@@ -248,13 +255,14 @@ impl AuthoringDocumentReadmission {
             )
             .into());
         }
-        let (document, limits) = candidate.into_authoring_parts();
+        let (document, limits, encoding) = candidate.into_authoring_parts();
         let state = classify_prefab_document(
             &document,
             self.state.source.clone(),
             AuthoringDocumentKind::Prefab,
             Arc::clone(&self.state.basis),
             limits,
+            encoding.or(self.state.encoding),
         )?;
         Ok(PrefabAuthoringDocumentCandidate { document, state })
     }
@@ -294,17 +302,18 @@ impl AuthoringDocumentReadmission {
                 authoring_reopen_kind_rejection(AuthoringDocumentKind::Scene, self.state.kind),
             ));
         }
-        let (document, _) = candidate.into_authoring_parts();
+        let (document, _, encoding) = candidate.into_authoring_parts();
         reclassification::admit_document(
             &document.placements,
             &document.entities,
             self.state.limits,
             admit,
         )?;
-        reclassification::classify_with_admission(
-            &document,
+        reclassification::classify_source_with_admission(
+            (&document).into(),
             &self.state,
             &self.state.schema_basis(),
+            encoding.or(self.state.encoding),
             admit,
         )
     }
@@ -342,7 +351,7 @@ impl AuthoringDocumentReadmission {
                 authoring_reopen_kind_rejection(AuthoringDocumentKind::Prefab, self.state.kind),
             ));
         }
-        let (document, _) = candidate.into_authoring_parts();
+        let (document, _, encoding) = candidate.into_authoring_parts();
         reclassification::admit_document(
             &document.placements,
             &document.entities,
@@ -350,13 +359,10 @@ impl AuthoringDocumentReadmission {
             admit,
         )?;
         reclassification::classify_source_with_admission(
-            AuthoringSourceParts {
-                placements: &document.placements,
-                entities: &document.entities,
-                inputs: Some(&document.inputs),
-            },
+            (&document).into(),
             &self.state,
             &self.state.schema_basis(),
+            encoding.or(self.state.encoding),
             admit,
         )
     }
@@ -1590,6 +1596,7 @@ pub(crate) struct AuthoringDocumentState {
     diagnostics: DiagnosticReport,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 }
 
 #[derive(Clone, Copy)]
@@ -1636,6 +1643,10 @@ impl<'a> AuthoringComponentTemplate<'a> {
 impl AuthoringDocumentState {
     pub(crate) const fn file_limits(&self) -> SceneFileLimits {
         self.limits
+    }
+
+    pub(crate) const fn file_encoding(&self) -> Option<SceneFileEncoding> {
+        self.encoding
     }
 
     /// Bounds selected values in the private replay of an admitted source and one field patch.
@@ -1805,13 +1816,14 @@ impl SceneDocumentCandidate {
         source: AuthoringDocumentSource,
         basis: &AuthoringSchemaBasis,
     ) -> Result<SceneAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
-        let (document, limits) = self.into_authoring_parts();
+        let (document, limits, encoding) = self.into_authoring_parts();
         let state = classify_scene_document(
             &document,
             source,
             AuthoringDocumentKind::Scene,
             Arc::clone(&basis.0),
             limits,
+            encoding,
         )?;
         Ok(SceneAuthoringDocumentCandidate { document, state })
     }
@@ -1837,13 +1849,14 @@ impl PrefabDocumentCandidate {
         source: AuthoringDocumentSource,
         basis: &AuthoringSchemaBasis,
     ) -> Result<PrefabAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
-        let (document, limits) = self.into_authoring_parts();
+        let (document, limits, encoding) = self.into_authoring_parts();
         let state = classify_prefab_document(
             &document,
             source,
             AuthoringDocumentKind::Prefab,
             Arc::clone(&basis.0),
             limits,
+            encoding,
         )?;
         Ok(PrefabAuthoringDocumentCandidate { document, state })
     }
@@ -2118,8 +2131,9 @@ fn classify_scene_document(
     kind: AuthoringDocumentKind,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
-    classify_scene_document_impl(document, source, kind, basis, limits, None)
+    classify_scene_document_impl(document, source, kind, basis, limits, encoding, None)
 }
 
 fn classify_scene_document_impl(
@@ -2128,18 +2142,16 @@ fn classify_scene_document_impl(
     kind: AuthoringDocumentKind,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     admission: Option<&mut reclassification::ClassificationCallback<'_>>,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
     classify_source_document_impl(
-        AuthoringSourceParts {
-            placements: &document.placements,
-            entities: &document.entities,
-            inputs: None,
-        },
+        document.into(),
         source,
         kind,
         basis,
         limits,
+        encoding,
         admission,
     )
 }
@@ -2150,26 +2162,37 @@ fn classify_prefab_document(
     kind: AuthoringDocumentKind,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
-    classify_source_document_impl(
-        AuthoringSourceParts {
-            placements: &document.placements,
-            entities: &document.entities,
-            inputs: Some(&document.inputs),
-        },
-        source,
-        kind,
-        basis,
-        limits,
-        None,
-    )
+    classify_source_document_impl(document.into(), source, kind, basis, limits, encoding, None)
 }
 
 /// Actual source declarations; Prefab inputs remain metadata rather than synthetic bindings.
-struct AuthoringSourceParts<'a> {
-    placements: &'a [SceneEntityPlacement],
-    entities: &'a [SceneEntityRecord],
-    inputs: Option<&'a BTreeSet<nara_identity::ReferenceInputId>>,
+#[derive(Clone, Copy)]
+pub(crate) struct AuthoringSourceParts<'a> {
+    pub(crate) placements: &'a [SceneEntityPlacement],
+    pub(crate) entities: &'a [SceneEntityRecord],
+    pub(crate) inputs: Option<&'a BTreeSet<nara_identity::ReferenceInputId>>,
+}
+
+impl<'a> From<&'a SceneDocument> for AuthoringSourceParts<'a> {
+    fn from(document: &'a SceneDocument) -> Self {
+        Self {
+            placements: &document.placements,
+            entities: &document.entities,
+            inputs: None,
+        }
+    }
+}
+
+impl<'a> From<&'a PrefabDocument> for AuthoringSourceParts<'a> {
+    fn from(document: &'a PrefabDocument) -> Self {
+        Self {
+            placements: &document.placements,
+            entities: &document.entities,
+            inputs: Some(&document.inputs),
+        }
+    }
 }
 
 fn classify_source_document_impl(
@@ -2178,6 +2201,7 @@ fn classify_source_document_impl(
     kind: AuthoringDocumentKind,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     mut admission: Option<&mut reclassification::ClassificationCallback<'_>>,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
     if let Some(inputs) = document.inputs {
@@ -2274,6 +2298,7 @@ fn classify_source_document_impl(
         diagnostics,
         basis,
         limits,
+        encoding,
     })
 }
 
@@ -2794,6 +2819,7 @@ fn prepare_scene_authoring_patch_impl(
         crate::format::validate_scene_publication_shape_with_admission(
             candidate.document(),
             state.limits,
+            state.encoding,
             |bytes| admit("publication-buffer", Some(bytes)),
         )
         .map_err(|error| match error {
@@ -2805,15 +2831,18 @@ fn prepare_scene_authoring_patch_impl(
             ),
         })
     } else {
-        crate::format::validate_scene_publication_shape(candidate.document(), state.limits).map_err(
-            |_| {
-                field_edit_rejection(
-                    edit,
-                    "scene.authoring-field-edit-format-invalid",
-                    "Authoring field edit exceeds the persistent Scene format boundary",
-                )
-            },
+        crate::format::validate_scene_publication_shape(
+            candidate.document(),
+            state.limits,
+            state.encoding,
         )
+        .map_err(|_| {
+            field_edit_rejection(
+                edit,
+                "scene.authoring-field-edit-format-invalid",
+                "Authoring field edit exceeds the persistent Scene format boundary",
+            )
+        })
     };
     shape?;
     let candidate_state = if let Some(admit) = admit.as_deref_mut() {
@@ -2891,7 +2920,7 @@ pub(crate) fn prepare_prefab_conversion_patch_with_admission(
         placements: prepared.document.placements,
         entities: prepared.document.entities,
     };
-    reclassification::validate_prefab_shape(&document, state.limits, Some(admit))?;
+    reclassification::validate_prefab_shape(&document, state.limits, state.encoding, Some(admit))?;
     Ok(PreparedPrefabAuthoringPatch {
         document,
         state: prepared.state,
@@ -2944,6 +2973,7 @@ pub(crate) fn prepare_prefab_conversion_patch_with_work(
     crate::format::validate_prefab_publication_shape_with_admission(
         &document,
         state.limits,
+        state.encoding,
         |bytes| work.reserve("publication-buffer", Some(bytes)),
     )
     .map_err(|error| match error {
@@ -2973,7 +3003,9 @@ pub(crate) fn prepare_prefab_conversion_patch(
         placements: prepared.document.placements,
         entities: prepared.document.entities,
     };
-    if crate::format::validate_prefab_publication_shape(&document, state.limits).is_err() {
+    if crate::format::validate_prefab_publication_shape(&document, state.limits, state.encoding)
+        .is_err()
+    {
         return Err(authoring_structure_rejection(
             "Conversion exceeds the persistent Prefab format boundary",
         ));
@@ -3048,7 +3080,12 @@ fn prepare_prefab_authoring_patch_impl(
             placements: prepared.document.placements,
             entities: prepared.document.entities,
         };
-        reclassification::validate_prefab_shape(&candidate, state.limits, admit.as_deref_mut())?;
+        reclassification::validate_prefab_shape(
+            &candidate,
+            state.limits,
+            state.encoding,
+            admit.as_deref_mut(),
+        )?;
         return Ok(PreparedPrefabAuthoringPatch {
             document: candidate,
             state: prepared.state,
@@ -3136,6 +3173,13 @@ struct AuthoringFieldChange {
     component_version: ComponentSchemaVersion,
     property: ComponentPropertyPath,
     value: Option<ComponentValue>,
+    default_property: Option<DefaultPropertyReplay>,
+}
+
+#[derive(Clone, Copy)]
+struct DefaultPropertyReplay {
+    default_witness: [u8; 32],
+    direction: DefaultPropertyDirection,
 }
 
 pub(crate) fn is_authoring_field_operation(operation: &ScenePatchOperation) -> bool {
@@ -3145,6 +3189,7 @@ pub(crate) fn is_authoring_field_operation(operation: &ScenePatchOperation) -> b
             | ScenePatchOperation::SetAssetRefField { .. }
             | ScenePatchOperation::RemoveField { .. }
             | ScenePatchOperation::ReplaceProperty { .. }
+            | ScenePatchOperation::DefaultProperty(_)
     )
 }
 
@@ -3164,14 +3209,17 @@ fn field_edits_from_operations<'a>(
     parse_authoring_field_operations(
         operations,
         maximum_writes,
-        |entity, component, version, field, property, value| AuthoringFieldChange {
-            entity: entity.clone(),
-            component: component.clone(),
-            component_version: version,
-            property: property
-                .cloned()
-                .unwrap_or_else(|| ComponentPropertyPath::new(field.clone())),
-            value: value.cloned(),
+        |entity, component, version, field, property, value, default_property| {
+            AuthoringFieldChange {
+                entity: entity.clone(),
+                component: component.clone(),
+                component_version: version,
+                property: property
+                    .cloned()
+                    .unwrap_or_else(|| ComponentPropertyPath::new(field.clone())),
+                value: value.cloned(),
+                default_property,
+            }
         },
     )
 }
@@ -3186,7 +3234,8 @@ fn validate_authoring_field_operations_with_limit<'a>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
     maximum_writes: usize,
 ) -> Result<(), ScenePatchReport> {
-    parse_authoring_field_operations(operations, maximum_writes, |_, _, _, _, _, _| ()).map(|_| ())
+    parse_authoring_field_operations(operations, maximum_writes, |_, _, _, _, _, _, _| ())
+        .map(|_| ())
 }
 
 fn parse_authoring_field_operations<'a, T>(
@@ -3199,6 +3248,7 @@ fn parse_authoring_field_operations<'a, T>(
         &ComponentFieldId,
         Option<&ComponentPropertyPath>,
         Option<&ComponentValue>,
+        Option<DefaultPropertyReplay>,
     ) -> T,
 ) -> Result<Vec<T>, ScenePatchReport> {
     let count = operations.clone().count();
@@ -3211,6 +3261,17 @@ fn parse_authoring_field_operations<'a, T>(
     operations
         .map(|operation| {
             let asset_value;
+            let default_property = match operation {
+                ScenePatchOperation::DefaultProperty(edit) => {
+                    logical_bytes =
+                        logical_bytes.saturating_add(DefaultPropertyEdit::LOGICAL_OVERHEAD);
+                    Some(DefaultPropertyReplay {
+                        default_witness: edit.default_witness,
+                        direction: edit.direction,
+                    })
+                }
+                _ => None,
+            };
             let (entity, component, component_version, field, property, value) = match operation {
                 ScenePatchOperation::SetField {
                     entity,
@@ -3255,7 +3316,15 @@ fn parse_authoring_field_operations<'a, T>(
                     component_version,
                     property,
                     value,
-                } => {
+                }
+                | ScenePatchOperation::DefaultProperty(DefaultPropertyEdit {
+                    entity,
+                    component,
+                    component_version,
+                    property,
+                    value,
+                    ..
+                }) => {
                     if property.steps.is_empty() {
                         return Err(authoring_field_patch_rejection());
                     }
@@ -3298,6 +3367,7 @@ fn parse_authoring_field_operations<'a, T>(
                 field,
                 property,
                 value,
+                default_property,
             ))
         })
         .collect()
@@ -3435,51 +3505,31 @@ fn prepare_admitted_field_edit(
                 .and_then(|bytes| bytes.checked_add(field_bytes)),
         )?;
     }
+    if let Some(replay) = edit.default_property {
+        let inverse = replay_default_property(
+            record,
+            &schema_entry.schema,
+            field,
+            edit,
+            replay,
+            state.property_staging_limits(),
+            admit,
+        )?;
+        return Ok((candidate, ScenePatchDocument::new([inverse])));
+    }
     if !edit.property.steps.is_empty() {
         let replacement = edit
             .value
             .as_ref()
             .expect("a nested edit always replaces a selected value");
-        let schema = &schema_entry.schema;
-        let limits = state.property_staging_limits();
-        let reject = |error| crate::authoring::property_rejection(&error, schema, None);
-        let (property, previous) = match admit {
-            Some(admit) => edit
-                .property
-                .replace_in_candidate_with_admission(
-                    schema,
-                    edit.component_version,
-                    record.value_mut(),
-                    replacement.clone(),
-                    limits,
-                    |nodes, bytes, allocated| {
-                        admit(
-                            "property-replay",
-                            nodes
-                                .checked_add(bytes)
-                                .and_then(|count| count.checked_add(allocated)),
-                        )
-                    },
-                )
-                .map_err(|error| match error {
-                    nara_reflect::__private::ComponentPropertyAdmissionError::Admission(report) => {
-                        report
-                    }
-                    nara_reflect::__private::ComponentPropertyAdmissionError::Property(error) => {
-                        reject(error)
-                    }
-                })?,
-            None => edit
-                .property
-                .replace_in_candidate(
-                    schema,
-                    edit.component_version,
-                    record.value_mut(),
-                    replacement.clone(),
-                    limits,
-                )
-                .map_err(reject)?,
-        };
+        let (property, previous) = replace_nested_field(
+            edit,
+            &schema_entry.schema,
+            record.value_mut(),
+            replacement,
+            state.property_staging_limits(),
+            admit,
+        )?;
         if !authoring_field_change_is_preservation_safe(field, Some(&previous), None) {
             return Err(field_edit_rejection(
                 edit,
@@ -3544,6 +3594,161 @@ fn prepare_admitted_field_edit(
         },
     };
     Ok((candidate, ScenePatchDocument::new([inverse])))
+}
+
+fn replace_nested_field(
+    edit: &AuthoringFieldChange,
+    schema: &ComponentSchema,
+    candidate: &mut ComponentValue,
+    replacement: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    admit: Option<&mut reclassification::AdmissionCallback<'_>>,
+) -> Result<(ComponentPropertyPath, ComponentValue), ScenePatchReport> {
+    let reject = |error| crate::authoring::property_rejection(&error, schema, None);
+    match admit {
+        Some(admit) => edit
+            .property
+            .replace_in_candidate_with_admission(
+                schema,
+                edit.component_version,
+                candidate,
+                replacement.clone(),
+                limits,
+                |nodes, bytes, allocated| {
+                    admit(
+                        "property-replay",
+                        nodes
+                            .checked_add(bytes)
+                            .and_then(|count| count.checked_add(allocated)),
+                    )
+                },
+            )
+            .map_err(|error| match error {
+                ComponentPropertyAdmissionError::Admission(report) => report,
+                ComponentPropertyAdmissionError::Property(error) => reject(error),
+            }),
+        None => edit
+            .property
+            .replace_in_candidate(
+                schema,
+                edit.component_version,
+                candidate,
+                replacement.clone(),
+                limits,
+            )
+            .map_err(reject),
+    }
+}
+
+fn replay_default_property(
+    record: &mut SceneComponentRecord,
+    schema: &ComponentSchema,
+    field: &ComponentFieldSchema,
+    edit: &AuthoringFieldChange,
+    replay: DefaultPropertyReplay,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
+) -> Result<ScenePatchOperation, ScenePatchReport> {
+    let reject = || {
+        field_edit_rejection(
+            edit,
+            "scene.authoring-default-property-basis-mismatch",
+            "Default property history requires the original default and exact storage state",
+        )
+    };
+    let replacement = edit.value.as_ref().ok_or_else(reject)?;
+    let default = record
+        .contextual_defaults
+        .get(field.id())
+        .or(field.default_value())
+        .ok_or_else(reject)?;
+    let path = field.path();
+    if let Some(admit) = admit.as_deref_mut() {
+        admit(
+            "default-property-storage-path",
+            retention::field_path_dynamic_bytes(path)
+                .and_then(|bytes| bytes.checked_mul(path.segments().len() + 6)),
+        )?;
+    }
+    let storage = record.value().get_path(path);
+    match replay.direction {
+        DefaultPropertyDirection::Materialize => {
+            if !matches!(
+                storage,
+                Err(ComponentFieldPathError::MissingField { path: missing, .. }) if &missing == path
+            ) {
+                return Err(reject());
+            }
+        }
+        DefaultPropertyDirection::RestoreOmission => {
+            storage.map_err(|_| reject())?;
+        }
+    }
+    if let Some(admit) = admit.as_deref_mut() {
+        let cost = default
+            .cost_up_to_with_admission(limits.nodes(), limits.bytes(), |request| {
+                admit("default-property-value-scan", request)
+            })?
+            .ok_or_else(reject)?;
+        admit(
+            "default-property-working-value",
+            cost.nodes()
+                .checked_mul(96)
+                .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
+        )?;
+        let cost = replacement.cost();
+        let selector_bytes = crate::patch::property_selector_bytes(&edit.property);
+        let step_bytes = edit
+            .property
+            .steps
+            .len()
+            .checked_mul(std::mem::size_of::<nara_reflect::ComponentPropertyStep>());
+        admit(
+            "default-property-inverse",
+            cost.nodes().checked_mul(96).and_then(|bytes| {
+                bytes
+                    .checked_add(cost.logical_bytes())?
+                    .checked_add(selector_bytes)?
+                    .checked_add(step_bytes?)
+            }),
+        )?;
+    }
+    if !authoring_field_change_is_preservation_safe(field, None, Some(default))
+        || exact_component_value_witness(default) != replay.default_witness
+    {
+        return Err(reject());
+    }
+    let default = default.clone();
+    let previous_root = record
+        .value_mut()
+        .set_path(path, default)
+        .map_err(|_| reject())?;
+    let (_, previous_leaf) =
+        replace_nested_field(edit, schema, record.value_mut(), replacement, limits, admit)?;
+    if !authoring_field_change_is_preservation_safe(field, Some(&previous_leaf), None) {
+        return Err(reject());
+    }
+    let direction = match replay.direction {
+        DefaultPropertyDirection::Materialize => DefaultPropertyDirection::RestoreOmission,
+        DefaultPropertyDirection::RestoreOmission => {
+            let previous_root = previous_root.as_ref().ok_or_else(reject)?;
+            let reconstructed = record.value().get_path(path).map_err(|_| reject())?;
+            if !component_values_exactly_match(previous_root, reconstructed) {
+                return Err(reject());
+            }
+            record.value_mut().remove_path(path).map_err(|_| reject())?;
+            DefaultPropertyDirection::Materialize
+        }
+    };
+    Ok(ScenePatchOperation::DefaultProperty(DefaultPropertyEdit {
+        entity: edit.entity.clone(),
+        component: edit.component.clone(),
+        component_version: edit.component_version,
+        property: edit.property.clone(),
+        value: replacement.clone(),
+        default_witness: replay.default_witness,
+        direction,
+    }))
 }
 
 fn authoring_field_change_is_preservation_safe(

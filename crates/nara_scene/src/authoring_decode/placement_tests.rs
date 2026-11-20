@@ -59,6 +59,7 @@ fn classify(document: &SceneDocument) -> AuthoringDocumentState {
         AuthoringDocumentKind::Scene,
         Arc::clone(&basis().0),
         SceneFileLimits::default(),
+        None,
     )
     .unwrap()
 }
@@ -162,6 +163,7 @@ fn classification_admits_the_complete_source_layout_before_its_manifest_copy() {
         AuthoringDocumentKind::Scene,
         Arc::clone(&basis().0),
         SceneFileLimits::default(),
+        None,
         Some(&mut admission),
     );
     assert!(result.is_err());

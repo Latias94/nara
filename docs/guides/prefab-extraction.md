@@ -131,6 +131,8 @@ Recovery consumes stored P/Q/dependant outputs and original disk Guards. It does
 extraction, regenerate Q identities/input names, execute a converter or reconstruct old nominal
 tokens, Workspace checkpoints, native handles or receipts. Header inspection conservatively
 admits parser/error storage; fitting the transport byte ceiling alone does not guarantee admission.
+The Pending package commits the exact reviewed output bytes. Recovery can finish supported v1
+JSON and RON files written with earlier formatting and publishes the original committed bytes.
 
 The [independent CLI-only consumer](../../tests/fixtures/prefab-extraction-recovery/README.md)
 documents its finite command interface and process-test setup. It is a qualification companion,

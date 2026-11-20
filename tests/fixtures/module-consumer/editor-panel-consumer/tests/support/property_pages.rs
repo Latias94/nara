@@ -22,6 +22,9 @@ use nara_tooling::{
     MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
 };
 
+#[path = "property_pages/round_eight.rs"]
+mod round_eight;
+
 const PANEL: &str = "consumer.property-pages";
 const COMPONENT: &str = "consumer.pages.PanelSettings";
 const STARTUP: &str = "scenes/startup.scene.json";
@@ -467,6 +470,24 @@ fn open_nonactive_source(
     schemas: AuthoringSchemaBundle,
     entities: impl IntoIterator<Item = SceneEntityRecord>,
 ) -> (Application, EditorDocumentId, String, String) {
+    let original = match kind {
+        EditorDocumentKind::Scene => SceneDocument::from_ordered_roots(entities).to_json_string(),
+        EditorDocumentKind::Prefab => PrefabDocument::from_ordered_roots(entities).to_json_string(),
+        EditorDocumentKind::Extension(_) => unreachable!(),
+    }
+    .unwrap();
+    let (app, document, startup) =
+        open_nonactive_source_text(project, kind, source, schemas, &original);
+    (app, document, original, startup)
+}
+
+fn open_nonactive_source_text(
+    project: &text_project::TextProject,
+    kind: EditorDocumentKind,
+    source: &str,
+    schemas: AuthoringSchemaBundle,
+    original: &str,
+) -> (Application, EditorDocumentId, String) {
     fs::write(
         project.root.join("schema/authoring.bundle.json"),
         schemas.to_json_string().unwrap(),
@@ -476,13 +497,7 @@ fn open_nonactive_source(
         .to_json_string()
         .unwrap();
     fs::write(project.root.join(STARTUP), &startup).unwrap();
-    let original = match kind {
-        EditorDocumentKind::Scene => SceneDocument::from_ordered_roots(entities).to_json_string(),
-        EditorDocumentKind::Prefab => PrefabDocument::from_ordered_roots(entities).to_json_string(),
-        EditorDocumentKind::Extension(_) => unreachable!(),
-    }
-    .unwrap();
-    fs::write(project.root.join(source), &original).unwrap();
+    fs::write(project.root.join(source), original).unwrap();
 
     let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
         &project.root,
@@ -557,7 +572,7 @@ fn open_nonactive_source(
         ),
         (0, 0)
     );
-    (app, document, original, startup)
+    (app, document, startup)
 }
 
 fn assert_navigation(

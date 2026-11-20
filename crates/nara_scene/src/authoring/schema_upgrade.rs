@@ -22,9 +22,12 @@ use super::{
 use crate::{
     AuthoringDocumentKind, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate, SceneDocument,
-    SceneDocumentCandidate, SceneEntityRecord, SceneFileLimits, ScenePatchReport,
-    SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
-    authoring_decode::{AuthoringDocumentState, schema_upgrade::AuthoredFieldUpgrade},
+    SceneDocumentCandidate, SceneEntityRecord, SceneFileEncoding, SceneFileLimits,
+    ScenePatchReport, SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
+    authoring_decode::{
+        AuthoringDocumentState, AuthoringSourceParts,
+        schema_upgrade::{AuthoredFieldUpgrade, AuthoredUpgradeOutput},
+    },
 };
 
 mod input;
@@ -219,16 +222,16 @@ pub fn admit_authored_upgrade_scene_source(
     previous: &AuthoringSchemaBasis,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<(SceneAuthoringSession, RetainedAuthoredSchemaUpgradeSource), ScenePatchReport> {
-    let (document, limits) = candidate.into_authoring_parts();
+    let (document, limits, encoding) = candidate.into_authoring_parts();
     work.begin_step()?;
     let result = (|| {
         let state = admit_unopened_source(
-            &document,
+            (&document).into(),
             source,
             previous,
             AuthoringDocumentKind::Scene,
-            Some(0),
             limits,
+            encoding,
             work,
         )?;
         let history = AuthoringHistory::new(SceneAuthoringHistoryLimits::default());
@@ -252,42 +255,31 @@ pub fn admit_authored_upgrade_scene_source(
 /// Admits an unopened nominal Prefab and its already-retained original-source token.
 ///
 /// This has the same complete-set and cumulative-work contract as
-/// [`admit_authored_upgrade_scene_source`]. The classifier borrows the original owned placements
-/// and records through its Scene-shaped structural input; no document is cloned and no Scene
-/// Session is created. The returned Session, classification and token all retain Prefab kind.
+/// [`admit_authored_upgrade_scene_source`]. The classifier borrows the original declarations and
+/// inputs. The returned Session, classification and token all retain Prefab kind.
 pub fn admit_authored_upgrade_prefab_source(
     candidate: PrefabDocumentCandidate,
     source: AuthoringDocumentSource,
     previous: &AuthoringSchemaBasis,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<(PrefabAuthoringSession, RetainedAuthoredSchemaUpgradeSource), ScenePatchReport> {
-    let (document, limits) = candidate.into_authoring_parts();
-    let inputs = document.inputs;
-    let inputs_bytes = crate::authoring_decode::retained_prefab_inputs_bytes(&inputs);
-    let document = SceneDocument {
-        placements: document.placements,
-        entities: document.entities,
-    };
+    let (document, limits, encoding) = candidate.into_authoring_parts();
     work.begin_step()?;
     let result = (|| {
         let state = admit_unopened_source(
-            &document,
+            (&document).into(),
             source,
             previous,
             AuthoringDocumentKind::Prefab,
-            inputs_bytes,
             limits,
+            encoding,
             work,
         )?;
         let history = AuthoringHistory::new(SceneAuthoringHistoryLimits::default());
         let retained = retained_source(&history, &state, SourceDocumentKind::Prefab, work);
         Ok((
             PrefabAuthoringSession {
-                document: Arc::new(PrefabDocument {
-                    inputs,
-                    placements: document.placements,
-                    entities: document.entities,
-                }),
+                document: Arc::new(document),
                 history,
                 source_upgrade_required: false,
                 authority: AuthoringSessionAuthority::Published(Arc::new(state)),
@@ -300,20 +292,24 @@ pub fn admit_authored_upgrade_prefab_source(
 }
 
 fn admit_unopened_source(
-    document: &SceneDocument,
+    document: AuthoringSourceParts<'_>,
     source: AuthoringDocumentSource,
     previous: &AuthoringSchemaBasis,
     kind: AuthoringDocumentKind,
-    inputs_bytes: Option<usize>,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
     let original = super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        &document.placements,
-        &document.entities,
+        document.placements,
+        document.entities,
         limits,
         |bytes| work.reserve("authored-upgrade-source-scan", bytes),
     )?;
+    let inputs_bytes = document.inputs.map_or(
+        Some(0),
+        crate::authoring_decode::retained_prefab_inputs_bytes,
+    );
     let original = original.and_then(|bytes| bytes.checked_add(inputs_bytes?));
     work.reserve("authored-upgrade-unopened-source", original)?;
     let storage = source_checkpoint::incumbent_storage_bytes(
@@ -332,6 +328,7 @@ fn admit_unopened_source(
         kind,
         previous,
         limits,
+        encoding,
         &mut |stage, bytes| work.reserve(stage, bytes),
     )?;
     let classification = state.checked_retained_bytes_with_admission(|bytes| {
@@ -816,7 +813,7 @@ impl BorrowedSource<'_, SceneDocument> {
             AuthoringDocumentKind::Scene,
             upgrade,
         )?;
-        let (candidate, _) = candidate.into_authoring_parts();
+        let (candidate, _, encoding) = candidate.into_authoring_parts();
         admit_candidate(
             &candidate.placements,
             &candidate.entities,
@@ -826,9 +823,13 @@ impl BorrowedSource<'_, SceneDocument> {
         admit_checkpoint_storage::<PreparedSceneAuthoredSchemaUpgrade, SceneDocument>(
             source_key, admit,
         )?;
-        let next =
-            self.state
-                .prepare_authored_upgrade(self.document, &candidate, upgrade, admit)?;
+        let next = self.state.prepare_authored_upgrade(
+            self.document,
+            &candidate,
+            upgrade,
+            AuthoredUpgradeOutput::Live(encoding),
+            admit,
+        )?;
         require_successor(self.state, &next, upgrade)?;
         Ok(PreparedSceneAuthoredSchemaUpgrade {
             original: Arc::clone(self.document),
@@ -892,7 +893,7 @@ impl BorrowedSource<'_, PrefabDocument> {
             AuthoringDocumentKind::Prefab,
             upgrade,
         )?;
-        let (candidate, _) = candidate.into_authoring_parts();
+        let (candidate, _, encoding) = candidate.into_authoring_parts();
         admit_candidate(
             &candidate.placements,
             &candidate.entities,
@@ -906,6 +907,7 @@ impl BorrowedSource<'_, PrefabDocument> {
             self.document,
             &candidate,
             upgrade,
+            AuthoredUpgradeOutput::Live(encoding),
             admit,
         )?;
         require_successor(self.state, &next, upgrade)?;
@@ -1007,6 +1009,9 @@ fn require_successor(
         || next.source() != original.source()
         || next.document_kind() != original.document_kind()
         || next.file_limits() != original.file_limits()
+        || original
+            .file_encoding()
+            .is_some_and(|encoding| next.file_encoding() != Some(encoding))
     {
         return Err(history_error_report(
             "scene.authored-schema-upgrade-classification-mismatch",

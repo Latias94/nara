@@ -278,24 +278,21 @@ impl ImguiEditorPanel for DefaultedPanel {
                 .unwrap();
             assert_eq!(cancelled.document(), observed.target.basis.document);
             assert_eq!(cancelled.base_revision(), observed.target.basis.revision);
+            let forward = cancelled.patch().operations.as_slice();
+            let inverse = cancelled.inverse().operations.as_slice();
+            for operations in [forward, inverse] {
+                assert!(matches!(
+                    operations,
+                    [ScenePatchOperation::DefaultProperty(change)]
+                        if change.component() == &observed.target.component
+                ));
+            }
+            assert_ne!(forward, inverse);
+            let preview = cancelled.preview_property(request).unwrap();
+            assert_eq!(preview.target, observed.target);
             assert_eq!(
-                cancelled.patch().operations.as_slice(),
-                &[ScenePatchOperation::SetField {
-                    entity: observed.target.entity.clone(),
-                    component: observed.target.component.clone(),
-                    component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("defaults"),
-                    value: ComponentValue::map([("wire_score", ComponentValue::U64(15))]),
-                }]
-            );
-            assert_eq!(
-                cancelled.inverse().operations.as_slice(),
-                &[ScenePatchOperation::RemoveField {
-                    entity: observed.target.entity.clone(),
-                    component: observed.target.component.clone(),
-                    component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("defaults"),
-                }]
+                preview.value,
+                EditorPropertyValue::Present(edits[0].value.clone())
             );
             drop(cancelled);
             self.0.prepared = Some(

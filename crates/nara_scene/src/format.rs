@@ -333,6 +333,9 @@ pub enum SceneFormatError {
         observed: u32,
         expected: u32,
     },
+    SessionOnlyPatchOperation {
+        operation_index: usize,
+    },
     Payload {
         encoding: SceneFileEncoding,
         source: Box<dyn Error + Send + Sync>,
@@ -421,6 +424,10 @@ impl Display for SceneFormatError {
                 formatter,
                 "scene patch format version is {observed}, expected {expected}"
             ),
+            Self::SessionOnlyPatchOperation { operation_index } => write!(
+                formatter,
+                "scene patch operation {operation_index} requires its owning authoring session"
+            ),
             Self::Payload { encoding, source } => {
                 write!(
                     formatter,
@@ -448,7 +455,9 @@ impl Error for SceneFormatError {
             | Self::Metadata(source) => Some(source.as_ref()),
             Self::Contract(error) => Some(error),
             Self::Budget(error) => Some(error),
-            Self::EncodedBytesExceeded { .. } | Self::PatchFormatVersion { .. } => None,
+            Self::EncodedBytesExceeded { .. }
+            | Self::PatchFormatVersion { .. }
+            | Self::SessionOnlyPatchOperation { .. } => None,
         }
     }
 }
@@ -536,6 +545,7 @@ impl SceneFormatError {
             Self::EncodedBytesExceeded { .. }
             | Self::Contract(_)
             | Self::PatchFormatVersion { .. }
+            | Self::SessionOnlyPatchOperation { .. }
             | Self::Budget(_)
             | Self::Encode { .. }
             | Self::Metadata(_) => None,
@@ -556,6 +566,7 @@ impl From<SceneFileBudgetError> for SceneFormatError {
 pub struct SceneDocumentCandidate {
     document: SceneDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 }
 
 /// Bounded Prefab declarations awaiting source-local semantic validation.
@@ -567,6 +578,7 @@ pub struct SceneDocumentCandidate {
 pub struct PrefabDocumentCandidate {
     document: PrefabDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 }
 
 /// A migrated canonical scene candidate that is not yet published authoring state.
@@ -917,7 +929,11 @@ impl SceneFilePayload for ScenePatchDocument {
     fn canonicalize_payload(&mut self) {}
 
     fn validate_contract(&self) -> Result<(), SceneFormatError> {
-        validate_patch_version(self)
+        validate_patch_version(self)?;
+        if let Some(operation_index) = self.session_only_operation_index() {
+            return Err(SceneFormatError::SessionOnlyPatchOperation { operation_index });
+        }
+        Ok(())
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
@@ -982,7 +998,7 @@ macro_rules! impl_scene_file_encoder {
 }
 
 macro_rules! impl_scene_file_candidate {
-    ($candidate:ty, $payload:ty) => {
+    ($candidate:ty, $payload:ty $(, $encoding:ident)?) => {
         impl $candidate {
             pub fn decode_json_str(input: &str) -> Result<Self, SceneFormatError> {
                 Self::decode_json_bytes(input.as_bytes())
@@ -1004,14 +1020,22 @@ macro_rules! impl_scene_file_candidate {
                 input: &[u8],
                 limits: SceneFileLimits,
             ) -> Result<Self, SceneFormatError> {
-                decode_json::<$payload>(input, limits).map(|document| Self { document, limits })
+                decode_json::<$payload>(input, limits).map(|document| Self {
+                    document,
+                    limits,
+                    $($encoding: Some(SceneFileEncoding::Json),)?
+                })
             }
 
             pub fn decode_ron_bytes_with_limits(
                 input: &[u8],
                 limits: SceneFileLimits,
             ) -> Result<Self, SceneFormatError> {
-                decode_ron::<$payload>(input, limits).map(|document| Self { document, limits })
+                decode_ron::<$payload>(input, limits).map(|document| Self {
+                    document,
+                    limits,
+                    $($encoding: Some(SceneFileEncoding::Ron),)?
+                })
             }
 
             /// Borrows the shape-bounded raw payload before domain traversal or canonical
@@ -1032,7 +1056,11 @@ macro_rules! impl_scene_file_candidate {
                 .map_err(SceneFileDecodingAdmissionError::Format)?;
                 admission(&document).map_err(SceneFileDecodingAdmissionError::Admission)?;
                 finish_decode(document, limits)
-                    .map(|document| Self { document, limits })
+                    .map(|document| Self {
+                        document,
+                        limits,
+                        $($encoding: Some(encoding),)?
+                    })
                     .map_err(SceneFileDecodingAdmissionError::Format)
             }
 
@@ -1050,15 +1078,16 @@ macro_rules! impl_scene_file_candidate {
 impl_scene_file_encoder!(SceneDocument);
 impl_scene_file_encoder!(PrefabDocument);
 impl_scene_file_encoder!(ScenePatchDocument);
-impl_scene_file_candidate!(SceneDocumentCandidate, SceneDocument);
-impl_scene_file_candidate!(PrefabDocumentCandidate, PrefabDocument);
+impl_scene_file_candidate!(SceneDocumentCandidate, SceneDocument, encoding);
+impl_scene_file_candidate!(PrefabDocumentCandidate, PrefabDocument, encoding);
 impl_scene_file_candidate!(ScenePatchDocumentCandidate, ScenePatchDocument);
 
 pub(crate) fn validate_scene_publication_shape(
     document: &SceneDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<(), SceneFormatError> {
-    validate_publication_shape(document, limits)
+    validate_publication_shape(document, limits, encoding)
 }
 
 pub(crate) fn validate_scene_value_budget(
@@ -1071,8 +1100,9 @@ pub(crate) fn validate_scene_value_budget(
 pub(crate) fn validate_prefab_publication_shape(
     document: &PrefabDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<(), SceneFormatError> {
-    validate_publication_shape(document, limits)
+    validate_publication_shape(document, limits, encoding)
 }
 
 #[derive(Debug)]
@@ -1093,17 +1123,19 @@ impl<E> Display for PublicationShapeAdmissionError<E> {
 pub(crate) fn validate_scene_publication_shape_with_admission<E>(
     document: &SceneDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     admission: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<(), PublicationShapeAdmissionError<E>> {
-    validate_publication_shape_with_admission(document, limits, admission)
+    validate_publication_shape_with_admission(document, limits, encoding, admission)
 }
 
 pub(crate) fn validate_prefab_publication_shape_with_admission<E>(
     document: &PrefabDocument,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     admission: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<(), PublicationShapeAdmissionError<E>> {
-    validate_publication_shape_with_admission(document, limits, admission)
+    validate_publication_shape_with_admission(document, limits, encoding, admission)
 }
 
 /// Compares a bounded owned source with its owner's canonical wire spelling, without copying
@@ -1192,7 +1224,7 @@ pub(crate) fn validate_patch_publication_shape(
     document: &ScenePatchDocument,
     limits: SceneFileLimits,
 ) -> Result<(), SceneFormatError> {
-    validate_publication_shape(document, limits)
+    validate_publication_shape(document, limits, None)
 }
 
 impl SceneDocumentCandidate {
@@ -1208,7 +1240,21 @@ impl SceneDocumentCandidate {
         Ok(Self {
             document: finish_decode(document, limits)?,
             limits,
+            encoding: None,
         })
+    }
+
+    /// Retains a known source or destination encoding when reusing an owned Scene.
+    /// The caller retains any original wire evidence. This checks the owned domain limits.
+    #[doc(hidden)]
+    pub fn from_source_document_with_encoding(
+        document: SceneDocument,
+        encoding: SceneFileEncoding,
+        limits: SceneFileLimits,
+    ) -> Result<Self, SceneFormatError> {
+        let mut candidate = Self::from_source_document(document, limits)?;
+        candidate.encoding = Some(encoding);
+        Ok(candidate)
     }
 
     /// Consumes bounded decoded declarations for deferred mixed Scene/Prefab composition.
@@ -1225,8 +1271,10 @@ impl SceneDocumentCandidate {
         Ok(self.document)
     }
 
-    pub(crate) fn into_authoring_parts(self) -> (SceneDocument, SceneFileLimits) {
-        (self.document, self.limits)
+    pub(crate) fn into_authoring_parts(
+        self,
+    ) -> (SceneDocument, SceneFileLimits, Option<SceneFileEncoding>) {
+        (self.document, self.limits, self.encoding)
     }
 
     pub fn canonicalize(
@@ -1253,7 +1301,12 @@ impl SceneDocumentCandidate {
         self,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<(SceneDocument, bool), SceneFilePublicationError> {
-        crate::migration::canonicalize_scene_document(self.document, registry, self.limits)
+        crate::migration::canonicalize_scene_document(
+            self.document,
+            registry,
+            self.limits,
+            self.encoding,
+        )
     }
 }
 
@@ -1271,7 +1324,21 @@ impl PrefabDocumentCandidate {
         Ok(Self {
             document: finish_decode(document, limits)?,
             limits,
+            encoding: None,
         })
+    }
+
+    /// Retains a known source or destination encoding when reusing an owned Prefab.
+    /// The caller retains any original wire evidence. This checks the owned domain limits.
+    #[doc(hidden)]
+    pub fn from_source_document_with_encoding(
+        document: PrefabDocument,
+        encoding: SceneFileEncoding,
+        limits: SceneFileLimits,
+    ) -> Result<Self, SceneFormatError> {
+        let mut candidate = Self::from_source_document(document, limits)?;
+        candidate.encoding = Some(encoding);
+        Ok(candidate)
     }
 
     /// Consumes bounded decoded declarations for deferred composition.
@@ -1293,8 +1360,10 @@ impl PrefabDocumentCandidate {
         Ok(self.document)
     }
 
-    pub(crate) fn into_authoring_parts(self) -> (PrefabDocument, SceneFileLimits) {
-        (self.document, self.limits)
+    pub(crate) fn into_authoring_parts(
+        self,
+    ) -> (PrefabDocument, SceneFileLimits, Option<SceneFileEncoding>) {
+        (self.document, self.limits, self.encoding)
     }
 
     pub fn canonicalize(
@@ -1321,7 +1390,12 @@ impl PrefabDocumentCandidate {
         self,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<(PrefabDocument, bool), SceneFilePublicationError> {
-        crate::migration::canonicalize_prefab_document(self.document, registry, self.limits)
+        crate::migration::canonicalize_prefab_document(
+            self.document,
+            registry,
+            self.limits,
+            self.encoding,
+        )
     }
 }
 
@@ -1440,7 +1514,7 @@ fn encode_with_admission<T: SceneFilePayload, E>(
         }));
     }
     result.map_err(Format)?;
-    if T::KIND == SCENE_PATCH_KIND {
+    if !certifies_publication_shape(&envelope, envelope.payload(), limits) {
         match encoding {
             SceneFileEncoding::Json => validate_json_shape(&bytes, limits.shape()),
             SceneFileEncoding::Ron => validate_ron_shape(&bytes, limits.shape()),
@@ -1459,27 +1533,17 @@ fn encode_with_admission<T: SceneFilePayload, E>(
 fn validate_publication_shape<T: SceneFilePayload>(
     payload: &T,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<(), SceneFormatError> {
     let envelope = canonical_envelope(payload, limits)?;
-    let certified = envelope
-        .payload()
-        .entity_document()
-        .is_some_and(|(placements, entities)| {
-            publication_shape::certifies_entity_document(
-                &envelope,
-                placements,
-                entities,
-                envelope.payload().reference_inputs(),
-                limits.shape(),
-            )
-        });
-    validate_json_publication_shape(&envelope, limits, certified, None)?;
-    validate_ron_publication_shape(&envelope, limits, certified, None)
+    let certified = certifies_publication_shape(&envelope, envelope.payload(), limits);
+    validate_publication_encodings(&envelope, limits, encoding, certified, None)
 }
 
 fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     payload: &T,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
     mut admission: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<(), PublicationShapeAdmissionError<E>> {
     use PublicationShapeAdmissionError::{Admission, Format};
@@ -1490,17 +1554,7 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     // The owning caller has already ordered its candidate. Shape checks borrow it;
     // serializing an envelope does not require a second canonical document copy.
     let envelope = publication_envelope(payload, T::KIND).map_err(Format)?;
-    let certified = payload
-        .entity_document()
-        .is_some_and(|(placements, entities)| {
-            publication_shape::certifies_entity_document(
-                &envelope,
-                placements,
-                entities,
-                payload.reference_inputs(),
-                limits.shape(),
-            )
-        });
+    let certified = certifies_publication_shape(&envelope, payload, limits);
     let mut refusal = None;
     let mut admit = |bytes| {
         admission(bytes).map_err(|error| {
@@ -1508,14 +1562,47 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
             io::Error::other("publication buffer admission refused")
         })
     };
-    let result = validate_json_publication_shape(&envelope, limits, certified, Some(&mut admit))
-        .and_then(|()| {
-            validate_ron_publication_shape(&envelope, limits, certified, Some(&mut admit))
-        });
+    let result =
+        validate_publication_encodings(&envelope, limits, encoding, certified, Some(&mut admit));
     match refusal {
         Some(error) => Err(Admission(error)),
         None => result.map_err(Format),
     }
+}
+
+fn certifies_publication_shape<T>(
+    envelope: &PersistentFileEnvelope<T>,
+    payload: &impl SceneFilePayload,
+    limits: SceneFileLimits,
+) -> bool {
+    payload
+        .entity_document()
+        .is_some_and(|(placements, entities)| {
+            publication_shape::certifies_entity_document(
+                envelope,
+                placements,
+                entities,
+                payload.reference_inputs(),
+                limits.shape(),
+            )
+        })
+}
+
+fn validate_publication_encodings<T: Serialize>(
+    envelope: &T,
+    limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
+    certified: bool,
+    mut admission: Option<&mut dyn FnMut(usize) -> io::Result<()>>,
+) -> Result<(), SceneFormatError> {
+    if encoding != Some(SceneFileEncoding::Ron) {
+        let admission = admission.as_mut().map(|admit| &mut **admit as &mut _);
+        validate_json_publication_shape(envelope, limits, certified, admission)?;
+    }
+    if encoding != Some(SceneFileEncoding::Json) {
+        validate_ron_publication_shape(envelope, limits, certified, admission)?;
+    }
+    Ok(())
 }
 
 fn validate_json_publication_shape<T: Serialize>(
@@ -2201,7 +2288,8 @@ impl SceneFileCounts {
                 ScenePatchOperation::RemoveEntity { .. }
                 | ScenePatchOperation::RemoveComponent { .. }
                 | ScenePatchOperation::RemoveField { .. }
-                | ScenePatchOperation::SetAssetRefField { .. } => {}
+                | ScenePatchOperation::SetAssetRefField { .. }
+                | ScenePatchOperation::DefaultProperty(_) => {}
             }
         }
         Ok(())

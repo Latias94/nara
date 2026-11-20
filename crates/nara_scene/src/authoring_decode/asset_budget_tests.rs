@@ -187,6 +187,7 @@ fn scene_conversion_at_64_value_nodes_matches_full_classification_save_and_reope
         AuthoringDocumentKind::Scene,
         Arc::clone(&basis.0),
         limits,
+        Some(SceneFileEncoding::Json),
     )
     .unwrap();
     assert_eq!(full.schema_declared_asset_references().count(), 6);
@@ -198,7 +199,7 @@ fn scene_conversion_at_64_value_nodes_matches_full_classification_save_and_reope
     assert_eq!(session.document(), &reviewed);
     assert_scene_classification(&session, &full);
 
-    crate::format::validate_scene_publication_shape(session.document(), limits).unwrap();
+    crate::format::validate_scene_publication_shape(session.document(), limits, None).unwrap();
     for json in [true, false] {
         let candidate = if json {
             SceneDocumentCandidate::decode_json_bytes_with_limits(
@@ -257,6 +258,7 @@ fn prefab_conversion_at_64_value_nodes_matches_full_classification_save_and_reop
         AuthoringDocumentKind::Prefab,
         Arc::clone(&basis.0),
         limits,
+        Some(SceneFileEncoding::Json),
     )
     .unwrap();
     assert_eq!(full.schema_declared_asset_references().count(), 6);
@@ -268,7 +270,7 @@ fn prefab_conversion_at_64_value_nodes_matches_full_classification_save_and_reop
     assert_eq!(session.document(), &reviewed);
     assert_prefab_classification(&session, &full);
 
-    crate::format::validate_prefab_publication_shape(session.document(), limits).unwrap();
+    crate::format::validate_prefab_publication_shape(session.document(), limits, None).unwrap();
     for json in [true, false] {
         let candidate = if json {
             PrefabDocumentCandidate::decode_json_bytes_with_limits(
@@ -324,6 +326,7 @@ fn default_asset_references_still_enforce_aggregate_node_and_byte_quotas() {
                 AuthoringDocumentKind::Scene,
                 Arc::clone(&basis.0),
                 limits,
+                None,
             );
             if count == admitted {
                 assert_eq!(
@@ -374,6 +377,7 @@ fn default_product_inventory_charges_complete_selection_bytes() {
                 AuthoringDocumentKind::Scene,
                 Arc::clone(&basis.0),
                 limits,
+                None,
             );
             if count == 3 {
                 let classified = classified.unwrap();

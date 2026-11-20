@@ -13,7 +13,8 @@ use nara_reflect::{
 use crate::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
-    SceneComponentRecord, SceneEntityId, authoring_decode::AuthoringAdapterReceipt,
+    SceneComponentRecord, SceneEntityId, SceneFileDecodingAdmissionError, SceneFormatError,
+    authoring_decode::AuthoringAdapterReceipt,
 };
 
 const COMPONENT: &str = "trial.enemy.EnemyStats";
@@ -567,7 +568,7 @@ fn refusals_release_only_scratch_and_keep_the_same_allowance_cumulative_for_retr
 }
 
 #[test]
-fn decoded_successors_cannot_bypass_original_publication_limits() {
+fn stored_successors_respect_wire_and_decoded_value_limits() {
     let upgrade = upgrade();
     // Isolate the direct value: the original contains three nodes; the new Record adds one.
     let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("enemy"))
@@ -576,23 +577,72 @@ fn decoded_successors_cannot_bypass_original_publication_limits() {
         .with_component(ComponentTypeId::new(COMPONENT), record(true))]);
     let old_prefab = PrefabDocument::new(original.placements.clone(), original.entities.clone());
     let next_prefab = PrefabDocument::new(successor.placements.clone(), successor.entities.clone());
-    let old_bytes = original
-        .to_json_string()
-        .unwrap()
-        .len()
-        .max(old_prefab.to_json_string().unwrap().len());
-    assert!(successor.to_json_string().unwrap().len() > old_bytes);
-    assert!(next_prefab.to_json_string().unwrap().len() > old_bytes);
-    let encoded = SceneFileLimits::default().with_encoded_bytes(ByteLimit::new(old_bytes).unwrap());
+    for encoding in [SceneFileEncoding::Json, SceneFileEncoding::Ron] {
+        let (old_scene, next_scene, old_prefab, next_prefab) = match encoding {
+            SceneFileEncoding::Json => (
+                original.to_json_string(),
+                successor.to_json_string(),
+                old_prefab.to_json_string(),
+                next_prefab.to_json_string(),
+            ),
+            SceneFileEncoding::Ron => (
+                original.to_ron_string(),
+                successor.to_ron_string(),
+                old_prefab.to_ron_string(),
+                next_prefab.to_ron_string(),
+            ),
+        };
+        let limits_for = |original: &str, successor: &str| {
+            assert!(successor.len() > original.len());
+            SceneFileLimits::default().with_encoded_bytes(ByteLimit::new(original.len()).unwrap())
+        };
+        let (old_scene, next_scene) = (old_scene.unwrap(), next_scene.unwrap());
+        let (old_prefab, next_prefab) = (old_prefab.unwrap(), next_prefab.unwrap());
+        let scene_limits = limits_for(&old_scene, &next_scene);
+        let prefab_limits = limits_for(&old_prefab, &next_prefab);
+        let read_scene = |bytes: &str| {
+            SceneDocumentCandidate::decode_bytes_with_admission(
+                bytes.as_bytes(),
+                encoding,
+                scene_limits,
+                |_| Ok::<_, std::convert::Infallible>(()),
+            )
+        };
+        let read_prefab = |bytes: &str| {
+            PrefabDocumentCandidate::decode_bytes_with_admission(
+                bytes.as_bytes(),
+                encoding,
+                prefab_limits,
+                |_| Ok::<_, std::convert::Infallible>(()),
+            )
+        };
+        assert!(read_scene(&old_scene).is_ok());
+        assert!(read_prefab(&old_prefab).is_ok());
+        for (error, maximum, observed) in [
+            (
+                read_scene(&next_scene).unwrap_err(),
+                old_scene.len(),
+                next_scene.len(),
+            ),
+            (
+                read_prefab(&next_prefab).unwrap_err(),
+                old_prefab.len(),
+                next_prefab.len(),
+            ),
+        ] {
+            assert!(matches!(
+                error,
+                SceneFileDecodingAdmissionError::Format(SceneFormatError::EncodedBytesExceeded {
+                    maximum: cap, observed: bytes,
+                })
+                    if cap == maximum && bytes == observed
+            ));
+        }
+    }
     let values = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(3).unwrap());
     for kind in [SourceDocumentKind::Scene, SourceDocumentKind::Prefab] {
-        for limits in [encoded, values] {
-            let mut work = AuthoredSchemaUpgradeWork::default();
-            assert!(
-                validate(kind, &original, &successor, &upgrade, limits, &mut work).is_err(),
-                "kind={kind:?}, limits={limits:?}",
-            );
-            assert_eq!(work.budget.retention_checkpoint(), (0, 0));
-        }
+        let mut work = AuthoredSchemaUpgradeWork::default();
+        assert!(validate(kind, &original, &successor, &upgrade, values, &mut work).is_err());
+        assert_eq!(work.budget.retention_checkpoint(), (0, 0));
     }
 }

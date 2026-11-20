@@ -25,7 +25,7 @@ use nara_scene::{
     AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringRecordFact, AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate,
     PrefabInstance, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
-    ResolvedPrefabSource, SceneDocument, SceneEntityRecord, SceneFileLimits,
+    ResolvedPrefabSource, SceneDocument, SceneEntityRecord, SceneFileEncoding, SceneFileLimits,
     SceneFilePublicationError, SceneFormatError, UnavailableRecordManifest,
     UnavailableRecordManifestEntry,
 };
@@ -442,9 +442,13 @@ impl AuthoringPrefabSource {
         }
         let source_path = AssetPath::new(self.source.project_path().as_str().to_owned())
             .map_err(AuthoringDocumentDataError::Source)?;
-        let candidate =
-            PrefabDocumentCandidate::from_source_document(self.document().clone(), self.limits)
-                .map_err(AuthoringDocumentDataError::Format)?;
+        let encoding = prefab_source_encoding(source_path.as_str())?;
+        let candidate = PrefabDocumentCandidate::from_source_document_with_encoding(
+            self.document().clone(),
+            encoding,
+            self.limits,
+        )
+        .map_err(AuthoringDocumentDataError::Format)?;
         Ok(candidate
             .admit_authoring_with_basis(
                 AuthoringDocumentSource::new(AssetRef::Path(source_path)),
@@ -1716,6 +1720,16 @@ fn admit_scene_document(
     Ok(published)
 }
 
+fn prefab_source_encoding(path: &str) -> Result<SceneFileEncoding, AuthoringDocumentDataError> {
+    if path.ends_with(".ron") {
+        Ok(SceneFileEncoding::Ron)
+    } else if path.ends_with(".json") {
+        Ok(SceneFileEncoding::Json)
+    } else {
+        Err(AuthoringDocumentDataError::UnsupportedEncoding)
+    }
+}
+
 fn admit_prefab_composition_source(
     source: &ReadAuthoringSource,
     scene_limits: SceneFileLimits,
@@ -1723,17 +1737,15 @@ fn admit_prefab_composition_source(
 ) -> Result<(Arc<PrefabDocument>, SceneFileLimits), AuthoringProjectSourceAdmissionError> {
     let reservation = reserve_composition_decode(source, scene_limits, budget)?;
     let limits = reservation.limits;
-    let path = source.source.project_path().as_str();
-    let candidate = if path.ends_with(".ron") {
-        PrefabDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
-    } else if path.ends_with(".json") {
-        PrefabDocumentCandidate::decode_json_bytes_with_limits(&source.bytes, limits)
-    } else {
-        return Err(map_document_data_error(
-            source,
-            AuthoringDocumentDataError::UnsupportedEncoding,
-            budget,
-        ));
+    let encoding = prefab_source_encoding(source.source.project_path().as_str())
+        .map_err(|error| map_document_data_error(source, error, budget))?;
+    let candidate = match encoding {
+        SceneFileEncoding::Ron => {
+            PrefabDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
+        }
+        SceneFileEncoding::Json => {
+            PrefabDocumentCandidate::decode_json_bytes_with_limits(&source.bytes, limits)
+        }
     }
     .map_err(|error| reservation.format_error(source, error))?;
     let document = candidate.into_composition_source().map_err(|error| {

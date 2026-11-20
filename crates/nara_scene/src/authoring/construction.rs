@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, sync::Arc};
 use nara_reflect::{ComponentPropertyPath, ComponentTypeId, ComponentValue, EntityReference};
 
 use super::{
-    AuthoringPropertyEdit, PrefabAuthoringSession, PreparedPrefabAuthoringEdit,
-    PreparedSceneAuthoringEdit, SceneAuthoringHistoryLimits, SceneAuthoringRevision,
-    SceneAuthoringSession, creation::allocate_entity_id, history_error_report, property,
+    AuthoringHistoryScope, AuthoringPropertyEdit, PrefabAuthoringSession,
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringHistoryLimits,
+    SceneAuthoringRevision, SceneAuthoringSession, creation::allocate_entity_id,
+    history_error_report, property,
 };
 use crate::{
     AuthoringSchemaBasis, PrefabDocument, PrefabEntityTarget, SceneDocument, SceneEntityId,
@@ -390,7 +391,11 @@ macro_rules! construction_session {
                     state,
                     self.history.limits,
                 )?;
-                let edit = self.prepare_authoring_edit(draft.revision, &patch)?;
+                let edit = self.prepare_scoped_authoring_edit(
+                    draft.revision,
+                    &patch,
+                    AuthoringHistoryScope::Ordinary,
+                )?;
                 Ok($prepared { edit, entities })
             }
 

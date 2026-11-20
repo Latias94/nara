@@ -383,7 +383,7 @@ impl SourceUpgradeRecovery {
                 .roots
                 .sort_unstable_by(|left, right| left.path.cmp(&right.path));
             payload.missing_sidecars.sort_unstable();
-            validate_payload(&payload, limits, budget)?;
+            validate_payload(&payload, limits, budget, true)?;
             let encoded = encode_package(&payload, limits, budget)?;
             budget.charge_source_bytes(0, 0, encoded.len(), 0)?;
             let digest = digest(&encoded);
@@ -428,7 +428,7 @@ impl SourceUpgradeRecovery {
             // Domain validation overlaps the actual stored payload, not the maximum raw-decode
             // reservation. Inner Scene/catalog owners reserve their own narrowed shape separately.
             budget.charge_source_bytes(0, 0, 0, retained)?;
-            validate_payload(&payload, limits, budget)?;
+            validate_payload(&payload, limits, budget, false)?;
             budget.charge_source_bytes(0, 0, encoded.len(), encoded.len())?;
             let encoded = encoded.to_vec();
             budget.charge_source_bytes(0, 0, encoded.len(), 0)?;
@@ -521,6 +521,7 @@ fn validate_payload(
     payload: &RecoveryPayload,
     limits: SourceUpgradeRecoveryLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
+    check_current_encoding: bool,
 ) -> Result<(), SourceUpgradeRecoveryError> {
     check_counts(
         payload.members.len(),
@@ -626,11 +627,13 @@ fn validate_payload(
         {
             return Err(SourceUpgradeRecoveryError::ConfigurationMismatch);
         }
-        let canonical = next
-            .to_canonical_toml_bytes()
-            .map_err(|_| SourceUpgradeRecoveryError::ManifestInvalid)?;
-        if canonical != payload.manifest.successor.bytes() {
-            return Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor);
+        if check_current_encoding {
+            let canonical = next
+                .to_canonical_toml_bytes()
+                .map_err(|_| SourceUpgradeRecoveryError::ManifestInvalid)?;
+            if canonical != payload.manifest.successor.bytes() {
+                return Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor);
+            }
         }
         validate_configurations(payload, &old, budget)
     })?;
@@ -659,7 +662,7 @@ fn validate_payload(
         for (bytes, canonical) in [
             (&member.old_disk, false),
             (&member.reviewed_working, false),
-            (&member.successor, true),
+            (&member.successor, check_current_encoding),
         ] {
             bytes.validate()?;
             validate_source(member, bytes.bytes(), canonical, limits.scene, budget).map_err(

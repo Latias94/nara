@@ -21,11 +21,12 @@ fn reference<T: SceneFilePayload>(
 
 fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
     let expected = reference(payload, limits).map_err(|error| error.to_string());
-    let actual = validate_publication_shape(payload, limits).map_err(|error| error.to_string());
+    let actual =
+        validate_publication_shape(payload, limits, None).map_err(|error| error.to_string());
     assert_eq!(actual, expected, "limits: {limits:?}");
     let mut ordered = payload.clone();
     ordered.canonicalize_payload();
-    let borrowed = validate_publication_shape_with_admission(&ordered, limits, |_| {
+    let borrowed = validate_publication_shape_with_admission(&ordered, limits, None, |_| {
         Ok::<_, std::convert::Infallible>(())
     })
     .map_err(|error| match error {
@@ -33,6 +34,50 @@ fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
         PublicationShapeAdmissionError::Admission(never) => match never {},
     });
     assert_eq!(borrowed, expected, "borrowed limits: {limits:?}");
+}
+
+#[test]
+fn explicit_source_encoding_admits_only_the_selected_wire_shape() {
+    macro_rules! check {
+        ($document:expr, $candidate:ty) => {{
+            let document = $document;
+            let json = document.to_json_string().unwrap();
+            let ron = document.to_ron_string().unwrap();
+            let base = SceneFileLimits::default();
+            let shape = base.shape();
+            let limits = (1..=256)
+                .map(|nodes| {
+                    base.with_shape(SerdeShapeLimits::new(
+                        shape.depth(),
+                        ItemLimit::new(nodes).unwrap(),
+                        shape.container_items(),
+                        shape.string_bytes(),
+                        shape.total_string_bytes(),
+                    ))
+                })
+                .find(|limits| {
+                    <$candidate>::decode_json_bytes_with_limits(json.as_bytes(), *limits).is_ok()
+                })
+                .unwrap();
+            let rejected = |error: SceneFormatError| {
+                assert_eq!(
+                    error.shape_error(),
+                    Some(&SerdeShapeError::NodeLimitExceeded {
+                        maximum: limits.shape().nodes().get(),
+                    })
+                );
+            };
+            rejected(
+                <$candidate>::decode_ron_bytes_with_limits(ron.as_bytes(), limits).unwrap_err(),
+            );
+            assert_eq!(document.to_json_string_with_limits(limits).unwrap(), json);
+            rejected(document.to_ron_string_with_limits(limits).unwrap_err());
+        }};
+    }
+    let scene = document(ComponentValue::U64(7), true);
+    let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
+    check!(scene, SceneDocumentCandidate);
+    check!(prefab, PrefabDocumentCandidate);
 }
 
 #[test]
@@ -64,12 +109,14 @@ fn borrowed_publication_shape_admits_each_retained_chunk_before_copying() {
                 validate_prefab_publication_shape_with_admission(
                     &prefab,
                     SceneFileLimits::default(),
+                    None,
                     &mut admit,
                 )
             } else {
                 validate_scene_publication_shape_with_admission(
                     &scene,
                     SceneFileLimits::default(),
+                    None,
                     &mut admit,
                 )
             };
@@ -509,7 +556,7 @@ fn encoded_boundaries<T: SceneFilePayload>(payload: &T) {
     }
     let limits = SceneFileLimits::default()
         .with_encoded_bytes(ByteLimit::new(json.len().max(ron.len())).unwrap());
-    assert!(validate_publication_shape(payload, limits).is_ok());
+    assert!(validate_publication_shape(payload, limits, None).is_ok());
 }
 
 fn document(value: ComponentValue, declared_owner: bool) -> SceneDocument {

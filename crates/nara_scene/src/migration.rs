@@ -5,8 +5,9 @@ use nara_reflect::{
 
 use crate::{
     PrefabComponentIntent, PrefabDocument, PrefabInstance, PrefabPropertyIntent,
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneFileLimits,
-    SceneFilePublicationError, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneFileEncoding,
+    SceneFileLimits, SceneFilePublicationError, SceneFormatError, ScenePatchDocument,
+    ScenePatchOperation,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_migration_error, with_public_identifier,
         with_public_locator, with_public_u64,
@@ -17,12 +18,13 @@ pub(crate) fn canonicalize_scene_document(
     mut document: SceneDocument,
     registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<(SceneDocument, bool), SceneFilePublicationError> {
     let mut budget = PublicationValueBudget::new(limits);
     let changed = canonicalize_entities(&mut document.entities, registry, &mut budget)?;
     document.canonicalize();
     if changed {
-        crate::format::validate_scene_publication_shape(&document, limits)
+        crate::format::validate_scene_publication_shape(&document, limits, encoding)
             .map_err(post_migration_format_error)?;
     }
     Ok((document, changed))
@@ -32,12 +34,13 @@ pub(crate) fn canonicalize_prefab_document(
     mut document: PrefabDocument,
     registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
 ) -> Result<(PrefabDocument, bool), SceneFilePublicationError> {
     let mut budget = PublicationValueBudget::new(limits);
     let changed = canonicalize_entities(&mut document.entities, registry, &mut budget)?;
     document.canonicalize();
     if changed {
-        crate::format::validate_prefab_publication_shape(&document, limits)
+        crate::format::validate_prefab_publication_shape(&document, limits, encoding)
             .map_err(post_migration_format_error)?;
     }
     Ok((document, changed))
@@ -90,7 +93,7 @@ fn canonicalize_patch(
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
-    for operation in &mut patch.operations {
+    for (operation_index, operation) in patch.operations.iter_mut().enumerate() {
         match operation {
             ScenePatchOperation::AddEntity { entity, .. } => {
                 changed |= canonicalize_entity(entity, registry, budget)?;
@@ -153,6 +156,11 @@ fn canonicalize_patch(
                         ))
                     })?;
                 budget.observe_with_selector_cost(value, property.steps.len(), selector_bytes)?;
+            }
+            ScenePatchOperation::DefaultProperty(_) => {
+                return Err(publication_error(
+                    crate::patch::session_only_operation_diagnostic(operation_index),
+                ));
             }
             ScenePatchOperation::RemoveField {
                 entity,
@@ -772,6 +780,7 @@ fn post_migration_format_error(error: SceneFormatError) -> SceneFilePublicationE
         SceneFormatError::Header { .. } => "header",
         SceneFormatError::Contract(_) => "contract",
         SceneFormatError::PatchFormatVersion { .. } => "patch-version",
+        SceneFormatError::SessionOnlyPatchOperation { .. } => "session-only-patch-operation",
         SceneFormatError::Payload { .. } => "payload",
         SceneFormatError::Budget(_) => "domain-budget",
         SceneFormatError::Encode { .. } => "encode",
@@ -897,7 +906,8 @@ mod overlay_snapshot_tests {
         entity.prefab = Some(declaration.clone());
         let document = SceneDocument::from_ordered_roots([entity]);
         let (canonical, changed) =
-            canonicalize_scene_document(document, &registry, SceneFileLimits::default()).unwrap();
+            canonicalize_scene_document(document, &registry, SceneFileLimits::default(), None)
+                .unwrap();
         assert!(changed);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(

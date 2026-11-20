@@ -81,6 +81,25 @@ impl ScenePatchDocument {
         (self.format_version != Self::CURRENT_FORMAT_VERSION).then_some(self.format_version)
     }
 
+    pub(crate) fn session_only_operation_index(&self) -> Option<usize> {
+        self.operations
+            .iter()
+            .position(|operation| matches!(operation, ScenePatchOperation::DefaultProperty(_)))
+    }
+
+    pub(crate) fn reject_session_only_operations(&self) -> Result<(), ScenePatchReport> {
+        if let Some(index) = self.session_only_operation_index() {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(session_only_operation_diagnostic(index));
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            });
+        }
+        Ok(())
+    }
+
     pub fn apply_to_scene(
         &self,
         document: &mut SceneDocument,
@@ -238,6 +257,7 @@ impl ScenePatchDocument {
             Option<usize>,
         ) -> DiagnosticReport,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
+        self.reject_session_only_operations()?;
         if let Some(format_version) = self.unsupported_format_version() {
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(with_public_u64(
@@ -455,6 +475,7 @@ impl ScenePatchDocument {
             Option<usize>,
         ) -> DiagnosticReport,
     ) -> Result<SceneValidationWork, Box<ScenePatchReport>> {
+        self.reject_session_only_operations().map_err(Box::new)?;
         if let Some(format_version) = self.unsupported_format_version() {
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(with_public_u64(
@@ -624,6 +645,39 @@ pub enum ScenePatchOperation {
         property: ComponentPropertyPath,
         value: ComponentValue,
     },
+    /// Session-owned replay of the first nested edit to an omitted default.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    DefaultProperty(DefaultPropertyEdit),
+}
+
+/// An in-memory operation observed through a prepared authoring edit or its inverse.
+///
+/// Cloning it does not grant replay authority. Replay belongs to the owning authoring session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefaultPropertyEdit {
+    pub(crate) entity: SceneEntityId,
+    pub(crate) component: ComponentTypeId,
+    pub(crate) component_version: ComponentSchemaVersion,
+    pub(crate) property: ComponentPropertyPath,
+    pub(crate) value: ComponentValue,
+    pub(crate) default_witness: [u8; 32],
+    pub(crate) direction: DefaultPropertyDirection,
+}
+
+impl DefaultPropertyEdit {
+    pub(crate) const LOGICAL_OVERHEAD: usize =
+        std::mem::size_of::<[u8; 32]>() + std::mem::size_of::<DefaultPropertyDirection>();
+
+    #[must_use]
+    pub const fn component(&self) -> &ComponentTypeId {
+        &self.component
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DefaultPropertyDirection {
+    Materialize,
+    RestoreOmission,
 }
 
 impl ScenePatchDocument {
@@ -1227,7 +1281,14 @@ fn observed_tree_cost(
                             property,
                             value,
                             ..
-                        } => {
+                        }
+                        | ScenePatchOperation::DefaultProperty(DefaultPropertyEdit {
+                            entity,
+                            component,
+                            property,
+                            value,
+                            ..
+                        }) => {
                             let steps = property.steps.len();
                             cost.operation_count = cost.operation_count.saturating_add(steps);
                             if limits.is_some_and(|limits| {
@@ -1241,6 +1302,11 @@ fn observed_tree_cost(
                             cost.structural_logical_bytes = cost
                                 .structural_logical_bytes
                                 .saturating_add(property_selector_bytes(property));
+                            if matches!(operation, ScenePatchOperation::DefaultProperty(_)) {
+                                cost.structural_logical_bytes = cost
+                                    .structural_logical_bytes
+                                    .saturating_add(DefaultPropertyEdit::LOGICAL_OVERHEAD);
+                            }
                             pending.push(ValueCostNode::Value(value, depth + 1));
                         }
                         ScenePatchOperation::RemoveField {
@@ -2581,6 +2647,9 @@ fn apply_operation<D: EntityDocument>(
             value,
             materialization_limits,
         ),
+        ScenePatchOperation::DefaultProperty(_) => {
+            Err(session_only_operation_diagnostic(operation_index))
+        }
         ScenePatchOperation::RemoveField {
             entity,
             component,
@@ -3583,6 +3652,17 @@ pub(crate) fn asset_ref_value_size(asset_ref: &AssetRef) -> (usize, usize) {
 
 fn with_component_field_id(diagnostic: Diagnostic, field: &ComponentFieldId) -> Diagnostic {
     with_public_locator(diagnostic, "field-id", field.as_str())
+}
+
+pub(crate) fn session_only_operation_diagnostic(operation_index: usize) -> Diagnostic {
+    patch_diagnostic(
+        operation_index,
+        "scene.patch-session-only-operation",
+        "Default property history requires its owning authoring session",
+        None,
+        None,
+        None,
+    )
 }
 
 fn patch_diagnostic(

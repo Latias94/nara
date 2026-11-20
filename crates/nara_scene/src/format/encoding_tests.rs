@@ -58,13 +58,13 @@ fn large_dual_u64_sources_round_trip_within_the_default_ron_byte_limit() {
         .with_component(ComponentTypeId::new("test.KeyedRows"), record);
     let scene = SceneDocument::from_ordered_roots([entity]);
     let limits = SceneFileLimits::default();
-    validate_scene_publication_shape(&scene, limits).unwrap();
+    validate_scene_publication_shape(&scene, limits, None).unwrap();
     let decoded = SceneDocumentCandidate::decode_ron_str(&scene.to_ron_string().unwrap()).unwrap();
     assert!(decoded.document == scene, "Scene RON changed the source");
     drop(decoded);
 
     let prefab = PrefabDocument::new(scene.placements, scene.entities);
-    validate_prefab_publication_shape(&prefab, limits).unwrap();
+    validate_prefab_publication_shape(&prefab, limits, None).unwrap();
     let decoded =
         PrefabDocumentCandidate::decode_ron_str(&prefab.to_ron_string().unwrap()).unwrap();
     assert!(decoded.document == prefab, "Prefab RON changed the source");

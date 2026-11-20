@@ -154,6 +154,7 @@ impl SceneAuthoringSession {
         base_revision: SceneAuthoringRevision,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
+        patch.reject_session_only_operations()?;
         self.prepare_scoped_authoring_edit(base_revision, patch, AuthoringHistoryScope::Ordinary)
     }
 
@@ -346,6 +347,7 @@ impl PrefabAuthoringSession {
         base_revision: SceneAuthoringRevision,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
+        patch.reject_session_only_operations()?;
         self.prepare_scoped_authoring_edit(base_revision, patch, AuthoringHistoryScope::Ordinary)
     }
 

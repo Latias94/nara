@@ -143,8 +143,15 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
         AuthoringDocumentKind::Scene => "scenes/local.scene.json",
         AuthoringDocumentKind::Prefab => "prefabs/local.prefab.json",
     }));
-    let state = classify_scene_document(&document, source, kind, basis, SceneFileLimits::default())
-        .unwrap();
+    let state = classify_scene_document(
+        &document,
+        source,
+        kind,
+        basis,
+        SceneFileLimits::default(),
+        None,
+    )
+    .unwrap();
     (document, state)
 }
 
@@ -192,6 +199,7 @@ fn bounded_field_replay_charges_the_storage_path_before_a_root_write() {
         AuthoringDocumentKind::Scene,
         basis,
         SceneFileLimits::default(),
+        None,
     )
     .unwrap();
     let patch = ScenePatchDocument::new([set("root", "short-id", ComponentValue::U64(2))]);
@@ -228,11 +236,13 @@ fn full(
         state.kind,
         Arc::clone(&state.basis),
         state.limits,
+        state.encoding,
     )
 }
 fn assert_same(actual: &AuthoringDocumentState, expected: &AuthoringDocumentState) {
     assert_eq!(actual.source, expected.source);
     assert_eq!(actual.kind, expected.kind);
+    assert_eq!(actual.encoding, expected.encoding);
     assert_eq!(actual.readiness, expected.readiness);
     assert_eq!(actual.record_facts, expected.record_facts);
     assert_eq!(
@@ -338,6 +348,7 @@ fn scalar_only_candidate_retains_local_classification_without_reference_facts() 
             kind,
             Arc::clone(&basis),
             SceneFileLimits::default(),
+            None,
         )
         .unwrap();
         let patch = ScenePatchDocument::new([set("z", "number", ComponentValue::U64(9))]);
@@ -787,8 +798,9 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                     .limits
                     .with_encoded_bytes(ByteLimit::new(base_bytes + 32).unwrap())
             };
-            crate::format::validate_scene_publication_shape(&document, limits).unwrap();
-            crate::format::validate_prefab_publication_shape(&prefab_document, limits).unwrap();
+            crate::format::validate_scene_publication_shape(&document, limits, None).unwrap();
+            crate::format::validate_prefab_publication_shape(&prefab_document, limits, None)
+                .unwrap();
             state.limits = limits;
             let candidate = prepare(
                 document.clone(),
@@ -802,7 +814,7 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                 "the final value itself remains semantically valid"
             );
             assert!(
-                crate::format::validate_scene_publication_shape(candidate.document(), limits)
+                crate::format::validate_scene_publication_shape(candidate.document(), limits, None)
                     .is_err()
             );
             drop(candidate);

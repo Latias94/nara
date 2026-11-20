@@ -117,7 +117,10 @@ pub use nara_identity::{
     SpawnedSceneInstance,
 };
 pub use occurrence::{SceneOccurrenceKey, SceneOccurrenceKeyError, SceneOccurrenceLimits};
-pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
+pub use patch::{
+    DefaultPropertyEdit, ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport,
+};
 pub use placement::{
     SceneEntityPlacement, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };

@@ -87,9 +87,9 @@ Rules:
   private source values. A replacement inside an explicitly stored root uses `ReplaceProperty`
   with the durable selector and selected value. Its inverse retains the previous selected value
   and addresses the same item under its resulting key. Repeated nested writes retain their order.
-  Explicit root replacements and first writes into a defaulted root coalesce as root-field
-  patches. Source Schemas prohibit overlapping root paths, so each of those root changes can be
-  published independently of sibling nested operations in the same transaction.
+  Explicit root replacements coalesce as root-field patches. Source Schemas prohibit overlapping
+  root paths, so a whole-root change can be published independently of sibling nested operations
+  in the same transaction.
   Original operation count, selector/key bytes and replacement payload are bounded; complete
   forward, inverse and history admission uses the resulting operations. Private staging allows
   the admitted source plus one bounded patch. Both directions check the final source against its
@@ -99,11 +99,13 @@ Rules:
   Scoped member IDs, declaration-path tombstones and keyed-item policy follow ADRs 0011/0081.
   This adds neither a second Undo owner nor durable Prefab overlay semantics to operation patches.
 - The source owner may initialize a missing target root from its admitted declared default before
-  a nested property write, exclusively in the evolving private candidate. It must not materialize
-  unrelated defaults, merge an explicit/partial value, create optional or keyed descendants, or
-  manufacture missing storage parents/list slots. A root-only write may explicitly create its
-  field through the same existing storage contract. The ordinary root patch/inverse/history owns
-  publication. Undo restores the field's original absence.
+  a nested property write, exclusively in the evolving private candidate. The owner retains the
+  default's exact value witness and the selected edit in local history. Undo verifies the edited
+  root and restores omission. Redo materializes the same admitted default and reapplies the edit.
+  Later nested writes use the ordinary property operation and reverse in transaction order.
+  Initialization requires an existing storage parent and permits only the selected missing root.
+  A root-only write may explicitly create its field through the ordinary root patch. The
+  default-backed operation belongs to the source owner's typed edit and history path.
   Missing parents, complete replay limits, capabilities and stale/history refusals remain real
   admission conditions. Complete Reflect resolution does not implicitly synthesize source values.
 - Invalid selector IDs are unadmitted caller data and are never retained in property-error objects.
@@ -212,7 +214,9 @@ ScenePlacement
   anchor: First | Last | Before { sibling } | After { sibling }
 ```
 
-Patch operations serialize as `op + args` so JSON and RON roundtrip with the same semantic shape.
+Standalone patch operations serialize as `op + args` so JSON and RON roundtrip with the same
+semantic shape. Consumers can observe `ScenePatchOperation::DefaultProperty` in prepared edits
+or their inverses. Applying it requires the original authoring session's typed history path.
 Payloads use `ComponentValue`, stable `ComponentTypeId`, and structured `ComponentFieldPath`.
 
 Implementation notes as of 2026-07-08:
