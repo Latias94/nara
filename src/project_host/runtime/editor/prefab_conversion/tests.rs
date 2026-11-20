@@ -844,7 +844,8 @@ fn effective_revert_revalidates_disk_after_dispatch_before_the_owner_consumes_it
                 &mut editor,
                 InspectAction::PrepareRevert {
                     inspection: operation,
-                    address
+                    address,
+                    limits: Default::default(),
                 }
             ),
             InspectOutcome::Accepted {

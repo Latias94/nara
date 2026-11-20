@@ -329,7 +329,9 @@ An exact controlling property claim in the containing source can initiate Revert
 claim or a claim covering a broader selector does not authorize removing that declaration from
 this address. Preparing and committing a Revert each check the live source and working-copy
 identity and revalidate physical source evidence in the same Session drive that consumes it.
-The existing prepared edit supplies the review and original transaction. Cancel and Session
+`PrepareRevert` passes the caller's `PrefabDeclarationLimits` to the source declaration owner.
+When that allowance is exhausted, the inspection reports `BudgetExceeded` with the source
+diagnostic. The existing prepared edit supplies the review and original transaction. Cancel and Session
 Close retain pending inspection work until physical return. Revert changes the containing source
 and creates one normal history entry. Read a new observation to see the value revealed by Revert.
 

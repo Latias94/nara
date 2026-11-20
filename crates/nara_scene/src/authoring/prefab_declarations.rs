@@ -113,8 +113,10 @@ impl PrefabDeclarationError {
         }
     }
 
-    fn report(self) -> ScenePatchReport {
-        let code = match self {
+    /// Returns the diagnostic identity used when this refusal is reported by the source owner.
+    #[must_use]
+    pub const fn diagnostic_code(self) -> &'static str {
+        match self {
             Self::NotAdmitted => "scene.authoring-prefab-not-admitted",
             Self::AnchorNotFound => "scene.authoring-prefab-anchor-not-found",
             Self::PathNotFound { .. } => "scene.authoring-prefab-path-not-found",
@@ -122,8 +124,11 @@ impl PrefabDeclarationError {
             Self::OverlayAbsent => "scene.authoring-prefab-overlay-absent",
             Self::SlotNotFound => "scene.authoring-prefab-slot-not-found",
             Self::BudgetExceeded => "scene.authoring-prefab-budget-exceeded",
-        };
-        history_error_report(code, self.summary())
+        }
+    }
+
+    fn report(self) -> ScenePatchReport {
+        history_error_report(self.diagnostic_code(), self.summary())
     }
 }
 

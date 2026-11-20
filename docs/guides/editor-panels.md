@@ -1238,11 +1238,14 @@ only that value under a separate allowance and gives local references their orig
 routes. The property exposes its contributing record and the claim controlling the selector.
 An explicit Set equal to its inherited value still appears as a claim.
 
-For a property with `revert_claim()`, submit `PrepareRevert` with the same inspection ID and
-the exact target, component and property path. Once the frame reports `Review`, the panel can
-borrow `prefab_inspection_revert_patch` and submit `Commit` or `Cancel`. Preparation and Commit
-verify the files and open Prefab working copies used by the original inspection. A terminal
-`Reverted` result carries the new revision. Acknowledge the result and begin a fresh inspection
+For a property with `revert_claim()`, submit `PrepareRevert` with the same inspection ID,
+the exact target, component and property path, and `PrefabDeclarationLimits`. Use the default
+for ordinary declarations. A tool handling large declarations can select a bounded allowance
+with `PrefabDeclarationLimits::new`. Revert charges both complete expected and replacement
+declarations and reports `BudgetExceeded` if they exceed the selected allowance. Once the frame
+reports `Review`, borrow `prefab_inspection_revert_patch` and submit `Commit` or `Cancel`.
+Preparation and Commit verify the files and open Prefab working copies used by the original
+inspection. A terminal `Reverted` result carries the new revision. Acknowledge it and inspect again
 to read the newly inherited value. Undo, Redo and Save remain ordinary Workspace operations.
 When inspection alone is enough, submit `Cancel` and acknowledge its result before starting
 another inspection.

@@ -10,9 +10,10 @@ use nara_scene::{
         AuthoringPrefabInspectionError, SourceDocumentInput,
         try_inspect_authoring_prefab_instance_with_loader,
     },
-    AuthoringPrefabInstanceSnapshot, AuthoringReadError, PrefabDeclarationLimits, PrefabDocument,
-    PrefabInstancePath, PrefabOverlaySlot, PrefabRevert, SceneCompilationFailureKind,
-    SceneCompilationOptions, SceneDocument, SceneEntityId, ScenePatchDocument,
+    AuthoringPrefabInstanceSnapshot, AuthoringReadError, PrefabDeclarationError,
+    PrefabDeclarationLimits, PrefabDocument, PrefabInstancePath, PrefabOverlaySlot, PrefabRevert,
+    SceneCompilationFailureKind, SceneCompilationOptions, SceneDocument, SceneEntityId,
+    ScenePatchDocument,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskRejection, TaskReturnState, TaskSpawnRequest,
@@ -91,6 +92,7 @@ enum State {
         basis: InspectionBasis,
         path: PrefabInstancePath,
         slot: PrefabOverlaySlot,
+        limits: PrefabDeclarationLimits,
     },
     Review {
         basis: InspectionBasis,
@@ -243,9 +245,9 @@ impl EditorProjectSession {
         let result = self
             .check_prefab_inspection_id(inspection)
             .and_then(|()| match action {
-                Action::PrepareRevert { address, .. } => {
-                    self.start_prefab_inspection_revert(&address)
-                }
+                Action::PrepareRevert {
+                    address, limits, ..
+                } => self.start_prefab_inspection_revert(&address, limits),
                 Action::Commit { .. } => self.start_prefab_inspection_commit(),
                 Action::Cancel { .. } => {
                     if matches!(
@@ -383,6 +385,7 @@ impl EditorProjectSession {
     fn start_prefab_inspection_revert(
         &mut self,
         address: &EditorPrefabPropertyAddress,
+        limits: PrefabDeclarationLimits,
     ) -> Result<(), Rejection> {
         let State::Ready { basis, snapshot } = &self.prefab_inspection.state else {
             return Err(Rejection::WrongPhase);
@@ -392,7 +395,12 @@ impl EditorProjectSession {
         let State::Ready { basis, .. } = mem::take(&mut self.prefab_inspection.state) else {
             unreachable!();
         };
-        self.prefab_inspection.state = State::PreparingRevert { basis, path, slot };
+        self.prefab_inspection.state = State::PreparingRevert {
+            basis,
+            path,
+            slot,
+            limits,
+        };
         Ok(())
     }
 
@@ -464,14 +472,19 @@ impl EditorProjectSession {
                 TaskReturnState::CleanupFailed => Err(Rejection::TaskCleanupFailed.into()),
                 TaskReturnState::Returned => Ok(self.prefab_inspection.cancelled()),
             },
-            State::PreparingRevert { basis, path, slot } => {
+            State::PreparingRevert {
+                basis,
+                path,
+                slot,
+                limits,
+            } => {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 let edit = self
                     .prepare_prefab_revert(
                         &basis.document,
                         &path,
                         PrefabRevert::Intent(slot),
-                        PrefabDeclarationLimits::default(),
+                        limits,
                     )
                     .map_err(preparation_failure)?;
                 Ok(State::Review { basis, edit })
@@ -680,10 +693,20 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError, stage: Rejection)
 
 fn preparation_failure(error: EditorEditPreparationError) -> Failure {
     match error {
-        EditorEditPreparationError::Document(report) => Failure {
-            reason: Rejection::SourceRejected,
-            diagnostics: report.diagnostics,
-        },
+        EditorEditPreparationError::Document(report) => {
+            let reason = if report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str()
+                    == PrefabDeclarationError::BudgetExceeded.diagnostic_code()
+            }) {
+                Rejection::BudgetExceeded
+            } else {
+                Rejection::SourceRejected
+            };
+            Failure {
+                reason,
+                diagnostics: report.diagnostics,
+            }
+        }
         EditorEditPreparationError::QueryBasis(_) => Rejection::StaleSource.into(),
         EditorEditPreparationError::Closing => Rejection::Closing.into(),
         EditorEditPreparationError::Busy => Rejection::Busy.into(),

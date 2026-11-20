@@ -2,7 +2,9 @@
 
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentPropertyPath, ComponentTypeId};
-use nara_scene::{PrefabEntityTarget, SceneAuthoringRevision, SceneEntityId};
+use nara_scene::{
+    PrefabDeclarationLimits, PrefabEntityTarget, SceneAuthoringRevision, SceneEntityId,
+};
 
 use crate::{EditorDocumentId, EditorDocumentQueryBasis, EditorFrameRevision};
 
@@ -108,6 +110,8 @@ pub enum EditorPrefabInspectionAction {
     PrepareRevert {
         inspection: EditorPrefabInspectionId,
         address: EditorPrefabPropertyAddress,
+        /// Logical limits for preparing the source declaration patch.
+        limits: PrefabDeclarationLimits,
     },
     Commit {
         inspection: EditorPrefabInspectionId,

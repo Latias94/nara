@@ -7,10 +7,10 @@ use nara::{
     scene::{
         AuthoringPrefabInstanceSnapshot, AuthoringPrefabPropertyClaimKind,
         AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin, PrefabComponentIntent,
-        PrefabDeclarationSource, PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget,
-        PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay, PrefabOverlaySlot,
-        PrefabPropertyClaim, PrefabPropertyIntent, SceneDocumentCandidate, SourceDocumentKey,
-        SourceDocumentKind,
+        PrefabDeclarationLimits, PrefabDeclarationSource, PrefabDocumentCandidate,
+        PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
+        PrefabInstancePath, PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim,
+        PrefabPropertyIntent, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
 };
 use nara_editor::{EditorPanel, EditorPanelContext, EditorPanelHost, workspace::EditorPanelTarget};
@@ -31,6 +31,7 @@ const BASE: &str = "prefabs/inspection-base.prefab.json";
 const UNRELATED: &str = "prefabs/unrelated-invalid.prefab.json";
 const INITIAL_SCORE: u64 = 20;
 const CHANGED_SCORE: u64 = 63;
+const SIBLING_NOTE_BYTES: usize = 140_000;
 
 fn schema() -> AuthoringSchemaBundle {
     let settings = ComponentSchema::new(
@@ -127,7 +128,7 @@ fn mounts() -> (PrefabInstance, PrefabInstance, PrefabInstance) {
     let right = PrefabInstance::forest(source);
     let note = PrefabPropertyClaim {
         path: property("note"),
-        intent: PrefabPropertyIntent::Set(ComponentValue::String("left note".into())),
+        intent: PrefabPropertyIntent::Set(ComponentValue::String("n".repeat(SIBLING_NOTE_BYTES))),
     };
     let overlay = |claims| {
         let mut overlay = PrefabOverlay::new(key.clone());
@@ -561,11 +562,13 @@ fn prepare_revert(
     app: &mut EditorApplication,
     inspection: EditorPrefabInspectionId,
     address: EditorPrefabPropertyAddress,
+    limits: PrefabDeclarationLimits,
 ) {
     assert_eq!(
         panel.dispatch(app, |_| Action::PrepareRevert {
             inspection,
-            address
+            address,
+            limits,
         }),
         Outcome::Accepted {
             inspection,
@@ -755,6 +758,13 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     };
     assert_history(&app, false, 0, 0);
     let mut panel = PanelDriver::register(&mut app);
+    let default_limits = PrefabDeclarationLimits::default();
+    let large_limits = PrefabDeclarationLimits::new(
+        default_limits.max_nodes(),
+        1024 * 1024,
+        default_limits.max_depth(),
+    )
+    .unwrap();
 
     let (right_id, right_address) = inspect_score(
         &mut panel,
@@ -768,6 +778,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         panel.dispatch(&mut app, |_| Action::PrepareRevert {
             inspection: right_id,
             address: right_address.clone(),
+            limits: default_limits,
         }),
         Outcome::Rejected {
             inspection: Some(right_id),
@@ -776,27 +787,42 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     );
     cancel(&mut panel, &mut app, right_id);
 
-    let (before_prepare, selected) =
+    let (limited, selected) =
         inspect_score(&mut panel, &mut app, document, "left", INITIAL_SCORE, true);
-    assert_ne!(right_id, before_prepare);
+    assert_ne!(right_id, limited);
     let mut missing_target = selected.clone();
     missing_target.entity.entity = PrefabEntityOrigin::SourceEntity(id("missing-target"));
     for address in [right_address, missing_target] {
         assert_eq!(
             panel.dispatch(&mut app, |_| Action::PrepareRevert {
-                inspection: before_prepare,
+                inspection: limited,
                 address,
+                limits: default_limits,
             }),
             Outcome::Rejected {
-                inspection: Some(before_prepare),
+                inspection: Some(limited),
                 reason: Rejection::InvalidProperty,
             }
         );
         assert_eq!(frame(&app).prefab_inspection().phase, Phase::Ready);
     }
 
+    prepare_revert(&mut panel, &mut app, limited, selected, default_limits);
+    assert_failure(
+        &mut app,
+        limited,
+        Rejection::BudgetExceeded,
+        "scene.authoring-prefab-budget-exceeded",
+    );
+    assert_eq!(basis(&app, document), captured);
+    assert_history(&app, false, 0, 0);
+    assert_eq!(fs::read(&source_file).unwrap(), original.as_bytes());
+    acknowledge(&mut panel, &mut app, limited);
+
+    let (before_prepare, selected) =
+        inspect_score(&mut panel, &mut app, document, "left", INITIAL_SCORE, true);
     fs::write(&base_file, &changed_base).unwrap();
-    prepare_revert(&mut panel, &mut app, before_prepare, selected);
+    prepare_revert(&mut panel, &mut app, before_prepare, selected, large_limits);
     assert_failure(
         &mut app,
         before_prepare,
@@ -816,7 +842,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     }]);
     let (reviewed, selected) =
         inspect_score(&mut panel, &mut app, document, "left", INITIAL_SCORE, true);
-    prepare_revert(&mut panel, &mut app, reviewed, selected);
+    prepare_revert(&mut panel, &mut app, reviewed, selected, large_limits);
     assert_review(&mut panel, &mut app, reviewed, &expected_patch);
     assert_eq!(basis(&app, document), captured);
     assert_history(&app, false, 0, 0);
@@ -882,7 +908,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
 
     let (inspection, selected) =
         inspect_score(&mut panel, &mut app, document, "left", INITIAL_SCORE, true);
-    prepare_revert(&mut panel, &mut app, inspection, selected);
+    prepare_revert(&mut panel, &mut app, inspection, selected, large_limits);
     assert_review(&mut panel, &mut app, inspection, &expected_patch);
     assert_eq!(
         app.prefab_inspection_revert_patch(inspection).unwrap(),
@@ -959,6 +985,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         panel.dispatch(&mut app, |_| Action::PrepareRevert {
             inspection: before_undo,
             address: inherited,
+            limits: large_limits,
         }),
         Outcome::Rejected {
             inspection: Some(before_undo),
