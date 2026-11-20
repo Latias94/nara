@@ -481,53 +481,6 @@ pub(super) fn selected_effective_value<'value>(
     )
 }
 
-pub(super) fn complete_value<'value>(
-    schema: &ComponentSchema,
-    owner: &PersistentComponentSchemaOwnerId,
-    component: &ComponentTypeId,
-    record: &'value SceneComponentRecord,
-    limits: SceneFileLimits,
-    admission: &mut Option<&mut ClassificationCallback<'_>>,
-) -> Result<std::borrow::Cow<'value, ComponentValue>, AuthoringDocumentPublicationError> {
-    let effective = effective_value(schema, record, limits, admission)?;
-    nara_reflect::__private::validate_component_value_with_admission(
-        schema,
-        effective.as_ref(),
-        limits.component_materialization_limits(),
-        |nodes, bytes, allocated| {
-            reference_charge(
-                admission,
-                "classification-value-validation",
-                nodes,
-                bytes,
-                allocated,
-            )
-        },
-    )
-    .map_err(|error| match error {
-        nara_reflect::__private::ComponentValueAdmissionError::Admission(report) => report,
-        nara_reflect::__private::ComponentValueAdmissionError::Value(error) => {
-            rejection(with_codec_error(
-                with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.authoring-component-value-invalid",
-                            "Persistent authoring record does not satisfy its declared schema",
-                        ),
-                        "schema-owner",
-                        owner.as_str(),
-                    ),
-                    "component-id",
-                    component.as_str(),
-                ),
-                &error,
-                Some(schema),
-            ))
-        }
-    })?;
-    Ok(effective)
-}
-
 pub(super) fn reference_charge(
     admission: &mut Option<&mut ClassificationCallback<'_>>,
     stage: &'static str,

@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
+    __private::{ComponentPropertyReadIndex, read_admitted_component_property_in_root},
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
     ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
     ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentSchema, ComponentShapeMember,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
-    resolve_component_property_in_root, resolve_component_property_read_path_in_root,
     resolve_component_property_schema_in_root,
 };
 
@@ -484,8 +484,9 @@ impl<'a> AuthoringComponentView<'a> {
         &self,
         root: &ComponentFieldId,
     ) -> Result<AuthoringPropertyValue<'a>, AuthoringReadError> {
-        let field = property_root_field(&self.schema()?.schema, root)?;
-        self.root_value(field, true)
+        let entry = self.schema()?;
+        let field = property_root_field(&entry.schema, root)?;
+        self.root_value(entry, field, true).map(|(value, _)| value)
     }
 
     fn resolve_property_value(
@@ -494,21 +495,22 @@ impl<'a> AuthoringComponentView<'a> {
         budget: &mut ComponentPropertyReadBudget,
         capture_read_path: bool,
     ) -> Result<(AuthoringPropertyValue<'a>, ComponentFieldPath), AuthoringReadError> {
-        let field = property_root(&self.schema()?.schema, property)?;
-        let root = self.root_value(field, property.steps.is_empty())?;
+        let entry = self.schema()?;
+        let field = property_root(&entry.schema, property)?;
+        let (root, index) = self.root_value(entry, field, property.steps.is_empty())?;
         let (value, defaulted) = match root {
             AuthoringPropertyValue::Present(value) => (value, false),
             AuthoringPropertyValue::Defaulted(value) => (value, true),
             AuthoringPropertyValue::Missing => return Ok((root, ComponentFieldPath::empty())),
         };
-        let (selected, read_path) = if capture_read_path {
-            resolve_component_property_read_path_in_root(field, value.into(), property, budget)?
-        } else {
-            (
-                resolve_component_property_in_root(field, value, property, budget)?.value,
-                ComponentFieldPath::empty(),
-            )
-        };
+        let (selected, read_path) = read_admitted_component_property_in_root(
+            field,
+            value.into(),
+            property,
+            budget,
+            capture_read_path,
+            index,
+        )?;
         let selected = selected
             .as_value()
             .ok_or(AuthoringReadError::InvalidFieldPath)?;
@@ -522,28 +524,41 @@ impl<'a> AuthoringComponentView<'a> {
 
     fn root_value(
         &self,
+        entry: &'a AuthoringSchemaEntry,
         field: &'a ComponentFieldSchema,
         allow_missing: bool,
-    ) -> Result<AuthoringPropertyValue<'a>, AuthoringReadError> {
+    ) -> Result<
+        (
+            AuthoringPropertyValue<'a>,
+            Option<&'a ComponentPropertyReadIndex>,
+        ),
+        AuthoringReadError,
+    > {
         let record = self
             .entity
             .components
             .get(self.fact.component())
             .expect("indexed component belongs to its source record");
+        let index = self.fact.property_reads.as_deref();
         match record.value().get_path(field.path()) {
-            Ok(value) => Ok(AuthoringPropertyValue::Present(value)),
+            Ok(value) => Ok((AuthoringPropertyValue::Present(value), index)),
             Err(
                 error @ (ComponentFieldPathError::MissingField { .. }
                 | ComponentFieldPathError::IndexOutOfBounds { .. }),
-            ) => match record
-                .contextual_defaults
-                .get(field.id())
-                .or(field.default_value())
-            {
-                Some(value) => Ok(AuthoringPropertyValue::Defaulted(value)),
-                None if allow_missing => Ok(AuthoringPropertyValue::Missing),
-                None => Err(ComponentPropertyError::ValueUnavailable(error).into()),
-            },
+            ) => {
+                if let Some(value) = record.contextual_defaults.get(field.id()) {
+                    Ok((AuthoringPropertyValue::Defaulted(value), index))
+                } else if let Some(value) = field.default_value() {
+                    Ok((
+                        AuthoringPropertyValue::Defaulted(value),
+                        entry.default_property_reads.as_deref(),
+                    ))
+                } else if allow_missing {
+                    Ok((AuthoringPropertyValue::Missing, None))
+                } else {
+                    Err(ComponentPropertyError::ValueUnavailable(error).into())
+                }
+            }
             Err(_) => Err(AuthoringReadError::InvalidFieldPath),
         }
     }

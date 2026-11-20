@@ -4,31 +4,24 @@ use std::borrow::Cow;
 
 use super::*;
 
+pub(super) struct CompleteAuthoringValue<'a> {
+    pub(super) effective: Cow<'a, ComponentValue>,
+    pub(super) property_reads: Option<Arc<ComponentPropertyReadIndex>>,
+}
+
 pub(super) fn validate_complete_value<'value>(
     schema: &ComponentSchema,
     owner: &PersistentComponentSchemaOwnerId,
     component: &ComponentTypeId,
     record: &'value SceneComponentRecord,
     limits: SceneFileLimits,
-) -> Result<Cow<'value, ComponentValue>, AuthoringDocumentPublicationError> {
-    let invalid = |summary, error| {
-        rejection(with_codec_error(
-            with_public_locator(
-                with_public_locator(
-                    diagnostic_error("scene.authoring-component-value-invalid", summary),
-                    "schema-owner",
-                    owner.as_str(),
-                ),
-                "component-id",
-                component.as_str(),
-            ),
-            &error,
-            Some(schema),
-        ))
-    };
-    check_contextual_record(schema, record, limits, &mut None)
-        .map_err(|error| contextual_record_rejection(schema, error))?;
-    let effective =
+    admission: &mut Option<&mut reclassification::ClassificationCallback<'_>>,
+) -> Result<CompleteAuthoringValue<'value>, AuthoringDocumentPublicationError> {
+    let effective = if admission.is_some() {
+        reclassification::effective_value(schema, record, limits, admission)?
+    } else {
+        check_contextual_record(schema, record, limits, admission)
+            .map_err(|error| contextual_record_rejection(schema, error))?;
         nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
             schema,
             record.value(),
@@ -39,18 +32,111 @@ pub(super) fn validate_complete_value<'value>(
         )
         .map(|(value, _)| value)
         .map_err(|error| {
-            invalid(
+            invalid_value(
+                schema,
+                owner,
+                component,
                 "Persistent authoring record exceeds its effective-value policy",
-                error,
+                &error,
             )
-        })?;
-    nara_reflect::validate_component_value(schema, effective.as_ref()).map_err(|error| {
-        invalid(
+        })?
+    };
+    let property_reads =
+        validate_property_read_index(schema, owner, component, record, &effective, admission)?;
+    Ok(CompleteAuthoringValue {
+        effective,
+        property_reads,
+    })
+}
+
+pub(super) fn validate_property_read_index(
+    schema: &ComponentSchema,
+    owner: &PersistentComponentSchemaOwnerId,
+    component: &ComponentTypeId,
+    record: &SceneComponentRecord,
+    value: &ComponentValue,
+    admission: &mut Option<&mut reclassification::ClassificationCallback<'_>>,
+) -> Result<Option<Arc<ComponentPropertyReadIndex>>, AuthoringDocumentPublicationError> {
+    use nara_reflect::__private::{
+        ComponentValueAdmissionError, index_component_property_reads,
+        index_component_property_reads_with_admission,
+    };
+
+    let invalid = |error| {
+        invalid_value(
+            schema,
+            owner,
+            component,
             "Persistent authoring record does not satisfy its declared schema",
-            error,
+            &error,
         )
-    })?;
-    Ok(effective)
+    };
+    let select = |field: &nara_reflect::ComponentFieldSchema| {
+        let Some(_) = field.default_value() else {
+            return true;
+        };
+        field.shape().has_keyed_property_lists()
+            && (record.contextual_defaults.contains_key(field.id())
+                || field
+                    .path()
+                    .segments()
+                    .iter()
+                    .try_fold(
+                        nara_reflect::ComponentValueRef::from(record.value()),
+                        |value, segment| match segment {
+                            ComponentFieldPathSegment::Field(name) => value.get(name),
+                            ComponentFieldPathSegment::Index(index) => {
+                                value.as_list()?.get(*index as usize)
+                            }
+                        },
+                    )
+                    .is_some())
+    };
+    let index = if admission.is_some() {
+        index_component_property_reads_with_admission(
+            schema,
+            value.into(),
+            select,
+            |nodes, bytes, allocated| {
+                reclassification::reference_charge(
+                    admission,
+                    "classification-value-validation",
+                    nodes,
+                    bytes,
+                    allocated,
+                )
+            },
+        )
+        .map_err(|error| match error {
+            ComponentValueAdmissionError::Admission(report) => report,
+            ComponentValueAdmissionError::Value(error) => invalid(error),
+        })?
+    } else {
+        index_component_property_reads(schema, value.into(), select).map_err(invalid)?
+    };
+    Ok((!index.is_empty()).then(|| Arc::new(index)))
+}
+
+fn invalid_value(
+    schema: &ComponentSchema,
+    owner: &PersistentComponentSchemaOwnerId,
+    component: &ComponentTypeId,
+    summary: &'static str,
+    error: &nara_reflect::ComponentCodecError,
+) -> AuthoringDocumentPublicationError {
+    rejection(with_codec_error(
+        with_public_locator(
+            with_public_locator(
+                diagnostic_error("scene.authoring-component-value-invalid", summary),
+                "schema-owner",
+                owner.as_str(),
+            ),
+            "component-id",
+            component.as_str(),
+        ),
+        error,
+        Some(schema),
+    ))
 }
 
 pub(super) enum ContextualRecordError {

@@ -46,11 +46,11 @@ use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    AuthoringSchemaBundle, CatalogFingerprint, ComponentCapability, ComponentFieldId,
-    ComponentFieldPathSegment, ComponentPropertyPath, ComponentSchema,
-    ComponentSchemaContributionReceipt, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueShape, DeclaredAssetReference, EntityReference,
-    PersistentComponentSchemaOwnerId,
+    __private::ComponentPropertyReadIndex, AuthoringSchemaBundle, CatalogFingerprint,
+    ComponentCapability, ComponentFieldId, ComponentFieldPathSegment, ComponentPropertyPath,
+    ComponentSchema, ComponentSchemaContributionReceipt, ComponentSchemaOwnerSnapshot,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
+    DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
@@ -611,7 +611,7 @@ impl UnavailableEntityReference {
 
 /// Immutable Schema/Adapter classification for one complete component record.
 /// Overlay facts describe source inventory; the Prefab compiler admits their effective values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AuthoringRecordFact {
     location: AuthoringRecordLocation,
     owner: AuthoringRecordOwnerClaim,
@@ -621,7 +621,23 @@ pub struct AuthoringRecordFact {
     readiness: AuthoringRecordReadiness,
     adapter: Option<AuthoringAdapterEvidence>,
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
+    property_reads: Option<Arc<ComponentPropertyReadIndex>>,
 }
+
+impl PartialEq for AuthoringRecordFact {
+    fn eq(&self, other: &Self) -> bool {
+        self.location == other.location
+            && self.owner == other.owner
+            && self.resolved_owner == other.resolved_owner
+            && self.component == other.component
+            && self.version == other.version
+            && self.readiness == other.readiness
+            && self.adapter == other.adapter
+            && self.schema_declared_asset_references == other.schema_declared_asset_references
+    }
+}
+
+impl Eq for AuthoringRecordFact {}
 
 /// Maximum ordered operations in one mixed source-authoring transaction.
 /// A complete construction shares this count across entities, components and property writes.
@@ -1766,6 +1782,7 @@ struct AuthoringSchemaEntry {
     owner: PersistentComponentSchemaOwnerId,
     schema: ComponentSchema,
     adapter: Option<AuthoringAdapterEvidence>,
+    default_property_reads: Option<Arc<ComponentPropertyReadIndex>>,
 }
 
 impl SceneDocumentCandidate {
@@ -1846,6 +1863,7 @@ impl AuthoringClassificationBasis {
                         owner: owner.owner_id().clone(),
                         schema: schema.clone(),
                         adapter: None,
+                        default_property_reads: None,
                     },
                 );
             }
@@ -1896,6 +1914,21 @@ impl AuthoringClassificationBasis {
                     catalog: adapter.catalog.clone(),
                 });
             }
+        }
+
+        for entry in schemas.values_mut().filter(|entry| entry.adapter.is_some()) {
+            let index = nara_reflect::__private::index_component_property_defaults(&entry.schema)
+                .map_err(|error| {
+                rejection(with_codec_error(
+                    diagnostic_error(
+                        "scene.authoring-component-value-invalid",
+                        "Persistent authoring Schema has an invalid property default",
+                    ),
+                    &nara_reflect::ComponentCodecError::Message(error.to_string()),
+                    Some(&entry.schema),
+                ))
+            })?;
+            entry.default_property_reads = (!index.is_empty()).then(|| Arc::new(index));
         }
 
         Ok(Self {
@@ -2389,8 +2422,8 @@ fn classify_complete_record(
         reclassification::record_identity_bytes(context.basis, component, record)
     })?;
     let classified = context.basis.classify_record(component, record)?;
-    let bounded = context.admission.is_some();
     let mut admitted_effective = None;
+    let mut property_reads = None;
     if classified.readiness.is_available() {
         let schema = classified
             .schema
@@ -2400,22 +2433,18 @@ fn classify_complete_record(
             .resolved_owner
             .as_ref()
             .expect("available authoring record retains its admitted schema owner");
-        let effective = if bounded {
-            reclassification::complete_value(
-                schema,
-                owner,
-                component,
-                record,
-                context.limits,
-                &mut context.admission,
-            )?
-        } else {
-            validate_complete_value(schema, owner, component, record, context.limits)?
-        };
+        let complete = validate_complete_value(
+            schema,
+            owner,
+            component,
+            record,
+            context.limits,
+            &mut context.admission,
+        )?;
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
             reclassification::validate_source_local_references(
                 schema,
-                effective.as_ref(),
+                complete.effective.as_ref(),
                 &context.namespace,
                 context
                     .limits
@@ -2424,7 +2453,8 @@ fn classify_complete_record(
                 &mut context.admission,
             )?;
         }
-        admitted_effective = Some(effective);
+        admitted_effective = Some(complete.effective);
+        property_reads = complete.property_reads;
     }
     let schema_declared_asset_references = if classified
         .schema
@@ -2493,6 +2523,7 @@ fn classify_complete_record(
         record,
         classified,
         schema_declared_asset_references,
+        property_reads,
         context,
     )?;
     Ok(())
@@ -2505,6 +2536,7 @@ fn retain_complete_record(
     record: &SceneComponentRecord,
     classified: ClassifiedRecord<'_>,
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
+    property_reads: Option<Arc<ComponentPropertyReadIndex>>,
     context: &mut ClassificationContext<'_, '_, '_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
     reclassification::charge(&mut context.admission, "record-fact", || {
@@ -2530,6 +2562,7 @@ fn retain_complete_record(
         readiness: classified.readiness,
         adapter: classified.adapter,
         schema_declared_asset_references: schema_declared_asset_references.clone(),
+        property_reads,
     });
     if !classified.readiness.is_available() {
         reclassification::charge_measured(

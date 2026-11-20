@@ -71,7 +71,12 @@ impl AuthoringDocumentState {
                 .checked_add(provenance_string_bytes(fact.component.as_str())?)?
                 .checked_add(asset_references_bytes(
                     &fact.schema_declared_asset_references,
-                )?)?;
+                )?)?
+                .checked_add(
+                    fact.property_reads
+                        .as_deref()
+                        .map_or(0, |index| index.retained_bytes()),
+                )?;
             if let Some(AuthoringAdapterEvidence {
                 catalog: AuthoringAdapterCatalog::Data { owner, .. },
                 ..

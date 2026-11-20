@@ -1,7 +1,7 @@
 //! Runtime-independent component schema identities and catalog data.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     error::Error,
     fmt::{self, Display, Formatter},
 };
@@ -13,7 +13,8 @@ use nara_identity::{
 
 use crate::{
     AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
-    ComponentPropertyKey, ComponentValue, ComponentValueRef,
+    ComponentPropertyKey, ComponentValue, ComponentValueRef, property::KeyedListLocations,
+    value_ref::ComponentListRef,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -1234,6 +1235,19 @@ impl ComponentValueShape {
         self.validate_value(value).is_ok()
     }
 
+    /// Whether a durable selector can address keyed rows below this admitted declaration.
+    #[doc(hidden)]
+    pub fn has_keyed_property_lists(&self) -> bool {
+        match self {
+            Self::KeyedList { .. } => true,
+            Self::Record { members } => members
+                .iter()
+                .any(|member| member.id.is_some() && member.shape.has_keyed_property_lists()),
+            Self::Optional { value } | Self::Map { value } => value.has_keyed_property_lists(),
+            _ => false,
+        }
+    }
+
     /// Checks declared structure without imposing a payload allocation or traversal budget.
     ///
     /// Callers own admission of the value's size and work. Opaque containers validate their outer
@@ -1243,18 +1257,30 @@ impl ComponentValueShape {
         value: impl Into<ComponentValueRef<'a>>,
     ) -> Result<(), ComponentShapeError> {
         self.validate()?;
-        self.validate_value_node(value.into(), &mut Vec::new())
+        self.validate_value_node(value.into(), &mut Vec::new(), &mut None)
+    }
+
+    pub(crate) fn validate_value_and_index(
+        &self,
+        value: ComponentValueRef<'_>,
+        locations: &mut KeyedListLocations,
+    ) -> Result<(), ComponentShapeError> {
+        self.validate()?;
+        self.validate_value_node(value, &mut Vec::new(), &mut Some(locations))
     }
 
     fn validate_value_node(
         &self,
         value: ComponentValueRef<'_>,
         path: &mut Vec<ComponentFieldPathSegment>,
+        locations: &mut Option<&mut KeyedListLocations>,
     ) -> Result<(), ComponentShapeError> {
         let expected = self.value_kind();
         match (self, value.kind()) {
             (Self::Optional { .. }, ComponentValueKind::Null) => Ok(()),
-            (Self::Optional { value: shape }, _) => shape.validate_value_node(value, path),
+            (Self::Optional { value: shape }, _) => {
+                shape.validate_value_node(value, path, locations)
+            }
             (
                 Self::Scalar {
                     kind,
@@ -1299,7 +1325,13 @@ impl ComponentValueShape {
                         )
                     })?;
                     path.push(ComponentFieldPathSegment::field(&member.name));
-                    member.shape.validate_value_node(value, path)?;
+                    if member.id.is_some() {
+                        member
+                            .shape
+                            .validate_indexed_child(value, path, locations)?;
+                    } else {
+                        member.shape.validate_value_node(value, path, &mut None)?;
+                    }
                     path.pop();
                 }
                 for name in values.keys() {
@@ -1316,7 +1348,7 @@ impl ComponentValueShape {
                 let values = value.as_list().expect("List kind checked");
                 for (index, value) in values.iter().enumerate() {
                     path.push(ComponentFieldPathSegment::index(index as u32));
-                    item.validate_value_node(value, path)?;
+                    item.validate_value_node(value, path, &mut None)?;
                     path.pop();
                 }
                 Ok(())
@@ -1325,33 +1357,37 @@ impl ComponentValueShape {
                 let values = value.as_list().expect("List kind checked");
                 let member =
                     keyed_list_member(item, key).map_err(|kind| shape_error(path, kind))?;
-                let mut keys = BTreeSet::new();
-                for (index, value) in values.iter().enumerate() {
-                    path.push(ComponentFieldPathSegment::index(index as u32));
-                    item.validate_value_node(value, path)?;
-                    let key = value
-                        .get(&member.name)
-                        .and_then(ComponentPropertyKey::from_value)
-                        .ok_or_else(|| {
-                            shape_error(
-                                path,
-                                ComponentShapeErrorKind::MissingMember(member.name.clone()),
-                            )
-                        })?;
-                    if !keys.insert(key.clone()) {
-                        return Err(shape_error(
-                            path,
-                            ComponentShapeErrorKind::DuplicateListKey(key),
-                        ));
-                    }
-                    path.pop();
+                if locations.is_some() && !values.is_empty() {
+                    let mut rows = BTreeMap::new();
+                    let mut key_string_bytes = 0usize;
+                    item.validate_list_keys(values, member, path, locations, |key, position| {
+                        match rows.entry(key) {
+                            Entry::Vacant(row) => {
+                                if let ComponentPropertyKey::String(key) = row.key() {
+                                    key_string_bytes = key_string_bytes.saturating_add(key.len());
+                                }
+                                row.insert(position);
+                                Ok(())
+                            }
+                            Entry::Occupied(row) => Err(row.key().clone()),
+                        }
+                    })?;
+                    locations
+                        .as_deref_mut()
+                        .expect("indexed validation retains the collection locations")
+                        .retain_rows(rows, key_string_bytes);
+                } else {
+                    let mut keys = BTreeSet::new();
+                    item.validate_list_keys(values, member, path, locations, |key, _| {
+                        keys.insert(key.clone()).then_some(()).ok_or(key)
+                    })?;
                 }
                 Ok(())
             }
             (Self::Map { value: shape }, ComponentValueKind::Map) => {
                 for (name, value) in value.as_map().expect("Map kind checked").iter() {
                     path.push(ComponentFieldPathSegment::field(name));
-                    shape.validate_value_node(value, path)?;
+                    shape.validate_indexed_child(value, path, locations)?;
                     path.pop();
                 }
                 Ok(())
@@ -1364,6 +1400,50 @@ impl ComponentValueShape {
                 },
             )),
         }
+    }
+
+    fn validate_indexed_child(
+        &self,
+        value: ComponentValueRef<'_>,
+        path: &mut Vec<ComponentFieldPathSegment>,
+        locations: &mut Option<&mut KeyedListLocations>,
+    ) -> Result<(), ComponentShapeError> {
+        let Some(locations) = locations.as_deref_mut() else {
+            return self.validate_value_node(value, path, &mut None);
+        };
+        let mut child = KeyedListLocations::default();
+        self.validate_value_node(value, path, &mut Some(&mut child))?;
+        if !child.is_empty() {
+            locations.retain_child(path.last().expect("child path retains its segment"), child);
+        }
+        Ok(())
+    }
+
+    fn validate_list_keys(
+        &self,
+        values: ComponentListRef<'_>,
+        member: &ComponentShapeMember,
+        path: &mut Vec<ComponentFieldPathSegment>,
+        locations: &mut Option<&mut KeyedListLocations>,
+        mut insert: impl FnMut(ComponentPropertyKey, usize) -> Result<(), ComponentPropertyKey>,
+    ) -> Result<(), ComponentShapeError> {
+        for (index, value) in values.iter().enumerate() {
+            path.push(ComponentFieldPathSegment::index(index as u32));
+            self.validate_indexed_child(value, path, locations)?;
+            let key = value
+                .get(&member.name)
+                .and_then(ComponentPropertyKey::from_value)
+                .ok_or_else(|| {
+                    shape_error(
+                        path,
+                        ComponentShapeErrorKind::MissingMember(member.name.clone()),
+                    )
+                })?;
+            insert(key, index)
+                .map_err(|key| shape_error(path, ComponentShapeErrorKind::DuplicateListKey(key)))?;
+            path.pop();
+        }
+        Ok(())
     }
 
     pub(crate) fn canonicalize(&mut self) {

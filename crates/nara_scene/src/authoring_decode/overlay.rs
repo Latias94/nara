@@ -375,7 +375,7 @@ fn classify_record(
         }
     }
     retain_complete_record(
-        location, None, component, record, classified, references, context,
+        location, None, component, record, classified, references, None, context,
     )?;
     Ok(())
 }

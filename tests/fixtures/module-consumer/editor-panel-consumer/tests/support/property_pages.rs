@@ -26,11 +26,16 @@ const PANEL: &str = "consumer.property-pages";
 const COMPONENT: &str = "consumer.pages.PanelSettings";
 const STARTUP: &str = "scenes/startup.scene.json";
 const SAMPLE_COUNT: usize = 4_097;
+const KEYED_ROW_COUNT: usize = 32_768;
+const KEYED_SCAN_ENTRIES: usize = 128;
 const ORIGINAL_SCORE: u64 = 7;
 const UPDATED_SCORE: u64 = 42;
+const FIRST_ROW_KEY: &str = "row-0";
 const OLD_ROW_KEY: &str = "chosen/original";
 const NEW_ROW_KEY: &str = "chosen/renamed";
 const INTERMEDIATE_ROW_SCORE: u64 = 19;
+const ORIGINAL_NOTE: &str = "keep this note";
+const UPDATED_NOTE: &str = "edit this note";
 
 fn schemas() -> AuthoringSchemaBundle {
     schema_bundle([
@@ -979,7 +984,7 @@ fn keyed_rows_entity() -> SceneEntityRecord {
             ("wire_score", ComponentValue::U64(score)),
         ])
     };
-    let rows = (0..SAMPLE_COUNT - 1)
+    let rows = (0..KEYED_ROW_COUNT - 1)
         .map(|index| row(format!("row-{index}"), index as u64))
         .chain([row(OLD_ROW_KEY.into(), ORIGINAL_SCORE)])
         .collect();
@@ -990,7 +995,7 @@ fn keyed_rows_entity() -> SceneEntityRecord {
                 ComponentSchemaVersion::ONE,
                 ComponentValue::map([
                     ("wire_rows", ComponentValue::List(rows)),
-                    ("wire_note", ComponentValue::String("keep this note".into())),
+                    ("wire_note", ComponentValue::String(ORIGINAL_NOTE.into())),
                 ]),
             )
             .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
@@ -1004,24 +1009,91 @@ fn keyed_rows_entity() -> SceneEntityRecord {
         )
 }
 
-fn keyed_read(basis: &EditorDocumentQueryBasis, key: &str, member: &str) -> EditorPropertyRead {
+fn selected_read(
+    basis: &EditorDocumentQueryBasis,
+    property: ComponentPropertyPath,
+) -> EditorPropertyRead {
     EditorPropertyRead {
         target: EditorPropertyTarget {
             basis: basis.clone(),
             entity: id("anchor"),
             component: ComponentTypeId::new(COMPONENT),
-            property: ComponentPropertyPath::new(ComponentFieldId::new("rows")).with_steps([
-                ComponentPropertyStep::ListItem {
-                    by: ComponentFieldId::new("id"),
-                    key: ComponentPropertyKey::String(key.into()),
-                },
-                ComponentPropertyStep::Member(ComponentFieldId::new(member)),
-            ]),
+            property,
         },
         limits: EditorPropertyReadLimits::new(128, 1, 32)
             .unwrap()
-            .with_scan_limits(2 * SAMPLE_COUNT + 32, 128 * 1024)
+            .with_scan_limits(KEYED_SCAN_ENTRIES, 4 * 1024)
             .unwrap(),
+    }
+}
+
+fn keyed_read(basis: &EditorDocumentQueryBasis, key: &str, member: &str) -> EditorPropertyRead {
+    selected_read(
+        basis,
+        ComponentPropertyPath::new(ComponentFieldId::new("rows")).with_steps([
+            ComponentPropertyStep::ListItem {
+                by: ComponentFieldId::new("id"),
+                key: ComponentPropertyKey::String(key.into()),
+            },
+            ComponentPropertyStep::Member(ComponentFieldId::new(member)),
+        ]),
+    )
+}
+
+fn note_read(basis: &EditorDocumentQueryBasis) -> EditorPropertyRead {
+    selected_read(
+        basis,
+        ComponentPropertyPath::new(ComponentFieldId::new("note")),
+    )
+}
+
+fn assert_selected_scalar(
+    observed: &EditorPropertyObservation,
+    request: &EditorPropertyRead,
+    expected: ComponentValue,
+) {
+    assert_eq!(observed.target, request.target);
+    assert!(observed.metadata_bytes <= request.limits.max_metadata_bytes());
+    assert_eq!(observed.value_nodes, 1);
+    assert_eq!(
+        observed.value_logical_bytes,
+        expected.cost().logical_bytes()
+    );
+    assert!(observed.scanned_entries <= request.limits.max_scan_entries());
+    assert!(observed.scanned_logical_bytes <= request.limits.max_scan_logical_bytes());
+    assert_eq!(observed.value, EditorPropertyValue::Present(expected));
+}
+
+fn assert_preview_leaf_page(
+    prepared: &PreparedEditorDocumentEdit,
+    request: &EditorPropertyRead,
+    expected: ComponentValue,
+) {
+    let page = prepared
+        .preview_property_page(root_page_request(request.target.clone(), request.limits))
+        .unwrap();
+    assert_eq!(page.target(), &request.target);
+    assert!(page.path().is_empty());
+    assert!(page.next.is_none());
+    assert_page_limits(&page, request.limits);
+    let expected = match expected {
+        ComponentValue::String(text) => EditorPropertyPageData::Text {
+            total_bytes: text.len(),
+            start: 0,
+            text,
+        },
+        value => EditorPropertyPageData::Scalar(value),
+    };
+    assert_eq!(page.value, EditorPropertyPageValue::Present(expected));
+}
+
+fn property_edit(request: &EditorPropertyRead, value: ComponentValue) -> AuthoringPropertyEdit {
+    AuthoringPropertyEdit {
+        entity: request.target.entity.clone(),
+        component: request.target.component.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        property: request.target.property.clone(),
+        value,
     }
 }
 
@@ -1037,12 +1109,12 @@ fn missing_row(key: &str) -> EditorDocumentQueryRejection {
 fn prepare_keyed_edit(
     context: &EditorPanelContext<'_, '_>,
     captured: &EditorDocumentQueryBasis,
-) -> PreparedEditorDocumentEdit {
+) -> (PreparedEditorDocumentEdit, EditorPropertyPageRead) {
     let old_score = keyed_read(captured, OLD_ROW_KEY, "score");
-    let old_key = keyed_read(captured, OLD_ROW_KEY, "id");
     let new_score = keyed_read(captured, NEW_ROW_KEY, "score");
+    let old_key = keyed_read(captured, OLD_ROW_KEY, "id");
     let new_key = keyed_read(captured, NEW_ROW_KEY, "id");
-    let mut rows = old_score.target.clone();
+    let mut rows = old_key.target.clone();
     rows.property.steps.clear();
     let limits = EditorPropertyReadLimits::new(128, 2, 32)
         .unwrap()
@@ -1056,69 +1128,69 @@ fn prepare_keyed_edit(
     assert_eq!(
         first.value,
         EditorPropertyPageValue::Present(EditorPropertyPageData::List {
-            total_items: SAMPLE_COUNT,
+            total_items: KEYED_ROW_COUNT,
             start: 0,
             items: vec![EditorPropertyPageItem::Map { len: 2 }],
         })
     );
-    assert!(first.next.is_some());
+    let continuation = EditorPropertyPageRead {
+        position: EditorPropertyPagePosition::Continue(first.next.unwrap()),
+        limits,
+    };
 
     let before = context.read_document_property(old_score.clone()).unwrap();
-    assert_eq!(before.target, old_score.target);
-    assert_eq!(before.value_nodes, 1);
-    assert_eq!(before.value_logical_bytes, 8);
-    assert!(before.scanned_entries <= old_score.limits.max_scan_entries());
-    assert!(before.scanned_logical_bytes <= old_score.limits.max_scan_logical_bytes());
-    assert_eq!(
-        before.value,
-        EditorPropertyValue::Present(ComponentValue::U64(ORIGINAL_SCORE))
-    );
-
-    let write = |request: &EditorPropertyRead, value| AuthoringPropertyEdit {
-        entity: request.target.entity.clone(),
-        component: request.target.component.clone(),
-        component_version: ComponentSchemaVersion::ONE,
-        property: request.target.property.clone(),
-        value,
-    };
+    assert_selected_scalar(&before, &old_score, ComponentValue::U64(ORIGINAL_SCORE));
     let edits = [
-        write(&old_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
-        write(&old_key, ComponentValue::String(NEW_ROW_KEY.into())),
-        write(&new_score, ComponentValue::U64(UPDATED_SCORE)),
+        property_edit(&old_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
+        property_edit(&old_key, ComponentValue::String(NEW_ROW_KEY.into())),
+        property_edit(&new_score, ComponentValue::U64(UPDATED_SCORE)),
     ];
-    let mut wrong_final = edits.clone();
-    wrong_final[2].property = old_score.target.property.clone();
-    let error = context
-        .prepare_authoring_property_edit(captured, &wrong_final)
-        .unwrap_err();
-    let EditorEditPreparationError::Document(rejected) = error else {
-        panic!("the old key must be rejected at the final write: {error:?}");
-    };
-    assert!(!rejected.applied);
-    assert!(rejected.patch_report.as_ref().unwrap().inverse.is_none());
-    assert!(rejected.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.authoring-property-edit-rejected"
-            && diagnostic.fields().iter().any(|field| {
-                field.key().as_str() == "operation-index"
-                    && field.value() == DiagnosticValueRef::Unsigned(2)
-            })
-            && diagnostic.fields().iter().any(|field| {
-                field.key().as_str() == "property-error-kind"
-                    && field.value() == DiagnosticValueRef::Identifier("list-item-not-found")
-            })
-    }));
-    assert_eq!(
-        context.read_document_property(old_score.clone()),
-        Ok(before)
-    );
-    assert_eq!(
-        context.read_document_property(new_score.clone()),
-        Err(missing_row(NEW_ROW_KEY))
-    );
+    let mut missing_final = edits.clone();
+    missing_final[2].property = old_score.target.property.clone();
+    let mut duplicate_final = edits.clone();
+    duplicate_final[2] = property_edit(&new_key, ComponentValue::String(FIRST_ROW_KEY.into()));
+    for (invalid_edits, error_kind) in [
+        (missing_final, "list-item-not-found"),
+        (duplicate_final, "ambiguous-list-item"),
+    ] {
+        let error = context
+            .prepare_authoring_property_edit(captured, &invalid_edits)
+            .unwrap_err();
+        let EditorEditPreparationError::Document(rejected) = error else {
+            panic!("the final write must fail with {error_kind}: {error:?}");
+        };
+        assert!(!rejected.applied);
+        assert!(rejected.patch_report.as_ref().unwrap().inverse.is_none());
+        assert!(rejected.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.authoring-property-edit-rejected"
+                && diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "operation-index"
+                        && field.value() == DiagnosticValueRef::Unsigned(2)
+                })
+                && diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "property-error-kind"
+                        && field.value() == DiagnosticValueRef::Identifier(error_kind)
+                })
+        }));
+        assert_eq!(
+            context.document_query_basis(captured.document).unwrap(),
+            *captured
+        );
+        assert_eq!(
+            context.read_document_property(old_score.clone()),
+            Ok(before.clone())
+        );
+        assert_keyed_rows(
+            captured,
+            |read| context.read_document_property(read),
+            OLD_ROW_KEY,
+            ORIGINAL_SCORE,
+        );
+    }
 
     let prepared = context
         .prepare_authoring_property_edit(captured, &edits)
-        .expect("the three leaf writes must fit without replaying the authored list");
+        .expect("the leaf writes must fit without replaying the authored list");
     let replace = |edit: AuthoringPropertyEdit| ScenePatchOperation::ReplaceProperty {
         entity: edit.entity,
         component: edit.component,
@@ -1128,63 +1200,121 @@ fn prepare_keyed_edit(
     };
     assert_eq!(prepared.patch().operations.as_slice(), &edits.map(replace));
     let inverse = [
-        write(&new_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
-        write(&new_key, ComponentValue::String(OLD_ROW_KEY.into())),
-        write(&old_score, ComponentValue::U64(ORIGINAL_SCORE)),
+        property_edit(&new_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
+        property_edit(&new_key, ComponentValue::String(OLD_ROW_KEY.into())),
+        property_edit(&old_score, ComponentValue::U64(ORIGINAL_SCORE)),
     ];
     assert_eq!(
         prepared.inverse().operations.as_slice(),
         &inverse.map(replace)
     );
+    assert_eq!(context.read_document_property(old_score), Ok(before));
+    assert_keyed_rows(
+        captured,
+        |read| prepared.preview_property(read),
+        NEW_ROW_KEY,
+        UPDATED_SCORE,
+    );
+    assert_preview_leaf_page(&prepared, &new_score, ComponentValue::U64(UPDATED_SCORE));
+    (prepared, continuation)
+}
+
+fn prepare_note_edit(
+    context: &EditorPanelContext<'_, '_>,
+    captured: &EditorDocumentQueryBasis,
+) -> PreparedEditorDocumentEdit {
+    assert_keyed_rows(
+        captured,
+        |read| context.read_document_property(read),
+        OLD_ROW_KEY,
+        ORIGINAL_SCORE,
+    );
+    let note = note_read(captured);
+    let original = ComponentValue::String(ORIGINAL_NOTE.into());
+    let updated = ComponentValue::String(UPDATED_NOTE.into());
+    let edit = property_edit(&note, updated.clone());
+    let prepared = context
+        .prepare_authoring_property_edit(captured, &[edit])
+        .expect("a scalar edit must fit beside the authored list");
+    let set_note = |value| ScenePatchOperation::SetField {
+        entity: note.target.entity.clone(),
+        component: note.target.component.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: note.target.property.root.clone(),
+        value,
+    };
     assert_eq!(
-        prepared.preview_property(old_score),
-        Err(missing_row(OLD_ROW_KEY))
+        prepared.patch().operations.as_slice(),
+        &[set_note(updated.clone())]
     );
     assert_eq!(
-        prepared.preview_property(new_key).unwrap().value,
-        EditorPropertyValue::Present(ComponentValue::String(NEW_ROW_KEY.into()))
+        prepared.inverse().operations.as_slice(),
+        &[set_note(original.clone())]
     );
-    let proposed = prepared.preview_property(new_score.clone()).unwrap();
-    assert_eq!(proposed.target, new_score.target);
-    assert_eq!(
-        proposed.value,
-        EditorPropertyValue::Present(ComponentValue::U64(UPDATED_SCORE))
+    assert_selected_scalar(
+        &context.read_document_property(note.clone()).unwrap(),
+        &note,
+        original,
     );
-    let page = prepared
-        .preview_property_page(root_page_request(
-            new_score.target.clone(),
-            new_score.limits,
-        ))
-        .unwrap();
-    assert_eq!(page.target(), &new_score.target);
-    assert!(page.next.is_none());
-    assert_page_limits(&page, new_score.limits);
-    assert_eq!(
-        page.value,
-        EditorPropertyPageValue::Present(EditorPropertyPageData::Scalar(ComponentValue::U64(
-            UPDATED_SCORE,
-        )))
+    assert_selected_scalar(
+        &prepared.preview_property(note.clone()).unwrap(),
+        &note,
+        updated.clone(),
+    );
+    assert_preview_leaf_page(&prepared, &note, updated);
+    assert_keyed_rows(
+        captured,
+        |read| prepared.preview_property(read),
+        OLD_ROW_KEY,
+        ORIGINAL_SCORE,
     );
     prepared
 }
 
-fn assert_keyed_score(
-    app: &EditorApplication,
-    document: EditorDocumentId,
-    key: &str,
-    absent_key: &str,
-    score: u64,
+fn assert_keyed_rows(
+    captured: &EditorDocumentQueryBasis,
+    read: impl Fn(EditorPropertyRead) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection>,
+    last_key: &str,
+    last_score: u64,
 ) {
-    let captured = basis(app, document);
-    assert_eq!(
-        app.read_document_property(keyed_read(&captured, key, "score"))
-            .unwrap()
-            .value,
-        EditorPropertyValue::Present(ComponentValue::U64(score))
+    for (key, score) in [(FIRST_ROW_KEY, 0), (last_key, last_score)] {
+        let request = keyed_read(captured, key, "score");
+        assert_selected_scalar(
+            &read(request.clone()).unwrap(),
+            &request,
+            ComponentValue::U64(score),
+        );
+    }
+    let request = keyed_read(captured, last_key, "id");
+    assert_selected_scalar(
+        &read(request.clone()).unwrap(),
+        &request,
+        ComponentValue::String(last_key.into()),
     );
+    let absent_key = if last_key == OLD_ROW_KEY {
+        NEW_ROW_KEY
+    } else {
+        OLD_ROW_KEY
+    };
     assert_eq!(
-        app.read_document_property(keyed_read(&captured, absent_key, "score")),
+        read(keyed_read(captured, absent_key, "score")),
         Err(missing_row(absent_key))
+    );
+}
+
+fn assert_keyed_state(app: &EditorApplication, document: EditorDocumentId, key: &str, score: u64) {
+    let captured = basis(app, document);
+    assert_keyed_rows(
+        &captured,
+        |read| app.read_document_property(read),
+        key,
+        score,
+    );
+    let request = note_read(&captured);
+    assert_selected_scalar(
+        &app.read_document_property(request.clone()).unwrap(),
+        &request,
+        ComponentValue::String(UPDATED_NOTE.into()),
     );
 }
 
@@ -1196,6 +1326,85 @@ fn a_registered_panel_round_trips_large_keyed_list_edits_on_a_nonactive_scene() 
 #[test]
 fn a_registered_panel_round_trips_large_keyed_list_edits_on_a_nonactive_prefab() {
     round_trip_keyed_edit(EditorDocumentKind::Prefab, "prefabs/keyed-rows.prefab.json");
+}
+
+fn review_and_commit_keyed_edit(
+    app: &mut EditorApplication,
+    host: &mut EditorPanelHost<PropertyPagesPanel>,
+    instance: EditorPanelInstanceId,
+    document: EditorDocumentId,
+    mut prepare: impl FnMut(
+        &EditorPanelContext<'_, '_>,
+        &EditorDocumentQueryBasis,
+    ) -> PreparedEditorDocumentEdit,
+) {
+    let initial = frame(app);
+    let active = initial.workspace().active_document.unwrap();
+    let initial_tab = initial.workspace().document(document).unwrap();
+    let mut token = None;
+    let review = host
+        .prepare(app, |panel, context| {
+            assert!(context.model().document().is_none());
+            assert_eq!(
+                context.model().frame().workspace().active_document,
+                Some(active)
+            );
+            let captured = context.document_query_basis(document).unwrap();
+            let prepared = prepare(context, &captured);
+            assert_eq!(prepared.document(), document);
+            assert_eq!(prepared.document_kind(), initial_tab.kind);
+            assert_eq!(prepared.base_revision(), captured.revision);
+            assert!(panel.retained.replace(prepared).is_none());
+            assert!(token.replace(context.instance_token()).is_none());
+            panel.completion = None;
+        })
+        .unwrap();
+    assert_eq!(review.submissions().len(), 0);
+    host.submit_and_drive(app, review, Duration::ZERO);
+    let token = token.unwrap();
+    assert_eq!(token.instance(), instance);
+    assert_eq!(
+        frame(app).workspace().documents,
+        initial.workspace().documents
+    );
+    assert_navigation(app, &initial, document);
+
+    let commit = host
+        .prepare(app, |panel, context| {
+            assert!(context.matches_instance(&token));
+            assert!(panel.completion.is_none());
+            context
+                .commit_authoring_edit(panel.retained.take().unwrap())
+                .unwrap();
+        })
+        .unwrap();
+    assert_eq!(commit.submissions().len(), 1);
+    let (origin, submitted) = commit.submissions().next().unwrap();
+    assert_eq!(origin, instance);
+    assert_eq!(
+        frame(app).workspace().documents,
+        initial.workspace().documents
+    );
+    host.submit_and_drive(app, commit, Duration::ZERO);
+    let edited = frame(app);
+    let tab = edited.workspace().document(document).unwrap();
+    host.inspect(app, &token, |panel, _| {
+        let report = panel.completed(submitted);
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert_eq!(report.document, Some(document));
+        assert_eq!(report.active_document, Some(active));
+        assert_eq!(report.revision, Some(tab.revision));
+    })
+    .unwrap();
+    assert_ne!(tab.revision, initial_tab.revision);
+    assert_eq!(tab.revision.source_id(), initial_tab.revision.source_id());
+    assert!(tab.dirty);
+    assert_eq!(tab.saved_revision, initial_tab.saved_revision);
+    assert_eq!(
+        (tab.history.undo_depth, tab.history.redo_depth),
+        (initial_tab.history.undo_depth + 1, 0)
+    );
+    assert_navigation(app, &initial, document);
 }
 
 fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
@@ -1210,97 +1419,64 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
     let source_path = project.root.join(source);
     let initial = frame(&app);
     let active = initial.workspace().active_document.unwrap();
-    let mut token = None;
     let (mut host, instance) = register_panel(&mut app);
-    let review = host
-        .prepare(&app, |panel, context| {
-            assert!(context.model().document().is_none());
-            assert_eq!(
-                context.model().frame().workspace().active_document,
-                Some(active)
-            );
-            let captured = context.document_query_basis(document).unwrap();
-            let prepared = prepare_keyed_edit(context, &captured);
-            assert_eq!(prepared.document(), document);
-            assert_eq!(prepared.document_kind(), kind);
-            assert_eq!(prepared.base_revision(), captured.revision);
-            assert!(panel.retained.replace(prepared).is_none());
-            assert!(token.replace(context.instance_token()).is_none());
-        })
-        .unwrap();
-    assert_eq!(review.submissions().len(), 0);
-    host.submit_and_drive(&mut app, review, Duration::ZERO);
-    let token = token.unwrap();
-    assert_eq!(token.instance(), instance);
-    assert_eq!(
-        frame(&app).workspace().documents,
-        initial.workspace().documents
-    );
-    assert_keyed_score(&app, document, OLD_ROW_KEY, NEW_ROW_KEY, ORIGINAL_SCORE);
+    let assert_unsaved = || {
+        assert!(
+            fs::read(&source_path).unwrap().as_slice() == original.as_bytes(),
+            "the original source bytes must persist until Save"
+        );
+    };
+    review_and_commit_keyed_edit(&mut app, &mut host, instance, document, prepare_note_edit);
     assert_navigation(&app, &initial, document);
-    assert_eq!(fs::read_to_string(&source_path).unwrap(), original);
+    assert_unsaved();
+    assert_keyed_state(&app, document, OLD_ROW_KEY, ORIGINAL_SCORE);
 
-    let commit = host
-        .prepare(&app, |panel, context| {
-            assert!(context.matches_instance(&token));
-            assert!(panel.completion.is_none());
-            context
-                .commit_authoring_edit(panel.retained.take().unwrap())
-                .unwrap();
-        })
-        .unwrap();
-    assert_eq!(commit.submissions().len(), 1);
-    let (origin, submitted) = commit.submissions().next().unwrap();
-    assert_eq!(origin, instance);
-    assert_eq!(
-        frame(&app).workspace().documents,
-        initial.workspace().documents
+    let mut continuation = None;
+    review_and_commit_keyed_edit(
+        &mut app,
+        &mut host,
+        instance,
+        document,
+        |context, captured| {
+            let (prepared, cursor) = prepare_keyed_edit(context, captured);
+            assert!(continuation.replace(cursor).is_none());
+            assert_unsaved();
+            prepared
+        },
     );
-    host.submit_and_drive(&mut app, commit, Duration::ZERO);
-    let edited = frame(&app);
-    let tab = edited.workspace().document(document).unwrap();
-    host.inspect(&app, &token, |panel, _| {
-        let report = panel.completed(submitted);
-        assert!(report.applied, "{:?}", report.diagnostics);
-        assert_eq!(report.document, Some(document));
-        assert_eq!(report.active_document, Some(active));
-        assert_eq!(report.revision, Some(tab.revision));
-    })
-    .unwrap();
-    let initial_tab = initial.workspace().document(document).unwrap();
-    assert_ne!(tab.revision, initial_tab.revision);
-    assert_eq!(tab.revision.source_id(), initial_tab.revision.source_id());
-    assert!(tab.dirty);
-    assert_eq!(tab.saved_revision, initial_tab.saved_revision);
-    assert_eq!((tab.history.undo_depth, tab.history.redo_depth), (1, 0));
-    assert_keyed_score(&app, document, NEW_ROW_KEY, OLD_ROW_KEY, UPDATED_SCORE);
+    assert_eq!(
+        app.read_document_property_page(continuation.unwrap()),
+        Err(EditorDocumentQueryRejection::StaleRevision)
+    );
+    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE);
     assert_navigation(&app, &initial, document);
-    assert_eq!(fs::read_to_string(&source_path).unwrap(), original);
+    assert_unsaved();
 
-    let original: serde_json::Value = serde_json::from_str(&original).unwrap();
-    let mut expected_edit = original.clone();
-    let component = &mut expected_edit["payload"]["entities"][0]["components"][COMPONENT]["value"];
-    let rows = component["value"]["wire_rows"]["value"]
-        .as_array_mut()
-        .unwrap();
-    assert_eq!(rows.len(), SAMPLE_COUNT);
-    let last = &mut rows.last_mut().unwrap()["value"];
+    let mut expected: serde_json::Value = serde_json::from_str(&original).unwrap();
+    let component = &mut expected["payload"]["entities"][0]["components"][COMPONENT]["value"];
+    let values = &mut component["value"];
+    let last = &values["wire_rows"]["value"][KEYED_ROW_COUNT - 1]["value"];
     assert_eq!(last["wire_key"]["value"], OLD_ROW_KEY);
     assert_eq!(last["wire_score"]["value"], ORIGINAL_SCORE);
-    last["wire_key"]["value"] = NEW_ROW_KEY.into();
-    last["wire_score"]["value"] = UPDATED_SCORE.into();
+    assert_eq!(values["wire_note"]["value"], ORIGINAL_NOTE);
+    values["wire_note"]["value"] = UPDATED_NOTE.into();
+    let set_expected_row = |expected: &mut serde_json::Value, key: &str, score: u64| {
+        let component = &mut expected["payload"]["entities"][0]["components"][COMPONENT]["value"];
+        let rows = component["value"]["wire_rows"]["value"]
+            .as_array_mut()
+            .unwrap();
+        assert_eq!(rows.len(), KEYED_ROW_COUNT);
+        let last = &mut rows.last_mut().unwrap()["value"];
+        last["wire_key"]["value"] = key.into();
+        last["wire_score"]["value"] = score.into();
+    };
+    set_expected_row(&mut expected, NEW_ROW_KEY, UPDATED_SCORE);
 
-    let mut saved = save_exact_source(&mut app, document, &source_path, &expected_edit);
+    let mut saved = save_exact_source(&mut app, document, &source_path, &expected);
     assert_navigation(&app, &initial, document);
-    for (redo, key, absent_key, score, expected) in [
-        (false, OLD_ROW_KEY, NEW_ROW_KEY, ORIGINAL_SCORE, &original),
-        (
-            true,
-            NEW_ROW_KEY,
-            OLD_ROW_KEY,
-            UPDATED_SCORE,
-            &expected_edit,
-        ),
+    for (redo, key, score) in [
+        (false, OLD_ROW_KEY, ORIGINAL_SCORE),
+        (true, NEW_ROW_KEY, UPDATED_SCORE),
     ] {
         let (checkpoint, _, disk_bytes) = &saved;
         let base_revision = checkpoint.revision;
@@ -1326,17 +1502,21 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
             ),
             "{result:?}"
         );
-        assert_keyed_score(&app, document, key, absent_key, score);
+        assert_keyed_state(&app, document, key, score);
         let current = frame(&app);
         let tab = current.workspace().document(document).unwrap();
         assert!(tab.dirty);
         assert_eq!(
             (tab.history.undo_depth, tab.history.redo_depth),
-            (usize::from(redo), usize::from(!redo))
+            (1 + usize::from(redo), usize::from(!redo))
         );
         assert_navigation(&app, &initial, document);
-        assert_eq!(&fs::read(&source_path).unwrap(), disk_bytes);
-        saved = save_exact_source(&mut app, document, &source_path, expected);
+        assert!(
+            &fs::read(&source_path).unwrap() == disk_bytes,
+            "history replay must leave the prior checkpoint on disk until Save"
+        );
+        set_expected_row(&mut expected, key, score);
+        saved = save_exact_source(&mut app, document, &source_path, &expected);
         assert_navigation(&app, &initial, document);
     }
 
@@ -1368,9 +1548,12 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
         app.read_document_property(keyed_read(&saving, NEW_ROW_KEY, "score")),
         Err(EditorDocumentQueryRejection::StaleIncarnation)
     );
-    assert_keyed_score(&app, document, NEW_ROW_KEY, OLD_ROW_KEY, UPDATED_SCORE);
+    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE);
     assert_navigation(&app, &initial, document);
-    assert_eq!(fs::read(source_path).unwrap(), saved_bytes);
+    assert!(
+        fs::read(source_path).unwrap() == saved_bytes,
+        "Reopen must retain the final saved source bytes"
+    );
     assert_eq!(
         fs::read_to_string(project.root.join(STARTUP)).unwrap(),
         startup
@@ -1410,9 +1593,8 @@ fn save_exact_source(
     assert_eq!(tab.saved_revision, saving.revision);
     assert!(!tab.dirty);
     let bytes = fs::read(path).unwrap();
-    assert_eq!(
-        &serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
-        expected,
+    assert!(
+        &serde_json::from_slice::<serde_json::Value>(&bytes).unwrap() == expected,
         "the complete normalized source must match after saving revision {revision:?}"
     );
     (saving, digest, bytes)

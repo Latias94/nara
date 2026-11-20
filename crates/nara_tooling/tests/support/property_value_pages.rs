@@ -568,10 +568,10 @@ fn a_returned_long_map_key_can_open_text_beyond_the_complete_copy_limit() {
 }
 
 #[test]
-fn continuation_reuses_the_admitted_list_position_instead_of_scanning_identities_again() {
+fn first_page_indexes_the_key_and_continuation_reuses_the_admitted_list_position() {
     use nara_reflect::ComponentPropertyKey;
 
-    const COUNT: u64 = 2_048;
+    const COUNT: u64 = 32_768;
     let key = ComponentFieldId::new("durable-key");
     let list = ComponentValueShape::keyed_list(
         ComponentValueShape::record_members([
@@ -614,9 +614,7 @@ fn continuation_reuses_the_admitted_list_position_instead_of_scanning_identities
                 target: target.clone(),
                 path: ComponentFieldPath::empty(),
             },
-            limits: limits
-                .with_scan_limits(2 * COUNT as usize + 4, 64 * 1024)
-                .unwrap(),
+            limits: limits.with_scan_limits(5, 1024).unwrap(),
         })
         .unwrap();
     assert_eq!(
@@ -629,7 +627,7 @@ fn continuation_reuses_the_admitted_list_position_instead_of_scanning_identities
             )],
         })
     );
-    assert_eq!(first.scanned_entries, 2 * COUNT as usize + 4);
+    assert_eq!(first.scanned_entries, 5);
     let resume_bytes = size_of::<u32>() + "b_value".len();
     let rest = workspace
         .read_document_property_page(resume(

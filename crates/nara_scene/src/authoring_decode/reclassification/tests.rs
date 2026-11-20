@@ -65,6 +65,125 @@ fn classify(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> Authoring
 }
 
 #[test]
+fn omitted_keyed_roots_share_the_schema_index_and_explicit_roots_keep_their_own_positions() {
+    use nara_reflect::{
+        ComponentFieldPathSegment, ComponentPropertyKey, ComponentPropertyReadBudget,
+        ComponentPropertyStep, ComponentShapeMember,
+    };
+
+    let key = ComponentFieldId::new("id");
+    let rows = ComponentFieldId::new("rows");
+    let row = |id, value| {
+        ComponentValue::map([
+            ("id", ComponentValue::U64(id)),
+            ("value", ComponentValue::U64(value)),
+        ])
+    };
+    let default = ComponentValue::List((0..128).map(|id| row(id, id + 1)).collect());
+    let field = ComponentFieldSchema::optional_with_default(
+        rows.clone(),
+        "Rows",
+        ComponentFieldPath::from_fields(["rows"]),
+        ComponentValueShape::keyed_list(
+            ComponentValueShape::record_members([
+                ComponentShapeMember::new("id", ComponentValueKind::U64).with_id(key.clone()),
+                ComponentShapeMember::new("value", ComponentValueKind::U64)
+                    .with_id(ComponentFieldId::new("value")),
+            ]),
+            key.clone(),
+        ),
+        default,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING);
+    let basis = basis(schema().with_fields([field]));
+    let entity = |name, value| {
+        SceneEntityRecord::new(SceneEntityId::new(name).unwrap()).with_component(
+            component(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner()),
+        )
+    };
+    let source = SceneDocument::from_ordered_roots([
+        entity(
+            "default-a",
+            ComponentValue::map([] as [(&str, ComponentValue); 0]),
+        ),
+        entity(
+            "default-b",
+            ComponentValue::map([] as [(&str, ComponentValue); 0]),
+        ),
+        entity(
+            "explicit",
+            ComponentValue::map([("rows", ComponentValue::List(vec![row(127, 900)]))]),
+        ),
+    ]);
+    let state = classify(&source, &basis);
+    assert_eq!(
+        state
+            .record_facts
+            .iter()
+            .filter(|fact| fact.property_reads.is_some())
+            .count(),
+        1
+    );
+    assert!(
+        !basis.0.schemas[&component()]
+            .default_property_reads
+            .as_ref()
+            .unwrap()
+            .is_empty()
+    );
+
+    let selector = ComponentPropertyPath::new(rows).with_steps([
+        ComponentPropertyStep::ListItem {
+            by: key,
+            key: ComponentPropertyKey::U64(127),
+        },
+        ComponentPropertyStep::Member(ComponentFieldId::new("value")),
+    ]);
+    let default_value = ComponentValue::U64(128);
+    let explicit_value = ComponentValue::U64(900);
+    for (name, position, expected) in [
+        (
+            "default-a",
+            127,
+            AuthoringPropertyValue::Defaulted(&default_value),
+        ),
+        (
+            "default-b",
+            127,
+            AuthoringPropertyValue::Defaulted(&default_value),
+        ),
+        (
+            "explicit",
+            0,
+            AuthoringPropertyValue::Present(&explicit_value),
+        ),
+    ] {
+        let item = state
+            .entity_view(&source.entities, &SceneEntityId::new(name).unwrap())
+            .unwrap()
+            .component(&component())
+            .unwrap();
+        let mut reads = ComponentPropertyReadBudget::new(
+            ItemLimit::new(16).unwrap(),
+            ByteLimit::new(256).unwrap(),
+        );
+        let (value, storage) = item
+            .property_value_with_read_path(&selector, &mut reads)
+            .unwrap();
+        assert_eq!(value, expected);
+        assert!(reads.scanned_entries() <= 8);
+        assert_eq!(
+            storage,
+            ComponentFieldPath::new([
+                ComponentFieldPathSegment::index(position),
+                ComponentFieldPathSegment::field("value"),
+            ])
+        );
+    }
+}
+
+#[test]
 fn extension_keeps_every_full_declaration_owner_and_adapter() {
     let previous = basis(schema());
     let mutate = |edit: fn(&mut BTreeMap<ComponentTypeId, AuthoringSchemaEntry>)| {

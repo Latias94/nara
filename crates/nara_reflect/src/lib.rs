@@ -87,9 +87,8 @@ pub use property::{
     ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
     ComponentPropertyReadBudget, ComponentPropertySchemaClaim, ComponentPropertyStep,
     ResolvedComponentProperty, replace_component_property, resolve_component_property,
-    resolve_component_property_in_root, resolve_component_property_read_path_in_root,
-    resolve_component_property_schema_claim, resolve_component_property_schema_in_root,
-    resolve_component_property_with_limits,
+    resolve_component_property_in_root, resolve_component_property_schema_claim,
+    resolve_component_property_schema_in_root, resolve_component_property_with_limits,
 };
 pub use provider::{
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
@@ -167,7 +166,9 @@ pub mod __private {
         validate_registered_persistent_apply_targets,
     };
     pub use crate::property::{
-        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+        ComponentPropertyAdmissionError, ComponentPropertyReadIndex,
+        read_admitted_component_property_in_root,
+        resolve_component_property_schema_claim_with_admission,
         resolve_component_property_storage_path_with_admission,
         validate_component_property_value_with_admission,
     };
@@ -177,8 +178,10 @@ pub mod __private {
     };
     pub use crate::registry::{
         ComponentRegistrySnapshotWitness, ComponentValueAdmissionError,
-        validate_component_value_with_admission, validate_explicit_component_value,
-        validate_explicit_component_value_with_admission, validate_schema_capabilities,
+        index_component_property_defaults, index_component_property_reads,
+        index_component_property_reads_with_admission, validate_component_value_with_admission,
+        validate_explicit_component_value, validate_explicit_component_value_with_admission,
+        validate_schema_capabilities,
     };
 
     use crate::{

@@ -25,6 +25,11 @@ use crate::{
     validate_component_value, validate_component_value_with_limits,
 };
 
+mod keyed_index;
+
+pub use keyed_index::ComponentPropertyReadIndex;
+pub(crate) use keyed_index::KeyedListLocations;
+
 /// Exact logical identity within a keyed list. Reusing a key asserts identity continuity;
 /// Reflect does not retain deleted item history or distinguish restoration from accidental reuse.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -392,7 +397,7 @@ pub struct ComponentPropertySchemaClaim<'schema> {
 }
 
 /// Finite selector lookup work, independent of the selected value's copying budget.
-/// Counts examined declarations, optional wrappers, tombstones, list keys and map lookups,
+/// Counts examined declarations, optional wrappers, tombstones, list keys and indexed lookups,
 /// not allocator usage, elapsed time or internal BTreeMap comparisons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPropertyReadBudget {
@@ -747,7 +752,8 @@ fn resolve_component_property_schema_claim_impl<'schema>(
         path.logical_bytes()?,
     )?;
     let field = resolve_root_field(schema, &path.root, Some(&mut *budget), &mut admission)?;
-    let selected = resolve_root_location(field, None, path, Some(budget), None, admission, None)?;
+    let selected =
+        resolve_root_location(field, None, path, Some(budget), None, admission, None, None)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
@@ -763,7 +769,7 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
-    let selected = admitted_root_location(field, Some(value.into()), path, budget, false)?;
+    let selected = admitted_root_location(field, Some(value.into()), path, budget, false, None)?;
     Ok(ResolvedComponentProperty {
         shape: selected.shape,
         value: selected
@@ -772,19 +778,24 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     })
 }
 
-/// Records the wire location selected in an admitted root for the exact same observation.
-/// Retained use requires the caller to fence the source revision and Schema admission.
+/// Reads an already admitted root with the index from its exact original field validation.
+/// The caller supplies the same explicit or defaulted field value and Schema. Index positions
+/// are private to the observation. A retained read path needs the original revision fence.
 #[doc(hidden)]
-pub fn resolve_component_property_read_path_in_root<'value>(
+pub fn read_admitted_component_property_in_root<'value>(
     field: &ComponentFieldSchema,
     value: ComponentValueRef<'value>,
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
+    capture_read_path: bool,
+    index: Option<&ComponentPropertyReadIndex>,
 ) -> Result<(ComponentValueRef<'value>, ComponentFieldPath), ComponentPropertyError> {
-    let selected = admitted_root_location(field, Some(value), path, budget, true)?;
+    let lists = index.and_then(|index| index.lists(field.id()));
+    let selected =
+        admitted_root_location(field, Some(value), path, budget, capture_read_path, lists)?;
     Ok((
         selected.value.expect("the observed root has a value"),
-        selected.storage.expect("the read path is captured"),
+        selected.storage.unwrap_or_default(),
     ))
 }
 
@@ -799,7 +810,7 @@ pub fn resolve_component_property_schema_in_root<'schema>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
-    let selected = admitted_root_location(field, None, path, budget, false)?;
+    let selected = admitted_root_location(field, None, path, budget, false, None)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
@@ -812,6 +823,7 @@ fn admitted_root_location<'schema, 'value>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
     capture_read_path: bool,
+    indexed_lists: Option<&KeyedListLocations>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     path.validate()?;
     if field.id != path.root {
@@ -825,6 +837,7 @@ fn admitted_root_location<'schema, 'value>(
         capture_read_path.then(Vec::new),
         None,
         None,
+        indexed_lists,
     )
 }
 
@@ -1009,6 +1022,7 @@ fn resolve_location_with_admission<'schema, 'value, 'path>(
         Some(root.path.segments().to_vec()),
         admission,
         edit,
+        None,
     )?;
     Ok((
         ResolvedComponentProperty {
@@ -1050,6 +1064,7 @@ fn resolve_root_location<'schema, 'value, 'path>(
     mut storage: Option<Vec<ComponentFieldPathSegment>>,
     mut admission: Option<&mut PropertyAdmission<'_>>,
     mut edit: Option<&mut PropertyReplacement<'path, '_>>,
+    mut indexed_lists: Option<&KeyedListLocations>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
     let mut depth = 0;
@@ -1155,6 +1170,7 @@ fn resolve_root_location<'schema, 'value, 'path>(
                     admit_property_work(&mut admission, 0, 0, member.name.len())?;
                     storage.push(ComponentFieldPathSegment::field(&member.name));
                 }
+                indexed_lists = indexed_lists.and_then(|lists| lists.field(&member.name));
                 shape = &member.shape;
             }
             ComponentPropertyStep::ListItem { by, key } => {
@@ -1222,60 +1238,87 @@ fn resolve_root_location<'schema, 'value, 'path>(
                         ComponentCodecError::invalid_field("keyed list", "list"),
                     ));
                 };
-                let new_key = match (&edit, &path.steps[step + 1..]) {
-                    (Some(edit), []) => {
-                        admit_property_work(&mut admission, 1, member.name.len(), 0)?;
-                        edit.value.get(&member.name)
-                    }
-                    (Some(edit), [ComponentPropertyStep::Member(id)]) if id == by => {
-                        Some(edit.value)
-                    }
-                    _ => None,
-                };
-                let mut key_change = None;
-                if let Some(replacement) = new_key.filter(|value| value.kind() == expected) {
-                    admit_property_work(&mut admission, 1, key.logical_bytes(), 0)?;
-                    if !key.matches(replacement) {
-                        key_change = Some(ListKeyChange {
-                            step,
-                            by,
-                            previous: key,
-                            value: replacement,
-                            duplicate: false,
-                        });
-                    }
-                }
-                let mut found = None;
-                for (index, value) in items.iter().enumerate() {
-                    observe_read(&mut budget, &mut admission, member.name.len())?;
-                    let identity = value
-                        .get(&member.name)
-                        .filter(|value| value.kind() == expected)
+                let indexed = indexed_lists.and_then(KeyedListLocations::rows);
+                let (index, value) = if let Some(rows) = indexed {
+                    observe_read(
+                        &mut budget,
+                        &mut admission,
+                        member.name.len().saturating_add(key.logical_bytes()),
+                    )?;
+                    let index =
+                        *rows
+                            .get(key)
+                            .ok_or_else(|| ComponentPropertyError::ListItemNotFound {
+                                step,
+                                key: key.clone(),
+                            })?;
+                    let value = items
+                        .get(index)
+                        .filter(|value| {
+                            value
+                                .get(&member.name)
+                                .is_some_and(|identity| key.matches(identity))
+                        })
                         .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
-                    let bytes = identity.as_str().map_or(8, str::len);
-                    observe_read(&mut budget, &mut admission, bytes)?;
-                    if let Some(change) = &mut key_change
-                        && !change.duplicate
-                    {
-                        admit_property_work(&mut admission, 1, bytes, 0)?;
-                        change.duplicate = change.value == identity;
+                    (index, value)
+                } else {
+                    let new_key = match (&edit, &path.steps[step + 1..]) {
+                        (Some(edit), []) => {
+                            admit_property_work(&mut admission, 1, member.name.len(), 0)?;
+                            edit.value.get(&member.name)
+                        }
+                        (Some(edit), [ComponentPropertyStep::Member(id)]) if id == by => {
+                            Some(edit.value)
+                        }
+                        _ => None,
+                    };
+                    let mut key_change = None;
+                    if let Some(replacement) = new_key.filter(|value| value.kind() == expected) {
+                        admit_property_work(&mut admission, 1, key.logical_bytes(), 0)?;
+                        if !key.matches(replacement) {
+                            key_change = Some(ListKeyChange {
+                                step,
+                                by,
+                                previous: key,
+                                value: replacement,
+                                duplicate: false,
+                            });
+                        }
                     }
-                    if key.matches(identity) && found.replace((index, value)).is_some() {
-                        return Err(ComponentPropertyError::AmbiguousListItem {
+                    let mut found = None;
+                    for (index, value) in items.iter().enumerate() {
+                        observe_read(&mut budget, &mut admission, member.name.len())?;
+                        let identity = value
+                            .get(&member.name)
+                            .filter(|value| value.kind() == expected)
+                            .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
+                        let bytes = identity.as_str().map_or(8, str::len);
+                        observe_read(&mut budget, &mut admission, bytes)?;
+                        if let Some(change) = &mut key_change
+                            && !change.duplicate
+                        {
+                            admit_property_work(&mut admission, 1, bytes, 0)?;
+                            change.duplicate = change.value == identity;
+                        }
+                        if key.matches(identity) && found.replace((index, value)).is_some() {
+                            return Err(ComponentPropertyError::AmbiguousListItem {
+                                step,
+                                key: key.clone(),
+                            });
+                        }
+                    }
+                    let selected =
+                        found.ok_or_else(|| ComponentPropertyError::ListItemNotFound {
                             step,
                             key: key.clone(),
-                        });
+                        })?;
+                    if let (Some(edit), Some(change)) = (&mut edit, key_change) {
+                        edit.key_change = Some(change);
                     }
-                }
-                let (index, value) =
-                    found.ok_or_else(|| ComponentPropertyError::ListItemNotFound {
-                        step,
-                        key: key.clone(),
-                    })?;
-                if let (Some(edit), Some(change)) = (&mut edit, key_change) {
-                    edit.key_change = Some(change);
-                }
+                    selected
+                };
                 current = Some(value);
+                indexed_lists = indexed_lists.and_then(|lists| lists.item(index));
                 if let Some(storage) = &mut storage {
                     let index = u32::try_from(index)
                         .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?;
@@ -1303,6 +1346,7 @@ fn resolve_root_location<'schema, 'value, 'path>(
                     admit_property_work(&mut admission, 0, 0, key.len())?;
                     storage.push(ComponentFieldPathSegment::field(key));
                 }
+                indexed_lists = indexed_lists.and_then(|lists| lists.field(key));
                 shape = entry;
             }
         }

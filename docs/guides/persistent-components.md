@@ -947,6 +947,11 @@ the same selector and complete value semantics. Schema/selector admission remain
 Keep typed resource refusals distinct from invalid selectors and replacement values; a budget
 failure does not establish a conflicting source intent.
 
+The Scene and Prefab authoring owners retain the row positions from key uniqueness validation.
+Workspace reads and prepared previews use those positions for first lookup by key, including on a
+non-active document. The caller's lookup and output budgets still apply. Value-page continuations
+retain their original read basis, and each write resolves against the current private candidate.
+
 For editing, pass ordered `AuthoringPropertyEdit` replacements to
 `prepare_authoring_property_edit` on a Scene/Prefab session, Workspace, project session or Editor
 Application, then use `commit_authoring_edit`. An edit inside an explicitly stored root produces

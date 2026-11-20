@@ -4,7 +4,8 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
     __private::{
-        ComponentPropertyAdmissionError, freeze_component_defaults,
+        ComponentPropertyAdmissionError, freeze_component_defaults, index_component_property_reads,
+        index_component_property_reads_with_admission, read_admitted_component_property_in_root,
         resolve_component_property_storage_path_with_admission,
         validate_component_property_value_with_admission,
     },
@@ -241,6 +242,143 @@ fn selected() -> ComponentPropertyPath {
         ComponentPropertyStep::MapEntry("slot.with[syntax]".into()),
         ComponentPropertyStep::Member(id("value")),
     ])
+}
+
+#[test]
+fn admitted_key_positions_follow_each_original_nested_collection() {
+    let inner = ComponentValueShape::keyed_list(
+        ComponentValueShape::record_members([
+            ComponentShapeMember::new("wire_id", ComponentValueKind::I64).with_id(id("inner")),
+            ComponentShapeMember::new("wire_score", ComponentValueKind::U64).with_id(id("score")),
+        ]),
+        id("inner"),
+    );
+    let schema = schema(ComponentValueShape::keyed_list(
+        ComponentValueShape::record_members([
+            ComponentShapeMember::new("wire_name", ComponentValueKind::String).with_id(id("outer")),
+            ComponentShapeMember::new("wire_groups", ComponentValueShape::map(inner))
+                .with_id(id("groups")),
+        ]),
+        id("outer"),
+    ));
+    let inner_row = |key, score| {
+        ComponentValue::map([
+            ("wire_id", ComponentValue::I64(key)),
+            ("wire_score", ComponentValue::U64(score)),
+        ])
+    };
+    let outer_row = |name: &str, rows| {
+        ComponentValue::map([
+            ("wire_name", ComponentValue::String(name.into())),
+            (
+                "wire_groups",
+                ComponentValue::map([("active.group", ComponentValue::List(rows))]),
+            ),
+        ])
+    };
+    let value = payload(ComponentValue::List(vec![
+        outer_row("north", vec![inner_row(-7, 11), inner_row(7, 12)]),
+        outer_row("south", vec![inner_row(7, 21), inner_row(-7, 22)]),
+    ]));
+    let ordinary = index_component_property_reads(&schema, (&value).into(), |_| true).unwrap();
+    let mut allocated = 0usize;
+    let admitted = index_component_property_reads_with_admission(
+        &schema,
+        (&value).into(),
+        |_| true,
+        |_, _, bytes| {
+            allocated += bytes;
+            Ok::<_, ()>(())
+        },
+    )
+    .unwrap();
+    assert_eq!(admitted, ordinary);
+    assert!(allocated >= admitted.retained_bytes());
+
+    let field = &schema.fields[0];
+    let root = value.get_path(field.path()).unwrap();
+    for (name, position, score) in [("north", 0, 11), ("south", 1, 22)] {
+        let path = ComponentPropertyPath::new(id("root")).with_steps([
+            ComponentPropertyStep::ListItem {
+                by: id("outer"),
+                key: ComponentPropertyKey::String(name.into()),
+            },
+            ComponentPropertyStep::Member(id("groups")),
+            ComponentPropertyStep::MapEntry("active.group".into()),
+            ComponentPropertyStep::ListItem {
+                by: id("inner"),
+                key: ComponentPropertyKey::I64(-7),
+            },
+            ComponentPropertyStep::Member(id("score")),
+        ]);
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(12).unwrap(),
+            ByteLimit::new(512).unwrap(),
+        );
+        let (selected, storage) = read_admitted_component_property_in_root(
+            field,
+            root.into(),
+            &path,
+            &mut budget,
+            true,
+            Some(&admitted),
+        )
+        .unwrap();
+        assert_eq!(selected.as_u64(), Some(score));
+        assert_eq!(
+            storage,
+            ComponentFieldPath::new([
+                ComponentFieldPathSegment::index(position),
+                ComponentFieldPathSegment::field("wire_groups"),
+                ComponentFieldPathSegment::field("active.group"),
+                ComponentFieldPathSegment::index(position),
+                ComponentFieldPathSegment::field("wire_score"),
+            ])
+        );
+        assert_eq!(
+            root.get_path(&storage).unwrap(),
+            &ComponentValue::U64(score)
+        );
+    }
+
+    let duplicate = payload(ComponentValue::List(vec![outer_row(
+        "north",
+        vec![inner_row(-7, 11), inner_row(-7, 12)],
+    )]));
+    assert_eq!(
+        index_component_property_reads(&schema, (&duplicate).into(), |_| true).unwrap_err(),
+        crate::validate_component_value(&schema, &duplicate).unwrap_err(),
+    );
+}
+
+#[test]
+fn nested_key_indexes_keep_only_one_copy_of_their_shared_map_key() {
+    let list = ComponentValueShape::keyed_list(
+        ComponentValueShape::record_members([ComponentShapeMember::new(
+            "id",
+            ComponentValueKind::U64,
+        )
+        .with_id(id("key"))]),
+        id("key"),
+    );
+    let schema = schema(ComponentValueShape::map(
+        ComponentValueShape::record_members([
+            ComponentShapeMember::new("first", list.clone()).with_id(id("first")),
+            ComponentShapeMember::new("second", list).with_id(id("second")),
+        ]),
+    ));
+    let retained_bytes = |name: &str| {
+        let row = ComponentValue::List(vec![ComponentValue::map([("id", ComponentValue::U64(1))])]);
+        let value = payload(ComponentValue::map([(
+            name,
+            ComponentValue::map([("first", row.clone()), ("second", row)]),
+        )]));
+        index_component_property_reads(&schema, (&value).into(), |_| true)
+            .unwrap()
+            .retained_bytes()
+    };
+    let long = "x".repeat(32 * 1024);
+    assert_eq!(retained_bytes(&long) - retained_bytes("x"), long.len() - 1);
 }
 
 #[test]

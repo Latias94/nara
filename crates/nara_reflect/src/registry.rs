@@ -30,6 +30,7 @@ use crate::{
     persistent_apply::{
         ErasedPreparedComponentCandidate, PreparedComponent, PreparedComponentCandidate,
     },
+    property::{ComponentPropertyReadIndex, KeyedListLocations},
     provider::{
         ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
         ComponentSchemaOwnerId, ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
@@ -3076,6 +3077,91 @@ pub fn validate_explicit_component_value_with_admission<E>(
     value: ComponentValueRef<'_>,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), ComponentValueAdmissionError<E>> {
+    validate_explicit_component_value_admitted(schema, value, &mut admit, None)
+}
+
+/// Validates the exact admitted effective value and retains positions from its key checks.
+/// The returned index belongs to the selected field values and the immutable current Schema.
+#[doc(hidden)]
+pub fn index_component_property_reads(
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+    select: impl Fn(&ComponentFieldSchema) -> bool,
+) -> Result<ComponentPropertyReadIndex, ComponentCodecError> {
+    let mut index = ComponentPropertyReadIndex::default();
+    match validate_component_value_coverage_admitted::<std::convert::Infallible>(
+        schema,
+        &SchemaPathIndex::from_schema(schema),
+        value,
+        false,
+        &mut None,
+        Some(PropertyReadIndexBuild {
+            index: &mut index,
+            select: &select,
+        }),
+    ) {
+        Ok(()) => Ok(index),
+        Err(ComponentValueAdmissionError::Value(error)) => Err(error),
+        Err(ComponentValueAdmissionError::Admission(never)) => match never {},
+    }
+}
+
+/// Admits semantic validation and the storage retained by the exact effective value's read index.
+#[doc(hidden)]
+pub fn index_component_property_reads_with_admission<E>(
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+    select: impl Fn(&ComponentFieldSchema) -> bool,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<ComponentPropertyReadIndex, ComponentValueAdmissionError<E>> {
+    let mut index = ComponentPropertyReadIndex::default();
+    validate_explicit_component_value_admitted(
+        schema,
+        value,
+        &mut admit,
+        Some(PropertyReadIndexBuild {
+            index: &mut index,
+            select: &select,
+        }),
+    )?;
+    if !index.is_empty() {
+        admit(0, 0, ComponentPropertyReadIndex::ALLOCATION_BYTES)
+            .map_err(ComponentValueAdmissionError::Admission)?;
+    }
+    Ok(index)
+}
+
+/// Indexes the immutable canonical defaults owned by one admitted Schema.
+#[doc(hidden)]
+pub fn index_component_property_defaults(
+    schema: &ComponentSchema,
+) -> Result<ComponentPropertyReadIndex, ComponentShapeError> {
+    let mut index = ComponentPropertyReadIndex::default();
+    for field in &schema.fields {
+        if let Some(value) = field.default_value()
+            && field.shape.has_keyed_property_lists()
+        {
+            let mut locations = KeyedListLocations::default();
+            field
+                .shape
+                .validate_value_and_index(value.into(), &mut locations)?;
+            index.retain_field(field.id(), locations);
+        }
+    }
+    Ok(index)
+}
+
+struct PropertyReadIndexBuild<'a> {
+    index: &'a mut ComponentPropertyReadIndex,
+    select: &'a dyn Fn(&ComponentFieldSchema) -> bool,
+}
+
+fn validate_explicit_component_value_admitted<E>(
+    schema: &ComponentSchema,
+    value: ComponentValueRef<'_>,
+    admit: &mut ValueValidationAdmission<'_, E>,
+    property_index: Option<PropertyReadIndexBuild<'_>>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
     // sort_unstable allocates no scratch beyond the collected offsets. Charge comparison
     // work against actual declaration lengths before constructing this temporary index.
     let comparisons = (usize::BITS - schema.fields.len().leading_zeros()) as usize;
@@ -3102,7 +3188,14 @@ pub fn validate_explicit_component_value_with_admission<E>(
         .map_err(ComponentValueAdmissionError::Admission)?;
     }
     let index = SchemaPathIndex::from_schema(schema);
-    validate_component_value_coverage_admitted(schema, &index, value, false, &mut Some(&mut admit))
+    validate_component_value_coverage_admitted(
+        schema,
+        &index,
+        value,
+        false,
+        &mut Some(admit),
+        property_index,
+    )
 }
 
 fn validate_component_value_coverage<'a>(
@@ -3125,6 +3218,7 @@ fn validate_component_value_coverage_with_presence<'a>(
         value.into(),
         require_all_fields,
         &mut None,
+        None,
     ) {
         Ok(()) => Ok(()),
         Err(ComponentValueAdmissionError::Value(error)) => Err(error),
@@ -3138,19 +3232,32 @@ fn validate_component_value_coverage_admitted<E>(
     value: ComponentValueRef<'_>,
     require_all_fields: bool,
     admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
+    mut property_index: Option<PropertyReadIndexBuild<'_>>,
 ) -> Result<(), ComponentValueAdmissionError<E>> {
     if schema.fields.is_empty() && value.as_map().is_some_and(|fields| fields.is_empty()) {
         return Ok(());
     }
 
     for field in &schema.fields {
+        let index = property_index
+            .as_mut()
+            .filter(|build| (build.select)(field));
         if let Some(admit) = admission.as_deref_mut() {
-            preflight_field_validation(field, value, admit)
+            preflight_field_validation(field, value, index.is_some(), admit)
                 .map_err(ComponentValueAdmissionError::Admission)?;
         }
         match value.get_path(&field.path) {
             Ok(value) => {
-                if let Err(error) = field.shape.validate_value(value) {
+                let result = if let Some(build) = index {
+                    let mut locations = KeyedListLocations::default();
+                    field
+                        .shape
+                        .validate_value_and_index(value, &mut locations)
+                        .map(|()| build.index.retain_field(field.id(), locations))
+                } else {
+                    field.shape.validate_value(value)
+                };
+                if let Err(error) = result {
                     if error.kind == ComponentShapeErrorKind::NumericInterval {
                         return Err(numeric_range_error(&field.id).into());
                     }
@@ -3191,7 +3298,7 @@ fn validate_component_value_coverage_admitted<E>(
     validate_value_node_coverage(schema, path_index, value, &mut Vec::new(), admission)
 }
 
-const VALIDATION_BTREE_ENTRY_BYTES: usize = 96;
+pub(crate) const VALIDATION_BTREE_ENTRY_BYTES: usize = 96;
 const VALIDATION_PATH_PUSH_BYTES: usize = 8 * std::mem::size_of::<ComponentFieldPathSegment>();
 
 fn validation_path_bytes(path: &[ComponentFieldPathSegment]) -> usize {
@@ -3243,6 +3350,7 @@ impl FieldValidationErrorScratch {
 fn preflight_field_validation<E>(
     field: &ComponentFieldSchema,
     value: ComponentValueRef<'_>,
+    index_keys: bool,
     admit: &mut ValueValidationAdmission<'_, E>,
 ) -> Result<(), E> {
     let mut current = Some(value);
@@ -3284,7 +3392,17 @@ fn preflight_field_validation<E>(
     if let Some(value) = current {
         // validate_value first validates its shape declaration, even for opaque values.
         preflight_validation_shape(&field.shape, segments, bytes, &mut scratch, admit)?;
-        preflight_validation_value(&field.shape, value, segments, bytes, &mut scratch, admit)?;
+        if preflight_validation_value(
+            &field.shape,
+            value,
+            segments,
+            bytes,
+            index_keys,
+            &mut scratch,
+            admit,
+        )? {
+            admit(0, 0, ComponentPropertyReadIndex::field_bytes(field.id()))?;
+        }
     }
     admit(0, 0, scratch.allocation_bytes())
 }
@@ -3302,7 +3420,7 @@ pub(crate) fn preflight_property_validation<'a, E>(
         ..FieldValidationErrorScratch::default()
     };
     preflight_validation_shape(shape, 0, 0, &mut scratch, admit)?;
-    preflight_validation_value(shape, value.into(), 0, 0, &mut scratch, admit)?;
+    preflight_validation_value(shape, value.into(), 0, 0, false, &mut scratch, admit)?;
     admit(0, 0, scratch.allocation_bytes())
 }
 
@@ -3357,16 +3475,20 @@ fn preflight_validation_value<E>(
     value: ComponentValueRef<'_>,
     segments: usize,
     bytes: usize,
+    index_keys: bool,
     scratch: &mut FieldValidationErrorScratch,
     admit: &mut ValueValidationAdmission<'_, E>,
-) -> Result<(), E> {
+) -> Result<bool, E> {
     use crate::ComponentValueShape as Shape;
     admit(1, 0, 0)?;
     scratch.path(segments, bytes);
+    let mut retains_key_index = false;
     match (shape, value.kind()) {
         (Shape::Optional { .. }, ComponentValueKind::Null) => {}
         (Shape::Optional { value: shape }, _) => {
-            preflight_validation_value(shape, value, segments, bytes, scratch, admit)?
+            return preflight_validation_value(
+                shape, value, segments, bytes, index_keys, scratch, admit,
+            );
         }
         (Shape::Record { members }, ComponentValueKind::Map) => {
             let values = value.as_map().expect("Map kind checked");
@@ -3382,14 +3504,18 @@ fn preflight_validation_value<E>(
                         member.name.len(),
                         VALIDATION_PATH_PUSH_BYTES.saturating_add(member.name.len()),
                     )?;
-                    preflight_validation_value(
+                    if preflight_validation_value(
                         &member.shape,
                         value,
                         segments + 1,
                         bytes.saturating_add(member.name.len()),
+                        index_keys && member.id.is_some(),
                         scratch,
                         admit,
-                    )?;
+                    )? {
+                        admit(0, 0, KeyedListLocations::edge_bytes(member.name.len()))?;
+                        retains_key_index = true;
+                    }
                 }
             }
             for name in values.keys() {
@@ -3410,16 +3536,21 @@ fn preflight_validation_value<E>(
                 }
                 _ => None,
             };
+            let index_items = index_keys && key_member.is_some();
+            retains_key_index = index_items && !values.is_empty();
             for value in values.iter() {
                 admit(1, 4, VALIDATION_PATH_PUSH_BYTES)?;
-                preflight_validation_value(
+                if preflight_validation_value(
                     item,
                     value,
                     segments + 1,
                     bytes.saturating_add(4),
+                    index_items,
                     scratch,
                     admit,
-                )?;
+                )? {
+                    admit(0, 0, KeyedListLocations::edge_bytes(0))?;
+                }
                 if let Some(member) = key_member {
                     let key_bytes = value
                         .get(&member.name)
@@ -3441,14 +3572,18 @@ fn preflight_validation_value<E>(
                     name.len(),
                     VALIDATION_PATH_PUSH_BYTES.saturating_add(name.len()),
                 )?;
-                preflight_validation_value(
+                if preflight_validation_value(
                     shape,
                     value,
                     segments + 1,
                     bytes.saturating_add(name.len()),
+                    index_keys,
                     scratch,
                     admit,
-                )?;
+                )? {
+                    admit(0, 0, KeyedListLocations::edge_bytes(name.len()))?;
+                    retains_key_index = true;
+                }
             }
         }
         (Shape::AssetRef { .. }, _) => {
@@ -3460,7 +3595,7 @@ fn preflight_validation_value<E>(
         }
         _ => {}
     }
-    Ok(())
+    Ok(retains_key_index)
 }
 
 pub(crate) fn numeric_range_error(field: &ComponentFieldId) -> ComponentCodecError {

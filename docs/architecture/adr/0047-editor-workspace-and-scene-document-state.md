@@ -137,8 +137,11 @@ Rules:
   the root. Default provenance propagates to a selected descendant without materializing a whole
   effective component. Missing is an omitted declared root with no default, not an invalid nested
   target. Optional absence, missing keys and retired selectors remain typed resolution failures.
-  Finite selector scan work and copied output cost are independent limits; neither a scalar result
-  nor an admitted source makes a keyed-list scan free.
+  Finite selector work and copied output cost have independent limits. Available direct records
+  retain the key positions from validation of their exact stored and contextual default values.
+  Canonical defaults share positions through their admitted Schema. Reads charge a selected keyed
+  lookup or each row visited during enumeration. Each admitted candidate owns its positions, and
+  ordered writes resolve against its evolving values.
 - A bounded property value page starts at that same admitted selector. Scene/Prefab supplies the
   borrowed value and its origin. The Workspace pages actual text or collection contents and
   carries the exact workspace, document kind, revision, Schema and selected value path in the

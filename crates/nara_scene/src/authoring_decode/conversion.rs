@@ -304,18 +304,36 @@ fn classify_materialized_record(
         ));
     }
     let schema = &entry.schema;
-    let effective = {
+    let (effective, property_reads) = {
         let mut admission = |phase, bytes| {
             work.reserve(phase, bytes)
                 .map_err(|report| AuthoringDocumentPublicationError::new(report.diagnostics))
         };
-        super::reclassification::effective_value(
+        let effective = super::reclassification::effective_value(
             schema,
             record,
             context.limits,
             &mut Some(&mut admission),
         )
-        .map_err(publication_report)?
+        .map_err(publication_report)?;
+        let property_reads = if schema
+            .fields()
+            .iter()
+            .any(|field| field.shape().has_keyed_property_lists())
+        {
+            super::complete_value::validate_property_read_index(
+                schema,
+                &entry.owner,
+                component,
+                record,
+                &effective,
+                &mut Some(&mut admission),
+            )
+            .map_err(publication_report)?
+        } else {
+            None
+        };
+        (effective, property_reads)
     };
     let limits = context
         .limits
@@ -409,6 +427,7 @@ fn classify_materialized_record(
         readiness: classified.readiness,
         adapter: classified.adapter,
         schema_declared_asset_references: references,
+        property_reads,
     });
     Ok(())
 }
