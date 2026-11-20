@@ -330,6 +330,9 @@ with a one-pixel marker, an 11×1/64 pixel marker and a collapsed control. It re
 select their source entity. The collapsed control and surrounding clear pixels produce no hit.
 Windows Vulkan hardware run `41871552-a3bd-493e-b35d-da873eeb6fec` passes all four composition
 tests on an RTX 4090. The regression joins actual offscreen image output and its display receipt.
+The independent CPU preview path passes all six selected controls in
+`b32c90f6-6296-4e45-9832-5af17c23b0ba`, including the geometry boundary control and ordinary
+preview transactions.
 [Composition regression](../../tests/fixtures/stock-composition-consumer/tests/composition.rs)
 
 ### Reference Game projectile retirement
@@ -348,6 +351,7 @@ retirement, nested and observed despawn, and two projectiles resolving their hit
 The product UI cohort also preserves the distinct default, hovered, pressed and focused Retry
 appearance. The timing table above remains the release baseline for writer operations. This
 repair targets one real caller and leaves immediate projectile spawning on its current entry point.
+The shared Hierarchy suite passes 50/50 in `66a170bb-5a36-4dd9-9598-4fe443daad3f`.
 [Reference game retirement](../../reference-game/src/systems.rs) ·
 [Hierarchy lifetime boundary](../architecture/adr/0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md#decision)
 
