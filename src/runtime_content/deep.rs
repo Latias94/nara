@@ -5,11 +5,23 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetProductRef, AssetRef};
+use nara_asset::{AssetProductRef, AssetRef, AssetRuntimeError};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    SafeSummary,
+};
 use nara_fs::ContentDigest;
 use nara_image::ImageDomain;
 use nara_material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
-use nara_reflect::ComponentTypeId;
+use nara_reflect::{
+    ComponentTypeId, ComponentValueRef, asset_reference_decode_work_bytes,
+    decode_asset_reference_value,
+};
+use nara_scene::SceneEntityId;
+use nara_sprite::{
+    SPRITE_COMPONENT_ID, SPRITE_IMAGE_FIELD_ID, SPRITE_SCHEMA_OWNER_ID,
+    persisted_sprite_image_value,
+};
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
@@ -27,8 +39,8 @@ use super::{
 ///
 /// Root Scenes, addressable roots and global Input participate. Every reachable Required or
 /// Reference target uses its selected production decoder and complete dependency admission.
-/// First-party Scene material bindings, Material texture kinds and Image/TileSet/Tilemap CPU
-/// constraints are checked against actual decoded facts and the executable's selected codec roles.
+/// First-party Scene Sprite and material bindings, Material texture kinds and Image/TileSet/Tilemap
+/// CPU constraints are checked against decoded facts and the executable's selected codec roles.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -149,6 +161,7 @@ impl NativeFacts {
     ) -> Result<(), RuntimeContentError> {
         let tilemap = ComponentTypeId::new("nara.tilemap.Tilemap");
         let material = ComponentTypeId::new("nara.material2d");
+        let sprite = ComponentTypeId::new(SPRITE_COMPONENT_ID);
         for entity in scene.candidate().document().entities() {
             if let Some(record) = entity.components().get(&tilemap) {
                 let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
@@ -171,6 +184,14 @@ impl NativeFacts {
             if let Some(record) = entity.components().get(&material) {
                 let binding = SceneMaterialBinding::read(base, record)?;
                 self.material_bindings.push(&base.inner.budget, binding)?;
+            }
+            if let Some(record) = entity.components().get(&sprite)
+                && record
+                    .schema_owner()
+                    .is_some_and(|owner| owner.as_str() == SPRITE_SCHEMA_OWNER_ID.as_str())
+                && let Some(image) = persisted_sprite_image_value(record.value())
+            {
+                validate_sprite_image(base, scene.product(), entity.id(), image)?;
             }
         }
         Ok(())
@@ -281,6 +302,65 @@ impl NativeFacts {
         }
         Ok(())
     }
+}
+
+fn validate_sprite_image(
+    base: &RuntimeContentBase,
+    scene: AssetProductRef,
+    entity: &SceneEntityId,
+    image: ComponentValueRef<'_>,
+) -> Result<(), RuntimeContentError> {
+    let target = {
+        let scratch = asset_reference_decode_work_bytes(image)
+            .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
+        let _work = base.inner.budget.reserve(0, scratch)?;
+        let reference = decode_asset_reference_value(image)
+            .map_err(|_| RuntimeContentError::ProductIdentityMismatch)?;
+        reference
+            .as_product()
+            .ok_or(RuntimeContentError::ProductIdentityMismatch)?
+    };
+    let member = base
+        .member(target)
+        .ok_or(RuntimeContentError::UndeclaredProduct)?;
+    if base.plan().runtime_codecs().role(member) != Some(RuntimeCodecRole::Image) {
+        return Err(sprite_image_publication_error(scene, entity, target));
+    }
+    Ok(())
+}
+
+fn sprite_image_publication_error(
+    scene: AssetProductRef,
+    entity: &SceneEntityId,
+    target: AssetProductRef,
+) -> RuntimeContentError {
+    let mut diagnostic = Diagnostic::error(
+        DiagnosticCode::new("runtime.content.sprite-image-publication-unavailable")
+            .expect("engine diagnostic code"),
+        SafeSummary::new(
+            "Scene Sprite image requires an Image codec selected for native publication",
+        )
+        .expect("engine diagnostic summary"),
+    );
+    let scene = scene.to_string();
+    let target = target.to_string();
+    for (key, value) in [
+        ("scene-product", scene.as_str()),
+        ("entity", entity.as_str()),
+        ("component", SPRITE_COMPONENT_ID),
+        ("field", SPRITE_IMAGE_FIELD_ID),
+        ("target-product", target.as_str()),
+    ] {
+        let key = DiagnosticFieldKey::new(key).expect("engine diagnostic field key");
+        let field = match PublicDiagnosticIdentifier::new(value) {
+            Ok(value) => DiagnosticField::public_identifier(key, value),
+            Err(_) => DiagnosticField::sensitive(key),
+        };
+        diagnostic = diagnostic
+            .try_with_field(field)
+            .expect("unique bounded Sprite diagnostic fields");
+    }
+    RuntimeContentError::Asset(AssetRuntimeError::new(diagnostic))
 }
 
 impl RuntimeContentBase {

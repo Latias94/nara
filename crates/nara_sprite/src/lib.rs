@@ -230,6 +230,13 @@ impl Sprite {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SpritePlugin;
 
+#[doc(hidden)]
+pub const SPRITE_COMPONENT_ID: &str = "nara.sprite.Sprite";
+#[doc(hidden)]
+pub const SPRITE_IMAGE_FIELD_ID: &str = "material.image";
+const MATERIAL_FIELD: &str = "material";
+const IMAGE_FIELD: &str = "image";
+
 pub const SPRITE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.sprite");
 pub const SPRITE_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.sprite.components");
@@ -259,7 +266,7 @@ impl Plugin for SpritePlugin {
     }
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let component_id = ComponentTypeId::new("nara.sprite.Sprite");
+        let component_id = ComponentTypeId::new(SPRITE_COMPONENT_ID);
         nara_reflect::validate_schema_provider_for_plugin(
             context,
             SPRITE_PLUGIN_ID,
@@ -269,7 +276,7 @@ impl Plugin for SpritePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let component_id = ComponentTypeId::new("nara.sprite.Sprite");
+        let component_id = ComponentTypeId::new(SPRITE_COMPONENT_ID);
         nara_reflect::register_schema_provider_for_plugin(
             app,
             SPRITE_PLUGIN_ID,
@@ -288,7 +295,7 @@ pub fn register_sprite_components(
         |value, context| {
             let size = read_vec2(value.field("size")?, "size")?;
             let anchor = read_optional_anchor(value.get("anchor"))?;
-            let material = read_sprite_material(value.field("material")?, context)?;
+            let material = read_sprite_material(value.field(MATERIAL_FIELD)?, context)?;
             let texture_region =
                 read_optional_texture_region(value.get("texture_region"), "texture_region")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
@@ -359,7 +366,7 @@ pub fn register_sprite_components(
             let mut fields = vec![
                 ("size", vec2_value(sprite.size)?),
                 ("anchor", vec2_value(sprite.anchor.normalized)?),
-                ("material", material),
+                (MATERIAL_FIELD, material),
                 ("layer", ComponentValue::I64(i64::from(sprite.layer))),
                 ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
                 (
@@ -413,7 +420,7 @@ fn sprite_schema() -> ComponentSchema {
             vec2_value(Vec2::ZERO).expect("center anchor is finite"),
         ),
         (
-            "material",
+            MATERIAL_FIELD,
             material_value(
                 ComponentValue::Null,
                 SamplerDescriptor::LINEAR_CLAMP,
@@ -432,7 +439,7 @@ fn sprite_schema() -> ComponentSchema {
 // Generation-one wire contract retained as owner-local catalog lineage data.
 fn sprite_schema_predecessor() -> ComponentSchema {
     ComponentSchema::new(
-        ComponentTypeId::new("nara.sprite.Sprite"),
+        ComponentTypeId::new(SPRITE_COMPONENT_ID),
         "Sprite",
         ComponentSchemaVersion::ONE,
     )
@@ -443,7 +450,7 @@ fn sprite_schema_predecessor() -> ComponentSchema {
 fn validate_sprite_components(
     registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    registry.validate_component_registration::<Sprite>(&ComponentTypeId::new("nara.sprite.Sprite"))
+    registry.validate_component_registration::<Sprite>(&ComponentTypeId::new(SPRITE_COMPONENT_ID))
 }
 
 fn sprite_fields() -> [ComponentFieldSchema; 19] {
@@ -499,9 +506,9 @@ fn sprite_fields() -> [ComponentFieldSchema; 19] {
             ComponentValueKind::F64,
         ),
         sprite_optional_asset_ref(
-            "material.image",
+            SPRITE_IMAGE_FIELD_ID,
             "Image",
-            ComponentFieldPath::from_fields(["material", "image"]),
+            ComponentFieldPath::from_fields([MATERIAL_FIELD, IMAGE_FIELD]),
             ComponentValue::Null,
         ),
         sprite_optional(
@@ -659,7 +666,12 @@ fn read_sprite_material(
     context: &mut ComponentDecodeContext<'_>,
 ) -> Result<PreparedSpriteMaterial, ComponentCodecError> {
     let tint = read_color(value.field("tint")?, "material.tint")?;
-    let image_ref = read_optional_asset_ref(value.get("image"), "material.image")?;
+    let image_ref = material_image_value(value)
+        .map(nara_reflect::decode_asset_reference_value)
+        .transpose()
+        .map_err(|_| {
+            ComponentCodecError::invalid_field(SPRITE_IMAGE_FIELD_ID, "canonical asset reference")
+        })?;
     let image = prepare_optional_texture(context, image_ref, "material.image.value")?;
     let sampler = read_sampler(value.get("sampler"), "material.sampler")?;
     let alpha_mode = read_alpha_mode(value.get("alpha_mode"), "material.alpha_mode")?;
@@ -670,6 +682,18 @@ fn read_sprite_material(
         alpha_mode,
         tint,
     })
+}
+
+/// Borrows the optional Image reference from an admitted Sprite component value.
+#[doc(hidden)]
+pub fn persisted_sprite_image_value(value: ComponentValueRef<'_>) -> Option<ComponentValueRef<'_>> {
+    material_image_value(value.get(MATERIAL_FIELD)?)
+}
+
+fn material_image_value(material: ComponentValueRef<'_>) -> Option<ComponentValueRef<'_>> {
+    material
+        .get(IMAGE_FIELD)
+        .filter(|value| value.kind() != ComponentValueKind::Null)
 }
 
 fn prepare_optional_texture(
@@ -1004,7 +1028,7 @@ fn material_value(
     tint: Color,
 ) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([
-        ("image", image),
+        (IMAGE_FIELD, image),
         ("sampler", sampler_value(sampler)),
         (
             "alpha_mode",
@@ -1058,19 +1082,6 @@ fn alpha_mode_str(alpha_mode: AlphaMode2d) -> &'static str {
     match alpha_mode {
         AlphaMode2d::Opaque => "opaque",
         AlphaMode2d::Blend => "blend",
-    }
-}
-
-fn read_optional_asset_ref(
-    value: Option<ComponentValueRef<'_>>,
-    field: &str,
-) -> Result<Option<AssetRef>, ComponentCodecError> {
-    match value {
-        None => Ok(None),
-        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
-        Some(value) => nara_reflect::decode_asset_reference_value(value)
-            .map(Some)
-            .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
     }
 }
 
