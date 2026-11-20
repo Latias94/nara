@@ -60,3 +60,23 @@ Apply the existing surface-coverage result when registering pointer hit regions.
 | Existing 4K Editor Scene preview hardware control | 1/1 passed with explicit Vulkan on an RTX 4090, reading the rendered pixels and comparing the picked entities. |
 
 The seven new findings used temporary Rust 1.95.0 probes and release libraries. Cook reopened real packs. Prefab tests used registered semantic panels and real project files. The D-pad and pointer tests used CPU presentations. The focus test used injected Windows messages. GPU evidence above belongs to the existing 4K picking control. Native audio output, physical controller input and a visible Editor session were outside this verification.
+
+## Repair status
+
+### Build-declared Image dependencies and Sprite codec admission
+
+Commit `6be6521` fulfills the first-build Image dependency through the Project Content loader.
+The loader uses earlier provenance for a known typed Image and discovers new identities through
+its bounded catalogue. PNG and sidecar observations reach the original publication fence. Two
+review controls check the exact combined file limit and successful path-only delivery with an
+unrelated invalid sidecar. A mixed acquisition control decodes the known and newly discovered
+Images in both Product orders. The source-free consumer reopens the relocated single-Scene pack
+after the original project path disappears. [Independent Cook consumer](../../tests/fixtures/module-consumer/asset-domain-consumer/tests/project_cook_runtime_selection.rs)
+
+Commit `c696d1f` makes deep validation check that a stock Sprite with an Image binding selects an
+Image publication codec. The diagnostic names the Scene, entity, field and target Product. The
+ordinary consumer verifies a fresh Headless startup, direct acquisition through the CPU codec,
+and null and omitted Sprite bindings. [Sprite publication regression](../../tests/cooked_sprite_publication.rs)
+
+The related Windows results are recorded in the Cook plan. The other five findings remain open in
+this report. [Cook qualification](../plans/2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)

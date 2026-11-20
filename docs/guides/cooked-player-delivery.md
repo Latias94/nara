@@ -64,7 +64,10 @@ verified group. A source-only importer does not automatically opt into that buil
 Stock payloads enter the pack through a delivery root or a Required or Reference edge declared by
 the cooked content. An importer can embed PNG data in a custom Product and keep the PNG as a
 tracked build input. If the codec declares a link to the Image Product, the pack also contains
-the Image payload.
+the Image payload. Cook can resolve a stock Image first requested by the build result, even when
+every Scene snapshot contains zero stock Images. An Image already read through an earlier Scene is
+reacquired from its admitted source path. A newly selected PNG and sidecar count toward the project
+delivery file limit. Cook verifies both alongside the original build inputs before publication.
 
 Decoded roots retire sequentially; the unpublished builder accumulates their processed members
 and performs the existing final complete validation. `PreparedProjectCook` retains source and
@@ -101,13 +104,13 @@ belongs to this delivery. Surplus members reject rather than silently evade vali
 implicit roots. A compound member preserves all of its Products without duplicating its bytes.
 
 Deep validation runs the selected production decoders and actual reference inventories, including
-Image/TileSet/Tilemap CPU constraints. A decoded Material's texture slots must target members
-selected with the Image codec role; a present Scene Product and matching dependency edge do not
-satisfy that requirement. A target Image transform that invalidates an atlas rejects;
-the assembler does not repair authored data implicitly. This work publishes no native resource or
-World. Pack startup later admits the catalog/extents and current demand, rather than repeating
-the entire producer validation eagerly. Later original-file corruption can reject a Deferred
-acquisition while preserving the current Scene.
+Image/TileSet/Tilemap CPU constraints. Material texture slots and the stock Sprite's optional
+`material.image` must target members selected with the Image publication role. Choose
+`ProductRecipe::add_runtime_image_codec` for an Image used by these native bindings. The generic
+`add_runtime_asset_codec` registration remains available for direct typed CPU consumption. An Image
+transform that invalidates an atlas rejects assembly. Pack startup admits the catalog, extents and
+current demand. Later original-file corruption can reject a Deferred acquisition while preserving
+the current Scene.
 
 ## Bind The Player
 

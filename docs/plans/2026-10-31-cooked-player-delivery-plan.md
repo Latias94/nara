@@ -178,11 +178,10 @@ complete members and rejects surplus explicit groups. A stock input absent from 
 closure stays in the original source and build observations used by the cache and publication.
 
 The normal traversal encodes only selected stock payloads while each strict snapshot is borrowed.
-A demand first introduced after an earlier snapshot has retired can revisit the source traversal
-once and use the previously admitted stock provider. The first receipt releases its source
-budget before that traversal. The new receipt must match both the original delivery digest and
-startup stamp. This reuses the original contribution results and releases decoded generations
-between roots. Temporary selection indexes release their assembly charge before final validation.
+Its initial implementation could revisit the source traversal once when a demand appeared after
+an earlier snapshot retired. The first receipt released its source budget before that traversal.
+The new receipt had to match both the original delivery digest and startup stamp. The Image
+successor below uses direct acquisition. Other stock payloads continue to use the bounded replay.
 
 The [repair evidence](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#runtime-members-and-build-observations)
 records the independently locked consumer with an embedded PNG, a linked Image, stale selection
@@ -190,6 +189,70 @@ and actual rebuild, and a second Scene adding a dependency on an earlier snapsho
 The three new cases pass within the 11-test Windows consumer run. The engine's boot, delivery
 and Cook cohort passes 64/64, and the Two-Level Game's Cook targets pass 37/37 with their selected
 source and source-free payloads.
+
+## Build-Declared Image Dependencies And Sprite Admission
+
+Real artifact builds can introduce a required Image Product that no authored Scene selected.
+After the original delivery traversal and explicit build contributions, satisfy that demand through
+the Project Content owner and stock Image importer. Use the traversal's canonical identity index
+and delivery receipt for an Image already observed. Resolve new identities from a bounded catalogue
+created only when needed. Read actual PNG and typed sidecar data through the admitted assets
+capability, checking the original digest where available. New stock paths extend the deduplicated
+delivery file count before reading. The original Cook fence retains their observations. Release each
+Image's decoded pixels after encoding. A missing identity, an unsupported auxiliary ID or a Soft
+edge provides no stock payload. Earlier non-Image demands continue to use the existing bounded
+replay and source revalidation.
+
+Deep delivery admission also joins the Sprite codec's selected Image binding to the executable's
+native Image publication role. The same bytes decoded through a CPU-only codec remain eligible
+for ordinary typed consumption. A package containing a Sprite that needs those bytes must select
+the publication role that its Runtime applies. Reuse the Sprite field contract and the original
+deep validation pass at the delivery boundary.
+
+Run the independently built badge consumer for embedded, source-linked, single-scene build-linked
+and cross-root build-linked cases. Verify exact runtime bytes, relocated execution with the original
+source path unavailable, changed PNG and changed sidecar, one contribution per Scene and rejection
+of unsupported/missing identities. Exercise the ordinary Sprite against both codec registrations
+and confirm untextured Sprite and direct typed Image behavior. Godot walks dependencies from its
+actual export roots. Bevy distinguishes recursive dependency state from the single decoded value.
+Nara keeps that distinction through its own artifact, source and Runtime publication owners.
+[Godot](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/export/editor_export_platform.cpp#L674-L691)
+[Bevy](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/server/mod.rs#L1082-L1125)
+[Fifth review](../audits/2026-11-20-cooked-dependencies-prefab-revert-and-input-review.md#p1--cook-cannot-resolve-an-image-first-requested-by-a-built-product)
+
+### Build-declared Image and Sprite qualification
+
+Commits `6be6521` and `c696d1f` implement Build-declared Image acquisition and Sprite admission.
+The single-Scene case first reproduced `MissingDependencyProduct` in Windows x64 Rust 1.95.0
+release nextest `750b6bba-0f88-4d5b-aae4-8c8a08bbd663`. A second red run,
+`548bec69-8302-46a0-9814-86b8a366fffb`, reproduced two findings from implementation review:
+path-only reacquisition visited an unrelated invalid sidecar, and extra stock files escaped the
+combined file ceiling. The mixed-order control then reproduced a duplicate catalogue identity in
+`18040f20-aa7b-4d10-87a9-b85bd8e1ec5e`. Exact supplemental reads now leave discovery state alone.
+The final review checked both sort orders, bound source facts and the file-count cutoff.
+
+The final independent asset-domain consumer passes 14/14 in
+`74721f7d-d097-4601-9777-b20e2375607b`. It exercises a relocated single-Scene pack after the original
+project path is removed, exact decoded pixels, embedded and source-linked controls, a stale build
+observation, a distinct PNG selected from a cached build, and the exact file limit plus refusal one
+file below. The cross-Scene controls verify one source import, one contribution per root and
+identical success with both Image orders. The same run covers compound Scene travel and processed
+Headless custody.
+
+The affected engine release cohort passes 147/147 in `44a9343b-c69a-443c-ba6e-86accc5606d1`.
+It covers source and Runtime owners, public boot and delivery, and the same Sprite fixture with
+generic versus publication Image codec roles. The positive case reopens the pack and starts a
+Headless Player, then checks the actual published Image. Null and omitted Sprite references and
+direct typed acquisition from the generic codec also pass.
+
+The Two-Level Game's ordinary Cook, source selection and pack corruption targets pass 47/47 in
+`0a441787-6fbe-4d58-a7dd-8416400d7cc4` with `cook,desktop,audio-cpal` selected.
+The production source-free Headless delivery passes 1/1 in
+`f2a442db-c25f-45f6-b857-6cd7db49e034`. It runs actual Windows Cargo Player compilation, package
+publication, source and cache removal, relocation, travel, Save/Restore, corruption refusal and
+contained process cleanup. GPU presentation and additional platforms are outside this run.
+Scoped engine correctness Clippy, strict Clippy on the independent Cook test and a
+`project-workflow` library build without `project-tooling` pass.
 
 ## Request-Owned Generated Rust Input Successor
 

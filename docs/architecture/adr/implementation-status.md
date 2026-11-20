@@ -2365,6 +2365,14 @@ Windows consumer run passes 11 tests, including actual pack decode, PNG drift an
 Scene's demand for stock data from an earlier snapshot. Engine 64/64 and Two-Level Cook 37/37
 pass. Complete explicit groups still undergo final reachability validation.
 
+Cook can fulfill a verified build's Required or Reference Image edge even when no Scene snapshot
+contains that Image. Known Images use the original delivery identity and source facts. New Images
+use the bounded catalogue. Both the delivery file limit and the publication fence include newly
+admitted PNG and sidecar files. Deep validation checks the stock Sprite's Image publication role
+with an exact binding diagnostic. The independent source-free pack, file-limit and typed CPU
+acquisition controls pass.
+[Build-declared Image and Sprite qualification](../../plans/2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)
+
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
 Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and

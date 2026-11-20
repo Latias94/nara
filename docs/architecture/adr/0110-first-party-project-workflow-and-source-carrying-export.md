@@ -15,6 +15,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-11-01 by project-wide source readiness and bounded authored-upgrade recovery
 **Amended**: 2026-11-14 by declaration-only finite build preparation and explicit metadata-feature absence
 **Amended**: 2026-11-19 by application-owned native-service selection across cooker and Player recipes
+**Amended**: 2026-11-20 by build-declared Image acquisition and Sprite publication admission
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -159,8 +160,17 @@ The compiled project entry selects stock payloads from the delivery roots and th
 Reference edges declared by the encoded Scenes and verified groups. A source asset consumed
 during construction, such as a PNG embedded into a typed Product, still contributes its source
 and build observations. The PNG becomes a separate Runtime member when an encoded Product or
-delivery root requires it. Explicit groups retain their complete mappings, subject to the original
-builder's final reachability and deep validation.
+delivery root requires it. When a verified group first requires a stock Image, the source loader
+uses the delivery traversal's admitted identity and file facts when available. It looks up a new
+identity in its bounded catalogue, then reads the actual PNG and typed sidecar. Additional stock
+files count against the same unique delivery file limit and participate in publication revalidation.
+Each Image's decoded pixels retire after encoding. Explicit groups retain their complete mappings,
+subject to the original builder's final reachability and deep validation.
+
+A stock Sprite's selected `material.image` requires the executable's Image publication codec role.
+Deep validation checks that binding while inspecting the compiled Scene. The generic typed codec
+is sufficient for direct CPU Image consumption. Null and omitted Sprite bindings are valid
+without a published Image.
 
 Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
 an independently expected catalog digest/length, content target/profile and relative pack location.
