@@ -1639,6 +1639,56 @@ mod atlas_content {
         }
     }
 
+    #[cfg(all(windows, feature = "play-flow", feature = "gamepad"))]
+    #[test]
+    fn controller_round_cook_rejects_the_same_start_conflict_as_runtime_startup() {
+        let cache = Cache::new();
+        let project = cache.project();
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let root = host_fs::readable_directory(&project).unwrap();
+        let directory = host_fs::writable_directory(&store).unwrap();
+        let input_path = project.join(super::INPUT_PATH);
+        let original = fs::read(&input_path).unwrap();
+        let mut input: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let start = input["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|binding| {
+                binding["input"]["GamepadButton"] == nara_gilrs::GamepadButton::Start.code()
+            })
+            .unwrap();
+        start["action"] = serde_json::json!("two-level-game.q");
+        let edited = serde_json::to_vec(&input).unwrap();
+        fs::write(&input_path, &edited).unwrap();
+
+        let exploration =
+            PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Gilrs).unwrap();
+        let round = exploration.with_flow(GameFlow::Round).unwrap();
+        let triple = "x86_64-pc-windows-msvc";
+        let Err(error) = content::prepare_for_player(&root, &directory, triple, round) else {
+            panic!("a controller round cooked an incompatible Start binding");
+        };
+        assert!(
+            matches!(error, ProjectCookError::Invalid(message) if message.contains("controller round reserves Start"))
+        );
+        assert!(!project.join(GENERATED).exists());
+        let (_, accepted) = content::prepare_for_player(&root, &directory, triple, exploration)
+            .unwrap()
+            .into_parts();
+        accepted.verify(&project).unwrap();
+        assert_eq!(fs::read(&input_path).unwrap(), edited);
+        drop(accepted);
+
+        fs::write(&input_path, &original).unwrap();
+        let (_, accepted) = content::prepare_for_player(&root, &directory, triple, round)
+            .unwrap()
+            .into_parts();
+        accepted.verify(&project).unwrap();
+        assert_eq!(fs::read(&input_path).unwrap(), original);
+    }
+
     #[test]
     fn invalid_selected_schema_matches_source_delivery_before_bootstrap_generation() {
         for (failure, kind, code) in [

@@ -12,18 +12,20 @@ use nara::{
     ProductRecipe, ProductRecipeError,
     advanced_prelude::{CurrentScene, StartupSceneActivationSet},
     app::{
-        AppExitRequests, PluginCategory, PluginDeclaration, PluginId, RuntimeFrameStatus,
-        RuntimeTimeSettings, StartupStage,
+        AppExitRequests, PluginCategory, PluginDeclaration, PluginId, RuntimeFaultDetail,
+        RuntimeFrameStatus, RuntimeTimeSettings, StartupStage,
     },
     ecs::{World, schedule::IntoScheduleConfigs},
     identity::SceneInstanceId,
     input::{
-        ActionBinding, ActionContext, ActionId, ActionMapBindings, ActionMapBuilder,
-        ActionMapLimits, ActionMaps, ActionPhase, InputBinding, InputSeatId, KeyCode,
-        SemanticActions,
+        ActionBinding, ActionContext, ActionContextDefinition, ActionId, ActionMapBindings,
+        ActionMapBuilder, ActionMapDefinition, ActionMapError, ActionMapLimits, ActionMaps,
+        ActionPhase, InputBinding, InputSeatId, KeyCode, SemanticActions,
     },
     prelude::{App, CoreStage, Plugin, PluginError, Resource},
 };
+#[cfg(feature = "gamepad")]
+use nara_gilrs::GamepadButton;
 
 use super::{ActiveLevel, GamePhase, Progress, Session, travel};
 use crate::{
@@ -39,6 +41,8 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory
         PluginId::new("nara.product.runtime-time"),
     ]);
 const CONTEXT: &str = "two-level-game.menu";
+#[cfg(feature = "gamepad")]
+const GAMEPAD_CONTEXT: &str = "two-level-game.menu.gamepad";
 const CONTROLS: [(&str, KeyCode); 4] = [
     ("confirm", KeyCode::Enter),
     ("pause", KeyCode::Escape),
@@ -59,6 +63,16 @@ pub enum FlowPhase {
     Complete,
     Degraded,
     Exiting,
+}
+
+/// Selects the controls derived from the admitted action definition at startup.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PlayFlowControls {
+    #[default]
+    Keyboard,
+    /// Uses the portable button codes supplied by the optional Gilrs adapter.
+    #[cfg(feature = "gamepad")]
+    KeyboardAndGamepad,
 }
 
 /// Observation only; callers operate through the installed menu action context.
@@ -103,6 +117,71 @@ struct Flow {
     error: Option<String>,
     context: ActionContext,
     controls: [ActionId; 4],
+    gamepad_menu: Option<GamepadMenu>,
+}
+
+#[derive(Clone)]
+struct GamepadMenu {
+    context: ActionContext,
+    start: ActionId,
+}
+
+impl GamepadMenu {
+    fn for_controls(controls: PlayFlowControls) -> Option<Self> {
+        match controls {
+            PlayFlowControls::Keyboard => None,
+            #[cfg(feature = "gamepad")]
+            PlayFlowControls::KeyboardAndGamepad => Some(Self {
+                context: ActionContext::new(GAMEPAD_CONTEXT).expect("static gamepad menu context"),
+                start: action("start"),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ControlError {
+    #[error("PRIMARY input map is absent")]
+    MissingMap,
+    #[error("round flow requires the gameplay input context")]
+    MissingGameplayContext,
+    #[error("menu keys Enter, Escape, T and X must be unbound in the source map")]
+    ReservedKeys,
+    #[cfg(feature = "gamepad")]
+    #[error("controller round reserves Start for its menu and can replace only gameplay Retry")]
+    ReservedStart,
+    #[error("round input map could not be derived: {0}")]
+    Definition(#[from] ActionMapError),
+}
+
+impl ControlError {
+    fn fault_detail(&self) -> RuntimeFaultDetail {
+        let (code, summary) = match self {
+            Self::MissingMap => (
+                "two-level-game.round-input-missing",
+                "The Round requires a PRIMARY input map",
+            ),
+            Self::MissingGameplayContext => (
+                "two-level-game.round-gameplay-context-missing",
+                "The Round requires the gameplay input context",
+            ),
+            Self::ReservedKeys => (
+                "two-level-game.round-menu-key-conflict",
+                "Menu keys Enter, Escape, T and X must be unbound in the source map",
+            ),
+            #[cfg(feature = "gamepad")]
+            Self::ReservedStart => (
+                "two-level-game.round-start-conflict",
+                "Controller round reserves Start for its menu and can replace only gameplay Retry",
+            ),
+            Self::Definition(_) => (
+                "two-level-game.round-input-definition-invalid",
+                "The derived Round input map could not be admitted",
+            ),
+        };
+        RuntimeFaultDetail::new(code, summary, "two-level-game.play-flow")
+            .expect("static Round input diagnostic")
+    }
 }
 
 struct Starting {
@@ -111,12 +190,35 @@ struct Starting {
 }
 
 /// Adds the source-game flow without changing the default product or checkpoint format.
-pub fn with_play_flow(recipe: ProductRecipe) -> Result<ProductRecipe, ProductRecipeError> {
-    recipe.add_plugin::<PlayFlowPlugin>()
+pub fn with_play_flow(
+    recipe: ProductRecipe,
+    controls: PlayFlowControls,
+) -> Result<ProductRecipe, ProductRecipeError> {
+    match controls {
+        PlayFlowControls::Keyboard => recipe.add_plugin::<PlayFlowPlugin>(),
+        #[cfg(feature = "gamepad")]
+        PlayFlowControls::KeyboardAndGamepad => {
+            recipe.add_configured_plugin(GamepadRound, |_| PlayFlowPlugin {
+                controls: PlayFlowControls::KeyboardAndGamepad,
+            })
+        }
+    }
 }
 
 #[derive(Default)]
-struct PlayFlowPlugin;
+struct PlayFlowPlugin {
+    controls: PlayFlowControls,
+}
+
+#[cfg(feature = "gamepad")]
+struct GamepadRound;
+
+#[cfg(feature = "gamepad")]
+impl nara::ProductConfiguration for GamepadRound {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(b"two-level-game.play-flow.gamepad/v1\0");
+    }
+}
 
 impl Plugin for PlayFlowPlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -146,6 +248,7 @@ impl Plugin for PlayFlowPlugin {
             error: None,
             context: context(),
             controls: CONTROLS.map(|(name, _)| action(name)),
+            gamepad_menu: GamepadMenu::for_controls(self.controls),
         })?
         .init_resource::<FlowSnapshot>()?;
         app.add_systems(
@@ -170,7 +273,7 @@ fn action(name: &str) -> ActionId {
 }
 
 fn initialize(world: &mut World) -> Result<(), nara::ecs::bevy_ecs::error::BevyError> {
-    install_controls(world).map_err(std::io::Error::other)?;
+    install_controls(world).map_err(|error| error.fault_detail().into_bevy_error())?;
     if world.resource::<Session>().initialized {
         enter(world, FlowPhase::Title);
     } else {
@@ -182,54 +285,107 @@ fn initialize(world: &mut World) -> Result<(), nara::ecs::bevy_ecs::error::BevyE
     Ok(())
 }
 
-fn install_controls(world: &mut World) -> Result<(), String> {
+fn install_controls(world: &mut World) -> Result<(), ControlError> {
+    let gamepad_menu = world.resource::<Flow>().gamepad_menu.clone();
     let mut maps = world.resource_mut::<ActionMaps>();
     let map = maps
         .get_mut(InputSeatId::PRIMARY)
-        .ok_or("PRIMARY map is absent")?;
-    if CONTROLS.iter().any(|(_, key)| {
-        map.bindings()
-            .iter()
-            .any(|binding| binding.input == InputBinding::Key(*key))
-    }) {
-        return Err("menu keys Enter, Escape, T and X must be unbound in the source map".into());
-    }
-    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
-    for entry in map.definition().contexts() {
-        builder
-            .declare_context(
-                entry.context.clone(),
-                map.is_context_enabled(&entry.context),
-            )
-            .map_err(|error| error.to_string())?;
-    }
-    for binding in map.bindings() {
-        builder
-            .bind(binding.clone())
-            .map_err(|error| error.to_string())?;
-    }
-    builder
-        .declare_context(context(), true)
-        .map_err(|error| error.to_string())?;
-    for (name, key) in CONTROLS {
-        builder
-            .bind(ActionBinding::key(action(name), key).with_context(context()))
-            .map_err(|error| error.to_string())?;
-    }
-    let bindings = builder
-        .compile()
-        .map_err(|error| error.to_string())?
-        .into_bindings();
+        .ok_or(ControlError::MissingMap)?;
+    let bindings = compile_controls(map.definition(), gamepad_menu.as_ref(), |entry| {
+        map.is_context_enabled(&entry.context)
+    })?;
     let retained = FlowBindings {
         admitted: map.bindings_handle(),
         installed: bindings.clone(),
     };
     map.replace_bindings(bindings);
-    map.disable_context(&ActionContext::gameplay())
-        .map_err(|error| error.to_string())?;
+    map.disable_context(&ActionContext::gameplay())?;
     drop(maps);
     world.insert_resource(retained);
     Ok(())
+}
+
+#[cfg(feature = "play-flow")]
+pub(crate) fn validate_input(
+    definition: &ActionMapDefinition,
+    controls: PlayFlowControls,
+) -> Result<(), String> {
+    let menu = GamepadMenu::for_controls(controls);
+    compile_controls(definition, menu.as_ref(), |entry| entry.enabled)
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+fn compile_controls(
+    definition: &ActionMapDefinition,
+    #[cfg_attr(
+        not(feature = "gamepad"),
+        allow(unused_variables, reason = "no gamepad menu can be selected")
+    )]
+    gamepad_menu: Option<&GamepadMenu>,
+    enabled: impl Fn(&ActionContextDefinition) -> bool,
+) -> Result<ActionMapBindings, ControlError> {
+    let gameplay = ActionContext::gameplay();
+    if !definition
+        .contexts()
+        .iter()
+        .any(|entry| entry.context == gameplay)
+    {
+        return Err(ControlError::MissingGameplayContext);
+    }
+    if CONTROLS.iter().any(|(_, key)| {
+        definition
+            .bindings()
+            .iter()
+            .any(|binding| binding.input == InputBinding::Key(*key))
+    }) {
+        return Err(ControlError::ReservedKeys);
+    }
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    for entry in definition.contexts() {
+        builder.declare_context(entry.context.clone(), enabled(entry))?;
+    }
+    for binding in definition.bindings() {
+        #[cfg(feature = "gamepad")]
+        if gamepad_menu.is_some() && superseded_gamepad_start(binding, &gameplay)? {
+            continue;
+        }
+        builder.bind(binding.clone())?;
+    }
+    builder.declare_context(context(), true)?;
+    for (name, key) in CONTROLS {
+        builder.bind(ActionBinding::key(action(name), key).with_context(context()))?;
+    }
+    #[cfg(feature = "gamepad")]
+    if let Some(menu) = gamepad_menu {
+        builder.declare_context(menu.context.clone(), false)?;
+        for (action, button, context) in [
+            (menu.start.clone(), GamepadButton::Start, context()),
+            (action("title"), GamepadButton::East, menu.context.clone()),
+            (action("exit"), GamepadButton::Select, menu.context.clone()),
+        ] {
+            builder
+                .bind(ActionBinding::gamepad_button(action, button.code()).with_context(context))?;
+        }
+    }
+    Ok(builder.compile()?.into_bindings())
+}
+
+#[cfg(feature = "gamepad")]
+fn superseded_gamepad_start(
+    binding: &ActionBinding,
+    gameplay: &ActionContext,
+) -> Result<bool, ControlError> {
+    if binding.input != InputBinding::GamepadButton(GamepadButton::Start.code()) {
+        return Ok(false);
+    }
+    if &binding.context == gameplay
+        && binding.action.as_str() == "two-level-game.r"
+        && binding.transform == nara::input::ActionTransform::Button
+    {
+        return Ok(true);
+    }
+    Err(ControlError::ReservedStart)
 }
 
 pub(super) fn simulation_enabled(world: &World) -> bool {
@@ -250,13 +406,30 @@ pub(super) fn drain_or_block_gameplay(world: &mut World) -> bool {
 
 fn enter(world: &mut World, phase: FlowPhase) {
     let enabled = phase == FlowPhase::Playing;
+    let gamepad_context = world
+        .resource::<Flow>()
+        .gamepad_menu
+        .as_ref()
+        .map(|menu| menu.context.clone());
     let result = world
         .resource_mut::<ActionMaps>()
         .get_mut(InputSeatId::PRIMARY)
         .ok_or_else(|| "PRIMARY map is absent".to_owned())
         .and_then(|map| {
             map.set_context_enabled(&ActionContext::gameplay(), enabled)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            if let Some(context) = gamepad_context {
+                let menu_open = matches!(
+                    phase,
+                    FlowPhase::Title
+                        | FlowPhase::Paused
+                        | FlowPhase::Complete
+                        | FlowPhase::Degraded
+                );
+                map.set_context_enabled(&context, menu_open)
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(())
         });
     let phase = if let Err(error) = result {
         world.resource_mut::<Flow>().error = Some(error);
@@ -380,12 +553,20 @@ fn advance(world: &mut World) {
             .iter()
             .any(|outcome| {
                 outcome.seat == InputSeatId::PRIMARY
-                    && outcome.context == flow.context
                     && &outcome.action == id
                     && outcome.phase == ActionPhase::Started
+                    && (outcome.context == flow.context
+                        || flow
+                            .gamepad_menu
+                            .as_ref()
+                            .is_some_and(|menu| outcome.context == menu.context))
             })
     };
     let [confirm, pause, title, exit] = flow.controls.each_ref().map(pressed);
+    let start = flow
+        .gamepad_menu
+        .as_ref()
+        .is_some_and(|menu| pressed(&menu.start));
     let phase = flow.phase;
     if exit {
         enter(world, FlowPhase::Exiting);
@@ -407,9 +588,9 @@ fn advance(world: &mut World) {
         if world.resource::<Flow>().drained {
             enter(world, FlowPhase::Playing);
         }
-    } else if pause && phase == FlowPhase::Playing {
+    } else if (pause || start) && phase == FlowPhase::Playing {
         enter(world, FlowPhase::Paused);
-    } else if (pause || confirm) && phase == FlowPhase::Paused {
+    } else if (pause || confirm || start) && phase == FlowPhase::Paused {
         enter(world, FlowPhase::Resuming);
     } else if title
         && matches!(
@@ -418,7 +599,7 @@ fn advance(world: &mut World) {
         )
     {
         enter(world, FlowPhase::Title);
-    } else if confirm
+    } else if (confirm || start)
         && matches!(
             phase,
             FlowPhase::Title | FlowPhase::Complete | FlowPhase::Degraded

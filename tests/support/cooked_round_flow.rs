@@ -64,6 +64,7 @@ struct Request {
     target: String,
     content_profile: String,
     runtime: String,
+    controllers: String,
     catalog_digest: Value,
 }
 
@@ -132,13 +133,13 @@ impl Drop for Custody {
     }
 }
 
-pub fn accept(cooker: &Path, runtime: RuntimeKind) {
+pub fn accept(cooker: &Path, runtime: RuntimeKind, controllers: ControllerBackend) {
     assert_eq!(std::env::var("CARGO_BUILD_JOBS").as_deref(), Ok("1"));
     assert!(matches!(
         runtime,
         RuntimeKind::Desktop | RuntimeKind::AudioDesktop
     ));
-    let player = PlayerSelection::new(runtime, ControllerBackend::Disabled)
+    let player = PlayerSelection::new(runtime, controllers)
         .unwrap()
         .with_flow(GameFlow::Round)
         .unwrap();
@@ -217,7 +218,7 @@ pub fn accept(cooker: &Path, runtime: RuntimeKind) {
             "--runtime".into(),
             runtime.name().into(),
             "--controllers".into(),
-            "none".into(),
+            controllers.name().into(),
             "--flow".into(),
             "round".into(),
             "--profile".into(),
@@ -252,7 +253,7 @@ pub fn accept(cooker: &Path, runtime: RuntimeKind) {
     let publication = process::record(&cooked, "TWO_LEVEL_PACKAGE_PUBLISHED ");
     assert!(publication["postpublication_error"].is_null());
     assert_eq!(publication["runtime"], runtime.name());
-    assert_eq!(publication["controllers"], "none");
+    assert_eq!(publication["controllers"], controllers.name());
     assert_eq!(publication["flow"], "round");
     let executable_name = format!("{}.exe", player.binary());
     assert_eq!(publication["executable"], executable_name);
@@ -317,6 +318,7 @@ pub fn accept(cooker: &Path, runtime: RuntimeKind) {
         target: triple,
         content_profile: player.content_profile().to_owned(),
         runtime: runtime.name().to_owned(),
+        controllers: controllers.name().to_owned(),
         catalog_digest: payload["catalog_digest"].clone(),
     };
     fs::write(worker.join(REQUEST), serde_json::to_vec(&request).unwrap()).unwrap();
@@ -353,6 +355,7 @@ pub fn accept(cooker: &Path, runtime: RuntimeKind) {
     let report = process::record(&text, REPORT);
     assert_eq!(report["success"], true);
     assert_eq!(report["runtime"], request.runtime);
+    assert_eq!(report["controllers"], request.controllers);
     assert_eq!(report["physical_round_processes"], 1);
     assert_eq!(report["finite_processes"], 1);
     assert_eq!(report["refused_processes"], 2);

@@ -1,4 +1,4 @@
-//! Keyboard-only presentation of the opt-in round flow through the existing ECS UI adapter.
+//! Presentation of the opt-in round flow through the existing ECS UI adapter.
 
 use nara::{
     ProductRecipe, ProductRecipeError,
@@ -51,6 +51,15 @@ pub struct PlayFlowHud {
     pub controls: Entity,
     pub error: Entity,
     snapshot: Option<FlowSnapshot>,
+    control_instructions: &'static str,
+}
+
+impl PlayFlowHud {
+    /// Control instructions authored by the latest game HUD update.
+    #[must_use]
+    pub const fn control_instructions(&self) -> &'static str {
+        self.control_instructions
+    }
 }
 
 /// Adds only the HUD plugin; the caller installs the round flow and UI presentation profile.
@@ -147,6 +156,7 @@ fn initialize(world: &mut World) -> Result<(), BevyError> {
         controls,
         error,
         snapshot: None,
+        control_instructions: "",
     });
     update(world);
     Ok(())
@@ -201,20 +211,37 @@ fn update(world: &mut World) {
         ));
     }
     if phase_changed {
-        let instructions = match snapshot.phase {
-            FlowPhase::Boot => "Loading the game... | X: exit",
-            FlowPhase::Title => "Enter: start | X: exit",
-            FlowPhase::Starting => "Starting a new round... | X: exit",
-            FlowPhase::Playing => "WASD: move / collect gems | E: travel | Escape: pause | X: exit",
-            FlowPhase::Paused => "Enter / Escape: continue | T: title | X: exit",
-            FlowPhase::Resuming => "Resuming the round... | X: exit",
-            FlowPhase::Complete => "Enter: restart | T: title | X: exit",
-            FlowPhase::Degraded => "Enter: new round | T: title | X: exit",
-            FlowPhase::Exiting => "Exiting the game...",
+        let gamepad = world.resource::<super::Flow>().gamepad_menu.is_some();
+        let instructions = match (snapshot.phase, gamepad) {
+            (FlowPhase::Boot, _) => "Loading the game... | X: exit",
+            (FlowPhase::Title, false) => "Enter: start | X: exit",
+            (FlowPhase::Title, true) => "Enter / Start: start | X / Select: exit",
+            (FlowPhase::Starting, _) => "Starting a new round... | X: exit",
+            (FlowPhase::Playing, false) => {
+                "WASD: move / collect gems | E: travel | Escape: pause | X: exit"
+            }
+            (FlowPhase::Playing, true) => {
+                "WASD / D-pad: move | E / South: travel | Escape / Start: pause | X: exit"
+            }
+            (FlowPhase::Paused, false) => "Enter / Escape: continue | T: title | X: exit",
+            (FlowPhase::Paused, true) => {
+                "Enter / Escape / Start: continue | T / East: title | X / Select: exit"
+            }
+            (FlowPhase::Resuming, _) => "Resuming the round... | X: exit",
+            (FlowPhase::Complete, false) => "Enter: restart | T: title | X: exit",
+            (FlowPhase::Complete, true) => {
+                "Enter / Start: restart | T / East: title | X / Select: exit"
+            }
+            (FlowPhase::Degraded, false) => "Enter: new round | T: title | X: exit",
+            (FlowPhase::Degraded, true) => {
+                "Enter / Start: new round | T / East: title | X / Select: exit"
+            }
+            (FlowPhase::Exiting, _) => "Exiting the game...",
         };
         world
             .entity_mut(controls)
             .insert(text(instructions, 16.0, FOREGROUND));
+        world.resource_mut::<PlayFlowHud>().control_instructions = instructions;
     }
     if error_changed {
         let visible = snapshot.error.is_some();

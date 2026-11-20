@@ -46,6 +46,9 @@ pub(super) fn prepare_for_player(
         .map_err(|error| ProjectCookError::Invalid(format!("cooked content target: {error}")))?;
     let implementation = implementation_digest().map_err(ProjectCookError::Invalid)?;
     let store = ArtifactBuildStore::open(cache.share(), ArtifactBuildLimits::default())?;
+    #[cfg(feature = "play-flow")]
+    let mut round_input =
+        (selection.flow() == two_level_game::delivery::GameFlow::Round).then_some(selection);
     prepare_project_cooked_content(
         ProjectCookRequest {
             root,
@@ -57,6 +60,16 @@ pub(super) fn prepare_for_player(
             limits: CookedContentLimits::default(),
         },
         |cx| {
+            #[cfg(feature = "play-flow")]
+            if let Some(selection) = round_input.take() {
+                let input = cx
+                    .snapshot()
+                    .input_action_map()
+                    .map(|input| input.definition());
+                selection
+                    .validate_round_input(input)
+                    .map_err(ProjectCookError::Invalid)?;
+            }
             cx.add_source_assets::<SoundBankDomain>()?;
             cx.add_source_assets::<SpriteAnimationDomain>()?;
             Ok(())

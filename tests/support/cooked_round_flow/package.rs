@@ -11,7 +11,7 @@ use nara::{
 };
 use serde_json::{Value, json};
 use two_level_game::{
-    delivery::{PlayerSelection, RuntimeKind},
+    delivery::{ControllerBackend, PlayerSelection, RuntimeKind},
     levels::LevelId,
 };
 
@@ -22,6 +22,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
     let mut runtime = false;
     let mut ui = false;
     let mut audio = false;
+    let mut gamepad = false;
     for line in graph.lines() {
         let (package, features) = line.split_once('|').expect("Cargo's selected tree format");
         let name = package.split_whitespace().next().unwrap();
@@ -32,14 +33,9 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
         assert!(
             !matches!(
                 name,
-                "notify"
-                    | "nara_asset_watch"
-                    | "nara_tooling"
-                    | "nara-editor"
-                    | "nara_editor"
-                    | "nara_gilrs"
+                "notify" | "nara_asset_watch" | "nara_tooling" | "nara-editor" | "nara_editor"
             ) && !name.starts_with("dear-imgui"),
-            "shipping round inherited a development/controller package: {line}"
+            "shipping round inherited a development package: {line}"
         );
         match name {
             "two-level-game" => {
@@ -67,6 +63,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
             }
             "nara_ui_render" => ui = true,
             "cpal" => audio = true,
+            "nara_gilrs" => gamepad = true,
             _ => {}
         }
     }
@@ -75,6 +72,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
         "actual shipping round requires game, runtime and presented UI nodes"
     );
     assert_eq!(audio, player.runtime() == RuntimeKind::AudioDesktop);
+    assert_eq!(gamepad, player.controllers() == ControllerBackend::Gilrs);
 }
 
 pub fn assert_payload(directory: &Path, executable: &str) {

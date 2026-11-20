@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "gamepad")]
+use nara::input::{ButtonTransitionPhase, GamepadConnection};
 use nara::{
     ProductConfiguration, ProductRecipe,
     advanced_prelude::CurrentScene,
@@ -38,12 +40,14 @@ use nara::{
     sprite::{Sprite, TextureRegion},
     tasks::{TaskPools, TaskReturnState},
 };
+#[cfg(feature = "gamepad")]
+use nara_gilrs::GamepadButton;
 use support::{DEADLINE, ProjectCopy};
 use two_level_game::{
     GamePhase, GameResumeError, GameSnapshot, RunOptions,
     animation::ExplorerFrame,
     capture_resume, configured_recipe,
-    flow::{FlowBindings, FlowPhase, FlowSnapshot, with_play_flow},
+    flow::{FlowBindings, FlowPhase, FlowSnapshot, PlayFlowControls, with_play_flow},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     open_explicit_project_root, product_recipe,
 };
@@ -54,7 +58,13 @@ const MENU: &str = "two-level-game.menu";
 const RIGHT: KeyCode = KeyCode::Character('d');
 
 #[derive(Clone, Default, Resource)]
-struct Driver(Arc<Mutex<Vec<(KeyCode, bool)>>>);
+struct Driver(Arc<Mutex<Vec<DriverInput>>>);
+
+enum DriverInput {
+    Key(KeyCode, bool),
+    #[cfg(feature = "gamepad")]
+    Button(GamepadButton, bool),
+}
 
 impl ProductConfiguration for Driver {
     fn write_canonical(&self, output: &mut Vec<u8>) {
@@ -64,16 +74,36 @@ impl ProductConfiguration for Driver {
 
 impl Driver {
     fn key(&self, key: KeyCode, pressed: bool) {
-        self.0.lock().unwrap().push((key, pressed));
+        self.0.lock().unwrap().push(DriverInput::Key(key, pressed));
     }
 
     fn tap(&self, key: KeyCode) {
         let mut pending = self.0.lock().unwrap();
-        pending.extend([(key, true), (key, false)]);
+        pending.extend([DriverInput::Key(key, true), DriverInput::Key(key, false)]);
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn button(&self, button: GamepadButton, pressed: bool) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(DriverInput::Button(button, pressed));
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn tap_button(&self, button: GamepadButton) {
+        self.0.lock().unwrap().extend([
+            DriverInput::Button(button, true),
+            DriverInput::Button(button, false),
+        ]);
     }
 }
 
 struct DriverPlugin(Driver);
+
+#[cfg(feature = "gamepad")]
+#[derive(Resource)]
+struct Connection(GamepadConnection);
 
 #[derive(Default, Resource)]
 struct ExplorerAtExtract(Option<(FlowPhase, TextureRegion)>);
@@ -120,20 +150,47 @@ fn explorer_region(world: &World) -> Option<TextureRegion> {
 }
 
 fn inject(world: &mut World) {
-    let keys = std::mem::take(&mut *world.resource::<Driver>().0.lock().unwrap());
-    let mut timeline = world.resource_mut::<InputTimeline>();
-    for (key, pressed) in keys {
-        timeline
-            .admit_keyboard(
-                WINDOW,
-                InputSeatId::PRIMARY,
-                if pressed {
-                    ButtonDriverInput::Press(key)
-                } else {
-                    ButtonDriverInput::Release(key)
-                },
-            )
-            .unwrap();
+    let inputs = std::mem::take(&mut *world.resource::<Driver>().0.lock().unwrap());
+    for input in inputs {
+        match input {
+            DriverInput::Key(key, pressed) => {
+                world
+                    .resource_mut::<InputTimeline>()
+                    .admit_keyboard(
+                        WINDOW,
+                        InputSeatId::PRIMARY,
+                        if pressed {
+                            ButtonDriverInput::Press(key)
+                        } else {
+                            ButtonDriverInput::Release(key)
+                        },
+                    )
+                    .unwrap();
+            }
+            #[cfg(feature = "gamepad")]
+            DriverInput::Button(button, pressed) => {
+                if world.get_resource::<Connection>().is_none() {
+                    let connection = world
+                        .resource_mut::<InputTimeline>()
+                        .connect_gamepad(WINDOW, InputSeatId::PRIMARY, 7)
+                        .unwrap();
+                    world.insert_resource(Connection(connection));
+                }
+                let connection = world.resource::<Connection>().0.clone();
+                world
+                    .resource_mut::<InputTimeline>()
+                    .admit_gamepad_button(
+                        &connection,
+                        button.code(),
+                        if pressed {
+                            ButtonTransitionPhase::Pressed
+                        } else {
+                            ButtonTransitionPhase::Released
+                        },
+                    )
+                    .unwrap();
+            }
+        }
     }
 }
 
@@ -147,7 +204,7 @@ impl Game {
     fn source() -> Self {
         Self::from_project(
             Path::new(env!("CARGO_MANIFEST_DIR")),
-            with_play_flow(product_recipe()).unwrap(),
+            keyboard_flow_recipe(),
         )
     }
 
@@ -418,10 +475,38 @@ impl Game {
         }
     }
 
+    #[cfg(feature = "gamepad")]
+    fn toggle_room(
+        &mut self,
+        button: GamepadButton,
+        room: impl Fn(&GameSnapshot) -> two_level_game::SideRoomPhase,
+        expected: two_level_game::SideRoomPhase,
+    ) {
+        self.driver.tap_button(button);
+        self.frame(STEP);
+        let deadline = Instant::now() + DEADLINE;
+        while room(&self.snapshot()) == two_level_game::SideRoomPhase::Preparing {
+            assert!(
+                Instant::now() < deadline,
+                "gamepad {button:?} room request did not settle"
+            );
+            self.frame(Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let snapshot = self.snapshot();
+        assert!(snapshot.error.is_none(), "{snapshot:?}");
+        assert_eq!(room(&snapshot), expected);
+        assert_eq!(self.flow().phase, FlowPhase::Playing);
+    }
+
     fn collect_near_pickup(&mut self) {
+        self.collect_near_pickup_with(|driver, pressed| driver.key(RIGHT, pressed));
+    }
+
+    fn collect_near_pickup_with(&mut self, drive_right: impl Fn(&Driver, bool)) {
         let collected = self.snapshot().collected;
         assert_eq!(self.object("gem-near").1, 1.0);
-        self.driver.key(RIGHT, true);
+        drive_right(&self.driver, true);
         for _ in 0..64 {
             self.frame(STEP);
             let snapshot = self.snapshot();
@@ -441,7 +526,7 @@ impl Game {
                         (FlowPhase::Complete, ExplorerFrame::Idle.texture_region())
                     );
                 }
-                self.driver.key(RIGHT, false);
+                drive_right(&self.driver, false);
                 self.frame(Duration::ZERO);
                 return;
             }
@@ -486,6 +571,10 @@ impl Drop for Game {
             assert_eq!(self.session.close(), HeadlessSessionClose::Complete);
         }
     }
+}
+
+fn keyboard_flow_recipe() -> ProductRecipe {
+    with_play_flow(product_recipe(), PlayFlowControls::Keyboard).unwrap()
 }
 
 fn assert_zero_round(game: &Game, round: u32) {
@@ -628,7 +717,7 @@ fn title_freezes_before_the_first_frame_and_new_round_prepares_a_real_source_sce
 fn a_pending_player_save_launch_survives_title_and_is_consumed_once_by_the_first_resume_batch() {
     let project = ProjectCopy::new();
     let save = project.save_path();
-    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
     let (admitted, installed) = game
         .session
         .observe(|world| {
@@ -718,7 +807,7 @@ fn a_refused_first_resume_save_launch_keeps_its_result_and_completes_the_origina
     let missing_parent = project.save_path().join("missing");
     let invalid = missing_parent.join("checkpoint.json");
     assert!(!missing_parent.exists());
-    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
     game.session
         .submit(
             two_level_game::player_launch(RunOptions {
@@ -963,10 +1052,13 @@ fn host_step_projects_the_pickup_in_maintenance_without_advancing_the_menu() {
 fn real_pickups_complete_a_round_and_new_scene_success_resets_progress_counters_and_clock() {
     let project = ProjectCopy::new();
     let save = project.save_path();
-    let recipe = with_play_flow(configured_recipe(RunOptions {
-        save_path: Some(save.clone()),
-        ..RunOptions::default()
-    }))
+    let recipe = with_play_flow(
+        configured_recipe(RunOptions {
+            save_path: Some(save.clone()),
+            ..RunOptions::default()
+        }),
+        PlayFlowControls::Keyboard,
+    )
     .unwrap();
     let mut game = Game::from_project(project.root(), recipe);
     let generation = game.session.runtime_generation().unwrap();
@@ -1055,7 +1147,7 @@ fn refused_source_preparation_retains_the_old_round_and_title_then_repaired_conf
         )
     );
     let original_bytes = fs::read(&path).unwrap();
-    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
     game.start_round();
     game.collect_near_pickup();
     game.command('m');
@@ -1110,6 +1202,239 @@ fn refused_source_preparation_retains_the_old_round_and_title_then_repaired_conf
     assert_eq!(game.session.runtime_generation(), Some(generation));
 }
 
+#[cfg(feature = "gamepad")]
+#[test]
+fn controller_can_complete_restart_and_exit_a_round_without_keyboard_input() {
+    use nara::input::InputBinding;
+    use two_level_game::SideRoomPhase::{Closed, Open};
+
+    let project = ProjectCopy::new();
+    let path = project.root().join(two_level_game::input::INPUT_PATH);
+    let mut input: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    input["payload"]["contexts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "context": "photo-mode", "enabled": false,
+        }));
+    for (button, name) in [
+        (GamepadButton::East, "photo"),
+        (GamepadButton::Select, "gallery"),
+    ] {
+        input["payload"]["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "action": format!("two-level-game.{name}"),
+                "input": {"GamepadButton": button.code()},
+                "context": "photo-mode",
+                "transform": "Button",
+            }));
+    }
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let recipe = with_play_flow(product_recipe(), PlayFlowControls::KeyboardAndGamepad).unwrap();
+    let mut game = Game::from_project(project.root(), recipe);
+    game.session
+        .observe(|world| {
+            let flow = world.resource::<FlowBindings>();
+            let map = world
+                .resource::<ActionMaps>()
+                .get(InputSeatId::PRIMARY)
+                .unwrap();
+            let retry = ActionId::new("two-level-game.r").unwrap();
+            let start = GamepadButton::Start.code();
+            let original = nara::input::startup_action_map_bindings(world).unwrap();
+            assert!(flow.admitted().shares_owner_with(original));
+            assert!(flow.installed().shares_owner_with(&map.bindings_handle()));
+            assert!(
+                flow.admitted()
+                    .definition()
+                    .bindings()
+                    .contains(&ActionBinding::gamepad_button(retry.clone(), start))
+            );
+            assert!(
+                map.bindings()
+                    .contains(&ActionBinding::key(retry, KeyCode::Character('r')))
+            );
+            let bound: Vec<_> = map
+                .bindings()
+                .iter()
+                .filter(|binding| binding.input == InputBinding::GamepadButton(start))
+                .map(|binding| (binding.action.as_str(), binding.context.as_str()))
+                .collect();
+            assert_eq!(bound, [("two-level-game.menu.start", MENU)]);
+            let photo = ActionContext::new("photo-mode").unwrap();
+            assert!(!map.is_context_enabled(&photo));
+            for (button, menu_action, gameplay_action) in [
+                (
+                    GamepadButton::East,
+                    "two-level-game.menu.title",
+                    "two-level-game.g",
+                ),
+                (
+                    GamepadButton::Select,
+                    "two-level-game.menu.exit",
+                    "two-level-game.b",
+                ),
+            ] {
+                let bindings: Vec<_> = map
+                    .bindings()
+                    .iter()
+                    .filter(|binding| binding.input == InputBinding::GamepadButton(button.code()))
+                    .collect();
+                assert_eq!(bindings.len(), 3);
+                assert!(bindings.iter().any(|binding| binding.context == photo));
+                assert!(
+                    bindings
+                        .iter()
+                        .any(|binding| binding.context == ActionContext::gameplay()
+                            && binding.action.as_str() == gameplay_action)
+                );
+                assert!(bindings.iter().any(|binding| binding.context.as_str()
+                    == "two-level-game.menu.gamepad"
+                    && binding.action.as_str() == menu_action));
+            }
+        })
+        .unwrap();
+    assert_eq!(game.flow().phase, FlowPhase::Title);
+    let boot = game.instance();
+    game.driver.button(GamepadButton::East, true);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Title);
+    game.driver.button(GamepadButton::Start, true);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Starting);
+    assert_eq!(game.instance(), boot);
+    game.settle_start(FlowPhase::Resuming);
+    assert_ne!(game.instance(), boot);
+    game.finish_resume();
+    game.frame(STEP);
+    assert_eq!(game.flow().phase, FlowPhase::Playing);
+    assert_eq!(game.snapshot().restarts, 0);
+    assert_eq!(game.snapshot().lookout, Closed);
+
+    game.driver.button(GamepadButton::East, false);
+    game.driver.button(GamepadButton::Start, false);
+    game.driver.button(GamepadButton::DPadRight, true);
+    game.frame(STEP);
+    let moved = game.snapshot().player;
+    assert!(moved.x > -120.0);
+    assert_eq!(game.snapshot().held, [false, true, false, false]);
+    game.driver.button(GamepadButton::Select, true);
+    game.driver.tap_button(GamepadButton::Start);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Paused);
+    assert_eq!(game.snapshot().held, [false; 4]);
+    assert!(game.queue().pending_commands > 0);
+    let paused_clock = game.clocks();
+    game.frame(Duration::from_millis(100));
+    game.driver.button(GamepadButton::Select, false);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Paused);
+    assert_eq!(game.clocks(), paused_clock);
+    assert_eq!(game.explorer_frame(), ExplorerFrame::Idle.texture_region());
+    game.driver.tap_button(GamepadButton::Start);
+    game.frame(Duration::ZERO);
+    game.finish_resume();
+    game.frame(STEP);
+    assert_eq!(game.snapshot().player, moved);
+    assert_eq!(game.snapshot().held, [false; 4]);
+    assert_eq!(game.snapshot().side_room, Closed);
+    game.driver.button(GamepadButton::DPadRight, false);
+    game.frame(Duration::ZERO);
+
+    game.toggle_room(GamepadButton::East, |state| state.lookout, Open);
+    game.toggle_room(GamepadButton::East, |state| state.lookout, Closed);
+    game.toggle_room(GamepadButton::Select, |state| state.side_room, Open);
+    game.toggle_room(GamepadButton::Select, |state| state.side_room, Closed);
+
+    game.collect_near_pickup_with(|driver, pressed| {
+        driver.button(GamepadButton::DPadRight, pressed)
+    });
+    assert_eq!(game.snapshot().score, 10);
+    assert!(game.flow().meadow_collected);
+    assert!(!game.flow().cavern_collected);
+    game.driver.tap_button(GamepadButton::South);
+    game.frame(STEP);
+    game.settle_level(LevelId::Cavern);
+    game.collect_near_pickup_with(|driver, pressed| {
+        driver.button(GamepadButton::DPadRight, pressed)
+    });
+    assert_eq!(game.flow().phase, FlowPhase::Complete);
+    assert_eq!(game.snapshot().score, 20);
+    assert_eq!(game.snapshot().travel_count, 1);
+    assert!(game.flow().cavern_collected);
+    let complete = game.instance();
+    game.driver.tap_button(GamepadButton::Start);
+    game.frame(Duration::ZERO);
+    game.settle_start(FlowPhase::Resuming);
+    assert_ne!(game.instance(), complete);
+    game.finish_resume();
+    assert_zero_round(&game, 2);
+
+    game.driver.tap_button(GamepadButton::Start);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Paused);
+    game.driver.tap_button(GamepadButton::East);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Title);
+    game.driver.tap_button(GamepadButton::Select);
+    assert_eq!(
+        game.session.frame(Duration::ZERO).unwrap(),
+        Some(AppExit::Requested)
+    );
+    assert_eq!(game.close_terminal(), HeadlessSessionClose::Complete);
+    assert!(game.session.is_closed());
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn controller_round_refuses_an_authored_start_binding_for_a_different_command() {
+    let project = ProjectCopy::new();
+    let path = project.root().join(two_level_game::input::INPUT_PATH);
+    let mut input: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let start = input["payload"]["bindings"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|binding| binding["input"]["GamepadButton"] == GamepadButton::Start.code())
+        .unwrap();
+    start["action"] = serde_json::json!("two-level-game.q");
+    let edited = serde_json::to_vec(&input).unwrap();
+    fs::write(&path, &edited).unwrap();
+    let recipe = with_play_flow(product_recipe(), PlayFlowControls::KeyboardAndGamepad).unwrap();
+    let mut session =
+        HeadlessSession::new(open_explicit_project_root(project.root()).unwrap(), recipe);
+    let startup = session.start();
+    let deadline = Instant::now() + DEADLINE;
+    let result = loop {
+        let result = session.close();
+        if result != HeadlessSessionClose::Pending || Instant::now() >= deadline {
+            break result;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    let error = startup.expect_err("an unrelated authored Start binding must refuse the Round");
+    assert_eq!(result, HeadlessSessionClose::Failed);
+    assert!(session.is_closed());
+    let nara::project_host::HeadlessSessionError::Runtime(diagnostics) = error else {
+        panic!("expected classified Runtime startup refusal, got {error:?}");
+    };
+    assert!(
+        diagnostics
+            .iter()
+            .any(|entry| entry.code().as_str() == "two-level-game.round-start-conflict"),
+        "{diagnostics:?}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), edited);
+
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
+    game.driver.tap_button(GamepadButton::Start);
+    game.frame(Duration::ZERO);
+    assert_eq!(game.flow().phase, FlowPhase::Title);
+    assert_eq!(game.runtime_clock(), (0, Duration::ZERO));
+}
+
 #[test]
 fn invalid_startup_checkpoint_can_stay_at_title_then_recover_a_new_initialized_animated_scene() {
     let project = ProjectCopy::new();
@@ -1140,7 +1465,7 @@ fn invalid_startup_checkpoint_can_stay_at_title_then_recover_a_new_initialized_a
     *role = serde_json::json!(3);
     fs::write(&path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
 
-    let mut game = Game::from_project(project.root(), with_play_flow(product_recipe()).unwrap());
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
     assert_eq!(game.flow().phase, FlowPhase::Degraded);
     assert!(
         game.flow()

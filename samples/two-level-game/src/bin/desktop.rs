@@ -34,9 +34,16 @@ fn main() -> ExitCode {
     });
     #[cfg(feature = "play-flow")]
     let recipe = if play_flow {
-        match two_level_game::flow::with_play_flow(recipe)
-            .and_then(two_level_game::flow::with_play_flow_hud)
-        {
+        use two_level_game::flow::{PlayFlowControls, with_play_flow, with_play_flow_hud};
+
+        let controls = PlayFlowControls::Keyboard;
+        #[cfg(feature = "gamepad")]
+        let controls = if gamepad {
+            PlayFlowControls::KeyboardAndGamepad
+        } else {
+            controls
+        };
+        match with_play_flow(recipe, controls).and_then(with_play_flow_hud) {
             Ok(recipe) => recipe,
             Err(error) => {
                 eprintln!("play flow configuration: {error}");

@@ -60,11 +60,7 @@ impl Observation {
         self.snapshot.phase == FlowPhase::Title
             && self.snapshot.round == 0
             && self.snapshot.error.is_none()
-            && self.presented_ui.as_ref().is_some_and(|ui| {
-                ui.matches_snapshot
-                    && ui.submitted_glyphs > 0
-                    && ui.text.iter().any(|text| text == "Enter: start | X: exit")
-            })
+            && self.current_presented()
     }
 
     pub(super) fn current_presented(&self) -> bool {
@@ -163,7 +159,8 @@ fn join_presented_ui(
         collected(snapshot.cavern_collected),
     );
     let matches_snapshot = heading.as_deref() == Some(expected_heading.as_str())
-        && text.iter().any(|text| text == &expected_goals);
+        && text.iter().any(|text| text == &expected_goals)
+        && text.iter().any(|text| text == hud.control_instructions());
     Some(PresentedHud {
         heading,
         text,

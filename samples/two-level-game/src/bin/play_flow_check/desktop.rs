@@ -63,8 +63,11 @@ pub(super) fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let recipe = match flow::with_play_flow(two_level_game::product_recipe())
-        .and_then(flow::with_play_flow_hud)
+    let recipe = match flow::with_play_flow(
+        two_level_game::product_recipe(),
+        flow::PlayFlowControls::Keyboard,
+    )
+    .and_then(flow::with_play_flow_hud)
     {
         Ok(recipe) => recipe,
         Err(error) => {

@@ -442,7 +442,8 @@ pub fn run(request: &Request) {
     println!(
         "\n{REPORT}{}",
         json!({
-            "success": true, "runtime": request.runtime, "physical_round_processes": 1,
+            "success": true, "runtime": request.runtime, "controllers": request.controllers,
+            "physical_round_processes": 1,
             "finite_processes": 1, "refused_processes": 2,
             "checkpoints": {"title": title, "started": started, "meadow_pickup": meadow,
                 "paused_while_d_held": paused, "resume_boundary": boundary, "resumed": resumed,

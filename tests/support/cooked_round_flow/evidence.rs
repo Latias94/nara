@@ -24,10 +24,16 @@ pub fn presented(record: &Value, request: &Request, previous: Option<&Value>) {
     assert_eq!(record["content_profile"], request.content_profile);
     assert_eq!(record["catalog_hash"], request.catalog_digest["hash"]);
     assert_eq!(record["catalog_length"], request.catalog_digest["length"]);
-    assert_eq!(
-        record["controllers"],
-        json!({"backend": "none", "connected": 0})
-    );
+    let backend = match request.controllers.as_str() {
+        "none" => "none",
+        "gilrs" => "gilrs-wgi",
+        selection => panic!("unexpected controller selection: {selection}"),
+    };
+    assert_eq!(record["controllers"]["backend"], backend);
+    let connected = number(&record["controllers"], "connected");
+    if backend == "none" {
+        assert_eq!(connected, 0);
+    }
     let source_input: Value = serde_json::from_slice(include_bytes!(
         "../../../samples/two-level-game/input/explorer.actions.json"
     ))
@@ -200,12 +206,24 @@ pub fn assert_shown(record: &Value, phase: &str, round: u32, score: u32, goals: 
         collected(goals[0]),
         collected(goals[1])
     );
-    let controls = match phase {
-        "Title" => "Enter: start | X: exit",
-        "Playing" => "WASD: move / collect gems | E: travel | Escape: pause | X: exit",
-        "Paused" => "Enter / Escape: continue | T: title | X: exit",
-        "Complete" => "Enter: restart | T: title | X: exit",
-        _ => panic!("unexpected acceptance phase: {phase}"),
+    let controls = match (phase, record["controllers"]["backend"].as_str()) {
+        ("Title", Some("none")) => "Enter: start | X: exit",
+        ("Playing", Some("none")) => {
+            "WASD: move / collect gems | E: travel | Escape: pause | X: exit"
+        }
+        ("Paused", Some("none")) => "Enter / Escape: continue | T: title | X: exit",
+        ("Complete", Some("none")) => "Enter: restart | T: title | X: exit",
+        ("Title", Some("gilrs-wgi")) => "Enter / Start: start | X / Select: exit",
+        ("Playing", Some("gilrs-wgi")) => {
+            "WASD / D-pad: move | E / South: travel | Escape / Start: pause | X: exit"
+        }
+        ("Paused", Some("gilrs-wgi")) => {
+            "Enter / Escape / Start: continue | T / East: title | X / Select: exit"
+        }
+        ("Complete", Some("gilrs-wgi")) => {
+            "Enter / Start: restart | T / East: title | X / Select: exit"
+        }
+        _ => panic!("unexpected acceptance phase or controller selection: {phase}; {record}"),
     };
     let text = record["flow"]["presented_ui"]["text"].as_array().unwrap();
     assert!(text.contains(&json!(goal_text)) && text.contains(&json!(controls)));

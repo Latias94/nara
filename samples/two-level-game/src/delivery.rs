@@ -278,6 +278,31 @@ impl PlayerSelection {
         Ok(())
     }
 
+    /// Checks Cook's admitted Input definition using the Round's actual startup derivation.
+    /// Exploration uses the original definition without a menu derivation.
+    #[cfg(feature = "play-flow")]
+    pub fn validate_round_input(
+        self,
+        input: Option<&nara::input::ActionMapDefinition>,
+    ) -> Result<(), String> {
+        if self.flow == GameFlow::Round {
+            let definition = input.ok_or("round flow requires an authored Input map")?;
+            crate::flow::validate_input(definition, self.round_controls())?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "play-flow")]
+    fn round_controls(self) -> crate::flow::PlayFlowControls {
+        use crate::flow::PlayFlowControls;
+
+        match self.controllers {
+            #[cfg(feature = "gamepad")]
+            ControllerBackend::Gilrs => PlayFlowControls::KeyboardAndGamepad,
+            _ => PlayFlowControls::Keyboard,
+        }
+    }
+
     pub fn recipe(self) -> Result<ProductRecipe, String> {
         let recipe = match self.runtime {
             RuntimeKind::Headless => crate::cooked_recipe(),
@@ -311,9 +336,13 @@ impl PlayerSelection {
         match self.flow {
             GameFlow::Exploration => Ok(recipe),
             #[cfg(feature = "play-flow")]
-            GameFlow::Round => crate::flow::with_play_flow(recipe)
-                .and_then(crate::flow::with_play_flow_hud)
-                .map_err(|error| error.to_string()),
+            GameFlow::Round => {
+                use crate::flow::{with_play_flow, with_play_flow_hud};
+
+                with_play_flow(recipe, self.round_controls())
+                    .and_then(with_play_flow_hud)
+                    .map_err(|error| error.to_string())
+            }
             #[cfg(not(feature = "play-flow"))]
             GameFlow::Round => Err("round flow requires the play-flow Cargo feature".into()),
         }

@@ -6,7 +6,10 @@
 ))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use two_level_game::{delivery::RuntimeKind, development::protocol};
+use two_level_game::{
+    delivery::{ControllerBackend, RuntimeKind},
+    development::protocol,
+};
 
 #[path = "../../../tests/support/continuity.rs"]
 #[allow(dead_code)]
@@ -20,6 +23,7 @@ fn production_cooked_round_desktop_accepts_physical_complete_round() {
     support::accept(
         std::path::Path::new(env!("CARGO_BIN_EXE_cook")),
         RuntimeKind::Desktop,
+        ControllerBackend::Disabled,
     );
 }
 
@@ -30,6 +34,19 @@ fn production_cooked_round_audio_desktop_accepts_physical_complete_round() {
     support::accept(
         std::path::Path::new(env!("CARGO_BIN_EXE_cook")),
         RuntimeKind::AudioDesktop,
+        ControllerBackend::Disabled,
+    );
+}
+
+#[test]
+#[cfg(feature = "gamepad")]
+#[ignore = "actual release cook --runtime desktop --controllers gilrs --flow round, relocated source-free Windows/DX12 keyboard round with native WGI and presented controller instructions; no physical controller required"]
+fn production_cooked_controller_round_presents_controller_instructions_and_keeps_keyboard_playable()
+{
+    support::accept(
+        std::path::Path::new(env!("CARGO_BIN_EXE_cook")),
+        RuntimeKind::Desktop,
+        ControllerBackend::Gilrs,
     );
 }
 
