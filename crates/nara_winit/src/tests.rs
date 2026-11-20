@@ -118,19 +118,29 @@ fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
     let key = KeyCode::Character('w');
     let mut gate = WinitInputGate::default();
     assert_eq!(
-        gate.keyboard_input(key, ElementState::Pressed, false),
+        gate.physical_keyboard_input(key, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(key))
     );
-    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, true), None);
     gate.lose_focus([key], [MouseButton::Left]);
+    assert_eq!(
+        gate.physical_keyboard_input(key, ElementState::Pressed, false),
+        None
+    );
     gate.gain_focus();
-    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, false), None);
+    assert_eq!(
+        gate.physical_keyboard_input(key, ElementState::Pressed, true),
+        None
+    );
+    assert_eq!(
+        gate.physical_keyboard_input(key, ElementState::Pressed, false),
+        cfg!(target_os = "windows").then_some(ButtonDriverInput::Press(key))
+    );
     assert_eq!(
         gate.mouse_input(MouseButton::Left, ElementState::Pressed),
         None
     );
     assert_eq!(
-        gate.keyboard_input(key, ElementState::Released, false),
+        gate.physical_keyboard_input(key, ElementState::Released, false),
         Some(ButtonDriverInput::Release(key))
     );
     assert_eq!(
@@ -138,7 +148,7 @@ fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
         Some(ButtonDriverInput::Release(MouseButton::Left))
     );
     assert_eq!(
-        gate.keyboard_input(key, ElementState::Pressed, false),
+        gate.physical_keyboard_input(key, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(key))
     );
     assert_eq!(
@@ -151,12 +161,12 @@ fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
 fn initial_focus_state_is_applied_to_the_input_gate() {
     let mut gate = WinitInputGate::reset_for_focus(false);
     assert_eq!(
-        gate.keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
+        gate.physical_keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
         None
     );
     gate.gain_focus();
     assert_eq!(
-        gate.keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
+        gate.physical_keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(KeyCode::Enter))
     );
 }
@@ -246,38 +256,52 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
         .unwrap();
-    assert!(
-        !state
-            .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                true
-            )
-            .unwrap()
+    for (edge, repeat, synthetic) in [
+        (ElementState::Pressed, false, true),
+        (ElementState::Released, false, true),
+        (ElementState::Pressed, true, false),
+    ] {
+        assert!(
+            !state
+                .apply_keyboard_event_with_origin(
+                    raw_key_event(WinitKeyCode::KeyW, edge),
+                    repeat,
+                    synthetic,
+                )
+                .unwrap()
+        );
+    }
+    state.runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        2
     );
-    assert!(
-        !state
-            .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false
-            )
-            .unwrap()
-    );
-    assert!(
+    assert_eq!(
         state
             .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::KeyW, ElementState::Released),
-                false
-            )
-            .unwrap()
-    );
-    assert!(
-        state
-            .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
                 false
             )
-            .unwrap()
+            .unwrap(),
+        cfg!(target_os = "windows")
     );
+    if !cfg!(target_os = "windows") {
+        for edge in [ElementState::Released, ElementState::Pressed] {
+            assert!(
+                state
+                    .apply_physical_keyboard_driver_event(
+                        raw_key_event(WinitKeyCode::KeyW, edge),
+                        false,
+                    )
+                    .unwrap()
+            );
+        }
+    }
     state.runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(
         state

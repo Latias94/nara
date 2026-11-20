@@ -1,7 +1,27 @@
 //! One process, one physical loop, sequential independently started Runtime generations.
 
 use super::*;
-use std::{cell::RefCell, rc::Rc, sync::mpsc::Receiver};
+use std::{
+    cell::RefCell,
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    ptr::null_mut,
+    rc::Rc,
+    sync::mpsc::Receiver,
+};
+use windows_sys::{
+    Win32::{
+        Foundation::HWND,
+        UI::{
+            Input::KeyboardAndMouse::VK_W,
+            WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, HWND_MESSAGE, IsWindowVisible, MSG, PM_NOREMOVE,
+                PeekMessageW, PostMessageW, WM_KEYDOWN, WM_KEYFIRST, WM_KEYLAST, WM_KEYUP,
+                WM_KILLFOCUS, WM_NCACTIVATE, WM_SETFOCUS,
+            },
+        },
+    },
+    w,
+};
 
 #[derive(Default)]
 struct Observations {
@@ -368,6 +388,7 @@ fn hidden_fullscreen_is_deferred_until_the_original_window_is_revealed() {
 struct NativeKeyboardMovement {
     held: bool,
     position: u64,
+    starts: u64,
     stops: u64,
 }
 
@@ -379,10 +400,18 @@ fn native_keyboard_binding() -> nara_input::KeyboardActionBinding {
     }
 }
 
-fn native_keyboard_session(binding: nara_input::KeyboardActionBinding) -> WinitSession {
+fn native_keyboard_session(
+    binding: nara_input::KeyboardActionBinding,
+    isolated: bool,
+) -> WinitSession {
     use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs};
-    use nara_gameplay::{GameplayCommandBatch, GameplayCommandSet};
-    use nara_input::{ActionBinding, ActionMap, ActionMapBuilder, ActionMapLimits, ActionMaps};
+    use nara_gameplay::{
+        ActionCommandBinding, ActionCommandMap, GameplayCommandBatch, GameplayCommandSet,
+        GameplayCommandTypeId,
+    };
+    use nara_input::{
+        ActionBinding, ActionMap, ActionMapBuilder, ActionMapLimits, ActionMaps, ActionPhase,
+    };
 
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
@@ -412,28 +441,38 @@ fn native_keyboard_session(binding: nara_input::KeyboardActionBinding) -> WinitS
         .unwrap(),
     ))
     .unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<nara_gameplay::ActionCommandMap>()
-        .bind(nara_gameplay::ActionCommandBinding::new(
-            binding.action,
-            nara_input::ActionPhase::Released,
-            nara_gameplay::GameplayCommandTypeId::new("test.native-keyboard-stop").unwrap(),
-        ))
-        .unwrap();
+    let start = GameplayCommandTypeId::new("test.native-keyboard-move").unwrap();
+    let stop = GameplayCommandTypeId::new("test.native-keyboard-stop").unwrap();
+    {
+        let mut commands = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
+        commands
+            .bind(ActionCommandBinding::new(
+                binding.action.clone(),
+                ActionPhase::Started,
+                start.clone(),
+            ))
+            .unwrap();
+        commands
+            .bind(ActionCommandBinding::new(
+                binding.action,
+                ActionPhase::Released,
+                stop.clone(),
+            ))
+            .unwrap();
+    }
     app.insert_resource(NativeKeyboardMovement {
-        held: true,
+        held: isolated,
         ..NativeKeyboardMovement::default()
     })
     .unwrap();
     app.add_systems(
         nara_app::CoreStage::FixedUpdate,
-        (|batch: Res<GameplayCommandBatch>, mut movement: ResMut<NativeKeyboardMovement>| {
+        (move |batch: Res<GameplayCommandBatch>, mut movement: ResMut<NativeKeyboardMovement>| {
             for command in batch.commands() {
-                if command.command_type()
-                    == &nara_gameplay::GameplayCommandTypeId::new("test.native-keyboard-stop")
-                        .unwrap()
-                {
+                if command.command_type() == &start {
+                    movement.held = true;
+                    movement.starts += 1;
+                } else if command.command_type() == &stop {
                     movement.held = false;
                     movement.stops += 1;
                 }
@@ -447,7 +486,7 @@ fn native_keyboard_session(binding: nara_input::KeyboardActionBinding) -> WinitS
     .unwrap();
     WinitRunner::new(WinitControlFlow::Wait)
         .with_initial_visibility(false)
-        .with_input_isolation(true)
+        .with_input_isolation(isolated)
         .__start_with_presentation_on(
             RuntimeInstance::start(app).unwrap(),
             Box::new(BoundedPlatformDriver {
@@ -458,6 +497,7 @@ fn native_keyboard_session(binding: nara_input::KeyboardActionBinding) -> WinitS
         )
 }
 
+#[track_caller]
 fn poll_native_keyboard_until(
     session: &mut WinitSession,
     condition: impl Fn(&WinitSession) -> bool,
@@ -483,10 +523,10 @@ fn poll_native_keyboard_until(
     );
 }
 
-fn keyboard_hwnd(window: &WinitWindow) -> windows_sys::Win32::Foundation::HWND {
+fn keyboard_hwnd(window: &WinitWindow) -> HWND {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().unwrap().as_raw() {
-        RawWindowHandle::Win32(handle) => handle.hwnd.get() as windows_sys::Win32::Foundation::HWND,
+        RawWindowHandle::Win32(handle) => handle.hwnd.get() as HWND,
         handle => panic!("expected original Win32 keyboard window, got {handle:?}"),
     }
 }
@@ -573,6 +613,10 @@ fn step_native_keyboard(session: &mut WinitSession) {
         session.control_status(step) == Some(RuntimeControlStatus::Applied)
             && session.paused_frame_complete()
     });
+    assert_eq!(session.runtime().state(), RuntimeState::Paused);
+}
+
+fn assert_native_keyboard_stopped(session: &WinitSession) {
     let movement = session
         .runtime()
         .world()
@@ -580,7 +624,6 @@ fn step_native_keyboard(session: &mut WinitSession) {
     assert!(!movement.held);
     assert_eq!(movement.position, 0);
     assert_eq!(movement.stops, 1);
-    assert_eq!(session.runtime().state(), RuntimeState::Paused);
 }
 
 fn retire_native_keyboard(mut session: WinitSession, original: Arc<WinitWindow>) {
@@ -595,10 +638,157 @@ fn retire_native_keyboard(mut session: WinitSession, original: Arc<WinitWindow>)
     assert_eq!(retired.result, Ok(AppExit::Requested));
 }
 
+#[track_caller]
+fn post_focus_test_message(hwnd: HWND, message: u32, wparam: usize, lparam: isize) {
+    assert_ne!(
+        unsafe { PostMessageW(hwnd, message, wparam, lparam) },
+        0,
+        "PostMessageW({message:#x}): {}",
+        std::io::Error::last_os_error(),
+    );
+}
+
+#[track_caller]
+fn assert_native_movement(
+    session: &WinitSession,
+    binding: &nara_input::KeyboardActionBinding,
+    expected: (bool, u64, u64, u64),
+) {
+    let world = session.runtime().world();
+    let movement = world.resource::<NativeKeyboardMovement>();
+    assert_eq!(
+        (
+            movement.held,
+            movement.position,
+            movement.starts,
+            movement.stops
+        ),
+        expected
+    );
+    assert_eq!(
+        world.resource::<nara_input::SemanticActions>().pressed(
+            InputSeatId::PRIMARY,
+            &binding.action,
+            &binding.context,
+        ),
+        movement.held
+    );
+}
+
+struct KeyUpReceiver(HWND);
+
+impl Drop for KeyUpReceiver {
+    fn drop(&mut self) {
+        let _ = unsafe { DestroyWindow(self.0) };
+    }
+}
+
+#[test]
+#[ignore = "requires a Windows message pump with hidden HWNDs; run in its own nextest process"]
+fn native_ordinary_refocus_admits_first_fresh_press_after_release_to_another_hwnd() {
+    const W_DOWN: isize = 0x0011_0001;
+    const W_REPEAT: isize = W_DOWN | (1 << 30);
+    const W_UP: isize = (W_REPEAT as u32 | (1 << 31)) as i32 as isize;
+
+    let binding = nara_input::KeyboardActionBinding {
+        key: KeyCode::Character('w'),
+        action: nara_input::ActionId::new("test.native-keyboard-w").unwrap(),
+        context: nara_input::ActionContext::gameplay(),
+    };
+    let mut session = native_keyboard_session(binding.clone(), false);
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        poll_native_keyboard_until(&mut session, WinitSession::paused_frame_complete);
+        let window = &session.app.as_ref().unwrap().platform_windows[&WindowId::PRIMARY];
+        assert_eq!(window.is_visible(), Some(false));
+        assert!(!window.has_focus());
+        let hwnd = keyboard_hwnd(window);
+        let other = unsafe {
+            CreateWindowExW(
+                0,
+                w!("STATIC"),
+                w!("nara focus test key-up receiver"),
+                0,
+                0,
+                0,
+                0,
+                0,
+                HWND_MESSAGE,
+                null_mut(),
+                null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(
+            !other.is_null() && other != hwnd,
+            "failed to create the second HWND: {}",
+            std::io::Error::last_os_error()
+        );
+        let receiver = KeyUpReceiver(other);
+        assert_eq!(unsafe { IsWindowVisible(receiver.0) }, 0);
+
+        let post_focus = |session: &mut WinitSession, focused: bool| {
+            let message = if focused { WM_SETFOCUS } else { WM_KILLFOCUS };
+            post_focus_test_message(hwnd, message, receiver.0 as usize, 0);
+            poll_native_keyboard_until(session, |session| {
+                let app = session.app.as_ref().unwrap();
+                app.platform_windows[&WindowId::PRIMARY].has_focus() == focused
+                    && app.input_gate.focused == focused
+                    && session.paused_frame_complete()
+            });
+        };
+        let post_w = |session: &mut WinitSession, target, message, lparam| {
+            post_focus_test_message(target, message, usize::from(VK_W), lparam);
+            let key_message_pending = || {
+                let mut message = MSG::default();
+                unsafe {
+                    PeekMessageW(&mut message, target, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE) != 0
+                }
+            };
+            assert!(key_message_pending());
+            poll_native_keyboard_until(session, |session| {
+                session.paused_frame_complete() && !key_message_pending()
+            });
+        };
+
+        post_focus_test_message(hwnd, WM_NCACTIVATE, 1, -1);
+        post_focus(&mut session, true);
+        post_w(&mut session, hwnd, WM_KEYDOWN, W_DOWN);
+        step_native_keyboard(&mut session);
+        assert_native_movement(&session, &binding, (true, 1, 1, 0));
+
+        post_focus(&mut session, false);
+        step_native_keyboard(&mut session);
+        assert_native_movement(&session, &binding, (false, 1, 1, 1));
+
+        post_focus(&mut session, true);
+        post_w(&mut session, hwnd, WM_KEYDOWN, W_REPEAT);
+        step_native_keyboard(&mut session);
+        assert_native_movement(&session, &binding, (false, 1, 1, 1));
+
+        post_focus(&mut session, false);
+        post_w(&mut session, receiver.0, WM_KEYUP, W_UP);
+        post_focus(&mut session, true);
+        post_w(&mut session, hwnd, WM_KEYDOWN, W_DOWN);
+        step_native_keyboard(&mut session);
+        assert_native_movement(&session, &binding, (true, 2, 2, 1));
+
+        post_w(&mut session, hwnd, WM_KEYUP, W_UP);
+        step_native_keyboard(&mut session);
+        assert_native_movement(&session, &binding, (false, 2, 2, 2));
+    }));
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+    outcome.unwrap_or_else(|payload| resume_unwind(payload));
+    assert_eq!(
+        session.into_retired().unwrap().result,
+        Ok(AppExit::Requested)
+    );
+}
+
 #[test]
 #[ignore = "requires an interactive Windows desktop; run serially in its own nextest process"]
 fn native_keyboard_release_gap_requires_one_original_stop_step_before_activation() {
-    let mut session = native_keyboard_session(native_keyboard_binding());
+    let mut session = native_keyboard_session(native_keyboard_binding(), true);
     let generation = session.runtime().generation();
     restore_native_d(&mut session);
     let window = session.app.as_ref().unwrap().platform_windows[&WindowId::PRIMARY].clone();
@@ -654,6 +844,7 @@ fn native_keyboard_release_gap_requires_one_original_stop_step_before_activation
             })
     );
     step_native_keyboard(&mut session);
+    assert_native_keyboard_stopped(&session);
     assert_eq!(session.input_activation(), WinitInputActivation::Active);
     assert!(
         !session
@@ -668,11 +859,9 @@ fn native_keyboard_release_gap_requires_one_original_stop_step_before_activation
 #[test]
 #[ignore = "injects a matched native D Down/Up; requires an interactive Windows desktop and serial execution"]
 fn native_posted_key_up_releases_a_physically_confirmed_restored_member_once() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, PostMessageW, WM_KEYUP,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
-    let mut session = native_keyboard_session(native_keyboard_binding());
+    let mut session = native_keyboard_session(native_keyboard_binding(), true);
     let generation = session.runtime().generation();
     restore_native_d(&mut session);
     let window = session.app.as_ref().unwrap().platform_windows[&WindowId::PRIMARY].clone();
@@ -754,6 +943,7 @@ fn native_posted_key_up_releases_a_physically_confirmed_restored_member_once() {
             })
     );
     step_native_keyboard(&mut session);
+    assert_native_keyboard_stopped(&session);
     assert_eq!(session.runtime().generation(), generation);
     assert_eq!(
         session
@@ -798,7 +988,7 @@ fn unsupported_native_keyboard_query_keeps_the_original_candidate_paused() {
         ..native_keyboard_binding()
     };
     assert!(crate::keyboard_continuation::physical_key(binding.key).is_none());
-    let mut session = native_keyboard_session(binding.clone());
+    let mut session = native_keyboard_session(binding.clone(), true);
     poll_native_keyboard_until(&mut session, |session| {
         session
             .capture_keyboard_holds(std::slice::from_ref(&binding))

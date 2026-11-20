@@ -736,6 +736,52 @@ fn cpu_active_paused_refocus_settles_platform_release_through_one_original_step(
 }
 
 #[test]
+fn activation_snapshot_suppresses_unowned_down_keys_until_physical_release() {
+    let mut session = cpu_active_keyboard_session();
+    let state = session.app.as_mut().unwrap();
+    let previously_held = KeyCode::Character('d');
+    let pressed_while_away = KeyCode::Character('w');
+    state.input_gate.lose_focus([previously_held], []);
+    state.input_gate.gain_focus();
+    state
+        .reconcile_keyboard_activation(vec![previously_held, pressed_while_away])
+        .unwrap();
+    assert_eq!(
+        state.keyboard_continuation.activation,
+        WinitInputActivation::ReconciliationPending
+    );
+    state.keyboard_continuation.activation = WinitInputActivation::Active;
+
+    for key in [WinitKeyCode::KeyD, WinitKeyCode::KeyW] {
+        assert!(
+            !state
+                .apply_keyboard_event_with_origin(
+                    raw_key_event(key, ElementState::Released),
+                    false,
+                    true,
+                )
+                .unwrap()
+        );
+        assert!(
+            !state
+                .apply_physical_keyboard_driver_event(
+                    raw_key_event(key, ElementState::Pressed),
+                    false,
+                )
+                .unwrap()
+        );
+        for edge in [ElementState::Released, ElementState::Pressed] {
+            assert!(
+                state
+                    .apply_physical_keyboard_driver_event(raw_key_event(key, edge), false)
+                    .unwrap()
+            );
+        }
+    }
+    close(session);
+}
+
+#[test]
 fn keyboard_admission_and_rejection_survive_the_same_post_operation_fault() {
     for reject in [false, true] {
         let mut session = keyboard_session(true, true);

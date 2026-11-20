@@ -501,20 +501,24 @@ impl WinitApp {
             }
             Err(error) => return self.retain_keyboard_activation_error(error),
         };
-        self.input_gate.suppressed_keys.retain(|key| {
+        self.input_gate.suppressed_keys.retain(|key, suppression| {
+            if down.contains(key) {
+                *suppression = KeySuppression::ActivationReconciliation;
+                return true;
+            }
             !self
                 .keyboard_continuation
                 .bindings
                 .iter()
                 .any(|binding| binding.key == *key)
-                || down.contains(key)
         });
         self.input_gate
             .suppressed_keys
-            .extend(down.iter().copied().filter(|key| {
-                !holds
+            .extend(down.iter().copied().filter_map(|key| {
+                (!holds
                     .iter()
-                    .any(|hold| hold.held && hold.binding.key == *key)
+                    .any(|hold| hold.held && hold.binding.key == key))
+                .then_some((key, KeySuppression::ActivationReconciliation))
             }));
         let missing = holds
             .iter()

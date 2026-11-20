@@ -1026,8 +1026,14 @@ struct WinitApp {
 #[derive(Debug)]
 struct WinitInputGate {
     focused: bool,
-    suppressed_keys: HashSet<KeyCode>,
+    suppressed_keys: HashMap<KeyCode, KeySuppression>,
     suppressed_mouse_buttons: HashSet<MouseButton>,
+}
+
+#[derive(Debug)]
+enum KeySuppression {
+    FocusLoss,
+    ActivationReconciliation,
 }
 
 impl Default for WinitInputGate {
@@ -1040,7 +1046,7 @@ impl WinitInputGate {
     fn reset_for_focus(focused: bool) -> Self {
         Self {
             focused,
-            suppressed_keys: HashSet::new(),
+            suppressed_keys: HashMap::new(),
             suppressed_mouse_buttons: HashSet::new(),
         }
     }
@@ -1051,7 +1057,11 @@ impl WinitInputGate {
         released_mouse_buttons: impl IntoIterator<Item = MouseButton>,
     ) {
         self.focused = false;
-        self.suppressed_keys.extend(released_keys);
+        for key in released_keys {
+            self.suppressed_keys
+                .entry(key)
+                .or_insert(KeySuppression::FocusLoss);
+        }
         self.suppress_mouse_buttons(released_mouse_buttons);
     }
 
@@ -1066,7 +1076,7 @@ impl WinitInputGate {
         self.focused = true;
     }
 
-    fn keyboard_input(
+    fn physical_keyboard_input(
         &mut self,
         key: KeyCode,
         state: ElementState,
@@ -1077,9 +1087,14 @@ impl WinitInputGate {
                 self.suppressed_keys.remove(&key);
                 self.focused.then_some(ButtonDriverInput::Release(key))
             }
-            ElementState::Pressed
-                if self.focused && !repeat && !self.suppressed_keys.contains(&key) =>
-            {
+            ElementState::Pressed if self.focused && !repeat => {
+                match self.suppressed_keys.get(&key) {
+                    Some(KeySuppression::FocusLoss) if cfg!(target_os = "windows") => {
+                        self.suppressed_keys.remove(&key);
+                    }
+                    Some(_) => return None,
+                    None => {}
+                }
                 Some(ButtonDriverInput::Press(key))
             }
             ElementState::Pressed => None,
@@ -1761,7 +1776,10 @@ impl WinitApp {
         let Some(key) = convert_physical_key(event.physical_key) else {
             return Ok(false);
         };
-        let Some(input) = self.input_gate.keyboard_input(key, event.state, repeat) else {
+        let Some(input) = self
+            .input_gate
+            .physical_keyboard_input(key, event.state, repeat)
+        else {
             return Ok(false);
         };
         let input_window_id = InputWindowId::new(self.input_window_id.get());
