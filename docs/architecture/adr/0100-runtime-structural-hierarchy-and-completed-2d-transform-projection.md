@@ -243,6 +243,14 @@ candidate buffers and fixed interpolation samples are retained. Public arbitrary
 snapshot retention remain outside this contract. Native World access remains trusted; a missing or
 foreign private slot fails explicitly rather than creating an out-of-World service.
 
+For fixed-step interpolation, local signed-scale pairs with equal handedness use equivalent
+rotation and scale representations before interpolation. If handedness changes, presentation uses
+the current basis between samples and interpolates translation. At an exact fixed cut, invertible
+local endpoints keep the sampled basis so parent and child scales stay paired. A zero-scale
+endpoint selects the current basis so presentation can recover from an older degenerate sample.
+A degenerate current camera still reaches normal View validation. Camera, Sprite and Tile
+extraction use the same composed presentation matrices.
+
 `add_fixed_transform_projection_systems` supplies both ends of the Resolve interval.
 `add_presented_transform_projection_systems` orders Extract consumers after presentation.
 The implementation applies actual deferred command boundaries before capturing a cut; a call to

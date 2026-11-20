@@ -26,7 +26,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const WARMUP: usize = 8;
@@ -95,21 +95,73 @@ fn disabled_parent_preserves_child_camera_extraction() -> Result<()> {
 fn disabled_parent_preserves_child_camera_pixels() -> Result<()> {
     require_adapter_selection();
     let captures = camera_inheritance_captures()?;
+    assert_camera_marker_pixels(
+        captures.into_iter().map(|(capture, camera_x)| {
+            let x = scene::CANVAS_WIDTH / 2 + (scene::CAMERA_SPRITE_X - camera_x) as u32;
+            (capture, x)
+        }),
+        4,
+    )
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native adapter for full pixel readback"]
+fn mirrored_parent_keeps_the_marker_drawn_at_and_around_the_half_tick() -> Result<()> {
+    require_adapter_selection();
+    let mut runtime = scene::build_camera_mirror()?;
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut captures = Vec::new();
+        for (delta, tick, alpha, screen_x) in [
+            (0, 0, 0.0, 168),
+            (20, 1, 0.0, 168),
+            (9, 1, 0.45, 152),
+            (1, 1, 0.5, 152),
+            (1, 1, 0.55, 152),
+            (19, 2, 0.5, 152),
+        ] {
+            let capture = scene::drive_for(&mut runtime, Duration::from_millis(delta));
+            let sample = capture.packet().captured_time().unwrap();
+            assert_eq!(sample.fixed().tick(), tick);
+            assert!((sample.render().interpolation_alpha() - alpha).abs() < 1.0e-6);
+            let views = capture.packet().views();
+            assert_eq!(views.len(), 1);
+            assert_eq!(
+                views[0]
+                    .mapping
+                    .clip_to_world_matrix()
+                    .determinant()
+                    .is_sign_negative(),
+                screen_x == 152
+            );
+            captures.push((capture, screen_x));
+        }
+        captures
+    }));
+    retire(runtime);
+    match result {
+        Ok(captures) => assert_camera_marker_pixels(captures, 2),
+        Err(payload) => resume_unwind(payload),
+    }
+}
+
+fn assert_camera_marker_pixels(
+    captures: impl IntoIterator<Item = (WgpuRenderInput, u32)>,
+    radius: u32,
+) -> Result<()> {
     let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(64 * 1024 * 1024);
     let producer = host.create_producer()?;
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
         let image = target();
-        for (index, (capture, camera_x)) in captures.into_iter().enumerate() {
+        for (index, (capture, center_x)) in captures.into_iter().enumerate() {
             host.begin_frame(index as u64 + 1)?;
             let input = adapt_input(&mut host, &producer, &capture, image, index == 0);
             let frame = submit(&mut host, &producer, &input);
             readback::settle(frame.outputs().submitted_prefix());
             let texture = frame.final_texture::<WgpuSceneColor>()?;
 
-            let center_x = scene::CANVAS_WIDTH / 2 + (scene::CAMERA_SPRITE_X - camera_x) as u32;
             let center_y = scene::CANVAS_HEIGHT / 2;
-            let red_x = center_x - 4..center_x + 4;
-            let red_y = center_y - 4..center_y + 4;
+            let red_x = center_x - radius..center_x + radius;
+            let red_y = center_y - radius..center_y + radius;
             let mut expected = Vec::with_capacity((scene::WIDTH * scene::HEIGHT) as usize);
             for y in 0..scene::HEIGHT {
                 for x in 0..scene::WIDTH {

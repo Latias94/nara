@@ -19,7 +19,10 @@ use crate::{
 /// Opts this world's presentation into interpolation between previous and current fixed samples.
 ///
 /// Insert this resource before startup. Paused frames, new entities, and edits outside the
-/// captured fixed pair display the current captured transform immediately.
+/// captured fixed pair display the current captured transform immediately. A change in spatial
+/// handedness uses the current local basis between samples and still interpolates translation.
+/// Exact invertible endpoints retain their sampled bases. Equal-handed signed scales
+/// interpolate through equivalent rotation and scale representations.
 #[derive(Clone, Copy, Debug, Default, Resource)]
 pub struct FixedTransformInterpolation;
 
@@ -289,19 +292,36 @@ pub(super) fn derive_render_projection(world: &mut World) -> Result<(), BevyErro
 }
 
 fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Transform2d {
-    if alpha >= 1.0 {
+    if alpha >= 1.0 || previous == current {
         return current;
     }
-    if alpha <= 0.0 {
+    let degenerate_scale = previous.scale.x == 0.0
+        || previous.scale.y == 0.0
+        || current.scale.x == 0.0
+        || current.scale.y == 0.0;
+    if alpha <= 0.0 && !degenerate_scale {
         return previous;
     }
-    let rotation = if previous.rotation == current.rotation {
+    let flip_x = previous.scale.x.is_sign_negative() != current.scale.x.is_sign_negative();
+    let flip_y = previous.scale.y.is_sign_negative() != current.scale.y.is_sign_negative();
+    let translation = previous.translation.lerp(current.translation, alpha);
+    if flip_x != flip_y || degenerate_scale {
+        return Transform2d {
+            translation,
+            ..current
+        };
+    }
+    let rotation = if previous.rotation == current.rotation && !flip_x {
         previous.rotation
     } else {
         // Reduce through the same trigonometric domain as the endpoint matrices. Taking the
         // remainder of a huge angle by an approximate TAU loses its actual orientation.
         let (previous_sin, previous_cos) = previous.rotation.sin_cos();
-        let (current_sin, current_cos) = current.rotation.sin_cos();
+        let (mut current_sin, mut current_cos) = current.rotation.sin_cos();
+        if flip_x {
+            current_sin = -current_sin;
+            current_cos = -current_cos;
+        }
         let previous_angle = f64::from(previous_sin).atan2(f64::from(previous_cos));
         let current_angle = f64::from(current_sin).atan2(f64::from(current_cos));
         let delta = (current_angle - previous_angle + std::f64::consts::PI)
@@ -309,10 +329,15 @@ fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Trans
             - std::f64::consts::PI;
         (previous_angle + delta * f64::from(alpha)) as f32
     };
+    let current_scale = if flip_x {
+        -current.scale
+    } else {
+        current.scale
+    };
     Transform2d {
-        translation: previous.translation.lerp(current.translation, alpha),
+        translation,
         rotation,
-        scale: previous.scale.lerp(current.scale, alpha),
+        scale: previous.scale.lerp(current_scale, alpha),
     }
 }
 

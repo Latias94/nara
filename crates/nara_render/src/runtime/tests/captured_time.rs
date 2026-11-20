@@ -29,6 +29,178 @@ fn moving_camera_app() -> App {
     app
 }
 
+#[test]
+fn parented_camera_presents_signed_scale_changes_without_suppressing_singular_faults() {
+    let midpoint = TIMESTEP + TIMESTEP / 2;
+    let mut rotation_equivalent = None;
+    for (scale, angle, expected_center, mirrored) in [
+        (Vec2::new(-1.0, 1.0), 0.0, Vec2::new(7.0, 0.0), true),
+        (Vec2::new(1.0, -1.0), 0.0, Vec2::new(13.0, 0.0), true),
+        (Vec2::splat(-1.0), 0.0, Vec2::new(10.0, -3.0), false),
+        (
+            Vec2::ONE,
+            std::f32::consts::PI,
+            Vec2::new(10.0, -3.0),
+            false,
+        ),
+        (Vec2::new(0.0, 1.0), 0.0, Vec2::ZERO, false),
+    ] {
+        let mut app = render_app(true);
+        app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
+            .unwrap();
+        app.insert_resource(FixedTransformInterpolation).unwrap();
+        let world = app.world_mut().unwrap();
+        let parent = world.spawn(Transform2d::IDENTITY).id();
+        let camera = world
+            .spawn((
+                Camera2d::default(),
+                Transform2d::from_translation(Vec2::new(3.0, 0.0)),
+            ))
+            .id();
+        place_parented(world, camera, parent);
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (move |mut poses: Query<&mut Transform2d>| {
+                *poses.get_mut(parent).unwrap() = Transform2d {
+                    translation: Vec2::new(20.0, 0.0),
+                    rotation: angle,
+                    scale,
+                };
+            })
+            .in_set(FixedUpdateSet::Simulate),
+        )
+        .unwrap();
+
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        let first = capture_packet(&runtime);
+        let mid = runtime.drive(midpoint);
+        if scale.x == 0.0 {
+            let retained = capture_packet(&runtime);
+            let retry = runtime.drive(TIMESTEP);
+            let tick = runtime.world().resource::<FixedTime>().tick();
+            retire_runtime(runtime);
+            let fault = mid.unwrap_err();
+            assert_eq!(fault.fault().kind(), nara_app::RuntimeFaultKind::System);
+            assert_eq!(retained, first);
+            assert_eq!(retry.unwrap_err(), fault);
+            assert_eq!(tick, 1);
+            let singular = Transform2d {
+                scale,
+                ..Transform2d::IDENTITY
+            }
+            .matrix();
+            assert!(matches!(
+                camera_mapping(camera, singular, 100.0, ViewportRect::new(0, 0, 320, 180).unwrap()),
+                Err(RenderViewExtractionError::SingularTransform { entity }) if entity == camera
+            ));
+            continue;
+        }
+
+        assert_eq!(mid.unwrap().frame().unwrap().status.fixed_tick, 1);
+        let sample = assert_current_sample(&runtime);
+        assert_eq!(sample.render().interpolation_alpha(), 0.5);
+        assert!(sample.spatial_interpolated());
+        let packet = capture_packet(&runtime);
+        let view = &packet.views()[0];
+        assert_eq!(view.id, first.views()[0].id);
+        let matrix = view.mapping.clip_to_world_matrix();
+        assert_eq!(matrix.determinant().is_sign_negative(), mirrored);
+        assert!(
+            view.mapping
+                .clip_to_world(Vec2::ZERO)
+                .abs_diff_eq(expected_center, 1.0e-4)
+        );
+        if scale == Vec2::splat(-1.0) {
+            rotation_equivalent = Some(matrix);
+        } else if angle != 0.0 {
+            assert!(matrix.abs_diff_eq(rotation_equivalent.unwrap(), 1.0e-4));
+        }
+        assert_eq!(
+            runtime
+                .drive(TIMESTEP)
+                .unwrap()
+                .frame()
+                .unwrap()
+                .status
+                .fixed_tick,
+            2
+        );
+        assert_eq!(capture_packet(&runtime).views()[0].id, view.id);
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
+fn exact_fixed_cut_uses_one_parent_and_child_camera_basis() {
+    let large = 2.0_f32.powi(40);
+    let small = large.recip();
+    let mut app = render_app(true);
+    app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
+        .unwrap();
+    app.insert_resource(FixedTransformInterpolation).unwrap();
+    let world = app.world_mut().unwrap();
+    let parent = world
+        .spawn(Transform2d {
+            scale: Vec2::splat(large),
+            ..Transform2d::IDENTITY
+        })
+        .id();
+    let camera = world
+        .spawn((
+            Camera2d::default(),
+            Transform2d {
+                scale: Vec2::splat(small),
+                ..Transform2d::IDENTITY
+            },
+        ))
+        .id();
+    place_parented(world, camera, parent);
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        (move |mut transforms: Query<&mut Transform2d>| {
+            transforms.get_mut(parent).unwrap().scale = Vec2::new(-small, small);
+            transforms.get_mut(camera).unwrap().scale = Vec2::splat(large);
+        })
+        .in_set(FixedUpdateSet::Simulate),
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let initial = capture_packet(&runtime);
+    assert_eq!(
+        runtime
+            .drive(TIMESTEP)
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status
+            .fixed_tick,
+        1
+    );
+    assert_eq!(
+        assert_current_sample(&runtime)
+            .render()
+            .interpolation_alpha(),
+        0.0
+    );
+    let boundary = capture_packet(&runtime);
+    assert_eq!(boundary.views()[0].mapping, initial.views()[0].mapping);
+    assert_eq!(boundary.views()[0].id, initial.views()[0].id);
+    runtime.drive(TIMESTEP / 2).unwrap();
+    let interior = capture_packet(&runtime);
+    assert!(
+        interior.views()[0]
+            .mapping
+            .clip_to_world_matrix()
+            .determinant()
+            < 0.0
+    );
+    assert_eq!(interior.views()[0].id, initial.views()[0].id);
+    runtime.finish().unwrap();
+}
+
 fn capture_packet(runtime: &RuntimeInstance) -> RenderFramePacket {
     let world = runtime.world();
     let views = world.resource::<ExtractedViews>();

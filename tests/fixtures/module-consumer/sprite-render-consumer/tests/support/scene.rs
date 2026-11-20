@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use nara_app::{App, CoreStage, RealTime, RuntimeInstance};
+use nara_app::{App, CoreStage, FixedTime, FixedUpdateSet, RealTime, RuntimeInstance};
 use nara_core::{Color, Vec2};
 use nara_ecs::{
     Component, Entity, Query, ResMut, Resource, World, bevy_ecs::entity_disabling::Disabled,
@@ -24,7 +24,7 @@ use nara_render_wgpu::{
     WgpuStockPolicyPlugin, WgpuStockSpritePlugin, take_captured_policy_batch,
 };
 use nara_tilemap::{TileCell, TileCoord, TileIndex, Tilemap};
-use nara_transform::Transform2d;
+use nara_transform::{FixedTransformInterpolation, Transform2d};
 use nara_window::{Window, WindowResolution};
 
 pub const WIDTH: u32 = 960;
@@ -393,6 +393,52 @@ pub fn build_camera_inheritance() -> Result<(RuntimeInstance, Entity, Entity)> {
     Ok((RuntimeInstance::start(app)?, parent, child))
 }
 
+pub fn build_camera_mirror() -> Result<RuntimeInstance> {
+    let mut app = App::new();
+    install_capture(&mut app)?;
+    app.insert_resource(FixedTime::new(Duration::from_millis(20)).unwrap())?;
+    app.insert_resource(FixedTransformInterpolation)?;
+    let world = app.world_mut()?;
+    let parent = world.spawn(Transform2d::IDENTITY).id();
+    let camera = world
+        .spawn((
+            Camera2d {
+                viewport_height: CANVAS_HEIGHT as f32,
+                ..Default::default()
+            },
+            Transform2d::IDENTITY,
+        ))
+        .id();
+    let sprite = world
+        .spawn((
+            Transform2d::from_translation(Vec2::new(8.0, 0.0)),
+            nara_sprite::Sprite::from_color(Vec2::splat(4.0), Color::rgb(1.0, 0.0, 0.0)),
+        ))
+        .id();
+    HierarchyWriter::new(world).apply_batch(&[
+        HierarchyOperation::Place {
+            entity: parent,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        },
+        HierarchyOperation::Place {
+            entity: camera,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+        },
+        HierarchyOperation::Place {
+            entity: sprite,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        },
+    ])?;
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        (move |mut poses: Query<&mut Transform2d>| {
+            poses.get_mut(parent).unwrap().scale.x = -1.0;
+        })
+        .in_set(FixedUpdateSet::Simulate),
+    )?;
+    Ok(RuntimeInstance::start(app)?)
+}
+
 fn change(
     mut state: ResMut<State>,
     mut maps: Query<&mut Tilemap>,
@@ -433,7 +479,11 @@ fn capture(world: &mut World) {
 }
 
 pub fn drive(runtime: &mut RuntimeInstance) -> WgpuRenderInput {
-    runtime.drive(Duration::ZERO).unwrap();
+    drive_for(runtime, Duration::ZERO)
+}
+
+pub fn drive_for(runtime: &mut RuntimeInstance, delta: Duration) -> WgpuRenderInput {
+    runtime.drive(delta).unwrap();
     runtime
         .world()
         .resource::<Captured>()
