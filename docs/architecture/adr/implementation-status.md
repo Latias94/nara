@@ -4715,6 +4715,11 @@ tracks camera interpolation across handedness, Scene-commit custody of the sampl
 and recovery stamps, original Product ownership at Cook publication, and presented UI geometry.
 The same record tracks the selected collection edit and the large first-lookup and encoding repairs.
 
+The [eighth workflow repair record](../../audits/2026-11-20-recovery-format-and-runtime-input-review.md#repair-status)
+tracks exact-byte v1 Prefab extraction and Schema upgrade recovery, bound Scene and Prefab
+encoding, and replay of selected edits to omitted defaults. It also records cross-profile
+source Export, menu capture and native Tab, and the sample's live pickup and audio history repairs.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

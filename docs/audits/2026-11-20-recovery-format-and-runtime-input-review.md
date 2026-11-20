@@ -240,3 +240,49 @@ were still being updated for the changed candidate and history interfaces. The l
 results for the 39,500-row RON edit and the 86-row omitted default are the baseline results
 above. Qualify each through preparation, commit, Undo, Redo and Save/Reopen against the
 integrated implementation.
+
+## Repair status
+
+| Workflow | Repair and regression |
+|---|---|
+| Prefab extraction and Schema upgrade | Recovery parses committed v1 bytes and verifies the stored transition under the admitted Schema. It republishes exact committed bytes and preserves the identity of files already published. Preparation still checks the current encoder's output. The process cases cover four-space RON, including a mixed publication, and a Schema upgrade case rejects a structurally altered successor with recomputed commitments. [Extraction process cases](../../src/project_host/runtime/editor/prefab_extraction/tests/process_recovery.rs) · [Schema upgrade process case](../../src/project_host/authoring/project/source_upgrade_resume/tests.rs) |
+| Bound RON authoring | Scene and Prefab candidates retain their binding's encoding through classification, edits, history and persistence. Explicit publication checks the selected destination writer and reader limits. The registered panel edits an independent scalar and the final keyed row in both 39,500-row sources. Explicit JSON output still rejects the same documents at its 16 MiB limit. [Panel workflow](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/round_eight.rs) |
+| Omitted defaults | The first nested edit records the selected value and an exact witness of the default in Session history. Undo verifies the reconstructed value before restoring omission. The 86-row Scene and Prefab workflows save and reopen both omitted and explicit states. [History contract](../architecture/adr/0026-editor-command-patch-and-undo-model.md) · [Panel workflow](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/round_eight.rs) |
+| Cross-profile source Export | The planner joins compatible uses for one path and digest while retaining each profile's original observations. The four profile pairings publish and run Check again in their new directory. [Export workflow](../../src/project_workflow/export/source_tests.rs) |
+| Menu capture and Tab | The interaction owner tests continuity of the held action and its route across decorations. Winit forwards Tab through its focused window. [Route continuity](../../crates/nara_ui_kernel/src/interaction/continuity.rs) · [Windows ingress](../../crates/nara_winit/src/lib.rs) |
+| Two-Level Game | Pickup scoring observes the live Scene occurrence and completed fixed-step position. The audio witness retains a bounded chronological suffix and exposes eviction to the source and cooked verification workflows. [Pickup workflow](../../samples/two-level-game/tests/pickup_gameplay.rs) · [Audio callback cases](../../samples/two-level-game/src/audio/device_tests.rs) |
+
+Windows release input qualification passed 72 UI kernel, 131 Runtime UI, and 82 Winit
+library cases, plus two selected hidden-window native cases. The run identifiers are
+`b71d9d54-f1b1-48f2-922e-1dca898096a5`, `65cf3ac2-0b8f-4985-8a7b-aae783669f2c`,
+`e44cef3d-7b38-4281-af7d-6f4e98cef261`, and `74550e95-e0f3-48c1-89d7-5444146455e1`.
+
+The independently locked Editor panel release run passed 24 cases, with one unrelated case
+skipped (`782b1812-a575-4d25-a896-be3556c4f8c6`). It includes the four original authoring
+reproductions, both adjacent 32,768-row keyed workflows, and the existing panel's compact
+forward/inverse inspection. The saved RON files match the expected bytes after Undo, Redo and
+Reopen. Reopening the saved JSON controls reads `Defaulted` after omission is restored and
+`Present` after the selected write is published again.
+
+The project and Scene release selection passed 386 of 387 cases
+(`7978aebc-f1e4-4c05-afc9-5bbba4d914e8`), including all 209 project cases. The sole failure
+asked the already-decoded transition checker to count serialized bytes. The corrected control
+exercises actual JSON and RON decoding for both source kinds and retains the transition's
+decoded-value and scratch-release assertions. The eight targeted Scene recovery cases then
+passed under the debug test profile (`24ab98db-4359-449e-8ee3-ab6ac122a773`).
+The independently locked recovery companion was rebuilt from the final source and passed the
+four-space extraction process regression with both publication states.
+
+The Two-Level Game release selection passed 144 cases (`56ac5871-6b92-41a0-a129-b62183374e85`).
+It includes retired and moved pickups, both PCM verifiers' incomplete-history refusal, and a
+deterministic device callback that starts and retires a Travel cue after scope history eviction.
+Five selected native cases passed on Windows (`db40ea2e-ec10-49da-b7e2-ddd4d1061779` and
+`44644800-5af9-4336-800e-f5242978ca48`). They cover the source desktop, the relocated cooked
+Player, development audio enablement, edited and rebound WAVs, and a cue that finishes before
+Retry. The desktop cases use DX12 and the original WASAPI callback. This repair's sustained
+rollover gate is deterministic. The earlier 4,097-retry WASAPI observation remains recorded in
+the working-tree retest above.
+
+The root and sample formatting checks, the independent panel package formatting check, and
+Clippy correctness for the affected engine libraries and sample targets passed. These results
+cover the selected Windows x64 workflows on Rust 1.95.0.

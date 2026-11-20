@@ -1100,6 +1100,18 @@ the relation between Cook source selection and publication. The UI interaction o
 presented rectangle's snapped edges for pointer hits and preserves the existing focus when a
 direction has no neighbor. The selected collection-edit workflow remains under R2.
 
+### November 20 Pending Recovery And Authoring Review
+
+The [eighth workflow repair record](../audits/2026-11-20-recovery-format-and-runtime-input-review.md#repair-status)
+traces interrupted v1 publication, source editing at the limits of each encoding, and runtime
+consumer failures. Recover stored output under its original byte commitment and prove the stored
+transition under the admitted Schema. Retain each bound source's encoding through working copy,
+history and Save. A first nested edit to a defaulted root keeps a selected edit and exact default
+witness in local history, with omission as the inverse. Cross-profile Export shares compatible
+file observations. Runtime input and sample gameplay keep presentation, live pickup and device
+state under their existing owners. The independent registered panel verified both 39,500-row RON
+sources and both omitted 86-row default sources through history and disk reopen.
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime

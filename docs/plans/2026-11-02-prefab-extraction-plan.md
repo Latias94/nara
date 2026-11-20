@@ -1018,6 +1018,12 @@ Include a late default64-handle refusal followed by a fresh process selecting a 
 ceiling at entry; never enlarge the old operation's allowance. These controls remain required
 before complete CP2 qualification.
 
+The [four-space v1 regression](../audits/2026-11-20-recovery-format-and-runtime-input-review.md#repair-status)
+resumes closed Prefab extraction output from both an all-old and mixed publication. The
+companion checks all outputs against the original byte commitments, compares unchanged Guards,
+and verifies physical identity for previously published files. Schema upgrade recovery has a
+separate fresh-process trajectory and rejects a structurally changed stored successor.
+
 ## Implementation Order
 
 1. Resolve root and reference semantics using current consumers and pinned Godot/Bevy evidence.

@@ -149,7 +149,9 @@ listener has since become hidden, the existing historical guard rejects the oper
 This is a finite listener-selection contract, not arbitrary mutable event callbacks or a new
 propagation owner. A component cannot infer capture from hover or an ancestor observation.
 
-`UiCaptureContinuity::SurfaceGeometry` retains strict default route equivalence.
+`UiCaptureContinuity::SurfaceGeometry` requires the same ordered hit regions and keyed
+propagation paths. Paint-only decorations can change order or clipping without interrupting a
+held control. A removed target, changed action or changed route still cancels the capture.
 `TargetGeometry` explicitly permits a fixed viewport's capture to advance across descendant or
 sibling changes. Its owner and keyed ancestors must retain exact path, geometry, clip, visible
 published state and interaction declarations under the same content transform, environment
