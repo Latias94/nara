@@ -19,7 +19,7 @@ use nara::{
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
     core::ItemLimit,
-    ecs::{Entity, World, schedule::IntoScheduleConfigs},
+    ecs::{Entity, Mut, World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
@@ -32,6 +32,7 @@ use nara::{
     },
     scene::advanced::SceneProductResource,
     sprite::Sprite,
+    transform::fixed_spatial_snapshot,
 };
 
 use crate::{
@@ -307,7 +308,7 @@ impl Plugin for ExplorationPlugin {
         )?;
         nara::transform::add_fixed_transform_projection_systems(
             app,
-            (side_room::find_relics, capture).chain(),
+            (collect_pickups, side_room::find_relics, capture).chain(),
         )?;
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -517,12 +518,6 @@ fn current_level_entity(world: &World, id: &SceneEntityId) -> Option<Entity> {
     }
 }
 
-fn hide_pickup(world: &mut World, entity: Entity) {
-    if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
-        sprite.material.tint.a = 0.0;
-    }
-}
-
 fn simulate(world: &mut World) {
     if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
         return;
@@ -542,38 +537,60 @@ fn simulate(world: &mut World) {
     let direction = Vec2::new(held[1] - held[0], held[2] - held[3]).normalize_or_zero();
     let duration = world.resource::<nara::app::FixedTime>().delta();
     let delta = duration.as_secs_f32();
-    let position = match collision::move_player(world, player, direction * 160.0 * delta, duration)
-    {
-        Ok(position) => position,
-        Err(error) => {
-            fail(world, error);
-            return;
-        }
-    };
+    if let Err(error) = collision::move_player(world, player, direction * 160.0 * delta, duration) {
+        fail(world, error);
+    }
+}
+
+fn collect_pickups(world: &mut World) {
+    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
+        return;
+    }
     let level = world.resource::<ActiveLevel>();
+    let (Some(content), Some(current), Ok(spatial)) = (
+        level.content(),
+        CurrentScene::get(world),
+        fixed_spatial_snapshot(world),
+    ) else {
+        return;
+    };
+    let receipt = current.receipt();
+    let EntityLookup::Resolved(player) = receipt.resolve(world, &content.player) else {
+        return;
+    };
+    let Ok(player) = spatial.global(player) else {
+        return;
+    };
+    let player_position = player.translation();
     let key = level.key();
-    let nearby = level
-        .content()
-        .unwrap()
+    let nearby = content
         .pickups
         .iter()
-        .filter(|(_, point)| point.distance(position) <= 16.0)
-        .map(|(id, _)| id.clone())
+        .filter_map(|id| {
+            let EntityLookup::Resolved(entity) = receipt.resolve(world, id) else {
+                return None;
+            };
+            let position = spatial.global(entity).ok()?.translation();
+            (position.distance(player_position) <= 16.0).then(|| (id.clone(), entity))
+        })
         .collect::<Vec<_>>();
-    for id in nearby {
+    for (id, entity) in nearby {
         let pickup = CollectedPickup {
             level: key,
             entity: id.clone(),
         };
-        if world.resource_mut::<Progress>().collect(pickup) {
-            if let Some(entity) = current_level_entity(world, &id) {
-                hide_pickup(world, entity);
+        let score = world.resource_scope(|world, mut progress: Mut<Progress>| {
+            let mut sprite = world.get_mut::<Sprite>(entity)?;
+            if !progress.collect(pickup) {
+                return None;
             }
-            let score = world.resource::<Progress>().checkpoint().score;
-            println!("two_level_game: collected={id} level={key:?} score={score}");
-            #[cfg(all(windows, feature = "audio-cpal"))]
-            crate::audio::pickup_collected(world, key, id);
-        }
+            sprite.material.tint.a = 0.0;
+            Some(progress.checkpoint().score)
+        });
+        let Some(score) = score else { continue };
+        println!("two_level_game: collected={id} level={key:?} score={score}");
+        #[cfg(all(windows, feature = "audio-cpal"))]
+        crate::audio::pickup_collected(world, key, id);
     }
 }
 
@@ -630,7 +647,7 @@ fn capture(world: &mut World) {
     let visible = level.content().map_or(0, |content| {
         content
             .pickups
-            .keys()
+            .iter()
             .filter(|id| {
                 receipt
                     .as_ref()

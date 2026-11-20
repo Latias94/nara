@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use nara::{
     asset::AssetRef,
@@ -59,7 +59,7 @@ pub(super) struct Content {
     pub player: SceneEntityId,
     pub checkpoint: SceneEntityId,
     pub checkpoint_position: Vec2,
-    pub pickups: BTreeMap<SceneEntityId, Vec2>,
+    pub pickups: BTreeSet<SceneEntityId>,
     pub bank: AssetRef,
     pub collision: RoomCollision,
     pub animation: PreparedAnimation,
@@ -92,7 +92,7 @@ impl Content {
         }
         let mut player = None;
         let mut checkpoint = None;
-        let mut pickups = BTreeMap::new();
+        let mut pickups = BTreeSet::new();
         let mut portals = 0;
         let mut cameras = 0;
         let mut bank = None;
@@ -156,7 +156,7 @@ impl Content {
                     checkpoint = Some((entity.id().clone(), position))
                 }
                 PICKUP => {
-                    pickups.insert(entity.id().clone(), position);
+                    pickups.insert(entity.id().clone());
                 }
                 PORTAL => portals += 1,
                 WALL => walls.push(Wall {
@@ -207,7 +207,7 @@ impl Content {
             .iter()
             .filter(|pickup| pickup.level.level() == level)
         {
-            if !self.pickups.contains_key(&pickup.entity) {
+            if !self.pickups.contains(&pickup.entity) {
                 return Err("saved pickup does not exist in prepared content".into());
             }
         }

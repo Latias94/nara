@@ -126,7 +126,10 @@ fn active_level_same_tick_content_aba_and_equal_writes_advance_only_generation()
     let tick = world.read_change_tick();
     let baseline = world.resource::<ActiveLevel>().capture_baseline();
     let mut changed = content.clone();
-    *changed.pickups.values_mut().next().unwrap() = Vec2::new(20.0, 30.0);
+    changed.pickups.pop_first().unwrap();
+    changed
+        .pickups
+        .insert(SceneEntityId::new("other-pickup").unwrap());
     world.resource_mut::<ActiveLevel>().set_content(changed);
     world
         .resource_mut::<ActiveLevel>()

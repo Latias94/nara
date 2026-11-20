@@ -3,7 +3,7 @@ use nara::{
     sprite::Sprite,
 };
 
-use crate::gameplay::{ActiveLevel, Progress, hide_pickup};
+use crate::gameplay::{ActiveLevel, Progress};
 
 pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> {
     let level = world.resource::<ActiveLevel>();
@@ -15,7 +15,7 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
     let entities = {
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
         let mut ids = vec![content.player.clone(), content.checkpoint.clone()];
-        ids.extend(content.pickups.keys().cloned());
+        ids.extend(content.pickups.iter().cloned());
         ids.into_iter()
             .map(|id| match current.receipt().resolve(world, &id) {
                 EntityLookup::Resolved(entity)
@@ -38,15 +38,16 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
     crate::gameplay::collision::place(world, player, pose)?;
 
     for (id, entity) in entities {
-        if content.pickups.contains_key(&id)
+        if content.pickups.contains(&id)
             && world
                 .resource::<Progress>()
                 .checkpoint()
                 .collected
                 .iter()
                 .any(|pickup| pickup.level == key && pickup.entity == id)
+            && let Some(mut sprite) = world.get_mut::<Sprite>(entity)
         {
-            hide_pickup(world, entity);
+            sprite.material.tint.a = 0.0;
         }
     }
     super::markers::rebuild(world)
