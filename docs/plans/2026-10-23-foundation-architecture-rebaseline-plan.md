@@ -583,8 +583,12 @@ The [prepared property preview](../architecture/authoring-read-projection-design
 reads the selected values from the exact candidate retained for commit. Each candidate owns
 its own page continuations and keeps its original basis for historical review. A
 [release baseline](../benchmarks/2026-10-25-prepared-panel.md#november-20-release-baseline)
-measures the existing reference-bearing preparation workflow at 1/257 entities. Complete
-field query coverage, preparation locality and larger-workload comparisons stay open.
+measures the existing reference-bearing preparation workflow at 1/257 entities. The
+[selective collection edit](../architecture/authoring-read-projection-design.md#selective-edits-in-authored-collections)
+at `c4f78de` keeps each changed descendant and its durable selector in the original candidate and history
+workflow. Undo uses the resulting key when the edit changes an item's identity. Complete field
+query coverage, preparation locality and larger-workload comparisons stay open. Initial keyed
+lookups keep the existing bounded scan contract.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
@@ -1084,6 +1088,14 @@ modal motion records the pointer location even over the underlay. Ordinary Windo
 accept a fresh key press through Winit without bypassing the paused handoff's physical checks.
 The effective Revert action carries the source owner's bounded declaration allowance through
 the existing review, publication and Undo history.
+
+### November 20 Camera, Recovery And Authoring Review
+
+The [seventh review repair record](../audits/2026-11-20-camera-recovery-and-authoring-review.md#repair-status)
+tracks mirror-safe camera interpolation, checkpoint write authority and recovery stamps, and
+the relation between Cook source selection and publication. The UI interaction owner uses the
+presented rectangle's snapped edges for pointer hits and preserves the existing focus when a
+direction has no neighbor. The selected collection-edit workflow remains under R2.
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 

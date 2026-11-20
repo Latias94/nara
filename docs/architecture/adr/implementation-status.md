@@ -4279,6 +4279,13 @@ and Save/Reopen. The Session Close and native DX12 regressions pass 2/2 for the 
 The [release preparation comparison](../../benchmarks/2026-10-25-prepared-panel.md#november-20-release-baseline)
 records the existing dual-format admission and commit workload on 1/257 reference-bearing entities.
 
+The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
+keeps the selected replacement and previous value in the original Scene and Prefab history.
+The inverse follows a changed key. Exact final file validation and nominal Schema readmission
+apply to the retained transaction. The independently locked Windows consumer verifies the
+complete workflow on 4,097 records in each document kind. Initial keyed lookup retains its
+existing scan limits, and complete R2 and larger workload measurements remain open.
+
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query
 bases, including construction preparation. Panel adapters delegate that check to the common
@@ -4701,6 +4708,11 @@ tracks unique cooked Image identities and `UiVisual` Image publication, stored s
 through disabled parents, ordered Round checkpoint writes, post-travel input handoff, and the
 source-dependent WASAPI verification workflow. The repair uses the existing catalogue, spatial
 queries, fixed command consumer and original audio callback.
+
+The [seventh workflow repair record](../../audits/2026-11-20-camera-recovery-and-authoring-review.md#repair-status)
+tracks camera interpolation across handedness, Scene-commit custody of the sample's checkpoint
+and recovery stamps, original Product ownership at Cook publication, and presented UI geometry.
+The same record links the selected collection edit and its remaining first-lookup limit.
 
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted

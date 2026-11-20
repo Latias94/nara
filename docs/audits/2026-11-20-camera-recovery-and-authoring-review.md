@@ -195,3 +195,84 @@ reducers. Camera and menu pixels were read from Vulkan offscreen textures on an 
 The new Editor cases exercised the public Workspace with serialized and admitted documents.
 The package publication callback was inspected. A complete directory publication, physical
 input, swapchain scanout and the full workspace suite were outside these probes.
+
+## Repair status
+
+### Camera interpolation and game recovery
+
+`65bd956` handles local handedness changes in fixed transform presentation, retaining the
+current basis between samples and interpolating the translation. An exact invertible endpoint
+keeps parent and child samples paired, including an extreme reciprocal-scale case found in
+review. A double sign flip uses an equivalent half-turn and preserves the existing shortest-arc
+policy. The selected CPU cohort passes 28/28 in run `df269d98-2912-413b-9ffb-4586a98f0a17`,
+including sticky Runtime fault and original frame retention for a genuinely singular camera.
+Two independent Vulkan cases pass in `397018cd-9e5b-47bf-b94f-15e5ea5a8b54` on a discrete NVIDIA
+GeForce RTX 4090. The mirror case checks six complete 960 × 540 outputs, including the exact
+fixed step, interpolation fractions 0.45, 0.5 and 0.55, and continued execution through tick 2.
+These captures are replayed after the original Runtime retires.
+
+`6491618` stages the exact checkpoint binding and observed level stamps in the game-owned
+travel request. Only successful Scene replacement publishes them. The Two-Level Windows
+suite passes 166/166 in run `8606d075-bb23-43ec-92c2-e0c7956f8384`. It covers direct and pending
+Save after a rejected Restore, external replacement after the read, successful Restore as the
+new write basis, and a fresh Runtime restoring a snapshot captured after rejected travel. The
+cases exercise real files and independent game instances through the original source Host.
+
+### Cook source selection
+
+In `ba85439`, the closure builder and delivery merger accept a raw read and a typed use of one
+path when the observed digests agree. The typed role is retained. A Schema bundle read as raw data
+continues to contribute to the Runtime content digest. Different bytes or competing typed uses
+still refuse publication. The Cook fence carries the selected owner of each delivered source,
+including an intrinsic Input identity and the source of compound subproducts. The original
+bounded catalogue verification looks for new competing claims in the configured source roots.
+A typed build contribution must publish only Products of its selected source. The common
+artifact store still supports explicit multi-source groups for other consumers.
+[ADR 0110](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md)
+
+The final engine and public source/Cook cohort passes 134/134 in
+`5e49b09f-ef40-45f9-8852-25ae28cf6b1a`. The shared action-map case produces the same cooked
+catalogue as the two-file control, installs the Input definition in Headless, and decodes the
+original raw bytes' digest through the imported compound Product. Changing either a selected
+file or its unique owner rejects the old selection. A raw read of the startup Scene sidecar
+retains the delivery metadata role. Both supplied and cache-hit typed groups reject foreign
+source Products. The first engine run had one fixture missing its explicit processed Input
+codec. The final case registers that codec and runs the actual Player.
+The independently locked Cook consumer passes its ten build, relocation, Player, and source
+identity cases in `f1ac29d3-7e09-459d-8f73-6270c65ce1e7`.
+
+### Presented menu input
+
+In `6b9b5d2`, the UI kernel and stock packet planner use the same snapped content and clip bounds. Hit
+membership uses the intersection in physical coordinates. The original authored points remain
+available to reducers for drag and other continuous gestures. Directional focus prefers overlap
+on the perpendicular axis, then distance. A direction with no destination retains current focus,
+while an old frame cannot consume a direction against a newer focus assignment. Retained visuals
+without published hits do not change another root's pointer capture.
+[ADR 0108](../architecture/adr/0108-ui-surface-presented-session-and-atomic-interaction.md)
+
+The final UI kernel, Runtime UI, and packet planner cohort passes 410/410 in
+`2ead686f-9182-490a-afa1-b4e2ff22e049`. It includes fractional physical scales, ancestor and
+Surface edge rounding, unchanged routed coordinates, capture across retained visuals, and
+directional activation before and after a one-pixel change in an unrelated button's position.
+The independent Vulkan stock UI cohort passes 2/2 in `1b1a49e8-7507-445a-ab3d-a2437b08d8ee`.
+The two origins, 20 and 20.4, yield the same complete image. Actual red and blue pixels and
+the immutable frame's hit results agree at both rectangle boundaries. Press/release routing
+and keyboard actions are covered in the CPU cohort.
+
+### Selective collection edits
+
+`c4f78de` covers the reviewed 86-row failure through the registered panel's 4,097-row Scene and Prefab
+trajectories. History retains the selected value and its inverse selector, including key edits.
+The original file format limits still bound the final source. This work keeps the existing
+65,536-entry initial key lookup budget. The reported 32,767-row refusal remains open.
+[Owner design and verification](../architecture/authoring-read-projection-design.md#selective-edits-in-authored-collections)
+
+### Qualification scope
+
+The repair runs used Windows x64 and Rust 1.95.0. The affected engine libraries pass correctness
+Clippy. Formatting passes for the root, sample, stock composition consumer and affected module
+consumer packages. The module-consumer formatting check runs package by package because the
+combined Windows command line exceeds the OS limit. GPU evidence covers offscreen Vulkan
+readback and the hidden native Drawn Editor on DX12. The full workspace and other platforms
+remain outside this qualification.
