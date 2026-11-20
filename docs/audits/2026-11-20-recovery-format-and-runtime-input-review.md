@@ -270,8 +270,12 @@ asked the already-decoded transition checker to count serialized bytes. The corr
 exercises actual JSON and RON decoding for both source kinds and retains the transition's
 decoded-value and scratch-release assertions. The eight targeted Scene recovery cases then
 passed under the debug test profile (`24ab98db-4359-449e-8ee3-ab6ac122a773`).
-The independently locked recovery companion was rebuilt from the final source and passed the
-four-space extraction process regression with both publication states.
+
+The project cases include `four_space_v1_schema_upgrade_resumes_in_a_fresh_process`. The fixture
+constructs the earlier four-space RON layout and publishes the Prefab before invoking the
+current reader in a fresh process. The test checks exact output bytes and the already published
+file's identity. The independently locked recovery companion also passed the four-space
+extraction process regression with both publication states.
 
 The Two-Level Game release selection passed 144 cases (`56ac5871-6b92-41a0-a129-b62183374e85`).
 It includes retired and moved pickups, both PCM verifiers' incomplete-history refusal, and a

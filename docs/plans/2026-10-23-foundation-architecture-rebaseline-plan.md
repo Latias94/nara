@@ -1114,6 +1114,12 @@ file observations. Runtime input and sample gameplay keep presentation, live pic
 state under their existing owners. The independent registered panel verified both 39,500-row RON
 sources and both omitted 86-row default sources through history and disk reopen.
 
+The [action outcome storage correction](2026-10-30-input-endpoint-admission-and-retirement-plan.md#action-outcome-storage-at-admission)
+removes the default eager backing allocation from both action result vectors. Ordinary action
+admission reserves the storage needed for its pending outcomes and terminal edges. Frame cleanup
+returns the backing arrays to the existing Input owner. The guides record the typed refusal and
+native delivery behavior. The separate processed Host dependency boundary remains R7 work.
+
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime

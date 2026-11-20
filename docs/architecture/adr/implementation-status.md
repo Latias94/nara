@@ -2134,6 +2134,13 @@ observation path. The record retains broad-run failure/correction history and pr
 That predecessor does not establish seat/analog/replay, full editable text, target-build or
 packaged delivery.
 
+The [action outcome allocation correction](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md#action-outcome-storage-at-admission)
+replaces two eagerly allocated vectors with backing storage reserved as Input accepts new
+action work. The original timeline keeps pending and terminal credits. Output arrays remain
+available to slice readers through frame cleanup, which returns capacity for reuse. Typed
+allocation refusal preserves accepted membership, and native adapters can still deliver its
+terminal edges. The linked plan records measured allocation scope and consumer verification.
+
 The November 13 [seat/gamepad/replay successor](../../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md)
 now separately qualifies the normalized seat/analog/replay portion under amended ADRs0041/0057/0102.
 `ActionMaps` owns bounded independent seat policy; typed button/axis aggregates retain original

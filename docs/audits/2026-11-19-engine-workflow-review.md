@@ -125,6 +125,7 @@ actual single-display Windows DX12 paths. The mixed-DPI test was outside this se
 
 | Finding | Repair and qualification |
 | --- | --- |
+| Input startup outcome storage | The default Input installation starts with both outcome arrays empty. Ordinary action admission reserves bounded backing storage for results and terminal edges. A deterministic refusal keeps the existing hold and its release, and a late admission preserves the current frame's published values. [Implementation and qualification](../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md#action-outcome-storage-at-admission) |
 | Pointer projection after geometry loss | `cf4791e` clears the convenience position for the sampled pointer's leave or its endpoint's invalidation. A managed Runtime regression covers resize, DPI, another endpoint, another pointer and fresh movement. Windows nextest `f0f5cd8f-644e-42ca-9d9a-f35ec12e349d`. |
 | Image reload with missing PNG provenance | `3ace201` settles the current failed request, retains the last-good Image version and uses the original removal queue for an exact primary Product. The superseded control preserves the replacement request's authority. Windows nextest `c2135ffc-eb02-4a7c-87e1-875ec7acade7`. |
 | Missing roots in an empty managed hierarchy | `c8b89b4` reports the managed fault, revokes the old completed order and keeps Stop available. A deferred command cannot recreate the missing roots. Standalone empty graphs remain usable. Windows nextest `8ba8a6a0-a090-438f-921c-85878d908297`. |
@@ -132,7 +133,7 @@ actual single-display Windows DX12 paths. The mixed-DPI test was outside this se
 | Additive unload with unavailable Asset events | `afcb683` requires the TileSet publication resources before retiring the occurrence. The sample holds `AssetEvents` outside the World during the original unload attempt, checks exact entities and publications, then retries successfully and retains the last good pixels. The same sample cohort checks parented relic collection against the completed world position. Windows nextest `0209359c-a330-4707-9977-6e4a4b99dea8` passes all 100 selected tests. |
 | Fixed clock change during presentation | `9f16750` settles fixed time and interpolation together. The original App frame, moving camera and retained Material captures agree through change and replay. Windows DX12 shader readback passes in nextest `c46484b9-485c-48fb-8889-914c563c5802`. |
 
-Open P2 findings from this review include default Input outcome storage, Tilemap dirty-chunk
+Open P2 findings from this review include Tilemap dirty-chunk
 retention, fractional-DPI integer Canvas fit, clipped UI image and border geometry, and drag
 selection in the drawn Inspector. The
 [third review's repair record](2026-11-19-engine-consumer-contract-review.md#repair-status)

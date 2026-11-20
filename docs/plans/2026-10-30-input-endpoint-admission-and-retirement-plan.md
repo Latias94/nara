@@ -285,3 +285,51 @@ passes 4/4 in `182f7505-0c3b-4972-b46e-28c50c1a7378`, including the hidden pause
 original release-gap exact Step and unsupported-activation controls. Correctness Clippy, root and
 independent formatting, document links and whitespace checks pass. These results cover the
 selected Windows Runtime boundaries and leave foreign native execution and numeric costs open.
+
+## Action Outcome Storage At Admission
+
+Implementation and regressions are in `e1c7f0f`.
+
+The [workflow audit](../audits/2026-11-19-engine-workflow-review.md#other-defects-and-measurable-refactor-costs)
+used Windows x64 element sizes to calculate the requests for two empty outcome arrays. Their
+backing allocations requested 42,991,616 and 52,428,800 bytes, or 91 MiB combined.
+Bevy `779770720e6ad916c1de38cf66a67d0e079ed1e3`
+starts its [message buffers](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/message/messages.rs)
+empty and recycles their capacity. Godot `b070e63b161aa816afac71dcfc9d60859d38f220`
+[queues and drains](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/input/input.cpp#L1624-L1700)
+actual input events. Nara retains its per-record pause and terminal guarantees.
+
+`InputTimeline` reserves outcome storage at the existing button, axis and keyboard-restoration
+admission boundaries. Its retained-plus-terminal occupancy times the maximum input fan-out
+bounds the physical results. Semantic storage also covers the most recently observed held groups,
+including restored holds. Consuming an action record can add at most its reserved fan-out to
+the held groups. A restored key reserves its logical record and terminal before adding its
+held group directly. Physical releases and neutralization convert original credits to records.
+Projection streams the admitted entries directly from the timeline in order. The result resources
+expose their original slices during the frame. Cleanup keeps the
+larger available allocation when new input grows storage while the current slices are live.
+
+Review rejected a candidate that would allocate at resolution. Its failure could have faulted
+the Runtime after accepting a release. The final admission refusal preserves the original log,
+sequence, held state and terminal credits. Pointer-only traffic does not grow action storage.
+Winit and Gilrs preserve later terminal delivery after the new admission refusal. Gilrs reports
+the refusal through its existing execution warning path after polling and reconciling devices.
+The capacity figures concern only these two arrays. Their high-water capacity can persist after
+a burst, and growth can briefly retain both the published and successor arrays. Total allocator
+use, process memory and frame times were outside the measurement.
+
+Windows x64 / Rust 1.95.0 verification passed the Input library and public integration suites
+(225/225, `08f8d5ef-6699-415c-aba7-914da3157637`), root exact-input, Runtime and authored Input
+consumers (83/83, `ff183717-371f-4081-88df-9be50df751e4`), and the independently locked source,
+bounded-input and seat replay consumers (17/17, `be335090-6c98-4d76-940e-e17543e487df`). The new
+tests check zero capacity at idle and after pointer-only traffic, successful terminal delivery
+after a deterministic allocation refusal, and same-frame read stability when later ingress grows
+the backing arrays. The maximum-fan-out case observes both context cancellation and fresh
+actions with their exact provenance.
+
+Winit and Gilrs passed 115/115 library tests with 27 native cases skipped
+(`e2c434e1-2266-42ac-9a55-e5d4f7c2eb63`). The selected hidden-window paused-input case then
+passed 1/1 (`5d847601-234f-486a-bfc7-a3a015128cd9`), as did Windows WGI acquisition and close
+without a controller (`55a0ced7-05e3-4358-a5b5-247cdc5172c9`). Correctness Clippy passed for
+Input, Gameplay, Winit and Gilrs. Workspace formatting and added local documentation links
+pass. Physical controller play and foreign platform execution require their own qualification.
