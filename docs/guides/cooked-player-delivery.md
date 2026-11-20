@@ -218,13 +218,20 @@ staged digests before existing no-replace whole-directory publication. It does n
 output for dependency libraries. Additional native libraries need explicit finite support before
 that product can claim a complete package.
 
+Use an output parent on the supported local filesystem for the build host. The native publication
+tiers are x86-64 Windows on local NTFS and x86-64 Linux on local ext4 with Linux 5.6 or later.
+On Linux the output parent uses `TrustedLocal` cooperative-writer authority. The same-parent
+rename protects the destination from overwrite, and the receipt reports name-bound source
+identity. [Filesystem transaction authority](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md#filesystem-transaction-authority)
+
 Handle every `PlayerPackageOutcome`. Clean rejection, orphaned nonempty candidate and unresolved
 begin custody are distinct. No recursive name-based cleanup occurs. `Published { receipt, error }`
 always means publication happened; an optional postpublication error does not make the destination
 absent. `package.json` is finalized before publication; physical receipts stay in the return value.
 Publication neither promotes executable last-good nor establishes Runtime Ready.
 
-The Player needs only `runtime-2d + serde` for executable-relative opening, not `project-tooling`:
+Executable-relative opening is available with `runtime-core` and `serde`. The local Player's
+recipe also selects `runtime-2d` to publish its selected stock assets.
 
 ```rust
 let expected = RuntimeContentExpectation::new(

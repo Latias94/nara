@@ -1220,8 +1220,9 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 qualified, including finite source Scene references and global source/processed Input;
 explicit Cargo build/capture and Windows headless/desktop cooked Player delivery are qualified
 within their recorded scopes. Windows dedicated-server delivery now has a qualified game,
-published member set and audited executable graph. Additional target/platform qualification
-and finer separation of the backend-neutral processed Host dependencies remain open.
+published member set and audited executable graph. The same game has Linux WSL2/ext4 native
+headless Player and Server evidence. Additional target and platform qualification and finer
+separation of the backend-neutral processed Host dependencies remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 The [explicit Cargo selection unit](2026-10-31-explicit-cargo-build-selection-plan.md) now owns
@@ -1419,7 +1420,13 @@ pickups, Retry, Save and fresh Restore. The [dedicated Server dependency boundar
 uses the shared processed Host with `runtime-core` and `serde`. The locked Windows graph drops
 the stock Image, Material, Render, Sprite and TileMap crates and retains the Scene, Transform2d
 and Rapier simulation. The dependency audit and the World service observations are separate
-evidence. Networking, long-running service operation and the foreign target proof remain open.
+evidence. The [Linux headless qualification](2026-10-31-cooked-player-delivery-plan.md#linux-headless-player-and-server-qualification)
+runs both release deliveries through the original Cooker and relocated executables on
+`x86_64-unknown-linux-gnu`. The ext4 Server package preserves the five Scene members and its
+locked dependency graph has 143 packages. Both CLI-produced installations also complete Save
+and fresh-process Restore with only the package, its ELF dependencies and private checkpoint
+storage mounted in isolated namespaces on the same WSL2 instance. Separate-machine deployment,
+networking and long-running service operation retain their own qualification.
 
 ## R8: External Render Feature And Host-Local Execution
 

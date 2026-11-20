@@ -485,6 +485,10 @@ The actual-delivery acceptance uses the production cooker, removes only its owne
 source/cache tree, and checks normal process/containment/output retirement. It also corrupts
 the deferred Cavern member after a valid publication, requiring failed travel to preserve the
 original Meadow receipt and progress, then separately checks catalog rejection at startup.
+On x86-64 Linux, set `TMPDIR` to an existing writable directory on local ext4 for both the
+Player and Server acceptance. The fixture stages and publishes the package below `TMPDIR`.
+On systems with tmpfs mounted at `/tmp`, use an ext4 directory such as a private directory
+under your home directory after confirming its mount type.
 Run it serially from the engine root after setting the absolute shared `CARGO_TARGET_DIR`,
 `CARGO_BUILD_JOBS=1`, `RUSTUP_TOOLCHAIN=1.95.0` and `CARGO_NET_OFFLINE=true`:
 

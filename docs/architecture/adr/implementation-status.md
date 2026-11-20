@@ -2396,8 +2396,12 @@ published binary. The [dedicated Server dependency boundary](../../plans/2026-10
 at `a36ce0f` uses the same processed Host and codec selection with `runtime-core` and `serde`. The locked
 Windows graph falls from 170 to 142 packages and retains Scene, Transform2d, Rapier, and the
 core Input and Window vocabulary. Image, Material, Render, Sprite and TileMap now belong to
-the client selection in this delivery. Networking and foreign deployment retain separate
-qualification.
+the client selection in this delivery. The [Linux headless qualification](../../plans/2026-10-31-cooked-player-delivery-plan.md#linux-headless-player-and-server-qualification)
+passes both relocated release deliveries on Ubuntu 26.04 WSL2 with ext4 publication. The Linux
+Server graph contains 143 packages and the package retains the same five Scene members. The
+native exit and wrong-pack controls pass. Both CLI-produced packages also Save and Restore in
+isolated same-instance namespaces with the package and its ELF dependencies as runtime inputs.
+Networking and separate-machine deployment retain separate qualification.
 
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,

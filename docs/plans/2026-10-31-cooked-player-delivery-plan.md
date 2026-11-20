@@ -1,7 +1,7 @@
 # Cooked Content And Captured Player Delivery
 
-Date: 2026-10-31. Status: implemented and qualified for the finite Windows native headless
-single-Player/base-pack consumer. Broader target/platform delivery remains open.
+Date: 2026-10-31. Status: implemented and qualified for the recorded finite Windows and
+Linux headless deliveries. Broader target and platform delivery remains open.
 Parent: [foundation R7](2026-10-23-foundation-architecture-rebaseline-plan.md#r7-target-build-and-base-source-free-delivery).
 Prerequisite: [explicit Cargo selection](2026-10-31-explicit-cargo-build-selection-plan.md).
 Broader direction: Proposed [ADR 0088](../architecture/adr/0088-target-build-cook-package-and-runtime-content-catalog.md).
@@ -156,6 +156,44 @@ direct Scene's custody and select the renderer assertion when its crate is compi
 and client library correctness Clippy checks pass. These runs cover Windows x64 and headless
 execution. Foreign runtime, desktop GPU presentation and long-running server behavior have
 separate qualification.
+
+### Linux Headless Player And Server Qualification
+
+Both Two-Level release deliveries pass on `430f07f` with Rust 1.95.0, `x86_64-unknown-linux-gnu`,
+Ubuntu 26.04 under WSL2 kernel `6.18.33.2-microsoft-standard-WSL2`, and a local ext4 checkout and
+test directory. Nextest run `12920e39-5cfc-479c-984a-ea70217c00e1` passes 2/2. The original
+production Cooker builds both executables with their generated pack expectations, using the
+committed lockfile. The fixture relocates each installation, removes its source and cache, and
+runs the ELF binaries in an empty working directory with a sealed environment and an unavailable
+tool path. The original Linux process owners report normal exit, empty containment, and drained
+output.
+
+The dedicated Server package contains five Scene members, two travel roots, two Immediate and
+two Deferred Scene edges, and zero non-Scene members. Its locked `normal,build` graph has 143
+package names and keeps the previous stock client crate exclusions. The Server completes
+collision, travel, concurrent regions, Save and fresh Restore. A valid pack with a different
+catalog digest is rejected before startup. The headless Player control also checks prepared
+client resources, input, Save and fresh Restore, and continued play from Meadow after Deferred
+Cavern corruption. [Server workflow](../../samples/two-level-game/tests/support/server_delivery/mod.rs) · [Player workflow](../../tests/support/cooked_delivery.rs)
+
+A second publication used the ordinary Cooker CLI for both targets. Each binary ran in its own
+Bubblewrap mount, user and process namespaces on the same WSL2 instance. The namespace exposed
+the published three-file directory read-only, the ELF loader and the three system libraries
+reported by `readelf`, and a private writable checkpoint directory. Each run started in an empty
+working directory with `PATH` set to an unavailable location. The project, cache, compiler and
+Cargo were outside the mount namespace.
+
+All four processes exited successfully and reported completed cleanup. Each Save produced a
+629-byte Cavern checkpoint with a score of 30, three collected pickups and three stored markers.
+Each fresh Restore reached Meadow with the same score and pickup count, and the checkpoint bytes
+matched the original Save. The Server also reported the restored Cavern state before travel.
+
+The initial default `/tmp` run (`559f0275-206c-4984-ba8d-5c1646f75eb5`) built both selected
+executables and refused directory publication before staging in both cases. `/tmp` was mounted
+as tmpfs. Selecting an ext4 `TMPDIR` satisfied the existing cooperative-writer publication tier.
+This qualifies native Linux headless execution on the observed WSL2 environment. Desktop
+presentation, older distributions and a separate runtime machine retain their own evidence gates.
+[Sample acceptance setup](../../samples/two-level-game/README.md#source-free-dedicated-server) · [Filesystem transaction authority](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md#filesystem-transaction-authority)
 
 ## Shared Compiled Project Cook Entry
 
