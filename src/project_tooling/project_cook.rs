@@ -16,7 +16,9 @@ use crate::{
     runtime_content::RuntimeContentTarget,
 };
 
-pub use content::{ProjectCookContext, prepare_project_cooked_content};
+pub use content::{
+    ProjectCookContext, prepare_project_cooked_content, prepare_project_server_content,
+};
 pub use package::{
     PreparedProjectPlayerPackage, ProjectCookSourceSelection, project_rust_input_inventory,
 };
@@ -33,6 +35,17 @@ pub struct ProjectCookRequest<'a> {
     pub store: &'a ArtifactBuildStore,
     pub implementation: ArtifactContentDigest,
     pub limits: CookedContentLimits,
+}
+
+/// Selects the server Runtime from the same manifest and authored content as a Cook request.
+///
+/// Exclusions name admitted source component types. Every retained component must use a
+/// compatible selected Schema and its normal dependencies. The server profile clears the
+/// global action map and the recipe supplies semantic commands without the raw Input plugin.
+pub struct ProjectServerCookTarget<'a> {
+    pub candidate: &'a ProjectSettingsCandidate,
+    pub recipe: ProductRecipe,
+    pub omit_components: &'a [nara_reflect::ComponentTypeId],
 }
 
 /// Unpublished content together with the source selection used to prepare it.

@@ -310,14 +310,25 @@ impl CookedContentBuilder {
         compiled: &CompiledSceneCandidate,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<(), CookedContentError> {
+        self.add_scene_with_component_omissions(product, compiled, asset_resolution, &[])
+    }
+
+    pub(crate) fn add_scene_with_component_omissions(
+        &mut self,
+        product: AssetProductRef,
+        compiled: &CompiledSceneCandidate,
+        asset_resolution: AssetReferenceResolver<'_>,
+        omitted: &[nara_reflect::ComponentTypeId],
+    ) -> Result<(), CookedContentError> {
         self.require_new_product(product)?;
         self.check_member_path(product)?;
         let scene_limits = self.limits.runtime.scene();
         self.admit_work(scene_limits.working_bytes().get())?;
-        let candidate = RuntimeSceneCandidate::cook(
+        let candidate = RuntimeSceneCandidate::cook_with_component_omissions(
             compiled,
             self.plan.schema_validation().bindings(),
             asset_resolution,
+            omitted,
             scene_limits,
         )
         .map_err(RuntimeContentError::Scene)?;

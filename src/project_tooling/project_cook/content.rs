@@ -16,6 +16,7 @@ use crate::{
     core::FormatVersion,
     fs::{ContentDigest, DirectoryCapability, RelativePath},
     material::{Material2dAsset, Material2dDomain},
+    project::RuntimePreset,
     project_content::{
         CookedProductSource, CookedProductSources, DeliveryAssetDefinition, DeliveryCatalogue,
         DeliverySnapshotPhase, DeliveryVisitError, ProjectImageContent, ProjectInputContent,
@@ -26,6 +27,7 @@ use crate::{
         ProjectContentSnapshot, ProjectTileSetContent, RuntimePlan, resolve_product_recipe,
     },
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
+    reflect::ComponentTypeId,
     runtime_content::RuntimeContentDependencyRole,
     scene::CompiledSceneCandidate,
     tilemap::{TileSetDescriptor, TileSetSource},
@@ -33,6 +35,7 @@ use crate::{
 
 use super::{
     PreparedProjectCook, ProjectCookError, ProjectCookRequest, ProjectCookSourceSelection,
+    ProjectServerCookTarget,
 };
 
 #[cfg(test)]
@@ -216,6 +219,7 @@ pub struct ProjectCookContext<'a> {
     store: &'a ArtifactBuildStore,
     implementation: ArtifactContentDigest,
     builder: &'a mut CookedContentBuilder,
+    omitted_scene_components: &'a [ComponentTypeId],
     outputs: &'a mut BTreeMap<AssetProductRef, Output>,
     built_sources: &'a mut BTreeMap<StableAssetId, TypeId>,
     observations: &'a mut Observations,
@@ -537,7 +541,7 @@ impl<'a> ProjectCookContext<'a> {
         Ok(())
     }
 
-    fn input(&mut self) -> Result<(), ProjectCookError> {
+    fn input(&mut self, include: bool) -> Result<(), ProjectCookError> {
         if let Some(input) = self.snapshot.input_action_map() {
             let path_bytes = input
                 .path()
@@ -560,7 +564,16 @@ impl<'a> ProjectCookContext<'a> {
                     .metadata_digest()
                     .map(ArtifactContentDigest::from_content),
             )?;
-            self.cook_stock(input.product(), StockAsset::Input(input))?;
+            if include {
+                self.cook_stock(input.product(), StockAsset::Input(input))?;
+            } else {
+                self.observations.product_source(
+                    self.builder,
+                    input.product().source(),
+                    input.path(),
+                    input.metadata_digest(),
+                )?;
+            }
         }
         Ok(())
     }
@@ -609,7 +622,12 @@ impl<'a> ProjectCookContext<'a> {
             .product_source(self.builder, product.source(), path, metadata)?;
         let resolver = self.snapshot.asset_resolution();
         match asset {
-            StockAsset::Scene(scene) => self.builder.add_scene(product, scene, resolver)?,
+            StockAsset::Scene(scene) => self.builder.add_scene_with_component_omissions(
+                product,
+                scene,
+                resolver,
+                self.omitted_scene_components,
+            )?,
             StockAsset::Image(image) => self.builder.add_image(image.image())?,
             StockAsset::Input(input) => self.builder.add_input(input.asset())?,
             StockAsset::Material(material) => {
@@ -859,16 +877,119 @@ pub fn prepare_project_cooked_content(
     request: ProjectCookRequest<'_>,
     mut contribute: impl FnMut(&mut ProjectCookContext<'_>) -> Result<(), ProjectCookError>,
 ) -> Result<PreparedProjectCook, ProjectCookError> {
-    catch_unwind(AssertUnwindSafe(|| prepare(request, &mut contribute)))
+    catch_unwind(AssertUnwindSafe(|| prepare(request, None, &mut contribute)))
         .unwrap_or(Err(ProjectCookError::Panicked))
+}
+
+/// Validates the authored delivery and cooks its selected Scene components for a server.
+///
+/// `source` selects the complete authored Scene and Prefab definitions. `server` selects the
+/// receiving executable's profile, Schema and codecs. Both profiles use the same manifest and
+/// content roots. The original source fence still includes the authored inputs used by Cook.
+/// Cook follows mandatory dependencies of the projected output and selected contributions.
+pub fn prepare_project_server_content(
+    source: ProjectCookRequest<'_>,
+    server: ProjectServerCookTarget<'_>,
+    mut contribute: impl FnMut(&mut ProjectCookContext<'_>) -> Result<(), ProjectCookError>,
+) -> Result<PreparedProjectCook, ProjectCookError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        prepare(source, Some(server), &mut contribute)
+    }))
+    .unwrap_or(Err(ProjectCookError::Panicked))
+}
+
+fn resolve_server_cook_plan(
+    source: &ProjectCookRequest<'_>,
+    source_plan: &RuntimePlan,
+    server: &ProjectServerCookTarget<'_>,
+) -> Result<RuntimePlan, ProjectCookError> {
+    let source_settings = source.candidate.settings();
+    let target_settings = server.candidate.settings();
+    let root = Some(source.root.identity());
+    if source.candidate.lineage().project_root_identity() != root
+        || server.candidate.lineage().project_root_identity() != root
+        || source.candidate.manifest_digest() != server.candidate.manifest_digest()
+        || source_settings.paths.assets != target_settings.paths.assets
+        || source_settings.paths.scenes != target_settings.paths.scenes
+        || source_settings.paths.prefabs != target_settings.paths.prefabs
+        || source_settings.startup != target_settings.startup
+        || source_settings.content != target_settings.content
+    {
+        return Err(ProjectCookError::Invalid(
+            "server Cook requires both profiles to select the same manifest and source content"
+                .into(),
+        ));
+    }
+    if target_settings.runtime_preset != RuntimePreset::Server
+        || server.candidate.input_requirement().is_some()
+    {
+        return Err(ProjectCookError::Invalid(
+            "server Cook requires the server preset with no selected global Input".into(),
+        ));
+    }
+    let target_plan = resolve_product_recipe(server.candidate, server.recipe.clone())
+        .map_err(|error| ProjectCookError::Invalid(format!("server composition: {error:?}")))?;
+    if target_plan
+        .plugin_plan()
+        .entries()
+        .iter()
+        .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+    {
+        return Err(ProjectCookError::Invalid(
+            "server Cook requires a recipe without the raw Input plugin".into(),
+        ));
+    }
+
+    let source_schema = source_plan.schema_validation();
+    let source_bundle = source_schema.authoring_schema_bundle();
+    let target_bundle = target_plan.schema_validation().authoring_schema_bundle();
+    for owner in target_bundle.owners() {
+        let compatible = source_bundle.owner(owner.owner_id()).is_some_and(|source| {
+            source.current() == owner.current() && source.predecessor() == owner.predecessor()
+        });
+        if !compatible {
+            return Err(ProjectCookError::Invalid(format!(
+                "server Schema owner {} differs from the admitted source composition",
+                owner.owner_id().as_str(),
+            )));
+        }
+    }
+    for component in server.omit_components {
+        if source_schema.bindings().schema(component).is_none() {
+            return Err(ProjectCookError::Invalid(format!(
+                "server Cook omits unknown source component {}",
+                component.as_str(),
+            )));
+        }
+    }
+    Ok(target_plan)
 }
 
 fn prepare(
     request: ProjectCookRequest<'_>,
+    server: Option<ProjectServerCookTarget<'_>>,
     contribute: &mut impl FnMut(&mut ProjectCookContext<'_>) -> Result<(), ProjectCookError>,
 ) -> Result<PreparedProjectCook, ProjectCookError> {
     let plan = resolve_product_recipe(request.candidate, request.recipe.clone())
         .map_err(|error| ProjectCookError::Invalid(format!("project composition: {error:?}")))?;
+    let include_input = server.is_none();
+    let (candidate, recipe, omitted_scene_components, expected_schema) = match server {
+        Some(server) => {
+            let target_plan = resolve_server_cook_plan(&request, &plan, &server)?;
+            (
+                server.candidate,
+                server.recipe,
+                server.omit_components,
+                target_plan.schema_validation().composition_fingerprint(),
+            )
+        }
+        None => (
+            request.candidate,
+            request.recipe.clone(),
+            &[][..],
+            plan.schema_validation().composition_fingerprint(),
+        ),
+    };
     let loader = ProjectContentLoader::with_limits(
         request.root.share(),
         request.recipe.source_content_limits(),
@@ -898,10 +1019,11 @@ fn prepare(
                             "cooked startup requires authored stable metadata".into(),
                         )
                     })?;
-                    let mut configuration =
-                        request.candidate.runtime_configuration().to_configuration();
-                    configuration.input.action_map =
-                        snapshot.input_action_map().map(|input| input.product());
+                    let mut configuration = candidate.runtime_configuration().to_configuration();
+                    if include_input {
+                        configuration.input.action_map =
+                            snapshot.input_action_map().map(|input| input.product());
+                    }
                     builder = Some(CookedContentBuilder::new(
                         CookedContentRequest {
                             target: request.target.clone(),
@@ -910,7 +1032,7 @@ fn prepare(
                             scenes: vec![startup],
                             addressable_roots: Vec::new(),
                         },
-                        request.recipe.clone(),
+                        recipe.clone(),
                         request.limits,
                     )?);
                 }
@@ -923,11 +1045,12 @@ fn prepare(
                     store: request.store,
                     implementation: request.implementation,
                     builder: builder.as_mut().expect("startup initialized the assembly"),
+                    omitted_scene_components,
                     outputs: &mut outputs,
                     built_sources: &mut built_sources,
                     observations: &mut observations,
                 };
-                context.input()?;
+                context.input(include_input)?;
                 context.select_stock(&mut inspected_members, |context| {
                     contribute(context)?;
                     context.scene_root()
@@ -966,6 +1089,7 @@ fn prepare(
                         store: request.store,
                         implementation: request.implementation,
                         builder: &mut builder,
+                        omitted_scene_components,
                         outputs: &mut outputs,
                         built_sources: &mut built_sources,
                         observations: &mut observations,
@@ -1029,10 +1153,10 @@ fn prepare(
         .plan()
         .schema_validation()
         .composition_fingerprint()
-        != receipt.schema_fingerprint()
+        != expected_schema
     {
         return Err(ProjectCookError::Invalid(
-            "cooked content Schema differs from its original source delivery".into(),
+            "cooked content Schema differs from its selected Runtime composition".into(),
         ));
     }
     let selection =

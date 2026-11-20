@@ -75,6 +75,7 @@ impl WorkBudget {
     pub fn document_clone(
         &mut self,
         document: &CompiledSceneDocument,
+        omitted: &[ComponentTypeId],
     ) -> Result<(), RuntimeSceneError> {
         let mut counts = FlatBudget::new(document.roots(), self)?;
         check(
@@ -98,12 +99,13 @@ impl WorkBudget {
             self.reserve(provenance_string_bytes(root.as_str()))?;
         }
         for entity in document.entities() {
-            counts.entity(
-                entity.id(),
-                entity.children(),
-                entity.components().len(),
-                self,
-            )?;
+            let components = entity.components();
+            let component_count = if omitted.is_empty() {
+                components.len()
+            } else {
+                components.keys().filter(|id| !omitted.contains(id)).count()
+            };
+            counts.entity(entity.id(), entity.children(), component_count, self)?;
             self.reserve(provenance_string_bytes(entity.id().as_str()))?;
             self.reserve(
                 entity
@@ -114,7 +116,10 @@ impl WorkBudget {
             for child in entity.children() {
                 self.reserve(provenance_string_bytes(child.as_str()))?;
             }
-            for (component, record) in entity.components() {
+            for (component, record) in components {
+                if omitted.contains(component) {
+                    continue;
+                }
                 let cost =
                     counts.component(component, record.schema_owner(), record.value(), self)?;
                 self.reserve(

@@ -8,8 +8,8 @@ use nara_reflect::{
         collect_declared_effective_asset_references_with_admission,
         plan_declared_entity_references_with_admission,
     },
-    ComponentFieldPathSegment, ComponentValueMaterializationLimits, DeclaredAssetReference,
-    EntityReference, EntityReferenceTraversalLimits,
+    ComponentFieldPathSegment, ComponentTypeId, ComponentValueMaterializationLimits,
+    DeclaredAssetReference, EntityReference, EntityReferenceTraversalLimits,
     rewrite_declared_asset_references_with_admission,
 };
 
@@ -27,13 +27,14 @@ pub(super) fn cook(
     compiled: &CompiledSceneCandidate,
     bindings: &SceneComponentBindings,
     asset_resolution: AssetReferenceResolver<'_>,
+    omitted: &[ComponentTypeId],
     limits: RuntimeSceneLimits,
 ) -> Result<RuntimeSceneCandidate, RuntimeSceneError> {
     require_scene_source(compiled.source_key())?;
     let mut work = WorkBudget::new(limits);
     // This exact independent payload, including actual owner strings, is admitted before
     // cloning. All subsequent edits belong exclusively to unpublished flat claims.
-    let mut claims = clone_claims(compiled, &mut work)?;
+    let mut claims = clone_claims(compiled, omitted, &mut work)?;
     let identifiers =
         identity::canonical_ids(compiled.source_key(), compiled.document(), false, &mut work)?;
     let traversal = limits.value_limits().reference_traversal_limits();
@@ -140,10 +141,11 @@ pub(super) fn cook(
 /// participate; the caller reserves the containing key here for its eventual candidate binding.
 pub(super) fn clone_claims(
     compiled: &CompiledSceneCandidate,
+    omitted: &[ComponentTypeId],
     work: &mut WorkBudget,
 ) -> Result<FlatSceneClaims, RuntimeSceneError> {
     let document = compiled.document();
-    work.document_clone(document)?;
+    work.document_clone(document, omitted)?;
     let provenance = provenance_cost(
         compiled.source_key(),
         compiled.canonical_provenance(),
@@ -161,6 +163,7 @@ pub(super) fn clone_claims(
                 components: entity
                     .components()
                     .iter()
+                    .filter(|(component, _)| !omitted.contains(component))
                     .map(|(component, record)| {
                         (
                             component.clone(),

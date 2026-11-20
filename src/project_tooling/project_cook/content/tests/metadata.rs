@@ -153,6 +153,7 @@ fn consumer_tables_admit_exact_metadata_and_refuse_one_byte_short_before_mutatio
             store: &fixture.store,
             implementation: fixture.request().implementation,
             builder: &mut builder,
+            omitted_scene_components: &[],
             outputs: &mut outputs,
             built_sources: &mut built_sources,
             observations: &mut observations,

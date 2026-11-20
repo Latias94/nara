@@ -327,7 +327,7 @@ fn scalar_cook_copies_admit_each_new_payload_backing_before_allocation() {
         .unwrap();
     let mut exact =
         budget::WorkBudget::new(defaults.with_working_bytes(ByteLimit::new(expected).unwrap()));
-    let claims = cook::clone_claims(&document, &mut exact).unwrap();
+    let claims = cook::clone_claims(&document, &[], &mut exact).unwrap();
     assert_eq!(exact.used(), expected);
     for entity in &claims.entities {
         let copied = &entity.components[&component].value;
@@ -347,7 +347,7 @@ fn scalar_cook_copies_admit_each_new_payload_backing_before_allocation() {
     }
     let mut short =
         budget::WorkBudget::new(defaults.with_working_bytes(ByteLimit::new(expected - 1).unwrap()));
-    assert!(cook::clone_claims(&document, &mut short).is_err());
+    assert!(cook::clone_claims(&document, &[], &mut short).is_err());
     assert!(short.used() < expected);
     for entity in document.document().entities() {
         assert_eq!(
@@ -366,6 +366,7 @@ fn compile(bindings: &SceneComponentBindings, document: SceneDocument) -> Compil
 fn copy_claims(candidate: &CompiledSceneCandidate) -> FlatSceneClaims {
     cook::clone_claims(
         candidate,
+        &[],
         &mut budget::WorkBudget::new(RuntimeSceneLimits::default()),
     )
     .unwrap()
@@ -477,6 +478,58 @@ fn admit_json(
         RuntimeSceneLimits::default(),
     )?
     .admit(&containing(), bindings)
+}
+
+#[test]
+fn component_omission_preserves_projected_identity_and_surviving_references() {
+    let bindings = bindings();
+    let source = fixture(&bindings, "first");
+    let assets = database();
+    let resolver = assets.resolver(&nara_asset::AssetPathScope::ROOT);
+    let limits = RuntimeSceneLimits::default();
+    let complete = RuntimeSceneCandidate::cook(&source, &bindings, resolver, limits).unwrap();
+    let text = component("game.Text");
+    let projected = RuntimeSceneCandidate::cook_with_component_omissions(
+        &source,
+        &bindings,
+        resolver,
+        std::slice::from_ref(&text),
+        limits,
+    )
+    .unwrap();
+    let decoded =
+        RuntimeSceneDocumentCandidate::from_json_bytes(&projected.to_json_bytes().unwrap(), limits)
+            .unwrap()
+            .admit(source.source_key(), &bindings)
+            .unwrap();
+
+    assert_eq!(
+        complete.canonical_provenance(),
+        decoded.canonical_provenance()
+    );
+    assert_eq!(complete.document().roots(), decoded.document().roots());
+    let before = complete.document().entities();
+    let after = decoded.document().entities();
+    assert_eq!(before.len(), after.len());
+    for (before, after) in before.iter().zip(after) {
+        assert_eq!(before.id(), after.id());
+        assert_eq!(before.children(), after.children());
+        assert!(!after.components().contains_key(&text));
+        assert!(
+            before
+                .components()
+                .iter()
+                .filter(|(id, _)| *id != &text)
+                .eq(after.components())
+        );
+    }
+    assert!(
+        source
+            .document()
+            .entities()
+            .iter()
+            .any(|entity| entity.components().contains_key(&text))
+    );
 }
 
 #[test]

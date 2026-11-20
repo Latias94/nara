@@ -13,7 +13,7 @@ use std::{error::Error, fmt};
 use nara_asset::AssetReferenceResolver;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::ComponentValueMaterializationLimits;
+use nara_reflect::{ComponentTypeId, ComponentValueMaterializationLimits};
 
 use crate::{
     CompiledSceneCandidate, CompiledSceneDocument, SceneComponentBindings,
@@ -188,7 +188,22 @@ impl RuntimeSceneCandidate {
         asset_resolution: AssetReferenceResolver<'_>,
         limits: RuntimeSceneLimits,
     ) -> Result<Self, RuntimeSceneError> {
-        cook::cook(compiled, bindings, asset_resolution, limits)
+        Self::cook_with_component_omissions(compiled, bindings, asset_resolution, &[], limits)
+    }
+
+    /// Cooks an admitted Scene for a target that omits explicitly selected component types.
+    ///
+    /// Roots, child order, entity identities and Prefab provenance remain complete. Retained
+    /// components still require the target's definitions and resolve their declared references.
+    /// The source candidate remains available in its original form.
+    pub fn cook_with_component_omissions(
+        compiled: &CompiledSceneCandidate,
+        bindings: &SceneComponentBindings,
+        asset_resolution: AssetReferenceResolver<'_>,
+        omitted: &[ComponentTypeId],
+        limits: RuntimeSceneLimits,
+    ) -> Result<Self, RuntimeSceneError> {
+        cook::cook(compiled, bindings, asset_resolution, omitted, limits)
     }
 
     #[must_use]

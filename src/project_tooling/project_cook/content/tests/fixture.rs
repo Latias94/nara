@@ -35,7 +35,7 @@ use super::super::*;
 
 pub(super) const SOURCE: &str = "assets/shared.compound";
 pub(super) const OPTIONAL: &str = "assets/build-only.bin";
-const COMPONENT: &str = "test.cook.SharedCompound";
+pub(super) const COMPONENT: &str = "test.cook.SharedCompound";
 const PREFIX: &str = "nara-shared-cook-content-";
 static NEXT: AtomicU64 = AtomicU64::new(0);
 static BUILDS: [AtomicUsize; 11] = [const { AtomicUsize::new(0) }; 11];

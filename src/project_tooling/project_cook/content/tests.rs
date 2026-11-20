@@ -22,7 +22,8 @@ mod fixture;
 mod metadata;
 
 use fixture::{
-    Codec, Domain, Fixture, Mapping, OPTIONAL, WideIntegers, auxiliary, product, write_metadata,
+    COMPONENT, Codec, Domain, Fixture, Mapping, OPTIONAL, WideIntegers, auxiliary, product,
+    write_metadata,
 };
 
 const STARTUP_META: &str = "scenes/first.scene.json.meta";
@@ -50,6 +51,140 @@ fn assert_source_work_released(host: &ProjectContentBudgetHost) {
     assert_eq!(budget.active(ProjectContentBudgetKind::WorkBytes), 0);
     assert_eq!(budget.active(ProjectContentBudgetKind::EncodedBytes), 0);
     assert_eq!(budget.active(ProjectContentBudgetKind::OpenHandles), 0);
+}
+
+#[test]
+fn server_cook_uses_target_definitions_and_keeps_omitted_source_inputs_fenced() {
+    use crate::input::{
+        ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapDomain,
+        ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec, KeyCode,
+    };
+
+    let mut fixture = Fixture::<0>::new(None);
+    let manifest_path = RelativePath::new("nara.toml").unwrap();
+    let mut manifest = fs::read_to_string(fixture.path.join("nara.toml")).unwrap();
+    manifest.push_str("\n[input]\naction_map = \"game.actions.json\"\n");
+    manifest.push_str("\n[profiles.server.capabilities]\nrequested = []\n");
+    manifest.push_str("[profiles.server.input]\nclear_action_map = true\n");
+    manifest.push_str("[profiles.server.paths]\nimport_cache = \"server-cache\"\n");
+    manifest.push_str("\n[profiles.other.runtime]\npreset = \"server\"\n");
+    manifest.push_str("[profiles.other.capabilities]\nrequested = []\n");
+    manifest.push_str("[profiles.other.input]\nclear_action_map = true\n");
+    manifest.push_str("[profiles.other.startup]\ndefault_scene = \"second.scene.json\"\n");
+    fixture.write("nara.toml", manifest.as_bytes());
+    let input_product = product(4);
+    let mut input = ActionMapBuilder::new(ActionMapLimits::default());
+    input
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    input
+        .bind(ActionBinding::key(
+            ActionId::new("jump").unwrap(),
+            KeyCode::Space,
+        ))
+        .unwrap();
+    let input = ActionMapFileCandidate::new(input_product, input.compile().unwrap())
+        .unwrap()
+        .to_json_string()
+        .unwrap();
+    fixture.write("game.actions.json", input.as_bytes());
+    fixture.recipe = fixture
+        .recipe
+        .clone()
+        .add_runtime_asset_codec::<ActionMapDomain, ActionMapRuntimeCodec>(
+            crate::runtime_content::RuntimeCodecDefinitionId::new("test.cook.input", 1),
+        )
+        .unwrap();
+    let (source, server, other) = {
+        let file = fixture.root.open_file_exact(&manifest_path).unwrap();
+        (
+            ingest_project_manifest(&file, None).unwrap(),
+            ingest_project_manifest(&file, Some("server")).unwrap(),
+            ingest_project_manifest(&file, Some("other")).unwrap(),
+        )
+    };
+    fixture.candidate = source;
+    let omitted = [ComponentTypeId::new(COMPONENT)];
+    let target = |candidate| ProjectServerCookTarget {
+        candidate,
+        recipe: crate::ProductRecipe::new(),
+        omit_components: &omitted,
+    };
+    let error = prepare_project_server_content(fixture.request(), target(&other), |_| {
+        panic!("changed content roots must refuse before contributions")
+    })
+    .err()
+    .expect("a target profile cannot substitute another startup Scene");
+    assert!(
+        matches!(error, ProjectCookError::Invalid(message) if message.contains("same manifest and source content"))
+    );
+
+    let error = prepare_project_server_content(
+        fixture.request(),
+        ProjectServerCookTarget {
+            omit_components: &[],
+            ..target(&server)
+        },
+        |_| Ok(()),
+    )
+    .err()
+    .expect("a component without a target definition must be explicitly omitted");
+    assert!(matches!(error, ProjectCookError::Content(_)));
+
+    let cooked =
+        prepare_project_server_content(fixture.request(), target(&server), |_| Ok(())).unwrap();
+    let base = cooked.content().base();
+    assert_eq!(
+        base.plan().settings().runtime_preset(),
+        RuntimePreset::Server
+    );
+    assert_ne!(
+        base.plan().schema_validation().composition_fingerprint(),
+        cooked.source().schema_fingerprint(),
+    );
+    assert_eq!(base.catalog().scenes(), [product(1), product(2)]);
+    assert_eq!(base.catalog().members().len(), 2);
+    assert!(base.member(auxiliary()).is_none());
+    assert!(base.member(input_product).is_none());
+    for product in [product(1), product(2)] {
+        let scene = base.acquire_scene(product).unwrap();
+        let entities = scene.candidate().document().entities();
+        assert_eq!(entities.len(), 1);
+        assert!(entities[0].components().is_empty());
+    }
+    let (_, selection) = cooked.into_parts();
+    selection.verify(&fixture.path).unwrap();
+    let input_metadata = "game.actions.json.meta";
+    write_metadata(
+        &fixture.path,
+        "game.actions.json",
+        "game.actions.json",
+        input_product.source(),
+        AssetSourceKind::Other("input-action-map".to_owned()),
+    );
+    assert!(matches!(
+        selection.verify(&fixture.path),
+        Err(ProjectCookError::Filesystem(FsError::TargetStateMismatch))
+    ));
+    fs::remove_file(fixture.path.join(input_metadata)).unwrap();
+    fixture.write("assets/competing.actions.json", input.as_bytes());
+    write_metadata(
+        &fixture.path,
+        "assets/competing.actions.json",
+        "competing.actions.json",
+        input_product.source(),
+        AssetSourceKind::Other("input-action-map".to_owned()),
+    );
+    assert!(matches!(
+        selection.verify(&fixture.path),
+        Err(ProjectCookError::Source(_))
+    ));
+    fs::remove_file(fixture.path.join("assets/competing.actions.json.meta")).unwrap();
+    fixture.write_source(b'B');
+    assert!(matches!(
+        selection.verify(&fixture.path),
+        Err(ProjectCookError::Filesystem(FsError::DigestMismatch { .. }))
+    ));
 }
 
 #[test]
