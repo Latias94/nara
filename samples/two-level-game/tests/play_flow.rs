@@ -63,7 +63,9 @@ struct Driver(Arc<Mutex<Vec<DriverInput>>>);
 enum DriverInput {
     Key(KeyCode, bool),
     #[cfg(feature = "gamepad")]
-    Button(GamepadButton, bool),
+    Button(usize, GamepadButton, bool),
+    #[cfg(feature = "gamepad")]
+    Disconnect(usize),
 }
 
 impl ProductConfiguration for Driver {
@@ -84,26 +86,39 @@ impl Driver {
 
     #[cfg(feature = "gamepad")]
     fn button(&self, button: GamepadButton, pressed: bool) {
+        self.controller_button(0, button, pressed);
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn controller_button(&self, controller: usize, button: GamepadButton, pressed: bool) {
         self.0
             .lock()
             .unwrap()
-            .push(DriverInput::Button(button, pressed));
+            .push(DriverInput::Button(controller, button, pressed));
     }
 
     #[cfg(feature = "gamepad")]
     fn tap_button(&self, button: GamepadButton) {
         self.0.lock().unwrap().extend([
-            DriverInput::Button(button, true),
-            DriverInput::Button(button, false),
+            DriverInput::Button(0, button, true),
+            DriverInput::Button(0, button, false),
         ]);
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn disconnect(&self, controller: usize) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(DriverInput::Disconnect(controller));
     }
 }
 
 struct DriverPlugin(Driver);
 
 #[cfg(feature = "gamepad")]
-#[derive(Resource)]
-struct Connection(GamepadConnection);
+#[derive(Default, Resource)]
+struct Connections([Option<GamepadConnection>; 2]);
 
 #[derive(Default, Resource)]
 struct ExplorerAtExtract(Option<(FlowPhase, TextureRegion)>);
@@ -121,6 +136,8 @@ impl Plugin for DriverPlugin {
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
         app.insert_resource(self.0.clone())?;
         app.init_resource::<ExplorerAtExtract>()?;
+        #[cfg(feature = "gamepad")]
+        app.init_resource::<Connections>()?;
         app.add_systems(StartupStage::Core, |world: &mut World| {
             world
                 .resource_mut::<InputTimeline>()
@@ -168,15 +185,18 @@ fn inject(world: &mut World) {
                     .unwrap();
             }
             #[cfg(feature = "gamepad")]
-            DriverInput::Button(button, pressed) => {
-                if world.get_resource::<Connection>().is_none() {
+            DriverInput::Button(controller, button, pressed) => {
+                if world.resource::<Connections>().0[controller].is_none() {
                     let connection = world
                         .resource_mut::<InputTimeline>()
-                        .connect_gamepad(WINDOW, InputSeatId::PRIMARY, 7)
+                        .connect_gamepad(WINDOW, InputSeatId::PRIMARY, 7 + controller as u16)
                         .unwrap();
-                    world.insert_resource(Connection(connection));
+                    world.resource_mut::<Connections>().0[controller] = Some(connection);
                 }
-                let connection = world.resource::<Connection>().0.clone();
+                let connection = world.resource::<Connections>().0[controller]
+                    .as_ref()
+                    .unwrap()
+                    .clone();
                 world
                     .resource_mut::<InputTimeline>()
                     .admit_gamepad_button(
@@ -188,6 +208,16 @@ fn inject(world: &mut World) {
                             ButtonTransitionPhase::Released
                         },
                     )
+                    .unwrap();
+            }
+            #[cfg(feature = "gamepad")]
+            DriverInput::Disconnect(controller) => {
+                let connection = world.resource_mut::<Connections>().0[controller]
+                    .take()
+                    .unwrap();
+                world
+                    .resource_mut::<InputTimeline>()
+                    .disconnect_gamepad(&connection)
                     .unwrap();
             }
         }
@@ -1200,6 +1230,348 @@ fn refused_source_preparation_retains_the_old_round_and_title_then_repaired_conf
     game.finish_resume();
     assert_zero_round(&game, 2);
     assert_eq!(game.session.runtime_generation(), Some(generation));
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn controller_pause_then_save_keeps_the_older_checkpoint() {
+    check_checkpoint_order(false);
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn controller_save_then_pause_writes_once() {
+    check_checkpoint_order(true);
+}
+
+#[cfg(feature = "gamepad")]
+fn controller_game_with_save(project: &ProjectCopy) -> Game {
+    let recipe = with_play_flow(
+        configured_recipe(RunOptions {
+            save_path: Some(project.save_path()),
+            ..RunOptions::default()
+        }),
+        PlayFlowControls::KeyboardAndGamepad,
+    )
+    .unwrap();
+    Game::from_project(project.root(), recipe)
+}
+
+#[cfg(feature = "gamepad")]
+fn check_checkpoint_order(save_first: bool) {
+    use GamepadButton::{East, LeftShoulder, RightShoulder, Start};
+    use two_level_game::save::decode_checkpoint;
+
+    for (delta, fixed_steps) in [
+        (STEP - Duration::from_millis(1), 0),
+        (STEP, 1),
+        (STEP * 3, 3),
+    ] {
+        let project = ProjectCopy::new();
+        let save = project.save_path();
+        let mut game = controller_game_with_save(&project);
+        game.start_round();
+        game.collect_near_pickup();
+
+        game.driver.tap_button(LeftShoulder);
+        game.frame(Duration::ZERO);
+        assert!(!save.exists());
+        game.frame(STEP * 3);
+        assert_eq!(game.snapshot().saves, 1);
+        let old_bytes = fs::read(&save).unwrap();
+        assert_eq!(decode_checkpoint(&old_bytes).unwrap().checkpoint.score, 10);
+
+        game.driver.tap_button(Start);
+        game.frame(Duration::ZERO);
+        assert_eq!(game.flow().phase, FlowPhase::Paused);
+        game.driver.tap_button(East);
+        game.frame(Duration::ZERO);
+        assert_eq!(game.flow().phase, FlowPhase::Title);
+        game.start_round();
+        assert_zero_round(&game, 2);
+
+        let before = game.snapshot();
+        let accepted = game.queue().accepted;
+        let buttons = if save_first {
+            [LeftShoulder, Start]
+        } else {
+            [Start, LeftShoulder]
+        };
+        for button in buttons {
+            game.driver.tap_button(button);
+        }
+        game.frame(delta);
+        let paused = game.snapshot();
+        assert_eq!(game.flow().phase, FlowPhase::Paused, "{delta:?}");
+        assert_eq!(paused.tick - before.tick, fixed_steps, "{delta:?}");
+        assert_eq!(game.queue().accepted, accepted + 1, "{delta:?}");
+        let wrote_in_pause_frame = save_first && fixed_steps != 0;
+        assert_eq!(paused.saves, u32::from(wrote_in_pause_frame), "{delta:?}");
+        if !wrote_in_pause_frame {
+            assert_eq!(fs::read(&save).unwrap(), old_bytes, "{delta:?}");
+        }
+
+        game.driver.tap_button(LeftShoulder);
+        game.frame(Duration::ZERO);
+        assert_eq!(game.flow().phase, FlowPhase::Paused);
+        assert_eq!(game.queue().accepted, accepted + 1);
+
+        game.driver.tap_button(Start);
+        game.frame(Duration::ZERO);
+        game.finish_resume();
+        let saved_bytes = fs::read(&save).unwrap();
+        let expected_score = if save_first { 0 } else { 10 };
+        assert_eq!(
+            decode_checkpoint(&saved_bytes).unwrap().checkpoint.score,
+            expected_score,
+            "{delta:?}"
+        );
+        if !save_first {
+            assert_eq!(saved_bytes, old_bytes, "{delta:?}");
+        }
+        game.driver.tap_button(RightShoulder);
+        game.frame(STEP);
+        game.settle_level(LevelId::Meadow);
+        assert_eq!(game.snapshot().restores, 1, "{delta:?}");
+        assert_eq!(game.snapshot().score, expected_score, "{delta:?}");
+        assert_eq!(game.snapshot().saves, u32::from(save_first), "{delta:?}");
+        assert_eq!(fs::read(&save).unwrap(), saved_bytes, "{delta:?}");
+    }
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn controller_save_pending_from_prior_frame_writes_on_the_pause_frame() {
+    use GamepadButton::{LeftShoulder, Start};
+    use two_level_game::save::decode_checkpoint;
+
+    let project = ProjectCopy::new();
+    let save = project.save_path();
+    let mut game = controller_game_with_save(&project);
+    game.start_round();
+    game.collect_near_pickup();
+    game.frame(STEP);
+    let before = game.snapshot();
+
+    game.driver.tap_button(LeftShoulder);
+    game.frame(Duration::from_millis(19));
+    assert_eq!(game.snapshot().tick, before.tick);
+    assert_eq!(game.queue().pending_commands, 1);
+    assert!(!save.exists());
+
+    game.driver.tap_button(Start);
+    game.driver.tap_button(LeftShoulder);
+    game.frame(Duration::from_millis(1));
+    assert_eq!(game.flow().phase, FlowPhase::Paused);
+    assert_eq!(game.snapshot().tick, before.tick + 1);
+    assert_eq!(game.snapshot().saves, 1);
+    let bytes = fs::read(&save).unwrap();
+    assert_eq!(decode_checkpoint(&bytes).unwrap().checkpoint.score, 10);
+    game.assert_idle();
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn the_first_paused_menu_action_decides_the_pending_round_save() {
+    use GamepadButton::{East, LeftShoulder, Start};
+
+    for title_first in [true, false] {
+        let project = ProjectCopy::new();
+        let save = project.save_path();
+        let mut game = controller_game_with_save(&project);
+        game.start_round();
+        game.collect_near_pickup();
+        game.driver.tap_button(LeftShoulder);
+        game.frame(STEP);
+        let original = fs::read(&save).unwrap();
+
+        game.driver.tap_button(Start);
+        game.frame(Duration::ZERO);
+        game.driver.tap_button(East);
+        game.frame(Duration::ZERO);
+        game.start_round();
+        assert_zero_round(&game, 2);
+
+        game.driver.tap_button(LeftShoulder);
+        game.driver.tap_button(Start);
+        game.frame(Duration::ZERO);
+        assert_eq!(game.flow().phase, FlowPhase::Paused);
+        assert_eq!(game.queue().pending_commands, 1);
+        let buttons = if title_first {
+            [East, Start]
+        } else {
+            [Start, East]
+        };
+        for button in buttons {
+            game.driver.tap_button(button);
+        }
+        game.frame(Duration::ZERO);
+        if title_first {
+            assert_eq!(game.flow().phase, FlowPhase::Title);
+            game.start_round();
+            assert_eq!(fs::read(&save).unwrap(), original);
+            assert_eq!(game.snapshot().saves, 0);
+        } else {
+            assert_eq!(game.flow().phase, FlowPhase::Resuming);
+            game.finish_resume();
+            assert_eq!(game.snapshot().saves, 1);
+            assert_eq!(
+                two_level_game::save::decode_checkpoint(&fs::read(&save).unwrap())
+                    .unwrap()
+                    .checkpoint
+                    .score,
+                0,
+            );
+        }
+        game.assert_idle();
+    }
+}
+
+#[test]
+fn refused_travel_preserves_the_last_admitted_typed_movement_decision() {
+    use nara::gameplay::{
+        GameplayCommandIngressSource, GameplayCommandSourceSequence, GameplayCommandSubmission,
+        GameplayCommandTick,
+    };
+
+    let project = ProjectCopy::new();
+    let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
+    game.start_round();
+    game.driver.key(RIGHT, true);
+    game.frame(STEP);
+    assert!(game.snapshot().held[1]);
+    let stopped_at = game.snapshot().player;
+    let submission = GameplayCommandSubmission::new(
+        GameplayCommandTick::new(game.snapshot().tick + 1).unwrap(),
+        GameplayCommandIngressSource::external("two-level-game.test.typed-stop").unwrap(),
+        GameplayCommandSourceSequence::new(1).unwrap(),
+        support::movement(1, false),
+    );
+    let key = submission.key();
+    assert_eq!(game.session.submit(submission).unwrap(), key);
+    game.frame(STEP);
+    assert_eq!(game.snapshot().player, stopped_at);
+    assert!(!game.snapshot().held[1]);
+
+    let starting_instance = game.instance();
+    fs::remove_file(project.root().join("scenes/cavern.scene.json")).unwrap();
+    game.tap(KeyCode::Character('e'));
+    game.frame(STEP);
+    let deadline = Instant::now() + DEADLINE;
+    while game.snapshot().error.is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "the missing travel target was never refused"
+        );
+        game.frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(game.snapshot().phase, GamePhase::Running);
+    assert_eq!(game.instance(), starting_instance);
+    assert!(!game.snapshot().held[1]);
+    game.frame(STEP * 3);
+    assert_eq!(game.snapshot().player, stopped_at);
+    game.assert_idle();
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn host_exact_step_keeps_native_and_typed_save_in_the_original_batch() {
+    use nara::gameplay::{
+        GameplayCommandIngressSource, GameplayCommandSourceSequence, GameplayCommandSubmission,
+        GameplayCommandTick,
+    };
+    use two_level_game::save::decode_checkpoint;
+
+    let project = ProjectCopy::new();
+    let save = project.save_path();
+    let mut game = controller_game_with_save(&project);
+    game.start_round();
+    assert_eq!(game.session.pause().unwrap(), None);
+
+    game.driver.tap_button(GamepadButton::Start);
+    game.driver.tap_button(GamepadButton::LeftShoulder);
+    game.frame(Duration::ZERO);
+    assert!(!save.exists());
+    assert_eq!(game.session.step().unwrap(), None);
+    assert_eq!(game.flow().phase, FlowPhase::Playing);
+    assert_eq!(game.snapshot().saves, 1);
+    game.assert_idle();
+
+    let submission = GameplayCommandSubmission::new(
+        GameplayCommandTick::new(game.snapshot().tick + 1).unwrap(),
+        GameplayCommandIngressSource::external("two-level-game.test.typed-save").unwrap(),
+        GameplayCommandSourceSequence::new(1).unwrap(),
+        support::action("two-level-game.save"),
+    );
+    let key = submission.key();
+    assert_eq!(game.session.submit(submission).unwrap(), key);
+    assert_eq!(game.snapshot().saves, 1);
+    assert_eq!(game.session.step().unwrap(), None);
+    assert_eq!(game.snapshot().saves, 2);
+    let bytes = fs::read(&save).unwrap();
+    assert_eq!(decode_checkpoint(&bytes).unwrap().checkpoint.score, 0);
+    game.assert_idle();
+}
+
+#[cfg(feature = "gamepad")]
+#[test]
+fn primary_travel_preserves_movement_for_controller_and_keyboard_handoffs() {
+    use GamepadButton::{DPadRight, South};
+
+    for keyboard in [false, true] {
+        for replacement_first in [true, false] {
+            let recipe =
+                with_play_flow(product_recipe(), PlayFlowControls::KeyboardAndGamepad).unwrap();
+            let mut game = Game::from_project(Path::new(env!("CARGO_MANIFEST_DIR")), recipe);
+            game.start_round();
+            game.driver.button(DPadRight, true);
+            game.frame(STEP);
+            assert!(game.snapshot().held[1]);
+
+            game.driver.tap_button(South);
+            game.frame(STEP);
+            game.settle_level(LevelId::Cavern);
+            assert_eq!(game.flow().phase, FlowPhase::Playing);
+            assert_eq!(game.snapshot().player.x, -120.0);
+
+            let replacement = |driver: &Driver, pressed| {
+                if keyboard {
+                    driver.key(RIGHT, pressed);
+                } else {
+                    driver.controller_button(1, DPadRight, pressed);
+                }
+            };
+            let check_step = |game: &mut Game, moving| {
+                let before = game.snapshot().player;
+                game.frame(STEP);
+                let after = game.snapshot();
+                let expected_dx = if moving { 3.2 } else { 0.0 };
+                assert_eq!(
+                    after.held,
+                    [false, moving, false, false],
+                    "keyboard={keyboard}, replacement_first={replacement_first}"
+                );
+                assert!((after.player.x - before.x - expected_dx).abs() < 0.0001);
+                assert_eq!(after.player.y, before.y);
+            };
+            check_step(&mut game, true);
+            if replacement_first {
+                replacement(&game.driver, true);
+                check_step(&mut game, true);
+                game.driver.disconnect(0);
+            } else {
+                game.driver.disconnect(0);
+                check_step(&mut game, false);
+                replacement(&game.driver, true);
+            }
+            check_step(&mut game, true);
+            replacement(&game.driver, false);
+            check_step(&mut game, false);
+            check_step(&mut game, false);
+            game.assert_idle();
+        }
+    }
 }
 
 #[cfg(feature = "gamepad")]

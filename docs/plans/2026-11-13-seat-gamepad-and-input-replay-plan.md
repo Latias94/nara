@@ -889,3 +889,17 @@ multi-binding continuation, controller hardware, foreign native execution, numer
 budgets and full R10/R12/Foundation remain open. Further small performance experiments and paused
 Editor/UI/Dialogue product work stay deferred. Continue from missing Runtime/game capability,
 not another Input validation or timing loop.
+
+## Round Input Ordering And Travel Handoff
+
+The [sixth workflow repair](../audits/2026-11-20-cook-identity-spatial-inheritance-and-round-input-review.md#repair-status)
+qualifies the Two-Level Game's original fixed command queue with ordered Round input. A local
+Save before the first Pause remains eligible in its original fixed batch. A later Save in the
+same frame cannot overwrite the checkpoint. The first Continue or Return to Title action while
+Paused determines whether that pending Save can finish. Host exact Step still consumes the
+original batch with the menu left in its current phase.
+
+Committed primary travel resynchronizes the live player's movement from the PRIMARY seat's
+aggregate held input. A rejected candidate keeps the incumbent's last applied movement decision
+and subsequent releases. Exact Resume retains its captured intent. The regression uses normal
+controller and keyboard contributions and also preserves explicit typed stop on rejected travel.

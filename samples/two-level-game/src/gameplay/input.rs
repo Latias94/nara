@@ -5,7 +5,7 @@ use nara::{
     gameplay::{ActionCommandBinding, ActionCommandMap},
     input::{
         ActionContext, ActionId, ActionMaps, ActionPhase, ActionTransform, InputBinding,
-        InputSeatId, KeyboardActionBinding,
+        InputSeatId, KeyboardActionBinding, SemanticActions,
     },
     prelude::{App, Plugin, PluginError},
 };
@@ -31,6 +31,42 @@ const MOVEMENT_ACTIONS: [&str; 4] = [
     "two-level-game.move-w",
     "two-level-game.move-s",
 ];
+pub(super) const SAVE_ACTION: &str = "two-level-game.k";
+
+pub(super) fn install_round_save_binding(world: &mut World) {
+    let id = ActionId::new(SAVE_ACTION).expect("static save action");
+    let standard =
+        ActionCommandBinding::from_command(id.clone(), ActionPhase::Started, action(SAVE));
+    let mut round = Some(ActionCommandBinding::from_command(
+        id,
+        ActionPhase::Started,
+        action(ROUND_SAVE),
+    ));
+    let mut map = world.resource_mut::<ActionCommandMap>();
+    let original = std::mem::take(&mut *map);
+    for binding in original.bindings() {
+        let binding = if binding == &standard {
+            round.take()
+        } else {
+            Some(binding.clone())
+        };
+        if let Some(binding) = binding {
+            map.bind(binding)
+                .expect("replacing the game's Save binding preserves command map admission");
+        }
+    }
+}
+
+pub(super) fn held_movement(world: &World) -> [bool; 4] {
+    let Some(actions) = world.get_resource::<SemanticActions>() else {
+        return [false; 4];
+    };
+    let gameplay = ActionContext::gameplay();
+    MOVEMENT_ACTIONS.map(|name| {
+        let action = ActionId::new(name).expect("static movement action");
+        actions.pressed(InputSeatId::PRIMARY, &action, &gameplay)
+    })
+}
 
 /// Complete primary Product selected by the source manifest and cooked Runtime configuration.
 #[must_use]
@@ -145,7 +181,7 @@ impl Plugin for GameInputPlugin {
             ("two-level-game.e", TRAVEL),
             ("two-level-game.q", INSTANCE),
             ("two-level-game.m", MARKER),
-            ("two-level-game.k", SAVE),
+            (SAVE_ACTION, SAVE),
             ("two-level-game.l", RESTORE),
             ("two-level-game.r", RETRY),
             ("two-level-game.b", SIDE_ROOM),

@@ -2,6 +2,9 @@
 //!
 //! This flow is not represented by the exact Resume protocol. Menu controls are frame actions;
 //! ordinary gameplay commands remain owned and acknowledged by the original fixed transaction.
+//! Round Save inputs preceding the first Pause keep their place in the next fixed batch, even
+//! if it arrives during Continue. Returning to Title discards the pending permissions. Host
+//! exact steps admit Save input while leaving the Round menu in its current phase.
 
 #[cfg(feature = "play-flow")]
 mod hud;
@@ -16,6 +19,7 @@ use nara::{
         RuntimeFrameStatus, RuntimeTimeSettings, StartupStage,
     },
     ecs::{World, schedule::IntoScheduleConfigs},
+    gameplay::add_local_gameplay_command_systems,
     identity::SceneInstanceId,
     input::{
         ActionBinding, ActionContext, ActionContextDefinition, ActionId, ActionMapBindings,
@@ -27,7 +31,7 @@ use nara::{
 #[cfg(feature = "gamepad")]
 use nara_gilrs::GamepadButton;
 
-use super::{ActiveLevel, GamePhase, Progress, Session, travel};
+use super::{ActiveLevel, GamePhase, Progress, Session, input, travel};
 use crate::{
     levels::{LevelId, LevelKey},
     save::{Checkpoint, CheckpointLocation},
@@ -118,6 +122,24 @@ struct Flow {
     context: ActionContext,
     controls: [ActionId; 4],
     gamepad_menu: Option<GamepadMenu>,
+    input: RoundInput,
+    pending_saves: usize,
+}
+
+#[derive(Default)]
+struct RoundInput {
+    confirm: bool,
+    pause: bool,
+    title: bool,
+    exit: bool,
+    start: bool,
+    paused_destination: Option<FlowPhase>,
+}
+
+impl RoundInput {
+    fn pauses(&self) -> bool {
+        self.pause || self.start
+    }
 }
 
 #[derive(Clone)]
@@ -249,12 +271,15 @@ impl Plugin for PlayFlowPlugin {
             context: context(),
             controls: CONTROLS.map(|(name, _)| action(name)),
             gamepad_menu: GamepadMenu::for_controls(self.controls),
+            input: RoundInput::default(),
+            pending_saves: 0,
         })?
         .init_resource::<FlowSnapshot>()?;
         app.add_systems(
             StartupStage::Runtime,
             initialize.after(StartupSceneActivationSet),
         )?;
+        add_local_gameplay_command_systems(app, read_input)?;
         app.add_systems(CoreStage::Update, advance)?;
         app.add_systems(
             CoreStage::Last,
@@ -274,6 +299,7 @@ fn action(name: &str) -> ActionId {
 
 fn initialize(world: &mut World) -> Result<(), nara::ecs::bevy_ecs::error::BevyError> {
     install_controls(world).map_err(|error| error.fault_detail().into_bevy_error())?;
+    input::install_round_save_binding(world);
     if world.resource::<Session>().initialized {
         enter(world, FlowPhase::Title);
     } else {
@@ -394,14 +420,17 @@ pub(super) fn simulation_enabled(world: &World) -> bool {
         .is_none_or(|flow| flow.phase == FlowPhase::Playing)
 }
 
-pub(super) fn drain_or_block_gameplay(world: &mut World) -> bool {
+pub(super) fn fixed_input(world: &mut World) -> (bool, usize) {
     let Some(mut flow) = world.get_resource_mut::<Flow>() else {
-        return false;
+        return (false, 0);
     };
     if flow.phase == FlowPhase::Resuming {
         flow.drained = true;
     }
-    flow.phase != FlowPhase::Playing
+    (
+        flow.phase != FlowPhase::Playing,
+        std::mem::take(&mut flow.pending_saves),
+    )
 }
 
 fn enter(world: &mut World, phase: FlowPhase) {
@@ -457,6 +486,12 @@ fn enter(world: &mut World, phase: FlowPhase) {
     let mut flow = world.resource_mut::<Flow>();
     flow.phase = phase;
     flow.drained = false;
+    if !matches!(
+        phase,
+        FlowPhase::Playing | FlowPhase::Paused | FlowPhase::Resuming
+    ) {
+        flow.pending_saves = 0;
+    }
 }
 
 fn new_round(world: &mut World) {
@@ -541,34 +576,66 @@ fn goals(world: &World) -> [bool; 2] {
     })
 }
 
+fn read_input(world: &mut World) {
+    let host_paused = world.resource::<RuntimeTimeSettings>().paused();
+    let flow = world.resource::<Flow>();
+    let [confirm, pause, title, exit] = &flow.controls;
+    let gameplay = ActionContext::gameplay();
+    let mut menu_input = RoundInput::default();
+    let mut saves = 0;
+    for outcome in world.resource::<SemanticActions>().as_slice() {
+        if outcome.seat != InputSeatId::PRIMARY || outcome.phase != ActionPhase::Started {
+            continue;
+        }
+        if outcome.context == gameplay {
+            if outcome.action.as_str() == input::SAVE_ACTION
+                && flow.phase == FlowPhase::Playing
+                && !menu_input.pauses()
+            {
+                saves += 1;
+            }
+        } else if !host_paused
+            && (outcome.context == flow.context
+                || flow
+                    .gamepad_menu
+                    .as_ref()
+                    .is_some_and(|menu| outcome.context == menu.context))
+        {
+            let action = &outcome.action;
+            let start = flow
+                .gamepad_menu
+                .as_ref()
+                .is_some_and(|menu| action == &menu.start);
+            if flow.phase == FlowPhase::Paused && menu_input.paused_destination.is_none() {
+                menu_input.paused_destination = if action == title {
+                    Some(FlowPhase::Title)
+                } else if action == pause || action == confirm || start {
+                    Some(FlowPhase::Resuming)
+                } else {
+                    None
+                };
+            }
+            menu_input.confirm |= action == confirm;
+            menu_input.pause |= action == pause;
+            menu_input.title |= action == title;
+            menu_input.exit |= action == exit;
+            menu_input.start |= start;
+        }
+    }
+    let mut flow = world.resource_mut::<Flow>();
+    flow.input = menu_input;
+    flow.pending_saves += saves;
+}
+
 fn advance(world: &mut World) {
     if world.resource::<RuntimeFrameStatus>().simulation_paused {
         return;
     }
-    let flow = world.resource::<Flow>();
-    let pressed = |id: &ActionId| {
-        world
-            .resource::<SemanticActions>()
-            .as_slice()
-            .iter()
-            .any(|outcome| {
-                outcome.seat == InputSeatId::PRIMARY
-                    && &outcome.action == id
-                    && outcome.phase == ActionPhase::Started
-                    && (outcome.context == flow.context
-                        || flow
-                            .gamepad_menu
-                            .as_ref()
-                            .is_some_and(|menu| outcome.context == menu.context))
-            })
+    let (phase, input) = {
+        let mut flow = world.resource_mut::<Flow>();
+        (flow.phase, std::mem::take(&mut flow.input))
     };
-    let [confirm, pause, title, exit] = flow.controls.each_ref().map(pressed);
-    let start = flow
-        .gamepad_menu
-        .as_ref()
-        .is_some_and(|menu| pressed(&menu.start));
-    let phase = flow.phase;
-    if exit {
+    if input.exit {
         enter(world, FlowPhase::Exiting);
         world.resource_mut::<AppExitRequests>().request_exit();
     } else if phase == FlowPhase::Starting {
@@ -588,18 +655,15 @@ fn advance(world: &mut World) {
         if world.resource::<Flow>().drained {
             enter(world, FlowPhase::Playing);
         }
-    } else if (pause || start) && phase == FlowPhase::Playing {
+    } else if phase == FlowPhase::Playing && input.pauses() {
         enter(world, FlowPhase::Paused);
-    } else if (pause || confirm || start) && phase == FlowPhase::Paused {
-        enter(world, FlowPhase::Resuming);
-    } else if title
-        && matches!(
-            phase,
-            FlowPhase::Paused | FlowPhase::Complete | FlowPhase::Degraded
-        )
-    {
+    } else if phase == FlowPhase::Paused {
+        if let Some(destination) = input.paused_destination {
+            enter(world, destination);
+        }
+    } else if input.title && matches!(phase, FlowPhase::Complete | FlowPhase::Degraded) {
         enter(world, FlowPhase::Title);
-    } else if (confirm || start)
+    } else if (input.confirm || input.start)
         && matches!(
             phase,
             FlowPhase::Title | FlowPhase::Complete | FlowPhase::Degraded

@@ -171,11 +171,17 @@ the original gamepad Retry binding in the installed map. The authored definition
 If a custom map binds Start to another command, choose a different button for that command
 before running or cooking the controller Round.
 
+Round Save follows the order of accepted local actions. Pressing Pause before Save preserves the
+current checkpoint. A Save accepted before Pause stays in its fixed batch. If that frame has no
+fixed step, the batch can finish on Continue. Returning to Title discards the pending Round Save.
+
 Each current controller uses the explicitly selected PRIMARY window/seat. The same ActionMap
 combines keyboard and controller contributions, so releasing one source does not release another
-held source. Focus loss and physical disconnection terminate accepted controls through Input's
-original lifetime. Known controls held across reassignment/refocus wait for release or neutral;
-cached holds are not replayed. Gilrs's event cache is not an instantaneous hardware snapshot.
+held source. Primary Scene travel resumes with the current held directions for that seat, including
+handoff to another controller or the keyboard. Focus loss and physical disconnection terminate
+accepted controls through Input's original lifetime. A known control held across reassignment or
+refocus can contribute again after release or neutral. Gilrs reports its event cache during those
+transitions.
 
 Compiling `gamepad` without passing `--gamepad` does not initialize the source backend. The optional
 source selection does not automatically enable a cooked Player backend or add native controller state to the

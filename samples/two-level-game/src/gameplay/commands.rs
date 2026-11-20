@@ -7,6 +7,7 @@ pub(crate) const TRAVEL: &str = "two-level-game.travel";
 pub(crate) const INSTANCE: &str = "two-level-game.instance";
 pub(crate) const MARKER: &str = "two-level-game.marker";
 pub(crate) const SAVE: &str = "two-level-game.save";
+pub(super) const ROUND_SAVE: &str = "two-level-game.round-save";
 pub(crate) const RESTORE: &str = "two-level-game.restore";
 pub(crate) const RETRY: &str = "two-level-game.retry";
 pub(crate) const SIDE_ROOM: &str = "two-level-game.side-room";

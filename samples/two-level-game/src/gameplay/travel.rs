@@ -13,7 +13,7 @@ use nara::{
     },
     core::ItemLimit,
     ecs::World,
-    gameplay::{GameplayCommandBatch, GameplayCommandPayload},
+    gameplay::{GameplayCommandBatch, GameplayCommandPayload, GameplayCommandSource},
     identity::SceneEntityId,
     prelude::Resource,
     project_host::{
@@ -64,44 +64,39 @@ pub(super) fn consume(world: &mut World) {
         eprintln!("two_level_game: Player launch rejected: {error}");
         world.resource_mut::<Session>().error = Some(error.clone());
     }
-    if super::flow::drain_or_block_gameplay(world) {
-        let released = world
-            .resource::<GameplayCommandBatch>()
-            .commands()
-            .iter()
-            .filter(|command| command.command_type().as_str() == MOVE)
-            .filter_map(|command| decode_movement(command).ok())
-            .filter(|(_, pressed)| !pressed)
-            .map(|(direction, _)| direction)
-            .collect::<Vec<_>>();
-        for direction in released {
-            world.resource_mut::<Session>().held[direction] = false;
-        }
-        return;
-    }
+    let (blocked, mut round_saves) = super::flow::fixed_input(world);
     let commands = world
         .resource::<GameplayCommandBatch>()
         .commands()
         .iter()
-        .map(|command| {
-            if command.command_type().as_str() == MOVE {
-                ConsumedInput::Movement(decode_movement(command))
-            } else {
-                ConsumedInput::Action(
-                    command.command_type().as_str().to_owned(),
+        .filter_map(|command| match command.command_type().as_str() {
+            MOVE => Some(ConsumedInput::Movement(decode_movement(command))),
+            ROUND_SAVE => {
+                if round_saves == 0 || command.source() != &GameplayCommandSource::LocalAction {
+                    return None;
+                }
+                round_saves -= 1;
+                Some(ConsumedInput::Action(
+                    SAVE.to_owned(),
                     command.payload().clone(),
-                )
+                ))
             }
+            _ if blocked => None,
+            kind => Some(ConsumedInput::Action(
+                kind.to_owned(),
+                command.payload().clone(),
+            )),
         })
         .collect::<Vec<_>>();
     for command in commands {
         let (kind, payload) = match command {
             ConsumedInput::Movement(Ok((direction, pressed))) => {
-                if !pressed || world.resource::<Session>().phase == GamePhase::Running {
+                if !pressed || (!blocked && world.resource::<Session>().phase == GamePhase::Running) {
                     world.resource_mut::<Session>().held[direction] = pressed;
                 }
                 continue;
             }
+            ConsumedInput::Movement(Err(_)) if blocked => continue,
             ConsumedInput::Movement(Err(error)) => {
                 eprintln!("two_level_game: action rejected: {error}");
                 world.resource_mut::<Session>().error = Some(error);
@@ -158,19 +153,7 @@ pub(super) fn consume(world: &mut World) {
             MARKER => add_marker(world),
             SIDE_ROOM => side_room::toggle(world, Room::SideRoom),
             LOOKOUT => side_room::toggle(world, Room::Lookout),
-            SAVE => {
-                let checkpoint = world.resource::<Progress>().checkpoint().clone();
-                let result = world.resource::<Storage>().save(&checkpoint);
-                if result.is_ok() {
-                    let mut session = world.resource_mut::<Session>();
-                    session.saves = session.saves.saturating_add(1);
-                    println!(
-                        "two_level_game: checkpoint file published and verified at {:?} score={}",
-                        checkpoint.location.level, checkpoint.score
-                    );
-                }
-                result
-            }
+            SAVE => save_checkpoint(world),
             RESTORE => match world.resource::<Storage>().load() {
                 Ok(checkpoint) => begin(world, checkpoint, true),
                 Err(error) => Err(error),
@@ -187,6 +170,18 @@ pub(super) fn consume(world: &mut World) {
     if let Some(error) = launch_error {
         world.resource_mut::<Session>().error = Some(error);
     }
+}
+
+fn save_checkpoint(world: &mut World) -> Result<(), String> {
+    let checkpoint = world.resource::<Progress>().checkpoint();
+    world.resource::<Storage>().save(checkpoint)?;
+    println!(
+        "two_level_game: checkpoint file published and verified at {:?} score={}",
+        checkpoint.location.level, checkpoint.score
+    );
+    let mut session = world.resource_mut::<Session>();
+    session.saves = session.saves.saturating_add(1);
+    Ok(())
 }
 
 fn retry_current(world: &mut World) -> Result<(), String> {
@@ -273,7 +268,6 @@ pub(super) fn begin(
         restore,
     });
     let mut session = world.resource_mut::<Session>();
-    session.held = [false; 4];
     session.phase = GamePhase::Preparing;
     session.error = None;
     Ok(())
@@ -415,7 +409,15 @@ pub(super) fn advance(world: &mut World) {
     }
     match reconstruct(world) {
         Ok(()) => {
-            world.resource_mut::<Session>().phase = GamePhase::Running;
+            let held =
+                if super::flow::simulation_enabled(world) && !super::resume::is_pending(world) {
+                    super::input::held_movement(world)
+                } else {
+                    [false; 4]
+                };
+            let mut session = world.resource_mut::<Session>();
+            session.held = held;
+            session.phase = GamePhase::Running;
             #[cfg(all(windows, feature = "audio-cpal"))]
             if !pending.restore {
                 crate::audio::travel_entered(world, pending.target);
