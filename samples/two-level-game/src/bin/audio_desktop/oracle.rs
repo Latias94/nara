@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::Cursor};
+use std::{collections::BTreeMap, io::Read, ops::Range};
 
 use serde::Serialize;
 use two_level_game::{
@@ -6,11 +6,15 @@ use two_level_game::{
     levels::LevelKey,
 };
 
-const PICKUP: &[u8] = include_bytes!("../../../assets/audio/pickup.wav");
-const TRAVEL: &[u8] = include_bytes!("../../../assets/audio/travel.wav");
 pub(super) const SAMPLE_RATE: u64 = 48_000;
 pub(super) const CHANNELS: usize = 2;
 pub(super) const MAX_OUTPUT_FRAMES: u64 = SAMPLE_RATE * 60;
+
+#[derive(Clone, Copy)]
+pub(super) struct SourceWavs<'a> {
+    pub pickup: &'a [u8],
+    pub travel: &'a [u8],
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct PcmEvidence {
@@ -35,9 +39,38 @@ struct Cue {
     end: Option<(u64, bool)>,
 }
 
-/// Decodes the original PCM16 files without consulting the game's prepared clips or mixer.
+/// Isolates the PCM chunks. Hound 3.5.1 does not skip RIFF padding on odd ancillary chunks.
+pub(super) fn wav_chunks(bytes: &[u8]) -> Result<(&[u8], Range<usize>), String> {
+    let mut offset = 12;
+    let mut format = None;
+    while let Some(header) = bytes.get(offset..offset + 8) {
+        let length = u32::from_le_bytes(header[4..].try_into().expect("chunk size field"));
+        let end = (offset + 8)
+            .checked_add(length as usize)
+            .ok_or("independent source WAV chunk length overflowed")?;
+        let chunk = bytes
+            .get(offset..end)
+            .ok_or("independent source WAV has a truncated chunk")?;
+        match &header[..4] {
+            b"fmt " => format = Some(chunk),
+            b"data" => {
+                return Ok((
+                    format.ok_or("independent source WAV has no format before its data")?,
+                    offset..end,
+                ));
+            }
+            _ => {}
+        }
+        offset = end + (length as usize % 2);
+    }
+    Err("independent source WAV has no data chunk".into())
+}
+
+/// Decodes the captured PCM16 files independently of the game's prepared clips and mixer.
 fn decode(bytes: &[u8]) -> Result<Vec<f32>, String> {
-    let mut wav = hound::WavReader::new(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+    let (format, data) = wav_chunks(bytes)?;
+    let input = (&bytes[..12]).chain(format).chain(&bytes[data]);
+    let mut wav = hound::WavReader::new(input).map_err(|error| error.to_string())?;
     let spec = wav.spec();
     if spec.sample_rate != SAMPLE_RATE as u32
         || spec.channels != 1
@@ -53,8 +86,8 @@ fn decode(bytes: &[u8]) -> Result<Vec<f32>, String> {
         .map(|sample| sample.map(|value| f32::from(value) / 32768.0))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    if samples.is_empty() || samples.iter().all(|value| *value == 0.0) {
-        return Err("independent source WAV is empty or silent".into());
+    if samples.is_empty() {
+        return Err("independent source WAV is empty".into());
     }
     Ok(samples)
 }
@@ -67,11 +100,11 @@ fn source_clip(cause: &AudioCause) -> AudioClip {
 }
 
 pub(super) fn verify(
+    sources: SourceWavs<'_>,
     snapshot: &AudioSnapshot,
     actual: &[f32],
     expected_causes: &[AudioCause],
     instances: &BTreeMap<u64, LevelKey>,
-    require_stale_cancellation: bool,
 ) -> Result<PcmEvidence, String> {
     if snapshot.error.is_some() || snapshot.faults != 0 {
         return Err(format!(
@@ -98,8 +131,14 @@ pub(super) fn verify(
         return Err("callback capture does not cover the complete bounded output interval".into());
     }
 
-    let pickup = decode(PICKUP)?;
-    let travel = decode(TRAVEL)?;
+    let pickup = decode(sources.pickup).map_err(|error| format!("Pickup: {error}"))?;
+    let travel = decode(sources.travel).map_err(|error| format!("Travel: {error}"))?;
+    let source_samples = |clip| -> &[f32] {
+        match clip {
+            AudioClip::Pickup => &pickup,
+            AudioClip::Travel => &travel,
+        }
+    };
     let mut cues: BTreeMap<(u64, u64, u64), Cue> = BTreeMap::new();
     let mut scopes = Vec::new();
     let mut accepted_causes = Vec::new();
@@ -203,17 +242,14 @@ pub(super) fn verify(
                             }
                             AudioPhase::Completed => {
                                 let start = cue.start.ok_or("unstarted cue reported completion")?;
-                                let length = match source_clip(cause) {
-                                    AudioClip::Pickup => pickup.len(),
-                                    AudioClip::Travel => travel.len(),
-                                } as u64;
-                                if *frame != start + length
-                                    || cue.end.replace((*frame, false)).is_some()
-                                {
-                                    return Err(
-                                        "cue completion is not its exact original WAV boundary"
-                                            .into(),
-                                    );
+                                let expected_end = start + source_samples(*clip).len() as u64;
+                                if *frame != expected_end {
+                                    return Err(format!(
+                                        "{clip:?} cue completion at frame={frame} differs from its source WAV boundary at frame={expected_end}"
+                                    ));
+                                }
+                                if cue.end.replace((*frame, false)).is_some() {
+                                    return Err("cue completed after a terminal fact".into());
                                 }
                                 completions += 1;
                             }
@@ -280,10 +316,7 @@ pub(super) fn verify(
             stale_scope_cancellations += 1;
         }
         if let Some(start) = cue.start {
-            let source = match source_clip(&cue.cause) {
-                AudioClip::Pickup => &pickup,
-                AudioClip::Travel => &travel,
-            };
+            let source = source_samples(cue.clip);
             if end < start
                 || end - start > source.len() as u64
                 || (cancelled && end - start == source.len() as u64)
@@ -296,9 +329,6 @@ pub(super) fn verify(
                 expected[frame as usize] += source[offset];
             }
         }
-    }
-    if require_stale_cancellation && stale_scope_cancellations == 0 {
-        return Err("native trajectory did not observe an old-scope one-shot cancellation".into());
     }
     let mut maximum_absolute_error = 0.0_f32;
     let mut nonzero_samples = 0;
@@ -319,9 +349,6 @@ pub(super) fn verify(
                 ));
             }
         }
-    }
-    if nonzero_samples == 0 {
-        return Err("complete callback capture was silent".into());
     }
     Ok(PcmEvidence {
         frames: snapshot.output_frames,

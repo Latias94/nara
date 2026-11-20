@@ -6,6 +6,9 @@
 #[path = "audio_desktop/oracle.rs"]
 mod oracle;
 #[cfg(windows)]
+#[path = "audio_desktop/project.rs"]
+mod project;
+#[cfg(windows)]
 #[path = "audio_desktop/workflow.rs"]
 mod workflow;
 

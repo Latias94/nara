@@ -9,6 +9,8 @@
 #![forbid(unsafe_code)]
 
 use std::{
+    fs,
+    io::Cursor,
     path::Path,
     thread,
     time::{Duration, Instant},
@@ -19,6 +21,13 @@ use nara::project_tooling::process::{
     SupervisedProcessState,
 };
 use serde::Deserialize;
+
+#[path = "support/game_replay.rs"]
+#[allow(dead_code, reason = "reuse the original private project fixture")]
+mod game_replay;
+
+const ACCEPTANCE_MARKER: &str =
+    "TWO_LEVEL_AUDIO_DESKTOP_OK gameplay=true independent_pcm=true original_native_retired=true";
 
 #[derive(Debug, Deserialize)]
 struct Report {
@@ -132,19 +141,133 @@ struct Adapter {
 #[test]
 #[ignore = "requires a real WASAPI output device and an interactive hardware Windows desktop; run serially with WGPU_BACKEND=dx12 or vulkan and NARA_WGPU_FORCE_FALLBACK=0"]
 fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owners() {
-    let backend = std::env::var("WGPU_BACKEND").expect("select exactly one hardware backend");
-    assert!(matches!(backend.as_str(), "dx12" | "vulkan"));
-    assert_eq!(
-        std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref(),
-        Ok("0")
-    );
-    let command = SupervisedProcessCommand::new(
+    assert_native_verification(None, (5760, 11520), true);
+}
+
+#[test]
+#[ignore = "requires a real WASAPI output device and an interactive hardware Windows desktop; run serially with WGPU_BACKEND=dx12 or vulkan and NARA_WGPU_FORCE_FALLBACK=0"]
+fn edited_and_rebound_sound_bank_matches_actual_callback_pcm() {
+    let project = game_replay::ProjectCopy::new();
+    let root = project.root();
+    let audio = root.join("assets/audio");
+    let pickup = audio.join("pickup.wav");
+    let mut edited = Cursor::new(Vec::new());
+    {
+        let mut original = hound::WavReader::open(&pickup).unwrap();
+        let mut writer = hound::WavWriter::new(&mut edited, original.spec()).unwrap();
+        for sample in original.samples::<i16>() {
+            writer.write_sample(sample.unwrap() / 2).unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+    fs::write(&pickup, edited.get_ref()).unwrap();
+    assert_native_verification(Some(root), (5760, 11520), true);
+    assert_eq!(&fs::read(&pickup).unwrap(), edited.get_ref());
+
+    let travel = fs::read(audio.join("travel.wav")).unwrap();
+    let original_meta = audio.join("game.soundbank.json.meta");
+    let mut meta: serde_json::Value =
+        serde_json::from_slice(&fs::read(&original_meta).unwrap()).unwrap();
+    meta["payload"]["asset"]["path"] = serde_json::json!("audio/edited/selected.soundbank.json");
+    let edited_audio = audio.join("edited");
+    fs::create_dir(&edited_audio).unwrap();
+    fs::write(edited_audio.join("cue.wav"), &travel).unwrap();
+    fs::write(
+        edited_audio.join("selected.soundbank.json"),
+        br#"{"pickup":"audio/edited/cue.wav","travel":"audio/edited/cue.wav"}"#,
+    )
+    .unwrap();
+    fs::write(
+        edited_audio.join("selected.soundbank.json.meta"),
+        serde_json::to_vec(&meta).unwrap(),
+    )
+    .unwrap();
+    for old in [
+        pickup,
+        audio.join("travel.wav"),
+        audio.join("game.soundbank.json"),
+        original_meta,
+    ] {
+        fs::remove_file(old).unwrap();
+    }
+    assert_native_verification(Some(root), (11520, 11520), true);
+    assert_eq!(fs::read(edited_audio.join("cue.wav")).unwrap(), travel);
+}
+
+#[test]
+#[ignore = "requires a real WASAPI output device and a hardware Windows desktop"]
+fn an_authored_travel_cue_that_finishes_before_retry_still_qualifies() {
+    let project = game_replay::ProjectCopy::new();
+    let travel = project.root().join("assets/audio/travel.wav");
+    let spec = hound::WavReader::open(&travel).unwrap().spec();
+    let mut short = Cursor::new(Vec::new());
+    {
+        let mut writer = hound::WavWriter::new(&mut short, spec).unwrap();
+        writer.write_sample(8192_i16).unwrap();
+        writer.finalize().unwrap();
+    }
+    fs::write(&travel, short.get_ref()).unwrap();
+    assert_native_verification(Some(project.root()), (5760, 1), false);
+    assert_eq!(&fs::read(travel).unwrap(), short.get_ref());
+}
+
+#[test]
+fn missing_input_animation_and_waveform_refuse_verification_before_native_start() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["input/explorer.actions.json"], "project.content.host-io"),
+        (
+            &[
+                "assets/animations/explorer.sprite-animations.json",
+                "assets/animations/explorer.sprite-animations.json.meta",
+            ],
+            "project.content.stable-asset-reference-unresolved",
+        ),
+        (&["assets/audio/travel.wav"], "assets/audio/travel.wav"),
+    ];
+    for &(missing, expected) in cases {
+        let project = game_replay::ProjectCopy::new();
+        for path in missing {
+            fs::remove_file(project.root().join(path)).unwrap();
+        }
+        let result = run_verifier(Some(project.root()), "vulkan");
+        let report = result.report;
+        assert!(
+            !result.exited_successfully
+                && !report.accepted
+                && report.runs.is_empty()
+                && result.acceptance_markers == 0,
+            "{missing:?}: {report:?}\n{}",
+            result.diagnostics
+        );
+        let failure = report.failure.expect("source rejection diagnostic");
+        assert!(
+            failure.contains("check source verification project"),
+            "{failure}"
+        );
+        assert!(failure.contains(expected), "{missing:?}: {failure}");
+    }
+}
+
+struct VerificationProcess {
+    report: Report,
+    exited_successfully: bool,
+    acceptance_markers: usize,
+    diagnostics: String,
+}
+
+fn run_verifier(project: Option<&Path>, backend: &str) -> VerificationProcess {
+    let mut command = SupervisedProcessCommand::new(
         env!("CARGO_BIN_EXE_audio_desktop"),
         Path::new(env!("CARGO_MANIFEST_DIR")),
     )
     .argument("--verify")
-    .environment("WGPU_BACKEND", backend.as_str())
+    .environment("WGPU_BACKEND", backend)
     .environment("NARA_WGPU_FORCE_FALLBACK", "0");
+    if let Some(project) = project {
+        command = command
+            .argument("--project-root")
+            .argument(project.as_os_str());
+    }
     let mut process = SupervisedProcessOwner::spawn(
         &command,
         ProcessLogLimits::try_from_counts(2048, 1024 * 1024).unwrap(),
@@ -201,10 +324,6 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
         "native audio supervision failed: {supervision_error:?}\n{diagnostics}"
     );
     assert!(
-        receipt.exit().success(),
-        "native audio prerequisite or gameplay failed: {receipt:?}\n{diagnostics}"
-    );
-    assert!(
         receipt.containment_empty() && receipt.readers_stopped() && receipt.output_drained(),
         "{receipt:?}"
     );
@@ -226,7 +345,32 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
         1,
         "missing or duplicate typed native audio report: {diagnostics}"
     );
-    let report = &reports[0];
+    VerificationProcess {
+        report: reports.into_iter().next().unwrap(),
+        exited_successfully: receipt.exit().success(),
+        acceptance_markers: stdout
+            .lines()
+            .filter(|line| *line == ACCEPTANCE_MARKER)
+            .count(),
+        diagnostics,
+    }
+}
+
+fn assert_native_verification(
+    project: Option<&Path>,
+    source_frames: (usize, usize),
+    require_cancellation: bool,
+) {
+    let backend = std::env::var("WGPU_BACKEND").expect("select exactly one hardware backend");
+    assert!(matches!(backend.as_str(), "dx12" | "vulkan"));
+    assert_eq!(
+        std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref(),
+        Ok("0")
+    );
+    let result = run_verifier(project, &backend);
+    assert!(result.exited_successfully, "{}", result.diagnostics);
+    assert_eq!(result.acceptance_markers, 1, "{}", result.diagnostics);
+    let report = result.report;
     assert!(report.accepted && report.failure.is_none(), "{report:?}");
     assert!(
         report.fresh_runtime_generation
@@ -285,7 +429,7 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
         assert!(pcm.maximum_absolute_error <= 0.000_001);
         assert_eq!(
             (pcm.pickup_source_frames, pcm.travel_source_frames),
-            (5760, 11520)
+            source_frames
         );
         assert!(pcm.scope_applications >= 3);
         assert!(pcm.validated_scene_instances >= 3);
@@ -296,7 +440,7 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
                 (audio.accepted, pcm.accepted_pickups, pcm.accepted_travels),
                 (5, 1, 4)
             );
-            assert!(pcm.stale_scope_cancellations > 0);
+            assert_eq!(pcm.stale_scope_cancellations > 0, require_cancellation);
             assert_eq!(
                 (
                     game.score,
@@ -369,11 +513,5 @@ fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owner
     assert_ne!(
         report.runs[0].audio.as_ref().unwrap().runtime,
         report.runs[1].audio.as_ref().unwrap().runtime
-    );
-    let marker = "TWO_LEVEL_AUDIO_DESKTOP_OK gameplay=true independent_pcm=true original_native_retired=true";
-    assert_eq!(
-        stdout.lines().filter(|line| *line == marker).count(),
-        1,
-        "{diagnostics}"
     );
 }

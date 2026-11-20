@@ -293,8 +293,11 @@ service merely because `audio-cpal` is compiled. One audio Runtime fixes the com
 with changed Product or PCM meaning refuses before Scene commit and requires a fresh Runtime.
 
 For the finite ordinary-game qualification, choose hardware DX12 or Vulkan and set
-`NARA_WGPU_FORCE_FALLBACK=0`. The executable uses a private copy of the project for deliberate
-source failure/repair, then retires both original native Runtimes and their recovered event loop:
+`NARA_WGPU_FORCE_FALLBACK=0`. The executable copies the admitted desktop project inputs into a
+private directory for deliberate source failure and repair. It captures the two WAVs selected by
+that project's sound-bank descriptor, independently decodes them for the callback comparison,
+and retires both native Runtimes and their recovered event loop. Pass `--project-root ABSOLUTE_PATH`
+with `--verify` to use another source checkout of this game.
 
 ```text
 cargo +1.95.0 run --locked --offline --release --features desktop,audio-cpal --bin audio_desktop -- --verify

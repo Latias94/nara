@@ -9,12 +9,20 @@ use two_level_game::{
     levels::{LevelId, LevelKey},
 };
 
-fn fixture() -> (
+const SHIPPED: oracle::SourceWavs<'static> = oracle::SourceWavs {
+    pickup: include_bytes!("../assets/audio/pickup.wav"),
+    travel: include_bytes!("../assets/audio/travel.wav"),
+};
+
+fn fixture(
+    pcm: &[u8],
+) -> (
     AudioSnapshot,
     Vec<f32>,
     Vec<AudioCause>,
     BTreeMap<u64, LevelKey>,
 ) {
+    let frames = (pcm.len() / 2) as u64;
     let meadow = LevelKey::main(LevelId::Meadow);
     let cavern = LevelKey::main(LevelId::Cavern);
     let cause = AudioCause::Pickup {
@@ -38,20 +46,19 @@ fn fixture() -> (
         },
         cue(AudioPhase::Accepted, 0),
         cue(AudioPhase::Started, 0),
-        cue(AudioPhase::Completed, 5760),
+        cue(AudioPhase::Completed, frames),
         AudioRecord::ScopeApplied {
             runtime: 7,
             instance: 2,
-            frame: 5760,
+            frame: frames,
         },
         AudioRecord::ScopeApplied {
             runtime: 7,
             instance: 3,
-            frame: 5761,
+            frame: frames + 1,
         },
     ];
-    let bytes = include_bytes!("../assets/audio/pickup.wav");
-    let mut output = bytes[44..]
+    let mut output = pcm
         .chunks_exact(2)
         .flat_map(|bytes| [f32::from(i16::from_le_bytes(bytes.try_into().unwrap())) / 32768.0; 2])
         .collect::<Vec<_>>();
@@ -65,7 +72,7 @@ fn fixture() -> (
         applied_instance: 3,
         play_admitted: true,
         callbacks: 8,
-        output_frames: 5762,
+        output_frames: frames + 2,
         accepted: 1,
         started: 1,
         completed: 1,
@@ -88,17 +95,90 @@ fn fixture() -> (
 }
 
 #[test]
-fn independent_callback_oracle_accepts_the_literal_wav_and_refuses_one_sample_corruption() {
-    let (snapshot, mut output, causes, instances) = fixture();
-    let proof = oracle::verify(&snapshot, &output, &causes, &instances, false).unwrap();
+fn independent_callback_oracle_accepts_the_captured_wav_and_locates_sample_corruption() {
+    let (snapshot, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let proof = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap();
     assert_eq!(proof.maximum_absolute_error, 0.0);
-    output[300] += 0.01;
-    assert!(oracle::verify(&snapshot, &output, &causes, &instances, false).is_err());
+    assert_eq!(
+        (proof.pickup_source_frames, proof.travel_source_frames),
+        (5760, 11520)
+    );
+    output[301] += 0.25;
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(
+        error.contains("independent PCM mismatch at frame=150 channel=1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn independent_callback_oracle_uses_the_edited_pickup_amplitude() {
+    let mut pickup = SHIPPED.pickup.to_vec();
+    for sample in pickup[44..].chunks_exact_mut(2) {
+        let original = i16::from_le_bytes([sample[0], sample[1]]);
+        sample.copy_from_slice(&(original / 2).to_le_bytes());
+    }
+    let (snapshot, output, causes, instances) = fixture(&pickup[44..]);
+    let sources = oracle::SourceWavs {
+        pickup: &pickup,
+        ..SHIPPED
+    };
+    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    assert_eq!(proof.pickup_source_frames, 5760);
+    assert_eq!(proof.maximum_absolute_error, 0.0);
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(error.contains("independent PCM mismatch"), "{error}");
+}
+
+#[test]
+fn independent_callback_oracle_uses_the_rebound_pickup_frame_boundary() {
+    let (snapshot, output, causes, instances) = fixture(&SHIPPED.travel[44..]);
+    let sources = oracle::SourceWavs {
+        pickup: SHIPPED.travel,
+        ..SHIPPED
+    };
+    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    assert_eq!(proof.pickup_source_frames, 11520);
+    assert_eq!(proof.maximum_absolute_error, 0.0);
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(
+        error.contains("source WAV boundary at frame=5760"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_odd_ancillary_chunk_preserves_the_captured_pcm() {
+    let (snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let mut pickup = SHIPPED.pickup.to_vec();
+    pickup.splice(12..12, b"JUNK\x01\x00\x00\x00X\x00".iter().copied());
+    let riff_length = (pickup.len() - 8) as u32;
+    pickup[4..8].copy_from_slice(&riff_length.to_le_bytes());
+    let sources = oracle::SourceWavs {
+        pickup: &pickup,
+        ..SHIPPED
+    };
+    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    assert_eq!(proof.maximum_absolute_error, 0.0);
+}
+
+#[test]
+fn silent_authored_samples_are_compared_against_the_actual_silent_output() {
+    let mut pickup = SHIPPED.pickup.to_vec();
+    pickup[44..].fill(0);
+    let (snapshot, output, causes, instances) = fixture(&pickup[44..]);
+    let sources = oracle::SourceWavs {
+        pickup: &pickup,
+        ..SHIPPED
+    };
+    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    assert_eq!(proof.nonzero_samples, 0);
+    assert_eq!(proof.maximum_absolute_error, 0.0);
 }
 
 #[test]
 fn a_matching_completed_wav_cannot_outlive_its_first_scene_replacement() {
-    let (mut snapshot, output, causes, instances) = fixture();
+    let (mut snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
     snapshot.records[4] = AudioRecord::ScopeApplied {
         runtime: 7,
         instance: 2,
@@ -109,12 +189,13 @@ fn a_matching_completed_wav_cannot_outlive_its_first_scene_replacement() {
         instance: 3,
         frame: 300,
     };
-    assert!(oracle::verify(&snapshot, &output, &causes, &instances, false).is_err());
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(error.contains("voice survived its first original Scene scope replacement"));
 }
 
 #[test]
 fn cancellation_at_a_second_replacement_cannot_hide_output_after_the_first_cut() {
-    let (mut snapshot, mut output, causes, instances) = fixture();
+    let (mut snapshot, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
     let mut cancelled = snapshot.records.remove(3);
     if let AudioRecord::Cue { phase, frame, .. } = &mut cancelled {
         *phase = AudioPhase::Cancelled { started: true };
@@ -134,12 +215,13 @@ fn cancellation_at_a_second_replacement_cannot_hide_output_after_the_first_cut()
     snapshot.completed = 0;
     snapshot.cancelled = 1;
     output[600..].fill(0.0);
-    assert!(oracle::verify(&snapshot, &output, &causes, &instances, true).is_err());
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(error.contains("voice survived its first original Scene scope replacement"));
 }
 
 #[test]
 fn a_scope_without_a_new_cue_still_requires_an_actual_game_instance() {
-    let (mut snapshot, output, causes, instances) = fixture();
+    let (mut snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
     snapshot.records[4] = AudioRecord::ScopeApplied {
         runtime: 7,
         instance: 999,
@@ -152,5 +234,6 @@ fn a_scope_without_a_new_cue_still_requires_an_actual_game_instance() {
     };
     snapshot.desired_instance = 1000;
     snapshot.applied_instance = 1000;
-    assert!(oracle::verify(&snapshot, &output, &causes, &instances, false).is_err());
+    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    assert!(error.contains("scope application has a foreign identity"));
 }

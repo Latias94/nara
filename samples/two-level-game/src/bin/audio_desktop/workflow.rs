@@ -1,13 +1,12 @@
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
-    fs,
     io::Write,
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     process::ExitCode,
     rc::Rc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use nara::{
@@ -33,7 +32,10 @@ use two_level_game::{
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
-use super::oracle::{self, CHANNELS, MAX_OUTPUT_FRAMES, PcmEvidence, SAMPLE_RATE};
+use super::{
+    oracle::{self, CHANNELS, MAX_OUTPUT_FRAMES, PcmEvidence, SAMPLE_RATE, SourceWavs},
+    project::{DESKTOP_PROFILE, ProjectCopy},
+};
 
 const POLL: Duration = Duration::from_millis(2);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -332,6 +334,11 @@ struct Session {
     game_deadline: Option<Instant>,
 }
 
+struct PcmVerification<'a> {
+    sources: SourceWavs<'a>,
+    causes: &'a [AudioCause],
+}
+
 impl Session {
     fn new(
         project: &Path,
@@ -385,7 +392,7 @@ impl Session {
             run: Some(DesktopRun::new(
                 root,
                 DesktopRunIntent::new()
-                    .with_profile("desktop")
+                    .with_profile(DESKTOP_PROFILE)
                     .with_recipe(recipe)
                     .with_execution(execution),
             )),
@@ -697,9 +704,8 @@ impl Session {
             || retried.current_instance == entered.current_instance
             || Some(retired.applied_instance) != retried.current_instance.map(|id| id.get())
             || retired.accepted != 2
-            || retired.cancelled == 0
         {
-            return Err("Retry failed to cancel the old-instance travel one-shot without publishing a new cue".into());
+            return Err("Retry did not retire the old-instance cue under the new scope".into());
         }
         evidence.retry_after_instance = retried.current_instance.map(|id| id.get());
         evidence.retry_audio_accepted = retired.accepted;
@@ -844,8 +850,7 @@ impl Session {
     fn finish(
         &mut self,
         mut evidence: RunEvidence,
-        causes: Option<&[AudioCause]>,
-        require_cancellation: bool,
+        verification: Option<PcmVerification<'_>>,
     ) -> (Option<WinitEventLoop>, RunEvidence) {
         if let Err(error) = protected(|| self.retire()) {
             evidence.fail(error);
@@ -907,14 +912,14 @@ impl Session {
                 evidence.fail("held read witness did not confirm complete original stream/callback retirement");
             }
             if evidence.failure.is_none()
-                && let Some(causes) = causes
+                && let Some(verification) = verification
             {
                 match oracle::verify(
+                    verification.sources,
                     &snapshot,
                     &observed.output,
-                    causes,
+                    verification.causes,
                     &observed.instances,
-                    require_cancellation,
                 ) {
                     Ok(pcm) => evidence.pcm = Some(pcm),
                     Err(error) => evidence.fail(error),
@@ -956,230 +961,6 @@ impl Drop for Session {
                 );
             }
         }
-    }
-}
-
-struct ProjectCopy {
-    temporary_parent: PathBuf,
-    directory: PathBuf,
-    project: PathBuf,
-    cavern: Vec<u8>,
-    meadow: Vec<u8>,
-    travel: Vec<u8>,
-}
-
-impl ProjectCopy {
-    fn new() -> Result<Self, String> {
-        let temporary_parent =
-            fs::canonicalize(std::env::temp_dir()).map_err(|error| error.to_string())?;
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| error.to_string())?
-            .as_nanos();
-        let directory = temporary_parent.join(format!(
-            "two-level-native-audio-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&directory).map_err(|error| error.to_string())?;
-        let directory = fs::canonicalize(directory).map_err(|error| error.to_string())?;
-        if directory.parent() != Some(temporary_parent.as_path()) {
-            return Err("temporary project escaped its original TEMP parent".into());
-        }
-        let project = directory.join("project");
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"));
-        for relative in [
-            "nara.toml",
-            "scenes/meadow.scene.json",
-            "scenes/meadow.scene.json.meta",
-            "scenes/cavern.scene.json",
-            "scenes/cavern.scene.json.meta",
-            "scenes/marker.scene.json",
-            "scenes/marker.scene.json.meta",
-            "scenes/side-room.scene.json",
-            "scenes/side-room.scene.json.meta",
-            "scenes/lookout.scene.json",
-            "scenes/lookout.scene.json.meta",
-            "prefabs/marker.prefab.json",
-            "assets/textures/meadow.png",
-            "assets/textures/meadow.png.meta",
-            "assets/textures/cavern.png",
-            "assets/textures/cavern.png.meta",
-            "assets/textures/explorer.png",
-            "assets/textures/explorer.png.meta",
-            "assets/textures/marker.png",
-            "assets/textures/marker.png.meta",
-            "assets/textures/side-room.png",
-            "assets/textures/side-room.png.meta",
-            "assets/tilesets/region.tileset.ron",
-            "assets/tilesets/region.tileset.ron.meta",
-            "assets/materials/region.material2d.json",
-            "assets/materials/region.material2d.json.meta",
-            "assets/materials/region.wgsl",
-            "assets/audio/pickup.wav",
-            "assets/audio/travel.wav",
-            "assets/audio/game.soundbank.json",
-            "assets/audio/game.soundbank.json.meta",
-            "schema/authoring.bundle.json",
-            "prefabs/README.md",
-        ] {
-            let destination = project.join(relative);
-            fs::create_dir_all(destination.parent().ok_or("copied file has no parent")?)
-                .map_err(|error| error.to_string())?;
-            let original = fs::read(source.join(relative)).map_err(|error| error.to_string())?;
-            let mut file = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&destination)
-                .map_err(|error| error.to_string())?;
-            file.write_all(&original)
-                .map_err(|error| error.to_string())?;
-            if fs::read(destination).map_err(|error| error.to_string())? != original {
-                return Err("temporary game content copy differs from the source".into());
-            }
-        }
-        let project = fs::canonicalize(project).map_err(|error| error.to_string())?;
-        let original = fs::canonicalize(source).map_err(|error| error.to_string())?;
-        if !project.starts_with(&directory)
-            || project.starts_with(&original)
-            || original.starts_with(&directory)
-        {
-            return Err("temporary project overlaps the original checkout".into());
-        }
-        let cavern = fs::read(project.join("scenes/cavern.scene.json"))
-            .map_err(|error| error.to_string())?;
-        let meadow = fs::read(project.join("scenes/meadow.scene.json"))
-            .map_err(|error| error.to_string())?;
-        let travel =
-            fs::read(project.join("assets/audio/travel.wav")).map_err(|error| error.to_string())?;
-        Ok(Self {
-            temporary_parent,
-            directory,
-            project,
-            cavern,
-            meadow,
-            travel,
-        })
-    }
-
-    fn edit_scene_position(&self, level: LevelId, revision: usize) -> Result<(), String> {
-        let path = fs::canonicalize(
-            self.project
-                .join("scenes")
-                .join(level.scene_path().as_str()),
-        )
-        .map_err(|error| error.to_string())?;
-        if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
-            return Err("copied Scene escaped its original temporary project".into());
-        }
-        let original = match level {
-            LevelId::Meadow => &self.meadow,
-            LevelId::Cavern => &self.cavern,
-        };
-        let mut scene: serde_json::Value =
-            serde_json::from_slice(original).map_err(|error| error.to_string())?;
-        let pickup = scene["payload"]["entities"]
-            .as_array_mut()
-            .and_then(|entities| entities.iter_mut().find(|entity| entity["id"] == "gem-far"))
-            .ok_or("copied level lacks the expected authored pickup")?;
-        pickup["components"]["nara.transform.Transform2d"]["value"]["value"]["translation"]["value"]
-            ["x"]["value"] = serde_json::json!(81 + revision);
-        let bytes = serde_json::to_vec_pretty(&scene).map_err(|error| error.to_string())?;
-        fs::write(&path, &bytes).map_err(|error| error.to_string())?;
-        if fs::read(&path).map_err(|error| error.to_string())? != bytes {
-            return Err("copied Scene edit differs from its requested authored revision".into());
-        }
-        Ok(())
-    }
-
-    fn restore_scene_positions(&self) -> Result<(), String> {
-        for (level, bytes) in [
-            (LevelId::Meadow, &self.meadow),
-            (LevelId::Cavern, &self.cavern),
-        ] {
-            let path = fs::canonicalize(
-                self.project
-                    .join("scenes")
-                    .join(level.scene_path().as_str()),
-            )
-            .map_err(|error| error.to_string())?;
-            if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
-                return Err("copied Scene escaped its original temporary project".into());
-            }
-            fs::write(&path, bytes).map_err(|error| error.to_string())?;
-            if fs::read(&path).map_err(|error| error.to_string())? != *bytes {
-                return Err("repaired copied level differs from its original bytes".into());
-            }
-        }
-        Ok(())
-    }
-
-    fn change_travel_samples(&self, changed: bool) -> Result<(), String> {
-        let path = fs::canonicalize(self.project.join("assets/audio/travel.wav"))
-            .map_err(|error| error.to_string())?;
-        if !path.starts_with(&self.project) || !path.starts_with(&self.directory) {
-            return Err("copied WAV escaped the original temporary project".into());
-        }
-        let mut bytes = self.travel.clone();
-        if changed {
-            let sample = bytes
-                .get_mut(48)
-                .ok_or("copied WAV lacks its PCM samples")?;
-            *sample ^= 1;
-        }
-        fs::write(&path, &bytes).map_err(|error| error.to_string())?;
-        if fs::read(&path).map_err(|error| error.to_string())? != bytes {
-            return Err("copied WAV replacement differs from the requested complete bytes".into());
-        }
-        Ok(())
-    }
-
-    fn remove_cavern(&self) -> Result<(), String> {
-        let path = fs::canonicalize(self.project.join("scenes/cavern.scene.json"))
-            .map_err(|error| error.to_string())?;
-        if !path.starts_with(&self.project)
-            || !path.starts_with(&self.directory)
-            || path.starts_with(
-                fs::canonicalize(env!("CARGO_MANIFEST_DIR")).map_err(|error| error.to_string())?,
-            )
-        {
-            return Err("refusing to remove a Cavern outside the validated private copy".into());
-        }
-        fs::remove_file(path).map_err(|error| error.to_string())
-    }
-
-    fn repair_cavern(&self) -> Result<(), String> {
-        let parent =
-            fs::canonicalize(self.project.join("scenes")).map_err(|error| error.to_string())?;
-        if !parent.starts_with(&self.project) {
-            return Err("copied Scene directory escaped the temporary project".into());
-        }
-        let path = parent.join("cavern.scene.json");
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)
-            .map_err(|error| error.to_string())?;
-        file.write_all(&self.cavern)
-            .map_err(|error| error.to_string())?;
-        drop(file);
-        if fs::read(path).map_err(|error| error.to_string())? != self.cavern {
-            return Err("repaired Cavern differs from its original bytes".into());
-        }
-        Ok(())
-    }
-
-    fn remove(self) -> Result<(), String> {
-        let actual = fs::canonicalize(&self.directory).map_err(|error| error.to_string())?;
-        let original =
-            fs::canonicalize(env!("CARGO_MANIFEST_DIR")).map_err(|error| error.to_string())?;
-        if actual != self.directory
-            || actual.parent() != Some(self.temporary_parent.as_path())
-            || original.starts_with(&actual)
-            || actual.starts_with(&original)
-        {
-            return Err("refusing to remove an unverified temporary project directory".into());
-        }
-        fs::remove_dir_all(actual).map_err(|error| error.to_string())
     }
 }
 
@@ -1242,7 +1023,7 @@ fn causes(scripted: bool) -> Vec<AudioCause> {
     causes
 }
 
-fn verify() -> Report {
+fn verify(source: &Path) -> Report {
     let mut report = Report {
         format: "two-level-native-game-audio/v1",
         accepted: false,
@@ -1257,7 +1038,7 @@ fn verify() -> Report {
         maximum_capture_frames_per_run: MAX_OUTPUT_FRAMES,
         deadline_scope: "cooperative original polls and native calls; no hard timeout or human-audibility claim",
     };
-    let project = match ProjectCopy::new() {
+    let project = match ProjectCopy::new(source) {
         Ok(project) => project,
         Err(error) => {
             report.failure = Some(error);
@@ -1313,7 +1094,12 @@ fn verify() -> Report {
         if let Some(witness) = session.observed.borrow().witness.clone() {
             retained_witnesses.push(witness);
         }
-        let (physical, evidence) = session.finish(evidence, Some(&causes(scripted)), !scripted);
+        let causes = causes(scripted);
+        let verification = PcmVerification {
+            sources: project.wavs(),
+            causes: &causes,
+        };
+        let (physical, evidence) = session.finish(evidence, Some(verification));
         event_loop = physical;
         let failed = evidence.failure.is_some();
         report.runs.push(evidence);
@@ -1383,6 +1169,7 @@ pub(super) fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
     let mut verification = false;
     let mut save_path = None;
+    let mut project_root = None;
     while let Some(argument) = args.next() {
         if argument == "--verify" && !verification {
             verification = true;
@@ -1391,15 +1178,24 @@ pub(super) fn main() -> ExitCode {
             if save_path.is_none() {
                 return usage();
             }
+        } else if argument == "--project-root" && project_root.is_none() {
+            project_root = args.next().map(PathBuf::from);
+            if project_root.is_none() {
+                return usage();
+            }
         } else {
             return usage();
         }
     }
     if save_path.as_ref().is_some_and(|path| !path.is_absolute())
         || (verification && save_path.is_some())
+        || project_root
+            .as_ref()
+            .is_some_and(|path| !verification || !path.is_absolute())
     {
         return usage();
     }
+    let development_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     if verification {
         if !matches!(
             std::env::var("WGPU_BACKEND").as_deref(),
@@ -1411,7 +1207,7 @@ pub(super) fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
-        let report = verify();
+        let report = verify(project_root.as_deref().unwrap_or(development_root));
         let mut text = match serde_json::to_vec(&report) {
             Ok(text) => text,
             Err(error) => {
@@ -1438,7 +1234,7 @@ pub(super) fn main() -> ExitCode {
         };
     }
     let mut session = match Session::new(
-        Path::new(env!("CARGO_MANIFEST_DIR")),
+        development_root,
         RunOptions {
             save_path,
             ..Default::default()
@@ -1457,7 +1253,7 @@ pub(super) fn main() -> ExitCode {
     if let Err(error) = protected(|| session.interactive()) {
         evidence.fail(error);
     }
-    let (physical, evidence) = session.finish(evidence, None, false);
+    let (physical, evidence) = session.finish(evidence, None);
     drop(physical);
     match evidence.failure {
         Some(error) => {
@@ -1469,6 +1265,8 @@ pub(super) fn main() -> ExitCode {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: audio_desktop [--save ABSOLUTE_PATH] | --verify");
+    eprintln!(
+        "usage: audio_desktop [--save ABSOLUTE_PATH] | --verify [--project-root ABSOLUTE_PATH]"
+    );
     ExitCode::FAILURE
 }
