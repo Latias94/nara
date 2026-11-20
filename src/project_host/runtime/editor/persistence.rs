@@ -895,7 +895,7 @@ impl EditorProjectSession {
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
         if !matches!(command, EditorPersistenceCommand::AcknowledgeResult { .. })
-            && (self.pending_workspace_intent.is_some() || self.pending_document_open.is_some())
+            && (self.pending_workspace_intent.is_some() || self.document_open_may_publish())
         {
             return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
         }

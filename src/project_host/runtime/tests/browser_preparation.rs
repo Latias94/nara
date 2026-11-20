@@ -279,6 +279,258 @@ fn browser_binding_rechecks_the_decoded_source_digest_before_publication() {
 }
 
 #[test]
+fn inspected_promotion_refuses_same_file_edits_after_the_persistence_host_was_bound() {
+    let project = project("inspected-source-late-body-drift");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let before = editor.drive_editor_frame(Duration::ZERO);
+    let inspected = begin_inspection(&mut editor, SCENE);
+    assert_eq!(
+        wait_open(&mut editor, inspected).document_open().result(),
+        Some(EditorDocumentOpenResult::Inspected { request: inspected })
+    );
+    assert!(editor.inspected_authoring_source(inspected).is_some());
+
+    let control = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
+    let EditorProjectBrowserActionOutcome::Preparing { request } = browser_action(
+        &mut editor,
+        EditorProjectBrowserAction::OpenInspectedSource { request: inspected },
+    ) else {
+        panic!("the exact inspected source must enter Open preparation");
+    };
+    assert_ne!(request, inspected);
+    assert!(control.wait_until_started());
+    let changed = editable_authoring_scene("changed-after-binding")
+        .to_json_string()
+        .unwrap();
+    fs::write(project.root.join(SCENE), &changed).unwrap();
+    control.release();
+
+    let completed = wait_open(&mut editor, request);
+    assert_eq!(completed.workspace(), before.workspace());
+    assert_eq!(
+        completed.scene_preview_document(),
+        before.scene_preview_document()
+    );
+    assert_eq!(
+        completed.document_open().result(),
+        Some(EditorDocumentOpenResult::Rejected {
+            request,
+            code: "project.editor.document-inspection-source-stale",
+        })
+    );
+    assert!(editor.inspected_authoring_source(inspected).is_none());
+    assert_eq!(
+        fs::read_to_string(project.root.join(SCENE)).unwrap(),
+        changed
+    );
+    acknowledge_open(&mut editor, request);
+    let ordinary_open = begin_open(&mut editor, SCENE);
+    let document = opened(&wait_open(&mut editor, ordinary_open), ordinary_open);
+    assert_eq!(scene_name_value(&editor, document), "changed-after-binding");
+    close(&mut editor);
+}
+
+#[test]
+fn inspected_promotion_refuses_an_equal_byte_leaf_replacement_after_worker_validation() {
+    let project = project("inspected-source-late-leaf-replacement");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let before = editor.drive_editor_frame(Duration::ZERO);
+    let inspected = begin_inspection(&mut editor, SCENE);
+    assert_eq!(
+        wait_open(&mut editor, inspected).document_open().result(),
+        Some(EditorDocumentOpenResult::Inspected { request: inspected })
+    );
+    let control = editor.hold_next_document_open(editor::OpenTestPhase::BeforeReturn);
+    let EditorProjectBrowserActionOutcome::Preparing { request } = browser_action(
+        &mut editor,
+        EditorProjectBrowserAction::OpenInspectedSource { request: inspected },
+    ) else {
+        panic!("the exact inspected source must enter Open preparation");
+    };
+    assert!(control.wait_until_started());
+    let path = project.root.join(SCENE);
+    let bytes = fs::read(&path).unwrap();
+    fs::rename(&path, path.with_extension("previous")).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    control.release();
+
+    let completed = wait_open(&mut editor, request);
+    assert_eq!(completed.workspace(), before.workspace());
+    assert_eq!(
+        completed.scene_preview_document(),
+        before.scene_preview_document()
+    );
+    assert_eq!(
+        completed.document_open().result(),
+        Some(EditorDocumentOpenResult::Rejected {
+            request,
+            code: "project.editor.document-source-identity-changed",
+        })
+    );
+    assert_eq!(fs::read(path).unwrap(), bytes);
+    close(&mut editor);
+}
+
+#[test]
+fn inspection_refuses_a_renamed_source_still_owned_by_an_open_document() {
+    let project = project("inspected-source-alias");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let opening = begin_open(&mut editor, SCENE);
+    let document = opened(&wait_open(&mut editor, opening), opening);
+    acknowledge_open(&mut editor, opening);
+    let moved = "scenes/moved.scene.json";
+    fs::rename(project.root.join(SCENE), project.root.join(moved)).unwrap();
+    refresh_browser(&mut editor);
+    let before = editor.drive_editor_frame(Duration::ZERO);
+    let inspected = begin_inspection(&mut editor, moved);
+    let rejected = wait_open(&mut editor, inspected);
+    assert_eq!(rejected.workspace(), before.workspace());
+    assert_eq!(rejected.workspace().active_document, Some(document));
+    assert_eq!(
+        rejected.document_open().result(),
+        Some(EditorDocumentOpenResult::Rejected {
+            request: inspected,
+            code: "project.editor.document-source-already-open",
+        })
+    );
+    assert!(editor.inspected_authoring_source(inspected).is_none());
+    close(&mut editor);
+}
+
+#[test]
+fn closing_an_unrelated_dirty_tab_and_cancelling_keeps_the_completed_inspection() {
+    let project = project("inspected-source-unrelated-close");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let active = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, active, "working-draft");
+    let request = begin_inspection(&mut editor, PREFAB);
+    let inspected = wait_open(&mut editor, request);
+    assert_eq!(
+        inspected.document_open().result(),
+        Some(EditorDocumentOpenResult::Inspected { request })
+    );
+    assert_eq!(
+        workspace_action(
+            &mut editor,
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument {
+                document: active
+            })
+        ),
+        EditorWorkspaceIntentRequestResult::Accepted,
+    );
+    let close_prompt = editor.workspace_intent_view().decision_prompt().unwrap();
+    assert!(editor.inspected_authoring_source(request).is_some());
+    assert_eq!(
+        workspace_action(
+            &mut editor,
+            close_prompt.resolve(EditorCloseDecision::Cancel)
+        ),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let after = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(after.workspace(), inspected.workspace());
+    assert_eq!(after.document_open(), inspected.document_open());
+    acknowledge_open(&mut editor, request);
+    close(&mut editor);
+}
+
+#[test]
+fn held_inspection_allows_saving_the_active_document_and_cancels_only_after_return() {
+    use nara_tooling::EditorPersistenceRequestResult;
+
+    let project = project("source-inspection-unrelated-save");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "saved-during-inspection");
+    let control = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
+    let request = begin_inspection(&mut editor, PREFAB);
+    assert!(control.wait_until_started());
+    assert_eq!(
+        editor
+            .drive_editor_frame(Duration::ZERO)
+            .document_open()
+            .pending(),
+        Some((request, PREFAB, EditorDocumentOpenPhase::Inspecting))
+    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document)
+        }),
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
+    let saved = drive_persistence_to_terminal(&mut editor);
+    assert!(matches!(
+        saved.persistence().result(),
+        Some(EditorPersistenceResult::Saved { document: saved_document, .. }) if saved_document == document
+    ));
+    assert_eq!(
+        saved.document_open().pending(),
+        Some((request, PREFAB, EditorDocumentOpenPhase::Inspecting))
+    );
+    assert_eq!(editor.workspace().active_document(), Some(document));
+    assert_eq!(editor.workspace().len(), 1);
+    assert!(editor.inspected_authoring_source(request).is_none());
+    assert_eq!(
+        browser_action(
+            &mut editor,
+            EditorProjectBrowserAction::CancelOpen { request }
+        ),
+        EditorProjectBrowserActionOutcome::OpenCancellationRequested { request }
+    );
+    let cancelling = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        cancelling.document_open().pending(),
+        Some((request, PREFAB, EditorDocumentOpenPhase::Cancelling))
+    );
+    assert!(cancelling.document_open().result().is_none());
+    control.release();
+    let completed = wait_open(&mut editor, request);
+    assert_eq!(
+        completed.document_open().result(),
+        Some(EditorDocumentOpenResult::Cancelled { request })
+    );
+    assert_eq!(completed.workspace(), saved.workspace());
+    assert!(editor.inspected_authoring_source(request).is_none());
+    assert!(
+        fs::read_to_string(project.root.join("scenes/startup.scene.json"))
+            .unwrap()
+            .contains("saved-during-inspection")
+    );
+    acknowledge_open(&mut editor, request);
+    close(&mut editor);
+}
+
+#[test]
+fn session_close_consumes_an_inspection_returned_before_the_next_frame() {
+    let project = project("inspection-close-before-publication");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let control = editor.hold_next_document_open(editor::OpenTestPhase::BeforeReturn);
+    let request = begin_inspection(&mut editor, SCENE);
+    assert!(control.wait_until_started());
+    let returned = editor.document_open_return_observer().unwrap();
+    control.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while returned.state() == nara_tasks::TaskReturnState::Pending {
+        assert!(
+            Instant::now() < deadline,
+            "the inspection did not physically return"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(returned.state(), nara_tasks::TaskReturnState::Returned);
+    assert!(editor.inspected_authoring_source(request).is_none());
+    close(&mut editor);
+    assert!(editor.document_open_return_observer().is_none());
+    let closed = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(closed.document_open().pending(), None);
+    assert_eq!(
+        closed.document_open().result(),
+        Some(EditorDocumentOpenResult::Cancelled { request })
+    );
+    assert!(editor.inspected_authoring_source(request).is_none());
+}
+
+#[test]
 fn cancelling_browser_open_waits_for_physical_return_and_requires_exact_result_acknowledgement() {
     let project = project("browser-open-cancel-and-retry");
     let mut editor = open_generic_editor_with_ready_index(&project);
@@ -1099,6 +1351,18 @@ fn begin_open(editor: &mut editor::EditorProjectSession, path: &str) -> EditorDo
     ) {
         EditorProjectBrowserActionOutcome::Preparing { request } => request,
         other => panic!("Browser Open must expose its pending request: {other:?}"),
+    }
+}
+
+fn begin_inspection(editor: &mut editor::EditorProjectSession, path: &str) -> EditorDocumentOpenId {
+    match browser_action(
+        editor,
+        EditorProjectBrowserAction::InspectSource {
+            relative_path: Arc::from(path),
+        },
+    ) {
+        EditorProjectBrowserActionOutcome::Preparing { request } => request,
+        other => panic!("Browser inspection must expose its pending request: {other:?}"),
     }
 }
 

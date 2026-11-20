@@ -440,6 +440,67 @@ impl Workflow<'_> {
         }
     }
 
+    pub(super) fn inspect_source_without_opening(&mut self, path: &str) -> TestResult {
+        use nara::tooling::{EditorProjectBrowserAction, EditorProjectBrowserActionOutcome};
+
+        let before = self.frame()?;
+        let bytes = self.project.read(path)?;
+        let EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::Preparing {
+            request,
+        }) = self.setup_action(EditorAction::ProjectBrowser(
+            EditorProjectBrowserAction::InspectSource {
+                relative_path: path.into(),
+            },
+        ))?
+        else {
+            return Err("the semantic inspection action did not start preparation".into());
+        };
+        let label = format!("Inspected authoring source (request {})", request.get());
+        self.wait(
+            "present the exact inspection receipt in the original Shell",
+            |workflow| {
+                workflow.frame().is_ok_and(|frame| {
+                    frame.document_open().result()
+                        == Some(EditorDocumentOpenResult::Inspected { request })
+                }) && workflow.panel_frame(SHELL).is_ok_and(|presented| {
+                    presented
+                        .semantics()
+                        .iter()
+                        .any(|node| node.name() == label)
+                })
+            },
+        )?;
+        let source = self
+            .native
+            .application
+            .inspected_authoring_source(request)
+            .ok_or("the original inspection result cannot be borrowed")?;
+        let entity = source
+            .entities_after(None)
+            .next()
+            .ok_or("the inspected Prefab has no entity")?;
+        source.entity(entity).map_err(|error| error.to_string())?;
+        let after = self.frame()?;
+        if source.relative_path() != path
+            || after.workspace() != before.workspace()
+            || after.scene_preview_document() != before.scene_preview_document()
+            || self.project.read(path)? != bytes
+        {
+            return Err("source inspection changed a document, preview, or saved file".into());
+        }
+        self.click(SHELL, "Acknowledge source open")?;
+        if self
+            .native
+            .application
+            .inspected_authoring_source(request)
+            .is_some()
+            || self.frame()?.document_open().result().is_some()
+        {
+            return Err("the presented acknowledgement retained the inspected source".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn open_source(&mut self, path: &str) -> TestResult<EditorDocumentId> {
         self.paint()?;
         while self.enabled(SHELL, "Previous sources")? {

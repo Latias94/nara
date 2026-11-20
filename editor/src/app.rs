@@ -1044,6 +1044,17 @@ impl EditorApplication {
             .read_document_property(request)
     }
 
+    /// Borrows the retained source observation for the exact inspection request.
+    #[must_use]
+    pub fn inspected_authoring_source(
+        &self,
+        request: nara::tooling::EditorDocumentOpenId,
+    ) -> Option<nara::project_host::EditorInspectedAuthoringSource<'_>> {
+        self.authoring_query_session()
+            .ok()?
+            .inspected_authoring_source(request)
+    }
+
     /// Reads one stored property claim from an exact source slot, even without composition.
     pub fn read_prefab_property_claim(
         &self,

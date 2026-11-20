@@ -346,6 +346,7 @@ mod tests {
         assert_eq!(super::editor_frame_maintenance_deadline(&idle, now), None);
         for phase in [
             EditorDocumentOpenPhase::Preparing,
+            EditorDocumentOpenPhase::Inspecting,
             EditorDocumentOpenPhase::Cancelling,
         ] {
             let opening = idle.clone().with_document_open(EditorDocumentOpenView::new(

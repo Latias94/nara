@@ -144,6 +144,9 @@ pub(super) fn open_status(view: &EditorDocumentOpenView) -> String {
             EditorDocumentOpenPhase::Preparing => {
                 format!("Opening source (request {})", request.get())
             }
+            EditorDocumentOpenPhase::Inspecting => {
+                format!("Inspecting source (request {})", request.get())
+            }
             EditorDocumentOpenPhase::Cancelling => {
                 format!("Cancelling source open (request {})", request.get())
             }
@@ -156,6 +159,9 @@ pub(super) fn open_status(view: &EditorDocumentOpenView) -> String {
                 document.raw(),
                 request.get()
             )
+        }
+        Some(EditorDocumentOpenResult::Inspected { request }) => {
+            format!("Inspected authoring source (request {})", request.get())
         }
         Some(EditorDocumentOpenResult::Rejected { request, .. }) => {
             format!(

@@ -367,9 +367,23 @@ impl EditorProjectBrowserSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorProjectBrowserAction {
     Refresh,
-    Open { relative_path: Arc<str> },
-    CancelOpen { request: EditorDocumentOpenId },
-    AcknowledgeOpen { request: EditorDocumentOpenId },
+    Open {
+        relative_path: Arc<str>,
+    },
+    /// Acquires a read-only observation of an indexed Scene or Prefab without opening a tab.
+    InspectSource {
+        relative_path: Arc<str>,
+    },
+    /// Opens the exact retained observation after revalidating its source.
+    OpenInspectedSource {
+        request: EditorDocumentOpenId,
+    },
+    CancelOpen {
+        request: EditorDocumentOpenId,
+    },
+    AcknowledgeOpen {
+        request: EditorDocumentOpenId,
+    },
 }
 
 /// Typed Host result for one accepted Project Browser action.

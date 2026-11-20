@@ -1,5 +1,5 @@
 use nara::{
-    project_host::EditorEditPreparationError,
+    project_host::{EditorEditPreparationError, EditorInspectedAuthoringSource},
     scene::{
         AuthoringConstructionDraft, AuthoringPrefabInstanceSnapshot, AuthoringPropertyEdit,
         PrefabDeclarationLimits, PrefabInstanceObservation, PrefabInstancePath,
@@ -7,11 +7,12 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorAuthoringPage, EditorAuthoringQuery, EditorDocumentId,
-        EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityPage,
-        EditorEntityQuery, EditorPrefabInspectionId, EditorPrefabInspectionRejection,
-        EditorPrefabPropertyClaimTarget, EditorPropertyObservation, EditorPropertyRead,
-        EditorPropertyReadLimits, EditorSourceToolAction, EditorSourceToolError,
-        EditorSourceToolReview, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+        EditorDocumentOpenId, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+        EditorEntityPage, EditorEntityQuery, EditorPrefabInspectionId,
+        EditorPrefabInspectionRejection, EditorPrefabPropertyClaimTarget,
+        EditorPropertyObservation, EditorPropertyRead, EditorPropertyReadLimits,
+        EditorSourceToolAction, EditorSourceToolError, EditorSourceToolReview,
+        PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
     },
 };
 
@@ -98,6 +99,15 @@ impl EditorPanelContext<'_, '_> {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         self.application.read_document_property(request)
+    }
+
+    /// Borrows the retained source observation for the exact inspection request.
+    #[must_use]
+    pub fn inspected_authoring_source(
+        &self,
+        request: EditorDocumentOpenId,
+    ) -> Option<EditorInspectedAuthoringSource<'_>> {
+        self.application.inspected_authoring_source(request)
     }
 
     /// Reads one bounded stored Prefab property claim through the named document's owner.

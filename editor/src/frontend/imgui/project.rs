@@ -633,10 +633,12 @@ pub(super) fn show_document_open(
             "{}: {path}",
             match phase {
                 EditorDocumentOpenPhase::Preparing => "Preparing document",
+                EditorDocumentOpenPhase::Inspecting => "Inspecting source",
                 EditorDocumentOpenPhase::Cancelling => "Cancelling document preparation",
             }
         ));
-        if phase == EditorDocumentOpenPhase::Preparing && ui.button("Cancel document preparation") {
+        if phase != EditorDocumentOpenPhase::Cancelling && ui.button("Cancel document preparation")
+        {
             actions.push(EditorAction::ProjectBrowser(
                 EditorProjectBrowserAction::CancelOpen { request },
             ));
@@ -645,6 +647,9 @@ pub(super) fn show_document_open(
     if let Some(result) = frame.document_open().result() {
         match result {
             EditorDocumentOpenResult::Opened { .. } => ui.text_wrapped("Project document opened"),
+            EditorDocumentOpenResult::Inspected { .. } => {
+                ui.text_wrapped("Authoring source inspected")
+            }
             EditorDocumentOpenResult::Cancelled { .. } => {
                 ui.text_wrapped("Document preparation cancelled")
             }

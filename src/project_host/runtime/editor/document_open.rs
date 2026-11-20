@@ -10,8 +10,11 @@ use nara_tooling::{
     EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult, EditorDocumentOpenView,
 };
 
+mod inspection;
 pub(super) mod preparation;
-use preparation::DocumentOpenPreparation;
+
+pub use inspection::EditorInspectedAuthoringSource;
+use preparation::{DocumentOpenInput, DocumentOpenPreparation, PreparedDocumentRequest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditorDocumentOpenRequestResult {
@@ -59,34 +62,41 @@ pub(super) struct PreparedAuthoringDocumentOpen {
 }
 
 impl PreparedAuthoringDocumentOpen {
-    fn current_source(&self) -> Result<(&str, FileCapability), SourceAdmissionError> {
-        let (path, source) = match self
+    fn source(&self) -> &crate::project_host::authoring::document::AuthoringDocumentSourceFact {
+        match self
             .document
             .as_ref()
-            .ok_or(SourceAdmissionError::HostUnavailable)?
+            .expect("the prepared document has not published")
         {
-            PreparedDocument::Scene {
-                relative_path,
-                host,
-                ..
-            } => (
-                relative_path.as_ref(),
-                host.try_with(|host| host.read_source()),
-            ),
-            PreparedDocument::Prefab {
-                relative_path,
-                host,
-                ..
-            } => (
-                relative_path.as_ref(),
-                host.try_with(|host| host.read_source()),
-            ),
+            PreparedDocument::Scene { source, .. } | PreparedDocument::Prefab { source, .. } => {
+                source
+            }
+        }
+    }
+
+    fn current_source(&self) -> Result<FileCapability, &'static str> {
+        let source = match self
+            .document
+            .as_ref()
+            .expect("the prepared document has not published")
+        {
+            PreparedDocument::Scene { host, .. } => host.try_with(|host| host.read_source()),
+            PreparedDocument::Prefab { host, .. } => host.try_with(|host| host.read_source()),
         };
-        let file = source
-            .ok_or(SourceAdmissionError::HostUnavailable)?
+        source
+            .ok_or(SourceAdmissionError::HostUnavailable.code())?
             .open()
-            .map_err(|_| SourceAdmissionError::SourceRead)?;
-        Ok((path, file))
+            .map_err(|_| SourceAdmissionError::SourceRead.code())
+    }
+
+    fn validate_source_identity(&self, file: &FileCapability) -> Result<(), &'static str> {
+        let admitted = self.source();
+        if file.identity() != admitted.identity()
+            || file.parent_identity() != admitted.parent_identity()
+        {
+            return Err("project.editor.document-source-identity-changed");
+        }
+        Ok(())
     }
 }
 
@@ -105,7 +115,7 @@ impl Drop for PreparedAuthoringDocumentOpen {
     }
 }
 
-struct OpenAdmission {
+pub(super) struct OpenAdmission {
     request: EditorDocumentOpenId,
     path: Arc<str>,
     index: Arc<ProjectSourceIndexSnapshot>,
@@ -114,10 +124,38 @@ struct OpenAdmission {
 pub(super) struct PendingDocumentOpen {
     admission: OpenAdmission,
     worker: DocumentOpenPreparation,
+    inspecting: bool,
     cancelled: bool,
 }
 
+pub(super) enum CompletedDocumentOpen {
+    Outcome(EditorDocumentOpenResult),
+    Inspected {
+        admission: OpenAdmission,
+        document: AdmittedAuthoringDocument,
+    },
+}
+
+impl CompletedDocumentOpen {
+    fn view(&self) -> EditorDocumentOpenResult {
+        match self {
+            Self::Outcome(result) => *result,
+            Self::Inspected { admission, .. } => EditorDocumentOpenResult::Inspected {
+                request: admission.request,
+            },
+        }
+    }
+}
+
 impl EditorProjectSession {
+    #[cfg(test)]
+    pub(crate) fn document_open_return_observer(&self) -> Option<nara_tasks::TaskReturnObserver> {
+        self.pending_document_open
+            .as_ref()?
+            .worker
+            .return_observer()
+    }
+
     #[cfg(test)]
     pub(crate) fn hold_next_document_open(
         &mut self,
@@ -146,10 +184,11 @@ impl EditorProjectSession {
         loop {
             self.drive_editor_frame(Duration::ZERO);
             if let Some(result) = self.document_open_result.take() {
-                return match result {
+                return match result.view() {
                     EditorDocumentOpenResult::Opened { document, .. } => {
                         EditorDocumentOpenRequestResult::Opened { document }
                     }
+                    EditorDocumentOpenResult::Inspected { .. } => unreachable!(),
                     EditorDocumentOpenResult::Rejected { code, .. } => rejected(code),
                     EditorDocumentOpenResult::Cancelled { .. } => {
                         rejected("project.editor.document-open-cancelled")
@@ -170,6 +209,25 @@ impl EditorProjectSession {
         relative_path: &str,
         kind: AuthoringDocumentKind,
     ) -> EditorDocumentOpenRequestResult {
+        self.request_indexed_authoring_source(index, relative_path, kind, false)
+    }
+
+    pub(super) fn inspect_indexed_authoring_source(
+        &mut self,
+        index: Arc<ProjectSourceIndexSnapshot>,
+        relative_path: &str,
+        kind: AuthoringDocumentKind,
+    ) -> EditorDocumentOpenRequestResult {
+        self.request_indexed_authoring_source(index, relative_path, kind, true)
+    }
+
+    fn request_indexed_authoring_source(
+        &mut self,
+        index: Arc<ProjectSourceIndexSnapshot>,
+        relative_path: &str,
+        kind: AuthoringDocumentKind,
+        inspect: bool,
+    ) -> EditorDocumentOpenRequestResult {
         if self.source_tools.reclamation_fenced() {
             return EditorDocumentOpenRequestResult::Rejected {
                 code: "project.editor.document-open-busy",
@@ -179,7 +237,7 @@ impl EditorProjectSession {
             || self.authoring_operation_fenced()
             || self.pending_document_open.is_some()
             || self.pending_workspace_intent.is_some()
-            || self.persistence.has_pending_work()
+            || !inspect && self.persistence.has_pending_work()
             || self.document_open_result.is_some()
         {
             return rejected("project.editor.document-open-busy");
@@ -195,6 +253,9 @@ impl EditorProjectSession {
         }
 
         if let Some(document) = self.exact_source_owner(relative_path) {
+            if inspect {
+                return rejected(SourceAdmissionError::AlreadyOpen.code());
+            }
             let expected_kind = match kind {
                 AuthoringDocumentKind::Scene => EditorDocumentKind::Scene,
                 AuthoringDocumentKind::Prefab => EditorDocumentKind::Prefab,
@@ -219,9 +280,70 @@ impl EditorProjectSession {
             Ok(captured) => captured,
             Err(error) => return rejected(error.code()),
         };
-        if let Err(error) = self.exclude_project_source_aliases(&relative_path) {
+        if !inspect && let Err(error) = self.exclude_project_source_aliases(&relative_path) {
             return rejected(error.code());
         }
+        let input = if inspect {
+            DocumentOpenInput::Inspect(captured)
+        } else {
+            DocumentOpenInput::Open(captured)
+        };
+        self.start_document_open(index, relative_path, input)
+    }
+
+    pub(super) fn request_open_inspected_authoring_source(
+        &mut self,
+        request: EditorDocumentOpenId,
+    ) -> EditorDocumentOpenRequestResult {
+        let Some(CompletedDocumentOpen::Inspected {
+            admission,
+            document,
+        }) = &self.document_open_result
+        else {
+            return rejected("project.editor.document-inspection-not-current");
+        };
+        if admission.request != request {
+            return rejected("project.editor.document-inspection-not-current");
+        }
+        if self.source_tools.reclamation_fenced()
+            || self.pending_document_open.is_some()
+            || self.pending_workspace_intent.is_some()
+            || self.persistence.has_pending_work()
+        {
+            return rejected("project.editor.document-open-busy");
+        }
+        if let Err(code) = self.validate_document_open_admission(admission) {
+            return rejected(code);
+        }
+        if self
+            .exact_source_owner(document.source().relative_path())
+            .is_some()
+        {
+            return rejected(SourceAdmissionError::AlreadyOpen.code());
+        }
+        if self.next_document_open_request == u64::MAX {
+            return rejected("project.editor.document-open-id-exhausted");
+        }
+        let Some(CompletedDocumentOpen::Inspected {
+            admission,
+            document,
+        }) = self.document_open_result.take()
+        else {
+            unreachable!("inspection was checked before consumption");
+        };
+        self.start_document_open(
+            admission.index,
+            admission.path,
+            DocumentOpenInput::OpenInspected(self.source_project_root(), document),
+        )
+    }
+
+    fn start_document_open(
+        &mut self,
+        index: Arc<ProjectSourceIndexSnapshot>,
+        path: Arc<str>,
+        input: DocumentOpenInput,
+    ) -> EditorDocumentOpenRequestResult {
         let Some(next) = self.next_document_open_request.checked_add(1) else {
             return rejected("project.editor.document-open-id-exhausted");
         };
@@ -229,11 +351,12 @@ impl EditorProjectSession {
         let request = EditorDocumentOpenId::new(self.current_frame().revision(), next);
         let admission = OpenAdmission {
             request,
-            path: relative_path,
+            path,
             index,
         };
+        let inspecting = matches!(&input, DocumentOpenInput::Inspect(_));
         let worker = DocumentOpenPreparation::start(
-            captured,
+            input,
             self.authoring_runtime.host_custody().clone(),
             self.authoring_runtime.persistence_tasks(),
             #[cfg(test)]
@@ -242,15 +365,15 @@ impl EditorProjectSession {
         self.pending_document_open = Some(PendingDocumentOpen {
             admission,
             worker,
+            inspecting,
             cancelled: false,
         });
         EditorDocumentOpenRequestResult::Preparing { request }
     }
 
-    fn validate_document_open(
+    fn validate_document_open_admission(
         &self,
         admission: &OpenAdmission,
-        prepared: &PreparedAuthoringDocumentOpen,
     ) -> Result<(), &'static str> {
         if !self.accepts_new_work() || self.authoring_operation_fenced() {
             return Err("project.editor.document-open-busy");
@@ -261,25 +384,24 @@ impl EditorProjectSession {
         if !Arc::ptr_eq(&current, &admission.index) {
             return Err("project.editor.document-index-stale");
         }
-        let (path, current) = prepared
-            .current_source()
-            .map_err(SourceAdmissionError::code)?;
-        self.exclude_source_aliases(path, &current)
-            .map_err(SourceAdmissionError::code)?;
-        let source = match prepared
-            .document
-            .as_ref()
-            .expect("prepared Open retains its document")
-        {
-            PreparedDocument::Scene { source, .. } | PreparedDocument::Prefab { source, .. } => {
-                source
-            }
-        };
+        Ok(())
+    }
+
+    fn validate_document_open(
+        &self,
+        admission: &OpenAdmission,
+        prepared: &PreparedAuthoringDocumentOpen,
+    ) -> Result<(), &'static str> {
+        self.validate_document_open_admission(admission)?;
+        let source = prepared.source();
         source
             .revalidate_native_source(&self.source_project_root())
             .map_err(|error| error.code())?;
-        self.exclude_native_source_key(source.relative_path(), source.source_key())?;
-        Ok(())
+        let current = prepared.current_source()?;
+        self.exclude_source_aliases(source.relative_path(), &current)
+            .map_err(SourceAdmissionError::code)?;
+        prepared.validate_source_identity(&current)?;
+        self.exclude_native_source_key(source.relative_path(), source.source_key())
     }
 
     pub(super) fn document_open_view(&self) -> EditorDocumentOpenView {
@@ -289,18 +411,47 @@ impl EditorProjectSession {
                 Arc::clone(&pending.admission.path),
                 if pending.cancelled {
                     EditorDocumentOpenPhase::Cancelling
+                } else if pending.inspecting {
+                    EditorDocumentOpenPhase::Inspecting
                 } else {
                     EditorDocumentOpenPhase::Preparing
                 },
             )
         });
-        EditorDocumentOpenView::new(pending, self.document_open_result)
+        EditorDocumentOpenView::new(
+            pending,
+            self.document_open_result
+                .as_ref()
+                .map(CompletedDocumentOpen::view),
+        )
+    }
+
+    /// Borrows the exact retained read-only result of an unopened-source inspection.
+    #[must_use]
+    pub fn inspected_authoring_source(
+        &self,
+        request: EditorDocumentOpenId,
+    ) -> Option<EditorInspectedAuthoringSource<'_>> {
+        match self.document_open_result.as_ref()? {
+            CompletedDocumentOpen::Inspected {
+                admission,
+                document,
+            } if admission.request == request => Some(EditorInspectedAuthoringSource { document }),
+            _ => None,
+        }
+    }
+
+    pub(super) fn document_open_may_publish(&self) -> bool {
+        self.pending_document_open
+            .as_ref()
+            .is_some_and(|pending| !pending.inspecting)
     }
 
     pub(super) fn acknowledge_document_open(&mut self, request: EditorDocumentOpenId) -> bool {
         if self
             .document_open_result
-            .is_some_and(|result| result.request() == request)
+            .as_ref()
+            .is_some_and(|result| result.view().request() == request)
         {
             self.document_open_result = None;
             true
@@ -315,6 +466,7 @@ impl EditorProjectSession {
                 admission,
                 worker,
                 cancelled,
+                ..
             }) if admission.request == request => {
                 *cancelled = true;
                 worker.cancel();
@@ -328,6 +480,7 @@ impl EditorProjectSession {
         let Some(PendingDocumentOpen {
             admission,
             mut worker,
+            inspecting,
             cancelled,
         }) = self.pending_document_open.take()
         else {
@@ -337,27 +490,30 @@ impl EditorProjectSession {
             self.pending_document_open = Some(PendingDocumentOpen {
                 admission,
                 worker,
+                inspecting,
                 cancelled,
             });
             return false;
         };
         let request = admission.request;
         if cancelled || !self.accepts_new_work() {
-            self.document_open_result = Some(EditorDocumentOpenResult::Cancelled { request });
+            self.document_open_result = Some(CompletedDocumentOpen::Outcome(
+                EditorDocumentOpenResult::Cancelled { request },
+            ));
             return true;
         }
         self.document_open_result = Some(
             match completion.and_then(|prepared| {
-                self.publish_prepared_document_open(&admission, prepared)
+                self.finish_document_open(admission, prepared)
                     .map_err(preparation::DocumentOpenFailure::from_code)
             }) {
-                Ok(document) => EditorDocumentOpenResult::Opened { request, document },
+                Ok(result) => result,
                 Err(failure) => {
                     let _ = self.diagnostics.push(failure.diagnostic);
-                    EditorDocumentOpenResult::Rejected {
+                    CompletedDocumentOpen::Outcome(EditorDocumentOpenResult::Rejected {
                         request,
                         code: failure.code,
-                    }
+                    })
                 }
             },
         );
@@ -371,6 +527,42 @@ impl EditorProjectSession {
         {
             *cancelled = true;
             worker.cancel();
+        }
+    }
+
+    pub(super) fn release_completed_source_inspection(&mut self) {
+        if matches!(
+            self.document_open_result,
+            Some(CompletedDocumentOpen::Inspected { .. })
+        ) {
+            self.document_open_result = None;
+        }
+    }
+
+    fn finish_document_open(
+        &mut self,
+        admission: OpenAdmission,
+        prepared: PreparedDocumentRequest,
+    ) -> Result<CompletedDocumentOpen, &'static str> {
+        match prepared {
+            PreparedDocumentRequest::Open(prepared) => {
+                let request = admission.request;
+                let document = self.publish_prepared_document_open(&admission, prepared)?;
+                Ok(CompletedDocumentOpen::Outcome(
+                    EditorDocumentOpenResult::Opened { request, document },
+                ))
+            }
+            PreparedDocumentRequest::Inspected(document) => {
+                self.validate_document_open_admission(&admission)?;
+                let path = document.source().relative_path();
+                self.exclude_native_source_key(path, document.source().source_key())?;
+                self.exclude_source_aliases(path, document.file())
+                    .map_err(SourceAdmissionError::code)?;
+                Ok(CompletedDocumentOpen::Inspected {
+                    admission,
+                    document,
+                })
+            }
         }
     }
 

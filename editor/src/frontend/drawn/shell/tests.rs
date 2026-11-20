@@ -1283,6 +1283,10 @@ fn source_open_feedback_uses_closed_english_messages() {
             "Opening source (request 5)",
         ),
         (
+            EditorDocumentOpenPhase::Inspecting,
+            "Inspecting source (request 5)",
+        ),
+        (
             EditorDocumentOpenPhase::Cancelling,
             "Cancelling source open (request 5)",
         ),

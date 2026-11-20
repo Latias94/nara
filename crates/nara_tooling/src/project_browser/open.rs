@@ -1,10 +1,10 @@
-//! Exact asynchronous document-open observation, independent of dispatch completion.
+//! Exact asynchronous document preparation, independent of dispatch completion.
 
 use std::sync::Arc;
 
 use crate::{EditorDocumentId, EditorFrameRevision};
 
-/// Identifies one accepted document-open request and its admitting Host frame incarnation.
+/// Identifies one accepted document preparation and its admitting Host frame incarnation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EditorDocumentOpenId {
     source: EditorFrameRevision,
@@ -29,12 +29,17 @@ impl EditorDocumentOpenId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorDocumentOpenPhase {
     Preparing,
+    Inspecting,
     Cancelling,
 }
 
 /// Terminal outcome retained until acknowledgement of this exact request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorDocumentOpenResult {
+    /// A read-only source observation is available on the requesting Session.
+    Inspected {
+        request: EditorDocumentOpenId,
+    },
     Opened {
         request: EditorDocumentOpenId,
         document: EditorDocumentId,
@@ -52,7 +57,8 @@ impl EditorDocumentOpenResult {
     #[must_use]
     pub const fn request(self) -> EditorDocumentOpenId {
         match self {
-            Self::Opened { request, .. }
+            Self::Inspected { request }
+            | Self::Opened { request, .. }
             | Self::Rejected { request, .. }
             | Self::Cancelled { request } => request,
         }

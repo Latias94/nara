@@ -767,7 +767,9 @@ impl EditorAction {
             | Self::Gesture(_) => true,
             Self::ProjectBrowser(action) => matches!(
                 action,
-                EditorProjectBrowserAction::Refresh | EditorProjectBrowserAction::Open { .. }
+                EditorProjectBrowserAction::Refresh
+                    | EditorProjectBrowserAction::Open { .. }
+                    | EditorProjectBrowserAction::InspectSource { .. }
             ),
             Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
             Self::Mutate(_)

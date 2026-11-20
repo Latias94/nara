@@ -1423,6 +1423,14 @@ impl PublishedAuthoringSceneDocument {
         &self.document
     }
 
+    /// Borrows a direct entity and its classified authoring records from this source.
+    pub fn authoring_entity_view(
+        &self,
+        entity: &SceneEntityId,
+    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
+        self.state.entity_view(&self.document.entities, entity)
+    }
+
     #[must_use]
     pub fn readiness(&self) -> AuthoringDocumentReadiness {
         self.state.readiness
@@ -1491,6 +1499,14 @@ impl PublishedAuthoringPrefabDocument {
     #[must_use]
     pub fn document(&self) -> &PrefabDocument {
         &self.document
+    }
+
+    /// Borrows a direct entity and its classified authoring records from this source.
+    pub fn authoring_entity_view(
+        &self,
+        entity: &SceneEntityId,
+    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
+        self.state.entity_view(&self.document.entities, entity)
     }
 
     #[must_use]

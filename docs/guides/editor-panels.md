@@ -1121,8 +1121,8 @@ rather than requiring a fresh geometry frame; mixed batches retain ordinary fram
 Scan-record and returned-row caps are independently checked. This concrete enumeration emits
 one ID for each inspected record; it does not first construct a complete Inspector. These caps
 do not bound ID bytes, total work across a batch, or the subsequent normal Application drive.
-Expanded Prefab identities, field queries, unopened sources and project-wide indexing are not
-part of entity enumeration; the separate bounded authoring-read experiment follows below.
+This request enumerates direct entities of open documents. Field queries and unopened-source
+inspection use the separate operations below.
 
 The integrated Host retains a concrete file lane for every open Scene/Prefab document. Opening
 another source of the same kind adds a slot; it does not trigger Close or discard dirty history.
@@ -1219,9 +1219,31 @@ The independent consumer discovers an editable integer in non-active Scene and P
 reads its current value and computes the replacement before preparing one ordinary source edit,
 Undo/Redo and Save/Reopen. Full query qualification is tracked separately from this guide; the
 selector-directed consumer also computes a keyed/map scalar edit without copying the unrelated
-root subtree. The experiment does not implement nested discovery, value pagination or unopened-source querying. Prepared panel
-submission has its own contract and qualification scope rather than following from read-only
-query outcomes.
+root subtree. An open-document property query discovers direct children one parent at a time.
+A property read returns the complete selected value within its copy allowance. Prepared panel
+submission has its own contract and qualification scope.
+
+## Inspect An Unopened Scene Or Prefab
+
+Submit `EditorAction::ProjectBrowser(EditorProjectBrowserAction::InspectSource { relative_path })`
+for a Scene or Prefab in the current Browser snapshot. Keep the request ID from `Preparing`.
+Once `frame.document_open()` returns `Inspected` for that request, borrow the snapshot through
+`context.inspected_authoring_source(request)`. Use `entities_after` to visit an ID-ordered page
+and `entity` to borrow its actual component, field and property views. Use
+`ComponentPropertyReadBudget` to bound nested property resolution. Keep the source IDs and the
+specific values your tool needs after the callback.
+
+The view describes the saved source admitted by the request. A file edit can make it historical.
+The active tab, selection, preview and working copies are independent of the inspection. If the
+source is already open, use its current `document_query_basis` to read the working copy.
+
+Use `AcknowledgeOpen { request }` to release a completed inspection, or `CancelOpen { request }`
+while it prepares. To edit that exact source, submit `OpenInspectedSource { request }` and wait
+for `Opened` with the newly assigned request ID. Open checks the retained source digest on its
+I/O task and checks the current file identity and metadata before publishing. Refresh the Browser
+if the indexed file object changed, then inspect again. After successful Open, use the returned
+document ID and its current query basis for prepared edit, Undo, Redo and Save.
+[Source inspection contract](../architecture/authoring-read-projection-design.md#inspection-of-an-unopened-project-source)
 
 ## Inspect An Effective Prefab Field
 

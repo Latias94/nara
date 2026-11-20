@@ -256,6 +256,12 @@ impl AdmittedAuthoringDocument {
             Self::Scene { source, .. } | Self::Prefab { source, .. } => source,
         }
     }
+
+    pub(crate) const fn file(&self) -> &FileCapability {
+        match self {
+            Self::Scene { file, .. } | Self::Prefab { file, .. } => file,
+        }
+    }
 }
 
 pub(super) struct AuthoringDocumentAdmissionBasis<'basis> {

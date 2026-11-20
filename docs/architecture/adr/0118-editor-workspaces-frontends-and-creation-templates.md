@@ -646,6 +646,14 @@ when later image/UI, source binding or Workspace publication rejects. Open error
 carry both diagnostic observation and owner-thread cleanup progress; consuming only diagnostics
 cannot certify cleanup or discard that responsibility.
 
+The frame-bound Browser `InspectSource` action starts the existing cancellable document read.
+The `Inspected` result lets a registered panel borrow the classified source by the exact request.
+Acknowledgement releases the result. `OpenInspectedSource` explicitly consumes it into a new
+request and reports publication through the ordinary Open outcome. The acquisition and its
+physical return use the same preparation slot. A pending inspection may run alongside a Save
+of an open document. Workspace retirement can cancel pending preparation, while Session
+retirement also releases completed inspections and drains returned preparation outcomes.
+
 Application holds one failed-Open owner independently of Recovery presentation, project-manager
 navigation or the incumbent project. While it remains Pending, Retry and new candidate construction
 are unavailable, maintenance continues without a presentation cadence, and process Exit waits for

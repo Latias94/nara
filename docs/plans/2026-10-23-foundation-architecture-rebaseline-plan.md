@@ -569,9 +569,14 @@ The [effective instance field successor](../architecture/authoring-read-projecti
 uses the selected compiler and the Host's actual dependency evidence. A registered semantic
 panel can inspect a non-active Scene or Prefab, find the controlling authored claim, and Revert
 it through the existing prepared edit, history and persistence owners. Explicit Revert checks
-the original files and working copies at the owning drive. Full field query, value pagination,
-unopened source queries, shared-owner preparation locality and the remaining cost comparison
-stay open.
+the original files and working copies at the owning drive. The
+[unopened source successor](../architecture/authoring-read-projection-design.md#inspection-of-an-unopened-project-source)
+adds a direct authored inspection through the same Browser preparation and classified source
+owners, with explicit promotion into the normal Workspace document lifecycle. Its
+[qualification](../architecture/authoring-read-projection-design.md#november-20-unopened-source-verification)
+covers independent Scene and Prefab file workflows, reviewed close and stale-source failures,
+and actual Drawn Shell presentation on Windows/DX12. Full field query,
+value pagination, shared-owner preparation locality and the remaining cost comparison stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

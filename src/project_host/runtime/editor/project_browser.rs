@@ -158,6 +158,7 @@ impl EditorProjectSession {
         source_index: Option<&Arc<ProjectSourceIndexSnapshot>>,
         action: EditorProjectBrowserAction,
     ) -> EditorProjectBrowserActionOutcome {
+        let inspect = matches!(&action, EditorProjectBrowserAction::InspectSource { .. });
         match action {
             EditorProjectBrowserAction::Refresh => {
                 if self.authoring_project().is_none() {
@@ -172,7 +173,8 @@ impl EditorProjectSession {
                     rejected("project.editor.browser-refresh-unavailable")
                 }
             }
-            EditorProjectBrowserAction::Open { relative_path } => {
+            EditorProjectBrowserAction::Open { relative_path }
+            | EditorProjectBrowserAction::InspectSource { relative_path } => {
                 let Some(index) = source_index else {
                     return rejected("project.editor.document-index-unavailable");
                 };
@@ -196,11 +198,22 @@ impl EditorProjectSession {
                         return rejected("project.editor.document-source-not-openable");
                     }
                 };
-                map_open_result(self.request_indexed_authoring_document(
-                    Arc::clone(index),
-                    &relative_path,
-                    kind,
-                ))
+                if inspect {
+                    map_open_result(self.inspect_indexed_authoring_source(
+                        Arc::clone(index),
+                        &relative_path,
+                        kind,
+                    ))
+                } else {
+                    map_open_result(self.request_indexed_authoring_document(
+                        Arc::clone(index),
+                        &relative_path,
+                        kind,
+                    ))
+                }
+            }
+            EditorProjectBrowserAction::OpenInspectedSource { request } => {
+                map_open_result(self.request_open_inspected_authoring_source(request))
             }
             EditorProjectBrowserAction::CancelOpen { request } => {
                 if self.cancel_document_open_request(request) {

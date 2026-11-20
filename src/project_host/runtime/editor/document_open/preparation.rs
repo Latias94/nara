@@ -13,8 +13,19 @@ use nara_tasks::{
     TaskTerminal,
 };
 
+pub(super) enum DocumentOpenInput {
+    Open(OwnedAuthoringDocumentRequest),
+    Inspect(OwnedAuthoringDocumentRequest),
+    OpenInspected(DirectoryCapability, AdmittedAuthoringDocument),
+}
+
+pub(super) enum PreparedDocumentRequest {
+    Open(PreparedAuthoringDocumentOpen),
+    Inspected(AdmittedAuthoringDocument),
+}
+
 pub(in crate::project_host::runtime::editor) struct DocumentOpenPreparation {
-    task: Option<TaskHandle<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>>>,
+    task: Option<TaskHandle<Result<PreparedDocumentRequest, DocumentOpenFailure>>>,
 }
 
 pub(super) struct DocumentOpenFailure {
@@ -43,21 +54,16 @@ impl DocumentOpenFailure {
 
 impl DocumentOpenPreparation {
     pub(super) fn start(
-        request: OwnedAuthoringDocumentRequest,
+        input: DocumentOpenInput,
         custody: persistence::HostCustody,
         pools: &TaskPools,
         #[cfg(test)] mut gate: Option<OpenTestGate>,
     ) -> Self {
-        let input = PreparationInput {
-            request: Some(request),
-            custody,
-        };
         let task = pools
             .spawn(
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(0, TaskDomainKey::new(0x6272_6f77_7365_726f)),
                 move |cancellation| {
-                    let mut input = input;
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::BeforeRead);
                     if cancellation.is_cancelled() {
@@ -65,11 +71,18 @@ impl DocumentOpenPreparation {
                             "project.editor.document-open-cancelled",
                         ));
                     }
-                    let request = input.request.take().expect("Open prepares once");
-                    let root = request.project_root();
-                    let admitted = request
-                        .prepare()
-                        .map_err(DocumentOpenFailure::from_admission)?;
+                    let inspect = matches!(&input, DocumentOpenInput::Inspect(_));
+                    let promote = matches!(&input, DocumentOpenInput::OpenInspected(..));
+                    let (root, admitted) = match input {
+                        DocumentOpenInput::Open(request) | DocumentOpenInput::Inspect(request) => {
+                            let root = request.project_root();
+                            let admitted = request
+                                .prepare()
+                                .map_err(DocumentOpenFailure::from_admission)?;
+                            (root, admitted)
+                        }
+                        DocumentOpenInput::OpenInspected(root, inspected) => (root, inspected),
+                    };
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::BeforeBinding);
                     if cancellation.is_cancelled() {
@@ -77,8 +90,14 @@ impl DocumentOpenPreparation {
                             "project.editor.document-open-cancelled",
                         ));
                     }
-                    let prepared = bind_document_open(&root, &input.custody, admitted)
-                        .map_err(DocumentOpenFailure::from_code)?;
+                    let prepared = if inspect {
+                        PreparedDocumentRequest::Inspected(admitted)
+                    } else {
+                        PreparedDocumentRequest::Open(
+                            bind_document_open(&root, &custody, admitted)
+                                .map_err(DocumentOpenFailure::from_code)?,
+                        )
+                    };
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::AfterPreparation);
                     if cancellation.is_cancelled() {
@@ -86,6 +105,26 @@ impl DocumentOpenPreparation {
                             "project.editor.document-open-cancelled",
                         ));
                     }
+                    if let PreparedDocumentRequest::Open(document) = &prepared
+                        && promote
+                    {
+                        let digest = document.source().digest();
+                        let current = document
+                            .current_source()
+                            .map_err(DocumentOpenFailure::from_code)?;
+                        document
+                            .validate_source_identity(&current)
+                            .map_err(DocumentOpenFailure::from_code)?;
+                        current
+                            .verify_digest(digest, digest.length())
+                            .map_err(|_| {
+                                DocumentOpenFailure::from_code(
+                                    "project.editor.document-inspection-source-stale",
+                                )
+                            })?;
+                    }
+                    #[cfg(test)]
+                    wait_at(&mut gate, OpenTestPhase::BeforeReturn);
                     Ok(prepared)
                 },
             )
@@ -94,9 +133,7 @@ impl DocumentOpenPreparation {
         Self { task }
     }
 
-    pub(super) fn poll(
-        &mut self,
-    ) -> Option<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>> {
+    pub(super) fn poll(&mut self) -> Option<Result<PreparedDocumentRequest, DocumentOpenFailure>> {
         // Rejected spawn disposes its captures before returning, even without a task handle.
         if let Some(task) = &self.task {
             match task.return_observer().state() {
@@ -129,17 +166,17 @@ impl DocumentOpenPreparation {
             task.cancel();
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn return_observer(&self) -> Option<nara_tasks::TaskReturnObserver> {
+        self.task.as_ref().map(TaskHandle::return_observer)
+    }
 }
 
 impl Drop for DocumentOpenPreparation {
     fn drop(&mut self) {
         self.cancel();
     }
-}
-
-struct PreparationInput {
-    request: Option<OwnedAuthoringDocumentRequest>,
-    custody: persistence::HostCustody,
 }
 
 fn bind_document_open(
@@ -221,6 +258,7 @@ pub(crate) enum OpenTestPhase {
     BeforeRead,
     BeforeBinding,
     AfterPreparation,
+    BeforeReturn,
 }
 
 #[cfg(test)]

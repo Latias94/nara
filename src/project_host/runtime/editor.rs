@@ -55,6 +55,7 @@ pub use authored_upgrade::{
 #[cfg(test)]
 pub(crate) use authoring_runtime::EditorImageRuntimeFailure;
 pub(crate) use document_open::EditorDocumentOpenRequestResult;
+pub use document_open::EditorInspectedAuthoringSource;
 #[cfg(test)]
 pub(crate) use document_open::preparation::OpenTestPhase;
 pub use extension_documents::EditorExtensionDocumentHostError;
@@ -905,7 +906,7 @@ pub struct EditorProjectSession {
     extension_documents: extension_documents::EditorExtensionDocumentsHost,
     pending_document_open: Option<document_open::PendingDocumentOpen>,
     next_document_open_request: u64,
-    document_open_result: Option<nara_tooling::EditorDocumentOpenResult>,
+    document_open_result: Option<document_open::CompletedDocumentOpen>,
     #[cfg(test)]
     next_document_open_gate: Option<document_open::preparation::OpenTestGate>,
     project_browser: project_browser::EditorProjectBrowserHost,
@@ -1100,6 +1101,9 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.cancel_pending_document_open();
+        self.release_completed_source_inspection();
+        self.advance_document_open();
         self.source_tools.cancel();
         self.source_tools.cancel_template_import();
         self.source_tools.cancel_reclamation();
@@ -1142,7 +1146,6 @@ impl EditorProjectSession {
         self.scene_capture.cancel();
         let play_closed = self.advance_session_play_close();
         self.advance_authoring_retirement();
-        self.cancel_pending_document_open();
         if let Some(project) = self.authoring_project_mut() {
             project.cancel_source_index();
         }
@@ -1169,6 +1172,7 @@ impl EditorProjectSession {
                 }
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
+                self.advance_document_open();
                 self.advance_schema_owner_adoption();
                 self.advance_authored_schema_upgrade();
                 self.advance_prefab_extraction();
@@ -1176,6 +1180,7 @@ impl EditorProjectSession {
                 self.advance_prefab_conversion();
                 self.advance_prefab_inspection();
                 self.advance_source_tools();
+                files_closed &= self.pending_document_open.is_none();
                 files_closed &= !self.schema_owner_adoption.pending();
                 files_closed &= !self.authored_schema_upgrade.work_pending();
                 files_closed &= !self.authored_schema_upgrade.writes_fenced();

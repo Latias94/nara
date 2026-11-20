@@ -419,6 +419,79 @@ needed. Read-only observation during retained close does not reopen mutation adm
 panel submission has its own scoped qualification; installable-tool placement/lifecycle remains
 separate.
 
+### Inspection Of An Unopened Project Source
+
+A registered tool can select an indexed Scene or Prefab for inspection while continuing to work
+in the active document. The Project Browser's existing document preparation lane admits one
+named source on its I/O pool. Inspection returns a retained immutable source observation with
+its original read capability. Workspace documents, history, selection and preview remain in
+their current owners throughout the observation.
+The Scene owner lends direct entity IDs, actual component records, interpreted fields and
+Present, Missing and Defaulted values through the same classified source view as open documents.
+Enumeration can resume after an ID. Tools bound their own iteration and use the existing selector
+work allowance for property reads. A retained inspection reflects the admitted bytes and Schema.
+
+An explicit `OpenInspectedSource` uses the original observation's locator and identity. The
+normal Open path binds the actual file to its persistence owner, with the original body digest,
+leaf and parent identities, admitted sidecar and Schema/index lineage. The I/O task checks the
+current body against the original digest. The Session checks the current index, location,
+file identity, aliases and source metadata before creating the Workspace document. Writes to
+the same file after the digest check are subject to the ordinary Save conflict check. Mutation
+preparation uses the newly opened document's query basis. Cleanup and cancellation remain with
+the Browser request and its original task pool.
+
+The consumer checks real Scene and Prefab files, including inspection that preserves unrelated
+selection and history, deliberate Open, a value-derived prepared edit, Undo/Redo and Save/Reopen.
+It also checks source or sidecar drift, late cancellation, and reuse of a stale result. The
+selected workflow covers direct authored records.
+
+Bevy's `DynamicWorld` loader exposes decoded source entities before any selected write maps
+them into a target World. Godot's translation extractor reads `PackedScene::get_state()` by
+asset path. Scene activation separately registers and switches the editor root. These designs
+support reading saved records without constructing an editing or simulation instance. Nara's
+explicit Open retains its nominal Schema, file and publication requirements. The selected
+promotion checks the source digest on the preparation worker. Subsequent individual field
+reads use the already admitted observation.
+[Bevy loader at `85503941e488`](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_world_serialization/src/world_asset_loader.rs#L49-L75)
+· [Godot extractor at `81ab961f9106`](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/translations/packed_scene_translation_parser_plugin.cpp#L42-L76)
+· [Godot scene activation at `81ab961f9106`](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/editor_node.cpp#L5043-L5069)
+
+#### November 20 unopened-source verification
+
+The initial independently locked panel target passes 16 tests in
+`e4184d05-7193-49c1-9386-d4ea9b71c143`, including the new Scene and Prefab workflows. This run
+precedes the final review corrections. Both new consumers use the registered panel and real
+stable-metadata project sources. They discover a stored value and compute the replacement.
+Explicit Open, prepared Commit, Undo, Redo, Save and Reopen preserve the complete authored
+payload and the unrelated dirty source's selection and history.
+
+Independent review moves the promotion's final body check to its I/O task and checks the
+current canonical file at publication. The Session drains completed preparation results during
+physical Close. Cancelling an unrelated dirty document's Close preserves the inspected source.
+The inspection checks existing file ownership, including a renamed file retained by an open
+document. Six Host controls exercise those corrections, independent Save during pending
+inspection, and rejection of a same-byte replacement after worker verification. The first
+combined Host/Drawn run `a564c15d-e288-4461-9e87-2e57f3d061da` passes 39/40. The remaining
+case exposes changed diagnostic precedence for an alias introduced after preparation. The
+existing alias check now runs before comparison with the admitted object's identities. The
+corrected run `80e5d9c4-96b3-40c1-9ab2-dd0883c31777` passes all 40 selected tests.
+The final independently locked release run `5ffa7048-4c4f-41c6-b240-b736301004d1` passes all
+16 selected panel tests, with the separate embedded Host case outside this run.
+
+The complete native Drawn source workspace passes in `addb1517-1fdc-46e4-a4a6-4cabc21b08cd`
+in 70.581 seconds with hardware DX12 selected and ImGui disabled. The original hidden Winit
+window presents the exact inspection acknowledgement control and its status. The fixture
+borrows the closed Prefab, verifies Workspace, preview and file continuity, acknowledges the
+result through the presented Shell and continues its original regular Open and authoring
+trajectory. Explicit promotion is exercised by the independent semantic panel consumers.
+
+The selected evidence uses Windows x64 and Rust 1.95.0. Correctness Clippy passes for the
+affected libraries. Rust formatting checks pass for the root workspace and the independently
+locked panel workspace. Value pagination, all-source discovery and preparation locality retain
+their own acceptance.
+[Independent panel workflow](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/unopened_authoring.rs)
+· [Host origin and close controls](../../src/project_host/runtime/tests/browser_preparation.rs)
+
 ## Acceptance And Experiment Stops
 
 - Source Scene/Prefab tests distinguish actual versus catalog-only components, all retained

@@ -4251,9 +4251,17 @@ endpoints.
 A registered semantic panel can ask the Host to Revert an exact containing claim and use
 ordinary history and persistence. The Host keeps only actual source validation receipts and
 revalidates them at the consuming drive. The Scene selection passes 68/68. Host and the shared
-native DX12 conversion pass 19/19. The final independent release run passes all fourteen
-ordinary panel cases and the DX12 embedded Host. Full R2 still includes complete field queries,
-value pagination, unopened source queries and preparation locality evidence.
+native DX12 conversion pass 19/19. The original independent release run passes all fourteen
+ordinary panel cases and the DX12 embedded Host.
+
+The [unopened-source successor](../authoring-read-projection-design.md#november-20-unopened-source-verification)
+uses the Browser's preparation task and the classified Scene source for saved direct records.
+Inspection leaves the active Workspace alone. Explicit Open promotes the admitted source through
+ordinary persistence binding after worker digest and current location/metadata checks. The
+independent tool drives Scene and Prefab through prepared editing and original history. The
+independently locked release cohort passes 16/16, the selected Host/Drawn CPU cohort passes
+40/40, and the hardware DX12 Drawn trajectory passes 1/1.
+Full R2 still includes complete field queries, value pagination and preparation locality evidence.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query

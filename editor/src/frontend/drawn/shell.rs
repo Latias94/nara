@@ -139,7 +139,7 @@ impl ShellBasis {
             }
             Control::CancelOpen => {
                 let (request, _, phase) = self.document_open.pending()?;
-                (phase == EditorDocumentOpenPhase::Preparing).then_some(
+                (phase != EditorDocumentOpenPhase::Cancelling).then_some(
                     EditorAction::ProjectBrowser(EditorProjectBrowserAction::CancelOpen {
                         request,
                     }),

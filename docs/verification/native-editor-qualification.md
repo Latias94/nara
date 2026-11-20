@@ -166,6 +166,11 @@ acknowledgment. Hide/reopen the actual panel incarnation,
 then close with active preedit and an original candidate pending; require late input/output refusal
 and original physical GPU retirement.
 
+The unopened-source inspection starts through the semantic Browser action on the same native
+Host. Require its exact `Inspected` status in an accepted Shell frame and acknowledgement by the
+presented control. Check that document, preview and disk facts survive the inspection. The
+independent semantic panel tests qualify explicit promotion and stale source refusal.
+
 Build the separately locked `drawn_editor` consumer and inspect its normal/build/feature graph
 using its [documented commands](../../tests/fixtures/editor-ui-host-consumer/README.md).
 Launch the actual production binary and public-entry consumer separately from the hidden native

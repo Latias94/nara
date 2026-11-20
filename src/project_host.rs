@@ -82,7 +82,8 @@ mod persistence;
 pub use persistence::EditorPersistenceReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 pub use runtime::{
-    EditorExtensionDocumentHostError, EditorSourceAssetDomain, EditorSourceAssetImporters,
+    EditorExtensionDocumentHostError, EditorInspectedAuthoringSource, EditorSourceAssetDomain,
+    EditorSourceAssetImporters,
 };
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]

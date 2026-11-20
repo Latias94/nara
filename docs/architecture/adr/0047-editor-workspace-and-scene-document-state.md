@@ -281,6 +281,13 @@ Rules:
   `AuthoringSchemaBasis` identifies the retained immutable data-only schema/Adapter admission.
   Both survive ordinary edits and Save. Reopen changes the source incarnation even when it
   preserves the schema admission. Neither projection grants mutation or persistence authority.
+- An unopened-source inspection retains one immutable indexed Scene or Prefab and its original
+  read capability through the Browser's document preparation lane. Source-owned borrowed views
+  expose direct authored IDs and admitted fields. Explicit Open consumes the exact request and
+  moves the continuously retained read into the ordinary persistence binding. It checks the
+  current index, canonical location, file identity, body and admitted source metadata before
+  creating the editable Workspace document. Preparation of mutations uses that document's
+  admitted query basis.
 - Additive Schema recovery prepares every open Scene and Prefab against one exact successor
   admission, including inactive dirty sources and retained Undo/Redo. The Workspace charges all
   incumbent source/classification/history retention before preparing its first successor and

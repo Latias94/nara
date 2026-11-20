@@ -157,6 +157,7 @@ impl Workflow<'_> {
         self.event(EditorPanelPlatformEvent::Focused(true))?;
         self.prepare_image_fixture()?;
         let scene = self.state()?.document;
+        self.inspect_source_without_opening(fixture::PREFAB)?;
         let prefab = self.open_source(fixture::PREFAB)?;
         let preserved = self.open_source(fixture::PRESERVED)?;
         self.switch_document(scene)?;
