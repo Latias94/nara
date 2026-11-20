@@ -174,7 +174,10 @@ pub mod __private {
         UiAuthoringCanvasCandidate, UiAuthoringCanvasCompileError, UiAuthoringCanvasCompileRequest,
         UiAuthoringCanvasCompiler,
     };
-    pub use crate::codec::prefab_contains_ui_root;
+    pub use crate::codec::{
+        UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID, persisted_ui_visual_image_value,
+        prefab_contains_ui_root,
+    };
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
         UiPreparedPresentationAuthority, UiPresentationCommit, UiPresentationInvalidationReason,

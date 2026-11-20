@@ -26,6 +26,11 @@ use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
 };
+#[cfg(feature = "runtime-ui")]
+use nara_ui::{
+    __private::{UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID, persisted_ui_visual_image_value},
+    UI_SCHEMA_OWNER_ID, UiVisual,
+};
 
 use super::{
     DecodeBudget, DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
@@ -39,8 +44,8 @@ use super::{
 ///
 /// Root Scenes, addressable roots and global Input participate. Every reachable Required or
 /// Reference target uses its selected production decoder and complete dependency admission.
-/// First-party Scene Sprite and material bindings, Material texture kinds and Image/TileSet/Tilemap
-/// CPU constraints are checked against decoded facts and the executable's selected codec roles.
+/// First-party Scene Sprite, UI Image and material bindings, Material texture kinds and
+/// Image/TileSet/Tilemap CPU constraints are checked against decoded facts and selected codec roles.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -162,6 +167,17 @@ impl NativeFacts {
         let tilemap = ComponentTypeId::new("nara.tilemap.Tilemap");
         let material = ComponentTypeId::new("nara.material2d");
         let sprite = ComponentTypeId::new(SPRITE_COMPONENT_ID);
+        #[cfg(feature = "runtime-ui")]
+        let ui_visual = {
+            let registry = base.plan().schema_validation().snapshot();
+            registry
+                .schema_for_type::<UiVisual>()
+                .map(|schema| schema.id())
+                .filter(|id| {
+                    id.as_str() == UI_VISUAL_ID
+                        && registry.component_schema_owner(id) == Some(UI_SCHEMA_OWNER_ID)
+                })
+        };
         for entity in scene.candidate().document().entities() {
             if let Some(record) = entity.components().get(&tilemap) {
                 let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
@@ -191,7 +207,26 @@ impl NativeFacts {
                     .is_some_and(|owner| owner.as_str() == SPRITE_SCHEMA_OWNER_ID.as_str())
                 && let Some(image) = persisted_sprite_image_value(record.value())
             {
-                validate_sprite_image(base, scene.product(), entity.id(), image)?;
+                validate_scene_image(
+                    base,
+                    scene.product(),
+                    entity.id(),
+                    image,
+                    SceneImageBinding::Sprite,
+                )?;
+            }
+            #[cfg(feature = "runtime-ui")]
+            if let Some(component) = ui_visual
+                && let Some(record) = entity.components().get(component)
+                && let Some(image) = persisted_ui_visual_image_value(record.value())
+            {
+                validate_scene_image(
+                    base,
+                    scene.product(),
+                    entity.id(),
+                    image,
+                    SceneImageBinding::UiVisual,
+                )?;
             }
         }
         Ok(())
@@ -304,11 +339,18 @@ impl NativeFacts {
     }
 }
 
-fn validate_sprite_image(
+enum SceneImageBinding {
+    Sprite,
+    #[cfg(feature = "runtime-ui")]
+    UiVisual,
+}
+
+fn validate_scene_image(
     base: &RuntimeContentBase,
     scene: AssetProductRef,
     entity: &SceneEntityId,
     image: ComponentValueRef<'_>,
+    binding: SceneImageBinding,
 ) -> Result<(), RuntimeContentError> {
     let target = {
         let scratch = asset_reference_decode_work_bytes(image)
@@ -324,31 +366,45 @@ fn validate_sprite_image(
         .member(target)
         .ok_or(RuntimeContentError::UndeclaredProduct)?;
     if base.plan().runtime_codecs().role(member) != Some(RuntimeCodecRole::Image) {
-        return Err(sprite_image_publication_error(scene, entity, target));
+        return Err(scene_image_publication_error(
+            scene, entity, target, binding,
+        ));
     }
     Ok(())
 }
 
-fn sprite_image_publication_error(
+fn scene_image_publication_error(
     scene: AssetProductRef,
     entity: &SceneEntityId,
     target: AssetProductRef,
+    binding: SceneImageBinding,
 ) -> RuntimeContentError {
-    let mut diagnostic = Diagnostic::error(
-        DiagnosticCode::new("runtime.content.sprite-image-publication-unavailable")
-            .expect("engine diagnostic code"),
-        SafeSummary::new(
+    let (code, summary, component, field) = match binding {
+        SceneImageBinding::Sprite => (
+            "runtime.content.sprite-image-publication-unavailable",
             "Scene Sprite image requires an Image codec selected for native publication",
-        )
-        .expect("engine diagnostic summary"),
+            SPRITE_COMPONENT_ID,
+            SPRITE_IMAGE_FIELD_ID,
+        ),
+        #[cfg(feature = "runtime-ui")]
+        SceneImageBinding::UiVisual => (
+            "runtime.content.ui-visual-image-publication-unavailable",
+            "Scene UiVisual background image requires an Image codec selected for native publication",
+            UI_VISUAL_ID,
+            UI_VISUAL_IMAGE_FIELD_ID,
+        ),
+    };
+    let mut diagnostic = Diagnostic::error(
+        DiagnosticCode::new(code).expect("engine diagnostic code"),
+        SafeSummary::new(summary).expect("engine diagnostic summary"),
     );
     let scene = scene.to_string();
     let target = target.to_string();
     for (key, value) in [
         ("scene-product", scene.as_str()),
         ("entity", entity.as_str()),
-        ("component", SPRITE_COMPONENT_ID),
-        ("field", SPRITE_IMAGE_FIELD_ID),
+        ("component", component),
+        ("field", field),
         ("target-product", target.as_str()),
     ] {
         let key = DiagnosticFieldKey::new(key).expect("engine diagnostic field key");
@@ -358,7 +414,7 @@ fn sprite_image_publication_error(
         };
         diagnostic = diagnostic
             .try_with_field(field)
-            .expect("unique bounded Sprite diagnostic fields");
+            .expect("unique bounded Scene image diagnostic fields");
     }
     RuntimeContentError::Asset(AssetRuntimeError::new(diagnostic))
 }

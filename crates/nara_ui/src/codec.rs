@@ -20,7 +20,8 @@ use crate::{UiButton, UiButtonVisuals, UiNode, UiRoot, UiSemantics, UiText, UiTh
 
 const UI_ROOT_ID: &str = "nara.ui.UiRoot";
 const UI_NODE_ID: &str = "nara.ui.UiNode";
-const UI_VISUAL_ID: &str = "nara.ui.UiVisual";
+pub const UI_VISUAL_ID: &str = "nara.ui.UiVisual";
+pub const UI_VISUAL_IMAGE_FIELD_ID: &str = "background.image";
 const UI_TEXT_ID: &str = "nara.ui.UiText";
 const UI_BUTTON_ID: &str = "nara.ui.UiButton";
 const UI_BUTTON_VISUALS_ID: &str = "nara.ui.UiButtonVisuals";
@@ -30,6 +31,7 @@ const UI_THEME_ID: &str = "nara.ui.UiTheme";
 const DIMENSION_FIELDS: &[&str] = &["kind", "value"];
 const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "role", "image"];
 const COLOR_FIELDS: &[&str] = &["red", "green", "blue", "alpha"];
+const IMAGE_BRUSH_KIND: &str = "image";
 
 pub fn register_ui_components(
     registry: &mut ComponentRegistryBuilder,
@@ -230,7 +232,11 @@ fn prepare_image(
     context: &mut ComponentDecodeContext<'_>,
 ) -> Result<PreparedUiImage, ComponentCodecError> {
     let invalid = |message: String| {
-        ComponentCodecError::invalid_asset_ref("background.image", reference.to_string(), message)
+        ComponentCodecError::invalid_asset_ref(
+            UI_VISUAL_IMAGE_FIELD_ID,
+            reference.to_string(),
+            message,
+        )
     };
     let maximum = context.materialization_limits().bytes();
     if let AssetRef::Path(path) = reference {
@@ -281,14 +287,14 @@ fn resolve_prepared_image(
         PreparedUiImage::Resolved(handle) => Ok(handle),
         PreparedUiImage::Path(path) => context.reserve_asset_path(&path).map_err(|error| {
             ComponentCodecError::invalid_asset_ref(
-                "background.image",
+                UI_VISUAL_IMAGE_FIELD_ID,
                 path.as_str(),
                 error.to_string(),
             )
         }),
         PreparedUiImage::Record(record) => context.reserve_asset_record(&record).map_err(|error| {
             ComponentCodecError::invalid_asset_ref(
-                "background.image",
+                UI_VISUAL_IMAGE_FIELD_ID,
                 record.path().as_str(),
                 error.to_string(),
             )
@@ -334,6 +340,16 @@ pub(crate) fn decode_visual_with_context(
         },
     };
     visual.build(handle)
+}
+
+pub fn persisted_ui_visual_image_value(
+    value: ComponentValueRef<'_>,
+) -> Option<ComponentValueRef<'_>> {
+    let background = value.get("background")?;
+    match background.get("kind")?.as_str()? {
+        IMAGE_BRUSH_KIND => brush_image_value(background),
+        _ => None,
+    }
 }
 
 /// Reads authored source selection without constructing a runtime image identity.
@@ -880,7 +896,15 @@ fn read_brush(
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let color = read_flat_color(value, field)?;
     let role = read_string(value.field("role")?, &format!("{field}.role"))?;
-    let image = read_optional_asset_ref(value.field("image").ok(), &format!("{field}.image"))?;
+    let image = brush_image_value(value)
+        .map(nara_reflect::decode_asset_reference_value)
+        .transpose()
+        .map_err(|_| {
+            ComponentCodecError::invalid_field(
+                format!("{field}.image"),
+                "canonical asset reference",
+            )
+        })?;
     match kind.as_str() {
         "solid" if role.is_empty() && image.is_none() => {
             Ok(AuthoredBrush::Plain(UiBrush::Solid(color)))
@@ -889,7 +913,7 @@ fn read_brush(
             &role,
             &format!("{field}.role"),
         )?))),
-        "image" if role.is_empty() => {
+        IMAGE_BRUSH_KIND if role.is_empty() => {
             let asset_ref = image.ok_or_else(|| {
                 ComponentCodecError::invalid_field(format!("{field}.image"), "an asset reference")
             })?;
@@ -906,7 +930,7 @@ fn read_brush(
             format!("{field}.image"),
             "no image for a role brush",
         )),
-        "image" => Err(ComponentCodecError::invalid_field(
+        IMAGE_BRUSH_KIND => Err(ComponentCodecError::invalid_field(
             format!("{field}.role"),
             "an empty role for an image brush",
         )),
@@ -945,13 +969,13 @@ fn brush_value(
         UiBrush::Image { image, tint } => {
             let asset_ref = reference.ok_or_else(|| {
                 ComponentCodecError::invalid_asset_ref(
-                    "background.image",
+                    UI_VISUAL_IMAGE_FIELD_ID,
                     image.to_string(),
                     "opaque image IDs have no persistent asset binding",
                 )
             })?;
             (
-                "image",
+                IMAGE_BRUSH_KIND,
                 *tint,
                 String::new(),
                 nara_reflect::encode_asset_reference_value(asset_ref),
@@ -984,24 +1008,17 @@ fn image_brush_value(
     tint: UiColor,
 ) -> Result<ComponentValue, ComponentCodecError> {
     brush_record(
-        "image",
+        IMAGE_BRUSH_KIND,
         tint,
         String::new(),
         nara_reflect::encode_asset_reference_value(reference),
     )
 }
 
-fn read_optional_asset_ref(
-    value: Option<ComponentValueRef<'_>>,
-    field: &str,
-) -> Result<Option<AssetRef>, ComponentCodecError> {
-    match value {
-        None => Ok(None),
-        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
-        Some(value) => nara_reflect::decode_asset_reference_value(value)
-            .map(Some)
-            .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
-    }
+fn brush_image_value(brush: ComponentValueRef<'_>) -> Option<ComponentValueRef<'_>> {
+    brush
+        .get("image")
+        .filter(|image| image.kind() != ComponentValueKind::Null)
 }
 
 fn read_radii(value: ComponentValueRef<'_>) -> Result<UiCornerRadii, ComponentCodecError> {
