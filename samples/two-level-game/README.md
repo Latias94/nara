@@ -427,7 +427,8 @@ catalog counts are qualification facts rather than limits imposed by the common 
 
 The default `--runtime headless` selection uses a fixed headless recipe even when the cooker
 has the `desktop` feature enabled. The cooker owns `player-bootstrap.rs` as an immutable logical
-input to the original Cargo request, then builds `player` with only `cooked-player`. Its trusted
+input to the original Cargo request, then builds `player` by requesting `cooked-player`, which
+enables its shared `local-player` feature. Its trusted
 build script tracks `NARA_CARGO_GENERATED_RUST_SOURCE` and writes only
 `OUT_DIR/nara-player-bootstrap.rs`. It never writes a generated file into this source project.
 These compiled constants independently select the exact catalog and pack; the Player accepts no expectation,
@@ -495,6 +496,45 @@ The separate ignored `cooked_delivery_sealed_player_worker` is an implementation
 this acceptance and requires its original worker request; do not select every ignored case
 without the production test filter. Ordinary CPU/fallback checks run with
 `--features cook,cooked-player` and no `--run-ignored` selection.
+
+## Source-Free Dedicated Server
+
+Select `--runtime server` in the same compiled cooker. It validates the ordinary authored
+Scenes and Prefab, then uses the manifest's `server` profile to produce a content pack for the
+`server` binary. The target profile installs the fixed-step command runtime and uses
+`PreserveDebt`. The cooker builds the binary with default features disabled and `cooked-server`
+selected. Native window, graphics, UI, audio and controller adapters are excluded from this
+build, along with the game's client animation and WAV dependencies. The core still compiles
+backend-neutral 2D and input types used by the shared processed Host.
+
+```text
+cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --runtime server --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelServer --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
+```
+
+The installation contains `server` (with the platform executable suffix), `content.pack`, and
+`package.json`. Its pack contains the two main Scenes, the marker Scene, and both deferred room
+Scenes. The server uses the original Scene topology, fixed-step collision, semantic commands,
+and checkpoint format. Source files and the cooker cache stay on the development machine.
+
+```text
+server --verify-travel
+server --verify-regions
+server --verify-save ABSOLUTE_CHECKPOINT_PATH
+server --verify-restore ABSOLUTE_CHECKPOINT_PATH
+```
+
+The finite runners report `TWO_LEVEL_SERVER_RESULT`. `--verify-regions` sends external semantic
+commands through the same queue used by the game. Save and Restore use separate invocations.
+The sample provides a local authoritative simulation and finite verification entry points.
+Networking and a persistent service loop remain future work. [Dedicated Cook workflow](../../docs/guides/cooked-player-delivery.md#cook-a-dedicated-server)
+
+The installed server regression builds, inspects, relocates and launches the actual package.
+Run it from the engine root with the same shared target and serial environment as the Player
+acceptance above:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook --test server_delivery --run-ignored only -E 'test(=production_cooker_delivers_the_source_free_two_level_server)' --test-threads=1 --no-fail-fast --no-tests fail
+```
 
 ## Source-Free Desktop Player
 

@@ -117,6 +117,29 @@ available for direct typed CPU consumption. An Image transform that invalidates 
 assembly. Pack startup admits the catalog, extents and current demand. Later original-file
 corruption can reject a Deferred acquisition while preserving the current Scene.
 
+### Cook A Dedicated Server
+
+Use `prepare_project_server_content` when a game ships a server derived from the same authored
+Scenes. Pass the ordinary `ProjectCookRequest` for source validation and a `ProjectServerCookTarget`
+with the server candidate, executable recipe and component types to omit. Both candidates come
+from the same opened project manifest and select the same authored content roots. Select the
+`server` preset and clear an inherited source action map with `clear_action_map = true` in the
+profile's `input` section. The target recipe installs semantic gameplay commands without the
+raw Input plugin.
+
+List only component types the game has verified it can run without. The cooker retains every
+entity, its hierarchy and provenance, and validates surviving references against the target
+Schema. The target can select a subset of the source Schema owners. Each selected owner's
+current and predecessor definitions must agree with the source. Artifacts needed by the retained
+components follow the ordinary dependency closure. Game-specific build contributions remain
+explicit. The admitted source profile still validates all of its authored inputs, and the
+existing publication fence protects those inputs during the build.
+
+Build and publish the exact server executable through the same generated expectation and
+captured package flow. Audit the shipping Cargo selection, delivered member table and an actual
+running World separately. Two-Level Game exposes this path as `cook --runtime server`. The
+source-free server opens its compiled pack relative to the executable.
+
 ## Bind The Player
 
 Native construction and publication live in `project_tooling::player_package`:

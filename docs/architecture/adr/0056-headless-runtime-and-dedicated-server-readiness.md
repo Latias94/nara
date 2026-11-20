@@ -85,6 +85,13 @@ Rules:
 - Headless asset and project loading follows the same untrusted-input, asset-root containment,
   import-cache, and migration policies as desktop/editor profiles. Importers must not require GPU
   resources unless they are render-backend preparation systems.
+- A dedicated server Cook may project the same authored Scenes into its own deployment. The
+  source profile owns full authoring admission and the original publication fence. The selected
+  Server profile and recipe own Runtime configuration, Schema, codecs and installed services.
+  The game chooses explicit component omissions. The Scene cooker preserves entity identity,
+  hierarchy and provenance and validates the retained data through the ordinary processed gate.
+  The cooked package follows the retained dependencies. Its executable, member table and
+  installed services have separate qualification. [Dedicated Cook workflow](../../guides/cooked-player-delivery.md#cook-a-dedicated-server)
 
 ## Input and Command Boundary
 

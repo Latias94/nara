@@ -12,6 +12,88 @@ seven-case processed regressions, independent reviews and explicit native/budget
 The [guide](../guides/cooked-player-delivery.md) documents the production interfaces. This closes
 the selected finite outcome without completing all R7 or the full foundation Goal.
 
+## Dedicated Server From Authored Scenes
+
+Use the same Two-Level Game source documents for the local Players and the dedicated server.
+The compiled cooker loads the admitted authoring profile through the existing source delivery
+owner. The game selects the Server profile from that same manifest, a server recipe, and an
+explicit set of presentation component types to omit. Both profiles must use the same physical
+project and source roots. Each target Schema owner must match the source composition's current
+and predecessor catalogs. The server configuration clears the inherited action map.
+
+Apply component omissions while the existing Scene cooker makes its independent flat output.
+Preserve entity identity, hierarchy, Prefab provenance, surviving references and the source
+selection's complete file observations. The original cooked builder traverses dependencies from
+the projected payloads and the target recipe's selected build contributions. A retained component
+still requires its target definition and every mandatory dependency. The same package owner binds
+the target catalog to the generated expectation and captured `server` executable.
+
+The game keeps one simulation, Scene owner, command queue and checkpoint format. Exercise
+movement, collision, scoring, marker topology, both auxiliary regions, primary travel, Retry,
+and checkpoint Save followed by Restore in a fresh relocated process. Inspect the actual server
+World and delivered catalog, and audit the native compiler's locked target dependency selection.
+The package must contain only the five Scene Products needed by this game, with two declared
+travel roots. The server binary excludes native graphics and window adapters, UI, device audio,
+controller backends, and project tooling. Audit the backend-neutral content and input vocabulary
+separately. The selected scope is a local authoritative runtime consumer without networking.
+
+Pinned Godot `b070e63b161aa816afac71dcfc9d60859d38f220` selects retained, stripped and removed
+resources at export. Its placeholder semantics are owned by the resource type. Pinned Bevy
+`779770720e6ad916c1de38cf66a67d0e079ed1e3` uses Cargo features and plugin composition as separate
+decisions. The two references support separate evidence for delivered content, executable
+dependencies and installed runtime services. [Godot export plugin](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/export/dedicated_server_export_plugin.cpp) · [Bevy headless example](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/examples/app/headless.rs)
+
+### Dedicated Server Qualification
+
+The first Windows x64 Rust 1.95.0 release engine selection passes 106 cases, including projected
+Prefab identity and surviving references, budget boundaries, original Cook, and processed
+content (`ab9bcb6f-049d-4c39-99d5-877ef0fcf822`). Review extended the final publication
+fence to record the source action map's sidecar and Product ownership even when the server
+omits that member. The two selections compare the actual content roots and allow a different
+cache path. The final compiled Cook and package selection passes 28/28 in
+`66191f17-7f27-49e6-b738-092665e2ed8b`. A new sidecar for an originally unaccompanied Input and a
+second source claiming that same UUID both refuse publication.
+
+The game builds the generated entry with only the `cooked-server` feature and passes the
+server-only all-target check. Local Player features still select the existing behavior and
+now imply `local-player`. Development Host compares the exact requested placement and the
+compiler's resolved feature list separately. The Windows release sample selection passes
+309 cases across 15 test binaries (`4e871d21-3e36-4f51-b87c-79bd447d7396`). It includes
+authored and cooked content, exact source resume, runtime collision, a local pickup whose
+Sprite is temporarily absent, and the stricter Development Host feature boundary.
+Both companion process tests pass in `ab59349e-eaf0-4908-af8c-b88808e9971a`. The relocated
+desktop Player presents through Windows DX12, drives the native keyboard path with injected
+input, saves and restores in a fresh process. The Development Host builds actual Rust body and
+private-structure edits and adopts fresh candidates after their probe processes retire.
+
+The production Windows release delivery passes both placements in
+`6e26cc7c-214f-459d-968e-bc0158bed513`. The ordinary headless Player remains source-free after
+relocation. The `server` package has exactly two declared travel roots, five Scene members,
+two Immediate and two Deferred Scene edges, and zero non-Scene members. The test decodes all
+five Scene payloads under the target Schema, checks each authored `ProjectLocation`, and checks
+the published pack, executable, generated source input and Cargo lock digests. The fixture's
+source and cache copies are removed before execution from an unrelated empty working directory
+with a sealed environment and unavailable tool path.
+
+The running server verifies that `FixedTime` preserves debt and that the World lacks raw Input,
+Windows, renderer state, and Image, Material and TileSet services. Its region trajectory uses
+eleven externally submitted command identities, all acknowledged by the original queue. It
+finds both relics, closes one room while retaining the original other room, reopens the first
+room, and confirms that Cavern travel retires both and the original Meadow. One held movement
+tick at the west wall leaves the explorer at its collision contact. Separate finite processes
+verify pickups, marker reconstruction, Retry, a score-30 Save, and fresh Restore of that file.
+A valid pack with a different catalog digest refuses before startup. Original processes retire
+normally without termination intervention.
+
+The locked Windows target's Cargo `normal,build` graph has 170 unique package names for the
+published `server` selection. Native graphics, Winit, UI and Editor packages, audio-device and
+controller backends, the game's Sprite animation and WAV packages, and development tooling are
+outside that graph. `nara_input`, `nara_window` and the stock CPU 2D crates remain compiled
+through the shared processed Host; their runtime services are absent in the observed server
+World. The current evidence covers one game and target. Foreign execution, a long-running
+service loop, networking, and processed exact-state reconstruction remain open.
+[Delivered process workflow](../../samples/two-level-game/tests/support/server_delivery/mod.rs) · [Cargo graph audit](../../samples/two-level-game/tests/support/server_delivery/graph.rs)
+
 ## Shared Compiled Project Cook Entry
 
 Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below, after

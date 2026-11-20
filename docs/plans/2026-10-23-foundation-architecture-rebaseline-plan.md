@@ -1213,8 +1213,9 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
 qualified, including finite source Scene references and global source/processed Input;
 explicit Cargo build/capture and Windows headless/desktop cooked Player delivery are qualified
-within their recorded scopes. Complete server stripping and additional target/platform
-qualification remain open.
+within their recorded scopes. Windows dedicated-server delivery now has a qualified game,
+published member set and audited executable graph. Additional target/platform qualification
+and finer separation of the backend-neutral processed Host dependencies remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 The [explicit Cargo selection unit](2026-10-31-explicit-cargo-build-selection-plan.md) now owns
@@ -1402,6 +1403,15 @@ failed candidate retaining last-good executable/data. State non-hermetic inputs 
 source-capture consistency. Foreign-target build-only is not native execution evidence.
 
 Delete implicit profile-name-to-Cargo policy and code/source/package generation conflation.
+
+The [dedicated Server qualification](2026-10-31-cooked-player-delivery-plan.md#dedicated-server-qualification)
+uses the same authored Two-Level Scenes and Prefab with a selected server recipe. Cook omits
+explicit client component types before encoding and follows only the resulting delivery edges.
+The Windows release package retains five Scenes and two travel roots. Independent process
+trajectories verify command-driven collision, concurrent regions and coordinated travel,
+pickups, Retry, Save and fresh Restore. The actual Cargo native-client exclusions and
+the remaining CPU dependencies are tracked separately from the services installed in the
+World. Networking, long-running service operation and the foreign target proof remain open.
 
 ## R8: External Render Feature And Host-Local Execution
 
