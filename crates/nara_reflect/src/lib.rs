@@ -87,8 +87,9 @@ pub use property::{
     ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
     ComponentPropertyReadBudget, ComponentPropertySchemaClaim, ComponentPropertyStep,
     ResolvedComponentProperty, replace_component_property, resolve_component_property,
-    resolve_component_property_in_root, resolve_component_property_schema_claim,
-    resolve_component_property_schema_in_root, resolve_component_property_with_limits,
+    resolve_component_property_in_root, resolve_component_property_read_path_in_root,
+    resolve_component_property_schema_claim, resolve_component_property_schema_in_root,
+    resolve_component_property_with_limits,
 };
 pub use provider::{
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,

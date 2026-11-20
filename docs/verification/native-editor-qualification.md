@@ -171,6 +171,10 @@ Host. Require its exact `Inspected` status in an accepted Shell frame and acknow
 presented control. Check that document, preview and disk facts survive the inspection. The
 independent semantic panel tests qualify explicit promotion and stale source refusal.
 
+After the observed Inspector applies its multilingual text, page that field through the
+Application action route on the same native Host. Reconstruct the exact value and check that
+history and selection stay in place. The presented Undo must stale the original continuation.
+
 Build the separately locked `drawn_editor` consumer and inspect its normal/build/feature graph
 using its [documented commands](../../tests/fixtures/editor-ui-host-consumer/README.md).
 Launch the actual production binary and public-entry consumer separately from the hidden native

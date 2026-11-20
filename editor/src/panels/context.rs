@@ -10,9 +10,9 @@ use nara::{
         EditorDocumentOpenId, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
         EditorEntityPage, EditorEntityQuery, EditorPrefabInspectionId,
         EditorPrefabInspectionRejection, EditorPrefabPropertyClaimTarget,
-        EditorPropertyObservation, EditorPropertyRead, EditorPropertyReadLimits,
-        EditorSourceToolAction, EditorSourceToolError, EditorSourceToolReview,
-        PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+        EditorPropertyObservation, EditorPropertyPage, EditorPropertyPageRead, EditorPropertyRead,
+        EditorPropertyReadLimits, EditorSourceToolAction, EditorSourceToolError,
+        EditorSourceToolReview, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
     },
 };
 
@@ -99,6 +99,14 @@ impl EditorPanelContext<'_, '_> {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         self.application.read_document_property(request)
+    }
+
+    /// Reads one bounded page of a source property through the document's original owner.
+    pub fn read_document_property_page(
+        &self,
+        request: EditorPropertyPageRead,
+    ) -> Result<EditorPropertyPage, EditorDocumentQueryRejection> {
+        self.application.read_document_property_page(request)
     }
 
     /// Borrows the retained source observation for the exact inspection request.

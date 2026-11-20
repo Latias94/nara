@@ -3,9 +3,10 @@ use nara_core::SourceUniverseId;
 use super::route_logical_bytes;
 use crate::{
     AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, EntityReference,
-    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
-    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop, ReferenceInputId,
-    ReferenceInputIdError, SceneEntityId, SourceDocumentKey, SourceDocumentKind, StableAssetId,
+    EntityReferenceCost, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+    PersistentRuntimeReference, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
+    ReferenceInputId, ReferenceInputIdError, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
+    StableAssetId,
 };
 
 const UNIVERSE: &str = "72011426-37e2-48ba-bc06-78841468889a";
@@ -187,8 +188,10 @@ fn structural_target_conversion_consumes_the_route_and_origin_without_cloning() 
 fn native_reference_costs_preserve_the_existing_node_and_byte_contract() {
     for value in ["root/player".to_string(), "a".repeat(4096)] {
         let reference = EntityReference::SceneLocal { entity: id(&value) };
-        assert_eq!(reference.cost().nodes(), 1);
-        assert_eq!(reference.cost().logical_bytes(), value.len());
+        let cost = reference.cost();
+        assert_eq!(cost.nodes(), 1);
+        assert_eq!(cost.logical_bytes(), value.len());
+        assert_cost_up_to_boundaries(&reference, cost);
     }
     for namespace in ["save.main".to_string(), "n".repeat(256)] {
         let reference = EntityReference::Persistent {
@@ -197,8 +200,10 @@ fn native_reference_costs_preserve_the_existing_node_and_byte_contract() {
                 PersistentRuntimeId::parse_str(STABLE_ID).unwrap(),
             ),
         };
-        assert_eq!(reference.cost().nodes(), 1);
-        assert_eq!(reference.cost().logical_bytes(), namespace.len() + 16);
+        let cost = reference.cost();
+        assert_eq!(cost.nodes(), 1);
+        assert_eq!(cost.logical_bytes(), namespace.len() + 16);
+        assert_cost_up_to_boundaries(&reference, cost);
     }
 }
 
@@ -215,7 +220,9 @@ fn authored_costs_charge_the_root_and_every_typed_endpoint() {
         let cost = reference.cost();
         assert_eq!(cost.nodes(), 2);
         assert_eq!(cost.logical_bytes(), bytes);
-        assert_eq!(EntityReference::Authored { reference }.cost(), cost);
+        let reference = EntityReference::Authored { reference };
+        assert_eq!(reference.cost(), cost);
+        assert_cost_up_to_boundaries(&reference, cost);
     }
 }
 
@@ -253,15 +260,22 @@ fn authored_costs_include_complete_named_location_and_stable_asset_keys() {
             after.logical_bytes(),
             before.logical_bytes() + 6 + key_bytes
         );
-        assert_eq!(
-            EntityReference::Authored {
-                reference: reference.clone(),
-            }
-            .cost(),
-            after
-        );
+        let wrapped = EntityReference::Authored {
+            reference: reference.clone(),
+        };
+        assert_eq!(wrapped.cost(), after);
+        assert_cost_up_to_boundaries(&wrapped, after);
     }
     assert_eq!(reference.cost().nodes(), 8);
+}
+
+fn assert_cost_up_to_boundaries(reference: &EntityReference, cost: EntityReferenceCost) {
+    let nodes = cost.nodes();
+    let bytes = cost.logical_bytes();
+    assert_eq!(reference.cost_up_to(nodes, bytes), Some(cost));
+    assert_eq!(reference.cost_up_to(nodes, usize::MAX), Some(cost));
+    assert_eq!(reference.cost_up_to(nodes - 1, bytes), None);
+    assert_eq!(reference.cost_up_to(nodes, bytes - 1), None);
 }
 
 #[test]

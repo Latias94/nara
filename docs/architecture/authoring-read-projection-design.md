@@ -1,7 +1,7 @@
 ---
 title: Selection-Independent Authoring Read Projections
 date: 2026-10-25
-status: Direct source discovery and selected Prefab field inspection; full R2 remains open
+status: Direct source discovery, selected Prefab field inspection and property value pages
 ---
 
 # Selection-Independent Authoring Read Projections
@@ -492,6 +492,85 @@ their own acceptance.
 [Independent panel workflow](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/unopened_authoring.rs)
 · [Host origin and close controls](../../src/project_host/runtime/tests/browser_preparation.rs)
 
+### Selected Property Value Pages
+
+A tool that examines a long description or a large collection needs to read it without
+increasing the complete-value copy ceiling. It starts with the same named document, entity,
+component and durable property selector as a complete read. Scene/Prefab resolves the admitted
+value and its Present, Defaulted or Missing origin through the original selector walker. The
+page inspects the borrowed payload at that location. A tool may select a wire key or list index
+within the value using a relative field path. A position is local to this observation. Prepared
+editing continues to require a durable property selector and its exact document basis.
+
+Lists report their length and contiguous item positions. Maps report their length and keys in
+canonical order; continuation seeks after the last admitted key. Immediate children report a
+container length, text byte length or complete scalar. Their payload can be opened in another
+page without copying unrequested descendants. Text pages contain complete UTF-8 scalars and
+report byte offsets for concatenation. The result preserves explicit Null, empty containers,
+empty text and Missing. A path into Missing or an absent or incompatible child refuses.
+
+Each continuation retains the original workspace, kind, document basis, selected property and
+relative location. After checking these facts, it borrows the same root and follows the wire
+position already resolved by Reflect. Resuming thus avoids repeating the selector's declaration
+and keyed-list search. Save, selection and edits in another document preserve the basis. Target
+edit, history navigation, Reopen, Schema adoption and project replacement follow the current
+basis rules. The Session refuses new page reads while Close is pending. A page is an owned
+historical observation that can outlive the workspace.
+
+Use the existing read limits. The selected container or text costs one output node. Returned
+container and text headers cost one node each. Copied scalars retain their canonical value cost,
+including reference routes. Copy work charges text chunks, Map keys and scalar data. A Map
+continuation shares the returned key, and the page and continuation share their durable target
+metadata. Relative path keys draw from the scan allowance, so a key returned by a Map page can
+open its child even above the durable selector metadata ceiling. Selector lookup, relative path
+probes and newly examined child identities share that allowance. A Map continuation seeks past
+its admitted key without charging it as a new child. These counts bound logical work. Native
+allocation, index comparison time and Editor frame work are separate.
+An insufficient allowance either returns actual progress with a continuation or refuses. A
+continuation means there is more data. Its next read can refuse under its supplied limits.
+An indivisible key, scalar or UTF-8 code point that cannot fit on an empty page returns the
+typed value-budget refusal. Complete-property reads keep their complete-value contract.
+
+Godot's array Inspector addresses each visible page through its array slots, and Bevy exposes
+borrowing access to individual list elements and map values. These references support paging
+the selected structure. Nara's page additionally enforces exact working-copy and Schema
+identity and keeps display positions separate from edit authority.
+[Godot array at `b070e63b161a`](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties_array_dict.cpp#L510-L542)
+· [Bevy List at `779770720e6a`](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_reflect/src/list.rs#L59-L112)
+· [Bevy Map at `779770720e6a`](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_reflect/src/map.rs#L52-L78)
+
+Qualification uses a registered independently locked panel with a non-active source. A
+complete read refuses under the selected allowance. The panel reads actual pages, derives a
+durable prepared edit and uses ordinary Undo, Redo, Save and Reopen. Owner tests exercise
+replay, terminal and exact budget boundaries, source-basis refusals, and repeated text or
+collection pages without reading unrelated payloads.
+
+#### November 20 property page verification
+
+The first focused Windows release run `0ce0a949-eca5-4728-9b6a-1141bcefa21c` passed 11/11 before
+review corrections. A broader fresh run `481f0f3b-2f22-4f42-a149-bfdd51a497d0` passed all seven
+page cases and 220/221 overall. An existing combined oversized and over-depth selector exposed
+changed diagnostic priority. The shared read path now admits metadata before returning the
+depth diagnostic, matching existing complete reads and discovery. The corrected Tooling
+release run `0c870eac-0d8c-4feb-b76d-c7c5e932b69a` passes 221/221 with one diagnostic skipped.
+
+Review distinguishes returned Map keys from durable selector metadata. A long key now opens
+its text through the relative scan allowance. It also found repeated keyed-list searches and
+a Map anchor charge that could block progress after the preceding row fit. The cursor now
+reuses the resolved wire position and seeks past the admitted Map key. Exact source fences
+remain at the Workspace. The Session owns synchronous and routed close admission. A copied
+entity reference uses the identity owner's bounded cost check before cloning.
+
+Windows nextest run `d0471e8c-d255-47f7-a9f8-fbbfecfc2c2d` passes 2/2. It checks the same-batch
+Host Close gate and reads the committed `Observed 属性 café` text in pages after a native DX12
+Inspector edit. Actual Undo restores the earlier value and invalidates the prior continuation.
+The Identity and Reflect libraries pass 392/392 in release run
+`015cb0d2-02cc-4dd7-8cf6-d303952e48d9`, shared with the separate spatial regression selection.
+The independently locked `prepared_authoring` target passes 19/19 in release run
+`e60bdfae-6ca6-4053-980a-57856ec12505`. The registered Scene and Prefab tests each page 4,097
+entries in a non-active document, compute a durable edit and verify the complete result through
+Undo, Redo, Save and Reopen. The same run includes separate Cook and camera work.
+
 ## Acceptance And Experiment Stops
 
 - Source Scene/Prefab tests distinguish actual versus catalog-only components, all retained
@@ -509,9 +588,8 @@ their own acceptance.
   keyed-item scans have their explicit separate budget, not a logarithmic lookup promise. Do not
   freeze thresholds from fabricated timings.
 - Reconcile ADRs 0047/0118 before shipping changed public contracts. Update the implementation
-  ledger only after actual owner/public evidence. Selector-directed reads and one-level direct
-  member discovery do not close durable Prefab overlay, recursive/collection discovery, value
-  pagination, unopened source queries, full R2 or the Goal.
+  ledger only after actual owner/public evidence. Full field query coverage, durable Prefab overlay,
+  and the remaining R2 preparation and cost work retain their owning acceptance requirements.
 
 If the borrowed view requires reimplementing recursive default materialization, a second
 classification service or a generic query planner, stop and deepen the existing source/Reflect seam instead. If inventory

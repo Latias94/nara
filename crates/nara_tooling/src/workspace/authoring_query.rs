@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
-use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentMemberPathSegment,
-    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertyStep, ComponentTypeId,
+    ComponentPropertyPath, ComponentPropertyStep, ComponentTypeId,
 };
 use nara_scene::{
-    AuthoringEntityView, AuthoringPropertyChild, AuthoringPropertyChildrenContinuation,
-    AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringRecordFact,
-    PrefabInstancePath, SceneEntityId,
+    AuthoringComponentView, AuthoringEntityView, AuthoringPropertyChild,
+    AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPosition,
+    AuthoringPropertyValue, AuthoringRecordFact, PrefabInstancePath, SceneEntityId,
 };
 
 use super::{
@@ -20,12 +19,14 @@ use crate::{
     EditorAuthoringProjection, EditorAuthoringPropertyStatus, EditorAuthoringQuery,
     EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
     EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorPropertyObservation, EditorPropertyRead, EditorPropertyValue,
+    EditorPropertyObservation, EditorPropertyRead, EditorPropertyTarget, EditorPropertyValue,
     authoring_query::{
         AuthoringCursorPosition, AuthoringPagePosition, PrefabPropertyClaimSource,
         PropertyPagePosition, property_metadata_bytes,
     },
 };
+
+mod value_page;
 
 pub(super) fn rejected_basis_report(
     workspace: &EditorWorkspace,
@@ -369,22 +370,11 @@ impl EditorWorkspace {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         let slot = self.resolve_document_query_slot(&request.target.basis, None)?;
-        let metadata_bytes = request.target.metadata_bytes();
-        if metadata_bytes > request.limits.max_metadata_bytes() {
-            return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
-        }
-        if request.target.property.steps.len() > nara_reflect::ComponentPropertyPath::MAX_STEPS {
-            return Err(nara_scene::AuthoringReadError::Property(
-                nara_reflect::ComponentPropertyError::PathDepthLimit,
-            )
-            .into());
-        }
-        let mut budget = ComponentPropertyReadBudget::new(
-            ItemLimit::new(request.limits.max_scan_entries()).expect("validated scan limit"),
-            ByteLimit::new(request.limits.max_scan_logical_bytes()).expect("validated scan limit"),
-        );
-        let root = entity_view(slot, &request.target.entity)?
-            .component(&request.target.component)?
+        let metadata_bytes = request
+            .target
+            .admitted_metadata_bytes(request.limits.max_metadata_bytes())?;
+        let mut budget = request.limits.scan_budget();
+        let root = property_component(slot, &request.target)?
             .property_value(&request.target.property, &mut budget)?;
         let (value_nodes, value_logical_bytes) = match root {
             AuthoringPropertyValue::Present(value) | AuthoringPropertyValue::Defaulted(value) => {
@@ -415,6 +405,13 @@ impl EditorWorkspace {
             scanned_logical_bytes: budget.scanned_logical_bytes(),
         })
     }
+}
+
+fn property_component<'a>(
+    slot: &'a EditorDocumentSlot,
+    target: &EditorPropertyTarget,
+) -> Result<AuthoringComponentView<'a>, EditorDocumentQueryRejection> {
+    Ok(entity_view(slot, &target.entity)?.component(&target.component)?)
 }
 
 fn entity_view<'a>(

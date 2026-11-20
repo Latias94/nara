@@ -1223,6 +1223,38 @@ root subtree. An open-document property query discovers direct children one pare
 A property read returns the complete selected value within its copy allowance. Prepared panel
 submission has its own contract and qualification scope.
 
+## Page A Large Authored Property
+
+Use `read_document_property_page` on the panel context when a selected value needs several
+reads. Start with the `EditorPropertyTarget` used by a complete property read and an empty
+relative path. [Complete property reads](#query-a-non-active-document)
+
+```rust,ignore
+let page = context.read_document_property_page(EditorPropertyPageRead {
+    position: EditorPropertyPagePosition::Start {
+        target,
+        path: ComponentFieldPath::empty(),
+    },
+    limits: EditorPropertyReadLimits::new(4096, 128, 16 * 1024)?,
+})?;
+```
+
+Use `EditorPropertyPagePosition::Continue(cursor)` with `page.next` to read more. The same
+request can also be submitted as `EditorAction::ReadDocumentPropertyPage` and returns
+`EditorActionOutcome::DocumentPropertyPage` through the ordinary panel result queue.
+
+The page keeps the value's Present, Defaulted or Missing origin. List pages give their start
+index and item count for the whole list. Map pages use sorted wire keys. A collection row
+contains its complete scalar or the length of its text or child container. To inspect a child
+branch, start a new read at the relative wire key or list index within the selected property.
+Relative path lookups count against the scan allowance. The metadata allowance covers the
+durable property target. Text chunks give byte offsets and preserve UTF-8 code-point boundaries.
+Increase the allowance within the published caps if a single key, scalar or code point cannot fit.
+
+The continuation keeps its original document basis. An edit or Reopen requires a new read
+from a fresh basis. Use a durable Schema selector when preparing an edit based on the result.
+[Value page contract](../architecture/authoring-read-projection-design.md#selected-property-value-pages)
+
 ## Inspect An Unopened Scene Or Prefab
 
 Submit `EditorAction::ProjectBrowser(EditorProjectBrowserAction::InspectSource { relative_path })`

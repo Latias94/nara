@@ -55,8 +55,10 @@ pub enum EditorDocumentQueryRejection {
     InvalidPropertyReadLimits,
     /// The aggregate owned observation's UTF-8 metadata exceeds the operation's limit.
     MetadataBudgetExceeded,
-    /// The selected value exceeds its node or logical-byte limit; nothing is truncated.
+    /// The complete value or the next indivisible part of a page exceeds its copy allowance.
     ValueBudgetExceeded,
+    /// The relative read path has no child at this step in the observed value.
+    InvalidValuePath { step: usize },
     /// Actual presence/readability/default interpretation is rejected by the source owner.
     Source(AuthoringReadError),
     /// Bounded source Prefab declaration observation is rejected by its owning session.
@@ -103,6 +105,9 @@ impl fmt::Display for EditorDocumentQueryRejection {
                 formatter.write_str("document query metadata budget exceeded")
             }
             Self::ValueBudgetExceeded => formatter.write_str("property read value budget exceeded"),
+            Self::InvalidValuePath { step } => {
+                write!(formatter, "property value path has no child at step {step}")
+            }
             Self::Source(error) => error.fmt(formatter),
             Self::PrefabDeclaration(error) => error.fmt(formatter),
         }

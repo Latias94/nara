@@ -206,15 +206,18 @@ impl AuthoredEntityReference {
     /// names are charged for every hop. Both counters saturate on overflow.
     #[must_use]
     pub fn cost(&self) -> EntityReferenceCost {
-        let logical_bytes = match &self.target {
+        EntityReferenceCost {
+            nodes: self.cost_nodes(),
+            logical_bytes: self.logical_bytes_up_to(usize::MAX).unwrap_or(usize::MAX),
+        }
+    }
+
+    fn logical_bytes_up_to(&self, maximum: usize) -> Option<usize> {
+        let endpoint_bytes = match &self.target {
             AuthoredReferenceTarget::Entity(entity) => entity.entity().as_str().len(),
             AuthoredReferenceTarget::Input(input) => input.as_str().len(),
         };
-        EntityReferenceCost {
-            nodes: self.cost_nodes(),
-            logical_bytes: route_logical_bytes(&self.through, logical_bytes, usize::MAX)
-                .unwrap_or(usize::MAX),
-        }
+        route_logical_bytes(&self.through, endpoint_bytes, maximum)
     }
 }
 
@@ -267,7 +270,7 @@ impl EntityReference {
     }
 
     /// Returns the logical node count without visiting an authored reference's hops.
-    /// Byte accounting remains in [`Self::cost`]; callers can admit this count first.
+    /// Use [`Self::cost_up_to`] to check both node and byte ceilings.
     #[must_use]
     pub fn cost_nodes(&self) -> usize {
         match self {
@@ -298,6 +301,36 @@ impl EntityReference {
                     .saturating_add(PERSISTENT_RUNTIME_UUID_BYTES),
             },
             Self::Authored { reference } => reference.cost(),
+        }
+    }
+
+    /// Returns the same saturating cost as [`Self::cost`] if both inclusive ceilings hold.
+    ///
+    /// Checks the constant-time node count first. For a finite byte ceiling, stops at the
+    /// endpoint or first hop that puts the byte count over the ceiling.
+    #[must_use]
+    pub fn cost_up_to(
+        &self,
+        max_nodes: usize,
+        max_logical_bytes: usize,
+    ) -> Option<EntityReferenceCost> {
+        let nodes = self.cost_nodes();
+        if nodes > max_nodes {
+            return None;
+        }
+
+        match self {
+            Self::Authored { reference } if max_logical_bytes != usize::MAX => {
+                let logical_bytes = reference.logical_bytes_up_to(max_logical_bytes)?;
+                Some(EntityReferenceCost {
+                    nodes,
+                    logical_bytes,
+                })
+            }
+            _ => {
+                let cost = self.cost();
+                (cost.logical_bytes() <= max_logical_bytes).then_some(cost)
+            }
         }
     }
 }

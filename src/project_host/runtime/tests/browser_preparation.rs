@@ -875,6 +875,57 @@ fn rejected_workspace_exit_does_not_cancel_an_already_admitted_browser_open() {
 }
 
 #[test]
+fn property_page_reads_refuse_pending_close_started_in_the_same_batch() {
+    use nara_reflect::{ComponentFieldPath, ComponentPropertyPath};
+    use nara_tooling::{
+        EditorDocumentQueryRejection, EditorPropertyPagePosition, EditorPropertyPageRead,
+        EditorPropertyReadLimits, EditorPropertyTarget,
+    };
+
+    let project = project("property-page-pending-close");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "draft-name");
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let request = EditorPropertyPageRead {
+        position: EditorPropertyPagePosition::Start {
+            target: EditorPropertyTarget {
+                basis: editor.document_query_basis(document).unwrap(),
+                entity: nara_identity::SceneEntityId::new("editable-name").unwrap(),
+                component: ComponentTypeId::new("nara.scene.Name"),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("value")),
+            },
+            path: ComponentFieldPath::empty(),
+        },
+        limits: EditorPropertyReadLimits::new(1024, 1, 1024).unwrap(),
+    };
+    let before_close = editor.read_document_property_page(request.clone());
+    let report = editor.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                EditorWorkspaceIntent::CloseDocument { document },
+            )),
+            EditorAction::ReadDocumentPropertyPage(request.clone()),
+        ],
+    ));
+    let phase = editor.workspace_intent_view().phase();
+    let during_close = editor.read_document_property_page(request);
+    close(&mut editor);
+
+    assert!(before_close.is_ok(), "{before_close:?}");
+    assert_eq!(phase, Some(EditorWorkspaceIntentPhase::AwaitingDecision));
+    assert_eq!(
+        report.unwrap().outcomes(),
+        [
+            EditorActionOutcome::WorkspaceIntent(EditorWorkspaceIntentRequestResult::Accepted),
+            EditorActionOutcome::DocumentPropertyPage(Err(EditorDocumentQueryRejection::Closing)),
+        ]
+    );
+    assert_eq!(during_close, Err(EditorDocumentQueryRejection::Closing));
+}
+
+#[test]
 fn explicit_close_retains_its_decision_while_cancelled_open_physically_returns() {
     for decision in [EditorCloseDecision::Cancel, EditorCloseDecision::Save] {
         let project = project("browser-open-dirty-cancel-or-save");

@@ -1,3 +1,11 @@
+use nara::{
+    reflect::{ComponentFieldId, ComponentFieldPath, ComponentPropertyPath, ComponentTypeId},
+    tooling::{
+        EditorDocumentQueryRejection, EditorPropertyPageData, EditorPropertyPagePosition,
+        EditorPropertyPageRead, EditorPropertyPageValue, EditorPropertyReadLimits,
+        EditorPropertyTarget,
+    },
+};
 use nara_ui_kernel::{UiAccessibilityInput, UiSeatId, UiSemanticFact};
 
 use crate::platform::drawn::operations::Observation;
@@ -195,10 +203,22 @@ impl Workflow<'_> {
         if self.native.operate(&disabled, &request).is_ok() || self.state()? != applied {
             return Err("A disabled observed action changed source or reported success".into());
         }
+        let continuation =
+            self.read_presented_name(applied.document, &selected, "Observed 属性 café")?;
+        if self.state()? != applied || self.selected()? != selected {
+            return Err("Reading the presented field changed the source or selection".into());
+        }
         if self.observed_activate(SHELL, "Undo")?.len() != 1 {
             return Err("Observed Undo lost its original action ID".into());
         }
         self.expect_rows(&before, before.undo, 1)?;
+        if self.setup_action(EditorAction::ReadDocumentPropertyPage(continuation))?
+            != EditorActionOutcome::DocumentPropertyPage(Err(
+                EditorDocumentQueryRejection::StaleRevision,
+            ))
+        {
+            return Err("An old text page survived the actual source Undo".into());
+        }
         if self.panel_field_value(INSPECTOR, &field)? != original_value {
             return Err("Observed Undo failed to restore the original field value".into());
         }
@@ -269,5 +289,74 @@ impl Workflow<'_> {
         }
         self.observed_activate(HIERARCHY, &format!("Select {selected}"))?;
         Ok(())
+    }
+
+    fn read_presented_name(
+        &mut self,
+        document: EditorDocumentId,
+        entity: &SceneEntityId,
+        expected: &str,
+    ) -> TestResult<EditorPropertyPageRead> {
+        let basis = self
+            .native
+            .application
+            .document_query_basis(document)
+            .map_err(|rejection| rejection.to_string())?;
+        let target = EditorPropertyTarget {
+            basis,
+            entity: entity.clone(),
+            component: ComponentTypeId::new("nara.scene.Name"),
+            property: ComponentPropertyPath::new(ComponentFieldId::new("value")),
+        };
+        let limits =
+            EditorPropertyReadLimits::new(1024, 1, 7).map_err(|rejection| rejection.to_string())?;
+        let mut position = EditorPropertyPagePosition::Start {
+            target: target.clone(),
+            path: ComponentFieldPath::empty(),
+        };
+        let mut result = String::new();
+        let mut first_continuation = None;
+        loop {
+            let outcome = self.setup_action(EditorAction::ReadDocumentPropertyPage(
+                EditorPropertyPageRead { position, limits },
+            ))?;
+            let EditorActionOutcome::DocumentPropertyPage(Ok(page)) = outcome else {
+                return Err(format!(
+                    "The actual Application refused its presented source read: {outcome:?}"
+                ));
+            };
+            if page.target() != &target {
+                return Err("The text page lost its source basis".into());
+            }
+            let EditorPropertyPageValue::Present(EditorPropertyPageData::Text {
+                total_bytes,
+                start,
+                text,
+            }) = page.value
+            else {
+                return Err("The applied source name failed to produce a text page".into());
+            };
+            if start != result.len()
+                || total_bytes != expected.len()
+                || text.is_empty()
+                || text.len() > 7
+            {
+                return Err("The text page returned a wrong or empty source range".into());
+            }
+            result.push_str(&text);
+            if !expected.starts_with(&result) {
+                return Err("The text page disagrees with the applied native field".into());
+            }
+            let Some(next) = page.next else { break };
+            let _ = first_continuation.get_or_insert_with(|| EditorPropertyPageRead {
+                position: EditorPropertyPagePosition::Continue(next.clone()),
+                limits,
+            });
+            position = EditorPropertyPagePosition::Continue(next);
+        }
+        if result != expected {
+            return Err("The native text pages did not reconstruct the applied field".into());
+        }
+        first_continuation.ok_or_else(|| "The fixture name must span more than one page".into())
     }
 }

@@ -594,18 +594,29 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
-    path.validate()?;
-    if field.id != path.root {
-        return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
-    }
-    let selected =
-        resolve_root_location(field, Some(value.into()), path, Some(budget), None, None)?;
+    let selected = admitted_root_location(field, Some(value.into()), path, budget, false)?;
     Ok(ResolvedComponentProperty {
         shape: selected.shape,
         value: selected
             .value
             .expect("value resolution retains its observation"),
     })
+}
+
+/// Records the wire location selected in an admitted root for the exact same observation.
+/// Retained use requires the caller to fence the source revision and Schema admission.
+#[doc(hidden)]
+pub fn resolve_component_property_read_path_in_root<'value>(
+    field: &ComponentFieldSchema,
+    value: ComponentValueRef<'value>,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<(ComponentValueRef<'value>, ComponentFieldPath), ComponentPropertyError> {
+    let selected = admitted_root_location(field, Some(value), path, budget, true)?;
+    Ok((
+        selected.value.expect("the observed root has a value"),
+        selected.storage.expect("the read path is captured"),
+    ))
 }
 
 /// Borrows a selector's declaration below an already admitted and indexed root field.
@@ -619,15 +630,32 @@ pub fn resolve_component_property_schema_in_root<'schema>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
-    path.validate()?;
-    if field.id != path.root {
-        return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
-    }
-    let selected = resolve_root_location(field, None, path, Some(budget), None, None)?;
+    let selected = admitted_root_location(field, None, path, budget, false)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
     })
+}
+
+fn admitted_root_location<'schema, 'value>(
+    field: &'schema ComponentFieldSchema,
+    value: Option<ComponentValueRef<'value>>,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+    capture_read_path: bool,
+) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
+    path.validate()?;
+    if field.id != path.root {
+        return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
+    }
+    resolve_root_location(
+        field,
+        value,
+        path,
+        Some(budget),
+        capture_read_path.then(Vec::new),
+        None,
+    )
 }
 
 /// Replaces exactly one existing target, returning its previous value.

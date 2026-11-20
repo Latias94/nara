@@ -53,6 +53,9 @@ mod prepared_panel_cost;
 #[path = "support/property_read.rs"]
 mod property_read;
 
+#[path = "support/property_pages.rs"]
+mod property_pages;
+
 #[path = "support/direct_member_authoring.rs"]
 mod direct_member_authoring;
 

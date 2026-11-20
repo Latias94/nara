@@ -575,8 +575,12 @@ adds a direct authored inspection through the same Browser preparation and class
 owners, with explicit promotion into the normal Workspace document lifecycle. Its
 [qualification](../architecture/authoring-read-projection-design.md#november-20-unopened-source-verification)
 covers independent Scene and Prefab file workflows, reviewed close and stale-source failures,
-and actual Drawn Shell presentation on Windows/DX12. Full field query,
-value pagination, shared-owner preparation locality and the remaining cost comparison stay open.
+and actual Drawn Shell presentation on Windows/DX12. The
+[selected property page successor](../architecture/authoring-read-projection-design.md#selected-property-value-pages)
+pages text and actual collection values under the original document query basis. It reuses
+the resolved wire position for continuations and the durable selector for prepared edits.
+Complete field query coverage, shared-owner preparation locality and the remaining cost
+comparison stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

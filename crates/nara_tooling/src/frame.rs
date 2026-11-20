@@ -722,6 +722,8 @@ pub enum EditorAction {
     QueryDocumentAuthoring(crate::EditorAuthoringQuery),
     /// Copies one selected property after source, scan and logical-copy admission.
     ReadDocumentProperty(crate::EditorPropertyRead),
+    /// Reads a bounded page from a selected property at its exact source basis.
+    ReadDocumentPropertyPage(crate::EditorPropertyPageRead),
     /// Consumes the source owner's unpublished edit without preparing it again.
     CommitAuthoringEdit(crate::PreparedEditorDocumentEdit),
     /// Consumes the source owner's construction and retains its exact successful mapping.
@@ -776,6 +778,7 @@ impl EditorAction {
             | Self::QueryDocumentEntities(_)
             | Self::QueryDocumentAuthoring(_)
             | Self::ReadDocumentProperty(_)
+            | Self::ReadDocumentPropertyPage(_)
             | Self::CommitAuthoringEdit(_)
             | Self::CommitAuthoringConstruction(_)
             | Self::PrefabConversion(_)
@@ -953,6 +956,7 @@ pub enum EditorActionOutcome {
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
     DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),
     DocumentProperty(Result<crate::EditorPropertyObservation, crate::EditorDocumentQueryRejection>),
+    DocumentPropertyPage(Result<crate::EditorPropertyPage, crate::EditorDocumentQueryRejection>),
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
     ImageImport(EditorImageImportActionOutcome),
@@ -987,12 +991,19 @@ mod entity_query_tests {
             position: EditorEntityQueryPosition::Start(basis.clone()),
             limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
         });
+        let property_target = crate::EditorPropertyTarget {
+            basis: basis.clone(),
+            entity: SceneEntityId::new("item").unwrap(),
+            component: ComponentTypeId::new("game.Data"),
+            property: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+        };
+        let limits = crate::EditorPropertyReadLimits::new(1024, 1, 8).unwrap();
         let queries = [
             query,
             EditorAction::QueryDocumentAuthoring(crate::EditorAuthoringQuery {
                 position: crate::EditorAuthoringQueryPosition::Start(
                     crate::EditorAuthoringQueryTarget {
-                        basis: basis.clone(),
+                        basis,
                         entity: SceneEntityId::new("item").unwrap(),
                         projection: crate::EditorAuthoringProjection::Components,
                     },
@@ -1000,15 +1011,15 @@ mod entity_query_tests {
                 limits: crate::EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
             }),
             EditorAction::ReadDocumentProperty(crate::EditorPropertyRead {
-                target: crate::EditorPropertyTarget {
-                    basis,
-                    entity: SceneEntityId::new("item").unwrap(),
-                    component: ComponentTypeId::new("game.Data"),
-                    property: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(
-                        "amount",
-                    )),
+                target: property_target.clone(),
+                limits,
+            }),
+            EditorAction::ReadDocumentPropertyPage(crate::EditorPropertyPageRead {
+                position: crate::EditorPropertyPagePosition::Start {
+                    target: property_target,
+                    path: nara_reflect::ComponentFieldPath::empty(),
                 },
-                limits: crate::EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
+                limits,
             }),
         ];
         for query in queries {

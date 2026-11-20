@@ -12,6 +12,14 @@ use nara_scene::{
 use crate::document_query::EditorDocumentQueryOwner;
 use crate::{EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
+mod value_page;
+
+pub use value_page::{
+    EditorPropertyPage, EditorPropertyPageCursor, EditorPropertyPageData, EditorPropertyPageItem,
+    EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
+};
+pub(crate) use value_page::{PropertyValuePagePosition, PropertyValuePageTarget};
+
 pub const MAX_EDITOR_AUTHORING_QUERY_ENTRIES: usize = 256;
 pub const MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES: usize = 64 * 1024;
 pub const MAX_EDITOR_PROPERTY_READ_VALUE_NODES: usize = 4_096;
@@ -428,6 +436,13 @@ impl EditorPropertyReadLimits {
     pub const fn max_scan_logical_bytes(self) -> usize {
         self.max_scan_logical_bytes
     }
+
+    pub(crate) fn scan_budget(self) -> nara_reflect::ComponentPropertyReadBudget {
+        nara_reflect::ComponentPropertyReadBudget::new(
+            nara_core::ItemLimit::new(self.max_scan_entries).expect("validated scan limit"),
+            nara_core::ByteLimit::new(self.max_scan_logical_bytes).expect("validated scan limit"),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -439,12 +454,26 @@ pub struct EditorPropertyTarget {
 }
 
 impl EditorPropertyTarget {
-    pub(crate) fn metadata_bytes(&self) -> usize {
-        self.entity
+    pub(crate) fn admitted_metadata_bytes(
+        &self,
+        maximum: usize,
+    ) -> Result<usize, EditorDocumentQueryRejection> {
+        let ids = self
+            .entity
             .as_str()
             .len()
-            .saturating_add(self.component.as_str().len())
-            .saturating_add(property_metadata_bytes(&self.property))
+            .saturating_add(self.component.as_str().len());
+        let bytes = maximum
+            .checked_sub(ids)
+            .and_then(|remaining| property_metadata_bytes_up_to(&self.property, remaining))
+            .ok_or(EditorDocumentQueryRejection::MetadataBudgetExceeded)?;
+        if self.property.steps.len() > ComponentPropertyPath::MAX_STEPS {
+            return Err(nara_scene::AuthoringReadError::from(
+                nara_reflect::ComponentPropertyError::PathDepthLimit,
+            )
+            .into());
+        }
+        Ok(ids + bytes)
     }
 }
 

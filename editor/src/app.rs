@@ -1044,6 +1044,16 @@ impl EditorApplication {
             .read_document_property(request)
     }
 
+    /// Reads one bounded page of a source property through the admitted Session.
+    pub fn read_document_property_page(
+        &self,
+        request: nara::tooling::EditorPropertyPageRead,
+    ) -> Result<nara::tooling::EditorPropertyPage, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .read_document_property_page(request)
+    }
+
     /// Borrows the retained source observation for the exact inspection request.
     #[must_use]
     pub fn inspected_authoring_source(

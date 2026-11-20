@@ -22,6 +22,9 @@ use nara_tooling::{
     EditorWorkspace, EditorWorkspaceCommand,
 };
 
+#[path = "support/property_value_pages.rs"]
+mod property_value_pages;
+
 fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
@@ -55,6 +58,22 @@ fn register_tag_catalog(
 }
 
 fn fixture_size(prefab: bool, extra_entities: usize) -> (EditorWorkspace, EditorDocumentId) {
+    fixture_with_values(
+        prefab,
+        extra_entities,
+        "x".repeat(10_000),
+        vec![ComponentValue::U64(1), ComponentValue::U64(2)],
+        None,
+    )
+}
+
+fn fixture_with_values(
+    prefab: bool,
+    extra_entities: usize,
+    blob: String,
+    tree: Vec<ComponentValue>,
+    additional_field: Option<(ComponentValueShape, ComponentValue)>,
+) -> (EditorWorkspace, EditorDocumentId) {
     let field = |name: &str, kind| {
         ComponentFieldSchema::required(
             ComponentFieldId::new(name),
@@ -70,73 +89,84 @@ fn fixture_size(prefab: bool, extra_entities: usize) -> (EditorWorkspace, Editor
         ComponentSchemaVersion::ONE,
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-    .with_fields([
-        field("amount", ComponentValueKind::U64),
-        field("blob", ComponentValueKind::String),
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("defaulted"),
-            "Defaulted",
-            ComponentFieldPath::from_fields(["defaulted"]),
-            ComponentValueKind::U64,
-            ComponentValue::U64(11),
-        ),
-        ComponentFieldSchema::optional(
-            ComponentFieldId::new("missing"),
-            "Missing",
-            ComponentFieldPath::from_fields(["missing"]),
-            ComponentValueKind::U64,
-        ),
-        ComponentFieldSchema::optional(
-            ComponentFieldId::new("nullable"),
-            "Nullable",
-            ComponentFieldPath::from_fields(["nullable"]),
-            ComponentValueKind::U64,
-        ),
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("null_default"),
-            "Null default",
-            ComponentFieldPath::from_fields(["null_default"]),
-            ComponentValueKind::U64,
-            ComponentValue::Null,
-        ),
-        ComponentFieldSchema::required(
-            ComponentFieldId::new("tree"),
-            "Tree",
-            ComponentFieldPath::from_fields(["tree"]),
-            ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::U64)),
-        ),
-        ComponentFieldSchema::required(
-            ComponentFieldId::new("record"),
-            "Record",
-            ComponentFieldPath::from_fields(["record"]),
-            ComponentValueShape::record_members([
-                ComponentShapeMember::new("wire_first", ComponentValueKind::U64)
-                    .with_id(ComponentFieldId::new("first")),
-                ComponentShapeMember::new(
-                    "wire_nested",
-                    ComponentValueShape::record_members([ComponentShapeMember::new(
-                        "wire_leaf",
-                        ComponentValueKind::Bool,
+    .with_fields(
+        [
+            field("amount", ComponentValueKind::U64),
+            field("blob", ComponentValueKind::String),
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("defaulted"),
+                "Defaulted",
+                ComponentFieldPath::from_fields(["defaulted"]),
+                ComponentValueKind::U64,
+                ComponentValue::U64(11),
+            ),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("missing"),
+                "Missing",
+                ComponentFieldPath::from_fields(["missing"]),
+                ComponentValueKind::U64,
+            ),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("nullable"),
+                "Nullable",
+                ComponentFieldPath::from_fields(["nullable"]),
+                ComponentValueKind::U64,
+            ),
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("null_default"),
+                "Null default",
+                ComponentFieldPath::from_fields(["null_default"]),
+                ComponentValueKind::U64,
+                ComponentValue::Null,
+            ),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("tree"),
+                "Tree",
+                ComponentFieldPath::from_fields(["tree"]),
+                ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::U64)),
+            ),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("record"),
+                "Record",
+                ComponentFieldPath::from_fields(["record"]),
+                ComponentValueShape::record_members([
+                    ComponentShapeMember::new("wire_first", ComponentValueKind::U64)
+                        .with_id(ComponentFieldId::new("first")),
+                    ComponentShapeMember::new(
+                        "wire_nested",
+                        ComponentValueShape::record_members([ComponentShapeMember::new(
+                            "wire_leaf",
+                            ComponentValueKind::Bool,
+                        )
+                        .with_id(ComponentFieldId::new("leaf"))]),
                     )
-                    .with_id(ComponentFieldId::new("leaf"))]),
-                )
-                .with_id(ComponentFieldId::new("nested")),
-                ComponentShapeMember::new("wire_only", ComponentValueKind::Bool),
-                ComponentShapeMember::new("wire_second", ComponentValueKind::String)
-                    .with_id(ComponentFieldId::new("second")),
+                    .with_id(ComponentFieldId::new("nested")),
+                    ComponentShapeMember::new("wire_only", ComponentValueKind::Bool),
+                    ComponentShapeMember::new("wire_second", ComponentValueKind::String)
+                        .with_id(ComponentFieldId::new("second")),
+                ]),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_member_tombstones([
+                ComponentMemberPath::new([ComponentMemberPathSegment::Member(
+                    ComponentFieldId::new("retired"),
+                )]),
+                ComponentMemberPath::new([
+                    ComponentMemberPathSegment::Member(ComponentFieldId::new("nested")),
+                    ComponentMemberPathSegment::Member(ComponentFieldId::new("retired_leaf")),
+                ]),
             ]),
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_member_tombstones([
-            ComponentMemberPath::new([ComponentMemberPathSegment::Member(ComponentFieldId::new(
-                "retired",
-            ))]),
-            ComponentMemberPath::new([
-                ComponentMemberPathSegment::Member(ComponentFieldId::new("nested")),
-                ComponentMemberPathSegment::Member(ComponentFieldId::new("retired_leaf")),
-            ]),
-        ]),
-    ]);
+        ]
+        .into_iter()
+        .chain(additional_field.as_ref().map(|(shape, _)| {
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("paged"),
+                "Paged",
+                ComponentFieldPath::from_fields(["paged"]),
+                shape.clone(),
+            )
+        })),
+    );
     let tag = nara_reflect::__private::resolve_schema_provider(
         nara_reflect::ComponentSchemaProviderDefinition::new(
             nara_reflect::ComponentSchemaOwnerId::new("game.tags"),
@@ -183,33 +213,31 @@ fn fixture_size(prefab: bool, extra_entities: usize) -> (EditorWorkspace, Editor
                 ComponentTypeId::new("game.Data"),
                 SceneComponentRecord::new(
                     ComponentSchemaVersion::ONE,
-                    ComponentValue::map([
-                        ("amount", ComponentValue::U64(7)),
-                        ("blob", ComponentValue::String("x".repeat(10_000))),
-                        ("nullable", ComponentValue::Null),
-                        (
-                            "tree",
-                            ComponentValue::List(vec![
-                                ComponentValue::U64(1),
-                                ComponentValue::U64(2),
-                            ]),
-                        ),
-                        (
-                            "record",
-                            ComponentValue::map([
-                                ("wire_first", ComponentValue::U64(13)),
-                                (
-                                    "wire_nested",
-                                    ComponentValue::map([(
-                                        "wire_leaf",
-                                        ComponentValue::Bool(true),
-                                    )]),
-                                ),
-                                ("wire_only", ComponentValue::Bool(false)),
-                                ("wire_second", ComponentValue::String("member".into())),
-                            ]),
-                        ),
-                    ]),
+                    ComponentValue::map(
+                        [
+                            ("amount", ComponentValue::U64(7)),
+                            ("blob", ComponentValue::String(blob)),
+                            ("nullable", ComponentValue::Null),
+                            ("tree", ComponentValue::List(tree)),
+                            (
+                                "record",
+                                ComponentValue::map([
+                                    ("wire_first", ComponentValue::U64(13)),
+                                    (
+                                        "wire_nested",
+                                        ComponentValue::map([(
+                                            "wire_leaf",
+                                            ComponentValue::Bool(true),
+                                        )]),
+                                    ),
+                                    ("wire_only", ComponentValue::Bool(false)),
+                                    ("wire_second", ComponentValue::String("member".into())),
+                                ]),
+                            ),
+                        ]
+                        .into_iter()
+                        .chain(additional_field.map(|(_, value)| ("paged", value))),
+                    ),
                 ),
             )
             .with_component(

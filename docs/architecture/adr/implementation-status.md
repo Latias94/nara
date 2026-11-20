@@ -4261,7 +4261,14 @@ ordinary persistence binding after worker digest and current location/metadata c
 independent tool drives Scene and Prefab through prepared editing and original history. The
 independently locked release cohort passes 16/16, the selected Host/Drawn CPU cohort passes
 40/40, and the hardware DX12 Drawn trajectory passes 1/1.
-Full R2 still includes complete field queries, value pagination and preparation locality evidence.
+
+The [selected value pages](../authoring-read-projection-design.md#selected-property-value-pages)
+allow registered tools to read exact collections, scalars and UTF-8 text from named Scene and
+Prefab documents. The continuation reuses the original Reflect resolution after validating its
+Workspace basis. The public workflow uses paged values to compute a durable edit and exercises
+ordinary history and persistence. The Windows Tooling release cohort passes 221/221, the
+independent panel target passes 19/19, and the selected Host Close and native DX12 trajectory
+pass 2/2. Full R2 still includes complete field query coverage and preparation locality evidence.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query

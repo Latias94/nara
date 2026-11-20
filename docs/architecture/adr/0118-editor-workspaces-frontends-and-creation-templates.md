@@ -599,6 +599,13 @@ Candidate-bearing commands are move-only. Queue refusal returns the unqueued can
 successful construction reports retain the actual source-owner mapping. Neither a candidate
 registry nor another history, preview validator or result-inference path is introduced.
 
+The Workspace also supplies a bounded page of one selected value through the same registered
+panel borrow and action/result routes. A page carries Present, Defaulted or Missing origin,
+the exact original read target and, if more data remains, an opaque continuation. Collection
+rows expose immediate values and branch lengths. Text pages contain valid UTF-8. These
+observations can feed the ordinary prepared edit through its independently admitted target.
+[Selected property value pages](../authoring-read-projection-design.md#selected-property-value-pages)
+
 This completion means dispatch, not eventual Save/Play completion. Several actions remain ordered;
 same-basis document writes can conflict and are never silently rebased. A cohesive multi-field
 operation uses one existing atomic patch. No generic bus, polling-ticket framework, asynchronous

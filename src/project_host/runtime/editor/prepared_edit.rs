@@ -64,6 +64,18 @@ impl EditorProjectSession {
         self.workspace.read_document_property(request)
     }
 
+    /// Reads one bounded page of a source property through the owning workspace.
+    /// Returns `Closing` while the Session is closing or resolving a workspace intent.
+    pub fn read_document_property_page(
+        &self,
+        request: nara_tooling::EditorPropertyPageRead,
+    ) -> Result<nara_tooling::EditorPropertyPage, EditorDocumentQueryRejection> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorDocumentQueryRejection::Closing);
+        }
+        self.workspace.read_document_property_page(request)
+    }
+
     /// Reads one bounded stored Prefab property claim at the original document basis.
     pub fn read_prefab_property_claim(
         &self,

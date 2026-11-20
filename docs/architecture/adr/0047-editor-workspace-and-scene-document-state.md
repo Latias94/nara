@@ -139,6 +139,12 @@ Rules:
   target. Optional absence, missing keys and retired selectors remain typed resolution failures.
   Finite selector scan work and copied output cost are independent limits; neither a scalar result
   nor an admitted source makes a keyed-list scan free.
+- A bounded property value page starts at that same admitted selector. Scene/Prefab supplies the
+  borrowed value and its origin. The Workspace pages actual text or collection contents and
+  carries the exact workspace, document kind, revision, Schema and selected value path in the
+  continuation. Relative wire keys and list positions refer to this read observation. Mutation
+  preparation still uses the durable Schema selector. Pages copy only the admitted chunk or child
+  data. A continuation must advance the read position.
 - Reading a default does not itself publish authored source. A later prepared property mutation
   may privately initialize only its missing root under ADR 0026, then use the same complete
   candidate/inverse/history owner. Cancel, stale rejection and failed final operations retain

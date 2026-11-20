@@ -148,6 +148,14 @@ impl ComponentValue {
         max_nodes: usize,
         max_logical_bytes: usize,
     ) -> Option<ComponentValueCost> {
+        if let Self::EntityReference(reference) = self {
+            let cost = reference.cost_up_to(max_nodes, max_logical_bytes)?;
+            return Some(ComponentValueCost::from_parts(
+                cost.nodes(),
+                cost.logical_bytes(),
+            ));
+        }
+
         let mut cost = ComponentValueCost::ZERO;
         self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, None)
             .then_some(cost)
@@ -155,7 +163,7 @@ impl ComponentValue {
 
     /// Admits canonical cost traversal scratch before each iterator-stack allocation.
     ///
-    /// The returned cost and early refusal rules match `cost_up_to`. The callback accounts
+    /// The same value ceilings apply as in [`Self::cost_up_to`]. The callback accounts
     /// complete replacement Vec requests in bytes, independently of retained value ownership.
     /// No value tree or error path is copied, including when the caller refuses.
     #[doc(hidden)]
@@ -173,7 +181,8 @@ impl ComponentValue {
     ///
     /// The prefix excludes unvisited children inferred by the minimum-node guard. Scratch
     /// admission retains its original error; an owning cumulative allowance settles the
-    /// returned prefix independently of that error and of the complete-value cost.
+    /// returned prefix independently of that error and of the complete-value cost. A
+    /// visited entity reference contributes its full scalar cost.
     #[doc(hidden)]
     pub fn cost_up_to_with_admission_measured<E>(
         &self,
@@ -587,7 +596,43 @@ impl Error for ComponentValueError {}
 
 #[cfg(test)]
 mod cost_traversal_tests {
+    use nara_identity::{
+        AuthoredEntityReference, EntityReference, PrefabEntityOrigin, PrefabInstanceHop,
+        SceneEntityId, SourceDocumentKey, SourceDocumentKind, StableAssetId,
+    };
+
     use super::{ComponentValue, ComponentValueCost};
+
+    #[test]
+    fn root_reference_cost_obeys_ceilings_and_preserves_the_measured_scalar_cost() {
+        let hop_count = 2;
+        let mut reference = AuthoredEntityReference::source(SceneEntityId::new("leaf").unwrap());
+        reference.through = vec![
+            PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("branch").unwrap()),
+                expected_base: SourceDocumentKey::stable_asset(
+                    StableAssetId::parse_str("44f2caae-b658-4790-a8a7-928935839ab7").unwrap(),
+                    SourceDocumentKind::Prefab,
+                ),
+            };
+            hop_count
+        ];
+        let value = ComponentValue::EntityReference(EntityReference::Authored { reference });
+        let nodes = 2 + 2 * hop_count;
+        let bytes = "leaf".len() + hop_count * ("branch".len() + 36 + 1);
+        let cost = ComponentValueCost::from_parts(nodes, bytes);
+        assert_eq!(value.cost(), cost);
+        assert_eq!(value.cost_up_to(nodes, bytes), Some(cost));
+        for (nodes, bytes) in [(nodes - 1, bytes), (nodes, bytes - 1)] {
+            assert_eq!(value.cost_up_to(nodes, bytes), None);
+            assert_eq!(
+                value.cost_up_to_with_admission_measured(nodes, bytes, |_| {
+                    Err("scalar requires no scratch")
+                }),
+                (Ok(None), cost)
+            );
+        }
+    }
 
     #[test]
     fn measured_attempt_keeps_the_visited_prefix_of_late_limit_and_scratch_refusals() {

@@ -99,6 +99,9 @@ impl EditorProjectSession {
             EditorAction::ReadDocumentProperty(request) => EditorActionOutcome::DocumentProperty(
                 self.workspace.read_document_property(request),
             ),
+            EditorAction::ReadDocumentPropertyPage(request) => {
+                EditorActionOutcome::DocumentPropertyPage(self.read_document_property_page(request))
+            }
             EditorAction::CommitAuthoringEdit(prepared) => self.commit_authoring_edit(prepared),
             EditorAction::CommitAuthoringConstruction(prepared) => {
                 match self.commit_authoring_construction(prepared) {
@@ -379,6 +382,7 @@ impl EditorProjectSession {
             EditorActionOutcome::DocumentEntities(_)
             | EditorActionOutcome::DocumentAuthoring(_)
             | EditorActionOutcome::DocumentProperty(_)
+            | EditorActionOutcome::DocumentPropertyPage(_)
             | EditorActionOutcome::AuthoringConstruction(_)
             | EditorActionOutcome::PrefabConversion(_)
             | EditorActionOutcome::PrefabInspection(_)
