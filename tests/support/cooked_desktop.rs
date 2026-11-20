@@ -254,6 +254,8 @@ pub fn accept(cooker: &Path, controllers: ControllerBackend) {
     let mut features = player.features();
     features.sort();
     assert_eq!(selection["requested_features"], json!(features));
+    features.push("local-player".to_owned());
+    features.sort();
     assert_eq!(payload["build"]["resolved_features"], json!(features));
     let images = evidence::inspect_package(&published, payload, &triple, &configuration, player);
     let bootstrap = payload["generated_input_name"].as_str().unwrap();

@@ -6,6 +6,7 @@ use nara::ProductRecipe;
 pub enum RuntimeKind {
     #[default]
     Headless,
+    Server,
     Desktop,
     AudioDesktop,
 }
@@ -14,9 +15,12 @@ impl RuntimeKind {
     pub fn parse(value: &str) -> Result<Self, String> {
         let runtime = match value {
             "headless" => Self::Headless,
+            "server" => Self::Server,
             "desktop" => Self::Desktop,
             "audio-desktop" => Self::AudioDesktop,
-            _ => return Err("--runtime requires headless, desktop or audio-desktop".into()),
+            _ => {
+                return Err("--runtime requires headless, server, desktop or audio-desktop".into());
+            }
         };
         runtime.require_features()?;
         Ok(runtime)
@@ -25,6 +29,7 @@ impl RuntimeKind {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Headless => "headless",
+            Self::Server => "server",
             Self::Desktop => "desktop",
             Self::AudioDesktop => "audio-desktop",
         }
@@ -33,14 +38,19 @@ impl RuntimeKind {
     pub const fn binary(self) -> &'static str {
         match self {
             Self::Headless => "player",
+            Self::Server => "server",
             Self::Desktop => "player_desktop",
             Self::AudioDesktop => "player_audio",
         }
     }
 
+    pub const fn uses_window(self) -> bool {
+        matches!(self, Self::Desktop | Self::AudioDesktop)
+    }
+
     fn require_features(self) -> Result<(), String> {
         match self {
-            Self::Headless => Ok(()),
+            Self::Headless | Self::Server => Ok(()),
             Self::Desktop if cfg!(feature = "desktop") => Ok(()),
             Self::Desktop => Err("desktop selection requires the desktop Cargo feature".into()),
             Self::AudioDesktop if cfg!(all(windows, feature = "desktop", feature = "audio-cpal")) => Ok(()),
@@ -111,7 +121,7 @@ impl PlayerSelection {
     pub fn new(runtime: RuntimeKind, controllers: ControllerBackend) -> Result<Self, String> {
         runtime.require_features()?;
         if controllers == ControllerBackend::Gilrs {
-            if runtime == RuntimeKind::Headless {
+            if !runtime.uses_window() {
                 return Err("native controllers require a desktop Player".into());
             }
             if !cfg!(all(windows, feature = "gamepad")) {
@@ -129,7 +139,7 @@ impl PlayerSelection {
 
     pub fn with_flow(self, flow: GameFlow) -> Result<Self, String> {
         if flow == GameFlow::Round {
-            if self.runtime == RuntimeKind::Headless {
+            if !self.runtime.uses_window() {
                 return Err("round flow requires a desktop Player with a frame-menu driver".into());
             }
             if !cfg!(feature = "play-flow") {
@@ -143,6 +153,11 @@ impl PlayerSelection {
         let (runtime, controllers, flow) = match profile {
             "two-level-shipping" => (
                 RuntimeKind::Headless,
+                ControllerBackend::Disabled,
+                GameFlow::Exploration,
+            ),
+            "two-level-server-shipping" => (
+                RuntimeKind::Server,
                 ControllerBackend::Disabled,
                 GameFlow::Exploration,
             ),
@@ -210,6 +225,7 @@ impl PlayerSelection {
     pub const fn manifest_profile(self) -> Option<&'static str> {
         match (self.runtime, self.flow) {
             (RuntimeKind::Headless, _) => None,
+            (RuntimeKind::Server, _) => Some("server"),
             (_, GameFlow::Exploration) => Some("desktop"),
             (_, GameFlow::Round) => Some("play-flow"),
         }
@@ -222,6 +238,7 @@ impl PlayerSelection {
     pub const fn content_profile(self) -> &'static str {
         match (self.runtime, self.controllers, self.flow) {
             (RuntimeKind::Headless, _, _) => "two-level-shipping",
+            (RuntimeKind::Server, _, _) => "two-level-server-shipping",
             (RuntimeKind::Desktop, ControllerBackend::Disabled, GameFlow::Exploration) => {
                 "two-level-desktop-shipping"
             }
@@ -250,8 +267,11 @@ impl PlayerSelection {
     }
 
     pub fn features(self) -> Vec<String> {
+        if self.runtime == RuntimeKind::Server {
+            return vec!["cooked-server".into()];
+        }
         let mut features = vec!["cooked-player".into()];
-        if self.runtime != RuntimeKind::Headless {
+        if self.runtime.uses_window() {
             features.push("desktop".into());
         }
         if self.runtime == RuntimeKind::AudioDesktop {
@@ -305,7 +325,13 @@ impl PlayerSelection {
 
     pub fn recipe(self) -> Result<ProductRecipe, String> {
         let recipe = match self.runtime {
+            RuntimeKind::Server => crate::cooked_server_recipe(),
+            #[cfg(feature = "local-player")]
             RuntimeKind::Headless => crate::cooked_recipe(),
+            #[cfg(not(feature = "local-player"))]
+            RuntimeKind::Headless => {
+                return Err("headless recipe requires the local-player Cargo feature".into());
+            }
             #[cfg(feature = "desktop")]
             RuntimeKind::Desktop => crate::cooked_desktop_recipe(),
             #[cfg(not(feature = "desktop"))]

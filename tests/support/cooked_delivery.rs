@@ -13,13 +13,13 @@ use serde::de::DeserializeOwned;
 const HEADER_BYTES: usize = 20;
 const MAX_PACK_BYTES: usize = 32 * 1024 * 1024;
 
-struct KnownPack {
-    catalog_bytes: Range<usize>,
+pub(crate) struct KnownPack {
+    pub(crate) catalog_bytes: Range<usize>,
     catalog: RuntimeContentCatalog,
     members: Vec<Range<usize>>,
 }
 
-fn inspect_pack(bytes: &[u8]) -> Result<KnownPack, String> {
+pub(crate) fn inspect_pack(bytes: &[u8]) -> Result<KnownPack, String> {
     if bytes.len() > MAX_PACK_BYTES
         || bytes.len() < HEADER_BYTES
         || &bytes[..8] != b"NARAPACK"
@@ -102,7 +102,7 @@ fn corrupt_catalog(bytes: &mut [u8]) -> Result<Range<usize>, String> {
 }
 
 #[cfg(all(feature = "cook", feature = "development"))]
-fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
+pub(crate) fn record<T: DeserializeOwned>(text: &str, prefix: &str) -> Result<T, String> {
     let mut records = text.lines().filter_map(|line| line.strip_prefix(prefix));
     let json = records
         .next()
@@ -236,6 +236,7 @@ pub mod native {
         containment_empty: bool,
         readers_stopped: bool,
         output_drained: bool,
+        termination_requested: bool,
         force_killed: bool,
     }
 
@@ -247,6 +248,7 @@ pub mod native {
                 containment_empty: receipt.containment_empty(),
                 readers_stopped: receipt.readers_stopped(),
                 output_drained: receipt.output_drained(),
+                termination_requested: receipt.termination_requested(),
                 force_killed: receipt.force_killed(),
             }
         }
@@ -258,25 +260,57 @@ pub mod native {
                 self.containment_empty
                     && self.readers_stopped
                     && self.output_drained
+                    && !self.termination_requested
                     && !self.force_killed,
                 "native process did not retire normally: {self:?}",
             );
         }
     }
 
-    struct Output {
-        stdout: String,
-        stderr: String,
-        receipt: SupervisedProcessCleanupReceipt,
+    pub(crate) struct Output {
+        pub(crate) stdout: String,
+        pub(crate) stderr: String,
+        pub(crate) receipt: SupervisedProcessCleanupReceipt,
     }
 
-    struct Custody {
+    impl Output {
+        pub(crate) fn assert_player_exit(&self, success: bool) {
+            let exit: NativeExit = record(&self.stdout, CLEANUP).unwrap();
+            exit.assert_clean();
+            assert_eq!(
+                exit.success, success,
+                "stdout={} stderr={}",
+                self.stdout, self.stderr
+            );
+            let code = exit.code.expect("Player must have an ordinary exit code");
+            assert_eq!(code == 0, success);
+        }
+    }
+
+    pub(crate) struct Custody {
         fixture: Option<Fixture>,
         process: Option<SupervisedProcessOwner>,
         build_cleanup: Option<Box<CargoBuildProcessCustody>>,
     }
 
     impl Custody {
+        pub(crate) fn new(fixture: Fixture) -> Self {
+            Self {
+                fixture: Some(fixture),
+                process: None,
+                build_cleanup: None,
+            }
+        }
+
+        pub(crate) fn tool(
+            &mut self,
+            command: &SupervisedProcessCommand,
+            timeout: Duration,
+        ) -> Output {
+            let owner = SupervisedProcessOwner::spawn(command, log_limits()).unwrap();
+            self.run(owner, timeout)
+        }
+
         fn run(&mut self, process: SupervisedProcessOwner, timeout: Duration) -> Output {
             assert!(self.process.is_none(), "all native operations are serial");
             self.process = Some(process);
@@ -325,11 +359,16 @@ pub mod native {
             }
         }
 
-        fn fixture(&self) -> &Fixture {
+        pub(crate) fn fixture(&self) -> &Fixture {
             self.fixture.as_ref().unwrap()
         }
 
-        fn player(&mut self, executable: &Path, arguments: Vec<OsString>, name: &str) -> Output {
+        pub(crate) fn player(
+            &mut self,
+            executable: &Path,
+            arguments: Vec<OsString>,
+            name: &str,
+        ) -> Output {
             let worker = self.fixture().directory(name);
             let cwd = worker.join("empty");
             fs::create_dir(&cwd).unwrap();
@@ -533,11 +572,7 @@ pub mod native {
             .environment("CARGO", tools.cargo_path())
             .environment("RUSTC", tools.rustc_path())
             .bounded_stdout(NonZeroUsize::new(OUTPUT_BYTES).unwrap());
-        let mut custody = Custody {
-            fixture: Some(fixture),
-            process: None,
-            build_cleanup: None,
-        };
+        let mut custody = Custody::new(fixture);
         let generated = custody
             .fixture()
             .project
@@ -546,10 +581,7 @@ pub mod native {
             .exists()
             .then(|| read_bounded(&generated, 32 * 1024));
         fs::write(&selected_bundle, b"not an authoring Schema bundle").unwrap();
-        let rejected = custody.run(
-            SupervisedProcessOwner::spawn(&command, log_limits()).unwrap(),
-            COOK_TIMEOUT,
-        );
+        let rejected = custody.tool(&command, COOK_TIMEOUT);
         assert!(!rejected.receipt.exit().success());
         assert!(
             rejected
@@ -565,8 +597,7 @@ pub mod native {
             original_generated,
         );
         fs::write(&selected_bundle, &bundle).unwrap();
-        let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
-        let cooked = custody.run(owner, COOK_TIMEOUT);
+        let cooked = custody.tool(&command, COOK_TIMEOUT);
         assert!(
             cooked.receipt.exit().success(),
             "stdout={} stderr={}",
@@ -614,6 +645,10 @@ pub mod native {
         assert_eq!(
             payload["build"]["selection"]["requested_features"],
             json!(["cooked-player"])
+        );
+        assert_eq!(
+            payload["build"]["resolved_features"],
+            json!(["cooked-player", "local-player"])
         );
         assert_eq!(pack.catalog.target().triple(), triple);
         let mut scenes = LevelId::ALL.map(LevelId::scene_product).to_vec();
@@ -1302,14 +1337,7 @@ pub mod native {
     }
 
     fn assert_player(output: &Output, scenario: &str, success: bool) -> Value {
-        let exit: NativeExit = record(&output.stdout, CLEANUP).unwrap();
-        exit.assert_clean();
-        assert_eq!(
-            exit.success, success,
-            "stdout={} stderr={}",
-            output.stdout, output.stderr
-        );
-        assert_eq!(exit.code == Some(0), success);
+        output.assert_player_exit(success);
         let result: Value = record(&output.stdout, RESULT).unwrap();
         assert_eq!(result["success"], success, "{result}");
         assert_eq!(result["scenario"], scenario);
@@ -1591,7 +1619,7 @@ pub mod native {
         }
     }
 
-    fn assert_payload(directory: &Path, executable: &str) {
+    pub(crate) fn assert_payload(directory: &Path, executable: &str) {
         let mut names = fs::read_dir(directory)
             .unwrap()
             .map(|entry| {
@@ -1610,7 +1638,7 @@ pub mod native {
         assert_eq!(names, expected);
     }
 
-    fn assert_sources_gone(project: &Path, cache: &Path) {
+    pub(crate) fn assert_sources_gone(project: &Path, cache: &Path) {
         assert!(!project.exists());
         assert!(!cache.exists());
         for member in [
@@ -1634,7 +1662,7 @@ pub mod native {
         }
     }
 
-    fn remove_owned_tree(fixture: &Fixture, root: &Path, target: &Path) {
+    pub(crate) fn remove_owned_tree(fixture: &Fixture, root: &Path, target: &Path) {
         assert_eq!(root, root.canonicalize().unwrap());
         assert!(
             root == fixture.project
@@ -1681,7 +1709,7 @@ pub mod native {
         json!({ "length": digest.length(), "hash": digest.as_bytes() })
     }
 
-    fn read_bounded(path: &Path, limit: usize) -> Vec<u8> {
+    pub(crate) fn read_bounded(path: &Path, limit: usize) -> Vec<u8> {
         let file = File::open(path).unwrap();
         assert!(
             file.metadata().unwrap().len() <= limit as u64,

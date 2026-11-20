@@ -884,7 +884,10 @@ impl DevelopmentHost {
         if !eligible_selection(captured.provenance().selection(), self.placement)
             || captured.provenance().selection().target_triple()
                 != captured.provenance().toolchain().host_target()
-            || !eligible_features(captured.provenance().resolved_features(), self.placement)
+            || !eligible_resolved_features(
+                captured.provenance().resolved_features(),
+                self.placement,
+            )
         {
             return Err(DevelopmentError::at(
                 DevelopmentStage::Build,
@@ -1019,6 +1022,14 @@ fn eligible_features(features: &[String], placement: DevelopmentPlacement) -> bo
     }
 }
 
+fn eligible_resolved_features(features: &[String], placement: DevelopmentPlacement) -> bool {
+    features
+        .split_last()
+        .is_some_and(|(local_player, requested)| {
+            local_player == "local-player" && eligible_features(requested, placement)
+        })
+}
+
 fn qualify_presentation(
     process: &mut Process,
     state: &ResumeState,
@@ -1120,7 +1131,9 @@ fn clean_game_retirement(report: &RetirementReport) -> bool {
 mod selection_tests {
     use nara::project_workflow::cargo::CargoBuildSelection;
 
-    use super::{DevelopmentPlacement, eligible_features, eligible_selection};
+    use super::{
+        DevelopmentPlacement, eligible_features, eligible_resolved_features, eligible_selection,
+    };
 
     #[test]
     fn development_admission_requires_its_exact_declared_placement() {
@@ -1149,6 +1162,16 @@ mod selection_tests {
             let admitted = selection("continuity", features.clone(), false);
             assert!(eligible_selection(&admitted, placement));
             assert!(eligible_features(admitted.features(), placement));
+            assert!(!eligible_resolved_features(admitted.features(), placement));
+            let mut resolved = admitted.features().to_vec();
+            resolved.push("local-player".to_owned());
+            assert!(eligible_resolved_features(&resolved, placement));
+            let mut widened_request = features.clone();
+            widened_request.push("local-player");
+            assert!(!eligible_selection(
+                &selection("continuity", widened_request, false),
+                placement,
+            ));
             assert!(!eligible_selection(
                 &selection("continuity", features.clone(), true),
                 placement,
@@ -1157,7 +1180,13 @@ mod selection_tests {
                 &selection("player", features.clone(), false),
                 placement,
             ));
-            for extra in ["cook", "cooked-player", "cost-measurement", "audio-cpal"] {
+            for extra in [
+                "cook",
+                "cooked-player",
+                "cooked-server",
+                "cost-measurement",
+                "audio-cpal",
+            ] {
                 if features.contains(&extra) {
                     continue;
                 }
@@ -1166,6 +1195,9 @@ mod selection_tests {
                 let widened = selection("continuity", widened, false);
                 assert!(!eligible_selection(&widened, placement));
                 assert!(!eligible_features(widened.features(), placement));
+                let mut resolved = widened.features().to_vec();
+                resolved.push("local-player".to_owned());
+                assert!(!eligible_resolved_features(&resolved, placement));
             }
             for undeclared in [vec![], vec!["desktop"], vec!["cooked-player"]] {
                 let undeclared = selection("continuity", undeclared, false);

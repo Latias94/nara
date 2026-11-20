@@ -9,7 +9,6 @@ use nara::{
         activate_prepared_project_scene, unload_project_scene_addition,
     },
     scene::SceneOccurrenceKey,
-    sprite::Sprite,
     transform::fixed_spatial_snapshot,
 };
 
@@ -18,9 +17,9 @@ use crate::side_room::{
 };
 
 use super::{
-    GamePhase, Session,
+    Session,
     commands::{LOOKOUT, SIDE_ROOM},
-    flow, player,
+    player, simulation_enabled,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -172,6 +171,7 @@ pub(super) fn advance(world: &mut World) {
     };
     let name = room.name();
     let relic = SceneEntityId::new(relic).expect("static relic ID");
+    let local_player = world.resource::<Session>().local_player;
     let ready = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         Some(ProjectSceneRequestState::Ready) => Some(
@@ -184,10 +184,11 @@ pub(super) fn advance(world: &mut World) {
                                 .components()
                                 .keys()
                                 .any(|kind| kind.as_str() == "nara.transform.Transform2d")
-                            && entity
-                                .components()
-                                .keys()
-                                .any(|kind| kind.as_str() == "nara.sprite.Sprite")
+                            && (!local_player
+                                || entity
+                                    .components()
+                                    .keys()
+                                    .any(|kind| kind.as_str() == "nara.sprite.Sprite"))
                     })
                 })
                 .map(|_| true)
@@ -232,7 +233,7 @@ pub(super) fn advance(world: &mut World) {
 }
 
 pub(super) fn find_relics(world: &mut World) {
-    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
+    if !simulation_enabled(world) {
         return;
     }
     for room in Room::ALL {
@@ -255,10 +256,19 @@ pub(super) fn find_relics(world: &mut World) {
             };
             relic.translation().distance_squared(player.translation()) <= 10.0 * 10.0
         });
-        if nearby && let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
-            sprite.material.tint.a = 0.0;
+        if nearby {
+            #[cfg(feature = "local-player")]
+            if world.resource::<Session>().local_player
+                && world.get::<nara::sprite::Sprite>(entity).is_none()
+            {
+                continue;
+            }
             if let RoomState::Open { found, .. } = &mut world.resource_mut::<Rooms>().0[index] {
                 *found = true;
+            }
+            #[cfg(feature = "local-player")]
+            if world.resource::<Session>().local_player {
+                super::hide_sprite(world, entity);
             }
         }
     }

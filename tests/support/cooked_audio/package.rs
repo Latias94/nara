@@ -185,6 +185,8 @@ pub fn inspect(
     let mut features = player.features();
     features.sort();
     assert_eq!(selection["requested_features"], json!(features));
+    features.push("local-player".to_owned());
+    features.sort();
     assert_eq!(payload["build"]["resolved_features"], json!(features));
     let mut products = BTreeSet::new();
     let mut images = BTreeMap::new();

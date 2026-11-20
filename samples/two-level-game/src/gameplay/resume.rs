@@ -68,12 +68,15 @@ pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
 }
 
 pub(super) fn record_configuration(app: &mut App) -> Result<(), PluginError> {
+    if !app.world().resource::<Session>().local_player {
+        return Ok(());
+    }
     let configuration = app.configuration_fingerprint().as_bytes();
     let unsupported = app
         .installed_plugins()
         .filter(|declaration| {
             let supported = supported_service(declaration.id.as_str());
-            #[cfg(all(windows, feature = "audio-cpal"))]
+            #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
             let supported = supported
                 || (declaration.id == crate::audio::AUDIO_PLUGIN_ID
                     && crate::audio::development_reset_installed(app.world()));
@@ -143,6 +146,7 @@ pub(super) fn remember_current(world: &mut World) {
     }
 }
 
+#[cfg(feature = "local-player")]
 pub(super) fn input_capture_eligible(world: &World) -> Result<(), GameResumeError> {
     let baseline = nara::input::startup_action_map_bindings(world)
         .ok_or_else(|| GameResumeError::Ineligible("admitted game input is unavailable".into()))?;
@@ -346,6 +350,9 @@ pub(super) fn begin_from_command(
     world: &mut World,
     payload: &GameplayCommandPayload,
 ) -> Result<(), String> {
+    if !world.resource::<Session>().local_player {
+        return Err("exact reconstruction requires the local source player".into());
+    }
     if world.resource::<FixedTime>().tick() != 1
         || !world.resource::<RuntimeTimeSettings>().paused()
         || world.resource::<Session>().clock.ticks != 0

@@ -1,7 +1,9 @@
 mod collision;
 pub(crate) mod commands;
 pub(crate) mod content;
+#[cfg(feature = "local-player")]
 pub mod flow;
+#[cfg(feature = "local-player")]
 pub mod input;
 #[cfg(feature = "desktop")]
 pub use input::movement_keyboard_bindings;
@@ -14,12 +16,14 @@ mod verification;
 
 use std::{path::PathBuf, sync::Arc};
 
+#[cfg(feature = "local-player")]
+use nara::sprite::Sprite;
 use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
     core::ItemLimit,
-    ecs::{Entity, Mut, World, schedule::IntoScheduleConfigs},
+    ecs::{Entity, World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
@@ -31,7 +35,6 @@ use nara::{
         PersistentComponentProvider,
     },
     scene::advanced::SceneProductResource,
-    sprite::Sprite,
     transform::fixed_spatial_snapshot,
 };
 
@@ -259,6 +262,7 @@ impl SceneProductResource for ActiveLevel {
 
 #[derive(Resource, Default)]
 pub(super) struct Session {
+    local_player: bool,
     player_launch: Option<Result<(), String>>,
     held: [bool; 4],
     markers: Vec<travel::MarkerInstance>,
@@ -272,14 +276,38 @@ pub(super) struct Session {
     clock: crate::resume::GameClock,
 }
 
+#[derive(Clone)]
+enum ExplorationConfiguration {
+    Server,
+    #[cfg(feature = "local-player")]
+    LocalPlayer(RunOptions),
+}
+
+impl ProductConfiguration for ExplorationConfiguration {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        match self {
+            Self::Server => output.extend_from_slice(b"two-level-game.server.v1"),
+            #[cfg(feature = "local-player")]
+            Self::LocalPlayer(options) => options.write_canonical(output),
+        }
+    }
+}
+
 struct ExplorationPlugin {
-    options: RunOptions,
+    configuration: ExplorationConfiguration,
 }
 impl Plugin for ExplorationPlugin {
     fn declaration() -> &'static PluginDeclaration {
         &DECLARATION
     }
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let (scenario, save_path, local_player) = match &self.configuration {
+            ExplorationConfiguration::Server => (Scenario::Interactive, None, false),
+            #[cfg(feature = "local-player")]
+            ExplorationConfiguration::LocalPlayer(options) => {
+                (options.scenario, options.save_path.as_deref(), true)
+            }
+        };
         app.world_mut()?
             .register_component::<travel::DynamicMarker>();
         let key = LevelKey::main(LevelId::STARTUP);
@@ -288,19 +316,22 @@ impl Plugin for ExplorationPlugin {
             anchor: SceneEntityId::new("checkpoint").unwrap(),
         })))?
         .insert_resource(ActiveLevel::new(key, None))?
-        .insert_resource(Session::default())?
+        .insert_resource(Session {
+            local_player,
+            ..Session::default()
+        })?
         .insert_resource(collision::CharacterState::default())?
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
         .insert_resource(Rooms::default())?
-        .insert_resource(verification::Verification::new(self.options.scenario))?;
+        .insert_resource(verification::Verification::new(scenario))?;
         resume::install(app)?;
-        storage::install(app, self.options.save_path.as_deref())?;
+        storage::install(app, save_path)?;
         add_startup_scene_activation_systems(app, initialize)?;
         add_local_gameplay_command_systems(app, verification::drive)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (travel::consume, simulate, project_animation)
+            (travel::consume, simulate)
                 .chain()
                 .in_set(GameplayCommandSet::Consume)
                 .before(GameplayCommandSet::Capture)
@@ -316,14 +347,23 @@ impl Plugin for ExplorationPlugin {
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            (
-                travel::advance,
-                side_room::advance,
-                resume::finish,
-                project_animation,
-            )
-                .chain(),
+            (travel::advance, side_room::advance, resume::finish).chain(),
         )?;
+        #[cfg(feature = "local-player")]
+        if local_player {
+            app.add_systems(
+                CoreStage::FixedUpdate,
+                project_animation
+                    .after(simulate)
+                    .in_set(GameplayCommandSet::Consume)
+                    .before(GameplayCommandSet::Capture)
+                    .in_set(FixedUpdateSet::Simulate),
+            )?
+            .add_systems(
+                CoreStage::TaskUpdate,
+                project_animation.after(resume::finish),
+            )?;
+        }
         app.add_systems(CoreStage::Last, capture)?;
         Ok(())
     }
@@ -333,15 +373,22 @@ impl Plugin for ExplorationPlugin {
     }
 }
 
+#[cfg(feature = "local-player")]
 #[must_use]
 pub fn product_recipe() -> ProductRecipe {
     configured_recipe(RunOptions::default())
 }
 
 /// The fixed headless recipe shared by the cooker and the source-free Player.
+#[cfg(feature = "local-player")]
 #[must_use]
 pub fn cooked_recipe() -> ProductRecipe {
-    with_cooked_image_codec(exploration_recipe(RunOptions::default()))
+    with_cooked_image_codec(product_recipe())
+}
+
+#[must_use]
+pub fn cooked_server_recipe() -> ProductRecipe {
+    exploration_recipe(ExplorationConfiguration::Server)
 }
 
 /// The fixed desktop recipe with the game's authored input and semantic commands.
@@ -351,6 +398,7 @@ pub fn cooked_desktop_recipe() -> ProductRecipe {
     with_cooked_image_codec(product_recipe())
 }
 
+#[cfg(feature = "local-player")]
 fn with_cooked_image_codec(recipe: ProductRecipe) -> ProductRecipe {
     recipe
         .add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(
@@ -359,24 +407,10 @@ fn with_cooked_image_codec(recipe: ProductRecipe) -> ProductRecipe {
         .expect("the game's fixed Runtime Image codec is valid")
 }
 
+#[cfg(feature = "local-player")]
 #[must_use]
 pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
-    exploration_recipe(options)
-}
-
-fn exploration_recipe(options: RunOptions) -> ProductRecipe {
-    let contribution = SchemaContribution::configured(
-        options,
-        |options| ExplorationPlugin {
-            options: options.clone(),
-        },
-        [PROVIDER],
-    )
-    .expect("static game schema and composition");
-    ProductRecipe::new()
-        .with_source_content_limits(
-            ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
-        )
+    exploration_recipe(ExplorationConfiguration::LocalPlayer(options))
         .add_runtime_asset_codec::<nara::input::ActionMapDomain, nara::input::ActionMapRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.input", 1),
         )
@@ -413,10 +447,25 @@ fn exploration_recipe(options: RunOptions) -> ProductRecipe {
             "two-level-game.sprite-animation", 1,
         ))
         .expect("the Sprite animation Runtime codec is valid")
-        .add_contribution(contribution)
-        .expect("static game recipe")
         .add_plugin::<input::GameInputPlugin>()
         .expect("static input plugin")
+}
+
+fn exploration_recipe(configuration: ExplorationConfiguration) -> ProductRecipe {
+    let contribution = SchemaContribution::configured(
+        configuration,
+        |configuration| ExplorationPlugin {
+            configuration: configuration.clone(),
+        },
+        [PROVIDER],
+    )
+    .expect("static game schema and composition");
+    ProductRecipe::new()
+        .with_source_content_limits(
+            ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
+        )
+        .add_contribution(contribution)
+        .expect("static game recipe")
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
@@ -473,10 +522,11 @@ fn initialize(world: &mut World) {
                 fail(world, error);
             } else {
                 world.resource_mut::<Session>().initialized = true;
-                project_animation(world);
-                println!(
-                    "two_level_game: entered Meadow instance=0; using configured game controls"
-                );
+                #[cfg(feature = "local-player")]
+                if world.resource::<Session>().local_player {
+                    project_animation(world);
+                }
+                println!("two_level_game: entered Meadow instance=0");
             }
         }
         Err(error) => fail(world, error),
@@ -492,7 +542,7 @@ fn fail(world: &mut World, error: String) {
     session.error = Some(error);
 }
 
-#[cfg(all(windows, feature = "audio-cpal"))]
+#[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
 pub(crate) fn sound_bank_reference(world: &World) -> Result<nara::asset::AssetRef, String> {
     let session = world.resource::<Session>();
     if !session.initialized || session.phase != GamePhase::Running {
@@ -501,7 +551,8 @@ pub(crate) fn sound_bank_reference(world: &World) -> Result<nara::asset::AssetRe
     world
         .resource::<ActiveLevel>()
         .content()
-        .map(|content| content.bank.clone())
+        .and_then(|content| content.presentation.as_ref())
+        .map(|presentation| presentation.bank.clone())
         .ok_or_else(|| "initial game content lacks its Sound Bank".into())
 }
 
@@ -518,8 +569,17 @@ fn current_level_entity(world: &World, id: &SceneEntityId) -> Option<Entity> {
     }
 }
 
+fn simulation_enabled(world: &World) -> bool {
+    let session = world.resource::<Session>();
+    #[cfg(feature = "local-player")]
+    if session.local_player && !flow::simulation_enabled(world) {
+        return false;
+    }
+    session.phase == GamePhase::Running
+}
+
 fn simulate(world: &mut World) {
-    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
+    if !simulation_enabled(world) {
         return;
     }
     if let Err(error) = resume::advance_clock(world) {
@@ -543,7 +603,7 @@ fn simulate(world: &mut World) {
 }
 
 fn collect_pickups(world: &mut World) {
-    if !flow::simulation_enabled(world) || world.resource::<Session>().phase != GamePhase::Running {
+    if !simulation_enabled(world) {
         return;
     }
     let level = world.resource::<ActiveLevel>();
@@ -575,35 +635,55 @@ fn collect_pickups(world: &mut World) {
         })
         .collect::<Vec<_>>();
     for (id, entity) in nearby {
+        #[cfg(feature = "local-player")]
+        if world.resource::<Session>().local_player && world.get::<Sprite>(entity).is_none() {
+            continue;
+        }
         let pickup = CollectedPickup {
             level: key,
             entity: id.clone(),
         };
-        let score = world.resource_scope(|world, mut progress: Mut<Progress>| {
-            let mut sprite = world.get_mut::<Sprite>(entity)?;
-            if !progress.collect(pickup) {
-                return None;
-            }
-            sprite.material.tint.a = 0.0;
-            Some(progress.checkpoint().score)
-        });
-        let Some(score) = score else { continue };
+        let mut progress = world.resource_mut::<Progress>();
+        if !progress.collect(pickup) {
+            continue;
+        }
+        let score = progress.checkpoint().score;
+        #[cfg(feature = "local-player")]
+        if world.resource::<Session>().local_player {
+            hide_sprite(world, entity);
+        }
+        #[cfg(not(feature = "local-player"))]
+        let _ = entity;
         println!("two_level_game: collected={id} level={key:?} score={score}");
-        #[cfg(all(windows, feature = "audio-cpal"))]
-        crate::audio::pickup_collected(world, key, id);
+        #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
+        if world.resource::<Session>().local_player {
+            crate::audio::pickup_collected(world, key, id);
+        }
     }
 }
 
+#[cfg(feature = "local-player")]
+fn hide_sprite(world: &mut World, entity: Entity) {
+    if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
+        sprite.material.tint.a = 0.0;
+    }
+}
+
+#[cfg(feature = "local-player")]
 fn project_animation(world: &mut World) {
     let session = world.resource::<Session>();
-    if !session.initialized || session.phase != GamePhase::Running {
+    if !session.local_player || !session.initialized || session.phase != GamePhase::Running {
         return;
     }
-    let Some(content) = world.resource::<ActiveLevel>().content() else {
+    let Some(presentation) = world
+        .resource::<ActiveLevel>()
+        .content()
+        .and_then(|content| content.presentation.as_ref())
+    else {
         fail(world, "the animated explorer content is unavailable".into());
         return;
     };
-    let region = content.animation.sample(session.clock, session.held);
+    let region = presentation.animation.sample(session.clock, session.held);
     let Some(entity) = player(world) else {
         fail(
             world,
@@ -611,13 +691,10 @@ fn project_animation(world: &mut World) {
         );
         return;
     };
-    match world.get::<nara::sprite::Sprite>(entity) {
+    match world.get::<Sprite>(entity) {
         Some(sprite) if sprite.texture_region == Some(region) => {}
         Some(_) => {
-            world
-                .get_mut::<nara::sprite::Sprite>(entity)
-                .unwrap()
-                .texture_region = Some(region);
+            world.get_mut::<Sprite>(entity).unwrap().texture_region = Some(region);
         }
         None => fail(world, "the animated explorer has no Sprite".into()),
     }
@@ -644,22 +721,31 @@ fn capture(world: &mut World) {
     let level = world.resource::<ActiveLevel>();
     let session = world.resource::<Session>();
     let rooms = world.resource::<Rooms>();
-    let visible = level.content().map_or(0, |content| {
-        content
-            .pickups
-            .iter()
-            .filter(|id| {
-                receipt
-                    .as_ref()
-                    .is_some_and(|receipt| match receipt.resolve(world, id) {
-                        EntityLookup::Resolved(entity) => world
-                            .get::<nara::sprite::Sprite>(entity)
-                            .is_some_and(|sprite| sprite.material.tint.a > 0.0),
-                        _ => false,
-                    })
-            })
-            .count()
-    });
+    let visible = level
+        .content()
+        .zip(receipt)
+        .map_or(0, |(content, receipt)| {
+            content
+                .pickups
+                .iter()
+                .filter(|id| {
+                    let EntityLookup::Resolved(entity) = receipt.resolve(world, id) else {
+                        return false;
+                    };
+                    #[cfg(feature = "local-player")]
+                    if session.local_player {
+                        return world
+                            .get::<Sprite>(entity)
+                            .is_some_and(|sprite| sprite.material.tint.a > 0.0);
+                    }
+                    let _ = entity;
+                    !progress
+                        .collected
+                        .iter()
+                        .any(|pickup| pickup.level == level.key() && &pickup.entity == *id)
+                })
+                .count()
+        });
     let snapshot = GameSnapshot {
         tick: world.resource::<nara::app::FixedTime>().tick(),
         level: Some(level.key()),
@@ -695,5 +781,5 @@ fn capture(world: &mut World) {
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "local-player"))]
 mod resource_tests;

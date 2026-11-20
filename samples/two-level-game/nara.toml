@@ -35,6 +35,12 @@ enabled = false
 [capabilities]
 requested = ["runtime-2d"]
 
+[profiles.server.capabilities]
+requested = []
+
+[profiles.server.input]
+clear_action_map = true
+
 [profiles.desktop.capabilities]
 requested = ["runtime-2d", "presentation-2d", "desktop-winit", "render-wgpu"]
 

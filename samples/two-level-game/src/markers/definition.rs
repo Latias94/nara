@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
+#[cfg(feature = "local-player")]
+use nara::sprite::Sprite;
 use nara::{
-    ecs::World,
+    ecs::{Entity, World},
     hierarchy::{Children, HierarchyRoots, Parent},
     identity::{
         EntityLookup, EntityReference, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
@@ -9,7 +11,6 @@ use nara::{
     prelude::{Transform2d, Vec2},
     reflect::ComponentTypeId,
     scene::CompiledSceneDocument,
-    sprite::Sprite,
 };
 
 use super::MarkerLink;
@@ -21,6 +22,8 @@ pub(crate) struct MarkerDefinition {
     pub(crate) root: SceneEntityId,
     pub(crate) parts: Vec<MarkerPart>,
     pub(crate) link_target: SceneEntityId,
+    #[cfg(feature = "local-player")]
+    local_player: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -33,11 +36,18 @@ pub(crate) struct MarkerPart {
 #[derive(Clone, Debug)]
 pub(crate) struct MarkerGeometry {
     position: Vec2,
-    parts: Vec<(Transform2d, Sprite)>,
+    parts: Vec<MarkerPartGeometry>,
+}
+
+#[derive(Clone, Debug)]
+struct MarkerPartGeometry {
+    transform: Transform2d,
+    #[cfg(feature = "local-player")]
+    sprite: Option<Sprite>,
 }
 
 impl MarkerDefinition {
-    pub(crate) fn read(scene: &CompiledSceneDocument) -> Result<Self, String> {
+    pub(crate) fn read(scene: &CompiledSceneDocument, local_player: bool) -> Result<Self, String> {
         let [root] = scene.roots() else {
             return Err("marker template requires exactly one spatial root".into());
         };
@@ -62,9 +72,13 @@ impl MarkerDefinition {
                 return Err("marker template contains an unexpected component".into());
             }
             if !entity.components().contains_key(&transform_id)
-                || !entity.components().contains_key(&sprite_id)
+                || (local_player && !entity.components().contains_key(&sprite_id))
             {
-                return Err("every marker part requires Transform2d and Sprite".into());
+                return Err(if local_player {
+                    "every marker part requires Transform2d and Sprite".into()
+                } else {
+                    "every marker part requires Transform2d".into()
+                });
             }
             parts.push(MarkerPart {
                 id: entity.id().clone(),
@@ -98,6 +112,8 @@ impl MarkerDefinition {
             root: root.clone(),
             parts,
             link_target,
+            #[cfg(feature = "local-player")]
+            local_player,
         })
     }
 
@@ -111,8 +127,14 @@ impl MarkerDefinition {
             return Err("marker placement must be finite".into());
         }
         let mut parts = Vec::with_capacity(self.parts.len());
-        self.visit_world(world, receipt, |_, transform, sprite| {
-            parts.push((*transform, sprite.clone()));
+        self.visit_world(world, receipt, |_, entity, transform| {
+            #[cfg(not(feature = "local-player"))]
+            let _ = entity;
+            parts.push(MarkerPartGeometry {
+                transform: *transform,
+                #[cfg(feature = "local-player")]
+                sprite: self.sprite(world, entity)?.cloned(),
+            });
             Ok(())
         })?;
         Ok(MarkerGeometry { position, parts })
@@ -128,20 +150,37 @@ impl MarkerDefinition {
         if position != geometry.position || self.parts.len() != geometry.parts.len() {
             return Err("marker occurrence differs from its saved placement".into());
         }
-        self.visit_world(world, receipt, |index, transform, sprite| {
-            let (expected_transform, expected_sprite) = &geometry.parts[index];
-            if transform != expected_transform || sprite != expected_sprite {
+        self.visit_world(world, receipt, |index, entity, transform| {
+            let expected = &geometry.parts[index];
+            let matches = transform == &expected.transform;
+            #[cfg(feature = "local-player")]
+            let matches = matches && self.sprite(world, entity)? == expected.sprite.as_ref();
+            #[cfg(not(feature = "local-player"))]
+            let _ = entity;
+            if !matches {
                 return Err("marker occurrence has changed authored geometry".into());
             }
             Ok(())
         })
     }
 
+    #[cfg(feature = "local-player")]
+    fn sprite<'a>(&self, world: &'a World, entity: Entity) -> Result<Option<&'a Sprite>, String> {
+        self.local_player
+            .then(|| {
+                world
+                    .get::<Sprite>(entity)
+                    .ok_or("marker member lacks its Sprite")
+            })
+            .transpose()
+            .map_err(String::from)
+    }
+
     fn visit_world(
         &self,
         world: &World,
         receipt: &SpawnedSceneInstance,
-        mut visit_geometry: impl FnMut(usize, &Transform2d, &Sprite) -> Result<(), String>,
+        mut visit_geometry: impl FnMut(usize, Entity, &Transform2d) -> Result<(), String>,
     ) -> Result<(), String> {
         if receipt.len() != self.parts.len()
             || self.parts.iter().any(|part| !receipt.contains(&part.id))
@@ -170,10 +209,7 @@ impl MarkerDefinition {
                 .get::<Transform2d>(entity)
                 .filter(|transform| transform.translation.is_finite())
                 .ok_or("marker member lacks a finite Transform2d")?;
-            let sprite = world
-                .get::<Sprite>(entity)
-                .ok_or("marker member lacks its Sprite")?;
-            visit_geometry(index, transform, sprite)?;
+            visit_geometry(index, entity, transform)?;
 
             let parent = self
                 .parts

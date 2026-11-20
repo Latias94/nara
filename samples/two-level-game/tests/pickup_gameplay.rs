@@ -1,3 +1,4 @@
+#![cfg(feature = "local-player")]
 #![forbid(unsafe_code)]
 
 #[allow(dead_code, reason = "reuse the public headless game driver")]
@@ -5,6 +6,7 @@
 mod support;
 
 use nara::{
+    ProductConfiguration,
     advanced_prelude::CurrentScene,
     app::{PluginCategory, PluginDeclaration, PluginId},
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
@@ -21,15 +23,26 @@ use two_level_game::{GameSnapshot, product_recipe};
 
 const NEAR_PICKUP: &str = "gem-near";
 const AUTHORED_CONTACT_TICK: u64 = 14;
+const SPRITE_RESTORE_TICK: u64 = AUTHORED_CONTACT_TICK + 1;
 const MOVED_CONTACT_TICK: u64 = 25;
 const AUTHORED_POSITION: Vec2 = Vec2::new(-60.0, 0.0);
 const MOVED_LOCAL_POSITION: Vec2 = Vec2::new(95.0, 0.0);
 const MOVED_WORLD_POSITION: Vec2 = Vec2::new(-25.0, 0.0);
 
-#[derive(Default)]
-struct PickupEdit<const RETIRE: bool>;
+#[derive(Clone, Copy)]
+enum PickupEdit {
+    Retire,
+    Move,
+    DetachSprite,
+}
 
-impl<const RETIRE: bool> Plugin for PickupEdit<RETIRE> {
+impl ProductConfiguration for PickupEdit {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.push(*self as u8);
+    }
+}
+
+impl Plugin for PickupEdit {
     fn declaration() -> &'static PluginDeclaration {
         const DECLARATION: PluginDeclaration = PluginDeclaration::new(
             PluginId::new("two-level-game.test-pickup-edit"),
@@ -40,9 +53,11 @@ impl<const RETIRE: bool> Plugin for PickupEdit<RETIRE> {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let edit = *self;
+        let mut detached_sprite = None;
         app.add_systems(
             CoreStage::FixedUpdate,
-            edit_pickup::<RETIRE>
+            (move |world: &mut World| edit_pickup(world, edit, &mut detached_sprite))
                 .in_set(FixedUpdateSet::Simulate)
                 .after(GameplayCommandSet::Consume),
         )?;
@@ -59,13 +74,13 @@ fn current_entity(world: &World, id: &str) -> Entity {
     }
 }
 
-fn edit_pickup<const RETIRE: bool>(world: &mut World) {
-    match (RETIRE, world.resource::<FixedTime>().tick()) {
-        (true, 1) => {
+fn edit_pickup(world: &mut World, edit: PickupEdit, detached_sprite: &mut Option<Sprite>) {
+    match (edit, world.resource::<FixedTime>().tick()) {
+        (PickupEdit::Retire, 1) => {
             let pickup = current_entity(world, NEAR_PICKUP);
             retire_and_despawn_scene_entity(world, pickup).unwrap();
         }
-        (false, AUTHORED_CONTACT_TICK) => {
+        (PickupEdit::Move, AUTHORED_CONTACT_TICK) => {
             let pickup = current_entity(world, NEAR_PICKUP);
             let parent = current_entity(world, "checkpoint");
             let from = HierarchyPlacement::current(world, pickup).unwrap();
@@ -74,16 +89,28 @@ fn edit_pickup<const RETIRE: bool>(world: &mut World) {
                 .move_entity(pickup, from, to)
                 .unwrap();
         }
-        (false, MOVED_CONTACT_TICK) => {
+        (PickupEdit::Move, MOVED_CONTACT_TICK) => {
             let pickup = current_entity(world, NEAR_PICKUP);
             world.get_mut::<Transform2d>(pickup).unwrap().translation = MOVED_LOCAL_POSITION;
+        }
+        (PickupEdit::DetachSprite, AUTHORED_CONTACT_TICK) => {
+            let pickup = current_entity(world, NEAR_PICKUP);
+            *detached_sprite = Some(world.entity_mut(pickup).take::<Sprite>().unwrap());
+        }
+        (PickupEdit::DetachSprite, SPRITE_RESTORE_TICK) => {
+            let pickup = current_entity(world, NEAR_PICKUP);
+            world
+                .entity_mut(pickup)
+                .insert(detached_sprite.take().unwrap());
         }
         _ => {}
     }
 }
 
-fn game_with_pickup_edit<const RETIRE: bool>() -> Game {
-    let recipe = product_recipe().add_plugin::<PickupEdit<RETIRE>>().unwrap();
+fn game_with_pickup_edit(edit: PickupEdit) -> Game {
+    let recipe = product_recipe()
+        .add_configured_plugin(edit, |edit| *edit)
+        .unwrap();
     Game::with_recipe(recipe)
 }
 
@@ -116,7 +143,7 @@ fn pickup_state(game: &Game) -> (Vec2, Vec2, f32) {
 
 #[test]
 fn retired_pickup_does_not_score_at_its_authored_position() {
-    let mut game = game_with_pickup_edit::<true>();
+    let mut game = game_with_pickup_edit(PickupEdit::Retire);
     let initial = game.snapshot();
     assert_eq!(initial.visible_pickups, 2);
 
@@ -141,8 +168,47 @@ fn retired_pickup_does_not_score_at_its_authored_position() {
 }
 
 #[test]
+fn a_live_pickup_scores_once_after_its_sprite_returns() {
+    let mut game = game_with_pickup_edit(PickupEdit::DetachSprite);
+    let id = SceneEntityId::new(NEAR_PICKUP).unwrap();
+    let (receipt, pickup) = game
+        .session
+        .observe(|world| {
+            let receipt = CurrentScene::get(world).unwrap().receipt().clone();
+            (receipt, current_entity(world, NEAR_PICKUP))
+        })
+        .unwrap();
+
+    let contact = walk_to_authored_contact(&mut game);
+    assert_eq!((contact.score, contact.collected), (0, 0));
+    game.session
+        .observe(|world| {
+            assert_eq!(receipt.resolve(world, &id), EntityLookup::Resolved(pickup));
+            assert!(world.get::<Sprite>(pickup).is_none());
+        })
+        .unwrap();
+
+    let restored = game.command(movement(1, false));
+    assert_eq!(restored.tick, SPRITE_RESTORE_TICK);
+    assert_eq!((restored.score, restored.collected), (10, 1));
+    game.session
+        .observe(|world| {
+            assert_eq!(receipt.resolve(world, &id), EntityLookup::Resolved(pickup));
+            assert_eq!(world.get::<Sprite>(pickup).unwrap().material.tint.a, 0.0);
+        })
+        .unwrap();
+
+    let still_overlapping = game.step();
+    assert_eq!(
+        (still_overlapping.score, still_overlapping.collected),
+        (10, 1)
+    );
+    game.close();
+}
+
+#[test]
 fn moved_pickup_is_collected_once_at_its_completed_fixed_world_position() {
-    let mut game = game_with_pickup_edit::<false>();
+    let mut game = game_with_pickup_edit(PickupEdit::Move);
     let original_contact = walk_to_authored_contact(&mut game);
     assert_eq!(
         (

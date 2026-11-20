@@ -4,6 +4,7 @@
 //! Preparation precedes logical Player bootstrap generation. Source-free Session acceptance
 //! consumes the prepared base after the copied project and import cache have been removed.
 
+#![cfg(feature = "local-player")]
 #![forbid(unsafe_code)]
 
 #[allow(dead_code)]

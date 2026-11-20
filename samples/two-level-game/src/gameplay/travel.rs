@@ -7,13 +7,15 @@ pub(super) use reconstruction::reconstruct;
 
 use std::collections::BTreeSet;
 
+#[cfg(feature = "local-player")]
+use nara::gameplay::GameplayCommandSource;
 use nara::{
     advanced_prelude::{
         CurrentScene, commit_prepared_project_scene, restart_current_scene_with_product,
     },
     core::ItemLimit,
     ecs::World,
-    gameplay::{GameplayCommandBatch, GameplayCommandPayload, GameplayCommandSource},
+    gameplay::{GameplayCommandBatch, GameplayCommandPayload},
     identity::SceneEntityId,
     prelude::Resource,
     project_host::{
@@ -72,7 +74,14 @@ pub(super) fn consume(world: &mut World) {
         eprintln!("two_level_game: Player launch rejected: {error}");
         world.resource_mut::<Session>().error = Some(error.clone());
     }
-    let (blocked, mut round_saves) = super::flow::fixed_input(world);
+    #[cfg(feature = "local-player")]
+    let (blocked, mut round_saves) = if world.resource::<Session>().local_player {
+        super::flow::fixed_input(world)
+    } else {
+        (false, 0)
+    };
+    #[cfg(not(feature = "local-player"))]
+    let blocked = false;
     let commands = world
         .resource::<GameplayCommandBatch>()
         .commands()
@@ -80,14 +89,15 @@ pub(super) fn consume(world: &mut World) {
         .filter_map(|command| match command.command_type().as_str() {
             MOVE => Some(ConsumedInput::Movement(decode_movement(command))),
             ROUND_SAVE => {
-                if round_saves == 0 || command.source() != &GameplayCommandSource::LocalAction {
-                    return None;
+                #[cfg(feature = "local-player")]
+                if round_saves != 0 && command.source() == &GameplayCommandSource::LocalAction {
+                    round_saves -= 1;
+                    return Some(ConsumedInput::Action(
+                        SAVE.to_owned(),
+                        command.payload().clone(),
+                    ));
                 }
-                round_saves -= 1;
-                Some(ConsumedInput::Action(
-                    SAVE.to_owned(),
-                    command.payload().clone(),
-                ))
+                None
             }
             _ if blocked => None,
             kind => Some(ConsumedInput::Action(
@@ -235,8 +245,10 @@ fn retry_current(world: &mut World) -> Result<(), String> {
             report.diagnostics
         ));
     }
-    #[cfg(all(windows, feature = "audio-cpal"))]
-    crate::audio::scene_replaced(world);
+    #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
+    if world.resource::<Session>().local_player {
+        crate::audio::scene_replaced(world);
+    }
     {
         let mut session = world.resource_mut::<Session>();
         session.markers.clear();
@@ -316,17 +328,27 @@ pub(super) fn advance(world: &mut World) {
         return;
     }
     let request = pending.request.unwrap();
-    #[cfg(all(windows, feature = "audio-cpal"))]
-    let audio_bank = crate::audio::bank_guard(world);
+    let local_player = world.resource::<Session>().local_player;
+    #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
+    let audio_bank = if local_player {
+        crate::audio::bank_guard(world)
+    } else {
+        None
+    };
     let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
         Some(ProjectSceneRequestState::Ready) => scenes.prepared(request).map(|view| {
             let marker = view
                 .scene_dependency(crate::markers::marker_product())
                 .ok_or("prepared level lacks its Immediate marker Scene dependency")?;
-            let content = Content::read(view.scene(), view.domain_assets(), marker)?;
-            #[cfg(all(windows, feature = "audio-cpal"))]
+            let local_assets = local_player.then(|| view.domain_assets());
+            let content = Content::read(view.scene(), local_assets, marker)?;
+            #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
             if let Some(bank) = &audio_bank {
-                bank.validate(view.domain_assets(), &content.bank)?;
+                let presentation = content
+                    .presentation
+                    .as_ref()
+                    .ok_or("prepared level lacks its Sound Bank")?;
+                bank.validate(view.domain_assets(), &presentation.bank)?;
             }
             Ok((content, view.source_content_stamp()))
         }),
@@ -418,8 +440,10 @@ pub(super) fn advance(world: &mut World) {
         world.resource::<Storage>().accept_load(binding);
     }
     *world.resource_mut::<Rooms>() = Rooms::default();
-    #[cfg(all(windows, feature = "audio-cpal"))]
-    crate::audio::scene_replaced(world);
+    #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
+    if local_player {
+        crate::audio::scene_replaced(world);
+    }
     ack(world, request);
     {
         let mut session = world.resource_mut::<Session>();
@@ -430,17 +454,21 @@ pub(super) fn advance(world: &mut World) {
     }
     match reconstruct(world) {
         Ok(()) => {
-            let held =
-                if super::flow::simulation_enabled(world) && !super::resume::is_pending(world) {
-                    super::input::held_movement(world)
-                } else {
-                    [false; 4]
-                };
+            let held = [false; 4];
+            #[cfg(feature = "local-player")]
+            let held = if local_player
+                && super::flow::simulation_enabled(world)
+                && !super::resume::is_pending(world)
+            {
+                super::input::held_movement(world)
+            } else {
+                held
+            };
             let mut session = world.resource_mut::<Session>();
             session.held = held;
             session.phase = GamePhase::Running;
-            #[cfg(all(windows, feature = "audio-cpal"))]
-            if !restore {
+            #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
+            if local_player && !restore {
                 crate::audio::travel_entered(world, pending.target);
             }
             println!(
@@ -469,5 +497,5 @@ fn cancel_ack(world: &mut World, request: ProjectSceneRequestId) {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "local-player"))]
 mod tests;

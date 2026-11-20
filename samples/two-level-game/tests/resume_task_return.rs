@@ -1,3 +1,4 @@
+#![cfg(feature = "local-player")]
 #![forbid(unsafe_code)]
 
 #[path = "support/resume_gameplay.rs"]

@@ -3,13 +3,16 @@ use nara::project_host::DesktopRun;
 use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedTime, RuntimeTimeSettings},
-    asset::Assets,
     ecs::World,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
-    material::{Material2d, Material2dAsset},
     prelude::Transform2d,
     project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
+};
+#[cfg(feature = "local-player")]
+use nara::{
+    asset::Assets,
+    material::{Material2d, Material2dAsset},
 };
 
 use super::{GameResumeError, ResumeControl};
@@ -23,6 +26,11 @@ use crate::{
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let session = world.resource::<Session>();
+    if !session.local_player {
+        return Err(reject(
+            "exact reconstruction requires the local source player",
+        ));
+    }
     if !session.initialized
         || session.phase != GamePhase::Running
         || session.error.is_some()
@@ -53,16 +61,19 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             control.unsupported
         )));
     }
+    #[cfg(feature = "local-player")]
     super::input_capture_eligible(world)?;
     if control.rejected {
         return Err(reject("this candidate rejected its reconstruction"));
     }
+    #[cfg(feature = "local-player")]
     if world
         .get_resource::<Assets<Material2dAsset>>()
         .is_some_and(|assets| !assets.is_empty())
     {
         return Err(reject("material assets are not represented by ResumeState"));
     }
+    #[cfg(feature = "local-player")]
     if world
         .iter_entities()
         .any(|entity| entity.contains::<Material2d>())
@@ -111,6 +122,7 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {
+        #[cfg(feature = "local-player")]
         if world.contains_resource::<nara::window::backend::WindowPresentationRequirement>() {
             return Err(GameResumeError::Ineligible(
                 "native presentation requires the desktop capture boundary".into(),
@@ -162,17 +174,21 @@ pub(crate) fn capture_world(
     progress.collected.sort();
     progress.markers.sort_by_key(|record| record.id);
     let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
-    let content = world
-        .resource::<ActiveLevel>()
-        .content()
-        .ok_or_else(|| reject("active animation content is unavailable"))?;
-    if !world
-        .get::<crate::animation::ExplorerAnimation>(entity)
-        .is_some_and(|component| content.animation.matches(component))
+    #[cfg(feature = "local-player")]
     {
-        return Err(reject(
-            "runtime animation configuration is not represented by admitted source",
-        ));
+        let presentation = world
+            .resource::<ActiveLevel>()
+            .content()
+            .and_then(|content| content.presentation.as_ref())
+            .ok_or_else(|| reject("active animation content is unavailable"))?;
+        if !world
+            .get::<crate::animation::ExplorerAnimation>(entity)
+            .is_some_and(|component| presentation.animation.matches(component))
+        {
+            return Err(reject(
+                "runtime animation configuration is not represented by admitted source",
+            ));
+        }
     }
     crate::gameplay::collision::capture_eligible(world, entity)
         .map_err(GameResumeError::Ineligible)?;

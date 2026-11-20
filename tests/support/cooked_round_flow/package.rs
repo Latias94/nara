@@ -42,6 +42,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
                 game = true;
                 features.sort();
                 let mut expected = player.features();
+                expected.push("local-player".to_owned());
                 expected.sort();
                 assert_eq!(features, expected);
             }
@@ -110,6 +111,8 @@ pub fn inspect(
     let mut features = player.features();
     features.sort();
     assert_eq!(selection["requested_features"], json!(features));
+    features.push("local-player".to_owned());
+    features.sort();
     assert_eq!(payload["build"]["resolved_features"], json!(features));
     for (name, field) in [
         (executable.as_str(), "executable_digest"),

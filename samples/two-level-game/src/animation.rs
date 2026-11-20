@@ -2,14 +2,16 @@
 
 use nara::{
     asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId},
-    core::Vec2,
     prelude::{Component, PersistentComponent},
-    project_host::ProjectDomainAssets,
-    sprite::TextureRegion,
 };
+#[cfg(feature = "local-player")]
+use nara::{core::Vec2, project_host::ProjectDomainAssets, sprite::TextureRegion};
+#[cfg(feature = "local-player")]
 use nara_sprite_animation::SpriteAnimationDomain;
+#[cfg(feature = "local-player")]
 use serde::Serialize;
 
+#[cfg(feature = "local-player")]
 use crate::resume::GameClock;
 
 /// Assets-relative path to the shared four-frame explorer atlas.
@@ -60,6 +62,7 @@ pub fn atlas_product() -> AssetProductRef {
 }
 
 /// One of four adjacent 16-by-16 frames in the 64-by-16 explorer atlas.
+#[cfg(feature = "local-player")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplorerFrame {
@@ -69,6 +72,7 @@ pub enum ExplorerFrame {
     WalkThree,
 }
 
+#[cfg(feature = "local-player")]
 impl ExplorerFrame {
     /// Returns the zero-based column in the atlas.
     #[must_use]
@@ -91,6 +95,7 @@ impl ExplorerFrame {
     }
 }
 
+#[cfg(feature = "local-player")]
 fn clip_name(held: [bool; 4]) -> &'static str {
     if held[0] == held[1] && held[2] == held[3] {
         "idle"
@@ -99,12 +104,14 @@ fn clip_name(held: [bool; 4]) -> &'static str {
     }
 }
 
+#[cfg(feature = "local-player")]
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedAnimation {
     assets: ProjectDomainAssets,
     reference: AssetRef,
 }
 
+#[cfg(feature = "local-player")]
 impl PreparedAnimation {
     pub(crate) fn acquire(
         assets: &ProjectDomainAssets,
@@ -143,5 +150,5 @@ impl PreparedAnimation {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "local-player"))]
 mod tests;

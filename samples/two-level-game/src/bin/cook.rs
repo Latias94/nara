@@ -65,9 +65,11 @@ fn run(options: input::Options) -> Result<(), String> {
         .map_err(build_failure)?;
     let limits = PlayerPackageLimits::default();
     let mut inputs = project_rust_input_inventory(&project).map_err(build_failure)?;
-    inputs.push(
-        RelativePath::new("assets/materials/region.wgsl").map_err(|error| error.to_string())?,
-    );
+    if options.selection.runtime() != input::RuntimeKind::Server {
+        inputs.push(
+            RelativePath::new("assets/materials/region.wgsl").map_err(|error| error.to_string())?,
+        );
+    }
     let selection = CargoBuildSelection::new(
         "two-level-game",
         options.selection.binary(),

@@ -1,3 +1,5 @@
+#![cfg(feature = "local-player")]
+
 #[cfg(feature = "development")]
 use std::process::Command;
 

@@ -301,9 +301,9 @@ impl Fixture {
                 "two-level-game" => {
                     game = true;
                     let expected: &[&str] = if desktop {
-                        &["cooked-player", "desktop"]
+                        &["cooked-player", "desktop", "local-player"]
                     } else {
-                        &["cooked-player"]
+                        &["cooked-player", "local-player"]
                     };
                     assert_eq!(features, expected, "{line}");
                 }

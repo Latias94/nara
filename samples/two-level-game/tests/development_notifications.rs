@@ -86,10 +86,9 @@ fn build_variant(placement: DevelopmentPlacement, variant: Variant) -> BuiltVari
     let build_wall_ns = nanos(started.elapsed());
     let provenance = executable.provenance();
     assert_eq!(provenance.selection(), request.selection());
-    assert_eq!(
-        provenance.resolved_features(),
-        request.selection().features()
-    );
+    let mut resolved = request.selection().features().to_vec();
+    resolved.push("local-player".to_owned());
+    assert_eq!(provenance.resolved_features(), resolved);
     assert!(!provenance.selection().default_features());
     assert_eq!(
         executable.digest(),

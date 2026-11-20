@@ -186,5 +186,5 @@ fn apply(world: &mut World) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "local-player"))]
 mod tests;

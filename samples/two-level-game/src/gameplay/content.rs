@@ -10,7 +10,11 @@ use nara::{
     scene::{CompiledSceneDocument, CompiledSceneEntity},
 };
 
-use super::collision::{CollisionBox, RoomCollision, Wall};
+use super::{
+    Session,
+    collision::{CollisionBox, RoomCollision, Wall},
+};
+#[cfg(feature = "local-player")]
 use crate::animation::{ExplorerAnimation, PreparedAnimation};
 use crate::markers::{MarkerDefinition, MarkerPalette, marker_product};
 use crate::{levels::LevelId, save::Checkpoint};
@@ -60,10 +64,63 @@ pub(super) struct Content {
     pub checkpoint: SceneEntityId,
     pub checkpoint_position: Vec2,
     pub pickups: BTreeSet<SceneEntityId>,
-    pub bank: AssetRef,
     pub collision: RoomCollision,
-    pub animation: PreparedAnimation,
     pub marker: MarkerDefinition,
+    #[cfg(feature = "local-player")]
+    pub presentation: Option<LocalPresentation>,
+}
+
+#[cfg(feature = "local-player")]
+#[derive(Debug, Clone)]
+pub(super) struct LocalPresentation {
+    #[cfg(all(windows, feature = "audio-cpal"))]
+    pub bank: AssetRef,
+    pub animation: PreparedAnimation,
+}
+
+#[cfg(feature = "local-player")]
+impl LocalPresentation {
+    fn read(
+        scene: &CompiledSceneDocument,
+        assets: &ProjectDomainAssets,
+        player: &SceneEntityId,
+        marker_owner: &SceneEntityId,
+    ) -> Result<Self, String> {
+        let mut bank = None;
+        let mut clips = None;
+        let role = ComponentTypeId::new("two-level-game.ObjectRole");
+        let sprite = ComponentTypeId::new("nara.sprite.Sprite");
+        let camera = ComponentTypeId::new("nara.render.Camera2d");
+        for entity in scene.entities() {
+            let palette = decode::<SoundPalette>(entity)?;
+            let components = entity.components();
+            if components.contains_key(&camera) {
+                if entity.id() != marker_owner {
+                    return Err("camera lacks its MarkerPalette".into());
+                }
+                bank = Some(palette.ok_or("camera lacks its SoundPalette")?.bank);
+            } else if palette.is_some() || entity.id() == marker_owner {
+                return Err(
+                    "SoundPalette and MarkerPalette must belong to the level camera".into(),
+                );
+            }
+            if components.contains_key(&role) && !components.contains_key(&sprite) {
+                return Err("game object lacks its authored Sprite".into());
+            }
+            if entity.id() == player {
+                clips = decode::<ExplorerAnimation>(entity)?.map(|animation| animation.clips);
+            }
+        }
+        let bank = bank.ok_or("level lacks its camera SoundPalette")?;
+        let clips = clips.ok_or("explorer lacks its authored animation resource")?;
+        #[cfg(not(all(windows, feature = "audio-cpal")))]
+        let _ = bank;
+        Ok(Self {
+            #[cfg(all(windows, feature = "audio-cpal"))]
+            bank,
+            animation: PreparedAnimation::acquire(assets, clips)?,
+        })
+    }
 }
 
 impl Content {
@@ -71,8 +128,14 @@ impl Content {
         let current = nara::advanced_prelude::CurrentScene::get(world)
             .ok_or("current Scene is unavailable")?;
         let assets = world
-            .get_resource::<ProjectDomainAssets>()
-            .ok_or("current domain assets are unavailable")?;
+            .resource::<Session>()
+            .local_player
+            .then(|| {
+                world
+                    .get_resource::<ProjectDomainAssets>()
+                    .ok_or("current domain assets are unavailable")
+            })
+            .transpose()?;
         nara::project_host::inspect_current_scene_dependency(
             world,
             current.receipt(),
@@ -84,7 +147,7 @@ impl Content {
 
     pub fn read(
         scene: &CompiledSceneDocument,
-        assets: &ProjectDomainAssets,
+        local_assets: Option<&ProjectDomainAssets>,
         marker: &CompiledSceneDocument,
     ) -> Result<Self, String> {
         if scene.entities().len() > 32 {
@@ -94,33 +157,24 @@ impl Content {
         let mut checkpoint = None;
         let mut pickups = BTreeSet::new();
         let mut portals = 0;
-        let mut cameras = 0;
-        let mut bank = None;
+        let mut marker_owner = None;
         let mut walls = Vec::new();
+        let marker_product = marker_product();
         for entity in scene.entities() {
-            let palette = decode::<SoundPalette>(entity)?;
-            let marker = decode::<MarkerPalette>(entity)?;
-            if entity
-                .components()
-                .keys()
-                .any(|id| id.as_str() == "nara.render.Camera2d")
-            {
-                cameras += 1;
+            if let Some(palette) = decode::<MarkerPalette>(entity)? {
                 if !scene.roots().contains(entity.id()) || transform(entity)?.is_none() {
-                    return Err("camera must be a transformed level root".into());
+                    return Err("MarkerPalette must belong to a transformed level root".into());
                 }
-                bank = Some(palette.ok_or("camera lacks its SoundPalette")?.bank);
-                let marker = marker.ok_or("camera lacks its MarkerPalette")?.template;
-                let expected = marker_product();
-                if marker.as_product() != Some(expected)
-                    && marker.as_stable_id() != Some(expected.source())
+                if palette.template.as_product() != Some(marker_product)
+                    && palette.template.as_stable_id() != Some(marker_product.source())
                 {
-                    return Err("camera must select the admitted marker Scene Product".into());
+                    return Err(
+                        "MarkerPalette must select the admitted marker Scene Product".into(),
+                    );
                 }
-            } else if palette.is_some() || marker.is_some() {
-                return Err(
-                    "SoundPalette and MarkerPalette must belong to the level camera".into(),
-                );
+                if marker_owner.replace(entity.id()).is_some() {
+                    return Err("level requires a unique MarkerPalette".into());
+                }
             }
             let Some(role) = decode::<ObjectRole>(entity)? else {
                 continue;
@@ -137,20 +191,11 @@ impl Content {
             {
                 return Err("wall position is outside the game's finite geometry".into());
             }
-            if !entity
-                .components()
-                .keys()
-                .any(|id| id.as_str() == "nara.sprite.Sprite")
-            {
-                return Err("game object lacks its authored Sprite".into());
-            }
             match role.kind {
                 PLAYER if player.is_none() => {
                     let definition =
                         decode::<CollisionBox>(entity)?.ok_or("explorer lacks its CollisionBox")?;
-                    let animation = decode::<ExplorerAnimation>(entity)?
-                        .ok_or("explorer lacks its authored animation resource")?;
-                    player = Some((entity.id().clone(), transform, definition, animation));
+                    player = Some((entity.id().clone(), transform, definition));
                 }
                 CHECKPOINT if checkpoint.is_none() => {
                     checkpoint = Some((entity.id().clone(), position))
@@ -170,25 +215,31 @@ impl Content {
         }
         let (checkpoint, checkpoint_position) =
             checkpoint.ok_or("level lacks a unique checkpoint")?;
-        if portals != 1 || cameras != 1 || pickups.len() != 2 {
-            return Err("level requires one camera, one portal and two authored pickups".into());
+        if portals != 1 || pickups.len() != 2 {
+            return Err("level requires one portal and two authored pickups".into());
         }
-        let (player, mut player_transform, definition, animation) =
+        let (player, mut player_transform, definition) =
             player.ok_or("level lacks a unique explorer")?;
+        let marker_owner = marker_owner.ok_or("level lacks its MarkerPalette")?;
+        #[cfg(feature = "local-player")]
+        let presentation = local_assets
+            .map(|assets| LocalPresentation::read(scene, assets, &player, marker_owner))
+            .transpose()?;
+        #[cfg(not(feature = "local-player"))]
+        let _ = marker_owner;
         player_transform.translation = checkpoint_position;
         walls.sort_by(|first, second| first.id.cmp(&second.id));
         let collision = RoomCollision::prepare(definition, walls, player_transform)?;
-        let animation = PreparedAnimation::acquire(assets, animation.clips)?;
-        let marker = MarkerDefinition::read(marker)?;
+        let marker = MarkerDefinition::read(marker, local_assets.is_some())?;
         Ok(Self {
             player,
             checkpoint,
             checkpoint_position,
             pickups,
-            bank: bank.ok_or("level lacks its camera SoundPalette")?,
             collision,
-            animation,
             marker,
+            #[cfg(feature = "local-player")]
+            presentation,
         })
     }
 
