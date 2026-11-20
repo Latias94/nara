@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -104,6 +105,12 @@ fn collect_near_pickup(game: &mut Game, score: u32, witness: &AudioWitness, capt
 #[ignore = "requires an actual Windows stereo 48 kHz f32 output device; run serially"]
 fn a_real_development_game_is_silent_until_enabled_and_only_new_cues_match_the_full_pcm_oracle() {
     let project = ProjectCopy::new();
+    let pickup = fs::read(project.root().join("assets/audio/pickup.wav")).unwrap();
+    let travel = fs::read(project.root().join("assets/audio/travel.wav")).unwrap();
+    let sources = oracle::SourceWavs {
+        pickup: &pickup,
+        travel: &travel,
+    };
     let recipe = || {
         audio::development_recipe(
             RunOptions::default(),
@@ -187,7 +194,7 @@ fn a_real_development_game_is_silent_until_enabled_and_only_new_cues_match_the_f
             level: LevelKey::main(LevelId::Meadow),
         },
     ];
-    let proof = oracle::verify(&closed, &capture.0, &expected, &instances, false).unwrap();
+    let proof = oracle::verify(sources, &closed, &capture.0, &expected, &instances).unwrap();
     assert_eq!(proof.maximum_absolute_error, 0.0);
     assert_eq!(proof.samples_compared, capture.0.len());
     assert!(proof.nonzero_samples > 0);
