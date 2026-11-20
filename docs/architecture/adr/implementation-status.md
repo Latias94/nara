@@ -4001,6 +4001,11 @@ qualify every trusted authoring/Play activation failure or complete R4b/R4c and 
 
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
+Scene View picking tests the original stock Sprite quad with `f64` intermediates. The stock
+composition consumer compares twelve red marker pixels and neighboring clear pixels against
+their exact pick results at 4096×2160. All four Windows Vulkan offscreen cases pass.
+[Scene picking precision evidence](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#scene-view-picking-precision)
+
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)
 adds explicit location/stable Scene and Prefab keys at the content owner, exact sidecar closure
 reconciliation, canonical Prefab ancestry and bounded provenance allocation. Delivery refuses

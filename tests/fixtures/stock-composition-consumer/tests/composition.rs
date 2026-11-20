@@ -1,13 +1,31 @@
 #![forbid(unsafe_code)]
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::{Arc, Mutex};
+use std::{
+    fs,
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    sync::{Arc, Mutex, mpsc},
+    thread,
+    time::{Duration, Instant},
+};
 
-use nara::render::{Extent2d, RenderFrameTarget, RenderImage2d, RenderImagePacket};
+use nara::{
+    fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
+    project_host::{
+        EditorPresentationImage, EditorPreviewPresentation, EditorProjectCloseProgress,
+        EditorProjectSession, TrustedCompiledEditorProjectIntent,
+    },
+    reflect::{ComponentTypeId, ComponentValue},
+    render::{
+        DisplayMapping2d, DisplayRect, DisplayScale, Extent2d, RenderFrameTarget, RenderImage2d,
+        RenderImagePacket,
+    },
+    scene::{SceneDocument, SceneDocumentCandidate, SceneEntityId},
+};
 use nara_render_wgpu::{
-    WgpuCompositeColor, WgpuPolicyDefinition, WgpuProgramTexture, WgpuPublishedFrame,
-    WgpuRenderHost, WgpuRenderInput, WgpuRenderProducer, WgpuRenderProgramError, WgpuSceneColor,
-    WgpuWorldColor,
+    WgpuCompositeColor, WgpuImageOutput, WgpuPolicyDefinition, WgpuProgramTexture,
+    WgpuPublishedFrame, WgpuRenderHost, WgpuRenderInput, WgpuRenderProducer,
+    WgpuRenderProgramError, WgpuSceneColor, WgpuWorldColor,
 };
 use nara_stock_composition_consumer::{
     CompositionCapture, CompositionConfiguration, CompositionPolicy, CompositionPorts, EffectSpace,
@@ -513,4 +531,256 @@ fn full_resolution_hud_stays_exact_over_both_effect_pixel_spaces_and_retained_br
         );
     }
     readback::finish(&mut host);
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; reads the real 4K Editor Scene output"]
+fn editor_scene_picks_pixel_centers_of_one_pixel_and_thin_quads_at_4k() {
+    const PREVIEW_WORLD_HEIGHT: f64 = 720.0;
+
+    readback::require_native_selection();
+    let recipe = nara::ProductRecipe::new();
+    let fixture = scene::SourceFixture::new(recipe.clone()).unwrap();
+    let extent = Extent2d::new(4096, 2160).unwrap();
+    let one_pixel = SceneEntityId::new("one-pixel").unwrap();
+    let thin = SceneEntityId::new("thin").unwrap();
+    let collapsed = SceneEntityId::new("collapsed").unwrap();
+    let scene_path = fixture.root().join("scenes/startup.scene.json");
+    let source = SceneDocumentCandidate::decode_json_bytes(&fs::read(&scene_path).unwrap())
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+    let template = source
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "sprite")
+        .unwrap();
+    let vec2 = |x, y| {
+        ComponentValue::map([
+            ("x", ComponentValue::f64(x).unwrap()),
+            ("y", ComponentValue::f64(y).unwrap()),
+        ])
+    };
+    let world_per_pixel = PREVIEW_WORLD_HEIGHT / f64::from(extent.height);
+    let markers = [
+        (&one_pixel, 2048, [1.0, 1.0], 1.0),
+        (&thin, 2061, [11.0, 1.0 / 64.0], 1.0),
+        (&collapsed, 2074, [11.0, 1.0], 0.0),
+    ]
+    .map(|(id, x, size, scale_y)| {
+        let mut marker = template.clone();
+        marker.id = id.clone();
+        let transform = marker
+            .components
+            .get_mut(&ComponentTypeId::new("nara.transform.Transform2d"))
+            .unwrap();
+        let ComponentValue::Map(fields) = transform.value_mut() else {
+            panic!("ordinary Transform fields")
+        };
+        let x = (f64::from(x) + 0.5 - f64::from(extent.width) / 2.0) * world_per_pixel;
+        fields.insert("translation".into(), vec2(x, -0.5 * world_per_pixel));
+        fields.insert("scale".into(), vec2(1.0, scale_y));
+        let sprite = marker
+            .components
+            .get_mut(&ComponentTypeId::new("nara.sprite.Sprite"))
+            .unwrap();
+        let ComponentValue::Map(fields) = sprite.value_mut() else {
+            panic!("ordinary Sprite fields")
+        };
+        fields.insert(
+            "size".into(),
+            vec2(size[0] * world_per_pixel, size[1] * world_per_pixel),
+        );
+        marker
+    });
+    fs::write(
+        scene_path,
+        SceneDocument::from_ordered_roots(markers)
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options
+            .share_mode(7)
+            .custom_flags(0x0200_0000 | 0x0020_0000);
+    }
+    let root = DirectoryCapability::from_host_handle(
+        options.open(fixture.root()).unwrap(),
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+    )
+    .unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        root,
+        TrustedCompiledEditorProjectIntent::new().with_recipe(recipe),
+    )
+    .unwrap();
+
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        editor.configure_editor_preview(Some(extent));
+        let candidate = editor.take_editor_preview_candidate().unwrap();
+        assert_eq!(candidate.hits().len(), 3);
+        let collapsed_hit = candidate
+            .hits()
+            .iter()
+            .find(|hit| hit.entity() == &collapsed)
+            .unwrap()
+            .instance();
+        assert!(collapsed_hit.x_axis.length_squared() > 0.0);
+        assert_eq!(collapsed_hit.y_axis.length_squared(), 0.0);
+
+        let mut presentation = EditorPreviewPresentation::new();
+        let (accepted, input) = presentation.accept(candidate).unwrap();
+        let RenderFrameTarget::Image(target) = input.packet().target() else {
+            panic!("Editor Scene preview image target")
+        };
+        assert_eq!(target.extent(), extent);
+        host.begin_frame(1).unwrap();
+        let reservation = host
+            .reserve_image_target(&producer, input.packet().source_generation(), target)
+            .unwrap();
+        host.activate_image_target(&producer, reservation).unwrap();
+        let output = host.submit(&producer, &input).unwrap();
+        let adapter = host.adapter_summary().unwrap();
+        assert_eq!(adapter.backend(), std::env::var("WGPU_BACKEND").unwrap());
+        assert_ne!(adapter.device_type(), "cpu");
+        eprintln!("4K Scene preview adapter: {adapter:?}");
+        let display = host.display_image(output).unwrap();
+        let origin = [2047, 1079];
+        let pixels = read_preview_crop(&mut host, display.output(), origin);
+        let receipt = display.receipt();
+        let mapping = DisplayMapping2d::fit(
+            extent,
+            DisplayRect {
+                min: [0.0, 0.0],
+                max: [extent.width as f32, extent.height as f32],
+            },
+            1.0,
+            DisplayScale::IntegerFit,
+        )
+        .unwrap();
+        let token = presentation
+            .finish(
+                accepted,
+                EditorPresentationImage {
+                    output_version: receipt.output_version(),
+                    display_occurrence: display.occurrence().get(),
+                    target: receipt.target(),
+                    target_generation: receipt.target_generation(),
+                    source_generation: receipt.source_generation(),
+                    source_handoff_generation: receipt.source_handoff_generation(),
+                    backend_instance_id: receipt.backend_instance_id(),
+                    device_epoch: receipt.device_epoch(),
+                    frame_index: receipt.render_transaction_frame_index(),
+                },
+                mapping,
+            )
+            .unwrap();
+        let red = [255, 0, 0, 255];
+        let clear = pixels[0][0];
+        assert_ne!(clear, red);
+        for (row, scanline) in pixels.into_iter().enumerate() {
+            for (column, pixel) in scanline.into_iter().enumerate() {
+                let x = origin[0] + column as u32;
+                let y = origin[1] + row as u32;
+                let expected = match (x, y) {
+                    (2048, 1080) => Some(&one_pixel),
+                    (2056..=2066, 1080) => Some(&thin),
+                    _ => None,
+                };
+                assert_eq!(
+                    pixel,
+                    if expected.is_some() { red } else { clear },
+                    "pixel ({x}, {y})",
+                );
+                let picked = presentation
+                    .pick(token, [x as f32 + 0.5, y as f32 + 0.5])
+                    .unwrap();
+                assert_eq!(picked.as_ref(), expected, "pick at pixel ({x}, {y})");
+            }
+        }
+    }));
+    host.retire_producer(&producer);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let EditorProjectCloseProgress::Complete(receipt) = editor.advance_close() {
+            assert!(!receipt.has_cleanup_failure());
+            break;
+        }
+        assert!(Instant::now() < deadline, "Editor preview did not retire");
+        thread::sleep(Duration::from_millis(1));
+    }
+    readback::finish(&mut host);
+    if let Err(error) = outcome {
+        resume_unwind(error);
+    }
+}
+
+fn read_preview_crop(
+    host: &mut WgpuRenderHost,
+    output: &WgpuImageOutput,
+    [x, y]: [u32; 2],
+) -> [[[u8; 4]; 32]; 3] {
+    const ROW_STRIDE: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    assert_eq!(output.format(), wgpu::TextureFormat::Rgba8Unorm);
+    let ((device, buffer), prefix) = host
+        .submit_image_use(std::slice::from_ref(output), |device, _, encoder, views| {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("scene-preview-pixel-centers"),
+                size: 3 * u64::from(ROW_STRIDE),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut source = views[0].texture().as_image_copy();
+            source.origin = wgpu::Origin3d { x, y, z: 0 };
+            encoder.copy_texture_to_buffer(
+                source,
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(ROW_STRIDE),
+                        rows_per_image: Some(3),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 32,
+                    height: 3,
+                    depth_or_array_layers: 1,
+                },
+            );
+            Ok((device.clone(), buffer))
+        })
+        .unwrap();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+        let _ = sender.send(result);
+    });
+    let timeout = Duration::from_secs(10);
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: prefix.submission_index().cloned(),
+            timeout: Some(timeout),
+        })
+        .unwrap();
+    receiver.recv_timeout(timeout).unwrap().unwrap();
+    assert!(prefix.poll().unwrap());
+    let pixels = {
+        let bytes = buffer.get_mapped_range(..).unwrap();
+        std::array::from_fn(|row| {
+            std::array::from_fn(|column| {
+                let offset = row * ROW_STRIDE as usize + column * 4;
+                bytes[offset..offset + 4].try_into().unwrap()
+            })
+        })
+    };
+    buffer.unmap();
+    pixels
 }

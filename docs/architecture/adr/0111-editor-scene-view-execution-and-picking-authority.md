@@ -217,6 +217,11 @@ presentation cannot regain input authority through a content-cache hit; restorin
 last-good content requires fresh accepted presentation authority. Scene identity epoch replacement
 retains the shared task/image owner required by ADR 0115; it is not full Runtime replacement.
 
+Stock Sprite picking evaluates the captured clip-space quad in double precision, widening the
+axes, center and sampled point before computing containment. A finite nonsingular quad remains
+eligible at any preview extent. Singular and nonfinite geometry never supplies a hit.
+[4K offscreen qualification](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#scene-view-picking-precision)
+
 Scene image and picking receipts identify the Host's retained Scene preview binding and that
 document's exact revision in the same immutable frame, not the active Inspector document (which
 may be a Prefab or extension). Showing a retained inactive Scene does not grant selection or

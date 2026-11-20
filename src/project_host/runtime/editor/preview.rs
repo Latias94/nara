@@ -63,16 +63,43 @@ impl EditorPreviewHit {
     /// Tests one clip-space point against the exact projected quad used by this hit fact.
     #[must_use]
     pub fn contains_clip_point(&self, point: [f32; 2]) -> bool {
-        let delta_x = point[0] - self.instance.center.x;
-        let delta_y = point[1] - self.instance.center.y;
-        let delta = Vec2::new(delta_x, delta_y);
-        let determinant = self.instance.x_axis.perp_dot(self.instance.y_axis);
-        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+        let x_axis = self.instance.x_axis.as_dvec2();
+        let y_axis = self.instance.y_axis.as_dvec2();
+        let determinant = x_axis.perp_dot(y_axis);
+        if !determinant.is_finite() || determinant == 0.0 {
             return false;
         }
-        let local_x = delta.perp_dot(self.instance.y_axis) / determinant;
-        let local_y = self.instance.x_axis.perp_dot(delta) / determinant;
+        let delta = Vec2::from_array(point).as_dvec2() - self.instance.center.as_dvec2();
+        let local_x = delta.perp_dot(y_axis) / determinant;
+        let local_y = x_axis.perp_dot(delta) / determinant;
         local_x.is_finite() && local_y.is_finite() && local_x.abs() <= 1.0 && local_y.abs() <= 1.0
+    }
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::*;
+
+    #[test]
+    fn projected_hit_widens_before_subtraction_and_refuses_invalid_geometry() {
+        let mut hit = EditorPreviewHit {
+            entity: SceneEntityId::new("marker").unwrap(),
+            draw_ordinal: 0,
+            instance: SpriteInstance::axis_aligned(
+                Vec2::new(-0.25, 0.0),
+                Vec2::new(0.5, 0.25),
+                Color::WHITE,
+            ),
+        };
+        assert!(hit.contains_clip_point([0.25, 0.0]));
+        assert!(!hit.contains_clip_point([0.25_f32.next_up(), 0.0]));
+        assert!(!hit.contains_clip_point([f32::NAN, 0.0]));
+
+        let center = hit.instance.center.to_array();
+        hit.instance.y_axis = Vec2::new(0.25, 0.0);
+        assert!(!hit.contains_clip_point(center));
+        hit.instance.y_axis = Vec2::new(0.0, f32::INFINITY);
+        assert!(!hit.contains_clip_point(center));
     }
 }
 

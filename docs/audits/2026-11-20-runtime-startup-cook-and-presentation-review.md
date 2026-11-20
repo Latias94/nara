@@ -320,3 +320,14 @@ releases. Neither route focuses or activates a control. An enabled target still 
 activates through both routes. The Windows interaction suite passes 66/66 in
 `6f9dfd17-7633-475a-bdf7-4a5d8389a71e`.
 [Pointer regressions](../../crates/nara_ui_kernel/tests/interaction/pointer_input.rs)
+
+### Scene View picking precision
+
+Scene View tests the accepted Sprite quad in double precision and rejects singular or nonfinite
+geometry. The independently locked stock composition consumer renders a 4096×2160 Scene preview
+with a one-pixel marker, an 11×1/64 pixel marker and a collapsed control. It reads the actual
+32×3 pixel region and samples the same presentation at every pixel center. All twelve red pixels
+select their source entity. The collapsed control and surrounding clear pixels produce no hit.
+Windows Vulkan hardware run `41871552-a3bd-493e-b35d-da873eeb6fec` passes all four composition
+tests on an RTX 4090. The regression joins actual offscreen image output and its display receipt.
+[Composition regression](../../tests/fixtures/stock-composition-consumer/tests/composition.rs)

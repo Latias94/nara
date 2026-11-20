@@ -108,23 +108,27 @@ impl FakeToolkit {
         // Draw the immutable projected quads into the target, rather than deriving fake hits.
         for (view_index, view) in packet.views().iter().enumerate() {
             let viewport = view.viewport;
+            let clip_width_per_pixel = 2.0 / f64::from(viewport.physical_width);
+            let clip_height_per_pixel = 2.0 / f64::from(viewport.physical_height);
             for batch in batches.for_view(view_index) {
                 assert!(
                     batch.image.is_none(),
                     "this consumer deliberately renders colored sprites"
                 );
                 for sprite in &batch.instances {
-                    let determinant = sprite.x_axis.perp_dot(sprite.y_axis);
+                    let x_axis = sprite.x_axis.as_dvec2();
+                    let y_axis = sprite.y_axis.as_dvec2();
+                    let area = x_axis.perp_dot(y_axis).abs();
+                    if !area.is_finite() || area == 0.0 {
+                        continue;
+                    }
+                    let center = sprite.center.as_dvec2();
                     for y in 0..viewport.physical_height {
+                        let dy = 1.0 - (f64::from(y) + 0.5) * clip_height_per_pixel - center.y;
                         for x in 0..viewport.physical_width {
-                            let clip = nara::prelude::Vec2::new(
-                                (x as f32 + 0.5) / viewport.physical_width as f32 * 2.0 - 1.0,
-                                1.0 - (y as f32 + 0.5) / viewport.physical_height as f32 * 2.0,
-                            );
-                            let delta = clip - sprite.center;
-                            if determinant.abs() > f32::EPSILON
-                                && (delta.perp_dot(sprite.y_axis) / determinant).abs() <= 1.0
-                                && (sprite.x_axis.perp_dot(delta) / determinant).abs() <= 1.0
+                            let dx = (f64::from(x) + 0.5) * clip_width_per_pixel - 1.0 - center.x;
+                            if (dx * y_axis.y - dy * y_axis.x).abs() <= area
+                                && (x_axis.x * dy - x_axis.y * dx).abs() <= area
                             {
                                 let index = (y + viewport.physical_y) as usize
                                     * image.extent().width as usize
