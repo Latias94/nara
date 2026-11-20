@@ -586,9 +586,12 @@ its own page continuations and keeps its original basis for historical review. A
 measures the existing reference-bearing preparation workflow at 1/257 entities. The
 [selective collection edit](../architecture/authoring-read-projection-design.md#selective-edits-in-authored-collections)
 at `c4f78de` keeps each changed descendant and its durable selector in the original candidate and history
-workflow. Undo uses the resulting key when the edit changes an item's identity. Complete field
-query coverage, preparation locality and larger-workload comparisons stay open. Initial keyed
-lookups keep the existing bounded scan contract.
+workflow. Undo uses the resulting key when the edit changes an item's identity. The follow-up
+[indexed keyed reads](../architecture/authoring-read-projection-design.md#indexed-reads-in-admitted-keyed-collections)
+retain validated positions in the exact source or Schema owner and remove the list-length scan
+from the first selected read. Compact canonical RON keeps the reviewed large document inside
+the original publication limits. Complete field query coverage, preparation locality and
+larger-workload comparisons stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

@@ -72,11 +72,11 @@ with the existing complete component resolver. Do not call complete effective-va
 or validate/copy every component sibling just to read one descendant.
 
 Separate finite scan entries/logical bytes from copied metadata and output nodes/logical bytes.
-Charge examined declaration members, tombstone paths, optional unwrapping and keyed-list items,
-including compared key bytes, before the corresponding work. Normal root/storage lookups retain
-their admitted bounded-path/index responsibilities. A small scalar output is not an O(depth),
-elapsed-time or allocator bound; keyed lookup can scan its list and must refuse exhausted work.
-The full selector contributes to metadata accounting before any owned observation is constructed.
+Charge examined declaration members, tombstone paths, optional unwrapping and key lookups
+before the corresponding work. Collection enumeration also charges each visited identity. The
+full selector contributes to metadata accounting before any owned observation is constructed.
+The counts describe admitted work and output. Index comparisons, elapsed time and allocator
+usage have their own costs.
 
 ### Source-owned recursive child discovery successor
 
@@ -656,9 +656,57 @@ the original source allowance, while one more byte refuses without history or so
 Both history sides survive nominal Schema readmission. The Host's same-batch pending Close
 guard passes in `facba9af-c907-4383-b5c4-fc6b5f9c5907`. The original Windows/DX12 Drawn Shell
 structure, history and persistence trajectory passes in `f8ad5d60-dea0-46bc-a7d0-b25a603b9a16`.
-Initial keyed-item resolution still
-charges its bounded scan, including the identity check across the list. The review's 32,767-row
-first-lookup refusal remains outside this edit qualification.
+This edit qualification kept the original first-lookup scan, including the uniqueness check
+across the list. The follow-up below addresses the separate 32,767-row refusal.
+
+### Indexed Reads In Admitted Keyed Collections
+
+In `06ce6a0`, direct Scene and Prefab records retain positions from the same uniqueness validation that admits
+their stored and contextual default values. Each entry is relative to the admitted root and the
+exact containing list. Canonical defaults share one index owned by the admitted Schema. The read
+selects an index together with its exact root, so an explicit value hiding a default uses its own
+positions. Nested lists share common path segments within that root. Read budgets charge
+declarations, paths and one lookup per indexed collection step. Child pages still
+visit the enumerated rows. Map keys and nested list positions are interpreted by the same Reflect
+walker that reads a property in arbitrary current-version values.
+
+Classification owns the index alongside the exact document, including retained prepared edits.
+Scoped admission charges its modeled allocation. History replay reconstructs positions from the
+replayed value. Each ordered write resolves its selector against the evolving candidate and checks
+for key conflicts before publication. The source owner retains all index positions.
+
+The separate write refusal came from the existing persistence check. Scene and Prefab publication
+validate canonical JSON and RON. Two-space RON indentation in `617b920` keeps the reviewed two-field
+workload inside the original 16 MiB format limit. The same grammar and shape checks apply.
+
+Bevy's `DynamicStruct` retains names and slot positions in the same container. Godot's `SceneState`
+owns the node-path index it uses for edit-time lookup. The Scene and Prefab source owners use the
+same ownership rule for Schema-defined row IDs while preserving authored list order.
+[Bevy `DynamicStruct`](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_reflect/src/structs.rs#L306-L381)
+· [Godot `SceneState`](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/scene/resources/packed_scene.cpp#L1570-L1630)
+
+The independently locked Windows release run `a62d78c6-1985-44eb-863d-b255ccc53f72` passed
+20/20. The registered panel exercises non-active Scene and Prefab documents with 32,768 keyed
+records each. Its first and last property reads use a 128-entry, 4 KiB lookup allowance.
+It previews and commits a scalar beside the list, changes the last row's key and value in order,
+and rejects a missing or duplicate key in the final operation. Undo, Redo, Save and Reopen compare
+complete JSON documents. The test also checks the active document and selection, cursor refusal
+after commit, and the new source incarnation on Reopen.
+[Independent panel regression](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages.rs)
+
+The Windows release owner cohort `546bba23-4246-4ad4-aaa2-5cb79aa185f1` passed 1,382/1,382
+with one ignored diagnostic. A Tooling read starts the 32,768-row numeric list's last value page
+with five scan entries. Reflect verifies separate nested row positions and one retained copy of a
+common long Map key. Scene proves the distinct canonical-default and explicit positions and
+round-trips both large document kinds through RON. Migration tests still reject a specific
+RON-only byte overflow and retain the incumbent document. These runs measure scan counts and
+encoded sizes. Preparation latency and resident memory have no measured claim in this slice.
+
+Correctness Clippy and formatting passed. The original native Drawn source workspace completed
+its structure, history and persistence run on Windows/DX12 in
+`80e0981f-6db6-4f36-b9c3-2886cbf06357`. The first linker attempt failed while writing its PDB
+with 0.27 GiB free on the build drive. The same command passed after moving the partial PDB
+off the drive. The large-list acceptance ran through the registered-panel interface.
 
 ## Acceptance And Experiment Stops
 
@@ -672,10 +720,8 @@ first-lookup refusal remains outside this edit qualification.
 - An independent Application consumer performs discover -> read -> computed edit on non-active
   Scene and Prefab documents, then one Undo/Redo and Save/Reopen. Retained receipts remain historical.
 - Compare author concepts and engine-private changes with current explicit-value editing. Record
-  index/storage cost and lookup/read timing; investigate any linear full-source-scan point-read
-  slope or copying of an unrequested component. Entity/component/root lookup remains indexed;
-  keyed-item scans have their explicit separate budget, not a logarithmic lookup promise. Do not
-  freeze thresholds from fabricated timings.
+  index/storage cost and lookup/read timing. Entity, component, root and admitted keyed lookups
+  use the owning index. Collection enumeration and unindexed values have their own scan costs.
 - Reconcile ADRs 0047/0118 before shipping changed public contracts. Update the implementation
   ledger only after actual owner/public evidence. Full field query coverage, durable Prefab overlay,
   and the remaining R2 preparation and cost work retain their owning acceptance requirements.

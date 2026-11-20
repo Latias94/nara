@@ -264,9 +264,29 @@ and keyboard actions are covered in the CPU cohort.
 
 `c4f78de` covers the reviewed 86-row failure through the registered panel's 4,097-row Scene and Prefab
 trajectories. History retains the selected value and its inverse selector, including key edits.
-The original file format limits still bound the final source. This work keeps the existing
-65,536-entry initial key lookup budget. The reported 32,767-row refusal remains open.
+The original file format limits still bound the final source. This initial repair kept the
+65,536-entry key scan. The subsequent indexed read and encoding repair addresses the
+32,767-row refusal.
 [Owner design and verification](../architecture/authoring-read-projection-design.md#selective-edits-in-authored-collections)
+
+### Large keyed lookup and file publication
+
+In `06ce6a0`, direct source reads and prepared previews use the positions retained by validation of the
+exact Scene or Prefab record. Canonical defaults use their Schema's shared positions. The
+candidate still resolves ordered writes against its evolving state and rejects duplicate keys.
+The current file cap remains 16,777,216 bytes. For the 32,768-row two-`u64` Scene, canonical RON
+with four-space indentation used 23,604,986 bytes. Two-space indentation in `617b920` uses 13,577,490 bytes.
+The Prefab uses 13,577,491 bytes under the same setting. Both formats pass publication checks,
+and RON round-trips each complete document.
+[Owner design](../architecture/authoring-read-projection-design.md#indexed-reads-in-admitted-keyed-collections)
+
+The independent registered-panel run `a62d78c6-1985-44eb-863d-b255ccc53f72` passed 20/20.
+Both document kinds complete the public workflow at 32,768 rows, including a separate scalar
+edit, ordered key and value changes, duplicate-key refusal and exact persisted history.
+The shared Reflect, Scene and Tooling cohort passed 1,382/1,382 in
+`546bba23-4246-4ad4-aaa2-5cb79aa185f1`. Its numeric last-row page starts with five scan entries.
+The original Drawn workspace passes its native DX12 regression in
+`80e0981f-6db6-4f36-b9c3-2886cbf06357`. The owner design records the linker retry and measurement scope.
 
 ### Qualification scope
 
