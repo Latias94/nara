@@ -161,6 +161,11 @@ around Cargo, before staging and before publication. Do not create a fresh basel
 callback: that would accept the changed selection being checked. Scene, Input and TileSet source
 observations participate alongside import/cook inputs.
 
+An importer may read the same action map that the manifest selects for global Input. Check and
+Cook retain one member with the Input role when both reads observe the same bytes. Before
+publication, the Host checks the selected Product owners along with their original file facts.
+This includes the source UUID shared by a compound group's primary and auxiliary Products.
+
 Code inputs and content observations are different inventories. Cargo revalidates its finite code
 inventory; group validity alone cannot extend content freshness across the later Player build.
 The Host retains content observation custody through publication. A failed fence returns

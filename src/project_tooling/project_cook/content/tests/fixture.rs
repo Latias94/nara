@@ -38,7 +38,7 @@ pub(super) const OPTIONAL: &str = "assets/build-only.bin";
 const COMPONENT: &str = "test.cook.SharedCompound";
 const PREFIX: &str = "nara-shared-cook-content-";
 static NEXT: AtomicU64 = AtomicU64::new(0);
-static BUILDS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
+static BUILDS: [AtomicUsize; 11] = [const { AtomicUsize::new(0) }; 11];
 
 pub(super) fn product(tag: u8) -> AssetProductRef {
     AssetProductRef::new(
@@ -67,6 +67,8 @@ fn diagnostic() -> Diagnostic {
 #[serde(deny_unknown_fields)]
 struct Source {
     rows: [u8; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raw_input: Option<AssetPath>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -94,6 +96,8 @@ pub(super) struct Compound {
     pub build_value: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integers: Option<WideIntegers>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_input_digest: Option<[u8; 32]>,
 }
 
 pub(super) struct Domain<const CASE: usize>;
@@ -139,6 +143,15 @@ impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
                 .ok_or_else(|| AssetImportError::domain(diagnostic()))
         };
         let auxiliary = auxiliary().product();
+        let raw_input_digest = body
+            .raw_input
+            .as_ref()
+            .map(|path| {
+                source
+                    .read_dependency(path, ByteLimit::new(2048).unwrap())
+                    .map(|bytes| *ContentDigest::of_bytes(&bytes).as_bytes())
+            })
+            .transpose()?;
         Ok(Compound {
             source: source.metadata().identity().stable_id(),
             auxiliary,
@@ -146,6 +159,7 @@ impl<const CASE: usize> SourceAssetImporter for Domain<CASE> {
             auxiliary_value: row(auxiliary)?,
             build_value: None,
             integers: settings.integers,
+            raw_input_digest,
         })
     }
 }
@@ -407,10 +421,15 @@ requested = ["runtime-2d"]
     }
 
     pub fn write_source(&self, value: u8) {
+        self.write_source_with_input(value, None);
+    }
+
+    pub fn write_source_with_input(&self, value: u8, raw_input: Option<AssetPath>) {
         self.write(
             SOURCE,
             &serde_json::to_vec(&Source {
                 rows: [value, b'Q'],
+                raw_input,
             })
             .unwrap(),
         );

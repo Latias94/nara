@@ -165,10 +165,14 @@ admitted catalogue roots. This applies to Images encoded from a Scene snapshot a
 required by a verified group. If source delivery has no complete catalogue, Cook discovers the
 selected identities in one bounded pass. It uses the admitted file facts when reading the actual
 PNG and typed sidecar. Additional stock files count against the same unique delivery file limit.
-The original publication fence rechecks the selected Image ownership and the retained file facts.
-Raw path-only inputs remain build observations until a Runtime dependency selects their Image
-Product. Each Image's decoded pixels retire after encoding. Explicit groups retain their complete
-mappings, subject to the original builder's final reachability and deep validation.
+The publication fence rechecks the retained file facts and the ownership of each selected Product
+source, including the owner UUID of a compound group's subproducts. The bounded catalogue pass
+also detects a sidecar claiming an intrinsic Input identity. A raw read and a typed use of the
+same file share one closure member when their digests agree. The member keeps the typed role, and
+different typed roles or digests still conflict. Raw path-only inputs remain build observations
+until a Runtime dependency selects their Product. Each Image's decoded pixels retire after
+encoding. Explicit groups retain their complete mappings, subject to the original builder's
+final reachability and deep validation.
 
 A stock Sprite's selected `material.image` and a stock `UiVisual` image brush's `background.image`
 require the executable's Image publication codec role. Deep validation checks those bindings

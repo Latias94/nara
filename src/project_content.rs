@@ -75,6 +75,8 @@ pub(crate) use budget::{ProjectContentGenerationLease, ProjectContentLease};
 pub(crate) use catalogue::DeliveryCatalogue;
 use catalogue::ReferenceCatalogue;
 pub(crate) use catalogue::asset_record_retained_bytes;
+#[cfg(feature = "project-tooling")]
+pub(crate) use catalogue::{CookedProductSource, CookedProductSources};
 use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
 pub use closure::{
     ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
@@ -82,8 +84,6 @@ pub use closure::{
 };
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
-#[cfg(feature = "project-tooling")]
-pub(crate) use delivery_images::{CookedImageSource, CookedImageSources};
 pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
@@ -427,6 +427,20 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub fn content_closure(&self) -> ProjectContentClosureReceipt {
         self.inner.content_closure.clone()
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(crate) fn delivery_member(&self, path: &str) -> Option<&ProjectContentMemberReceipt> {
+        if let Some(metadata) = self.inner.delivery_scene_metadata.as_ref()
+            && metadata.path().as_str() == path
+        {
+            return Some(metadata);
+        }
+        let members = self.inner.content_closure.members();
+        members
+            .binary_search_by(|member| member.path().as_str().cmp(path))
+            .ok()
+            .map(|index| &members[index])
     }
 
     /// Returns startup attestation only when this snapshot selected the manifest's default Scene.

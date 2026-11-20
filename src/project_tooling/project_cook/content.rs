@@ -14,12 +14,11 @@ use crate::{
         ArtifactContentDigest, ArtifactSourceRequest, VerifiedArtifactGroup, build_source,
     },
     core::FormatVersion,
-    fs::{DirectoryCapability, RelativePath},
-    input::ActionMapAsset,
+    fs::{ContentDigest, DirectoryCapability, RelativePath},
     material::{Material2dAsset, Material2dDomain},
     project_content::{
-        CookedImageSource, CookedImageSources, DeliveryCatalogue, DeliverySnapshotPhase,
-        DeliveryVisitError, ProjectImageContent, SelectedSceneProduct,
+        CookedProductSource, CookedProductSources, DeliveryCatalogue, DeliverySnapshotPhase,
+        DeliveryVisitError, ProjectImageContent, ProjectInputContent, SelectedSceneProduct,
     },
     project_host::{
         ProjectContentDeliveryReceipt, ProjectContentLoader, ProjectContentMemberKind,
@@ -66,7 +65,7 @@ enum Output {
 enum StockAsset<'a> {
     Scene(&'a CompiledSceneCandidate),
     Image(&'a ProjectImageContent),
-    Input(&'a ActionMapAsset),
+    Input(&'a ProjectInputContent),
     Material(&'a Material2dAsset),
     TileSet(&'a ProjectTileSetContent),
 }
@@ -87,25 +86,24 @@ impl StockAsset<'_> {
 struct Observations {
     raw: BTreeMap<AssetSourcePath, Option<ArtifactContentDigest>>,
     processed: Vec<ArtifactBuildObservation>,
-    image_sources: BTreeMap<StableAssetId, CookedImageSource>,
+    product_sources: BTreeMap<StableAssetId, CookedProductSource>,
 }
 
 impl Observations {
-    fn image_source(
+    fn product_source(
         &mut self,
         builder: &mut CookedContentBuilder,
-        product: AssetProductRef,
-        image: &ProjectImageContent,
+        source: StableAssetId,
+        path: &AssetSourcePath,
+        metadata: Option<ContentDigest>,
     ) -> Result<(), ProjectCookError> {
-        let path = image.path();
-        let metadata = image.metadata_digest();
-        match self.image_sources.entry(product.source()) {
+        match self.product_sources.entry(source) {
             Entry::Vacant(entry) => {
                 builder.reserve_consumer_metadata(metadata_bytes::<(
                     StableAssetId,
-                    CookedImageSource,
+                    CookedProductSource,
                 )>(path.as_str().len())?)?;
-                entry.insert(CookedImageSource {
+                entry.insert(CookedProductSource {
                     path: path.clone(),
                     metadata,
                 });
@@ -117,7 +115,7 @@ impl Observations {
                 Ok(())
             }
             Entry::Occupied(_) => Err(ProjectCookError::Invalid(format!(
-                "cooked Image Product {product} changed its selected source"
+                "cooked Product source {source} changed its selection"
             ))),
         }
     }
@@ -256,9 +254,16 @@ impl<'a> ProjectCookContext<'a> {
             }
             self.builder
                 .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
-            let request = self.source_request::<D>(scope, assets.share(), record.path())?;
+            let (request, metadata) =
+                self.source_request::<D>(scope, assets.share(), record.path())?;
             let group = build_source::<D>(self.store, &request, |_| Ok(()))?.into_group();
             self.add_verified_group(&group)?;
+            self.observations.product_source(
+                self.builder,
+                record.stable_id(),
+                record.path(),
+                Some(metadata),
+            )?;
             self.built_sources.insert(record.stable_id(), domain);
         }
         Ok(())
@@ -268,7 +273,8 @@ impl<'a> ProjectCookContext<'a> {
     ///
     /// First admission requires the selected snapshot to contain the source. The build owner
     /// compares its normalized settings, source identity, primary bytes and compiled definition
-    /// with the retained seed. The existing group supplies the build observations for publication.
+    /// with the retained seed. All output Products must belong to that source. The existing
+    /// group supplies the build observations for publication.
     pub fn add_group<D>(&mut self, group: &VerifiedArtifactGroup) -> Result<(), ProjectCookError>
     where
         D: SourceAssetBuild,
@@ -303,7 +309,7 @@ impl<'a> ProjectCookContext<'a> {
         self.builder
             .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
         let directory = self.open_source_directory(scope)?;
-        let request = self.source_request::<D>(scope, directory, record.path())?;
+        let (request, metadata) = self.source_request::<D>(scope, directory, record.path())?;
         if !request.matches_source_group::<D>(self.store, group)? {
             return Err(ProjectCookError::Invalid(format!(
                 "artifact group does not match the selected source build: {}",
@@ -311,6 +317,12 @@ impl<'a> ProjectCookContext<'a> {
             )));
         }
         self.add_verified_group(group)?;
+        self.observations.product_source(
+            self.builder,
+            record.stable_id(),
+            record.path(),
+            Some(metadata),
+        )?;
         self.built_sources.insert(source.source(), domain);
         Ok(())
     }
@@ -332,7 +344,7 @@ impl<'a> ProjectCookContext<'a> {
         scope: &AssetPathScope,
         directory: DirectoryCapability,
         path: &AssetSourcePath,
-    ) -> Result<ArtifactSourceRequest, ProjectCookError>
+    ) -> Result<(ArtifactSourceRequest, ContentDigest), ProjectCookError>
     where
         D: SourceAssetBuild,
         D::Settings: serde::Serialize,
@@ -343,22 +355,15 @@ impl<'a> ProjectCookContext<'a> {
         let revision = FormatVersion::new(D::BUILD_REVISION).ok_or_else(|| {
             ProjectCookError::Invalid("source-build revision must be nonzero".into())
         })?;
-        let closure = self.snapshot.content_closure();
-        let members = closure.members();
-        let digest = |path: &str, kind| {
-            members
-                .binary_search_by(|member| member.path().as_str().cmp(path))
-                .ok()
-                .map(|index| &members[index])
-                .filter(|member| member.kind() == kind)
-                .map(|member| ArtifactContentDigest::from_content(member.digest()))
-                .ok_or_else(|| {
-                    ProjectCookError::Invalid(format!("source build input is not selected: {path}"))
-                })
-        };
-        let primary = digest(path.as_str(), ProjectContentMemberKind::AssetSource)?;
-        let metadata = digest(&path.meta_path(), ProjectContentMemberKind::AssetMetadata)?;
-        Ok(ArtifactSourceRequest::new(
+        let primary = self
+            .snapshot
+            .delivery_member(path.as_str())
+            .ok_or_else(|| {
+                ProjectCookError::Invalid(format!("source build input is not selected: {path}"))
+            })?
+            .digest();
+        let metadata = selected_metadata(self.snapshot, path)?;
+        let request = ArtifactSourceRequest::new(
             directory,
             scope.clone(),
             local,
@@ -368,7 +373,11 @@ impl<'a> ProjectCookContext<'a> {
                 implementation: self.implementation,
             },
         )
-        .with_source_digests(primary, metadata))
+        .with_source_digests(
+            ArtifactContentDigest::from_content(primary),
+            ArtifactContentDigest::from_content(metadata),
+        );
+        Ok((request, metadata))
     }
 
     fn add_verified_group(
@@ -383,6 +392,11 @@ impl<'a> ProjectCookContext<'a> {
         let mut present = 0;
         let mut total = 0;
         for product in products {
+            if product.source() != group.seed().source.source() {
+                return Err(ProjectCookError::Invalid(format!(
+                    "artifact group Product {product} belongs to a different source than its seed"
+                )));
+            }
             total += 1;
             match self.outputs.get(product) {
                 None | Some(Output::Demanded) => {}
@@ -555,7 +569,7 @@ impl<'a> ProjectCookContext<'a> {
                     .metadata_digest()
                     .map(ArtifactContentDigest::from_content),
             )?;
-            self.cook_stock(input.product(), StockAsset::Input(input.asset()))?;
+            self.cook_stock(input.product(), StockAsset::Input(input))?;
         }
         Ok(())
     }
@@ -580,15 +594,33 @@ impl<'a> ProjectCookContext<'a> {
         if !self.register_stock(product, kind)? {
             return Ok(());
         }
+        let (path, metadata) = match asset {
+            StockAsset::Image(image) => (image.path(), Some(image.metadata_digest())),
+            StockAsset::Input(input) => (input.path(), input.metadata_digest()),
+            _ => {
+                let record = self
+                    .snapshot
+                    .asset_database()
+                    .record_for_stable_id(product.source())
+                    .ok_or_else(|| {
+                        ProjectCookError::Invalid(format!(
+                            "cooked Product {product} lost its admitted source"
+                        ))
+                    })?;
+                let path = record.path();
+                self.builder.admit_consumer_work(
+                    path.as_str().len().checked_add(5).ok_or_else(overflow)?,
+                )?;
+                (path, Some(selected_metadata(self.snapshot, path)?))
+            }
+        };
+        self.observations
+            .product_source(self.builder, product.source(), path, metadata)?;
         let resolver = self.snapshot.asset_resolution();
         match asset {
             StockAsset::Scene(scene) => self.builder.add_scene(product, scene, resolver)?,
-            StockAsset::Image(image) => {
-                self.observations
-                    .image_source(self.builder, product, image)?;
-                self.builder.add_image(image.image())?;
-            }
-            StockAsset::Input(input) => self.builder.add_input(input)?,
+            StockAsset::Image(image) => self.builder.add_image(image.image())?,
+            StockAsset::Input(input) => self.builder.add_input(input.asset())?,
             StockAsset::Material(material) => {
                 let material = material
                     .resolve_texture_references(|reference| resolve_image(resolver, reference))?;
@@ -637,6 +669,20 @@ impl<'a> ProjectCookContext<'a> {
     }
 }
 
+fn selected_metadata(
+    snapshot: &ProjectContentSnapshot,
+    path: &AssetSourcePath,
+) -> Result<ContentDigest, ProjectCookError> {
+    let metadata_path = path.meta_path();
+    snapshot
+        .delivery_member(&metadata_path)
+        .filter(|member| member.kind() == ProjectContentMemberKind::AssetMetadata)
+        .map(|member| member.digest())
+        .ok_or_else(|| {
+            ProjectCookError::Invalid(format!("source metadata is not selected: {metadata_path}"))
+        })
+}
+
 fn reserve_output(builder: &mut CookedContentBuilder) -> Result<(), ProjectCookError> {
     builder.reserve_consumer_metadata(metadata_bytes::<(AssetProductRef, Output)>(0)?)?;
     Ok(())
@@ -658,10 +704,11 @@ fn finish_stock_images(
                 Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
             )
     };
-    if observations.image_sources.is_empty()
-        && !outputs
-            .iter()
-            .any(|(product, output)| is_demanded(product, output))
+    let is_cooked_image =
+        |output: &Output| matches!(output, Output::Stock(StockKind::Image, StockState::Cooked));
+    if !outputs
+        .iter()
+        .any(|(product, output)| is_cooked_image(output) || is_demanded(product, output))
     {
         return Ok(());
     }
@@ -673,21 +720,32 @@ fn finish_stock_images(
         receipt,
         catalogue.as_ref(),
         &|id| {
-            observations.image_sources.contains_key(&id)
-                || AssetProductRef::new(id, ImportedProductId::PRIMARY)
-                    .ok()
-                    .and_then(|product| outputs.get(&product).map(|output| (product, output)))
-                    .is_some_and(|(product, output)| is_demanded(&product, output))
+            AssetProductRef::new(id, ImportedProductId::PRIMARY)
+                .ok()
+                .and_then(|product| outputs.get(&product).map(|output| (product, output)))
+                .is_some_and(|(product, output)| {
+                    is_cooked_image(output) || is_demanded(&product, output)
+                })
         },
     )?;
-    sources.verify_sources(&observations.image_sources)?;
+    for (product, output) in &*outputs {
+        if is_cooked_image(output) {
+            let id = product.source();
+            sources.verify_source(id, &observations.product_sources[&id])?;
+        }
+    }
     for (&product, output) in outputs
         .iter_mut()
         .filter(|(product, output)| is_demanded(product, output))
     {
         let acquired = sources.with_image(product, |image, source| {
             let path = image.path();
-            observations.image_source(builder, product, image)?;
+            observations.product_source(
+                builder,
+                product.source(),
+                path,
+                Some(image.metadata_digest()),
+            )?;
             observations.raw(
                 builder,
                 path.as_str(),
@@ -882,10 +940,10 @@ fn prepare(
             Some(ArtifactContentDigest::from_content(member.digest())),
         )?;
     }
-    let image_sources = CookedImageSources::new(
+    let product_sources = CookedProductSources::new(
         &loader,
         request.candidate,
-        std::mem::take(&mut observations.image_sources),
+        std::mem::take(&mut observations.product_sources),
     );
     let observations = observations.finish(&mut builder)?;
     let content = builder.finish()?;
@@ -901,7 +959,7 @@ fn prepare(
         ));
     }
     let selection =
-        ProjectCookSourceSelection::capture(request.root, receipt, observations, image_sources)?;
+        ProjectCookSourceSelection::capture(request.root, receipt, observations, product_sources)?;
     Ok(PreparedProjectCook { content, selection })
 }
 

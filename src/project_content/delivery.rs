@@ -449,8 +449,8 @@ impl ProjectContentLoader {
             .iter()
             .chain(&snapshot.inner.delivery_scene_metadata)
         {
-            if let Some(previous) = members.get(member.path().as_str()) {
-                if previous != member {
+            if let Some(previous) = members.get_mut(member.path().as_str()) {
+                if !previous.merge_usage(member) {
                     return Err(delivery_member_changed());
                 }
                 continue;

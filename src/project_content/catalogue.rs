@@ -2,6 +2,8 @@
 
 use nara_asset::{AssetMetaFileLimits, AssetMetaIdentityCandidate};
 use nara_fs::{DirectoryEnumerationLimits, FileKind};
+#[cfg(feature = "project-tooling")]
+use nara_project::ProjectPath;
 
 use super::*;
 
@@ -27,6 +29,112 @@ pub(crate) struct DeliveryCatalogue {
     pub(super) asset_database: ProjectAssetDatabase,
     pub(super) asset_database_work_bytes: usize,
     _budget: BudgetTicket,
+}
+
+#[cfg(feature = "project-tooling")]
+pub(crate) struct CookedProductSources {
+    roots: [ProjectPath; 3],
+    sources: BTreeMap<StableAssetId, CookedProductSource>,
+    budget: ProjectContentBudgetHost,
+}
+
+#[cfg(feature = "project-tooling")]
+pub(crate) struct CookedProductSource {
+    pub(crate) path: AssetSourcePath,
+    pub(crate) metadata: Option<ContentDigest>,
+}
+
+#[cfg(feature = "project-tooling")]
+impl CookedProductSources {
+    pub(crate) fn new(
+        loader: &ProjectContentLoader,
+        candidate: &ProjectSettingsCandidate,
+        sources: BTreeMap<StableAssetId, CookedProductSource>,
+    ) -> Option<Self> {
+        if sources.is_empty() {
+            return None;
+        }
+        let configured = &candidate.settings().paths;
+        Some(Self {
+            roots: [
+                configured.assets.clone(),
+                configured.prefabs.clone(),
+                configured.scenes.clone(),
+            ],
+            sources,
+            budget: loader.budget_host(),
+        })
+    }
+
+    pub(crate) fn retained_path_bytes(&self) -> Result<usize, ProjectContentError> {
+        let kind = ProjectContentBudgetKind::RetainedBytes;
+        let roots = self.roots.iter().try_fold(0, |total, root| {
+            checked_plan_sum(kind, [total, string_retained_bytes(root.as_str())?])
+        })?;
+        self.sources.values().try_fold(roots, |total, source| {
+            checked_plan_sum(
+                kind,
+                [
+                    total,
+                    size_of::<(StableAssetId, CookedProductSource)>(),
+                    BTREE_ENTRY_OVERHEAD,
+                    string_retained_bytes(source.path.as_str())?,
+                ],
+            )
+        })
+    }
+
+    pub(crate) fn verify(&self, root: &DirectoryCapability) -> Result<(), ProjectContentError> {
+        let loader = ProjectContentLoader::with_budget_host(
+            root.share(),
+            self.budget.limits(),
+            self.budget.clone(),
+        )?;
+        let mut context = LoadContext::with_inputs(&loader, (), ());
+        context.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
+        let [assets, prefabs, scenes] = &self.roots;
+        context.bind_source_paths(assets, prefabs, scenes)?;
+        context.scan_reference_catalogue(Some(&|id| self.sources.contains_key(&id)))?;
+        for (&id, source) in &self.sources {
+            let catalogued = [
+                &context.asset_scope,
+                &context.prefab_scope,
+                &context.scene_scope,
+            ]
+            .into_iter()
+            .any(|scope| scope.relative_path(&source.path).is_some());
+            verify_selected_source(
+                &context.asset_database,
+                context.catalogue.as_ref(),
+                id,
+                &source.path,
+                source.metadata.filter(|_| catalogued),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "project-tooling")]
+pub(super) fn verify_selected_source(
+    database: &ProjectAssetDatabase,
+    catalogue: Option<&ReferenceCatalogue>,
+    id: StableAssetId,
+    path: &AssetSourcePath,
+    metadata: Option<ContentDigest>,
+) -> Result<(), ProjectContentError> {
+    match database.record_for_stable_id(id) {
+        Some(record) if record.path() == path => {}
+        None if metadata.is_none() => {}
+        _ => return Err(identity_conflict(path)),
+    }
+    let observed = catalogue
+        .and_then(|catalogue| catalogue.metadata.get(path))
+        .map(|metadata| metadata.digest);
+    if observed != metadata {
+        return Err(metadata_source_changed(path.as_str()));
+    }
+    Ok(())
 }
 
 type CatalogueDirectory = (String, usize, usize);

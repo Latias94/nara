@@ -22,6 +22,7 @@ pub enum ProjectContentMemberKind {
     Prefab,
     InputActionMap,
     AssetMetadata,
+    /// Source bytes with no more specific role in this closure.
     AssetSource,
 }
 
@@ -37,14 +38,21 @@ impl ProjectContentMemberKind {
             Self::AssetSource => "asset",
         }
     }
+
+    fn merge(self, other: Self) -> Option<Self> {
+        match (self, other) {
+            (Self::AssetSource, typed) | (typed, Self::AssetSource) => Some(typed),
+            (left, right) if left == right => Some(left),
+            _ => None,
+        }
+    }
 }
 
 /// One exact source member admitted into a Scene content closure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectContentMemberReceipt {
-    kind: ProjectContentMemberKind,
+    facts: ProjectContentMemberFacts,
     path: ProjectPath,
-    digest: ContentDigest,
 }
 
 impl ProjectContentMemberReceipt {
@@ -53,12 +61,15 @@ impl ProjectContentMemberReceipt {
         path: ProjectPath,
         digest: ContentDigest,
     ) -> Self {
-        Self { kind, path, digest }
+        Self {
+            facts: ProjectContentMemberFacts::new(kind, digest),
+            path,
+        }
     }
 
     #[must_use]
     pub const fn kind(&self) -> ProjectContentMemberKind {
-        self.kind
+        self.facts.kind
     }
 
     #[must_use]
@@ -68,12 +79,16 @@ impl ProjectContentMemberReceipt {
 
     #[must_use]
     pub const fn digest(&self) -> ContentDigest {
-        self.digest
+        self.facts.digest
     }
 
     #[must_use]
     pub const fn byte_len(&self) -> u64 {
-        self.digest.length()
+        self.digest().length()
+    }
+
+    pub(super) fn merge_usage(&mut self, member: &Self) -> bool {
+        self.facts.merge(member.facts)
     }
 }
 
@@ -101,7 +116,7 @@ impl ProjectSceneContentStamp {
         self.manifest_digest
     }
 
-    /// Returns the admitted runtime-content digest, excluding manifest and schema-bundle facts.
+    /// Returns the admitted runtime-content digest, excluding standalone manifest and schema facts.
     #[must_use]
     pub const fn content_digest(self) -> ContentDigest {
         self.content_digest
@@ -398,10 +413,43 @@ pub(super) struct ProjectContentClosureBuilder {
     members: BTreeMap<String, ProjectContentMemberFacts>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProjectContentMemberFacts {
     kind: ProjectContentMemberKind,
     digest: ContentDigest,
+    raw_source: bool,
+}
+
+impl ProjectContentMemberFacts {
+    const fn new(kind: ProjectContentMemberKind, digest: ContentDigest) -> Self {
+        Self {
+            kind,
+            digest,
+            raw_source: matches!(kind, ProjectContentMemberKind::AssetSource),
+        }
+    }
+
+    fn merge(&mut self, other: Self) -> bool {
+        if self.digest != other.digest {
+            return false;
+        }
+        let Some(kind) = self.kind.merge(other.kind) else {
+            return false;
+        };
+        self.kind = kind;
+        self.raw_source |= other.raw_source;
+        true
+    }
+
+    const fn runtime_kind(self) -> Option<ProjectContentMemberKind> {
+        if self.kind.contributes_to_runtime_content_digest() {
+            Some(self.kind)
+        } else if self.raw_source {
+            Some(ProjectContentMemberKind::AssetSource)
+        } else {
+            None
+        }
+    }
 }
 
 impl ProjectContentClosureBuilder {
@@ -443,22 +491,13 @@ impl ProjectContentClosureBuilder {
 
     pub(super) fn content_digest_framed_bytes(&self) -> Result<usize, ProjectContentError> {
         let mut total = b"nara.project-startup-content-digest.v2\0".len();
-        for (path, facts) in self
-            .members
-            .iter()
-            .filter(|(_, facts)| facts.kind.contributes_to_runtime_content_digest())
-        {
+        for (path, facts) in &self.members {
+            let Some(kind) = facts.runtime_kind() else {
+                continue;
+            };
             total = checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
-                [
-                    total,
-                    8,
-                    facts.kind.digest_role().len(),
-                    8,
-                    path.len(),
-                    8,
-                    32,
-                ],
+                [total, 8, kind.digest_role().len(), 8, path.len(), 8, 32],
             )?;
         }
         Ok(total)
@@ -478,12 +517,11 @@ impl ProjectContentClosureBuilder {
         })?;
         let mut encoded_length = 0_u64;
         framed.extend_from_slice(b"nara.project-startup-content-digest.v2\0");
-        for (path, facts) in self
-            .members
-            .iter()
-            .filter(|(_, facts)| facts.kind.contributes_to_runtime_content_digest())
-        {
-            append_frame(&mut framed, facts.kind.digest_role().as_bytes())?;
+        for (path, facts) in &self.members {
+            let Some(kind) = facts.runtime_kind() else {
+                continue;
+            };
+            append_frame(&mut framed, kind.digest_role().as_bytes())?;
             append_frame(&mut framed, path.as_bytes())?;
             framed.extend_from_slice(&facts.digest.length().to_le_bytes());
             framed.extend_from_slice(facts.digest.as_bytes());
@@ -512,18 +550,22 @@ impl ProjectContentClosureBuilder {
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
         let key = path.as_str().to_owned();
-        let facts = ProjectContentMemberFacts { kind, digest };
+        let facts = ProjectContentMemberFacts::new(kind, digest);
         match self.members.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(facts);
                 Ok(())
             }
-            Entry::Occupied(entry) if entry.get() == &facts => Ok(()),
-            Entry::Occupied(_) => Err(ProjectContentError::single(
-                ProjectContentErrorKind::ClosurePathCollision,
-                "project.content.closure-path-collision",
-                "Project Scene closure assigns conflicting facts to one logical path",
-            )),
+            Entry::Occupied(mut entry) => {
+                if entry.get_mut().merge(facts) {
+                    return Ok(());
+                }
+                Err(ProjectContentError::single(
+                    ProjectContentErrorKind::ClosurePathCollision,
+                    "project.content.closure-path-collision",
+                    "Project Scene closure assigns conflicting facts to one logical path",
+                ))
+            }
         }
     }
 
@@ -547,13 +589,10 @@ impl ProjectContentClosureBuilder {
         let members = self
             .members
             .into_iter()
-            .map(|(path, facts)| {
-                ProjectContentMemberReceipt::new(
-                    facts.kind,
-                    ProjectPath::new(path)
-                        .expect("Scene closure paths were validated before admission"),
-                    facts.digest,
-                )
+            .map(|(path, facts)| ProjectContentMemberReceipt {
+                facts,
+                path: ProjectPath::new(path)
+                    .expect("Scene closure paths were validated before admission"),
             })
             .collect::<Box<[_]>>();
         let closure_plan_digest = closure_plan_digest(&runtime_directories, &members);
@@ -583,10 +622,10 @@ fn closure_plan_digest(
         append_plan_frame(&mut framed, directory.as_str().as_bytes());
     }
     for member in members {
-        append_plan_frame(&mut framed, member.kind.digest_role().as_bytes());
+        append_plan_frame(&mut framed, member.kind().digest_role().as_bytes());
         append_plan_frame(&mut framed, member.path.as_str().as_bytes());
-        append_plan_frame(&mut framed, &member.digest.length().to_le_bytes());
-        append_plan_frame(&mut framed, member.digest.as_bytes());
+        append_plan_frame(&mut framed, &member.digest().length().to_le_bytes());
+        append_plan_frame(&mut framed, member.digest().as_bytes());
     }
     ContentDigest::of_bytes(&framed)
 }
@@ -599,5 +638,51 @@ fn append_plan_frame(target: &mut Vec<u8>, bytes: &[u8]) {
 impl ProjectContentMemberKind {
     const fn contributes_to_runtime_content_digest(self) -> bool {
         !matches!(self, Self::ProjectManifest | Self::AuthoringSchemaBundle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_authoring_member_used_as_raw_data_still_contributes_to_runtime_content() {
+        use ProjectContentMemberKind::{AssetSource, AuthoringSchemaBundle, InputActionMap};
+
+        let manifest = ContentDigest::of_bytes(b"manifest");
+        let bytes = ContentDigest::of_bytes(b"schema bundle read by an importer");
+        let path = ProjectPath::new("assets/schema.bundle.json").unwrap();
+        let mut builder = ProjectContentClosureBuilder::new(manifest).unwrap();
+        builder
+            .insert_project_path(AuthoringSchemaBundle, path.clone(), bytes)
+            .unwrap();
+        let digest = |builder: &ProjectContentClosureBuilder| {
+            builder
+                .content_digest(builder.content_digest_framed_bytes().unwrap())
+                .unwrap()
+        };
+        let authoring_only = digest(&builder);
+        builder
+            .insert_project_path(AssetSource, path.clone(), bytes)
+            .unwrap();
+        let shared = digest(&builder);
+        assert_ne!(shared, authoring_only);
+
+        let mut reversed = ProjectContentClosureBuilder::new(manifest).unwrap();
+        reversed
+            .insert_project_path(AssetSource, path.clone(), bytes)
+            .unwrap();
+        assert_eq!(shared, digest(&reversed));
+        reversed
+            .insert_project_path(AuthoringSchemaBundle, path.clone(), bytes)
+            .unwrap();
+        assert_eq!(shared, digest(&reversed));
+        for (kind, bytes) in [(InputActionMap, bytes), (AssetSource, manifest)] {
+            let error = reversed
+                .insert_project_path(kind, path.clone(), bytes)
+                .unwrap_err();
+            assert_eq!(error.kind(), ProjectContentErrorKind::ClosurePathCollision);
+        }
+        assert_eq!(shared, digest(&reversed));
     }
 }

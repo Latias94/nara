@@ -10,7 +10,7 @@ use crate::{
     },
     asset_build::ArtifactContentDigest,
     image::ImageImportSettings,
-    project_content::CookedImageSource,
+    project_content::CookedProductSource,
     project_host::{
         ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
         ingest_project_manifest, resolve_product_recipe,
@@ -216,14 +216,14 @@ fn selected_image_scan_rejects_sidecar_bytes_changed_after_the_file_check() {
     .to_json_string()
     .unwrap();
     fixture.write(path, &bytes);
-    let image_sources = CookedImageSources::new(
+    let product_sources = CookedProductSources::new(
         &loader,
         &candidate,
         [(
             id,
-            CookedImageSource {
+            CookedProductSource {
                 path: AssetSourcePath::new("assets/selected.png").unwrap(),
-                metadata: ContentDigest::of_bytes(bytes.as_bytes()),
+                metadata: Some(ContentDigest::of_bytes(bytes.as_bytes())),
             },
         )]
         .into_iter()
@@ -233,7 +233,7 @@ fn selected_image_scan_rejects_sidecar_bytes_changed_after_the_file_check() {
         &root,
         receipt,
         vec![raw(path, Some(bytes.as_bytes()))],
-        image_sources,
+        product_sources,
     )
     .unwrap();
     selection.verify(&fixture.project).unwrap();
@@ -243,7 +243,7 @@ fn selected_image_scan_rejects_sidecar_bytes_changed_after_the_file_check() {
     bytes.push('\n');
     fixture.write(path, &bytes);
     let error = selection
-        .image_sources
+        .product_sources
         .as_ref()
         .unwrap()
         .verify(&selection.root)
