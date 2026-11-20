@@ -310,3 +310,13 @@ contacts and lets the same bodies fall. A local hull change whose world debug po
 same coordinates also replaces the pair. The independent offscreen render consumer passes 11/11
 in `2fb9f395-238a-4fe2-96b5-b56fefb3416c`, including two hardware DX12 trajectories.
 [Collision qualification](../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)
+
+### Disabled controls and pointer motion
+
+A move over a disabled hit records the observed pointer position and exits the old hover target.
+The disabled control still rejects a press. The public journal regressions move from an enabled
+button to the disabled control, then check both coordinate-bearing and position-free presses and
+releases. Neither route focuses or activates a control. An enabled target still focuses and
+activates through both routes. The Windows interaction suite passes 66/66 in
+`6f9dfd17-7633-475a-bdf7-4a5d8389a71e`.
+[Pointer regressions](../../crates/nara_ui_kernel/tests/interaction/pointer_input.rs)

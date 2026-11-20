@@ -436,6 +436,122 @@ fn uncaptured_motion_uses_nearest_interest_without_duplicating_parent_targets() 
 }
 
 #[test]
+fn moving_onto_a_disabled_button_exits_previous_hover() {
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let first = exact_key("base", "first");
+
+    let entered = session
+        .dispatch(&journal, route, move_pointer(UiPoint::new(20.0, 20.0)))
+        .unwrap();
+    let hover = target_events(
+        entered.consumed().unwrap(),
+        &UiRoutedEventKind::HoverChanged { hovered: true },
+    );
+    assert_eq!(hover.len(), 1);
+    assert_eq!(hover[0].target(), &first);
+
+    let moved = session
+        .dispatch(&journal, route, move_pointer(UiPoint::new(20.0, 80.0)))
+        .unwrap();
+    let transitions = moved
+        .consumed()
+        .expect("moving onto a disabled button still updates hover")
+        .events()
+        .iter()
+        .filter(|event| event.phase() == UiRoutePhase::Target)
+        .map(|event| (event.target(), event.kind()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transitions,
+        vec![(&first, &UiRoutedEventKind::HoverChanged { hovered: false })]
+    );
+}
+
+#[test]
+fn clicks_after_moving_onto_a_button_respect_its_enabled_state() {
+    let mut compiler = compiler();
+    let target = exact_key("base", "first");
+    let position = UiPoint::new(40.0, 30.0);
+    for enabled in [false, true] {
+        let authored = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(base_root_with_first_enabled(enabled))
+            .build()
+            .unwrap();
+        let mut journal = hosted_journal();
+        let route = submit(&mut journal, compile(&mut compiler, &authored, 1), 10);
+
+        for click_position in [Some(position), None] {
+            let mut session = UiInteractionSession::default();
+            for point in [UiPoint::new(140.0, 30.0), position] {
+                session
+                    .dispatch(&journal, route, move_pointer(point))
+                    .unwrap();
+            }
+            let mut click_edge = |phase| {
+                session
+                    .dispatch(
+                        &journal,
+                        route,
+                        UiInputEvent::Pointer(sample_button(
+                            UiPointerButton::Primary,
+                            phase,
+                            click_position,
+                        )),
+                    )
+                    .unwrap()
+            };
+            let pressed = click_edge(UiButtonPhase::Pressed);
+            let released = click_edge(UiButtonPhase::Released);
+            let semantics = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+            let focused = semantics
+                .nodes()
+                .iter()
+                .filter(|node| node.state().focused())
+                .map(|node| node.key())
+                .collect::<Vec<_>>();
+
+            if enabled {
+                assert_eq!(focused, vec![&target], "{click_position:?}");
+                for (outcome, kind) in [
+                    (pressed, UiRoutedEventKind::Pressed),
+                    (released, UiRoutedEventKind::Released { inside: true }),
+                ] {
+                    let events = target_events(outcome.consumed().unwrap(), &kind);
+                    assert_eq!(events.len(), 1, "{click_position:?}");
+                    assert_eq!(events[0].target(), &target, "{click_position:?}");
+                    assert_eq!(
+                        events[0].pointer_input().unwrap().position(),
+                        Some(position),
+                        "{click_position:?}"
+                    );
+                }
+            } else {
+                assert!(focused.is_empty(), "{click_position:?}: {focused:?}");
+                assert_eq!(
+                    pressed.rejection(),
+                    Some(&UiNonActivation::TargetDisabled {
+                        target: target.clone(),
+                    }),
+                    "{click_position:?}"
+                );
+                assert_eq!(
+                    released.rejection(),
+                    Some(&UiNonActivation::NoPointerCapture),
+                    "{click_position:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn scroll_without_interest_and_disabled_listener_refuse_without_partial_pointer_state() {
     for disabled_listener in [false, true] {
         let mut compiler = compiler();

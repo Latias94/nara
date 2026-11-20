@@ -75,6 +75,7 @@ pub(super) fn pointer_move(
         .map(|capture| capture.target.clone());
     let hovered = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
         Ok(hovered) => hovered,
+        Err(UiNonActivation::TargetDisabled { .. }) => None,
         Err(_) if captured.is_some() => None,
         Err(reason) => return Err(reason),
     };
