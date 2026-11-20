@@ -279,7 +279,10 @@ gameplay. The existing exact-reconstruction inventory continues refusing this un
 audio service.
 
 The optional recipe owns a finite cue queue, sixteen voices, a 4096-effect duplicate ledger,
-bounded observation and managed device shutdown. The camera's `SoundPalette` declares the one
+bounded observation and managed device shutdown. The observation history retains its newest
+records and reports the number it evicted. Playback keeps the device's actual scope and counters.
+Source and cooked verification require the complete recorded callback history. The camera's
+`SoundPalette` declares the one
 [Sound Bank descriptor](assets/audio/game.soundbank.json), whose metadata supplies its stable
 primary Product. Source import reads both [original WAVs](assets/audio/README.md) through the
 admitted raw-dependency reader; cooked content contains the validated canonical PCM and complete

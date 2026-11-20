@@ -11,7 +11,7 @@ mod native_tests;
 
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     rc::Rc,
     sync::{Arc, Mutex},
 };
@@ -198,7 +198,15 @@ pub struct AudioSnapshot {
     pub error_callback_released: bool,
     pub physical_complete: bool,
     pub error: Option<String>,
+    /// Retained records in order. Use [`AudioWitness::snapshot_with_history`] to detect eviction.
     pub records: Vec<AudioRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AudioObservation {
+    #[serde(flatten)]
+    pub snapshot: AudioSnapshot,
+    pub evicted_records: u64,
 }
 
 /// A copy of this game's own callback output, rather than system or microphone capture.
@@ -224,31 +232,26 @@ struct GameAudioState {
 
 #[derive(Default)]
 struct AudioJournal {
-    records: Vec<AudioRecord>,
+    records: VecDeque<AudioRecord>,
     cues: usize,
     scopes: usize,
+    evicted_records: u64,
 }
 
 impl AudioJournal {
-    fn push(&mut self, record: AudioRecord) -> Result<(), &'static str> {
-        let (count, limit, error) = match &record {
-            AudioRecord::Cue { .. } => (
-                &mut self.cues,
-                MAX_CUE_RECORDS,
-                "audio cue record capacity exhausted",
-            ),
-            AudioRecord::ScopeApplied { .. } => (
-                &mut self.scopes,
-                MAX_SCOPE_RECORDS,
-                "audio scope record capacity exhausted",
-            ),
-        };
-        if *count == limit {
-            return Err(error);
+    fn push(&mut self, record: AudioRecord) {
+        match &record {
+            AudioRecord::Cue { .. } => self.cues += 1,
+            AudioRecord::ScopeApplied { .. } => self.scopes += 1,
         }
-        *count += 1;
-        self.records.push(record);
-        Ok(())
+        while self.cues > MAX_CUE_RECORDS || self.scopes > MAX_SCOPE_RECORDS {
+            match self.records.pop_front().expect("nonempty audio history") {
+                AudioRecord::Cue { .. } => self.cues -= 1,
+                AudioRecord::ScopeApplied { .. } => self.scopes -= 1,
+            }
+            self.evicted_records = self.evicted_records.saturating_add(1);
+        }
+        self.records.push_back(record);
     }
 }
 
@@ -260,34 +263,42 @@ pub struct AudioWitness(Arc<Mutex<GameAudioState>>);
 
 impl AudioWitness {
     pub fn snapshot(&self) -> AudioSnapshot {
+        self.snapshot_with_history().snapshot
+    }
+
+    /// Captures the retained chronological suffix and the number of earlier records it omits.
+    pub fn snapshot_with_history(&self) -> AudioObservation {
         let mut state = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.drain();
         let native = state.device.snapshot();
-        AudioSnapshot {
-            runtime: native.runtime,
-            reset_on_rebuild: state.policy == AudioPolicy::ResetOnRebuild,
-            output_enabled: state.output_enabled && state.check_live(native).is_ok(),
-            suppressed_effects: state.suppressed_effects,
-            desired_instance: native.desired_instance,
-            applied_instance: native.applied_instance,
-            play_admitted: native.play_admitted,
-            callbacks: native.callback_count,
-            output_frames: native.output_frame,
-            accepted: native.counters.accepted,
-            started: native.counters.started,
-            completed: native.counters.completed,
-            cancelled: native.counters.cancelled,
-            faults: native.faults,
-            admission_open: native.admission_open,
-            stream_drop_returned: native.stream_drop_returned,
-            data_callback_released: native.data_callback_released,
-            error_callback_released: native.error_callback_released,
-            physical_complete: native.physical_complete,
-            error: state.error.clone(),
-            records: state.journal.records.clone(),
+        AudioObservation {
+            snapshot: AudioSnapshot {
+                runtime: native.runtime,
+                reset_on_rebuild: state.policy == AudioPolicy::ResetOnRebuild,
+                output_enabled: state.output_enabled && state.check_live(native).is_ok(),
+                suppressed_effects: state.suppressed_effects,
+                desired_instance: native.desired_instance,
+                applied_instance: native.applied_instance,
+                play_admitted: native.play_admitted,
+                callbacks: native.callback_count,
+                output_frames: native.output_frame,
+                accepted: native.counters.accepted,
+                started: native.counters.started,
+                completed: native.counters.completed,
+                cancelled: native.counters.cancelled,
+                faults: native.faults,
+                admission_open: native.admission_open,
+                stream_drop_returned: native.stream_drop_returned,
+                data_callback_released: native.data_callback_released,
+                error_callback_released: native.error_callback_released,
+                physical_complete: native.physical_complete,
+                error: state.error.clone(),
+                records: state.journal.records.iter().cloned().collect(),
+            },
+            evicted_records: state.journal.evicted_records,
         }
     }
 
@@ -452,9 +463,7 @@ impl GameAudioState {
                     }
                 }
             };
-            if let Err(error) = self.journal.push(record) {
-                self.error(error.into());
-            }
+            self.journal.push(record);
         }
     }
 }

@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot,
     animation::clips_product,
-    audio::{self, AudioSnapshot, AudioWitness},
+    audio::{self, AudioWitness},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelKey},
     sound_bank::{SoundBankDomain, SoundCue, bank_product},
 };
@@ -34,7 +34,7 @@ pub(super) struct AudioObservation {
     captured_frames: u64,
     dropped_frames: u64,
     game: Option<GameSnapshot>,
-    snapshot: Option<AudioSnapshot>,
+    snapshot: Option<audio::AudioObservation>,
     pcm: Option<Value>,
     native: Value,
     input: Option<Value>,
@@ -206,7 +206,10 @@ impl PlayerExtension for AudioObservation {
 
     fn finish(&mut self) -> Result<(), String> {
         let drained = self.drain();
-        self.snapshot = self.witness.as_ref().map(AudioWitness::snapshot);
+        self.snapshot = self
+            .witness
+            .as_ref()
+            .map(AudioWitness::snapshot_with_history);
         let target = self
             .target
             .as_ref()
@@ -230,10 +233,11 @@ impl PlayerExtension for AudioObservation {
                 "original cooked audio window/surface/provider did not physically retire".into(),
             );
         }
-        let snapshot = self
+        let observation = self
             .snapshot
             .as_ref()
             .ok_or("original audio witness was never published")?;
+        let snapshot = &observation.snapshot;
         if !snapshot.play_admitted
             || !snapshot.physical_complete
             || !snapshot.stream_drop_returned
@@ -258,7 +262,7 @@ impl PlayerExtension for AudioObservation {
                 .get(&AssetRef::Product(bank_product()))
                 .ok_or("original acquired SoundBank Product is unavailable")?;
             self.pcm = Some(oracle::verify(
-                snapshot,
+                observation,
                 &self.output,
                 bank.samples(SoundCue::Pickup),
                 bank.samples(SoundCue::Travel),
@@ -283,7 +287,7 @@ impl PlayerExtension for AudioObservation {
             "pcm": self.pcm,
             "native": self.native,
             "deadline_scope": "cooperative original polls and native calls; callback samples do not establish human audibility",
-            "observation_scope": "bounded callback capture drops and counts excess frames; --verify requires complete PCM",
+            "observation_scope": "bounded callback capture and diagnostic history report omissions. --verify requires complete PCM and diagnostic history",
             "verification_input": "initial isolation, then original focus and physical-key reconciliation before Resume",
         }))
     }

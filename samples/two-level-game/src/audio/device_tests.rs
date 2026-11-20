@@ -1,6 +1,6 @@
 use super::super::{
-    AudioCause, AudioPhase, AudioPolicy, AudioRecord, AudioWitness as GameWitness, GameAudioState,
-    MAX_CAUSES,
+    AudioCause, AudioClip, AudioPhase, AudioPolicy, AudioRecord, AudioWitness as GameWitness,
+    GameAudioState, MAX_CAUSES, MAX_SCOPE_RECORDS,
 };
 use super::super::{clips::ClipKind, mixer::EffectId};
 use super::*;
@@ -307,6 +307,56 @@ fn development_scene_retirement_still_cancels_an_original_started_voice() {
     assert_eq!(game.snapshot().accepted, 2);
     assert_eq!(game.snapshot().completed, 1);
     assert_eq!(game.snapshot().suppressed_effects, 1);
+}
+
+#[test]
+fn ordinary_travel_starts_and_retires_after_scope_history_eviction() {
+    let mut callback = CallbackControl::new(None);
+    let game = game_witness(&callback, AudioPolicy::Ordinary);
+    let travel_instance = MAX_SCOPE_RECORDS as u64 + 2;
+    for instance in 1..travel_instance {
+        callback.control.set_scope(scope(instance)).unwrap();
+        assert_eq!(callback.output(1), [0.0; 2]);
+        game.0.lock().unwrap().drain();
+    }
+    let before_travel = game.snapshot_with_history();
+    assert_eq!(before_travel.evicted_records, 1);
+    assert_eq!(before_travel.snapshot.applied_instance, travel_instance - 1);
+    assert_eq!(before_travel.snapshot.accepted, 0);
+    assert!(before_travel.snapshot.output_enabled);
+
+    publish_game(&game, travel_instance, ClipKind::Travel);
+    assert_eq!(callback.output(1), [-0.25; 2]);
+    let replacement = travel_instance + 1;
+    callback.control.set_scope(scope(replacement)).unwrap();
+    assert_eq!(callback.output(1), [0.0; 2]);
+
+    let retired = game.snapshot_with_history();
+    assert_eq!(retired.evicted_records, 3);
+    let audio = retired.snapshot;
+    assert_eq!(audio.desired_instance, replacement);
+    assert_eq!(audio.applied_instance, replacement);
+    assert_eq!(
+        (
+            audio.accepted,
+            audio.started,
+            audio.completed,
+            audio.cancelled
+        ),
+        (1, 1, 0, 1)
+    );
+    assert!(audio.output_enabled && audio.admission_open && audio.error.is_none());
+    assert_eq!(audio.faults, 0);
+    assert!(audio.records.iter().any(|record| matches!(
+        record,
+        AudioRecord::Cue {
+            instance,
+            clip: AudioClip::Travel,
+            phase: AudioPhase::Cancelled { started: true },
+            frame,
+            ..
+        } if *instance == travel_instance && *frame == travel_instance
+    )));
 }
 
 #[test]

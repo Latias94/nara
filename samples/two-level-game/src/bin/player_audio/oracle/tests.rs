@@ -1,9 +1,10 @@
 use super::*;
+use two_level_game::audio::AudioSnapshot;
 
 const PICKUP: [f32; 2] = [0.25, -0.5];
 const TRAVEL: [f32; 3] = [0.125, 0.25, -0.125];
 
-fn fixture() -> (AudioSnapshot, Vec<f32>, BTreeMap<u64, LevelKey>) {
+fn fixture() -> (AudioObservation, Vec<f32>, BTreeMap<u64, LevelKey>) {
     let meadow = LevelKey::main(LevelId::Meadow);
     let cavern = LevelKey::main(LevelId::Cavern);
     let other = LevelKey::new(LevelId::Cavern, 1).unwrap();
@@ -92,28 +93,31 @@ fn fixture() -> (AudioSnapshot, Vec<f32>, BTreeMap<u64, LevelKey>) {
     .flat_map(|sample| [sample; CHANNELS])
     .collect();
     (
-        AudioSnapshot {
-            runtime: 7,
-            reset_on_rebuild: false,
-            output_enabled: false,
-            suppressed_effects: 0,
-            desired_instance: 6,
-            applied_instance: 6,
-            play_admitted: true,
-            callbacks: 4,
-            output_frames: 20,
-            accepted: 7,
-            started: 7,
-            completed: 7,
-            cancelled: 0,
-            faults: 0,
-            admission_open: false,
-            stream_drop_returned: true,
-            data_callback_released: true,
-            error_callback_released: true,
-            physical_complete: true,
-            error: None,
-            records,
+        AudioObservation {
+            snapshot: AudioSnapshot {
+                runtime: 7,
+                reset_on_rebuild: false,
+                output_enabled: false,
+                suppressed_effects: 0,
+                desired_instance: 6,
+                applied_instance: 6,
+                play_admitted: true,
+                callbacks: 4,
+                output_frames: 20,
+                accepted: 7,
+                started: 7,
+                completed: 7,
+                cancelled: 0,
+                faults: 0,
+                admission_open: false,
+                stream_drop_returned: true,
+                data_callback_released: true,
+                error_callback_released: true,
+                physical_complete: true,
+                error: None,
+                records,
+            },
+            evicted_records: 0,
         },
         actual,
         instances,
@@ -153,8 +157,8 @@ fn verification_refuses_reported_loss_without_waiting_for_a_gap() {
 
 #[test]
 fn compares_every_callback_sample_and_reports_exact_acquired_source_frames() {
-    let (snapshot, actual, instances) = fixture();
-    let proof = verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).unwrap();
+    let (observation, actual, instances) = fixture();
+    let proof = verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).unwrap();
     assert_eq!(proof["samples_compared"], 40);
     assert_eq!(proof["pickup_source_frames"], 2);
     assert_eq!(proof["travel_source_frames"], 3);
@@ -165,35 +169,45 @@ fn compares_every_callback_sample_and_reports_exact_acquired_source_frames() {
 }
 
 #[test]
+fn refuses_reported_history_eviction_even_when_samples_and_counters_match() {
+    let (mut observation, actual, instances) = fixture();
+    observation.evicted_records = 1;
+    assert_eq!(
+        verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).unwrap_err(),
+        "cooked audio diagnostic history is incomplete (evicted records = 1)"
+    );
+}
+
+#[test]
 fn rejects_a_corrupt_callback_sample_or_wrong_acquired_pcm() {
-    let (snapshot, mut actual, instances) = fixture();
+    let (observation, mut actual, instances) = fixture();
     actual[0] = 0.0;
-    assert!(verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).is_err());
-    let (snapshot, actual, instances) = fixture();
-    assert!(verify(&snapshot, &actual, &[0.5, -0.5], &TRAVEL, &instances).is_err());
+    assert!(verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).is_err());
+    let (observation, actual, instances) = fixture();
+    assert!(verify(&observation, &actual, &[0.5, -0.5], &TRAVEL, &instances).is_err());
 }
 
 #[test]
 fn refuses_pcm_acceptance_with_a_missing_final_frame() {
-    let (snapshot, mut actual, instances) = fixture();
+    let (observation, mut actual, instances) = fixture();
     actual.truncate(actual.len() - CHANNELS);
     assert_eq!(
-        verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).unwrap_err(),
+        verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).unwrap_err(),
         "callback PCM does not cover the complete bounded output interval"
     );
 }
 
 #[test]
 fn refuses_pcm_acceptance_before_physical_callback_release() {
-    let (mut snapshot, actual, instances) = fixture();
-    snapshot.error_callback_released = false;
-    assert!(verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).is_err());
+    let (mut observation, actual, instances) = fixture();
+    observation.snapshot.error_callback_released = false;
+    assert!(verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).is_err());
 }
 
 #[test]
 fn rejects_a_cue_from_another_scene_instance() {
-    let (mut snapshot, actual, instances) = fixture();
-    for record in &mut snapshot.records {
+    let (mut observation, actual, instances) = fixture();
+    for record in &mut observation.snapshot.records {
         if let AudioRecord::Cue {
             instance,
             sequence: 1,
@@ -203,15 +217,15 @@ fn rejects_a_cue_from_another_scene_instance() {
             *instance = 2;
         }
     }
-    assert!(verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).is_err());
+    assert!(verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).is_err());
 }
 
 #[test]
 fn cancellation_requires_the_exact_scene_replacement_output_boundary() {
-    let (mut snapshot, mut actual, instances) = fixture();
-    snapshot.completed = 6;
-    snapshot.cancelled = 1;
-    for record in &mut snapshot.records {
+    let (mut observation, mut actual, instances) = fixture();
+    observation.snapshot.completed = 6;
+    observation.snapshot.cancelled = 1;
+    for record in &mut observation.snapshot.records {
         match record {
             AudioRecord::Cue {
                 sequence: 1,
@@ -230,9 +244,9 @@ fn cancellation_requires_the_exact_scene_replacement_output_boundary() {
     }
     actual[2] = 0.0;
     actual[3] = 0.0;
-    let proof = verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).unwrap();
+    let proof = verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).unwrap();
     assert_eq!(proof["stale_scope_cancellations"], 1);
-    for record in &mut snapshot.records {
+    for record in &mut observation.snapshot.records {
         if let AudioRecord::ScopeApplied {
             instance: 2, frame, ..
         } = record
@@ -240,5 +254,5 @@ fn cancellation_requires_the_exact_scene_replacement_output_boundary() {
             *frame = 2;
         }
     }
-    assert!(verify(&snapshot, &actual, &PICKUP, &TRAVEL, &instances).is_err());
+    assert!(verify(&observation, &actual, &PICKUP, &TRAVEL, &instances).is_err());
 }

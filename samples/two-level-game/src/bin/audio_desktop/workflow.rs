@@ -28,7 +28,7 @@ use nara::{
 use serde::Serialize;
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
-    audio::{self, AudioCause, AudioOptions, AudioSnapshot, AudioWitness},
+    audio::{self, AudioCause, AudioObservation, AudioOptions, AudioSnapshot, AudioWitness},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
@@ -127,7 +127,7 @@ struct RunEvidence {
     failure: Option<String>,
     game: Option<GameEvidence>,
     controls: Option<ControlEvidence>,
-    audio: Option<AudioSnapshot>,
+    audio: Option<AudioObservation>,
     pcm: Option<PcmEvidence>,
     native: NativeEvidence,
 }
@@ -230,7 +230,8 @@ impl Observed {
             if self.target.is_none() {
                 self.target = world.get_resource::<BackendWindowHandles>().cloned();
             }
-            if let Some(snapshot) = world.get_resource::<GameSnapshot>()
+            if verify
+                && let Some(snapshot) = world.get_resource::<GameSnapshot>()
                 && let (Some(instance), Some(level)) = (snapshot.current_instance, snapshot.level)
             {
                 if self
@@ -693,21 +694,26 @@ impl Session {
         self.wait_audio(|audio| audio.accepted == 2 && audio.started == 2)?;
         evidence.retry_before_instance = entered.current_instance.map(|id| id.get());
         let retried = self.step(Some(action("two-level-game.retry")?), false)?;
-        let retired = self.wait_audio(|audio| {
-            audio.desired_instance == audio.applied_instance
-                && audio.completed + audio.cancelled == audio.accepted
-        })?;
+        let retry_instance = retried
+            .current_instance
+            .ok_or("Retry did not publish a Scene instance")?;
         if retried.level != entered.level
             || retried.score != 10
             || retried.restarts != 1
             || retried.travel_count != 1
             || retried.current_instance == entered.current_instance
-            || Some(retired.applied_instance) != retried.current_instance.map(|id| id.get())
-            || retired.accepted != 2
         {
-            return Err("Retry did not retire the old-instance cue under the new scope".into());
+            return Err("Retry did not commit a new instance of the same level".into());
         }
-        evidence.retry_after_instance = retried.current_instance.map(|id| id.get());
+        evidence.retry_after_instance = Some(retry_instance.get());
+        let retired = self.wait_audio(|audio| {
+            audio.applied_instance == retry_instance.get()
+                && audio.desired_instance == audio.applied_instance
+                && audio.completed + audio.cancelled == audio.accepted
+        })?;
+        if retired.accepted != 2 || retired.started != 2 {
+            return Err("Retry changed the number of accepted or started cues".into());
+        }
         evidence.retry_audio_accepted = retired.accepted;
         let saved = self.step(Some(action("two-level-game.save")?), false)?;
         if saved.saves != 1 {
@@ -899,7 +905,8 @@ impl Session {
             evidence.fail("original presentation observer panicked");
         }
         if let Some(witness) = &observed.witness {
-            let snapshot = witness.snapshot();
+            let observation = witness.snapshot_with_history();
+            let snapshot = &observation.snapshot;
             if !snapshot.play_admitted
                 || !snapshot.physical_complete
                 || !snapshot.stream_drop_returned
@@ -916,7 +923,7 @@ impl Session {
             {
                 match oracle::verify(
                     verification.sources,
-                    &snapshot,
+                    &observation,
                     &observed.output,
                     verification.causes,
                     &observed.instances,
@@ -925,7 +932,7 @@ impl Session {
                     Err(error) => evidence.fail(error),
                 }
             }
-            evidence.audio = Some(snapshot);
+            evidence.audio = Some(observation);
         } else {
             evidence
                 .fail("native audio device was unavailable or failed before witness publication");
@@ -1115,8 +1122,9 @@ fn verify(source: &Path) -> Report {
     drop(event_loop);
     if report.runs.len() == 2 {
         if let (Some(first), Some(second)) = (&report.runs[0].audio, &report.runs[1].audio) {
-            report.fresh_runtime_generation =
-                first.runtime != 0 && second.runtime != 0 && first.runtime != second.runtime;
+            let first = first.snapshot.runtime;
+            let second = second.snapshot.runtime;
+            report.fresh_runtime_generation = first != 0 && second != 0 && first != second;
         }
     }
     report.retired_generation_unchanged = retained_witnesses.len() == 2
@@ -1124,16 +1132,19 @@ fn verify(source: &Path) -> Report {
             .iter()
             .zip(&report.runs)
             .all(|(witness, run)| {
-                let now = witness.snapshot();
+                let observation = witness.snapshot_with_history();
+                let now = &observation.snapshot;
                 run.audio.as_ref().is_some_and(|closed| {
-                    now.runtime == closed.runtime
-                        && now.output_frames == closed.output_frames
-                        && now.callbacks == closed.callbacks
-                        && now.accepted == closed.accepted
-                        && now.started == closed.started
-                        && now.completed == closed.completed
-                        && now.cancelled == closed.cancelled
-                        && now.records == closed.records
+                    let earlier = &closed.snapshot;
+                    observation.evicted_records == closed.evicted_records
+                        && now.runtime == earlier.runtime
+                        && now.output_frames == earlier.output_frames
+                        && now.callbacks == earlier.callbacks
+                        && now.accepted == earlier.accepted
+                        && now.started == earlier.started
+                        && now.completed == earlier.completed
+                        && now.cancelled == earlier.cancelled
+                        && now.records == earlier.records
                         && now.faults == 0
                         && now.error.is_none()
                         && now.physical_complete

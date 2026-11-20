@@ -5,7 +5,7 @@ mod oracle;
 
 use std::collections::BTreeMap;
 use two_level_game::{
-    audio::{AudioCause, AudioClip, AudioPhase, AudioRecord, AudioSnapshot},
+    audio::{AudioCause, AudioClip, AudioObservation, AudioPhase, AudioRecord, AudioSnapshot},
     levels::{LevelId, LevelKey},
 };
 
@@ -17,7 +17,7 @@ const SHIPPED: oracle::SourceWavs<'static> = oracle::SourceWavs {
 fn fixture(
     pcm: &[u8],
 ) -> (
-    AudioSnapshot,
+    AudioObservation,
     Vec<f32>,
     Vec<AudioCause>,
     BTreeMap<u64, LevelKey>,
@@ -87,7 +87,10 @@ fn fixture(
         records,
     };
     (
-        snapshot,
+        AudioObservation {
+            snapshot,
+            evicted_records: 0,
+        },
         output,
         vec![cause],
         BTreeMap::from([(1, meadow), (2, cavern), (3, meadow)]),
@@ -96,18 +99,29 @@ fn fixture(
 
 #[test]
 fn independent_callback_oracle_accepts_the_captured_wav_and_locates_sample_corruption() {
-    let (snapshot, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
-    let proof = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap();
+    let (observation, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let proof = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap();
     assert_eq!(proof.maximum_absolute_error, 0.0);
     assert_eq!(
         (proof.pickup_source_frames, proof.travel_source_frames),
         (5760, 11520)
     );
     output[301] += 0.25;
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(
         error.contains("independent PCM mismatch at frame=150 channel=1"),
         "{error}"
+    );
+}
+
+#[test]
+fn a_matching_retained_history_with_an_evicted_prefix_cannot_qualify() {
+    let (mut observation, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    observation.evicted_records = 1;
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
+    assert_eq!(
+        error,
+        "audio diagnostic history is incomplete (evicted records = 1)"
     );
 }
 
@@ -118,29 +132,29 @@ fn independent_callback_oracle_uses_the_edited_pickup_amplitude() {
         let original = i16::from_le_bytes([sample[0], sample[1]]);
         sample.copy_from_slice(&(original / 2).to_le_bytes());
     }
-    let (snapshot, output, causes, instances) = fixture(&pickup[44..]);
+    let (observation, output, causes, instances) = fixture(&pickup[44..]);
     let sources = oracle::SourceWavs {
         pickup: &pickup,
         ..SHIPPED
     };
-    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    let proof = oracle::verify(sources, &observation, &output, &causes, &instances).unwrap();
     assert_eq!(proof.pickup_source_frames, 5760);
     assert_eq!(proof.maximum_absolute_error, 0.0);
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(error.contains("independent PCM mismatch"), "{error}");
 }
 
 #[test]
 fn independent_callback_oracle_uses_the_rebound_pickup_frame_boundary() {
-    let (snapshot, output, causes, instances) = fixture(&SHIPPED.travel[44..]);
+    let (observation, output, causes, instances) = fixture(&SHIPPED.travel[44..]);
     let sources = oracle::SourceWavs {
         pickup: SHIPPED.travel,
         ..SHIPPED
     };
-    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    let proof = oracle::verify(sources, &observation, &output, &causes, &instances).unwrap();
     assert_eq!(proof.pickup_source_frames, 11520);
     assert_eq!(proof.maximum_absolute_error, 0.0);
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(
         error.contains("source WAV boundary at frame=5760"),
         "{error}"
@@ -149,7 +163,7 @@ fn independent_callback_oracle_uses_the_rebound_pickup_frame_boundary() {
 
 #[test]
 fn an_odd_ancillary_chunk_preserves_the_captured_pcm() {
-    let (snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let (observation, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
     let mut pickup = SHIPPED.pickup.to_vec();
     pickup.splice(12..12, b"JUNK\x01\x00\x00\x00X\x00".iter().copied());
     let riff_length = (pickup.len() - 8) as u32;
@@ -158,7 +172,7 @@ fn an_odd_ancillary_chunk_preserves_the_captured_pcm() {
         pickup: &pickup,
         ..SHIPPED
     };
-    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    let proof = oracle::verify(sources, &observation, &output, &causes, &instances).unwrap();
     assert_eq!(proof.maximum_absolute_error, 0.0);
 }
 
@@ -166,19 +180,20 @@ fn an_odd_ancillary_chunk_preserves_the_captured_pcm() {
 fn silent_authored_samples_are_compared_against_the_actual_silent_output() {
     let mut pickup = SHIPPED.pickup.to_vec();
     pickup[44..].fill(0);
-    let (snapshot, output, causes, instances) = fixture(&pickup[44..]);
+    let (observation, output, causes, instances) = fixture(&pickup[44..]);
     let sources = oracle::SourceWavs {
         pickup: &pickup,
         ..SHIPPED
     };
-    let proof = oracle::verify(sources, &snapshot, &output, &causes, &instances).unwrap();
+    let proof = oracle::verify(sources, &observation, &output, &causes, &instances).unwrap();
     assert_eq!(proof.nonzero_samples, 0);
     assert_eq!(proof.maximum_absolute_error, 0.0);
 }
 
 #[test]
 fn a_matching_completed_wav_cannot_outlive_its_first_scene_replacement() {
-    let (mut snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let (mut observation, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let snapshot = &mut observation.snapshot;
     snapshot.records[4] = AudioRecord::ScopeApplied {
         runtime: 7,
         instance: 2,
@@ -189,13 +204,14 @@ fn a_matching_completed_wav_cannot_outlive_its_first_scene_replacement() {
         instance: 3,
         frame: 300,
     };
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(error.contains("voice survived its first original Scene scope replacement"));
 }
 
 #[test]
 fn cancellation_at_a_second_replacement_cannot_hide_output_after_the_first_cut() {
-    let (mut snapshot, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let (mut observation, mut output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let snapshot = &mut observation.snapshot;
     let mut cancelled = snapshot.records.remove(3);
     if let AudioRecord::Cue { phase, frame, .. } = &mut cancelled {
         *phase = AudioPhase::Cancelled { started: true };
@@ -215,13 +231,14 @@ fn cancellation_at_a_second_replacement_cannot_hide_output_after_the_first_cut()
     snapshot.completed = 0;
     snapshot.cancelled = 1;
     output[600..].fill(0.0);
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(error.contains("voice survived its first original Scene scope replacement"));
 }
 
 #[test]
 fn a_scope_without_a_new_cue_still_requires_an_actual_game_instance() {
-    let (mut snapshot, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let (mut observation, output, causes, instances) = fixture(&SHIPPED.pickup[44..]);
+    let snapshot = &mut observation.snapshot;
     snapshot.records[4] = AudioRecord::ScopeApplied {
         runtime: 7,
         instance: 999,
@@ -234,6 +251,6 @@ fn a_scope_without_a_new_cue_still_requires_an_actual_game_instance() {
     };
     snapshot.desired_instance = 1000;
     snapshot.applied_instance = 1000;
-    let error = oracle::verify(SHIPPED, &snapshot, &output, &causes, &instances).unwrap_err();
+    let error = oracle::verify(SHIPPED, &observation, &output, &causes, &instances).unwrap_err();
     assert!(error.contains("scope application has a foreign identity"));
 }

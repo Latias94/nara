@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, io::Read, ops::Range};
 
 use serde::Serialize;
 use two_level_game::{
-    audio::{AudioCause, AudioClip, AudioPhase, AudioRecord, AudioSnapshot},
+    audio::{AudioCause, AudioClip, AudioObservation, AudioPhase, AudioRecord},
     levels::LevelKey,
 };
 
@@ -101,11 +101,12 @@ fn source_clip(cause: &AudioCause) -> AudioClip {
 
 pub(super) fn verify(
     sources: SourceWavs<'_>,
-    snapshot: &AudioSnapshot,
+    observation: &AudioObservation,
     actual: &[f32],
     expected_causes: &[AudioCause],
     instances: &BTreeMap<u64, LevelKey>,
 ) -> Result<PcmEvidence, String> {
+    let snapshot = &observation.snapshot;
     if snapshot.error.is_some() || snapshot.faults != 0 {
         return Err(format!(
             "audio observation failed: {:?}; faults={:#x}",
@@ -129,6 +130,12 @@ pub(super) fn verify(
         || actual.len() as u64 != snapshot.output_frames * CHANNELS as u64
     {
         return Err("callback capture does not cover the complete bounded output interval".into());
+    }
+    if observation.evicted_records != 0 {
+        return Err(format!(
+            "audio diagnostic history is incomplete (evicted records = {})",
+            observation.evicted_records
+        ));
     }
 
     let pickup = decode(sources.pickup).map_err(|error| format!("Pickup: {error}"))?;

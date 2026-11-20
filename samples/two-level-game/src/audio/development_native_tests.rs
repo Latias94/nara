@@ -181,7 +181,9 @@ fn a_real_development_game_is_silent_until_enabled_and_only_new_cues_match_the_f
         "new enabled travel did not complete on its original device clock",
     );
     game.close();
-    let closed = capture.drain(&witness);
+    capture.drain(&witness);
+    let closed_observation = witness.snapshot_with_history();
+    let closed = &closed_observation.snapshot;
     assert!(!closed.output_enabled);
     assert_eq!(closed.suppressed_effects, 2);
     assert!(witness.enable_development_output().is_err());
@@ -194,12 +196,19 @@ fn a_real_development_game_is_silent_until_enabled_and_only_new_cues_match_the_f
             level: LevelKey::main(LevelId::Meadow),
         },
     ];
-    let proof = oracle::verify(sources, &closed, &capture.0, &expected, &instances).unwrap();
+    let proof = oracle::verify(
+        sources,
+        &closed_observation,
+        &capture.0,
+        &expected,
+        &instances,
+    )
+    .unwrap();
     assert_eq!(proof.maximum_absolute_error, 0.0);
     assert_eq!(proof.samples_compared, capture.0.len());
     assert!(proof.nonzero_samples > 0);
     assert_eq!((proof.accepted_pickups, proof.accepted_travels), (1, 1));
-    let original = serde_json::to_value(&closed).unwrap();
+    let original = serde_json::to_value(&closed_observation).unwrap();
 
     let mut fresh = Game::from_project_with_recipe(project.root(), recipe());
     let fresh_witness = observation(&fresh);
@@ -242,7 +251,10 @@ fn a_real_development_game_is_silent_until_enabled_and_only_new_cues_match_the_f
     assert!(retired.data_callback_released && retired.error_callback_released);
     assert_eq!(fresh_capture.0.len() as u64, retired.output_frames * 2);
     fresh_capture.assert_silent();
-    assert_eq!(original, serde_json::to_value(witness.snapshot()).unwrap());
+    assert_eq!(
+        original,
+        serde_json::to_value(witness.snapshot_with_history()).unwrap()
+    );
 }
 
 #[derive(Default)]

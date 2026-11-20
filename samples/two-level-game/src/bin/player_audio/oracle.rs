@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use nara::fs::ContentDigest;
 use serde_json::{Value, json};
 use two_level_game::{
-    audio::{AudioCause, AudioClip, AudioOutput, AudioPhase, AudioRecord, AudioSnapshot},
+    audio::{AudioCause, AudioClip, AudioObservation, AudioOutput, AudioPhase, AudioRecord},
     levels::{LevelId, LevelKey},
 };
 
@@ -93,12 +93,13 @@ fn digest(samples: &[f32]) -> [u8; 32] {
 }
 
 pub(super) fn verify(
-    snapshot: &AudioSnapshot,
+    observation: &AudioObservation,
     actual: &[f32],
     pickup: &[f32],
     travel: &[f32],
     instances: &BTreeMap<u64, LevelKey>,
 ) -> Result<Value, String> {
+    let snapshot = &observation.snapshot;
     if !snapshot.play_admitted
         || !snapshot.physical_complete
         || !snapshot.stream_drop_returned
@@ -116,6 +117,12 @@ pub(super) fn verify(
         || actual.len() as u64 != snapshot.output_frames * CHANNELS as u64
     {
         return Err("callback PCM does not cover the complete bounded output interval".into());
+    }
+    if observation.evicted_records != 0 {
+        return Err(format!(
+            "cooked audio diagnostic history is incomplete (evicted records = {})",
+            observation.evicted_records
+        ));
     }
     for source in [pickup, travel] {
         if source.is_empty()

@@ -93,6 +93,7 @@ struct Audio {
     callbacks: u64,
     output_frames: u64,
     faults: u64,
+    evicted_records: u64,
     admission_open: bool,
     stream_drop_returned: bool,
     data_callback_released: bool,
@@ -141,7 +142,7 @@ struct Adapter {
 #[test]
 #[ignore = "requires a real WASAPI output device and an interactive hardware Windows desktop; run serially with WGPU_BACKEND=dx12 or vulkan and NARA_WGPU_FORCE_FALLBACK=0"]
 fn ordinary_audible_game_matches_original_wavs_and_retires_original_native_owners() {
-    assert_native_verification(None, (5760, 11520), true);
+    assert_native_verification(None, (5760, 11520));
 }
 
 #[test]
@@ -161,7 +162,7 @@ fn edited_and_rebound_sound_bank_matches_actual_callback_pcm() {
         writer.finalize().unwrap();
     }
     fs::write(&pickup, edited.get_ref()).unwrap();
-    assert_native_verification(Some(root), (5760, 11520), true);
+    assert_native_verification(Some(root), (5760, 11520));
     assert_eq!(&fs::read(&pickup).unwrap(), edited.get_ref());
 
     let travel = fs::read(audio.join("travel.wav")).unwrap();
@@ -190,7 +191,7 @@ fn edited_and_rebound_sound_bank_matches_actual_callback_pcm() {
     ] {
         fs::remove_file(old).unwrap();
     }
-    assert_native_verification(Some(root), (11520, 11520), true);
+    assert_native_verification(Some(root), (11520, 11520));
     assert_eq!(fs::read(edited_audio.join("cue.wav")).unwrap(), travel);
 }
 
@@ -207,7 +208,7 @@ fn an_authored_travel_cue_that_finishes_before_retry_still_qualifies() {
         writer.finalize().unwrap();
     }
     fs::write(&travel, short.get_ref()).unwrap();
-    assert_native_verification(Some(project.root()), (5760, 1), false);
+    assert_native_verification(Some(project.root()), (5760, 1));
     assert_eq!(&fs::read(travel).unwrap(), short.get_ref());
 }
 
@@ -356,11 +357,7 @@ fn run_verifier(project: Option<&Path>, backend: &str) -> VerificationProcess {
     }
 }
 
-fn assert_native_verification(
-    project: Option<&Path>,
-    source_frames: (usize, usize),
-    require_cancellation: bool,
-) {
+fn assert_native_verification(project: Option<&Path>, source_frames: (usize, usize)) {
     let backend = std::env::var("WGPU_BACKEND").expect("select exactly one hardware backend");
     assert!(matches!(backend.as_str(), "dx12" | "vulkan"));
     assert_eq!(
@@ -407,6 +404,7 @@ fn assert_native_verification(
         let audio = run.audio.as_ref().expect("post-World read witness");
         assert!(audio.runtime != 0 && audio.callbacks > 0 && audio.output_frames > 0);
         assert_eq!(audio.faults, 0);
+        assert_eq!(audio.evicted_records, 0);
         assert!(
             audio.play_admitted
                 && audio.error.is_none()
@@ -433,6 +431,7 @@ fn assert_native_verification(
         );
         assert!(pcm.scope_applications >= 3);
         assert!(pcm.validated_scene_instances >= 3);
+        assert_eq!(pcm.stale_scope_cancellations as u64, audio.cancelled);
         let game = run.game.as_ref().expect("actual final gameplay facts");
         if index == 0 {
             assert_eq!(run.trajectory, "interactive_commands");
@@ -440,7 +439,11 @@ fn assert_native_verification(
                 (audio.accepted, pcm.accepted_pickups, pcm.accepted_travels),
                 (5, 1, 4)
             );
-            assert_eq!(pcm.stale_scope_cancellations > 0, require_cancellation);
+            assert_eq!(audio.started, audio.accepted);
+            assert!(audio.cancelled <= 1);
+            if source_frames.1 == 1 {
+                assert_eq!(audio.cancelled, 0);
+            }
             assert_eq!(
                 (
                     game.score,
