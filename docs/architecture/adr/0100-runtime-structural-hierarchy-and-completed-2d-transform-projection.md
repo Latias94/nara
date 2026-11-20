@@ -70,9 +70,10 @@ flowchart LR
   advances a saved revision.
 - `Transform2d` is the only authored and runtime-local 2D spatial authority. `GlobalTransform2d` is
   a copyable opaque affine value, with no Component identity. The transform Module privately owns
-  completed immutable simulation and presentation cuts. A continuous direct-parent 2D chain
-  composes affine values; a non-spatial direct parent starts a new spatial domain. Consumers never
-  skip that parent to inherit from an earlier ancestor.
+  completed immutable simulation and presentation cuts. A continuous chain of stored direct-parent
+  transforms composes affine values, including through entities excluded by gameplay query filters.
+  A direct parent without a stored `Transform2d` starts a new spatial domain. Consumers never skip
+  that parent to inherit from an earlier ancestor.
 - Consumers that require current world-space data run only after a named semantic completion
   boundary. They do not independently walk parent chains or silently fall back to local or identity
   transforms.

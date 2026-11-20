@@ -6,11 +6,15 @@ mod readback;
 mod scene;
 
 use nara_app::{RuntimeCandidateRetirementState, RuntimeInstance};
+use nara_core::Vec2;
+use nara_ecs::bevy_ecs::entity_disabling::Disabled;
+use nara_hierarchy::Parent;
 use nara_render::{RenderImage2d, RenderImagePacket};
 use nara_render_wgpu::{
     WgpuPublishedFrame, WgpuRenderHost, WgpuRenderInput, WgpuRenderProducer, WgpuSceneColor,
 };
 use nara_sprite_render::SpriteRenderStats;
+use nara_transform::Transform2d;
 use scene::{Result, Scenario};
 use serde_json::{Value, json};
 use std::{
@@ -78,6 +82,137 @@ fn ordinary_module_capture_observes_direct_cell_edits_and_new_view_samples() -> 
         }
     }
     Ok(())
+}
+
+#[test]
+fn disabled_parent_preserves_child_camera_extraction() -> Result<()> {
+    camera_inheritance_captures()?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native adapter for full pixel readback"]
+fn disabled_parent_preserves_child_camera_pixels() -> Result<()> {
+    require_adapter_selection();
+    let captures = camera_inheritance_captures()?;
+    let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(64 * 1024 * 1024);
+    let producer = host.create_producer()?;
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+        let image = target();
+        for (index, (capture, camera_x)) in captures.into_iter().enumerate() {
+            host.begin_frame(index as u64 + 1)?;
+            let input = adapt_input(&mut host, &producer, &capture, image, index == 0);
+            let frame = submit(&mut host, &producer, &input);
+            readback::settle(frame.outputs().submitted_prefix());
+            let texture = frame.final_texture::<WgpuSceneColor>()?;
+
+            let center_x = scene::CANVAS_WIDTH / 2 + (scene::CAMERA_SPRITE_X - camera_x) as u32;
+            let center_y = scene::CANVAS_HEIGHT / 2;
+            let red_x = center_x - 4..center_x + 4;
+            let red_y = center_y - 4..center_y + 4;
+            let mut expected = Vec::with_capacity((scene::WIDTH * scene::HEIGHT) as usize);
+            for y in 0..scene::HEIGHT {
+                for x in 0..scene::WIDTH {
+                    let red = red_x.contains(&(x / 3)) && red_y.contains(&(y / 3));
+                    expected.push([if red { 255 } else { 0 }, 0, 0, 255]);
+                }
+            }
+            assert_pixels(&expected, &readback::read(&mut host, &texture));
+        }
+        let adapter = host.adapter_summary().expect("the pixel replay's adapter");
+        assert_eq!(adapter.backend(), std::env::var("WGPU_BACKEND")?);
+        let fallback = std::env::var("NARA_WGPU_FORCE_FALLBACK")?;
+        if fallback == "1" {
+            assert_eq!(adapter.device_type(), "cpu");
+        } else {
+            assert!(matches!(
+                adapter.device_type(),
+                "discrete-gpu" | "integrated-gpu"
+            ));
+        }
+        println!(
+            "CAMERA_INHERITANCE_ADAPTER {:?} {} {}",
+            adapter.name(),
+            adapter.backend(),
+            adapter.device_type()
+        );
+        Ok(())
+    }));
+    if let Some(prefix) = host.retire_producer(&producer) {
+        readback::settle(&prefix);
+    }
+    readback::finish(&mut host);
+    match result {
+        Ok(result) => result,
+        Err(payload) => resume_unwind(payload),
+    }
+}
+
+fn camera_inheritance_captures() -> Result<Vec<(WgpuRenderInput, f32)>> {
+    let (mut runtime, parent, child) = scene::build_camera_inheritance()?;
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut view_id = None;
+        let mut previous_frame = None;
+        let steps = [
+            ("initial", 103.0),
+            ("built-in marker inserted", 103.0),
+            ("built-in marker removed", 103.0),
+            ("custom marker inserted", 103.0),
+            ("custom marker removed", 103.0),
+            ("parent transform removed", 3.0),
+            ("parent transform restored", 103.0),
+        ];
+        let mut captures = Vec::with_capacity(steps.len());
+        for (index, (step, camera_x)) in steps.into_iter().enumerate() {
+            let capture = scene::drive(&mut runtime);
+            let world = runtime.world();
+            assert_eq!(
+                world.get::<Disabled>(parent).is_some(),
+                index == 1,
+                "{step}"
+            );
+            assert_eq!(
+                world.get::<scene::GameplayDisabled>(parent).is_some(),
+                index == 3,
+                "{step}"
+            );
+            assert_eq!(
+                world.get::<Transform2d>(parent).is_some(),
+                index != 5,
+                "{step}"
+            );
+            assert_eq!(
+                world.get::<Parent>(child).unwrap().parent(),
+                parent,
+                "{step}"
+            );
+            let packet = capture.packet();
+            let frame = packet.frame_index();
+            assert!(
+                previous_frame.is_none_or(|previous| frame > previous),
+                "{step}"
+            );
+            previous_frame = Some(frame);
+            let views = packet.views();
+            assert_eq!(views.len(), 1, "{step}");
+            let view = &views[0];
+            assert_eq!(view.camera_entity, child, "{step}");
+            assert_eq!(view.id, *view_id.get_or_insert(view.id), "{step}");
+            let center = view.mapping.clip_to_world(Vec2::ZERO);
+            let expected = Vec2::new(camera_x, 0.0);
+            assert!(
+                (center - expected).length() < 1e-4,
+                "{step}: {center:?} != {expected:?}"
+            );
+            captures.push((capture, camera_x));
+        }
+        captures
+    }));
+    retire(runtime);
+    match result {
+        Ok(captures) => Ok(captures),
+        Err(payload) => resume_unwind(payload),
+    }
 }
 
 #[test]

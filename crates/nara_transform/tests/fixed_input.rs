@@ -5,16 +5,19 @@ use nara_app::{
     RuntimeControlRequestResult, RuntimeInstance,
 };
 use nara_core::{Mat3, Vec2};
-use nara_ecs::{Commands, Entity, Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Commands, Component, Entity, Query, Res, ResMut, Resource, World,
+    bevy_ecs::entity_disabling::Disabled, schedule::IntoScheduleConfigs,
+};
 use nara_hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
     HierarchyPlugin, HierarchyWriter, Parent,
 };
 use nara_reflect::ComponentRegistryPlugin;
 use nara_transform::{
-    FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d,
-    SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp,
-    Transform2d, TransformPlugin, add_fixed_transform_input_systems,
+    FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, FixedTransformInterpolation,
+    HistoricalSpatialSnapshot2d, SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase,
+    SpatialSnapshotStamp, Transform2d, TransformPlugin, add_fixed_transform_input_systems,
     add_fixed_transform_projection_systems, fixed_input_spatial_snapshot, fixed_spatial_snapshot,
     historical_spatial_snapshot, presented_spatial_snapshot,
 };
@@ -532,4 +535,89 @@ fn applications_without_consumers_do_not_publish_fixed_inputs() {
     assert!(historical_spatial_snapshot(runtime.world()).is_ok());
     assert!(presented_spatial_snapshot(runtime.world()).is_ok());
     runtime.finish().unwrap();
+}
+
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+struct GameplayDisabled;
+
+#[test]
+fn disabled_parent_participates_in_fixed_input_and_interpolation() {
+    let timestep = Duration::from_millis(20);
+    for built_in in [true, false] {
+        let mut app = App::new();
+        app.set_execution_profile(ExecutionProfile::Serial).unwrap();
+        if !built_in {
+            app.world_mut()
+                .unwrap()
+                .register_disabling_component::<GameplayDisabled>();
+        }
+        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
+            .unwrap();
+        app.insert_resource(FixedTime::new(timestep).unwrap())
+            .unwrap();
+        app.insert_resource(FixedTransformInterpolation).unwrap();
+
+        let world = app.world_mut().unwrap();
+        let mut parent = world.spawn(translation(100.0, 0.0));
+        if built_in {
+            parent.insert(Disabled);
+        } else {
+            parent.insert(GameplayDisabled);
+        }
+        let parent = parent.id();
+        let child = world.spawn(translation(3.0, 0.0)).id();
+        let mut hierarchy = HierarchyWriter::new(world);
+        hierarchy
+            .place(
+                parent,
+                HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            )
+            .unwrap();
+        hierarchy
+            .place(
+                child,
+                HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+            )
+            .unwrap();
+
+        add_fixed_transform_input_systems(
+            &mut app,
+            move |input: FixedInputSpatialSnapshot2d, transforms: Query<&Transform2d>| {
+                assert!(transforms.get(parent).is_err());
+                assert_eq!(transforms.get(child).unwrap(), &translation(3.0, 0.0));
+                assert_eq!(input.parent(child), Ok(Some(parent)));
+                assert_eq!(input.local(parent), Ok(translation(100.0, 0.0)));
+                assert_eq!(
+                    input.global(child).unwrap().translation(),
+                    Vec2::new(103.0, 0.0)
+                );
+            },
+        )
+        .unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (move |world: &mut World| {
+                world.get_mut::<Transform2d>(parent).unwrap().translation.x = 110.0;
+            })
+            .in_set(FixedUpdateSet::Simulate),
+        )
+        .unwrap();
+        add_fixed_transform_projection_systems(&mut app, move |fixed: FixedSpatialSnapshot2d| {
+            assert_eq!(
+                fixed.global(child).unwrap().translation(),
+                Vec2::new(113.0, 0.0)
+            );
+        })
+        .unwrap();
+
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(timestep + timestep / 2).unwrap();
+        let presented = presented_spatial_snapshot(runtime.world()).unwrap();
+        assert_eq!(
+            presented.global(child).unwrap().translation(),
+            Vec2::new(108.0, 0.0)
+        );
+        runtime.finish().unwrap();
+    }
 }

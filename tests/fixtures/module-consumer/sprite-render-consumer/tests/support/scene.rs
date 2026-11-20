@@ -6,9 +6,12 @@ use std::{
     time::Duration,
 };
 
-use nara_app::{App, CoreStage, RuntimeInstance};
+use nara_app::{App, CoreStage, RealTime, RuntimeInstance};
 use nara_core::{Color, Vec2};
-use nara_ecs::{Entity, Query, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Component, Entity, Query, ResMut, Resource, World, bevy_ecs::entity_disabling::Disabled,
+    schedule::IntoScheduleConfigs,
+};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
@@ -191,21 +194,7 @@ impl Drop for Lifetime {
     }
 }
 
-pub fn build(
-    population: usize,
-    views: usize,
-    scenario: Scenario,
-    bound: bool,
-    dropped: Arc<AtomicBool>,
-) -> Result<RuntimeInstance> {
-    let side = match population {
-        64 => 8,
-        4096 => 64,
-        65536 => 256,
-        _ => return Err("unsupported finite population".into()),
-    };
-    assert!(matches!(views, 1 | 2));
-    let mut app = App::new();
+fn install_capture(app: &mut App) -> Result<()> {
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
@@ -229,8 +218,33 @@ pub fn build(
         WgpuStockSpritePlugin,
         WgpuStockPolicyPlugin,
     ))?;
+    app.world_mut()?
+        .insert_resource(nara_render::ClearColor(Color::BLACK));
+    app.init_resource::<Captured>()?;
+    app.add_systems(
+        CoreStage::Render,
+        capture.in_set(WgpuPolicyCaptureSet::Publish),
+    )?;
+    Ok(())
+}
+
+pub fn build(
+    population: usize,
+    views: usize,
+    scenario: Scenario,
+    bound: bool,
+    dropped: Arc<AtomicBool>,
+) -> Result<RuntimeInstance> {
+    let side = match population {
+        64 => 8,
+        4096 => 64,
+        65536 => 256,
+        _ => return Err("unsupported finite population".into()),
+    };
+    assert!(matches!(views, 1 | 2));
+    let mut app = App::new();
+    install_capture(&mut app)?;
     let world = app.world_mut()?;
-    world.insert_resource(nara_render::ClearColor(Color::BLACK));
     let mut placements = Vec::new();
     let mut camera = None;
     for view in 0..views {
@@ -303,13 +317,80 @@ pub fn build(
         camera: camera.unwrap(),
     });
     world.insert_resource(Lifetime(dropped));
-    app.init_resource::<Captured>()?;
     app.add_systems(CoreStage::Update, change)?;
-    app.add_systems(
-        CoreStage::Render,
-        capture.in_set(WgpuPolicyCaptureSet::Publish),
-    )?;
     Ok(RuntimeInstance::start(app)?)
+}
+
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct GameplayDisabled;
+
+pub const CAMERA_SPRITE_X: f32 = 103.0;
+
+pub fn build_camera_inheritance() -> Result<(RuntimeInstance, Entity, Entity)> {
+    let mut app = App::new();
+    app.world_mut()?
+        .register_disabling_component::<GameplayDisabled>();
+    install_capture(&mut app)?;
+
+    let world = app.world_mut()?;
+    let parent_pose = Transform2d::from_translation(Vec2::new(100.0, 0.0));
+    let parent = world.spawn(parent_pose).id();
+    let camera = Camera2d {
+        viewport_height: CANVAS_HEIGHT as f32,
+        ..Default::default()
+    };
+    let child = world
+        .spawn((camera, Transform2d::from_translation(Vec2::new(3.0, 0.0))))
+        .id();
+    world.spawn((camera, Transform2d::IDENTITY, Disabled));
+    world.spawn((camera, Transform2d::IDENTITY, GameplayDisabled));
+    let sprite = world
+        .spawn((
+            Transform2d::from_translation(Vec2::new(CAMERA_SPRITE_X, 0.0)),
+            nara_sprite::Sprite::from_color(Vec2::splat(8.0), Color::rgb(1.0, 0.0, 0.0)),
+        ))
+        .id();
+    HierarchyWriter::new(world).apply_batch(&[
+        HierarchyOperation::Place {
+            entity: parent,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        },
+        HierarchyOperation::Place {
+            entity: child,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+        },
+        HierarchyOperation::Place {
+            entity: sprite,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        },
+    ])?;
+    app.add_systems(CoreStage::Update, move |world: &mut World| {
+        let frame = world.resource::<RealTime>().frame;
+        let mut parent = world.entity_mut(parent);
+        match frame {
+            2 => {
+                parent.insert(Disabled);
+            }
+            3 => {
+                parent.remove::<Disabled>();
+            }
+            4 => {
+                parent.insert(GameplayDisabled);
+            }
+            5 => {
+                parent.remove::<GameplayDisabled>();
+            }
+            6 => {
+                parent.remove::<Transform2d>();
+            }
+            7 => {
+                parent.insert(parent_pose);
+            }
+            _ => {}
+        }
+    })?;
+    Ok((RuntimeInstance::start(app)?, parent, child))
 }
 
 fn change(

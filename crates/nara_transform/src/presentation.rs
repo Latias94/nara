@@ -3,7 +3,7 @@ use nara_app::{
     StartupStage,
 };
 use nara_ecs::{
-    Entity, FromWorld, Mut, QueryState, Resource, World, bevy_ecs::entity::EntityHashMap,
+    Entity, FromWorld, Mut, Resource, World, bevy_ecs::entity::EntityHashMap,
     bevy_ecs::error::BevyError, bevy_ecs::schedule::ApplyDeferred, bevy_ecs::world::WorldId,
     schedule::IntoScheduleConfigs,
 };
@@ -12,6 +12,7 @@ use crate::{
     __private::TransformSet,
     GlobalTransform2d, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
     historical_spatial_snapshot,
+    propagation::{LocalTransformQuery, stored_local_transforms},
     snapshot::{PresentationSnapshot, SimulationSnapshot, SpatialSource, next_publication},
 };
 
@@ -49,11 +50,7 @@ impl HistoryOrigin {
 pub(super) struct TransformHistory {
     origin: HistoryOrigin,
     before_origin: Option<HistoryOrigin>,
-    locals: QueryState<(
-        Entity,
-        &'static Transform2d,
-        Option<&'static nara_hierarchy::Parent>,
-    )>,
+    locals: LocalTransformQuery,
     samples: EntityHashMap<LocalSamples>,
     before: EntityHashMap<SpatialSource>,
     candidate: EntityHashMap<GlobalTransform2d>,
@@ -64,7 +61,7 @@ impl FromWorld for TransformHistory {
         Self {
             origin: HistoryOrigin::current(world),
             before_origin: None,
-            locals: world.query(),
+            locals: stored_local_transforms(world),
             samples: EntityHashMap::default(),
             before: EntityHashMap::default(),
             candidate: EntityHashMap::default(),
@@ -76,7 +73,7 @@ impl TransformHistory {
     fn bind(&mut self, world: &mut World) {
         let origin = HistoryOrigin::current(world);
         if self.origin != origin {
-            self.locals = world.query();
+            self.locals = stored_local_transforms(world);
             self.samples.clear();
             self.before.clear();
             self.before_origin = None;

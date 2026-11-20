@@ -3,8 +3,14 @@ use nara_app::{
     StartupStage,
 };
 use nara_ecs::{
-    Entity, FromWorld, Mut, QueryState, Resource, World, bevy_ecs::error::BevyError,
-    bevy_ecs::schedule::ApplyDeferred, schedule::IntoScheduleConfigs,
+    Entity, FromWorld, Mut, QueryState, Resource, World,
+    bevy_ecs::{
+        entity_disabling::DefaultQueryFilters,
+        error::BevyError,
+        query::{FilteredAccess, QueryBuilder},
+        schedule::ApplyDeferred,
+    },
+    schedule::IntoScheduleConfigs,
 };
 use nara_hierarchy::{HierarchyOrder, Parent};
 
@@ -16,6 +22,21 @@ use crate::{
         SpatialSource, next_publication,
     },
 };
+
+pub(super) type LocalTransformQuery =
+    QueryState<(Entity, &'static Transform2d, Option<&'static Parent>)>;
+
+pub(super) fn stored_local_transforms(world: &mut World) -> LocalTransformQuery {
+    let mut query = QueryBuilder::new(world);
+    if let Some(filters) = query.world().get_resource::<DefaultQueryFilters>() {
+        let mut allowed = FilteredAccess::default();
+        for component in filters.disabling_ids() {
+            allowed.access_mut().add_archetypal(component);
+        }
+        query.extend_access(allowed);
+    }
+    query.build()
+}
 
 /// Failure to publish one complete runtime 2D spatial cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -38,7 +59,7 @@ pub(crate) enum TransformCompletionError {
 
 #[derive(Resource)]
 struct TransformPropagation {
-    locals: QueryState<(Entity, &'static Transform2d, Option<&'static Parent>)>,
+    locals: LocalTransformQuery,
     observed: Vec<(Entity, SpatialSource)>,
     observed_publication: Option<SpatialSnapshotStamp>,
     candidate: SpatialPayload,
@@ -49,7 +70,7 @@ struct TransformPropagation {
 impl FromWorld for TransformPropagation {
     fn from_world(world: &mut World) -> Self {
         Self {
-            locals: world.query(),
+            locals: stored_local_transforms(world),
             observed: Vec::new(),
             observed_publication: None,
             candidate: SpatialPayload::default(),
