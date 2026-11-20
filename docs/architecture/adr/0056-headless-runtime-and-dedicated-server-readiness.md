@@ -92,6 +92,11 @@ Rules:
   hierarchy and provenance and validates the retained data through the ordinary processed gate.
   The cooked package follows the retained dependencies. Its executable, member table and
   installed services have separate qualification. [Dedicated Cook workflow](../../guides/cooked-player-delivery.md#cook-a-dedicated-server)
+- The processed Headless Host is available with `runtime-core` and `serde`. It owns the same
+  start, Scene request, residency and close transactions for server and client configurations.
+  First-party source loading and the stock Image, Material and TileSet publications select
+  `runtime-2d`. Processed CPU products still use their selected codecs and the Host's typed
+  collections. `Transform2d` is available to the simulation through the core feature.
 
 ## Input and Command Boundary
 

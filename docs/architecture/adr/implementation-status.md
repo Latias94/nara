@@ -2392,9 +2392,12 @@ Scene encoder omits selected client components while retaining identity, hierarc
 Prefab provenance. The relocated Windows release server runs with five Scene members, a target
 Schema derived from the source owners, and no installed raw Input, window or presentation
 services. Original command, collision, region lifetimes, travel and checkpoint owners drive the
-published binary. The locked Cargo graph excludes native client backends and development tools
-and retains the shared backend-neutral input, window and CPU 2D dependencies. Networking and
-foreign deployment retain separate qualification.
+published binary. The [dedicated Server dependency boundary](../../plans/2026-10-31-cooked-player-delivery-plan.md#dedicated-server-dependency-boundary)
+at `a36ce0f` uses the same processed Host and codec selection with `runtime-core` and `serde`. The locked
+Windows graph falls from 170 to 142 packages and retains Scene, Transform2d, Rapier, and the
+core Input and Window vocabulary. Image, Material, Render, Sprite and TileMap now belong to
+the client selection in this delivery. Networking and foreign deployment retain separate
+qualification.
 
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,

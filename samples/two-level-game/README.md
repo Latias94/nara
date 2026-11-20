@@ -504,8 +504,10 @@ Scenes and Prefab, then uses the manifest's `server` profile to produce a conten
 `server` binary. The target profile installs the fixed-step command runtime and uses
 `PreserveDebt`. The cooker builds the binary with default features disabled and `cooked-server`
 selected. Native window, graphics, UI, audio and controller adapters are excluded from this
-build, along with the game's client animation and WAV dependencies. The core still compiles
-backend-neutral 2D and input types used by the shared processed Host.
+build, along with the stock Image, Material, Render, Sprite and TileMap crates and the game's
+client animation and WAV dependencies. The server uses `nara` with `runtime-core` and `serde`.
+It keeps Transform2d and Rapier for simulation and the core Input and Window vocabulary.
+The Server profile leaves the raw Input and Window services out of its World.
 
 ```text
 cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --runtime server --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelServer --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release

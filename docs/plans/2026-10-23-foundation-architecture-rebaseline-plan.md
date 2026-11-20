@@ -1415,9 +1415,11 @@ uses the same authored Two-Level Scenes and Prefab with a selected server recipe
 explicit client component types before encoding and follows only the resulting delivery edges.
 The Windows release package retains five Scenes and two travel roots. Independent process
 trajectories verify command-driven collision, concurrent regions and coordinated travel,
-pickups, Retry, Save and fresh Restore. The actual Cargo native-client exclusions and
-the remaining CPU dependencies are tracked separately from the services installed in the
-World. Networking, long-running service operation and the foreign target proof remain open.
+pickups, Retry, Save and fresh Restore. The [dedicated Server dependency boundary](2026-10-31-cooked-player-delivery-plan.md#dedicated-server-dependency-boundary)
+uses the shared processed Host with `runtime-core` and `serde`. The locked Windows graph drops
+the stock Image, Material, Render, Sprite and TileMap crates and retains the Scene, Transform2d
+and Rapier simulation. The dependency audit and the World service observations are separate
+evidence. Networking, long-running service operation and the foreign target proof remain open.
 
 ## R8: External Render Feature And Host-Local Execution
 

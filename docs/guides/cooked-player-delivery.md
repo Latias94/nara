@@ -140,6 +140,17 @@ captured package flow. Audit the shipping Cargo selection, delivered member tabl
 running World separately. Two-Level Game exposes this path as `cook --runtime server`. The
 source-free server opens its compiled pack relative to the executable.
 
+Compile a processed server against `nara` with default features disabled and `runtime-core`
+and `serde` enabled. Use `HeadlessSession::from_runtime_content` for an explicitly driven session
+or `HeadlessRun::from_runtime_content` for a bounded run. Both use the same processed Scene and
+CPU asset admission as the local Player. Source-backed constructors and stock Image, TileSet and
+Material publication use `runtime-2d`. Keep a separate Cargo selection for the cooker, since it
+reads the authored project using the client feature set.
+
+`ProductRecipe::add_runtime_asset_codec` and its `ProductRecipeError::RuntimeCodec` variant are
+available with `runtime-core` and `serde`. Exhaustive matches in that configuration need to
+handle codec selection failures.
+
 ## Bind The Player
 
 Native construction and publication live in `project_tooling::player_package`:

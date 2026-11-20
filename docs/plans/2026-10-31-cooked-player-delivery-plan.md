@@ -85,14 +85,77 @@ verify pickups, marker reconstruction, Retry, a score-30 Save, and fresh Restore
 A valid pack with a different catalog digest refuses before startup. Original processes retire
 normally without termination intervention.
 
-The locked Windows target's Cargo `normal,build` graph has 170 unique package names for the
-published `server` selection. Native graphics, Winit, UI and Editor packages, audio-device and
-controller backends, the game's Sprite animation and WAV packages, and development tooling are
-outside that graph. `nara_input`, `nara_window` and the stock CPU 2D crates remain compiled
-through the shared processed Host; their runtime services are absent in the observed server
-World. The current evidence covers one game and target. Foreign execution, a long-running
-service loop, networking, and processed exact-state reconstruction remain open.
+The first published `server` selection had 170 unique package names in the locked Windows
+`normal,build` graph. The build excluded native graphics, Winit, UI and Editor packages,
+audio-device and controller backends, the game's Sprite animation and WAV packages, and
+development tooling. That build compiled `nara_input`, `nara_window` and stock CPU 2D crates
+through the processed Host while leaving their runtime services out of the World. The evidence
+covers one game and target. Foreign execution, a long-running service loop, networking, and
+processed exact-state reconstruction remain open.
 [Delivered process workflow](../../samples/two-level-game/tests/support/server_delivery/mod.rs) · [Cargo graph audit](../../samples/two-level-game/tests/support/server_delivery/graph.rs)
+
+### Dedicated Server Dependency Boundary
+
+The `a36ce0f` Two-Level Server builds with the root `runtime-core` and `serde` features. These select
+the same immutable Runtime content base, executable configuration and codec agreement, Headless
+Host, Scene request, and residency transaction used by the local Player. The server keeps the
+compiled Scene definitions, typed CPU collections, Transform2d, fixed time, command queue and
+Rapier. Source loading and the first-party Image, Material and TileSet publication paths require
+the client `runtime-2d` feature. Two-Level Game selects that feature through `local-player`.
+
+Verify three independent claims. The locked `normal,build` graph for the actual server build
+excludes Image, Material, Render, Sprite and TileMap packages as well as the previous native
+client and tooling exclusions. The relocated package retains the five Scene members and two
+travel roots, and the running World still lacks the raw Input and Window resources. Run the same
+command, collision, region, travel, Save and fresh Restore trajectory through the generated server
+executable. Run the local Player control through the existing client feature selection and the
+original typed asset publication. Keep Input and Window's backend-neutral packages at their
+existing core boundary for this unit.
+
+Bevy's headless example selects its Cargo features and then configures the same application and
+schedule runner used in other placements. Godot's server export selects its resource projection
+at export. These references support separate checks for the executable graph, cooked content and
+installed services. [Bevy headless example](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/examples/app/headless.rs) · [Godot export plugin](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/export/dedicated_server_export_plugin.cpp)
+
+The isolated Windows x64 `cooked-server` all-target check passes on Rust 1.95.0. The locked
+`normal,build` selection has 142 package names, down from 170 in the prior delivery. Both checks
+use the independent sample manifest. The all-target check compiles the selection with a bootstrap
+placeholder. The actual Cook trajectory supplies the executable's generated expectation.
+
+The core-only engine and public selection passes 105/105 in
+`366c7154-a59d-4a0f-9f96-66e082479140`. It covers processed dependency and source-base admission,
+coordinated travel and retry after a native participant refuses retirement, direct Scene custody,
+and a `HeadlessSession` that publishes custom CPU collections from captured content after the
+original files have been removed. Closing returns the original decoded-product reservation.
+Compilation also passes with `runtime-core` alone, the stock 2D and source-tooling selection,
+and `runtime-ui,serde`. [Typed CPU session workflow](../../src/runtime_content/prepared/tests.rs) · [Managed Scene cases](../../src/project_host/runtime/scene_requests/tests/instances.rs)
+
+The `runtime-ui,serde` behavioral controls pass 2/2 in `65c48079-a0ea-423d-b679-bd09cac436b3`.
+A solid `UiVisual` starts as a real Scene component. An image brush in the same selection
+receives the typed missing-publication diagnostic in both deep validation and Headless startup.
+The referenced CPU product remains independently decodable. This is a content and startup check.
+The stock Host, content, Cook and public startup selection passes 193/193 in
+`8c00e1dc-bf97-4789-a796-c9c55d71f7f2`, including source-backed startup and both Sprite and UI
+Image publication controls. The Two-Level release selection passes 219/219 with one ignored
+real-build continuity case in `b69d1312-2430-455e-aa68-2992fcf0785d`. It exercises source and
+processed gameplay, scene groups, checkpoints, replay and the authored cook inputs.
+
+The actual native release Server and headless Player deliveries pass 2/2 in
+`503dd023-b4e0-4fd9-bfb4-a892b2a84056`. Cook generates the Server entry from the selected pack.
+Its locked Windows graph contains the same 142 package names, and the pack has exactly five
+Scene members, two travel roots, two Immediate and two Deferred Scene edges, and zero non-Scene
+members. The relocated executable completes travel, concurrent regions, Save and fresh Restore.
+The wrong-content control refuses while opening the pack. The original native processes retire
+normally. The Player control runs through the same authored game with its local assets and
+separate feature selection. [Server delivery assertions](../../samples/two-level-game/tests/support/server_delivery/mod.rs)
+
+Independent reviews checked source and processed Host custody, schema and codec agreement
+between cooker and executable, and stock publication order. Narrow test compilation exposed
+two assertions using types gated by unrelated features. The corrected tests check the original
+direct Scene's custody and select the renderer assertion when its crate is compiled. The core
+and client library correctness Clippy checks pass. These runs cover Windows x64 and headless
+execution. Foreign runtime, desktop GPU presentation and long-running server behavior have
+separate qualification.
 
 ## Shared Compiled Project Cook Entry
 
