@@ -579,8 +579,12 @@ and actual Drawn Shell presentation on Windows/DX12. The
 [selected property page successor](../architecture/authoring-read-projection-design.md#selected-property-value-pages)
 pages text and actual collection values under the original document query basis. It reuses
 the resolved wire position for continuations and the durable selector for prepared edits.
-Complete field query coverage, shared-owner preparation locality and the remaining cost
-comparison stay open.
+The [prepared property preview](../architecture/authoring-read-projection-design.md#prepared-edit-property-preview)
+reads the selected values from the exact candidate retained for commit. Each candidate owns
+its own page continuations and keeps its original basis for historical review. A
+[release baseline](../benchmarks/2026-10-25-prepared-panel.md#november-20-release-baseline)
+measures the existing reference-bearing preparation workflow at 1/257 entities. Complete
+field query coverage, preparation locality and larger-workload comparisons stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 

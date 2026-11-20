@@ -571,6 +571,57 @@ The independently locked `prepared_authoring` target passes 19/19 in release run
 entries in a non-active document, compute a durable edit and verify the complete result through
 Undo, Redo, Save and Reopen. The same run includes separate Cook and camera work.
 
+### Prepared Edit Property Preview
+
+A semantic tool can read the proposed value of any direct property from a retained
+`PreparedEditorDocumentEdit`. It passes the original `EditorPropertyRead` or starts an
+`EditorPropertyPageRead` with the preparation's exact document, revision and Schema. Scene and
+Prefab lend the same indexed property view used for live reads, over the candidate's document
+and classification. The result uses the ordinary selector, presence, scan and copy limits.
+The caller can use a live read from the original basis for the before value while that basis
+is current. The candidate supplies the after value, including authored presence, defaults
+and missing fields. The forward and inverse patches remain available for structural review.
+
+A preview has the lifetime of its prepared edit. Its owned pages are historical observations.
+Continuations bind to the exact candidate, including when two candidates start at the same
+basis. The live workspace and another candidate refuse those continuations. A candidate can
+still be reviewed after its base changes. Preview borrows the candidate for inspection.
+Publication requires successful commit against the current source.
+
+Acceptance uses an independently registered panel in non-active Scene and Prefab documents.
+It compares live and proposed values, crosses a value page boundary, and checks cursor ownership.
+The panel consumes the reviewed candidate through normal submission, Undo, Redo, Save and Reopen.
+
+The pinned Godot Inspector records do/undo property values for an editor action. The pinned Bevy
+reflector borrows a component at its actual entity storage location. Together these give concrete
+precedent for reviewing property-sized data. Nara additionally retains an unpublished source
+candidate with the classification and revision its commit will check.
+[Godot Inspector](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/inspector/editor_inspector.cpp#L2981-L2992)
+· [Bevy ReflectComponent](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_ecs/src/reflect/component.rs#L205-L216)
+
+#### November 20 prepared preview verification
+
+The independently locked release run `5b17f2c8-5adc-4ebf-a467-882ce32bea75` passes 19/19,
+including 18 ordinary consumer cases and the preparation diagnostic. Each of the registered
+Scene and Prefab consumers reads the proposed score alongside the current score, checks value
+limits and cursor ownership, and commits the original reviewed edit. Undo leaves the retained
+second candidate available for review and its stale submission is refused. Redo, Save and
+Reopen produce the exact reviewed value under the original document's persistence identity.
+[Panel consumer](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages.rs)
+
+An independent source review corrected a diagnostic that mentioned a cursor for a complete read
+with a mismatched document. Tooling release run `dfec11e6-51e7-479d-9d0f-286ec0423724` passes
+230/230 with one pre-existing diagnostic skipped. The owner cases cover candidate presence,
+value limits, structural removals and nominal readmission of the same Schema catalog without
+advancing the live revision. The first two fixture attempts were refused by the existing
+read-only component and placement rules. The final fixture uses a fully editable record and
+removes its placement in the same prepared entity deletion.
+
+Windows release run `3cc801ad-76d7-461a-8fd8-8a2de1600c70` passes both the Session Close gate
+and the original DX12 Drawn Inspector workflow after the shared property reader change. The
+native path reads presented, committed values. Candidate reads are exercised by the independent
+panel and Tooling targets. Expanded Prefab values use the separate effective-field workflow.
+
 ## Acceptance And Experiment Stops
 
 - Source Scene/Prefab tests distinguish actual versus catalog-only components, all retained

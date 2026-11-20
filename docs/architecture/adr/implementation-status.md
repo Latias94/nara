@@ -4270,6 +4270,15 @@ ordinary history and persistence. The Windows Tooling release cohort passes 221/
 independent panel target passes 19/19, and the selected Host Close and native DX12 trajectory
 pass 2/2. Full R2 still includes complete field query coverage and preparation locality evidence.
 
+The [prepared property preview](../authoring-read-projection-design.md#prepared-edit-property-preview)
+at `60633ca` uses the candidate's indexed source and classification to provide bounded direct reads
+and value pages. Each candidate has its own continuations and retains its original observation basis.
+Tooling passes 230/230. The independently locked release run passes 19/19, including registered
+non-active Scene and Prefab preview, successful submission, stale submission refusal, Undo/Redo
+and Save/Reopen. The Session Close and native DX12 regressions pass 2/2 for the shared reader.
+The [release preparation comparison](../../benchmarks/2026-10-25-prepared-panel.md#november-20-release-baseline)
+records the existing dual-format admission and commit workload on 1/257 reference-bearing entities.
+
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query
 bases, including construction preparation. Panel adapters delegate that check to the common

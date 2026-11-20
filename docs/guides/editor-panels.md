@@ -847,6 +847,19 @@ Preparation itself validates that complete original observation, including exact
 before interpreting intent. A freshly captured basis cannot replace the observation underlying an
 older proposal. Tool publication and request identity remain the concrete tool owner's obligations.
 
+For a before/after review, read the current value through `read_document_property` and pass the
+same request to `prepared.preview_property`. Both calls use the original `EditorPropertyRead`
+and its limits. The preview reads the candidate's authored value and reports Present, Defaulted
+or Missing. For text or collections that exceed the complete read limit, use the same
+`EditorPropertyPageRead` start request with `prepared.preview_property_page`. Continue each
+series through its original read source. Passing a live continuation to a preview, or passing
+a preview continuation to the workspace or another candidate, returns `WrongPreparedEdit`.
+Exhaustive matches on `EditorDocumentQueryRejection` must handle that variant.
+
+The preview target still carries the preparation basis. A subsequent live edit leaves the
+retained preview available for review. Commit continues to check the current source before
+publishing that candidate.
+
 Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
 component templates and edit their fields/references. Final classification and forward/inverse
 history admission precede publication. One accepted patch is one Undo/Redo entry. A valid forward
@@ -974,7 +987,11 @@ preparation access; it exposes no mutable Application, Session, source document 
 
 ```rust,ignore
 let prepared = context.prepare_authoring_property_edit(&observation.target.basis, &edits)?;
-preview_changes(prepared.patch(), prepared.inverse());
+let proposed = prepared.preview_property(EditorPropertyRead {
+    target: observation.target.clone(),
+    limits: preview_limits,
+})?;
+show_property_change(&observation.value, &proposed.value);
 self.prepared = Some(prepared);
 ```
 

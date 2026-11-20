@@ -154,6 +154,40 @@ retained-memory and latency costs. A different contract needs a complete repair/
 and owning ADR reconciliation; it must not arrive disguised as an equivalent performance patch.
 Choose after phase attribution and a fair same-workflow comparison, not from reference names alone.
 
+## November 20 Release Baseline
+
+The original diagnostic at `0d3e76f` reports the current optimized-build cost on Windows x64,
+Rust 1.95.0. It uses the same 1/257-record Scene and Prefab files with real source-local
+entity references and unknown components, eight warmups and 64 changed-value samples per case.
+The release test binary was built before the preview changes entered its dependencies. Direct
+execution selected the ignored test by its full Rust test name after the initial exact nextest
+filter selected no tests. The diagnostic passed with the existing edit, dispatch and history
+assertions.
+
+Each public preparation result reports nearest-rank P50 / P95 in milliseconds.
+
+| Source / entities | Direct | Registered panel |
+| --- | ---: | ---: |
+| Scene / 1 | 0.0182 / 0.0196 | 0.0224 / 0.0380 |
+| Scene / 257 | 1.8401 / 1.9858 | 1.9136 / 2.2952 |
+| Prefab / 1 | 0.0180 / 0.0205 | 0.0219 / 0.0400 |
+| Prefab / 257 | 2.0722 / 3.1634 | 1.9411 / 3.0163 |
+
+For 257 entities, direct commit and drive measures 182.4 / 227.2 µs for Scene and
+223.5 / 426.7 µs for Prefab. The panel dispatch and drive measures 219.9 / 287.7 µs and
+223.0 / 464.8 µs, respectively. Typed panel enqueue ranges from 0.8 to 0.9 µs at P50.
+
+The larger case still requires whole-document work. The preparation result supplies a scale
+reference for the prepared-preview workflow and retains both format encoders and the original
+admission policy. The measurement excludes native presentation and covers a narrow source-size
+range. The earlier debug diagnostics use a different profile and source revision.
+
+The same diagnostic with the prepared-preview successor passes as part of release run
+`5b17f2c8-5adc-4ebf-a467-882ce32bea75`. The four 257-entity preparation P50 measurements range
+from 1.6479 to 1.8460 ms, with P95 from 1.8996 to 2.0270 ms. The timers cover the existing
+prepare-and-commit workload. Candidate reads fall outside those timers. Both runs use the same
+fixed case order under ordinary machine load, so their variation provides a scale reference.
+
 ## Caller Responsibilities
 
 The direct Application and registered-panel interfaces share the source-owned candidate,
