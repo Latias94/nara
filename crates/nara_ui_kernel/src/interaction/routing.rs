@@ -1,7 +1,6 @@
 use super::{UiNonActivation, UiPointerInput, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind};
 use crate::{
-    UiDispatchBatch, UiFrame, UiHitRegion, UiInteraction, UiKey, UiLayoutFact, UiPoint, UiRootKey,
-    UiRootStatus,
+    UiDispatchBatch, UiFrame, UiInteraction, UiKey, UiLayoutFact, UiPoint, UiRootKey, UiRootStatus,
 };
 
 pub(super) fn hit_target(
@@ -10,11 +9,7 @@ pub(super) fn hit_target(
     modal_root: Option<&UiRootKey>,
     position: UiPoint,
 ) -> Result<Option<UiKey>, UiNonActivation> {
-    let Some(region) = frame
-        .hit_regions()
-        .iter()
-        .find(|region| region_contains(region, position))
-    else {
+    let Some(region) = frame.matching_hit_regions(position).next() else {
         return Ok(None);
     };
     if let Some(reason) = surface_target_rejection(frame, latest, modal_root, region.key()) {
@@ -26,10 +21,6 @@ pub(super) fn hit_target(
         });
     }
     Ok(Some(region.key().clone()))
-}
-
-fn region_contains(region: &UiHitRegion, point: UiPoint) -> bool {
-    region.rect.contains(point) && region.clip_rect.is_none_or(|clip| clip.contains(point))
 }
 
 pub(super) fn surface_target_rejection(

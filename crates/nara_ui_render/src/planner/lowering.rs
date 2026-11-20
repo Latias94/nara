@@ -656,15 +656,7 @@ fn packet_clip(
 }
 
 fn packet_surface_clip(clip: Option<UiRect>, environment: UiEnvironment) -> Option<UiPacketRect> {
-    let authored_content = UiRect::new(UiPoint::default(), environment.logical_size())?;
-    let physical_content = environment
-        .physical_rect(authored_content)
-        .and_then(packet_rect)?;
-    let physical_clip = match clip {
-        Some(clip) => environment.physical_rect(clip).and_then(packet_rect)?,
-        None => physical_content,
-    };
-    physical_content.intersect(physical_clip)
+    environment.physical_clip_rect(clip).and_then(packet_rect)
 }
 
 fn primitive_clip(

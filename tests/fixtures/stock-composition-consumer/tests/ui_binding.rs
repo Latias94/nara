@@ -232,3 +232,118 @@ fn real_final_ui_binding_rejects_foreign_key_instance_capture_and_equal_pixel_su
     }
     readback::finish(&mut host);
 }
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU for stock UI pixels"]
+fn snapped_button_hit_edges_match_the_original_rendered_pixels() {
+    use nara_ui_kernel::{
+        UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiInteraction, UiKey,
+        UiLayer, UiLocalKey, UiNode, UiPoint, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme,
+        UiVisual,
+    };
+    use nara_ui_render::{UiPreparedImages, UiPresentationPlanner};
+
+    let root = UiRootKey::runtime("consumer.stock-composition", "hit-edges").unwrap();
+    let foreground = UiLocalKey::runtime("consumer.stock-composition", "foreground").unwrap();
+    let background = UiLocalKey::runtime("consumer.stock-composition", "background").unwrap();
+    let front_key = UiKey::scoped(root.clone(), foreground.clone()).unwrap();
+    let back_key = UiKey::scoped(root.clone(), background.clone()).unwrap();
+    let (width, height) = (scene::WIDTH, scene::HEIGHT);
+    let extent = Extent2d::new(width, height).unwrap();
+    let source = scene::capture(false);
+    let mut compiler =
+        UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default()).unwrap();
+    let mut planner = UiPresentationPlanner::default();
+    let installation = WgpuPolicyDefinition::new(UiPolicy {
+        ui: WgpuFeatureDefinition::new(WgpuUiFeature::new()).declare(),
+    })
+    .install()
+    .unwrap();
+    readback::require_native_selection();
+    let mut host = WgpuRenderHost::offscreen();
+    let mut aligned: Option<oracle::Image> = None;
+    for (revision, x) in [(1, 20.0), (2, 20.4)] {
+        let authored = UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root.clone(), UiLayer::Base, UiStyle::fill()).with_children([
+                    UiNode::new(UiStyle::absolute(0.0, 0.0, width as f32, height as f32))
+                        .with_key(background.clone())
+                        .with_interaction(UiInteraction::hit_target())
+                        .with_visual(UiVisual::solid(UiColor::rgba(0.0, 0.0, 1.0, 1.0))),
+                    UiNode::new(UiStyle::absolute(x, 3.0, 5.0, 6.0))
+                        .with_key(foreground.clone())
+                        .with_interaction(UiInteraction::hit_target())
+                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0))),
+                ]),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            width as f32,
+            height as f32,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let frame = compiler
+            .compile(&authored, environment, UiTheme::default())
+            .unwrap();
+        let packet = planner
+            .plan(
+                Arc::clone(&frame),
+                RenderTarget::PrimaryWindow,
+                &UiPreparedImages::new(),
+            )
+            .unwrap();
+        host.begin_frame(revision).unwrap();
+        let producer = host.create_producer().unwrap();
+        let target =
+            RenderImagePacket::new(RenderImage2d::allocate_handle().unwrap(), extent).unwrap();
+        let input = installation
+            .capture(
+                source.packet().clone(),
+                Arc::new(Capture {
+                    packet,
+                    wiring: Wiring::Original,
+                }),
+            )
+            .unwrap()
+            .with_image_target(target)
+            .unwrap();
+        let reservation = host
+            .reserve_image_target(&producer, input.packet().source_generation(), target)
+            .unwrap();
+        host.activate_image_target(&producer, reservation).unwrap();
+        let candidate = host.prepare(&producer, &input).unwrap();
+        let submitted = host
+            .submit_candidate(&producer, candidate)
+            .unwrap_or_else(|failure| panic!("{:?}", failure.error));
+        let actual = readback::read(&mut host, &submitted.final_texture::<FinalUi>().unwrap());
+        host.retire_producer(&producer);
+        for cursor_x in [19, 20, 24, 25] {
+            let (target, color) = if (20..25).contains(&cursor_x) {
+                (&front_key, [255, 0, 0, 255])
+            } else {
+                (&back_key, [0, 0, 255, 255])
+            };
+            assert_eq!(actual.pixels[(6 * width + cursor_x) as usize], color);
+            assert_eq!(
+                frame
+                    .hit_test(UiPoint::new(cursor_x as f32, 6.0))
+                    .unwrap()
+                    .key(),
+                target
+            );
+        }
+        if let Some(original) = &aligned {
+            original.assert_matches(&actual, 0, "aligned and fractional origins");
+        } else {
+            aligned = Some(actual);
+        }
+    }
+    readback::finish(&mut host);
+}

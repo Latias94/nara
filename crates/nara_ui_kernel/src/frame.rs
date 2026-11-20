@@ -212,6 +212,16 @@ impl UiEnvironment {
         self.content_transform
             .authored_rect_to_physical(rect, self.snap_policy)
     }
+
+    /// Returns the snapped authored clip restricted to the surface's snapped content bounds.
+    #[must_use]
+    pub fn physical_clip_rect(self, clip: Option<UiRect>) -> Option<UiPhysicalRect> {
+        let content = self.physical_rect(self.content_transform.authored_bounds())?;
+        match clip {
+            Some(clip) => content.intersect(self.physical_rect(clip)?),
+            None => Some(content),
+        }
+    }
 }
 
 fn revision(field: &'static str, value: u64) -> Result<UiRevision, UiEnvironmentError> {
@@ -423,6 +433,8 @@ pub struct UiHitRegion {
     pub(crate) key: UiKey,
     pub(crate) rect: UiRect,
     pub(crate) clip_rect: Option<UiRect>,
+    pub(crate) minimum: UiPoint,
+    pub(crate) maximum: UiPoint,
     pub(crate) enabled: bool,
 }
 
@@ -432,6 +444,7 @@ impl UiHitRegion {
         &self.key
     }
 
+    /// Returns the original logical allocation, before clipping and pixel snapping.
     #[must_use]
     pub const fn rect(&self) -> UiRect {
         self.rect
@@ -443,9 +456,10 @@ impl UiHitRegion {
     }
 
     pub(crate) fn contains(&self, point: UiPoint) -> bool {
-        self.enabled
-            && self.rect.contains(point)
-            && self.clip_rect.is_none_or(|clip| clip.contains(point))
+        point.x() >= self.minimum.x()
+            && point.x() < self.maximum.x()
+            && point.y() >= self.minimum.y()
+            && point.y() < self.maximum.y()
     }
 }
 
@@ -681,9 +695,28 @@ impl UiFrame {
         &self.diagnostics
     }
 
+    /// Finds the top enabled rectangular hit at an authored point using visible pixel bounds.
     #[must_use]
     pub fn hit_test(&self, point: UiPoint) -> Option<&UiHitRegion> {
-        self.hits.iter().find(|region| region.contains(point))
+        self.matching_hit_regions(point)
+            .find(|region| region.enabled())
+    }
+
+    pub(crate) fn matching_hit_regions(
+        &self,
+        point: UiPoint,
+    ) -> impl Iterator<Item = &UiHitRegion> {
+        let hits = if self
+            .environment
+            .content_transform()
+            .authored_bounds()
+            .contains(point)
+        {
+            self.hits.as_slice()
+        } else {
+            &[]
+        };
+        hits.iter().filter(move |region| region.contains(point))
     }
 
     /// Returns whether an active modal root requires unhandled input to stop at this frame.

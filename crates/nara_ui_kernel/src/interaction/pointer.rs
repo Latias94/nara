@@ -42,12 +42,7 @@ pub(super) fn pointer_button_is_unsupported(
             .map(|position| position.point)
     });
     position
-        .and_then(|position| {
-            frame.hit_regions().iter().find(|region| {
-                region.rect().contains(position)
-                    && region.clip_rect.is_none_or(|clip| clip.contains(position))
-            })
-        })
+        .and_then(|position| frame.matching_hit_regions(position).next())
         .and_then(|region| {
             frame
                 .layouts()

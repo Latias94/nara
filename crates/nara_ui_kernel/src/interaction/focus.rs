@@ -83,9 +83,20 @@ pub(super) fn navigate_focus(
             state.modal_root.as_ref(),
             &candidates,
         ),
-        UiNavigation::Up | UiNavigation::Down | UiNavigation::Left | UiNavigation::Right => current
-            .and_then(|current| directional_focus(current, direction, frame, &candidates))
-            .unwrap_or_else(|| candidates[0].key().clone()),
+        UiNavigation::Up | UiNavigation::Down | UiNavigation::Left | UiNavigation::Right => {
+            if let Some(current) = current {
+                if state.focus_is_stale(route) {
+                    return Err(UiNonActivation::StaleFocus);
+                }
+                let origin = focus_fact(frame, current).ok_or(UiNonActivation::NoFocusTarget)?;
+                let Some(next) = directional_focus(origin, direction, &candidates) else {
+                    return Ok(());
+                };
+                next
+            } else {
+                candidates[0].key().clone()
+            }
+        }
     };
     set_input_focus(state, seat, next, frame, route, batch)
 }
@@ -126,30 +137,46 @@ fn sequential_focus(
 }
 
 fn directional_focus(
-    current: &UiKey,
+    origin: &UiFocusFact,
     direction: UiNavigation,
-    frame: &UiFrame,
     candidates: &[&UiFocusFact],
 ) -> Option<UiKey> {
-    let current_rect = focus_fact(frame, current)?.visible_rect();
+    let current_rect = origin.visible_rect();
     let (current_x, current_y) = rect_center(current_rect);
+    let horizontal = matches!(direction, UiNavigation::Left | UiNavigation::Right);
+    let cross_range = |rect: UiRect| {
+        if horizontal {
+            (rect.origin().y(), rect.max().y())
+        } else {
+            (rect.origin().x(), rect.max().x())
+        }
+    };
+    let (current_min, current_max) = cross_range(current_rect);
     candidates
         .iter()
-        .filter(|candidate| candidate.key() != current)
+        .filter(|candidate| candidate.key() != origin.key())
         .filter_map(|candidate| {
-            let (x, y) = rect_center(candidate.visible_rect());
-            let (primary, secondary) = match direction {
-                UiNavigation::Up => (current_y - y, (current_x - x).abs()),
-                UiNavigation::Down => (y - current_y, (current_x - x).abs()),
-                UiNavigation::Left => (current_x - x, (current_y - y).abs()),
-                UiNavigation::Right => (x - current_x, (current_y - y).abs()),
+            let rect = candidate.visible_rect();
+            let (x, y) = rect_center(rect);
+            let dx = x - current_x;
+            let dy = y - current_y;
+            let forward = match direction {
+                UiNavigation::Up => -dy,
+                UiNavigation::Down => dy,
+                UiNavigation::Left => -dx,
+                UiNavigation::Right => dx,
                 UiNavigation::Next | UiNavigation::Previous => return None,
             };
-            (primary > 0.0).then_some((primary, secondary, candidate.key()))
+            if forward <= 0.0 {
+                return None;
+            }
+            let (min, max) = cross_range(rect);
+            let aligned = min < current_max && current_min < max;
+            Some((!aligned, dx * dx + dy * dy, candidate.key()))
         })
         .min_by(|left, right| {
             left.0
-                .total_cmp(&right.0)
+                .cmp(&right.0)
                 .then_with(|| left.1.total_cmp(&right.1))
                 .then_with(|| left.2.cmp(right.2))
         })

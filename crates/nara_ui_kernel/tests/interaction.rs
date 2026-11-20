@@ -2394,6 +2394,113 @@ fn visible_overflow_keeps_a_child_presented_after_its_parent_leaves_the_clip() {
 }
 
 #[test]
+fn directional_navigation_prefers_an_aligned_neighbor_and_keeps_focus_at_the_edge() {
+    for quit_x in [20.0, 21.0] {
+        for reverse in [false, true] {
+            let mut buttons = [
+                button("resume", "Resume", "resume", 20.0, 10.0, true),
+                button("settings", "Settings", "settings", 140.0, 10.0, true),
+                button("quit", "Quit", "quit", quit_x, 125.0, true),
+            ];
+            if reverse {
+                buttons.reverse();
+            }
+            let snapshot = UiAuthoringSnapshotBuilder::new(1)
+                .with_root(
+                    UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                        .with_children(buttons),
+                )
+                .build()
+                .unwrap();
+            let frame = compile(&mut compiler(), &snapshot, 1);
+            let resume = exact_key("base", "resume");
+            let resume_index = frame
+                .focus_order()
+                .iter()
+                .position(|candidate| candidate.key() == &resume)
+                .unwrap();
+            let mut journal = hosted_journal();
+            let route = submit(&mut journal, frame, 10);
+            let mut session = UiInteractionSession::default();
+            let navigate = |session: &mut UiInteractionSession, direction| {
+                session
+                    .dispatch(
+                        &journal,
+                        route,
+                        UiInputEvent::Navigate {
+                            seat: SEAT,
+                            direction,
+                        },
+                    )
+                    .unwrap()
+            };
+            for _ in 0..=resume_index {
+                assert!(
+                    navigate(&mut session, UiNavigation::Next)
+                        .consumed()
+                        .is_some()
+                );
+            }
+            assert_keyboard_activation(&mut session, &journal, route, "base", "resume");
+
+            assert!(
+                navigate(&mut session, UiNavigation::Right)
+                    .consumed()
+                    .is_some()
+            );
+            assert_keyboard_activation(&mut session, &journal, route, "base", "settings");
+
+            let edge = navigate(&mut session, UiNavigation::Up);
+            assert!(edge.consumed().unwrap().events().is_empty());
+            assert_keyboard_activation(&mut session, &journal, route, "base", "settings");
+        }
+    }
+}
+
+#[test]
+fn historical_direction_rejects_when_its_frame_did_not_own_the_new_focus() {
+    let snapshot = |revision| {
+        let mut root = UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+            .with_child(button("first", "First", "first", 10.0, 10.0, true));
+        if revision == 2 {
+            root = root.with_child(button("second", "Second", "second", 110.0, 10.0, true));
+        }
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(root)
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let original = submit(&mut journal, compile(&mut compiler, &snapshot(1), 1), 10);
+    let mut session = UiInteractionSession::default();
+    let next = UiInputEvent::Navigate {
+        seat: SEAT,
+        direction: UiNavigation::Next,
+    };
+    session.dispatch(&journal, original, next.clone()).unwrap();
+    assert_keyboard_activation(&mut session, &journal, original, "base", "first");
+    let latest = submit(&mut journal, compile(&mut compiler, &snapshot(2), 1), 11);
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap();
+    session.dispatch(&journal, latest, next).unwrap();
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "second");
+    let stale = session
+        .dispatch(
+            &journal,
+            original,
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Left,
+            },
+        )
+        .unwrap();
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleFocus));
+    assert_keyboard_activation(&mut session, &journal, latest, "base", "second");
+}
+
+#[test]
 fn focus_visibility_directional_navigation_uses_clipped_origin_and_destination_centers() {
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(

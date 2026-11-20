@@ -344,13 +344,16 @@ impl UiSurfaceContentTransform {
     /// safe-area regions.
     #[must_use]
     pub fn physical_to_authored(self, point: UiPoint) -> Option<UiPoint> {
-        if !self.physical_content_bounds().contains(point) {
-            return None;
-        }
-        Some(UiPoint::new(
+        self.physical_content_bounds()
+            .contains(point)
+            .then(|| self.physical_to_authored_unclipped(point))
+    }
+
+    pub(crate) fn physical_to_authored_unclipped(self, point: UiPoint) -> UiPoint {
+        UiPoint::new(
             (point.x() - self.physical_content_origin.x()) / self.content_scale_factor,
             (point.y() - self.physical_content_origin.y()) / self.content_scale_factor,
-        ))
+        )
     }
 
     /// Maps and clips authored geometry to the exact physical content rect.
@@ -477,6 +480,16 @@ impl UiPhysicalRect {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.max_x <= self.min_x || self.max_y <= self.min_y
+    }
+
+    pub(crate) fn intersect(self, other: Self) -> Option<Self> {
+        let clipped = Self {
+            min_x: self.min_x.max(other.min_x),
+            min_y: self.min_y.max(other.min_y),
+            max_x: self.max_x.min(other.max_x),
+            max_y: self.max_y.min(other.max_y),
+        };
+        (!clipped.is_empty()).then_some(clipped)
     }
 
     fn snap_physical_edges(

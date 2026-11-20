@@ -87,6 +87,280 @@ fn capture_viewport(
 }
 
 #[test]
+fn rectangular_hits_follow_snapped_paint_and_clip_without_rounding_pointer_samples() {
+    use nara_ui_kernel::{UiColor, UiPaintPrimitive, UiVisual};
+
+    for (scale, clip, origin, width, left, right) in [
+        (1.0, None, 20.4, 5.0, 20, 25),
+        (1.25, None, 20.4, 5.0, 26, 32),
+        (1.25, Some((21.4, 3.1)), -1.0, 5.0, 27, 31),
+        (1.0, Some((-30.0, 32.5)), 0.4, 40.0, 0, 3),
+    ] {
+        let node = |name, x, y, width, height, rgb: [f32; 3]| {
+            UiNode::new(UiStyle::absolute(x, y, width, height))
+                .with_key(node_key(name))
+                .with_interaction(UiInteraction::hit_target())
+                .with_visual(UiVisual::solid(UiColor::rgba(rgb[0], rgb[1], rgb[2], 1.0)))
+        };
+        let back = node("back", 0.0, 0.0, 120.0, 80.0, [0.0, 0.0, 1.0]);
+        let front = if let Some((clip_x, clip_width)) = clip {
+            clipping_parent(
+                clip_x,
+                10.0,
+                clip_width,
+                30.0,
+                node("front", origin, 0.0, width, 30.0, [1.0, 0.0, 0.0]),
+            )
+        } else {
+            node("front", origin, 10.0, width, 30.0, [1.0, 0.0, 0.0])
+        };
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                    .with_children([back, front]),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(SURFACE, 320.0, 180.0, scale, 1, 1, 1, 1).unwrap();
+        let frame = compiler()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let front_key = exact_key("base", "front");
+        let back_key = exact_key("base", "back");
+        let (paint_left, paint_right) = frame
+            .paint()
+            .iter()
+            .find_map(|primitive| {
+                let UiPaintPrimitive::Rect {
+                    key: Some(key),
+                    physical_rect,
+                    clip_rect,
+                    ..
+                } = primitive
+                else {
+                    return None;
+                };
+                (key == &front_key).then(|| {
+                    let clip = environment.physical_clip_rect(*clip_rect).unwrap();
+                    (
+                        physical_rect.min_x().max(clip.min_x()),
+                        physical_rect.max_x().min(clip.max_x()),
+                    )
+                })
+            })
+            .unwrap();
+        assert_eq!((paint_left, paint_right), (left, right));
+        let mut journal = hosted_journal();
+        let route = submit(&mut journal, Arc::clone(&frame), 10);
+        let mut session = UiInteractionSession::default();
+        for (x, target) in [
+            (left as f32 - 0.125, &back_key),
+            (left as f32, &front_key),
+            (right as f32 - 0.125, &front_key),
+            (right as f32, &back_key),
+        ] {
+            let position = environment
+                .content_transform()
+                .physical_to_authored(UiPoint::new(x, 21.25));
+            let Some(position) = position else {
+                assert_eq!(left, 0);
+                assert!(x < 0.0);
+                continue;
+            };
+            assert_eq!(frame.hit_test(position).unwrap().key(), target);
+            for (phase, kind) in [
+                (UiButtonPhase::Pressed, UiRoutedEventKind::Pressed),
+                (
+                    UiButtonPhase::Released,
+                    UiRoutedEventKind::Released { inside: true },
+                ),
+            ] {
+                let outcome = session
+                    .dispatch(
+                        &journal,
+                        route,
+                        UiInputEvent::Pointer(sample_button(
+                            UiPointerButton::Primary,
+                            phase,
+                            Some(position),
+                        )),
+                    )
+                    .unwrap();
+                let events = target_events(outcome.consumed().unwrap(), &kind);
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].target(), target);
+                assert_eq!(
+                    events[0].pointer_input().unwrap().position(),
+                    Some(position)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn pixel_coverage_clips_an_unclipped_button_at_a_fractional_surface_edge() {
+    use nara_ui_kernel::{UiColor, UiPaintPrimitive, UiSafeAreaInsets, UiVisual};
+
+    let transform = UiSurfaceContentTransform::new(
+        UiSize::new(183.2, 144.0).unwrap(),
+        UiSize::new(640.0, 180.0).unwrap(),
+        UiSafeAreaInsets::new(0.4, 0.0, 0.4, 0.0).unwrap(),
+        1.25,
+    )
+    .unwrap();
+    let environment = UiEnvironment::for_surface(
+        SURFACE,
+        transform,
+        UiSurfaceGenerations::new(1, 1, 1, 1).unwrap(),
+        1,
+        1,
+    )
+    .unwrap();
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_child(
+                UiNode::new(UiStyle::absolute(50.1, 10.0, 160.0, 40.0))
+                    .with_key(node_key("button"))
+                    .with_interaction(UiInteraction::hit_target())
+                    .with_visual(UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0))),
+            ),
+        )
+        .build()
+        .unwrap();
+    let frame = compiler()
+        .compile(&snapshot, environment, UiTheme::default())
+        .unwrap();
+    let [
+        UiPaintPrimitive::Rect {
+            physical_rect,
+            clip_rect: None,
+            ..
+        },
+    ] = frame.paint()
+    else {
+        panic!("expected one rectangle without an ancestor clip");
+    };
+    assert_eq!(physical_rect.max_x(), 435);
+    assert_eq!(environment.physical_clip_rect(None).unwrap().max_x(), 434);
+    let inside = transform
+        .physical_to_authored(UiPoint::new(433.0, 25.0))
+        .unwrap();
+    let outside = transform
+        .physical_to_authored(UiPoint::new(434.0, 25.0))
+        .unwrap();
+    let target = exact_key("base", "button");
+    assert_eq!(frame.hit_test(inside).unwrap().key(), &target);
+    assert!(frame.hit_test(outside).is_none());
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, frame, 10);
+    let mut session = UiInteractionSession::default();
+    let result = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::Pointer(sample_button(
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(outside),
+            )),
+        )
+        .unwrap();
+    assert_eq!(result.rejection(), Some(&UiNonActivation::NoPointerTarget));
+    let result = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::Pointer(sample_button(
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(inside),
+            )),
+        )
+        .unwrap();
+    assert_eq!(
+        target_events(result.consumed().unwrap(), &UiRoutedEventKind::Pressed)[0].target(),
+        &target
+    );
+}
+
+#[test]
+fn cached_visual_clip_changes_do_not_cancel_pointer_capture_in_another_root() {
+    let cached = root_key("cached");
+    let snapshot = |revision, available, width| {
+        let x = if available { 0.0 } else { f32::NAN };
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(canvas_root(viewport(
+                viewport_input(UiCaptureContinuity::SurfaceGeometry),
+                0.0,
+                true,
+            )))
+            .with_root(
+                UiRoot::new(
+                    cached.clone(),
+                    UiLayer::Base,
+                    UiStyle::absolute(x, 0.0, 320.0, 180.0),
+                )
+                .with_child(clipping_parent(
+                    200.0,
+                    10.0,
+                    width,
+                    40.0,
+                    button("other", "Other", "other", 0.0, 0.0, true),
+                )),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let mut fallback = |revision| {
+        let width = if revision == 2 { 60.1 } else { 60.2 };
+        let _unpresented = compile(&mut compiler, &snapshot(revision - 1, true, width), 1);
+        let retained = compile(&mut compiler, &snapshot(revision, false, width), 1);
+        assert!(
+            retained
+                .root_outcomes()
+                .iter()
+                .any(|outcome| outcome.key() == &cached
+                    && outcome.status() == UiRootStatus::RetainedVisual)
+        );
+        retained
+    };
+    let before = fallback(2);
+    let original = submit(&mut journal, Arc::clone(&before), 10);
+    let mut session = UiInteractionSession::default();
+    capture_viewport(&mut session, &journal, original);
+    let after = fallback(4);
+    assert_eq!(before.hit_regions(), after.hit_regions());
+    let latest = submit(&mut journal, after, 11);
+    let reconciled = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap();
+    assert!(
+        reconciled
+            .is_none_or(|batch| target_events(&batch, &UiRoutedEventKind::Cancelled).is_empty())
+    );
+    let released = session
+        .dispatch(
+            &journal,
+            latest,
+            UiInputEvent::Pointer(sample_button(
+                UiPointerButton::Middle,
+                UiButtonPhase::Released,
+                Some(UiPoint::new(20.0, 90.0)),
+            )),
+        )
+        .unwrap();
+    let events = target_events(
+        released.consumed().unwrap(),
+        &UiRoutedEventKind::Released { inside: true },
+    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].target(), &exact_key("base", "viewport"));
+}
+
+#[test]
 fn pointer_samples_preserve_modifiers_and_resolve_only_actual_button_positions() {
     let mut compiler = compiler();
     let mut journal = hosted_journal();

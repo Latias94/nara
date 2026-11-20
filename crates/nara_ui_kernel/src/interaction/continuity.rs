@@ -1,5 +1,5 @@
 use super::routing::{active_modal_root, published_layout, route_path};
-use crate::{UiFrame, UiKey};
+use crate::{UiFrame, UiHitRegion, UiKey, UiPoint, UiRect};
 
 fn environment_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
     let previous = previous.environment();
@@ -50,12 +50,19 @@ pub(super) fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame
         && previous
             .hit_regions()
             .iter()
-            .map(|region| (region.key(), region.rect(), region.clip_rect))
-            .eq(latest
-                .hit_regions()
-                .iter()
-                .map(|region| (region.key(), region.rect(), region.clip_rect)))
+            .map(hit_geometry)
+            .eq(latest.hit_regions().iter().map(hit_geometry))
         && active_modal_root(previous) == active_modal_root(latest)
+}
+
+fn hit_geometry(region: &UiHitRegion) -> (&UiKey, UiRect, Option<UiRect>, UiPoint, UiPoint) {
+    (
+        region.key(),
+        region.rect(),
+        region.clip_rect,
+        region.minimum,
+        region.maximum,
+    )
 }
 
 pub(super) fn capture_declarations_are_equivalent(

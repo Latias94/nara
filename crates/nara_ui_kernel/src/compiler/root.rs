@@ -98,6 +98,7 @@ pub(super) fn compile_root(
     let scale_factor = environment.scale_factor();
     let content_transform = environment.content_transform();
     let surface_bounds = content_transform.authored_bounds();
+    let surface_pixel_bounds = environment.physical_clip_rect(None);
     let snap_clipped =
         |rect| content_transform.clipped_authored_rect_to_physical(rect, environment.snap_policy());
 
@@ -149,11 +150,17 @@ pub(super) fn compile_root(
         let physical_rect = surface_rect.and_then(snap_clipped);
         let visible_bounds = if node_visible {
             clipped.rect().and_then(|clipped_rect| {
-                if clipped_rect == rect {
-                    return surface_rect.zip(physical_rect);
-                }
-                let visible_rect = clipped_rect.intersect(surface_bounds)?;
-                let visible_physical_rect = snap_clipped(visible_rect)?;
+                let visible_rect = if clipped_rect == rect {
+                    surface_rect?
+                } else {
+                    clipped_rect.intersect(surface_bounds)?
+                };
+                let physical_clip = if let Some(clip) = inherited_clip.rect() {
+                    environment.physical_clip_rect(Some(clip))?
+                } else {
+                    surface_pixel_bounds?
+                };
+                let visible_physical_rect = physical_rect?.intersect(physical_clip)?;
                 Some((visible_rect, visible_physical_rect))
             })
         } else {
@@ -369,6 +376,14 @@ pub(super) fn compile_root(
             continue;
         };
         if node.node.interaction.hit_testable {
+            let minimum = content_transform.physical_to_authored_unclipped(UiPoint::new(
+                visible_physical_rect.min_x() as f32,
+                visible_physical_rect.min_y() as f32,
+            ));
+            let maximum = content_transform.physical_to_authored_unclipped(UiPoint::new(
+                visible_physical_rect.max_x() as f32,
+                visible_physical_rect.max_y() as f32,
+            ));
             hit_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),
                 UiHitRegion {
@@ -378,6 +393,8 @@ pub(super) fn compile_root(
                         .expect("required interaction key is validated"),
                     rect,
                     clip_rect: inherited_clip.rect(),
+                    minimum,
+                    maximum,
                     enabled: node.node.interaction.enabled,
                 },
             ));

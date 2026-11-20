@@ -289,8 +289,12 @@ inherited clip to its children even when its own rectangle lies outside that cli
 uses its own intersection for drawing and interaction.
 Pointer hit registration, keyboard focus, navigation, activation and platform semantics require
 coverage in that visible region after snapping to physical pixels. An intentional hit area can
-omit paint when it covers pixels. Directional navigation uses the centers of the visible
-logical regions. A visible disabled control may retain focus but cannot activate. Pointer
+omit paint when it covers pixels. Rectangular hit membership uses the same half-open, snapped
+edges as rectangle paint and clipping. Routed pointer samples retain their continuous authored
+coordinates. Directional navigation uses the centers and perpendicular overlap of the visible
+logical regions. It prefers an aligned control in the requested direction, then proximity. If
+focus is already set and there is no neighbor, the direction leaves focus in place. A visible
+disabled control may retain focus but cannot activate. Pointer
 capture keeps its existing continuity and cancellation rules. Motion on the current
 presentation that reaches a modal underlay records the pointer position and clears hover.
 Pointer button events still require an eligible target in the modal scope.
