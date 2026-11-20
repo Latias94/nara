@@ -350,3 +350,10 @@ appearance. The timing table above remains the release baseline for writer opera
 repair targets one real caller and leaves immediate projectile spawning on its current entry point.
 [Reference game retirement](../../reference-game/src/systems.rs) ·
 [Hierarchy lifetime boundary](../architecture/adr/0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md#decision)
+
+### Tracing cursor lifetime
+
+The diagnostics contract now states that each sink keeps a cursor for its selected bus and
+creates a new cursor from the replacement Runtime. The caller owns this cursor lifetime, and
+emission uses the supplied cursor's sequence position.
+[Diagnostics bus contract](../architecture/adr/0048-runtime-diagnostics-and-observability-bus.md#decision)

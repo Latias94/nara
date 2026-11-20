@@ -65,7 +65,9 @@ Rules:
   is never itself product evidence. Offline observations do not write back into this bus,
   participate in gameplay or overload decisions, or move evidence ownership into
   `nara_diagnostic`. ADR 0099 retired RGF-U22's reusable evidence envelope and publication model.
-- A tracing sink emits one safe entry or only entries after a caller-owned cursor. The bus does not
+- A tracing sink emits one safe entry or only entries after a caller-owned cursor. A cursor is
+  valid for the `RuntimeDiagnostics` bus that created it. A host that replaces its Runtime must
+  obtain a fresh cursor from the new bus, whose sequence starts at zero. The bus does not
   offer an emit-entire-history loop that repeats retained events on every frame, and field values are
   not logged.
 - `DiagnosticsPlugin` installs both `RuntimeDiagnostics` and the separate numeric
