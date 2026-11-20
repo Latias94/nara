@@ -17,7 +17,7 @@ pub(super) fn hit_target(
     else {
         return Ok(None);
     };
-    if let Some(reason) = target_rejection(frame, latest, modal_root, region.key()) {
+    if let Some(reason) = surface_target_rejection(frame, latest, modal_root, region.key()) {
         return Err(reason);
     }
     if !region.enabled() || !key_is_enabled(latest, region.key()) {
@@ -32,40 +32,15 @@ fn region_contains(region: &UiHitRegion, point: UiPoint) -> bool {
     region.rect.contains(point) && region.clip_rect.is_none_or(|clip| clip.contains(point))
 }
 
-pub(super) fn target_rejection(
-    frame: &UiFrame,
-    latest: &UiFrame,
-    modal_root: Option<&UiRootKey>,
-    target: &UiKey,
-) -> Option<UiNonActivation> {
-    target_rejection_with_visibility(frame, latest, modal_root, target, UiLayoutFact::visible)
-}
-
 pub(super) fn surface_target_rejection(
     frame: &UiFrame,
     latest: &UiFrame,
     modal_root: Option<&UiRootKey>,
     target: &UiKey,
 ) -> Option<UiNonActivation> {
-    target_rejection_with_visibility(
-        frame,
-        latest,
-        modal_root,
-        target,
-        UiLayoutFact::visible_on_surface,
-    )
-}
-
-fn target_rejection_with_visibility(
-    frame: &UiFrame,
-    latest: &UiFrame,
-    modal_root: Option<&UiRootKey>,
-    target: &UiKey,
-    visible: impl Fn(&UiLayoutFact) -> bool,
-) -> Option<UiNonActivation> {
     for frame in [frame, latest] {
         match published_layout(frame, target) {
-            Some(layout) if visible(layout) => {}
+            Some(layout) if layout.visible_on_surface() => {}
             Some(_) => {
                 return Some(UiNonActivation::TargetHidden {
                     target: target.clone(),
@@ -91,7 +66,7 @@ pub(super) fn is_interactive_key(
     modal_root: Option<&UiRootKey>,
     target: &UiKey,
 ) -> bool {
-    target_rejection(frame, latest, modal_root, target).is_none()
+    surface_target_rejection(frame, latest, modal_root, target).is_none()
         && frame
             .hit_regions()
             .iter()

@@ -757,6 +757,48 @@ fn focus_visibility_preserves_capture_through_an_unclipped_offscreen_ancestor() 
 }
 
 #[test]
+fn historical_press_cannot_target_a_button_that_lost_pixel_coverage() {
+    let snapshot = |revision, width| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                    button("background", "Background", "background", 0.0, 0.0, true),
+                    UiNode::new(UiStyle::absolute(19.9, 0.0, width, 40.0).with_z_index(1))
+                        .with_key(node_key("foreground"))
+                        .with_interaction(UiInteraction::focus_target()),
+                ]),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let mut journal = hosted_journal();
+    let initial = compile(&mut compiler, &snapshot(1, 1.2), 1);
+    let foreground = exact_key("base", "foreground");
+    let point = UiPoint::new(20.0, 20.0);
+    assert_eq!(initial.hit_test(point).unwrap().key(), &foreground);
+    let historical = submit(&mut journal, initial, 10);
+    let successor = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(2, 0.2), 1),
+        11,
+    );
+    let mut session = UiInteractionSession::default();
+    let press = pointer_button(UiButtonPhase::Pressed, point);
+    assert_eq!(
+        session
+            .dispatch(&journal, historical, press.clone())
+            .unwrap()
+            .rejection(),
+        Some(&UiNonActivation::TargetHidden { target: foreground }),
+    );
+    let accepted = session.dispatch(&journal, successor, press).unwrap();
+    let pressed = target_events(accepted.consumed().unwrap(), &UiRoutedEventKind::Pressed);
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].target(), &exact_key("base", "background"));
+}
+
+#[test]
 fn staged_pan_cannot_renew_epoch_or_mutate_the_live_presented_capture() {
     let declaration = viewport_input(UiCaptureContinuity::TargetGeometry);
     let mut compiler = compiler();

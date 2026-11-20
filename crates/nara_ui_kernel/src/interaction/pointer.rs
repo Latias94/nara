@@ -3,7 +3,8 @@ use super::{
     UiPointerInputKind, UiRoutedEventKind, UiSeatId,
     focus::{is_focusable_key, set_focus},
     routing::{
-        hit_target, nearest_pointer_listener, route_event, route_pointer_event, target_rejection,
+        hit_target, nearest_pointer_listener, route_event, route_pointer_event,
+        surface_target_rejection,
     },
     state::{PointerCapture, SurfaceState},
 };
@@ -61,6 +62,7 @@ pub(super) fn pointer_move(
     input: UiPointerInput,
     frame: &UiFrame,
     latest: &UiFrame,
+    route: UiRouteStamp,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
     let seat = input.seat();
@@ -76,6 +78,9 @@ pub(super) fn pointer_move(
     let hovered = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
         Ok(hovered) => hovered,
         Err(UiNonActivation::TargetDisabled { .. }) => None,
+        Err(UiNonActivation::TargetOutsideModal { .. }) if state.presented_route == Some(route) => {
+            None
+        }
         Err(_) if captured.is_some() => None,
         Err(reason) => return Err(reason),
     };
@@ -244,7 +249,7 @@ pub(super) fn pointer_release(
         route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
         return Ok(());
     };
-    if target_rejection(frame, latest, state.modal_root.as_ref(), &target).is_some() {
+    if surface_target_rejection(frame, latest, state.modal_root.as_ref(), &target).is_some() {
         route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
         return Ok(());
     }

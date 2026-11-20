@@ -1,3 +1,5 @@
+use nara_input::GamepadButton;
+
 macro_rules! controls {
     ($name:ident, $native:ty, $description:literal, $($variant:ident = $code:literal => $mapped:ident),+ $(,)?) => {
         #[doc = $description]
@@ -32,27 +34,42 @@ macro_rules! controls {
     };
 }
 
-controls!(GamepadButton, gilrs::Button, "Portable mapped gamepad buttons, independent of native discriminants.",
-    South = 0 => South,
-    East = 1 => East,
-    West = 2 => West,
-    North = 3 => North,
-    LeftShoulder = 4 => LeftTrigger,
-    RightShoulder = 5 => RightTrigger,
-    LeftTrigger = 6 => LeftTrigger2,
-    RightTrigger = 7 => RightTrigger2,
-    Select = 8 => Select,
-    Start = 9 => Start,
-    Mode = 10 => Mode,
-    LeftThumb = 11 => LeftThumb,
-    RightThumb = 12 => RightThumb,
-    DPadUp = 13 => DPadUp,
-    DPadDown = 14 => DPadDown,
-    DPadLeft = 15 => DPadLeft,
-    DPadRight = 16 => DPadRight,
-    C = 17 => C,
-    Z = 18 => Z,
-);
+macro_rules! button_mapping {
+    ($($button:ident => $native:ident),+ $(,)?) => {
+        pub(crate) const BUTTONS: &[(GamepadButton, gilrs::Button)] = &[
+            $((GamepadButton::$button, gilrs::Button::$native),)+
+        ];
+
+        pub(crate) fn button_from_native(button: gilrs::Button) -> Option<GamepadButton> {
+            match button {
+                $(gilrs::Button::$native => Some(GamepadButton::$button),)+
+                _ => None,
+            }
+        }
+    };
+}
+
+button_mapping! {
+    South => South,
+    East => East,
+    West => West,
+    North => North,
+    LeftShoulder => LeftTrigger,
+    RightShoulder => RightTrigger,
+    LeftTrigger => LeftTrigger2,
+    RightTrigger => RightTrigger2,
+    Select => Select,
+    Start => Start,
+    Mode => Mode,
+    LeftThumb => LeftThumb,
+    RightThumb => RightThumb,
+    DPadUp => DPadUp,
+    DPadDown => DPadDown,
+    DPadLeft => DPadLeft,
+    DPadRight => DPadRight,
+    C => C,
+    Z => Z,
+}
 
 controls!(GamepadAxis, gilrs::Axis, "Portable normalized gamepad axes; positive Y follows Gilrs mapping.",
     LeftStickX = 0 => LeftStickX,

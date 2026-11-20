@@ -17,6 +17,7 @@ mod binding;
 mod definition;
 #[cfg(feature = "serde")]
 mod format;
+mod gamepad;
 mod keyboard_continuation;
 #[cfg(feature = "serde")]
 mod runtime;
@@ -34,6 +35,7 @@ pub use definition::{
 };
 #[cfg(feature = "serde")]
 pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
+pub use gamepad::GamepadButton;
 pub use keyboard_continuation::{
     KeyboardActionBinding, KeyboardContinuationError, KeyboardHold, capture_keyboard_holds,
     reconcile_keyboard_holds, restore_keyboard_holds,

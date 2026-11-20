@@ -21,10 +21,11 @@ mod controls;
 mod devices;
 
 use bridge::{Bridge, PhysicalState};
-pub use controls::{GamepadAxis, GamepadButton};
+pub use controls::GamepadAxis;
 pub use devices::{
     GamepadAssignmentError, GamepadRoute, GilrsDevice, GilrsDeviceToken, GilrsDevices,
 };
+pub use nara_input::GamepadButton;
 
 pub const GILRS_INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.gilrs");
 const CLOSE: PluginShutdownObligationId = PluginShutdownObligationId::new("nara.gilrs.native");

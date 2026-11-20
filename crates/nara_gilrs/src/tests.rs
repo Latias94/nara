@@ -563,15 +563,36 @@ fn zero_gamepad_admission_and_invalid_axis_and_inventory_fail_explicitly() {
 
 #[test]
 fn portable_codes_map_deliberately_and_configuration_has_no_native_side_effects() {
-    assert_eq!(GamepadButton::LeftShoulder.native(), Button::LeftTrigger);
-    assert_eq!(GamepadButton::LeftTrigger.native(), Button::LeftTrigger2);
-    for &button in GamepadButton::ALL {
-        assert_eq!(GamepadButton::from_native(button.native()), Some(button));
+    use crate::controls::{BUTTONS, button_from_native};
+
+    assert_eq!(
+        button_from_native(Button::LeftTrigger),
+        Some(GamepadButton::LeftShoulder)
+    );
+    assert_eq!(
+        button_from_native(Button::LeftTrigger2),
+        Some(GamepadButton::LeftTrigger)
+    );
+    for (index, &(button, native)) in BUTTONS.iter().enumerate() {
+        assert_eq!(usize::from(button.code()), index);
+        assert_eq!(GamepadButton::from_code(button.code()), Some(button));
+        assert_eq!(button_from_native(native), Some(button));
     }
+    for (native, expected_code) in [
+        (Button::South, 0),
+        (Button::RightThumb, 12),
+        (Button::DPadUp, 13),
+        (Button::DPadDown, 14),
+        (Button::DPadLeft, 15),
+        (Button::DPadRight, 16),
+    ] {
+        assert_eq!(button_from_native(native).unwrap().code(), expected_code);
+    }
+    assert_eq!(GamepadButton::from_code(u16::MAX), None);
     for &axis in GamepadAxis::ALL {
         assert_eq!(GamepadAxis::from_native(axis.native()), Some(axis));
     }
-    assert_eq!(GamepadButton::from_native(Button::Unknown), None);
+    assert_eq!(button_from_native(Button::Unknown), None);
     assert_eq!(GamepadAxis::from_native(Axis::Unknown), None);
     let plugin = GilrsInputPlugin::new(Some(ROUTE));
     assert_eq!(plugin.default_route, Some(ROUTE));

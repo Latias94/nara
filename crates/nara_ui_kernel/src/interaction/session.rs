@@ -523,7 +523,9 @@ fn apply_input(
                 });
                 let input = input.with_resolved_position(position);
                 let result = match input.kind() {
-                    UiPointerInputKind::Moved => pointer_move(state, input, frame, latest, batch),
+                    UiPointerInputKind::Moved => {
+                        pointer_move(state, input, frame, latest, route, batch)
+                    }
                     UiPointerInputKind::Scroll { .. } => {
                         pointer_scroll(state, input, frame, latest, batch)
                     }

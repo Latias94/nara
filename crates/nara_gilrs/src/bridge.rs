@@ -5,20 +5,21 @@ use nara_input::{
     AxisValue, ButtonTransitionPhase, GamepadConnection, InputIngressError, InputTimeline,
 };
 
+use crate::controls::{BUTTONS, button_from_native};
 use crate::devices::{GilrsDevice, GilrsDeviceToken};
-use crate::{BridgeError, GamepadAxis, GamepadButton, GamepadRoute, GilrsDevices};
+use crate::{BridgeError, GamepadAxis, GamepadRoute, GilrsDevices};
 
 #[derive(Clone, Default)]
 pub(crate) struct PhysicalState {
-    pub buttons: [bool; 19],
+    pub buttons: [bool; BUTTONS.len()],
     pub axes: [AxisValue; 8],
 }
 
 impl PhysicalState {
     pub fn snapshot(gamepad: &Gamepad<'_>) -> Result<Self, BridgeError> {
         let mut state = Self::default();
-        for &button in GamepadButton::ALL {
-            state.buttons[button.code() as usize] = gamepad.is_pressed(button.native());
+        for &(button, native) in BUTTONS {
+            state.buttons[usize::from(button.code())] = gamepad.is_pressed(native);
         }
         for &axis in GamepadAxis::ALL {
             state.axes[axis.code() as usize] =
@@ -41,7 +42,7 @@ struct DeviceState {
     label: u16,
     serial: u64,
     physical: PhysicalState,
-    blocked_buttons: [bool; 19],
+    blocked_buttons: [bool; BUTTONS.len()],
     blocked_axes: [bool; 8],
     active: Option<ActiveConnection>,
 }
@@ -140,7 +141,7 @@ impl Bridge {
             label,
             serial: self.serial,
             physical,
-            blocked_buttons: [false; 19],
+            blocked_buttons: [false; BUTTONS.len()],
             blocked_axes: [false; 8],
             active: None,
         });
@@ -223,11 +224,11 @@ impl Bridge {
         };
         match event {
             EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
-                let Some(button) = GamepadButton::from_native(button) else {
+                let Some(button) = button_from_native(button) else {
                     return Ok(());
                 };
                 let pressed = matches!(event, EventType::ButtonPressed(..));
-                let index = button.code() as usize;
+                let index = usize::from(button.code());
                 state.physical.buttons[index] = pressed;
                 if !pressed && state.blocked_buttons[index] {
                     state.blocked_buttons[index] = false;

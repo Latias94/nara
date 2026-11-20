@@ -365,6 +365,9 @@ pub(super) fn compile_root(
                 ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
             }
         }
+        let Some((visible_rect, visible_physical_rect)) = visible_bounds else {
+            continue;
+        };
         if node.node.interaction.hit_testable {
             hit_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),
@@ -379,9 +382,6 @@ pub(super) fn compile_root(
                 },
             ));
         }
-        let Some((visible_rect, visible_physical_rect)) = visible_bounds else {
-            continue;
-        };
         if node.node.interaction.focusable {
             focus_entries.push(RootOrdered::new(
                 root_order(node, u8::MAX),

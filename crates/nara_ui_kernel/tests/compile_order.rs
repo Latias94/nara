@@ -80,6 +80,30 @@ fn same_layer_root_sequence_is_explicit_and_not_key_sorted() {
 }
 
 #[test]
+fn hit_regions_use_snapped_coverage_even_without_paint() {
+    let foreground = key("foreground");
+    for (width, expected) in [(0.2, None), (1.2, Some(&foreground))] {
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                hit_root("background", 0.1).with_child(
+                    UiNode::new(UiStyle::absolute(19.9, 0.0, width, 50.0))
+                        .with_key(foreground.clone())
+                        .with_interaction(UiInteraction::hit_target()),
+                ),
+            )
+            .build()
+            .unwrap();
+        let frame = compiler()
+            .compile(&snapshot, environment(1.0), UiTheme::default())
+            .unwrap();
+        assert_eq!(frame.paint().len(), 1);
+        let hit = frame.hit_test(UiPoint::new(20.0, 20.0)).unwrap();
+        assert_eq!(hit.key().root_key(), &root_key("background"));
+        assert_eq!(hit.key().local_key(), expected);
+    }
+}
+
+#[test]
 fn retained_visual_rebinds_to_the_current_root_ordinal() {
     let mut compiler = compiler();
     let baseline = UiAuthoringSnapshotBuilder::new(1)

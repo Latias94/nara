@@ -59,6 +59,9 @@ use driver::UiTestApp;
 #[path = "adapter_prepared_loss_tests.rs"]
 mod prepared_loss;
 
+#[path = "adapter_input_regression_tests.rs"]
+mod input_regressions;
+
 use crate::__private::UiPresentationCommit;
 
 const TEST_DOMAIN: &str = "nara.test.ui";

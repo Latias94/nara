@@ -91,7 +91,9 @@ Rules:
   most one keyboard/text target, each view has an explicit focus domain, and a gameplay viewport
   receives gameplay input only after explicit activation. Pointer capture is bound to its source
   window/view and emits an observable cancellation on focus loss, tear-off, close, or target
-  invalidation. Cross-window shortcuts are global only when declared as such.
+  invalidation. Cross-window shortcuts are global only when declared as such. Ordinary Windows
+  Winit keyboard admission uses a real nonrepeat press after refocus as the start of a new hold.
+  The paused native handoff uses its own focus and physical key reconciliation before activation.
 - Runtime/game UI and editor/tool UI each own the accessibility outcome of their product surface.
   They may share semantic vocabulary or platform bridges, but neither may treat the other as an
   overlay that supplies accessibility after the fact. Runtime UI nodes and editor adapters should
@@ -209,6 +211,8 @@ integer label is metadata, including when concurrent connections use equal label
 another World or endpoint recreation cannot adopt an old token. Every button and axis sample
 validates this authority before mutation; retain it at the adapter's original event boundary
 rather than looking up a current connection for an originless delayed sample.
+`nara_input::GamepadButton` defines the stable button codes shared by the native adapter and
+stock UI navigation. Action bindings retain their numeric representation for other codes.
 
 Finite normalized scalar admission rejects nonfinite/out-of-range values. A raw nonzero axis
 starts one member; later samples update that same original press sequence, and zero terminates

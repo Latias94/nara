@@ -1,5 +1,7 @@
 use nara_core::Vec2;
-use nara_input::{ButtonTransitionPhase, InputEventKind, InputTimelineEntry, KeyCode, MouseButton};
+use nara_input::{
+    ButtonTransitionPhase, GamepadButton, InputEventKind, InputTimelineEntry, KeyCode, MouseButton,
+};
 use nara_ui_kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiNavigation, UiPoint, UiPointerButton,
     UiPointerId, UiPointerInput, UiRouteStamp, UiSeatId, UiSurfaceContentTransform,
@@ -267,24 +269,24 @@ fn project_gamepad(
     if phase != ButtonTransitionPhase::Pressed {
         return None;
     }
-    match button {
-        0 => Some(UiInputEvent::ActivateFocused {
+    match GamepadButton::from_code(button)? {
+        GamepadButton::South => Some(UiInputEvent::ActivateFocused {
             seat,
             source: UiActivationSource::Gamepad,
         }),
-        12 => Some(UiInputEvent::Navigate {
+        GamepadButton::DPadUp => Some(UiInputEvent::Navigate {
             seat,
             direction: UiNavigation::Up,
         }),
-        13 => Some(UiInputEvent::Navigate {
+        GamepadButton::DPadDown => Some(UiInputEvent::Navigate {
             seat,
             direction: UiNavigation::Down,
         }),
-        14 => Some(UiInputEvent::Navigate {
+        GamepadButton::DPadLeft => Some(UiInputEvent::Navigate {
             seat,
             direction: UiNavigation::Left,
         }),
-        15 => Some(UiInputEvent::Navigate {
+        GamepadButton::DPadRight => Some(UiInputEvent::Navigate {
             seat,
             direction: UiNavigation::Right,
         }),

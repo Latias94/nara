@@ -287,11 +287,13 @@ Compilation intersects node geometry with ancestor clips and the Surface Slot co
 Style visibility applies to the subtree. In a visible subtree, a non-clipping node passes its
 inherited clip to its children even when its own rectangle lies outside that clip. Each child
 uses its own intersection for drawing and interaction.
-Keyboard focus, navigation, activation and platform semantics use that same visible region after
-snapping to physical pixels. A control with no covered pixels has no focus destination or
-semantic action. Directional navigation uses the centers of the visible logical regions. A
-visible disabled control may retain focus but cannot activate. Pointer capture keeps its
-existing continuity and cancellation rules.
+Pointer hit registration, keyboard focus, navigation, activation and platform semantics require
+coverage in that visible region after snapping to physical pixels. An intentional hit area can
+omit paint when it covers pixels. Directional navigation uses the centers of the visible
+logical regions. A visible disabled control may retain focus but cannot activate. Pointer
+capture keeps its existing continuity and cancellation rules. Motion on the current
+presentation that reaches a modal underlay records the pointer position and clears hover.
+Pointer button events still require an eligible target in the modal scope.
 Each visible semantic node names its nearest published semantic ancestor. A visible overflow
 child can attach directly to the Surface root when all of its semantic ancestors are clipped.
 Implicit activation uses the focus assignment for the presented route. A focus change on a

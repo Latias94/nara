@@ -143,8 +143,10 @@ cannot adopt or terminate the replacement connection.
 
 [`nara_gilrs`](../../crates/nara_gilrs/README.md) is a separately consumed concrete native
 collector. It depends on App, ECS and Input, not the root product, Winit, UI or rendering.
-Its mapped button and axis codes are explicit portable values; do not persist Gilrs IDs or
-native enum discriminants as player identity.
+Use `nara_input::GamepadButton::code()` for standard button bindings. Gilrs and the stock
+Runtime UI share these identities, including the four D-pad directions and South activation.
+The serialized binding still stores a numeric code. Do not persist Gilrs IDs or native enum
+discriminants as player identity.
 
 Install it with an explicit route to an endpoint that the actual Host connects:
 
@@ -217,6 +219,11 @@ ordinary physical release retains its own trigger and the restored member identi
 steps run the original input preparation and gameplay mapper before command admission. Ordinary
 frames and catch-up ticks consume semantic work once per App frame; late input waits for the next
 First mapping boundary instead of being staged prematurely.
+
+An ordinary Windows Winit window releases its admitted keys on focus loss. After refocus, the
+first real nonrepeat press starts a new hold even if another window received the previous
+release. Winit's synthetic focus events and repeated key-down events do not start that hold.
+Native activation after a paused handoff follows the physical reconciliation below.
 
 Native isolation, actual focus and physical reconciliation belong to the native session. Use the
 [desktop control operations](rust-product-recipes.md#caller-driven-desktop-control) for that
