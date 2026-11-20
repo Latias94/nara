@@ -900,6 +900,8 @@ pub enum InputIngressError {
         retained: usize,
         requested: usize,
     },
+    /// A new action could not reserve the result storage promised at admission.
+    ActionOutputAllocationRefused,
     SequenceExhausted {
         requested: usize,
     },
@@ -970,6 +972,9 @@ impl Display for InputIngressError {
             }
             Self::MemberCapacityExceeded { limit } => {
                 write!(formatter, "input member capacity {limit} was exceeded")
+            }
+            Self::ActionOutputAllocationRefused => {
+                formatter.write_str("input action result storage allocation was refused")
             }
             Self::UnknownEndpoint { window, seat } => write!(
                 formatter,

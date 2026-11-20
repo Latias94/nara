@@ -234,6 +234,12 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
             .accepted,
         1
     );
+    assert!(
+        !state
+            .submit_button_event(|_| Err(InputIngressError::ActionOutputAllocationRefused.into()))
+            .unwrap()
+    );
+    assert!(state.is_healthy_live());
     state
         .apply_focus_driver_event(WindowId::PRIMARY, false)
         .unwrap();

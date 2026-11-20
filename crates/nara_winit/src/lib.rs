@@ -1203,6 +1203,19 @@ impl WinitApp {
         with_runtime_driver_scope(&mut self.runtime, operation)
     }
 
+    fn submit_button_event(
+        &mut self,
+        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<(), ButtonInputDriverError>,
+    ) -> Result<bool, AppRunError> {
+        self.with_driver_scope(|scope| match operation(scope) {
+            Ok(()) => Ok(true),
+            Err(ButtonInputDriverError::Timeline(
+                InputIngressError::ActionOutputAllocationRefused,
+            )) => Ok(false),
+            Err(error) => Err(error),
+        })
+    }
+
     fn is_healthy_live(&self) -> bool {
         self.shutdown == WinitShutdownState::Running
             && self.primary_failure.is_none()
@@ -1688,7 +1701,7 @@ impl WinitApp {
                 if self.input_timeline_installed()
                     && let Some(input) = self.mouse_driver_input(state, button)
                 {
-                    self.with_driver_scope(|scope| {
+                    self.submit_button_event(|scope| {
                         apply_mouse_driver_input_at(
                             scope,
                             InputWindowId::new(window_id.get()),
@@ -1784,11 +1797,10 @@ impl WinitApp {
             return Ok(false);
         };
         let input_window_id = InputWindowId::new(self.input_window_id.get());
-        self.with_driver_scope(|scope| {
+        self.submit_button_event(|scope| {
             apply_keyboard_driver_input_at(scope, input_window_id, InputSeatId::PRIMARY, input)
                 .map(|_| ())
-        })?;
-        Ok(true)
+        })
     }
 
     fn apply_focus_driver_event(

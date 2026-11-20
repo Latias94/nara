@@ -133,6 +133,14 @@ exact Step. `InputTimeline::entries()` visits live records in admission order an
 gaps. Paused actions retain their original press association and staging basis. Accepted holds
 retain their remaining release obligations.
 
+The binding and semantic result vectors start empty. The Input owner allocates backing storage
+when admitting action-bearing input or restoring held keys and reuses it across frames. A new
+action can return `InputIngressError::ActionOutputAllocationRefused` before taking a sequence or
+changing a member. The original release capacity stays available to accepted holds. Read action
+results during the frame, before cleanup returns their storage to the owner.
+Winit treats this refusal as an unaccepted button event. Gilrs completes its bounded poll and
+reports the refusal as a warning so it can continue delivering releases and axis neutralization.
+
 A UI Host connects its logical endpoint before `install_ui_surface`, including when native window
 creation happens later. The Surface keeps that exact Input lifetime through suspension and geometry
 changes. An explicit restore may attach a newly connected incarnation with the same labels; that

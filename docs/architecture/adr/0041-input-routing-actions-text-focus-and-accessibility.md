@@ -197,6 +197,15 @@ earlier action is deferred. Live records retain admission order and their origin
 which can have gaps. Pending actions keep their original staging basis. Held members reserve
 their remaining terminal obligations and retain their press provenance through retirement.
 
+The two action outcome vectors start empty. Before accepting an ordinary action or restoring a
+logical hold, the Input owner reserves their backing storage using the existing retained-record
+and terminal-credit bound. Semantic outcomes also need room to cancel the currently held action
+groups. An unresolved edge carries its potential fan-out until resolution consumes the edge and
+records the resulting held count. A failed reservation refuses the new operation before its
+sequence, member or projections change. Terminal delivery uses the original admission's capacity.
+Frame cleanup returns the published arrays to the owner for reuse. If a later edge needs more
+space during the frame, the original action results remain available through cleanup.
+
 Keyboard/mouse endpoint labels remain the public delivery identity for their bounded workflow. Explicit
 connection/retirement and private non-reused record/member identity protect internal lifetimes.
 Retirement prevents label reuse while old internal consumers still pin the record. The adapter

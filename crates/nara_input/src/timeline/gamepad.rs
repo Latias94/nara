@@ -237,7 +237,7 @@ impl InputTimeline {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let after =
             self.topology.obligations() - endpoint.obligations() + endpoint.rearmed_obligations();
-        let plan = self.plan(1, after)?;
+        let plan = self.plan_action_admission(1, after)?;
         let draft = self.member_draft(member, value, None);
         let admission = self.publish(plan, &[draft]);
         self.topology.members[member_index]

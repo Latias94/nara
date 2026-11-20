@@ -1,5 +1,7 @@
 //! Bounded normalized Input ownership, observation and presentation-route publication.
 
+#[path = "timeline/action_outputs.rs"]
+mod action_outputs;
 #[path = "timeline/capacity.rs"]
 mod capacity;
 #[path = "timeline/owner.rs"]

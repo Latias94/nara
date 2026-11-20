@@ -47,7 +47,7 @@ pub struct SemanticActionOutcome {
 #[derive(Debug, Resource)]
 pub struct SemanticActions {
     held: BTreeMap<ActionKey, HeldAction>,
-    outcomes: Vec<SemanticActionOutcome>,
+    pub(crate) outcomes: Vec<SemanticActionOutcome>,
     contribution_count: usize,
     contribution_limit: usize,
 }
@@ -64,18 +64,9 @@ impl SemanticActions {
             .members()
             .checked_mul(MAX_BINDINGS_PER_INPUT)
             .ok_or(InputConfigurationError::CapacityOverflow)?;
-        let outcome_limit = limits
-            .events()
-            .checked_mul(MAX_BINDINGS_PER_INPUT)
-            .and_then(|count| count.checked_add(contribution_limit))
-            .ok_or(InputConfigurationError::CapacityOverflow)?;
-        let mut outcomes = Vec::new();
-        outcomes
-            .try_reserve_exact(outcome_limit)
-            .map_err(|_| InputConfigurationError::AllocationRefused)?;
         Ok(Self {
             held: BTreeMap::new(),
-            outcomes,
+            outcomes: Vec::new(),
             contribution_count: 0,
             contribution_limit,
         })
@@ -106,6 +97,10 @@ impl SemanticActions {
     #[must_use]
     pub fn as_slice(&self) -> &[SemanticActionOutcome] {
         &self.outcomes
+    }
+
+    pub(crate) fn held_action_count(&self) -> usize {
+        self.held.len()
     }
 
     pub(crate) fn clear_outcomes(&mut self) {
@@ -777,6 +772,12 @@ mod tests {
             .unwrap();
         let entry = *timeline.entries().last().unwrap();
         let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        timeline.lend_action_outputs(
+            &mut crate::ActionOutcomes {
+                outcomes: Vec::new(),
+            },
+            &mut semantic,
+        );
         semantic.apply(&maps, &staging, &revision, entry);
         assert!(semantic.pressed(InputSeatId::PRIMARY, &action, &context));
 
@@ -824,6 +825,12 @@ mod tests {
             .unwrap()
             .clone();
         let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        timeline.lend_action_outputs(
+            &mut crate::ActionOutcomes {
+                outcomes: Vec::new(),
+            },
+            &mut semantic,
+        );
         // Apply both distinct admitted presses, then end the first member. The same raw endpoint
         // and binding must not make the older release remove the later member's contribution.
         for index in [0, 2, 1] {
@@ -886,6 +893,12 @@ mod tests {
                 .unwrap();
         }
         let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        timeline.lend_action_outputs(
+            &mut crate::ActionOutcomes {
+                outcomes: Vec::new(),
+            },
+            &mut semantic,
+        );
         let output_capacity = semantic.outcomes.capacity();
         for entry in timeline.entries().copied() {
             semantic.apply(&maps, &staging, &revision, entry);

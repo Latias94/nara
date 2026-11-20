@@ -182,12 +182,13 @@ impl NativeState {
         &mut self,
         devices: &mut GilrsDevices,
         timeline: &mut InputTimeline,
-    ) -> Result<(), BridgeError> {
+    ) -> Result<bool, BridgeError> {
         self.bridge.reconcile(devices, timeline, false)?;
         let Some(gilrs) = &mut self.gilrs else {
             return Err(BridgeError::InventoryReplaced);
         };
         let mut drained = false;
+        let mut refused_action = false;
         for _ in 0..self.budget {
             let Some(raw) = gilrs.next_event() else {
                 drained = true;
@@ -197,7 +198,7 @@ impl NativeState {
             let filtered = Some(dpad).filter_ev(&deadzone, gilrs).unwrap();
             gilrs.update(&filtered);
             let id = usize::from(filtered.id);
-            match filtered.event {
+            let result = match filtered.event {
                 EventType::Connected => {
                     let gamepad = gilrs.gamepad(filtered.id);
                     self.bridge.connected(
@@ -205,27 +206,33 @@ impl NativeState {
                         gamepad.name(),
                         PhysicalState::snapshot(&gamepad)?,
                         devices,
-                    )?;
+                    )
                 }
-                EventType::Disconnected => self.bridge.disconnected(id, devices, timeline)?,
-                EventType::Dropped => {
-                    if let EventType::AxisChanged(axis, _, code) = dpad.event {
-                        self.bridge.event(
-                            id,
-                            EventType::AxisChanged(
-                                axis,
-                                gilrs.gamepad(filtered.id).state().value(code),
-                                code,
-                            ),
-                            timeline,
-                        )?;
-                    }
+                EventType::Disconnected => self.bridge.disconnected(id, devices, timeline),
+                EventType::Dropped => match dpad.event {
+                    EventType::AxisChanged(axis, _, code) => self.bridge.event(
+                        id,
+                        EventType::AxisChanged(
+                            axis,
+                            gilrs.gamepad(filtered.id).state().value(code),
+                            code,
+                        ),
+                        timeline,
+                    ),
+                    _ => Ok(()),
+                },
+                event => self.bridge.event(id, event, timeline),
+            };
+            match result {
+                Err(BridgeError::Ingress(InputIngressError::ActionOutputAllocationRefused)) => {
+                    refused_action = true;
                 }
-                event => self.bridge.event(id, event, timeline)?,
+                other => other?,
             }
         }
         gilrs.inc();
-        self.bridge.reconcile(devices, timeline, drained)
+        self.bridge.reconcile(devices, timeline, drained)?;
+        Ok(refused_action)
     }
 }
 
@@ -234,7 +241,7 @@ fn poll_native(
     mut devices: ResMut<GilrsDevices>,
     mut timeline: ResMut<InputTimeline>,
 ) -> Result<(), BevyError> {
-    native
+    let refused_action = native
         .0
         .borrow_mut()
         .poll(&mut devices, &mut timeline)
@@ -264,7 +271,13 @@ fn poll_native(
             RuntimeFaultDetail::new(code, summary, "nara_gilrs")
                 .expect("static Gilrs fault metadata is valid")
                 .into_bevy_error()
-        })
+        })?;
+    if refused_action {
+        return Err(BevyError::warning(
+            InputIngressError::ActionOutputAllocationRefused,
+        ));
+    }
+    Ok(())
 }
 
 impl NativeClose {

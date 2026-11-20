@@ -8,13 +8,15 @@ use nara_core::Vec2;
 use nara_ecs::Resource;
 
 use super::{
+    action_outputs::ActionOutputBuffers,
     capacity::{InputCapacity, InputCapacityError, InputCapacityPlan},
     topology::{EndpointId, Gamepad, GamepadId, InputTopology, Member},
     *,
 };
 use crate::{
-    AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
-    PointerDriverInput, StagedActionRevision, semantic::ActionStaging,
+    ActionOutcomes, AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode,
+    MouseButton, PointerDriverInput, SemanticActions, StagedActionRevision,
+    semantic::ActionStaging,
 };
 
 #[path = "gamepad.rs"]
@@ -228,6 +230,7 @@ pub struct InputTimeline {
     limits: InputLimits,
     pub(super) topology: InputTopology,
     pub(super) capacity: InputCapacity,
+    action_outputs: ActionOutputBuffers,
     retained: VecDeque<RetainedInput>,
     scratch: Vec<InputDraft>,
     observation_cursor: u64,
@@ -284,6 +287,7 @@ impl InputTimeline {
             limits,
             topology: InputTopology::new(limits)?,
             capacity: InputCapacity::new(limits.events()),
+            action_outputs: ActionOutputBuffers::default(),
             retained,
             scratch,
             observation_cursor: 0,
@@ -884,6 +888,23 @@ impl InputTimeline {
             .plan(drafts, obligations)
             .map_err(|error| self.capacity_error(error, drafts, obligations))
     }
+
+    /// The occupied event ledger covers retained actions and outstanding releases. A new action
+    /// can create at most one held contribution per binding. Its record allowance covers those
+    /// contributions until resolution consumes the record and observes the new held count.
+    fn plan_action_admission(
+        &mut self,
+        drafts: usize,
+        obligations: usize,
+    ) -> Result<InputCapacityPlan, InputIngressError> {
+        let plan = self.plan(drafts, obligations)?;
+        if drafts != 0 {
+            self.action_outputs
+                .reserve(plan.occupied_after(), self.limits)?;
+        }
+        Ok(plan)
+    }
+
     fn terminal_plan(&self, drafts: usize, obligations: usize) -> InputCapacityPlan {
         self.capacity
             .plan_terminal(drafts, obligations)
@@ -1063,7 +1084,7 @@ impl InputTimeline {
             + endpoint.rearmed_obligations()
             + 1
             + usize::from(pointer.is_some_and(|pointer| !pointer.leave));
-        let plan = self.plan(1, after)?;
+        let plan = self.plan_action_admission(1, after)?;
         let kind = match input {
             InputBinding::Key(key) => InputEventKind::Key {
                 key,
@@ -1851,32 +1872,46 @@ impl InputTimeline {
         }
     }
 
-    pub(crate) fn take_deferred_action_inputs(
+    pub(crate) fn lend_action_outputs(
         &mut self,
-    ) -> Vec<(InputTimelineEntry, Arc<StagedActionRevision>)> {
-        let mut entries = Vec::with_capacity(self.retained.len());
+        bindings: &mut ActionOutcomes,
+        semantic: &mut SemanticActions,
+    ) {
+        self.action_outputs
+            .lend(&mut bindings.outcomes, &mut semantic.outcomes);
+    }
+
+    pub(crate) fn reclaim_action_outputs(
+        &mut self,
+        bindings: &mut ActionOutcomes,
+        semantic: &mut SemanticActions,
+    ) {
+        self.action_outputs
+            .reclaim(&mut bindings.outcomes, &mut semantic.outcomes);
+    }
+
+    pub(crate) fn observe_semantic_holds(&mut self, semantic: &SemanticActions) {
+        self.action_outputs
+            .observe_held_actions(semantic.held_action_count());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn action_output_capacities(&self) -> (usize, usize) {
+        self.action_outputs.capacities()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn refuse_semantic_output_growth(&mut self) {
+        self.action_outputs.refuse_semantic_growth = true;
+    }
+
+    pub(crate) fn resolve_deferred_action_inputs(
+        &mut self,
+        mut resolve: impl FnMut(InputTimelineEntry, Arc<StagedActionRevision>),
+    ) {
         for record in &mut self.retained {
-            if record.action != ActionRetention::Deferred || record.ui_pending {
+            let Some(deliver) = Self::deferred_action_delivery(&self.topology, record) else {
                 continue;
-            }
-            let deliver = match record.action_delivery {
-                ActionDelivery::OwnUiDisposition => !record.ui_consumed,
-                ActionDelivery::Gameplay => true,
-                ActionDelivery::Ui => false,
-                ActionDelivery::FollowPress(sequence) => {
-                    match self
-                        .topology
-                        .members
-                        .iter()
-                        .flatten()
-                        .find(|member| member.held.press_sequence == sequence)
-                        .map(|member| member.held.disposition)
-                    {
-                        Some(HeldInputDisposition::Gameplay) => true,
-                        Some(HeldInputDisposition::Ui) => false,
-                        Some(HeldInputDisposition::Pending) | None => continue,
-                    }
-                }
             };
             record.action = ActionRetention::Done;
             let revision = record
@@ -1884,10 +1919,40 @@ impl InputTimeline {
                 .take()
                 .expect("an admitted action edge retains its actual staging basis");
             if deliver {
-                entries.push((record.entry, revision));
+                resolve(record.entry, revision);
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_deferred_action_inputs(
+        &mut self,
+    ) -> Vec<(InputTimelineEntry, Arc<StagedActionRevision>)> {
+        let mut entries = Vec::new();
+        self.resolve_deferred_action_inputs(|entry, revision| entries.push((entry, revision)));
         entries
+    }
+
+    fn deferred_action_delivery(topology: &InputTopology, record: &RetainedInput) -> Option<bool> {
+        if record.action != ActionRetention::Deferred || record.ui_pending {
+            return None;
+        }
+        match record.action_delivery {
+            ActionDelivery::OwnUiDisposition => Some(!record.ui_consumed),
+            ActionDelivery::Gameplay => Some(true),
+            ActionDelivery::Ui => Some(false),
+            ActionDelivery::FollowPress(sequence) => match topology
+                .members
+                .iter()
+                .flatten()
+                .find(|member| member.held.press_sequence == sequence)
+                .map(|member| member.held.disposition)
+            {
+                Some(HeldInputDisposition::Gameplay) => Some(true),
+                Some(HeldInputDisposition::Ui) => Some(false),
+                Some(HeldInputDisposition::Pending) | None => None,
+            },
+        }
     }
 
     /// Call after clearing this frame's projection and action copies.

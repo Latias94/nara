@@ -266,6 +266,9 @@ pub(crate) fn apply_registered(
                 &input.holds,
                 &members,
             );
+            world
+                .resource_mut::<InputTimeline>()
+                .observe_semantic_holds(&semantic);
         });
         Ok(admission)
     }))

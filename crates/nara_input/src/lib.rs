@@ -10,7 +10,7 @@ use nara_app::{
     RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
-use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::{DetectChangesMut, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 
 mod axis;
 mod binding;
@@ -828,18 +828,6 @@ pub struct ActionOutcomes {
 }
 
 impl ActionOutcomes {
-    fn with_limits(limits: InputLimits) -> Result<Self, InputConfigurationError> {
-        let capacity = limits
-            .events()
-            .checked_mul(MAX_BINDINGS_PER_INPUT)
-            .ok_or(InputConfigurationError::CapacityOverflow)?;
-        let mut outcomes = Vec::new();
-        outcomes
-            .try_reserve_exact(capacity)
-            .map_err(|_| InputConfigurationError::AllocationRefused)?;
-        Ok(Self { outcomes })
-    }
-
     fn push_projected(&mut self, outcome: ActionOutcome) {
         assert!(self.outcomes.len() < self.outcomes.capacity());
         self.outcomes.push(outcome);
@@ -881,7 +869,6 @@ impl Plugin for InputPlugin {
             plugin: INPUT_PLUGIN_ID,
             message: error.to_string(),
         };
-        let outcomes = ActionOutcomes::with_limits(limits).map_err(projection_error)?;
         let semantic = SemanticActions::with_limits(limits).map_err(projection_error)?;
         app.insert_resource(
             InputFrameObservations::with_capacity(limits.events()).map_err(projection_error)?,
@@ -898,7 +885,9 @@ impl Plugin for InputPlugin {
         app.insert_resource(state::InputInstallation::new(
             app.world().resource::<ActionMaps>(),
         ))?;
-        app.insert_resource(outcomes)?;
+        app.insert_resource(ActionOutcomes {
+            outcomes: Vec::new(),
+        })?;
         app.insert_resource(semantic)?;
         if !app.world().contains_resource::<ActionStaging>() {
             app.insert_resource(ActionStaging::default())?;
@@ -1042,19 +1031,26 @@ fn resolve_action_outcomes(
     mut outcomes: ResMut<ActionOutcomes>,
     mut semantic: ResMut<SemanticActions>,
 ) {
-    staging.resolved_frame = Some(time.frame);
     if !outcomes.is_empty() {
         outcomes.clear();
     }
     semantic.clear_outcomes();
+    timeline.bypass_change_detection().lend_action_outputs(
+        outcomes.bypass_change_detection(),
+        semantic.bypass_change_detection(),
+    );
     staging.observe_maps(&action_maps);
     semantic.reconcile(&action_maps, &staging);
-    for (entry, staged_revision) in timeline.take_deferred_action_inputs() {
+    timeline.resolve_deferred_action_inputs(|entry, staged_revision| {
         if let Some(map) = action_maps.get(entry.route().seat()) {
             resolve_input_binding(map, entry, &mut outcomes);
         }
         semantic.apply(&action_maps, &staging, &staged_revision, entry);
-    }
+    });
+    timeline
+        .bypass_change_detection()
+        .observe_semantic_holds(&semantic);
+    staging.resolved_frame = Some(time.frame);
 }
 
 fn actions_need_resolution(time: Res<RealTime>, staging: Res<ActionStaging>) -> bool {
@@ -1132,6 +1128,10 @@ fn clear_input_transitions(
     if !semantic.as_slice().is_empty() {
         semantic.clear_outcomes();
     }
+    timeline.bypass_change_detection().reclaim_action_outputs(
+        outcomes.bypass_change_detection(),
+        semantic.bypass_change_detection(),
+    );
     observations.clear();
     timeline.finish_frame();
 }

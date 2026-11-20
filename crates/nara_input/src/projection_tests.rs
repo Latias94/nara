@@ -38,7 +38,7 @@ fn capture_actions(
     snapshot.semantic = semantic.as_slice().to_vec();
 }
 
-fn runtime(limits: InputLimits) -> RuntimeInstance {
+fn projection_app(limits: InputLimits) -> App {
     let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
     builder
         .declare_context(ActionContext::gameplay(), true)
@@ -71,7 +71,11 @@ fn runtime(limits: InputLimits) -> RuntimeInstance {
     )
     .unwrap();
     app.add_systems(CoreStage::Update, capture_actions).unwrap();
-    RuntimeInstance::start(app).unwrap()
+    app
+}
+
+fn runtime(limits: InputLimits) -> RuntimeInstance {
+    RuntimeInstance::start(projection_app(limits)).unwrap()
 }
 
 fn input<T>(
@@ -93,6 +97,211 @@ fn activate_is_held(runtime: &RuntimeInstance) -> bool {
         &ActionId::new("activate").unwrap(),
         &ActionContext::gameplay(),
     )
+}
+
+#[test]
+fn action_projection_buffers_start_empty_and_follow_the_current_batch() {
+    let limits = InputLimits::default();
+    let mut runtime = runtime(limits);
+    runtime.drive(Duration::ZERO).unwrap();
+    let capacities = |runtime: &RuntimeInstance| {
+        runtime
+            .world()
+            .resource::<InputTimeline>()
+            .action_output_capacities()
+    };
+    assert_eq!(capacities(&runtime), (0, 0));
+    input(&mut runtime, |scope| {
+        apply_pointer_driver_input(scope, PointerDriverInput::Moved(Vec2::ONE)).unwrap();
+    });
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(capacities(&runtime), (0, 0));
+
+    key(&mut runtime, ButtonDriverInput::Press(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let actions = runtime.world().resource::<ActionOutcomes>();
+    let semantic = runtime.world().resource::<SemanticActions>();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.actions.len(), 1);
+    assert_eq!(snapshot.semantic.len(), 1);
+    let (binding_capacity, semantic_capacity) = capacities(&runtime);
+    assert!((1..limits.events() * MAX_BINDINGS_PER_INPUT).contains(&binding_capacity));
+    assert!((1..limits.events() * MAX_BINDINGS_PER_INPUT).contains(&semantic_capacity));
+    assert!(actions.as_slice().is_empty());
+    assert!(semantic.as_slice().is_empty());
+
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(capacities(&runtime), (binding_capacity, semantic_capacity));
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn action_output_refusal_rejects_a_new_press_and_preserves_an_accepted_release() {
+    let mut app = projection_app(InputLimits::default());
+    app.add_systems(
+        CoreStage::Update,
+        |mut timeline: ResMut<InputTimeline>, semantic: Res<SemanticActions>| {
+            let context = ActionContext::gameplay();
+            if semantic.pressed(
+                InputSeatId::PRIMARY,
+                &ActionId::new("activate").unwrap(),
+                &context,
+            ) {
+                timeline.refuse_semantic_output_growth();
+            }
+        },
+    )
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    key(&mut runtime, ButtonDriverInput::Press(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+    let started = runtime.world().resource::<FrameSnapshot>().actions[0].provenance;
+    assert!(activate_is_held(&runtime));
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let refused = input(&mut runtime, |scope| {
+        apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter))
+    });
+    assert_eq!(
+        refused,
+        Err(InputIngressError::ActionOutputAllocationRefused.into())
+    );
+    key(&mut runtime, ButtonDriverInput::Release(KeyCode::Enter));
+    assert_eq!(
+        runtime.world().resource::<InputTimeline>().retained_len(),
+        0
+    );
+    assert!(activate_is_held(&runtime));
+
+    key(&mut runtime, ButtonDriverInput::Release(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(activate_is_held(&runtime));
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Resume),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.actions.len(), 1);
+    let release = &snapshot.actions[0];
+    assert_eq!(release.phase, ActionPhase::Released);
+    assert_eq!(release.binding, InputBinding::Key(KeyCode::Space));
+    assert_eq!(release.provenance.sequence(), started.sequence() + 1);
+    assert_eq!(
+        release.provenance.press_sequence(),
+        Some(started.sequence())
+    );
+    assert_eq!(snapshot.semantic.len(), 1);
+    assert_eq!(snapshot.semantic[0].phase, ActionPhase::Released);
+    assert_eq!(snapshot.semantic[0].provenance, Some(release.provenance));
+    assert!(!activate_is_held(&runtime));
+    assert_eq!(
+        runtime.world().resource::<InputTimeline>().retained_len(),
+        0
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn later_ingress_keeps_published_outcomes_and_delivers_cancellation_with_new_actions() {
+    let gameplay = ActionContext::gameplay();
+    let menu = ActionContext::new("menu").unwrap();
+    let limits = InputLimits::new(24, 1, 1, 4).unwrap();
+    let mut app = projection_app(limits);
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder.declare_context(gameplay.clone(), true).unwrap();
+    builder.declare_context(menu.clone(), true).unwrap();
+    for index in 0..MAX_BINDINGS_PER_INPUT {
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new(format!("old-{index}")).unwrap(),
+                KeyCode::Space,
+            ))
+            .unwrap();
+        builder
+            .bind(
+                ActionBinding::key(
+                    ActionId::new(format!("new-{index}")).unwrap(),
+                    KeyCode::Enter,
+                )
+                .with_context(menu.clone()),
+            )
+            .unwrap();
+    }
+    let map = ActionMap::new(
+        builder.compile().unwrap().into_bindings(),
+        ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+    )
+    .unwrap();
+    app.insert_resource(ActionMaps::new(map)).unwrap();
+    app.add_systems(
+        CoreStage::Update,
+        move |mut timeline: ResMut<InputTimeline>,
+              mut maps: ResMut<ActionMaps>,
+              actions: Res<ActionOutcomes>,
+              semantic: Res<SemanticActions>| {
+            if actions
+                .as_slice()
+                .first()
+                .is_none_or(|outcome| outcome.binding != InputBinding::Key(KeyCode::Space))
+            {
+                return;
+            }
+            let capacities = timeline.action_output_capacities();
+            timeline
+                .admit_keyboard(
+                    InputWindowId::UNSPECIFIED,
+                    InputSeatId::PRIMARY,
+                    ButtonDriverInput::Press(KeyCode::Enter),
+                )
+                .unwrap();
+            let grown = timeline.action_output_capacities();
+            assert!(grown.0 > capacities.0 && grown.1 > capacities.1);
+            assert_eq!(actions.as_slice().len(), MAX_BINDINGS_PER_INPUT);
+            assert_eq!(semantic.as_slice().len(), MAX_BINDINGS_PER_INPUT);
+            maps.get_mut(InputSeatId::PRIMARY)
+                .unwrap()
+                .disable_context(&gameplay)
+                .unwrap();
+        },
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    key(&mut runtime, ButtonDriverInput::Press(KeyCode::Space));
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.actions.len(), MAX_BINDINGS_PER_INPUT);
+    assert!(
+        snapshot
+            .actions
+            .iter()
+            .all(|outcome| outcome.phase == ActionPhase::Started)
+    );
+
+    runtime.drive(Duration::ZERO).unwrap();
+    let snapshot = runtime.world().resource::<FrameSnapshot>();
+    assert_eq!(snapshot.actions.len(), MAX_BINDINGS_PER_INPUT);
+    assert_eq!(snapshot.semantic.len(), 2 * MAX_BINDINGS_PER_INPUT);
+    let (cancellations, started) = snapshot.semantic.split_at(MAX_BINDINGS_PER_INPUT);
+    assert!(cancellations.iter().all(|outcome| {
+        outcome.phase == ActionPhase::Released
+            && outcome.cause == SemanticActionCause::ContextChanged
+            && outcome.provenance.is_none()
+    }));
+    for (index, (binding, aggregate)) in snapshot.actions.iter().zip(started).enumerate() {
+        assert_eq!(binding.action.as_str(), format!("new-{index}"));
+        assert_eq!(binding.binding, InputBinding::Key(KeyCode::Enter));
+        assert_eq!(binding.action, aggregate.action);
+        assert_eq!(aggregate.phase, ActionPhase::Started);
+        assert_eq!(aggregate.provenance, Some(binding.provenance));
+    }
+    runtime.finish().unwrap();
 }
 
 #[test]

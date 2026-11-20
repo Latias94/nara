@@ -161,6 +161,10 @@ impl InputCapacity {
 }
 
 impl InputCapacityPlan {
+    pub(super) const fn occupied_after(&self) -> usize {
+        self.after.retained + self.after.obligations
+    }
+
     pub(super) const fn first_sequence(&self) -> Option<u64> {
         if self.before.next_sequence == self.after.next_sequence {
             None

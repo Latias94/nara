@@ -147,7 +147,7 @@ impl InputTimeline {
                 + endpoint.rearmed_obligations()
                 + count
         };
-        let plan = self.plan(count, after)?;
+        let plan = self.plan_action_admission(count, after)?;
         let drafts = holds
             .iter()
             .filter(|hold| hold.held)
